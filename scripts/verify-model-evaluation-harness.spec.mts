@@ -3,10 +3,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { BRAND_PROFILE_TASK } from "../apps/api/src/site-builder/agents/brand-profile";
+import { DESIGN_SPEC_TASK } from "../apps/api/src/site-builder/design/design-brief-producer";
 import {
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from "../apps/api/src/site-builder/eval/brand-profile-eval";
+import {
+  DESIGN_SPEC_EVAL_FIXTURES,
+  prepareDesignSpecEvalFixture,
+} from "../apps/api/src/site-builder/eval/design-spec-eval";
 import {
   buildCanonicalModelEvaluationCase,
   buildTaskEvaluationPlan,
@@ -147,12 +152,56 @@ test("the canonical suite pins the committed fixture and prompt fingerprints", a
   }
 });
 
+test("the design_spec suite pins all six sparse/rich catalog pairs", () => {
+  const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+  const suite = plan.evaluationSuite;
+  assert.ok(suite);
+  assert.equal(suite.fixtureIds.length, 12);
+  assert.equal(suite.repeats, 2);
+  assert.equal(DESIGN_SPEC_EVAL_FIXTURES.length, 12);
+  assert.equal(
+    DESIGN_SPEC_EVAL_FIXTURES.filter(({ mode }) => mode === "sparse").length,
+    6,
+  );
+  assert.equal(
+    DESIGN_SPEC_EVAL_FIXTURES.filter(({ mode }) => mode === "rich").length,
+    6,
+  );
+  for (const fingerprint of suite.fixtureFingerprints) {
+    const fixture = DESIGN_SPEC_EVAL_FIXTURES.find(
+      ({ fixtureId }) => fixtureId === fingerprint.fixtureId,
+    );
+    assert.ok(fixture);
+    const prepared = prepareDesignSpecEvalFixture(fixture);
+    assert.equal(
+      sha256CanonicalJson(fixture),
+      fingerprint.fixtureSha256,
+      `${fingerprint.fixtureId} fixture fingerprint drifted`,
+    );
+    assert.equal(
+      sha256Text(DESIGN_SPEC_TASK.buildPrompt(prepared.input)),
+      fingerprint.promptSha256,
+      `${fingerprint.fixtureId} prompt fingerprint drifted`,
+    );
+    const evaluationCase = buildCanonicalModelEvaluationCase(
+      plan,
+      fingerprint.fixtureId,
+    );
+    assert.deepEqual(evaluationCase.payload.fixture, fixture);
+    assert.deepEqual(evaluationCase.payload.taskInput, prepared.input);
+    assert.equal(
+      evaluationCase.payload.prompt,
+      DESIGN_SPEC_TASK.buildPrompt(prepared.input),
+    );
+  }
+});
+
 test("a missing harness id fails documentation verification", async () => {
   const documents = await currentDocuments();
   documents["docs/status/current.md"] = documents[
     "docs/status/current.md"
   ].replace(
-    "site-builder-model-evaluation-harness/2026-07-28-v3",
+    "site-builder-model-evaluation-harness/2026-07-30-v4",
     "missing-harness-id",
   );
   assert.throws(

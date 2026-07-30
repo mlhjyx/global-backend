@@ -78,7 +78,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 这是 evaluation-only、依赖注入的协议 executor 与内存 harness；只通过显式 wire client/cost resolver seam 执行，未接生产依赖。",
     "- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。",
     "- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。",
-    "- 当前唯一可 dispatch suite 是 BrandProfile；其余 6 个 task fail-closed 为 `blocked_no_evaluation_suite`。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
+    "- 当前可 dispatch 的 canonical suite 是 BrandProfile 与 `design_spec`；其余 5 个 task fail-closed 为 `blocked_no_evaluation_suite`。`design_spec` 只完成零费用 suite 准备，尚无真实 evidence、费用授权或 promotion。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
     "- 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。",
     `- zero-cost evidence 准备合同 ${code(SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID)} 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。`,
     "",
@@ -140,7 +140,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     `- ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.executions} executions / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.wireCalls} wire calls / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.amountCents}¢ 仍标记为 ${code(MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.verification)}，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。`,
     `- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 ${code("wx")} 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 ${code(".env")} 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。`,
     `- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 ${code("READY_FOR_PRODUCT_DECISION")}，同时固定 ${code("dispatchAuthorization=NOT_AUTHORIZED")}。`,
-    "- 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。图片、视频、embedding、preview、deferred、其他六个无 suite task 继续在 client 前阻断。",
+    "- 当前 PR 没有生成真实 attestation、费用卡文件或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。BrandProfile evidence-prep 仍只准入其固定任务；`design_spec` 仅有零费用 suite，其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。",
     "",
   ].join("\n");
 }
@@ -158,7 +158,7 @@ export function verifyModelEvaluationHarness(
     plans
       .filter((plan) => plan.dispatchAdmission === "task_evaluation_ready")
       .map((plan) => plan.taskId),
-    ["site_builder.brand_profile"],
+    ["site_builder.brand_profile", "site_builder.design_spec"],
     "only tasks with a canonical task/fixture/evaluator suite may dispatch",
   );
   assert.deepEqual(

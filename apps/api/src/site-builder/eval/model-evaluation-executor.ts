@@ -22,6 +22,8 @@ import {
 } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
 import { modelPolicyRegistry } from "../agents/model-policy.registry";
+import type { SiteBuilderTaskId } from "../agents/task-route-bindings";
+import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
 import { checkAgainstSchema } from "../../model-gateway/schema-validate";
 import {
   buildCanonicalModelEvaluationCase,
@@ -57,6 +59,12 @@ export type ModelEvaluationProtocolAdmission =
   | "blocked_requires_media_gateway"
   | "blocked_no_consumer"
   | "blocked_no_evaluation_suite";
+
+const RETIRED_EVALUATION_COMPARATOR_ALIASES = new Set([
+  "minimax-m3",
+  "doubao-seed-2.0-pro",
+  "doubao-seed-2.0-lite",
+]);
 
 export interface ModelEvaluationProtocolAdmissionEntry {
   protocol: ModelCandidateProtocol;
@@ -1652,6 +1660,7 @@ function assertCanonicalRequest(
     );
     if (
       !comparatorRoute ||
+      RETIRED_EVALUATION_COMPARATOR_ALIASES.has(request.alias) ||
       catalog.status !== "legacy-only" ||
       catalog.domain !== "text" ||
       request.expectedProtocol !== "openai-chat-completions" ||
@@ -1677,7 +1686,7 @@ function assertCanonicalRequest(
     request.repairTaskOutput !== plan.evaluationSuite.repairTaskOutput ||
     !canonicalJsonEqual(
       request.outputSchema,
-      BRAND_PROFILE_TASK.outputSchema,
+      taskDefinition(request.taskId).outputSchema,
     ) ||
     !canonicalJsonEqual(request.caseContract, canonicalCase.contract) ||
     !canonicalJsonEqual(request.casePayload, canonicalCase.payload)
@@ -1705,10 +1714,17 @@ function assertCanonicalRequest(
   return selectedProtocol;
 }
 
+function taskDefinition(taskId: SiteBuilderTaskId) {
+  if (taskId === "site_builder.brand_profile") return BRAND_PROFILE_TASK;
+  if (taskId === "site_builder.design_spec") return DESIGN_SPEC_TASK;
+  throw preDispatchError("evaluation_task_not_admitted");
+}
+
 function structuredSystemPrompt(
   outputSchema: Readonly<Record<string, unknown>>,
+  taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): string {
-  return `${BRAND_PROFILE_TASK.system ?? ""}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
+  return `${taskDefinition(taskId).system ?? ""}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
 }
 
 function repairPrompt(prompt: string, kind: string, reason: string): string {
@@ -1718,9 +1734,10 @@ function repairPrompt(prompt: string, kind: string, reason: string): string {
 export function modelEvaluationInitialPromptUtf8Bytes(
   prompt: string,
   outputSchema: Readonly<Record<string, unknown>>,
+  taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): number {
   return (
-    Buffer.byteLength(structuredSystemPrompt(outputSchema), "utf8") +
+    Buffer.byteLength(structuredSystemPrompt(outputSchema, taskId), "utf8") +
     Buffer.byteLength(prompt, "utf8")
   );
 }
@@ -1728,9 +1745,10 @@ export function modelEvaluationInitialPromptUtf8Bytes(
 export function modelEvaluationRepairPromptUtf8BytesUpperBound(
   prompt: string,
   outputSchema: Readonly<Record<string, unknown>>,
+  taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): number {
   return (
-    Buffer.byteLength(structuredSystemPrompt(outputSchema), "utf8") +
+    Buffer.byteLength(structuredSystemPrompt(outputSchema, taskId), "utf8") +
     Buffer.byteLength(
       repairPrompt(
         prompt,
@@ -1911,10 +1929,23 @@ function validationFailure(
     };
   }
   try {
-    BRAND_PROFILE_TASK.validateOutput?.(
-      request.casePayload.taskInput,
-      artifact as never,
-    );
+    if (request.taskId === "site_builder.brand_profile") {
+      BRAND_PROFILE_TASK.validateOutput?.(
+        request.casePayload.taskInput as Parameters<
+          NonNullable<typeof BRAND_PROFILE_TASK.validateOutput>
+        >[0],
+        artifact as never,
+      );
+    } else if (request.taskId === "site_builder.design_spec") {
+      DESIGN_SPEC_TASK.validateOutput?.(
+        request.casePayload.taskInput as Parameters<
+          NonNullable<typeof DESIGN_SPEC_TASK.validateOutput>
+        >[0],
+        artifact as never,
+      );
+    } else {
+      throw new Error("evaluation_task_not_admitted");
+    }
     return null;
   } catch (error) {
     return {
@@ -2165,7 +2196,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
       complete: true,
     };
     const providerReportedCostCents: (number | null)[] = [];
-    const system = structuredSystemPrompt(request.outputSchema);
+    const system = structuredSystemPrompt(request.outputSchema, request.taskId);
     const maximumWireCalls = request.repairTaskOutput ? 2 : 1;
     const campaignReservationCents =
       request.perCallCostCapCents * maximumWireCalls;

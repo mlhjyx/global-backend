@@ -39,6 +39,23 @@ import {
   type BrandProfileEvalFixture,
 } from "./brand-profile-eval";
 import {
+  DESIGN_SPEC_EVALUATOR_RUBRIC,
+  DESIGN_SPEC_EVALUATOR_VERSION,
+  DESIGN_SPEC_EVAL_FIXTURES,
+  DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION,
+  DESIGN_SPEC_PROMPT_VERSION,
+  DESIGN_SPEC_ROUTE_VALIDATION_VERSION,
+  designSpecFixtureFingerprint,
+  evaluateDesignSpecOutput,
+  prepareDesignSpecEvalFixture,
+  type DesignSpecEvalFixture,
+} from "./design-spec-eval";
+import {
+  DESIGN_SPEC_TASK,
+  type DesignSpecTaskInput,
+  type DesignSpecTaskOutput,
+} from "../design/design-brief-producer";
+import {
   inspectEvaluationMatrix,
   sha256Bytes,
   sha256CanonicalJson,
@@ -58,7 +75,7 @@ import {
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-28-v3" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v4" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v3" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -204,6 +221,24 @@ const VALIDATE_BRAND_PROFILE_OUTPUT = (() => {
   return validator;
 })();
 assertModelOutputSchemaCompiles(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT);
+
+const DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(DESIGN_SPEC_TASK.inputSchema),
+);
+const DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(DESIGN_SPEC_TASK.outputSchema),
+);
+const DESIGN_SPEC_REPAIR_TASK_OUTPUT =
+  DESIGN_SPEC_TASK.repairTaskOutput === true;
+const BUILD_DESIGN_SPEC_PROMPT = DESIGN_SPEC_TASK.buildPrompt;
+const VALIDATE_DESIGN_SPEC_OUTPUT = (() => {
+  const validator = DESIGN_SPEC_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("DesignSpec canonical route validator is required");
+  }
+  return validator;
+})();
+assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
 
 const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
   {
@@ -402,9 +437,160 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
+const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+  },
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+  },
+  {
+    role: "task",
+    path: "apps/api/src/site-builder/design/design-brief-producer.ts",
+  },
+  {
+    role: "catalog",
+    path: "apps/api/src/site-builder/design/catalog.ts",
+  },
+  {
+    role: "judge",
+    path: "apps/api/src/site-builder/eval/design-spec-eval.ts",
+  },
+  {
+    role: "harness",
+    path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+  },
+  {
+    role: "evaluation_executor",
+    path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
+    role: "evaluation_cost_safety",
+    path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+  },
+  {
+    role: "suite_preparation",
+    path: "apps/api/src/site-builder/eval/design-spec-evaluation-suite-prep.ts",
+  },
+  {
+    role: "create_only_writer",
+    path: "apps/api/src/site-builder/eval/create-only-json.ts",
+  },
+  {
+    role: "suite_preparation_runner",
+    path: "apps/api/scripts/prepare-site-builder-design-spec-evaluation-suite.mts",
+  },
+  {
+    role: "api_manifest",
+    path: "apps/api/package.json",
+  },
+  {
+    role: "provider",
+    path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+  },
+  {
+    role: "transport_registry",
+    path: "apps/api/src/model-gateway/model-transports.ts",
+  },
+  {
+    role: "task_runner",
+    path: "apps/api/src/site-builder/agents/ai-task.ts",
+  },
+  {
+    role: "gateway_router",
+    path: "apps/api/src/model-gateway/router-model-gateway.ts",
+  },
+  {
+    role: "schema_validator",
+    path: "apps/api/src/model-gateway/schema-validate.ts",
+  },
+  {
+    role: "evaluation_provenance",
+    path: "apps/api/src/site-builder/eval/eval-provenance.ts",
+  },
+  {
+    role: "task_route",
+    path: "apps/api/src/site-builder/agents/task-routes.ts",
+  },
+  {
+    role: "task_route_binding",
+    path: "apps/api/src/site-builder/agents/task-route-bindings.ts",
+  },
+  {
+    role: "profile_registry",
+    path: "apps/api/src/site-builder/agents/model-profiles.ts",
+  },
+  {
+    role: "provider_registry",
+    path: "apps/api/src/model-gateway/model-provider.registry.ts",
+  },
+  {
+    role: "model_router",
+    path: "apps/api/src/model-gateway/model-router.ts",
+  },
+  {
+    role: "provider_error",
+    path: "apps/api/src/model-gateway/providers/provider-output-error.ts",
+  },
+  { role: "gateway_types", path: "apps/api/src/model-gateway/types.ts" },
+  {
+    role: "gateway_contract",
+    path: "apps/api/src/model-gateway/model-gateway.ts",
+  },
+  {
+    role: "provider_contract",
+    path: "apps/api/src/model-gateway/model-provider.ts",
+  },
+  { role: "budget_ledger", path: "apps/api/src/tools/budget.ts" },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/model-policy.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/site-spec.ts",
+  },
+  { role: "contracts_source", path: "packages/contracts/src/index.ts" },
+  { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
+  { role: "contracts_manifest", path: "packages/contracts/package.json" },
+  { role: "dependency_lock", path: "pnpm-lock.yaml" },
+] as const);
+
+const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v1",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v1",
+  taskContractId: "site_builder.design_spec",
+  promptVersion: DESIGN_SPEC_PROMPT_VERSION,
+  inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
+  outputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT),
+  repairTaskOutput: DESIGN_SPEC_REPAIR_TASK_OUTPUT,
+  routeValidationVersion: DESIGN_SPEC_ROUTE_VALIDATION_VERSION,
+  evaluatorVersion: DESIGN_SPEC_EVALUATOR_VERSION,
+  evaluatorRubricSha256: sha256CanonicalJson(DESIGN_SPEC_EVALUATOR_RUBRIC),
+  fixtureSetId: "site-builder.design-spec-golden/2026-07-30-v1",
+  fixtureSchemaVersion: DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION,
+  fixtureIds: Object.freeze(
+    DESIGN_SPEC_EVAL_FIXTURES.map(({ fixtureId }) => fixtureId),
+  ),
+  fixtureFingerprints: Object.freeze(
+    DESIGN_SPEC_EVAL_FIXTURES.map((fixture) =>
+      Object.freeze({
+        fixtureId: fixture.fixtureId,
+        ...designSpecFixtureFingerprint(fixture),
+      }),
+    ),
+  ),
+  repeats: 2,
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v1",
+  sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
+}) satisfies TaskEvaluationSuite;
+
 const TASK_EVALUATION_SUITES = Object.freeze(
   new Map<SiteBuilderTaskId, TaskEvaluationSuite>([
     ["site_builder.brand_profile", BRAND_PROFILE_EVALUATION_SUITE],
+    ["site_builder.design_spec", DESIGN_SPEC_EVALUATION_SUITE],
   ]),
 );
 
@@ -1547,8 +1733,8 @@ export interface ModelEvaluationSourceFileFingerprint {
 }
 
 export interface ModelEvaluationCasePayload {
-  fixture: BrandProfileEvalFixture;
-  taskInput: BrandProfileInput;
+  fixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
+  taskInput: BrandProfileInput | DesignSpecTaskInput;
   prompt: string;
   sourceFiles: readonly ModelEvaluationSourceFileFingerprint[];
 }
@@ -1822,7 +2008,7 @@ export class ModelEvaluationCapabilityCampaign {
       hardStopMs: options.plan.envelope.hardStopMs,
       perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
       reasoningEffort: options.plan.envelope.reasoningEffort,
-      outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+      outputSchema: canonicalTaskOutputSchema(options.plan.taskId),
       repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
       caseContract: evaluationCase.contract,
       casePayload: evaluationCase.payload,
@@ -1969,7 +2155,7 @@ export class ModelEvaluationCapabilityCampaign {
     }
     if (validation.status !== "capability_proven") return validation;
     try {
-      gradeCanonicalTaskArtifact(
+      assessCanonicalTaskArtifact(
         options.plan,
         evaluationCase.payload,
         outcome.value.artifact,
@@ -2166,6 +2352,18 @@ function sourceBundleMatchesCase(
   }
 }
 
+function canonicalTaskOutputSchema(
+  taskId: SiteBuilderTaskId,
+): Readonly<Record<string, unknown>> {
+  if (taskId === "site_builder.brand_profile") {
+    return BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  if (taskId === "site_builder.design_spec") {
+    return DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  throw new Error(`task output schema is not canonical: ${taskId}`);
+}
+
 export function buildCanonicalModelEvaluationCase(
   plan: TaskEvaluationPlan,
   fixtureId: string,
@@ -2176,32 +2374,50 @@ export function buildCanonicalModelEvaluationCase(
   }
   assertCandidateBelongsToPlan(plan, firstCandidate);
   const suite = plan.evaluationSuite;
-  if (
-    plan.dispatchAdmission !== "task_evaluation_ready" ||
-    !suite ||
-    plan.taskId !== "site_builder.brand_profile"
-  ) {
+  if (plan.dispatchAdmission !== "task_evaluation_ready" || !suite) {
     throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
   }
   if (!suite.fixtureIds.includes(fixtureId)) {
     throw new Error(`model evaluation fixture is not canonical: ${fixtureId}`);
   }
-  const fixture = JSON.parse(
-    readFileSync(
-      resolve(
-        REPOSITORY_ROOT,
-        "apps/api/test/fixtures/golden-companies/brand-profile",
-        `${fixtureId}.json`,
+  let fixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
+  let taskInput: BrandProfileInput | DesignSpecTaskInput;
+  let prompt: string;
+  if (plan.taskId === "site_builder.brand_profile") {
+    fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          REPOSITORY_ROOT,
+          "apps/api/test/fixtures/golden-companies/brand-profile",
+          `${fixtureId}.json`,
+        ),
+        "utf8",
       ),
-      "utf8",
-    ),
-  ) as BrandProfileEvalFixture;
-  const prepared = prepareBrandProfileEvalFixture(fixture);
+    ) as BrandProfileEvalFixture;
+    const prepared = prepareBrandProfileEvalFixture(fixture);
+    taskInput = prepared.input;
+    prompt = BUILD_BRAND_PROFILE_PROMPT(prepared.input);
+  } else if (plan.taskId === "site_builder.design_spec") {
+    const canonicalFixture = DESIGN_SPEC_EVAL_FIXTURES.find(
+      (entry) => entry.fixtureId === fixtureId,
+    );
+    if (!canonicalFixture) {
+      throw new Error(
+        `model evaluation fixture is not canonical: ${fixtureId}`,
+      );
+    }
+    fixture = canonicalFixture;
+    const prepared = prepareDesignSpecEvalFixture(canonicalFixture);
+    taskInput = prepared.input;
+    prompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else {
+    throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
+  }
   const sourceFiles = currentSourceBundle(suite);
   const payload = deepFreeze({
     fixture,
-    taskInput: prepared.input,
-    prompt: BUILD_BRAND_PROFILE_PROMPT(prepared.input),
+    taskInput,
+    prompt,
     sourceFiles,
   });
   const contract: ModelEvaluationCaseContract = {
@@ -2276,8 +2492,27 @@ function assertCaseContract(
   const fixture = suite.fixtureFingerprints.find(
     (entry) => entry.fixtureId === contract.fixtureId,
   );
-  const prepared = prepareBrandProfileEvalFixture(payload.fixture);
   const currentSources = currentSourceBundle(suite);
+  let preparedFixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
+  let preparedInput: BrandProfileInput | DesignSpecTaskInput;
+  let expectedPrompt: string;
+  if (plan.taskId === "site_builder.brand_profile") {
+    const prepared = prepareBrandProfileEvalFixture(
+      payload.fixture as BrandProfileEvalFixture,
+    );
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt = BUILD_BRAND_PROFILE_PROMPT(prepared.input);
+  } else if (plan.taskId === "site_builder.design_spec") {
+    const prepared = prepareDesignSpecEvalFixture(
+      payload.fixture as DesignSpecEvalFixture,
+    );
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else {
+    throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
+  }
   if (
     !fixture ||
     contract.fixtureSha256 !== fixture.fixtureSha256 ||
@@ -2286,10 +2521,10 @@ function assertCaseContract(
     contract.promptSha256 !== sha256Text(payload.prompt) ||
     contract.sourceBundleSha256 !== sha256CanonicalJson(payload.sourceFiles) ||
     sha256CanonicalJson(payload.fixture) !==
-      sha256CanonicalJson(prepared.fixture) ||
+      sha256CanonicalJson(preparedFixture) ||
     sha256CanonicalJson(payload.taskInput) !==
-      sha256CanonicalJson(prepared.input) ||
-    payload.prompt !== BUILD_BRAND_PROFILE_PROMPT(payload.taskInput) ||
+      sha256CanonicalJson(preparedInput) ||
+    payload.prompt !== expectedPrompt ||
     JSON.stringify(payload.sourceFiles) !== JSON.stringify(currentSources) ||
     !SHA256.test(contract.sourceBundleSha256)
   ) {
@@ -2483,61 +2718,112 @@ function validArtifactFingerprint<T>(
   }
 }
 
-function gradeCanonicalTaskArtifact(
+export function assessCanonicalTaskArtifact(
   plan: TaskEvaluationPlan,
   payload: ModelEvaluationCasePayload,
   artifact: unknown,
 ): TaskArtifactAssessment {
-  if (
-    plan.taskId !== "site_builder.brand_profile" ||
-    plan.evaluationSuite?.evaluatorVersion !==
-      BRAND_PROFILE_EVALUATOR_VERSION ||
-    plan.evaluationSuite.outputSchemaSha256 !==
-      sha256CanonicalJson(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT)
-  ) {
-    throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
-  }
-  assertModelOutputSchemaCompiles(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT);
-  const outputCheck = checkAgainstSchema(
-    BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
-    artifact,
-  );
-  if (!outputCheck.valid) {
-    throw new Error(
-      "task artifact does not satisfy the canonical output schema",
+  if (plan.taskId === "site_builder.brand_profile") {
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        BRAND_PROFILE_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT);
+    const outputCheck = checkAgainstSchema(
+      BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+      artifact,
     );
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as BrandProfileOutput;
+    const taskInput = payload.taskInput as BrandProfileInput;
+    const fixture = payload.fixture as BrandProfileEvalFixture;
+    VALIDATE_BRAND_PROFILE_OUTPUT(taskInput, output);
+    const prepared = prepareBrandProfileEvalFixture(fixture);
+    const outcome = evaluateBrandProfileOutput(prepared, output);
+    const qualityPassed =
+      outcome.acceptedFactCount >=
+        prepared.fixture.assertions.minimumAcceptedFacts &&
+      outcome.forbiddenOutputTerms.length === 0;
+    const factualityPassed =
+      outcome.rejectedFactCount === 0 &&
+      outcome.missingAcceptedTerms.length === 0;
+    const findingCodes = [
+      ...(outcome.acceptedFactCount <
+      prepared.fixture.assertions.minimumAcceptedFacts
+        ? ["accepted_fact_minimum"]
+        : []),
+      ...(outcome.rejectedFactCount > 0 ? ["rejected_fact"] : []),
+      ...(outcome.missingAcceptedTerms.length > 0
+        ? ["required_fact_missing"]
+        : []),
+      ...(outcome.forbiddenOutputTerms.length > 0
+        ? ["forbidden_output_term"]
+        : []),
+    ];
+    return {
+      qualityPassed,
+      structurePassed: true,
+      factualityPassed,
+      stabilityKey: sha256CanonicalJson(artifact),
+      findingCodes,
+    };
   }
-  const output = artifact as BrandProfileOutput;
-  VALIDATE_BRAND_PROFILE_OUTPUT(payload.taskInput, output);
-  const prepared = prepareBrandProfileEvalFixture(payload.fixture);
-  const outcome = evaluateBrandProfileOutput(prepared, output);
-  const qualityPassed =
-    outcome.acceptedFactCount >=
-      prepared.fixture.assertions.minimumAcceptedFacts &&
-    outcome.forbiddenOutputTerms.length === 0;
-  const factualityPassed =
-    outcome.rejectedFactCount === 0 &&
-    outcome.missingAcceptedTerms.length === 0;
-  const findingCodes = [
-    ...(outcome.acceptedFactCount <
-    prepared.fixture.assertions.minimumAcceptedFacts
-      ? ["accepted_fact_minimum"]
-      : []),
-    ...(outcome.rejectedFactCount > 0 ? ["rejected_fact"] : []),
-    ...(outcome.missingAcceptedTerms.length > 0
-      ? ["required_fact_missing"]
-      : []),
-    ...(outcome.forbiddenOutputTerms.length > 0
-      ? ["forbidden_output_term"]
-      : []),
-  ];
-  return {
-    qualityPassed,
-    structurePassed: true,
-    factualityPassed,
-    stabilityKey: sha256CanonicalJson(artifact),
-    findingCodes,
-  };
+  if (plan.taskId === "site_builder.design_spec") {
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        DESIGN_SPEC_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
+    const outputCheck = checkAgainstSchema(
+      DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT,
+      artifact,
+    );
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as DesignSpecTaskOutput;
+    const taskInput = payload.taskInput as DesignSpecTaskInput;
+    VALIDATE_DESIGN_SPEC_OUTPUT(taskInput, output);
+    const prepared = prepareDesignSpecEvalFixture(
+      payload.fixture as DesignSpecEvalFixture,
+    );
+    const outcome = evaluateDesignSpecOutput(prepared, output);
+    const factualityPassed =
+      outcome.referencedUnselectedCatalogIds.length === 0 &&
+      outcome.contradictedMetricClaims.length === 0;
+    return {
+      qualityPassed: outcome.selectedDeterministicCandidate && factualityPassed,
+      structurePassed: true,
+      factualityPassed,
+      stabilityKey: output.candidateId,
+      findingCodes: [
+        ...(!outcome.selectedDeterministicCandidate
+          ? ["deterministic_catalog_baseline_mismatch"]
+          : []),
+        ...(outcome.referencedUnselectedCatalogIds.length > 0
+          ? ["unselected_catalog_reference"]
+          : []),
+        ...(outcome.contradictedMetricClaims.length > 0
+          ? ["frozen_candidate_metric_contradiction"]
+          : []),
+      ],
+    };
+  }
+  throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
 }
 
 export async function runLegacyComparatorEvaluationAttempt<T>(options: {
@@ -2550,6 +2836,16 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
     request: ModelEvaluationExecutionRequest,
   ) => Promise<ModelEvaluationCallResult<T>>;
 }): Promise<ModelEvaluationCallResult<T>> {
+  if (
+    ["minimax-m3", "doubao-seed-2.0-pro", "doubao-seed-2.0-lite"].includes(
+      options.alias,
+    )
+  ) {
+    throw new ModelEvaluationCallError("legacy_comparator_not_admitted", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
   if (
     !isTrustedModelEvaluationProtocolExecute(options.executeLegacyComparator)
   ) {
@@ -2644,7 +2940,7 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
     hardStopMs: options.plan.envelope.hardStopMs,
     perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
     reasoningEffort: options.plan.envelope.reasoningEffort,
-    outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+    outputSchema: canonicalTaskOutputSchema(options.plan.taskId),
     repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
@@ -2856,7 +3152,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     hardStopMs: options.plan.envelope.hardStopMs,
     perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
     reasoningEffort: options.plan.envelope.reasoningEffort,
-    outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+    outputSchema: canonicalTaskOutputSchema(options.plan.taskId),
     repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
@@ -3180,7 +3476,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     outcome.value.artifact !== undefined
   ) {
     try {
-      assessment = gradeCanonicalTaskArtifact(
+      assessment = assessCanonicalTaskArtifact(
         options.plan,
         evaluationCase.payload,
         outcome.value.artifact,
@@ -3421,7 +3717,7 @@ function assertCanonicalEvaluationRun(
     run.identityVerified
   ) {
     try {
-      canonicalAssessment = gradeCanonicalTaskArtifact(
+      canonicalAssessment = assessCanonicalTaskArtifact(
         plan,
         evaluationCase.payload,
         run.artifact,
