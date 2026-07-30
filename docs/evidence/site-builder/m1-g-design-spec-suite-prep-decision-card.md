@@ -2,19 +2,22 @@
 
 > 状态：`READY_FOR_SUITE_RE_REVIEW`；dispatch：`NOT_AUTHORIZED`；真实网络调用：`0`；模型费用：`$0.00`。
 
-修复后固定 suite 提交：`d9e63cb0580d0ea9a0a30f3bbe8760f5b6f01f45`。create-only runner 已从该提交逐文件复核 46 个 source bundle 成员并生成 [v2 机器 manifest](m1-g-design-spec-suite-prep-manifest-v2.json)；source bundle SHA-256=`23ff2e81d2060e47657dc7e02f94e21de5f562923d3510bc5628ba5a567dd478`，manifest SHA-256=`f32b4765b4988bdb61f59a2d3a36d64dfb8998c25462c149e1b7aefdbaa02f42`。旧 [v1 manifest](m1-g-design-spec-suite-prep-manifest.json) 作为被审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
+第二轮修复后的固定 suite 提交：`e8d13af6a024a8a38bd4a36ebcd349767f04d6a2`。create-only runner 已从该 clean commit 逐文件复核 47 个 source bundle 成员并生成 [v3 机器 manifest](m1-g-design-spec-suite-prep-manifest-v3.json)；source bundle SHA-256=`d0484a31eb2fb11669fd083c44c3b086329a9aefea2c0fdd258d6639d2bd4d53`，manifest SHA-256=`2eb9ac54fc1b21129e5ad86e33033de8a97eafb88a2afd51b5d2ceed9d30d089`。旧 [v1 manifest](m1-g-design-spec-suite-prep-manifest.json) 与 [v2 manifest](m1-g-design-spec-suite-prep-manifest-v2.json) 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
 
 ## 本 PR 冻结什么
 
 - canonical task：`site_builder.design_spec`
-- 视觉输入切片：六个 approved Family，各一组 sparse/rich，共 12 个合成 fixture
+- 视觉输入切片：六个 approved Family，各一组 sparse/rich，共 12 个合成 fixture；每例保存完整合成生产输入
 - runnable 候选：`gpt-5.6-terra / openai-responses`、`gpt-5.5 / openai-responses`、`claude-sonnet-5 / anthropic-messages`
 - 每个候选对 12 个 fixture 重复 2 次，共 72 个 target execution
 - GPT-5.5 在矩阵前增加 1 个 task-shaped capability probe
 - 每个 execution 最多 1 次 closed schema repair、最多 2 次 wire call
+- fixture task input 必须通过与产品运行共用的完整 catalog enumeration、required-role eligibility、ranking 和 top-3 projection 从该生产输入逐字重建，不能手工拼 candidate
 - fixture/prompt SHA-256 以独立常量固定；catalog 的 approved→B3→B2→B1 数据链、renderer preset digest 与 `design-catalog-v2` 合同实现纳入 source bundle
-- evaluator 对 reasons/warnings 中任何不属于已选 candidate 的 catalog-shaped 标识符 fail-closed，并校验每一次重复指标声明
+- evaluator 的 reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言指标、其他 candidate 或新事实均 fail-closed
 - comparator：24 个 `deterministic-catalog-selection/v1` case，逐例真实执行确定性选择并冻结 expected/actual/PASS/result digest，不调用模型
+- suite 自身固定 `legacyComparatorAliases=[]`；凭据必须精确覆盖三个 target alias，按 73 executions / 146 wire calls 绑定，MiniMax/Doubao extra scope 在预算和 client 前拒绝
+- runner 在导入 suite 前删除并本地重建 ignored 的 `packages/contracts/dist`；manifest 冻结 31 个 fixed-commit tracked contracts 文件（SHA-256=`c95bd7d5c90dd6cbe42dd35f6c58d6d0e1e473a3404efa5377e3547b99d15dd6`）及实际加载的 21 个 JS artifact（SHA-256=`d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01`），构建后漂移即停止
 
 因此未来真实评测的模型清单为 73 executions、最多 146 wire calls。按任务现有 20¢ 单次物理调用硬门，规划绝对上界为 2920¢（$29.20）；它不是预计费用、凭据额度或支出授权。
 
