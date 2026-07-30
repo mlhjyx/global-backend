@@ -75,7 +75,7 @@ import {
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v4" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v5" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v3" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -455,6 +455,26 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/design/catalog.ts",
   },
   {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-approved.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-b3-drafts.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-b2-drafts.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-b1-drafts.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/renderer-preset-digests.ts",
+  },
+  {
     role: "judge",
     path: "apps/api/src/site-builder/eval/design-spec-eval.ts",
   },
@@ -550,7 +570,35 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
   },
   {
     role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-catalog-v2.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/component-qualification.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-integrity.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-dna.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-observation.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-source.ts",
+  },
+  {
+    role: "contracts_source",
     path: "packages/contracts/src/site-builder/site-spec.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/copy-bundle.ts",
   },
   { role: "contracts_source", path: "packages/contracts/src/index.ts" },
   { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
@@ -558,9 +606,110 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
   { role: "dependency_lock", path: "pnpm-lock.yaml" },
 ] as const);
 
+const DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS = deepFreeze([
+  {
+    fixtureId: "natural-origin-rich",
+    fixtureSha256:
+      "69b96bae10968fc9c482c779c99fea463ab9a601ced68d24bfbf7f1d94413a11",
+    promptSha256:
+      "5fb86019a941070eeacbc7f1007fa9e92f003ae8979066766c5e10e964a1b525",
+  },
+  {
+    fixtureId: "natural-origin-sparse",
+    fixtureSha256:
+      "8d05755970beb1def90f295ddbc09a371bb1d804f560d0d832ffc83c955b7f35",
+    promptSha256:
+      "692e857dd3091ef7c9a98f9aaabfef364f66fe3651aa9ebdaf11dab0b4931aac",
+  },
+  {
+    fixtureId: "oem-capability-rich",
+    fixtureSha256:
+      "7138efc9eb08ae579dfdd9a2d18d193fde653e387286241cf1817c6775211972",
+    promptSha256:
+      "aaeb5f48c16aa354b6522434224868407594eb57e6c0e152f5e2c3b2ebaa9842",
+  },
+  {
+    fixtureId: "oem-capability-sparse",
+    fixtureSha256:
+      "a572ae5370b5d0d3840b00fa02d3d6977ec97cea17ae867687ffb5e653d450ee",
+    promptSha256:
+      "fb85e601456a8beaf36125258a1bc437bda5eb6b59258154f0eedaa88a4592b5",
+  },
+  {
+    fixtureId: "precision-industrial-rich",
+    fixtureSha256:
+      "9b56068c44b1d0a05c04d793e864299c6bc0ffc6e9bf73bd72e232b422b914bc",
+    promptSha256:
+      "de947c94d93aa5bf1a16430a780e00192fb4763336263048a75f5a156bc6b492",
+  },
+  {
+    fixtureId: "precision-industrial-sparse",
+    fixtureSha256:
+      "d8f97c6bce8c726bd0e1b63a1769d916195e093cbf2246181cadf9d7f695d651",
+    promptSha256:
+      "e35c02133dc73349096fe93e8b4efac34e55ab3c7fa0cfa7386090a3b2391544",
+  },
+  {
+    fixtureId: "premium-innovation-rich",
+    fixtureSha256:
+      "12f16155fbf46681d462838a2fab76cdd4502bcbdff765a4c175f07173d99115",
+    promptSha256:
+      "604e7884e0ff94bf1eaf144dcf410f7fa79514bc15d9dba33a68253e8ca62b90",
+  },
+  {
+    fixtureId: "premium-innovation-sparse",
+    fixtureSha256:
+      "9630449df0656a412ec586b2199f8e4f82d18872c75349a78368ddc73c67fae4",
+    promptSha256:
+      "cfe08b810dce6ff460947d1d9e8cd1088e8e0873fc2bd2569781b733cd190a35",
+  },
+  {
+    fixtureId: "scientific-trust-rich",
+    fixtureSha256:
+      "c63e4870404ff3cabee62e82df2fe949b5320af6470d44d94a45548419f78276",
+    promptSha256:
+      "efb1384f20fbd07c2e5549b12413f03770d50dd17017a7a681f492d6c01ed7fb",
+  },
+  {
+    fixtureId: "scientific-trust-sparse",
+    fixtureSha256:
+      "ea14225ab33858efa950dd0408c430e394fd6af1e5e6a7a3371c41fb4337673a",
+    promptSha256:
+      "a4a1ecd4350c99c4c8041051f0091dc87545856488056d4e89af38a17f9da944",
+  },
+  {
+    fixtureId: "technical-catalog-rich",
+    fixtureSha256:
+      "59a30ab16269d437d8df79640d58d952c993722898c93e5c470090af481d869f",
+    promptSha256:
+      "73ebf0c6f6d526f8b0c6a64e4a689eee86c2a7006ac41007434faa5a2b4721be",
+  },
+  {
+    fixtureId: "technical-catalog-sparse",
+    fixtureSha256:
+      "35aabef149f16ef2a66a4ef97b9d0e751900bc0661c667606bc8213cd2679c96",
+    promptSha256:
+      "faa98f2db258841693fe50b528c7967d0621f09a9fbbbe675fbf17dd3162532c",
+  },
+] as const);
+
+const DESIGN_SPEC_ACTUAL_FIXTURE_FINGERPRINTS = DESIGN_SPEC_EVAL_FIXTURES.map(
+  (fixture) => ({
+    fixtureId: fixture.fixtureId,
+    ...designSpecFixtureFingerprint(fixture),
+  }),
+);
+
+if (
+  JSON.stringify(DESIGN_SPEC_ACTUAL_FIXTURE_FINGERPRINTS) !==
+  JSON.stringify(DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS)
+) {
+  throw new Error("design_spec frozen fixture fingerprints drifted");
+}
+
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v1",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v1",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v2",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v2",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
@@ -569,21 +718,14 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   routeValidationVersion: DESIGN_SPEC_ROUTE_VALIDATION_VERSION,
   evaluatorVersion: DESIGN_SPEC_EVALUATOR_VERSION,
   evaluatorRubricSha256: sha256CanonicalJson(DESIGN_SPEC_EVALUATOR_RUBRIC),
-  fixtureSetId: "site-builder.design-spec-golden/2026-07-30-v1",
+  fixtureSetId: "site-builder.design-spec-golden/2026-07-30-v2",
   fixtureSchemaVersion: DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION,
   fixtureIds: Object.freeze(
     DESIGN_SPEC_EVAL_FIXTURES.map(({ fixtureId }) => fixtureId),
   ),
-  fixtureFingerprints: Object.freeze(
-    DESIGN_SPEC_EVAL_FIXTURES.map((fixture) =>
-      Object.freeze({
-        fixtureId: fixture.fixtureId,
-        ...designSpecFixtureFingerprint(fixture),
-      }),
-    ),
-  ),
+  fixtureFingerprints: DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS,
   repeats: 2,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v1",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v2",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -2803,7 +2945,7 @@ export function assessCanonicalTaskArtifact(
     );
     const outcome = evaluateDesignSpecOutput(prepared, output);
     const factualityPassed =
-      outcome.referencedUnselectedCatalogIds.length === 0 &&
+      outcome.referencedForbiddenCatalogIdentifiers.length === 0 &&
       outcome.contradictedMetricClaims.length === 0;
     return {
       qualityPassed: outcome.selectedDeterministicCandidate && factualityPassed,
@@ -2814,8 +2956,8 @@ export function assessCanonicalTaskArtifact(
         ...(!outcome.selectedDeterministicCandidate
           ? ["deterministic_catalog_baseline_mismatch"]
           : []),
-        ...(outcome.referencedUnselectedCatalogIds.length > 0
-          ? ["unselected_catalog_reference"]
+        ...(outcome.referencedForbiddenCatalogIdentifiers.length > 0
+          ? ["forbidden_catalog_identifier"]
           : []),
         ...(outcome.contradictedMetricClaims.length > 0
           ? ["frozen_candidate_metric_contradiction"]

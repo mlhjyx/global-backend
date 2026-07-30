@@ -62,6 +62,24 @@ describe("design_spec zero-cost suite preparation", () => {
         ["minimax-m3", "doubao-seed-2.0-pro"].includes(alias),
       ),
     ).toBe(false);
+    expect(manifest.deterministicComparator.cases).toHaveLength(24);
+    expect(
+      manifest.deterministicComparator.cases.every(
+        (entry) =>
+          entry.assessment === "PASS" &&
+          entry.actualCandidateId === entry.expectedCandidateId &&
+          /^[a-f0-9]{64}$/.test(entry.fixtureSha256) &&
+          /^[a-f0-9]{64}$/.test(entry.promptSha256) &&
+          /^[a-f0-9]{64}$/.test(entry.resultSha256),
+      ),
+    ).toBe(true);
+    expect(
+      new Set(
+        manifest.deterministicComparator.cases.map(
+          ({ expectedCandidateId }) => expectedCandidateId,
+        ),
+      ).size,
+    ).toBe(12);
     expect(manifest.manifestSha256).toMatch(/^[a-f0-9]{64}$/);
   });
 

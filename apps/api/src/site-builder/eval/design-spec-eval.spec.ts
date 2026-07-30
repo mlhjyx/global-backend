@@ -64,7 +64,7 @@ describe("design_spec canonical evaluation fixtures", () => {
       }),
     ).toEqual({
       selectedDeterministicCandidate: true,
-      referencedUnselectedCatalogIds: [],
+      referencedForbiddenCatalogIdentifiers: [],
       contradictedMetricClaims: [],
     });
   });
@@ -98,7 +98,46 @@ describe("design_spec canonical evaluation fixtures", () => {
       }),
     ).toEqual({
       selectedDeterministicCandidate: true,
-      referencedUnselectedCatalogIds: [unselected.familyId],
+      referencedForbiddenCatalogIdentifiers: [unselected.familyId],
+      contradictedMetricClaims: ["industryMatchCount"],
+    });
+  });
+
+  it("flags invented catalog-shaped identifiers in evaluation prose", () => {
+    const fixture = DESIGN_SPEC_EVAL_FIXTURES[0]!;
+    const prepared = prepareDesignSpecEvalFixture(fixture);
+    const selected = prepared.input.candidates[0]!;
+    expect(
+      evaluateDesignSpecOutput(prepared, {
+        candidateId: selected.id,
+        reasons: ["Use invented-family and fabricated-blueprint"],
+        warnings: [],
+      }),
+    ).toMatchObject({
+      selectedDeterministicCandidate: true,
+      referencedForbiddenCatalogIdentifiers: [
+        "fabricated-blueprint",
+        "invented-family",
+      ],
+      contradictedMetricClaims: [],
+    });
+  });
+
+  it("flags any contradictory repeated metric claim", () => {
+    const fixture = DESIGN_SPEC_EVAL_FIXTURES[0]!;
+    const prepared = prepareDesignSpecEvalFixture(fixture);
+    const selected = prepared.input.candidates[0]!;
+    expect(
+      evaluateDesignSpecOutput(prepared, {
+        candidateId: selected.id,
+        reasons: [
+          `industryMatchCount:${selected.industryMatchCount}`,
+          `industryMatchCount:${selected.industryMatchCount + 999}`,
+        ],
+        warnings: [],
+      }),
+    ).toMatchObject({
+      referencedForbiddenCatalogIdentifiers: [],
       contradictedMetricClaims: ["industryMatchCount"],
     });
   });

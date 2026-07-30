@@ -1,6 +1,6 @@
 # Site Builder 模型评测 Harness 基线
 
-> 机器合同：`site-builder-model-evaluation-harness/2026-07-30-v4`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-28-v1`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
+> 机器合同：`site-builder-model-evaluation-harness/2026-07-30-v5`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-28-v1`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
 
 ## 范围
 
@@ -37,7 +37,7 @@
 |---|---|---|---|---|---:|---:|---:|---:|---:|---|
 | `site_builder.brand_profile` | `structured.workspace_materials` | `task_evaluation_ready` | `site-builder.brand-profile-evaluation-suite/2026-07-27-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe` | 12000 | 240s | 240s | 480s | 40¢ | low |
 | `site_builder.copy` | `copy.premium` | `blocked_no_evaluation_suite` | — | `claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 4000 | 120s | 120s | 240s | 20¢ | low |
-| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-07-30-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
+| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-07-30-v2` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
 | `site_builder.assemble` | `structured.default` | `blocked_no_evaluation_suite` | — | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 16000 | 180s | 180s | 360s | 20¢ | — |
 | `site_builder.assembly_fix` | `structured.default` | `blocked_no_evaluation_suite` | — | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 8000 | 180s | 180s | 360s | 20¢ | — |
 | `site_builder.qa_summarize` | `text.summary` | `blocked_no_evaluation_suite` | — | `gpt-5.6-luna` / `openai-responses` / `none`<br>`gpt-5.4-mini` / `openai-responses` / `none`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 3000 | 90s | 90s | 180s | 20¢ | — |

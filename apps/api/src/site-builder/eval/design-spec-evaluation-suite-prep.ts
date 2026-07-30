@@ -10,9 +10,15 @@ import {
 } from "./model-evaluation-executor";
 import { sha256CanonicalJson } from "./eval-provenance";
 import { writeRepositoryJsonCreateOnly } from "./create-only-json";
+import {
+  DESIGN_SPEC_EVAL_FIXTURES,
+  designSpecFixtureFingerprint,
+  prepareDesignSpecEvalFixture,
+  selectDesignSpecDeterministicCandidate,
+} from "./design-spec-eval";
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v1" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v2" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 
@@ -45,6 +51,12 @@ export interface DesignSpecDeterministicComparatorCase {
   comparatorId: "deterministic-catalog-selection/v1";
   fixtureId: string;
   attempt: number;
+  fixtureSha256: string;
+  promptSha256: string;
+  expectedCandidateId: string;
+  actualCandidateId: string;
+  assessment: "PASS";
+  resultSha256: string;
   wireCalls: 0;
   costCents: 0;
 }
@@ -233,12 +245,42 @@ export function buildDesignSpecEvaluationSuitePrepManifest(
   }
   const deterministicCases: DesignSpecDeterministicComparatorCase[] = [];
   for (const fixtureId of suite.fixtureIds) {
+    const fixture = DESIGN_SPEC_EVAL_FIXTURES.find(
+      (candidate) => candidate.fixtureId === fixtureId,
+    );
+    if (!fixture) {
+      throw new Error(`design_spec comparator fixture missing: ${fixtureId}`);
+    }
+    const prepared = prepareDesignSpecEvalFixture(fixture);
+    const expectedCandidateId =
+      prepared.fixture.assertions.deterministicCandidateId;
+    const actualCandidateId = selectDesignSpecDeterministicCandidate(
+      prepared.input,
+    ).id;
+    if (actualCandidateId !== expectedCandidateId) {
+      throw new Error(
+        `design_spec deterministic comparator mismatch: ${fixtureId}`,
+      );
+    }
+    const fingerprints = designSpecFixtureFingerprint(fixture);
     for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
+      const result = {
+        fixtureId,
+        attempt,
+        expectedCandidateId,
+        actualCandidateId,
+        assessment: "PASS" as const,
+      };
       deterministicCases.push({
         ordinal: deterministicCases.length + 1,
         comparatorId: "deterministic-catalog-selection/v1",
         fixtureId,
         attempt,
+        ...fingerprints,
+        expectedCandidateId,
+        actualCandidateId,
+        assessment: "PASS",
+        resultSha256: sha256CanonicalJson(result),
         wireCalls: 0,
         costCents: 0,
       });

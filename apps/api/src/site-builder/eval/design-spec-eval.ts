@@ -12,7 +12,7 @@ import { STATIC_DESIGN_CATALOG_V2 } from "../design/catalog";
 export const DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION =
   "site-builder-design-spec-eval-fixture/v1" as const;
 export const DESIGN_SPEC_EVALUATOR_VERSION =
-  "site-builder-design-spec-evaluator/2026-07-30-v1" as const;
+  "site-builder-design-spec-evaluator/2026-07-30-v2" as const;
 export const DESIGN_SPEC_ROUTE_VALIDATION_VERSION =
   "site-builder-design-spec-route-validation/2026-07-30-v1" as const;
 export const DESIGN_SPEC_PROMPT_VERSION =
@@ -54,7 +54,7 @@ export interface PreparedDesignSpecEvalFixture {
 
 export interface DesignSpecEvaluationOutcome {
   selectedDeterministicCandidate: boolean;
-  referencedUnselectedCatalogIds: string[];
+  referencedForbiddenCatalogIdentifiers: string[];
   contradictedMetricClaims: string[];
 }
 
@@ -359,6 +359,26 @@ function mentioned(text: string, value: string): boolean {
   ).test(text);
 }
 
+function catalogShapedIdentifiers(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .match(/[a-z0-9]+(?:-[a-z0-9]+)+/gi)
+        ?.map((value) => value.toLocaleLowerCase("en")) ?? [],
+    ),
+  ];
+}
+
+export function selectDesignSpecDeterministicCandidate(
+  input: DesignSpecTaskInput,
+): DesignBriefCandidateSummary {
+  const selected = rankDeterministicCandidates(input.candidates)[0];
+  if (!selected || !input.candidates.every(candidateIsCatalogClosed)) {
+    throw new Error("design_spec deterministic comparator input is invalid");
+  }
+  return selected;
+}
+
 export function evaluateDesignSpecOutput(
   prepared: PreparedDesignSpecEvalFixture,
   output: DesignSpecTaskOutput,
@@ -375,14 +395,17 @@ export function evaluateDesignSpecOutput(
     selected.demoVisualPackId,
     ...Object.values(selected.blueprintIds),
   ]);
-  const referencedUnselectedCatalogIds = [
+  const referencedForbiddenCatalogIdentifiers = [
     ...new Set([
-      ...catalogIds(),
-      ...prepared.input.candidates.map(({ id }) => id),
+      ...[
+        ...catalogIds(),
+        ...prepared.input.candidates.map(({ id }) => id),
+      ].filter((id) => !allowedCatalogIds.has(id) && mentioned(prose, id)),
+      ...catalogShapedIdentifiers(prose).filter(
+        (identifier) => !allowedCatalogIds.has(identifier),
+      ),
     ]),
-  ]
-    .filter((id) => !allowedCatalogIds.has(id) && mentioned(prose, id))
-    .sort();
+  ].sort();
   const contradictedMetricClaims: string[] = [];
   const metricClaims = [
     ["industryMatchCount", selected.industryMatchCount],
@@ -390,10 +413,12 @@ export function evaluateDesignSpecOutput(
     ["demoFallbackCount", selected.demoFallbackCount],
   ] as const;
   for (const [name, expected] of metricClaims) {
-    const match = prose.match(
-      new RegExp(`${name}\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)`, "i"),
-    );
-    if (match && Number(match[1]) !== expected) {
+    const claims = [
+      ...prose.matchAll(
+        new RegExp(`${name}\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)`, "gi"),
+      ),
+    ];
+    if (claims.some((claim) => Number(claim[1]) !== expected)) {
       contradictedMetricClaims.push(name);
     }
   }
@@ -401,7 +426,7 @@ export function evaluateDesignSpecOutput(
     selectedDeterministicCandidate:
       output.candidateId ===
       prepared.fixture.assertions.deterministicCandidateId,
-    referencedUnselectedCatalogIds,
+    referencedForbiddenCatalogIdentifiers,
     contradictedMetricClaims,
   };
 }

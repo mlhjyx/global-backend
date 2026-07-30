@@ -1720,11 +1720,16 @@ function taskDefinition(taskId: SiteBuilderTaskId) {
   throw preDispatchError("evaluation_task_not_admitted");
 }
 
+function taskEvaluationOutputConstraint(taskId: SiteBuilderTaskId): string {
+  if (taskId !== "site_builder.design_spec") return "";
+  return "\n评测输出的 reasons/warnings 中，任何带连字符的标识符都必须逐字来自已选 candidate；不得创造或引用其他 family、preset、blueprint、visual-pack 或 candidate 标识符。";
+}
+
 function structuredSystemPrompt(
   outputSchema: Readonly<Record<string, unknown>>,
   taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): string {
-  return `${taskDefinition(taskId).system ?? ""}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
+  return `${taskDefinition(taskId).system ?? ""}${taskEvaluationOutputConstraint(taskId)}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
 }
 
 function repairPrompt(prompt: string, kind: string, reason: string): string {

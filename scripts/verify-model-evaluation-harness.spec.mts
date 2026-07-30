@@ -201,7 +201,7 @@ test("a missing harness id fails documentation verification", async () => {
   documents["docs/status/current.md"] = documents[
     "docs/status/current.md"
   ].replace(
-    "site-builder-model-evaluation-harness/2026-07-30-v4",
+    "site-builder-model-evaluation-harness/2026-07-30-v5",
     "missing-harness-id",
   );
   assert.throws(

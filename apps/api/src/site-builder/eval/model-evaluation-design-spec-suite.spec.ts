@@ -65,7 +65,23 @@ describe("design_spec canonical model evaluation suite", () => {
       expect(evaluationCase.contract.sourceBundleSha256).toMatch(
         /^[a-f0-9]{64}$/,
       );
-      expect(evaluationCase.payload.sourceFiles.length).toBeGreaterThan(20);
+      expect(
+        evaluationCase.payload.sourceFiles.map(({ path }) => path),
+      ).toEqual(
+        expect.arrayContaining([
+          "apps/api/src/site-builder/design/catalog-v2-approved.ts",
+          "apps/api/src/site-builder/design/catalog-v2-b3-drafts.ts",
+          "apps/api/src/site-builder/design/catalog-v2-b2-drafts.ts",
+          "apps/api/src/site-builder/design/catalog-v2-b1-drafts.ts",
+          "apps/api/src/site-builder/design/renderer-preset-digests.ts",
+          "packages/contracts/src/site-builder/design-catalog-v2.ts",
+          "packages/contracts/src/site-builder/component-qualification.ts",
+          "packages/contracts/src/site-builder/design-integrity.ts",
+          "packages/contracts/src/site-builder/design-dna.ts",
+          "packages/contracts/src/site-builder/design-observation.ts",
+          "packages/contracts/src/site-builder/design-source.ts",
+        ]),
+      );
       expect(evaluationCase.payload.taskInput).toMatchObject({
         candidates: expect.any(Array),
       });
@@ -124,6 +140,26 @@ describe("design_spec canonical model evaluation suite", () => {
       structurePassed: true,
       factualityPassed: true,
       findingCodes: ["deterministic_catalog_baseline_mismatch"],
+    });
+
+    expect(
+      assessCanonicalTaskArtifact(plan, evaluationCase.payload, {
+        candidateId: selected.id,
+        reasons: [
+          `industryMatchCount:${selected.industryMatchCount}`,
+          "industryMatchCount:999",
+          "invented-family",
+        ],
+        warnings: [],
+      }),
+    ).toMatchObject({
+      qualityPassed: false,
+      structurePassed: true,
+      factualityPassed: false,
+      findingCodes: [
+        "forbidden_catalog_identifier",
+        "frozen_candidate_metric_contradiction",
+      ],
     });
   });
 
