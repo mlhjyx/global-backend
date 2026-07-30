@@ -3,6 +3,9 @@ import {
   type CompiledContractArtifactFingerprint,
 } from "./compiled-contracts-attestation";
 
+export const DESIGN_SPEC_EXPECTED_LOADED_CONTRACTS_RUNTIME_FINGERPRINT =
+  "7313b68ccc2ee68728d245a38f420b6e99c6a6ef159eecfa927d24bee7187b8e" as const;
+
 export const DESIGN_SPEC_COMPILED_CONTRACT_ARTIFACTS = Object.freeze([
   {
     path: "packages/contracts/dist/index.js",

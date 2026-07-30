@@ -16,6 +16,8 @@ import {
   writeSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+
+import { modelEvaluationRuntimeIntegrityMatches } from "./model-evaluation-runtime-integrity";
 import {
   getModelCandidateCatalogEntry,
   type ModelCandidateProtocol,
@@ -45,7 +47,6 @@ import {
   isTrustedModelEvaluationCostSafetyAttestation,
   type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
-import { modelEvaluationRuntimeIntegrityMatches } from "./model-evaluation-runtime-integrity";
 
 export const MODEL_EVALUATION_PROTOCOL_ADMISSION_SCHEMA_VERSION =
   "site-builder-model-evaluation-protocol-admission/v1" as const;
@@ -2431,7 +2432,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
           effectiveSettlement,
         );
       }
-      let response: ModelEvaluationWireResponse;
+      let response: ModelEvaluationWireResponse | undefined;
+      let wireFailed = false;
+      let wireError: unknown;
       try {
         switch (protocol) {
           case "openai-responses":
@@ -2487,13 +2490,24 @@ export function createModelEvaluationProtocolExecutor(deps: {
             break;
         }
       } catch (error) {
+        wireFailed = true;
+        wireError = error;
+      }
+
+      if (!modelEvaluationRuntimeIntegrityMatches(request.taskId)) {
         usage.callCount += 1;
         usage.complete = false;
         providerReportedCostCents.push(
-          error instanceof ModelEvaluationWireHttpError ||
-            error instanceof ModelEvaluationWireResponseBodyError
-            ? responseCost(error.providerReportedCostCents)
-            : null,
+          wireFailed &&
+            (wireError instanceof ModelEvaluationWireHttpError ||
+              wireError instanceof ModelEvaluationWireResponseBodyError)
+            ? responseCost(wireError.providerReportedCostCents)
+            : isRecord(response)
+              ? responseCost(response.providerReportedCostCents)
+              : null,
+        );
+        const error = new Error(
+          "compiled_contracts_runtime_attestation_mismatch_after_wire",
         );
         const settlement = await safeResolveSettlement(
           settlementResolver,
@@ -2509,6 +2523,42 @@ export function createModelEvaluationProtocolExecutor(deps: {
               ...providerReportedCostCents,
             ]),
             error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        await freezeDurableAuthorization(
+          "compiled_contracts_runtime_attestation_mismatch",
+        );
+        throw new ModelEvaluationCallError(
+          "compiled_contracts_runtime_attestation_mismatch",
+          effectiveSettlement,
+        );
+      }
+
+      if (wireFailed) {
+        usage.callCount += 1;
+        usage.complete = false;
+        providerReportedCostCents.push(
+          wireError instanceof ModelEvaluationWireHttpError ||
+            wireError instanceof ModelEvaluationWireResponseBodyError
+            ? responseCost(wireError.providerReportedCostCents)
+            : null,
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error: wireError,
           },
           costSafety,
         );
@@ -2596,36 +2646,6 @@ export function createModelEvaluationProtocolExecutor(deps: {
         );
       }
       addUsage(usage, normalized.usage);
-      if (!modelEvaluationRuntimeIntegrityMatches(request.taskId)) {
-        const error = new Error(
-          "compiled_contracts_runtime_attestation_mismatch_after_wire",
-        );
-        const settlement = await safeResolveSettlement(
-          settlementResolver,
-          {
-            executionId: request.executionId,
-            taskId: request.taskId,
-            alias: request.alias,
-            protocol,
-            outcome: "failed",
-            callCount: usage.callCount,
-            usage: settlementUsage(usage),
-            providerReportedCostCents: Object.freeze([
-              ...providerReportedCostCents,
-            ]),
-            error,
-          },
-          costSafety,
-        );
-        const effectiveSettlement = await closeCampaignReservation(settlement);
-        await freezeDurableAuthorization(
-          "compiled_contracts_runtime_attestation_mismatch",
-        );
-        throw new ModelEvaluationCallError(
-          "compiled_contracts_runtime_attestation_mismatch",
-          effectiveSettlement,
-        );
-      }
       return normalized;
     };
 

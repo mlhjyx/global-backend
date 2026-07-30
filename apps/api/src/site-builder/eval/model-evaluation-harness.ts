@@ -3,6 +3,10 @@ import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
+  assertModelEvaluationRuntimeIntegrity,
+  modelEvaluationRuntimeIntegrityMatches,
+} from "./model-evaluation-runtime-integrity";
+import {
   SITE_BUILDER_MODEL_CANDIDATE_BASELINE,
   SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
   MODEL_CANDIDATE_PROTOCOLS,
@@ -75,15 +79,11 @@ import {
   type CompiledContractsRuntimeBinding,
 } from "./compiled-contracts-attestation";
 import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-compiled-contracts-runtime";
-import {
-  assertModelEvaluationRuntimeIntegrity,
-  modelEvaluationRuntimeIntegrityMatches,
-} from "./model-evaluation-runtime-integrity";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v9" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v10" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -515,6 +515,10 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/design-spec-compiled-contracts-runtime.ts",
   },
   {
+    role: "loaded_contracts_runtime_binding",
+    path: "apps/api/src/site-builder/eval/design-spec-loaded-contracts-runtime.ts",
+  },
+  {
     role: "runtime_integrity",
     path: "apps/api/src/site-builder/eval/model-evaluation-runtime-integrity.ts",
   },
@@ -732,8 +736,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v6",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v5",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v7",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v6",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
@@ -752,7 +756,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v6",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v7",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 

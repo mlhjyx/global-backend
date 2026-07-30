@@ -124,6 +124,23 @@ function designSpecTargetOnlyCostSafetyInput(
   return input;
 }
 
+function replaceLoadedContractsModuleIdentity(): () => void {
+  const cachePath = Object.keys(require.cache).find((path) =>
+    path.endsWith("/packages/contracts/dist/site-builder/design-catalog-v2.js"),
+  );
+  if (!cachePath) throw new Error("loaded design catalog contract not found");
+  const original = require.cache[cachePath];
+  if (!original) throw new Error("loaded design catalog contract disappeared");
+  const replacement = Object.assign(
+    Object.create(Object.getPrototypeOf(original)),
+    original,
+  ) as NodeModule;
+  require.cache[cachePath] = replacement;
+  return () => {
+    require.cache[cachePath] = original;
+  };
+}
+
 function directRequest(): ModelEvaluationExecutionRequest {
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
   const candidate = plan.candidates[0];
@@ -1595,6 +1612,162 @@ describe("model evaluation executor authorization", () => {
       actualProtocol: "openai-responses",
       costSettlement: { state: "settled", amountCents: 1 },
     });
+    expect(wire).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a replaced loaded contracts module identity before dispatch", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+    const candidate = plan.candidates[0];
+    const wire = vi.fn();
+    const resolver = fakeResolver();
+    const costSafety = createModelEvaluationCostSafetyAttestation(
+      designSpecTargetOnlyCostSafetyInput(resolver.resolverId),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    const restore = replaceLoadedContractsModuleIdentity();
+    try {
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "precision-industrial-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).rejects.toMatchObject({
+        failureCode: "compiled_contracts_runtime_attestation_mismatch",
+        costSettlement: {
+          state: "not_incurred",
+          reason: "rejected_before_dispatch",
+        },
+      });
+      expect(wire).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("runs the post-wire guard on rejection and durably freezes drift", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+    const candidate = plan.candidates[0];
+    let restore = () => {};
+    const wire = vi.fn(async () => {
+      restore = replaceLoadedContractsModuleIdentity();
+      throw new Error("provider failed while contracts drifted");
+    });
+    const resolver = fakeResolver();
+    const costSafety = createModelEvaluationCostSafetyAttestation(
+      designSpecTargetOnlyCostSafetyInput(resolver.resolverId),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    try {
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "precision-industrial-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        failureCode: "compiled_contracts_runtime_attestation_mismatch",
+        resultClass: "capability_unavailable",
+        costSettlement: {
+          state: "unknown",
+          reason: "provider_ack_unknown",
+        },
+      });
+    } finally {
+      restore();
+    }
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "precision-industrial-sparse",
+        attempt: 1,
+        campaignBudget: new ModelEvaluationBudgetGuard(100),
+        execute: executor.execute,
+      }),
+    ).resolves.toMatchObject({
+      failureCode: "post_dispatch_settlement_incoherent",
+      resultClass: "capability_unavailable",
+      costSettlement: {
+        state: "unknown",
+        reason: "invalid_settlement",
+      },
+    });
+    expect(wire).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves reported settlement when a malformed response also drifts", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+    const candidate = plan.candidates[0];
+    let restore = () => {};
+    const wire = vi.fn(async () => {
+      restore = replaceLoadedContractsModuleIdentity();
+      return {
+        body: null,
+        providerReportedCostCents: 2,
+      };
+    });
+    const resolver = fakeResolver();
+    const costSafety = createModelEvaluationCostSafetyAttestation(
+      designSpecTargetOnlyCostSafetyInput(resolver.resolverId),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    try {
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "precision-industrial-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        failureCode: "compiled_contracts_runtime_attestation_mismatch",
+        resultClass: "capability_unavailable",
+        costSettlement: {
+          state: "settled",
+          amountCents: 2,
+          basis: "provider_reported@authorization-spec-settlement/v1",
+        },
+      });
+    } finally {
+      restore();
+    }
     expect(wire).toHaveBeenCalledTimes(1);
   });
 
