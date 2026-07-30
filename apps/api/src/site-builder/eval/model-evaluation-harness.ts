@@ -84,7 +84,7 @@ import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-co
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v12" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v13" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -755,8 +755,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v9",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v8",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v10",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v9",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   systemPromptSha256: DESIGN_SPEC_SYSTEM_PROMPT_SHA256,
@@ -776,7 +776,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v9",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v10",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1255,16 +1255,17 @@ function bindTrustedModelEvaluationExecutor(
     suite === null
       ? null
       : buildCanonicalModelEvaluationCase(plan, suite.fixtureIds[0]);
-  let currentFixedCommitSha: string | null = null;
-  try {
-    const observed = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: REAL_REPOSITORY_ROOT,
-      encoding: "utf8",
-    }).trim();
-    currentFixedCommitSha = /^[a-f0-9]{40}$/.test(observed) ? observed : null;
-  } catch {
-    currentFixedCommitSha = null;
-  }
+  const currentFixedCommitSha = (() => {
+    try {
+      const observed = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: REAL_REPOSITORY_ROOT,
+        encoding: "utf8",
+      }).trim();
+      return /^[a-f0-9]{40}$/.test(observed) ? observed : null;
+    } catch {
+      return null;
+    }
+  })();
   if (
     suite === null ||
     preparedCase === null ||
