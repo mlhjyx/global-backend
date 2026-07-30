@@ -2443,12 +2443,8 @@ describe("quality-first candidate summary and ranking", () => {
   });
 
   it("uses captured freeze intrinsics before branding trusted runs", async () => {
-    const objectIsFrozen = vi
-      .spyOn(Object, "isFrozen")
-      .mockReturnValue(true);
-    let trustedRun:
-      | Awaited<ReturnType<typeof acceptedRun>>
-      | undefined;
+    const objectIsFrozen = vi.spyOn(Object, "isFrozen").mockReturnValue(true);
+    let trustedRun: Awaited<ReturnType<typeof acceptedRun>> | undefined;
     try {
       trustedRun = (
         await fullMatrix(
@@ -2484,7 +2480,7 @@ describe("quality-first candidate summary and ranking", () => {
     expect(Object.isFrozen(trustedRun.usage)).toBe(true);
     expect(Object.isFrozen(trustedRun.capabilityProbeAttestation)).toBe(true);
     expect(trustedRun).toMatchObject({
-      schemaVersion: "site-builder-model-evaluation-run/v3",
+      schemaVersion: "site-builder-model-evaluation-run/v4",
       costSafetyContractId:
         "site-builder-model-evaluation-cost-safety/2026-07-28-v1",
       credentialSnapshotSha256:
@@ -2492,7 +2488,7 @@ describe("quality-first candidate summary and ranking", () => {
       pricingSnapshotSha256:
         "2222222222222222222222222222222222222222222222222222222222222222",
       capabilityProbeAttestation: {
-        schemaVersion: "site-builder-model-capability-probe-attestation/v2",
+        schemaVersion: "site-builder-model-capability-probe-attestation/v3",
       },
     });
     expect(trustedRun.costSafetyAttestationSha256).toMatch(/^[a-f0-9]{64}$/);

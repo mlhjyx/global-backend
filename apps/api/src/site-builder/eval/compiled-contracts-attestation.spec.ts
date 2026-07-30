@@ -13,6 +13,9 @@ import { describe, expect, it } from "vitest";
 import {
   assertCompiledContractsAttestationStable,
   buildCompiledContractsAttestation,
+  compiledContractsRuntimeBindingFromAttestation,
+  compiledContractsRuntimeBindingMatches,
+  readCompiledContractsRuntimeBinding,
 } from "./compiled-contracts-attestation";
 
 describe("compiled contracts fixed-commit attestation", () => {
@@ -91,11 +94,25 @@ describe("compiled contracts fixed-commit attestation", () => {
       expect(() =>
         assertCompiledContractsAttestationStable(root, attestation),
       ).not.toThrow();
+      const expectedRuntimeBinding =
+        compiledContractsRuntimeBindingFromAttestation(attestation);
+      expect(
+        compiledContractsRuntimeBindingMatches(
+          expectedRuntimeBinding,
+          readCompiledContractsRuntimeBinding(root),
+        ),
+      ).toBe(true);
 
       writeFileSync(
         join(root, "packages/contracts/dist/index.js"),
         '"use strict"; exports.drifted = true;\n',
       );
+      expect(
+        compiledContractsRuntimeBindingMatches(
+          expectedRuntimeBinding,
+          readCompiledContractsRuntimeBinding(root),
+        ),
+      ).toBe(false);
       expect(() =>
         assertCompiledContractsAttestationStable(root, attestation),
       ).toThrow("compiled contracts drifted during suite preparation");

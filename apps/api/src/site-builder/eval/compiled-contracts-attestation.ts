@@ -38,6 +38,19 @@ export interface CompiledContractsAttestation {
   suiteImportedAfterBuild: true;
 }
 
+export interface CompiledContractsRuntimeBinding {
+  schemaVersion: typeof COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION;
+  buildId: typeof COMPILED_CONTRACTS_BUILD_ID;
+  runtimeEntrypoint: typeof COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT;
+  compiledArtifactCount: number;
+  compiledArtifactTreeSha256: string;
+}
+
+export interface CompiledContractArtifactFingerprint {
+  path: string;
+  sha256: string;
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -143,6 +156,52 @@ function compiledContractArtifacts(repositoryRoot: string) {
     path,
     sha256: sha256(readFileSync(resolve(realRoot, path))),
   }));
+}
+
+export function readCompiledContractsRuntimeBinding(
+  repositoryRoot: string,
+): CompiledContractsRuntimeBinding {
+  const compiledArtifacts = compiledContractArtifacts(repositoryRoot);
+  return {
+    schemaVersion: COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
+    buildId: COMPILED_CONTRACTS_BUILD_ID,
+    runtimeEntrypoint: COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+    compiledArtifactCount: compiledArtifacts.length,
+    compiledArtifactTreeSha256: sha256(canonicalJson(compiledArtifacts)),
+  };
+}
+
+export function compiledContractsRuntimeBindingFromAttestation(
+  attestation: CompiledContractsAttestation,
+): CompiledContractsRuntimeBinding {
+  return compiledContractsRuntimeBindingFromArtifacts(
+    attestation.compiledArtifacts,
+  );
+}
+
+export function compiledContractsRuntimeBindingFromArtifacts(
+  compiledArtifacts: readonly CompiledContractArtifactFingerprint[],
+): CompiledContractsRuntimeBinding {
+  return {
+    schemaVersion: COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
+    buildId: COMPILED_CONTRACTS_BUILD_ID,
+    runtimeEntrypoint: COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+    compiledArtifactCount: compiledArtifacts.length,
+    compiledArtifactTreeSha256: sha256(canonicalJson(compiledArtifacts)),
+  };
+}
+
+export function compiledContractsRuntimeBindingMatches(
+  expected: CompiledContractsRuntimeBinding,
+  observed: CompiledContractsRuntimeBinding,
+): boolean {
+  return (
+    expected.schemaVersion === observed.schemaVersion &&
+    expected.buildId === observed.buildId &&
+    expected.runtimeEntrypoint === observed.runtimeEntrypoint &&
+    expected.compiledArtifactCount === observed.compiledArtifactCount &&
+    expected.compiledArtifactTreeSha256 === observed.compiledArtifactTreeSha256
+  );
 }
 
 export function buildCompiledContractsAttestation(options: {

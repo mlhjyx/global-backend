@@ -39,6 +39,12 @@ describe("design_spec canonical model evaluation suite", () => {
         taskContractId: "site_builder.design_spec",
         repeats: 2,
         legacyComparatorAliases: [],
+        compiledContractsRuntimeBinding: {
+          runtimeEntrypoint: "packages/contracts/dist/index.js",
+          compiledArtifactCount: 21,
+          compiledArtifactTreeSha256:
+            "d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01",
+        },
         fixtureIds: expect.arrayContaining([
           "precision-industrial-rich",
           "precision-industrial-sparse",
@@ -65,6 +71,9 @@ describe("design_spec canonical model evaluation suite", () => {
       expect(evaluationCase.contract.fixtureId).toBe(fixtureId);
       expect(evaluationCase.contract.sourceBundleSha256).toMatch(
         /^[a-f0-9]{64}$/,
+      );
+      expect(evaluationCase.contract.compiledContractsArtifactTreeSha256).toBe(
+        "d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01",
       );
       expect(
         evaluationCase.payload.sourceFiles.map(({ path }) => path),

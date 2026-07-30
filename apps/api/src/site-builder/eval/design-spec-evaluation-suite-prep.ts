@@ -21,16 +21,19 @@ import {
   COMPILED_CONTRACTS_BUILD_COMMAND,
   COMPILED_CONTRACTS_BUILD_ID,
   COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
+  compiledContractsRuntimeBindingFromAttestation,
+  compiledContractsRuntimeBindingMatches,
   type CompiledContractsAttestation,
 } from "./compiled-contracts-attestation";
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v3" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v4" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 
 export const DESIGN_SPEC_EVALUATION_STOP_CONDITIONS = Object.freeze([
   "fixed_commit_or_source_bundle_drift",
+  "compiled_contracts_runtime_attestation_drift",
   "fixture_matrix_or_prompt_drift",
   "candidate_alias_or_protocol_drift",
   "retired_or_deferred_alias_present",
@@ -87,6 +90,7 @@ export interface DesignSpecEvaluationSuitePrepManifest {
     candidateCount: 3;
     sourceBundleContractId: string;
     sourceBundleSha256: string;
+    compiledContractsArtifactTreeSha256: string;
     sourceFiles: readonly {
       role: string;
       path: string;
@@ -224,6 +228,17 @@ export function buildDesignSpecEvaluationSuitePrepManifest(
     plan.envelope.perCallCostCapCents !== 20
   ) {
     throw new Error("design_spec suite matrix is not canonical");
+  }
+  if (
+    suite.compiledContractsRuntimeBinding === null ||
+    !compiledContractsRuntimeBindingMatches(
+      suite.compiledContractsRuntimeBinding,
+      compiledContractsRuntimeBindingFromAttestation(compiledContracts),
+    )
+  ) {
+    throw new Error(
+      "design_spec suite is not bound to the rebuilt contracts runtime",
+    );
   }
   const cases = suite.fixtureIds.map((fixtureId) =>
     buildCanonicalModelEvaluationCase(plan, fixtureId),
@@ -383,6 +398,8 @@ export function buildDesignSpecEvaluationSuitePrepManifest(
       candidateCount: 3,
       sourceBundleContractId: suite.sourceBundleContractId,
       sourceBundleSha256: cases[0]!.contract.sourceBundleSha256,
+      compiledContractsArtifactTreeSha256:
+        suite.compiledContractsRuntimeBinding.compiledArtifactTreeSha256,
       sourceFiles,
     },
     repair: {

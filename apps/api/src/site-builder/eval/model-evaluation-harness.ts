@@ -70,15 +70,21 @@ import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
+import {
+  compiledContractsRuntimeBindingMatches,
+  readCompiledContractsRuntimeBinding,
+  type CompiledContractsRuntimeBinding,
+} from "./compiled-contracts-attestation";
+import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-compiled-contracts-runtime";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v6" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v7" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
-  "site-builder-model-evaluation-run/v3" as const;
+  "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
-  "site-builder-model-capability-probe-attestation/v2" as const;
+  "site-builder-model-capability-probe-attestation/v3" as const;
 
 export interface TaskEvaluationEnvelope {
   maxTokens: number;
@@ -119,6 +125,7 @@ export interface TaskEvaluationSuite {
   }[];
   repeats: number;
   legacyComparatorAliases: readonly string[];
+  compiledContractsRuntimeBinding: CompiledContractsRuntimeBinding | null;
   sourceBundleContractId: string;
   sourceBundleFiles: readonly {
     role: string;
@@ -434,6 +441,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
   ]),
   repeats: 2,
   legacyComparatorAliases: Object.freeze(["deepseek-v4-pro", "glm-5.2"]),
+  compiledContractsRuntimeBinding: null,
   sourceBundleContractId: "brand-profile-evaluation-source-bundle/v7",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
@@ -498,6 +506,10 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
   {
     role: "compiled_contracts_attestation",
     path: "apps/api/src/site-builder/eval/compiled-contracts-attestation.ts",
+  },
+  {
+    role: "compiled_contracts_runtime_binding",
+    path: "apps/api/src/site-builder/eval/design-spec-compiled-contracts-runtime.ts",
   },
   {
     role: "create_only_writer",
@@ -713,8 +725,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v3",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v3",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v4",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v4",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
@@ -731,7 +743,9 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   fixtureFingerprints: DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS,
   repeats: 2,
   legacyComparatorAliases: Object.freeze([]),
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v3",
+  compiledContractsRuntimeBinding:
+    DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v4",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -977,6 +991,7 @@ export interface CapabilityProbeAttestation {
   taskContractFingerprint: string;
   sourceBundleContractId: string;
   sourceBundleSha256: string;
+  compiledContractsArtifactTreeSha256: string | null;
   probeFixtureId: string;
   probeFixtureSha256: string;
   probePromptSha256: string;
@@ -1827,6 +1842,7 @@ export interface ModelEvaluationRun {
   fixtureSha256: string;
   promptSha256: string;
   sourceBundleSha256: string;
+  compiledContractsArtifactTreeSha256: string | null;
   evaluatorVersion: string;
   evaluatorRubricSha256: string;
   capabilityProbeAttestation: CapabilityProbeAttestation | null;
@@ -1867,6 +1883,7 @@ export interface ModelEvaluationCaseContract {
   fixtureSha256: string;
   promptSha256: string;
   sourceBundleSha256: string;
+  compiledContractsArtifactTreeSha256: string | null;
 }
 
 export interface ModelEvaluationSourceFileFingerprint {
@@ -1993,6 +2010,7 @@ function capabilityProbeAttestationIsCanonical(
   );
   const { attestationSha256, ...payload } = attestation;
   return (
+    compiledContractsRuntimeMatchesSuite(plan.evaluationSuite) &&
     attestation.schemaVersion === CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION &&
     CAMPAIGN_ID.test(attestation.campaignId) &&
     attestation.harnessId === SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID &&
@@ -2014,6 +2032,8 @@ function capabilityProbeAttestationIsCanonical(
     attestation.sourceBundleContractId ===
       probeCase.contract.sourceBundleContractId &&
     attestation.sourceBundleSha256 === probeCase.contract.sourceBundleSha256 &&
+    attestation.compiledContractsArtifactTreeSha256 ===
+      probeCase.contract.compiledContractsArtifactTreeSha256 &&
     attestation.probeFixtureId === probeCase.contract.fixtureId &&
     attestation.probeFixtureSha256 === probeCase.contract.fixtureSha256 &&
     attestation.probePromptSha256 === probeCase.contract.promptSha256 &&
@@ -2076,6 +2096,7 @@ export class ModelEvaluationCapabilityCampaign {
         `candidate does not require a canonical capability probe: ${options.plan.taskId}/${options.candidate.alias}`,
       );
     }
+    assertCompiledContractsRuntimeBeforeDispatch(options.plan.evaluationSuite);
     const costSafety = bindTrustedModelEvaluationExecutor(
       this.#budget,
       options.execute,
@@ -2280,6 +2301,7 @@ export class ModelEvaluationCapabilityCampaign {
         options.plan.evaluationSuite,
         evaluationCase.payload,
       ) &&
+      compiledContractsRuntimeMatchesSuite(options.plan.evaluationSuite) &&
       validCallIdentityShape(outcome.value) &&
       validEvaluationUsage(outcome.value.usage) &&
       validArtifactFingerprint(outcome.value) &&
@@ -2329,6 +2351,8 @@ export class ModelEvaluationCapabilityCampaign {
       taskContractFingerprint: evaluationCase.contract.taskContractFingerprint,
       sourceBundleContractId: evaluationCase.contract.sourceBundleContractId,
       sourceBundleSha256: evaluationCase.contract.sourceBundleSha256,
+      compiledContractsArtifactTreeSha256:
+        evaluationCase.contract.compiledContractsArtifactTreeSha256,
       probeFixtureId: evaluationCase.contract.fixtureId,
       probeFixtureSha256: evaluationCase.contract.fixtureSha256,
       probePromptSha256: evaluationCase.contract.promptSha256,
@@ -2419,6 +2443,7 @@ export function taskEvaluationContractFingerprint(
     fixtureSetId: suite.fixtureSetId,
     fixtureSchemaVersion: suite.fixtureSchemaVersion,
     fixtureFingerprints: suite.fixtureFingerprints,
+    compiledContractsRuntimeBinding: suite.compiledContractsRuntimeBinding,
     sourceBundleContractId: suite.sourceBundleContractId,
     sourceBundleFiles: suite.sourceBundleFiles,
   });
@@ -2426,6 +2451,51 @@ export function taskEvaluationContractFingerprint(
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const REAL_REPOSITORY_ROOT = realpathSync(REPOSITORY_ROOT);
+const COMPILED_CONTRACTS_RUNTIME_AT_HARNESS_LOAD = (() => {
+  try {
+    return deepFreeze(readCompiledContractsRuntimeBinding(REPOSITORY_ROOT));
+  } catch {
+    return null;
+  }
+})();
+
+function compiledContractsRuntimeMatchesSuite(
+  suite: TaskEvaluationSuite,
+): boolean {
+  const expected = suite.compiledContractsRuntimeBinding;
+  if (expected === null) return true;
+  if (
+    COMPILED_CONTRACTS_RUNTIME_AT_HARNESS_LOAD === null ||
+    !compiledContractsRuntimeBindingMatches(
+      expected,
+      COMPILED_CONTRACTS_RUNTIME_AT_HARNESS_LOAD,
+    )
+  ) {
+    return false;
+  }
+  try {
+    return compiledContractsRuntimeBindingMatches(
+      expected,
+      readCompiledContractsRuntimeBinding(REPOSITORY_ROOT),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function assertCompiledContractsRuntimeBeforeDispatch(
+  suite: TaskEvaluationSuite,
+): void {
+  if (!compiledContractsRuntimeMatchesSuite(suite)) {
+    throw new ModelEvaluationCallError(
+      "compiled_contracts_runtime_attestation_mismatch",
+      {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    );
+  }
+}
 
 function resolveRepositorySourcePath(path: string): string {
   if (
@@ -2582,6 +2652,8 @@ export function buildCanonicalModelEvaluationCase(
     fixtureSha256: sha256CanonicalJson(payload.fixture),
     promptSha256: sha256Text(payload.prompt),
     sourceBundleSha256: sha256CanonicalJson(payload.sourceFiles),
+    compiledContractsArtifactTreeSha256:
+      suite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? null,
   };
   const evaluationCase = deepFreeze({ contract, payload });
   assertCaseContract(plan, evaluationCase);
@@ -2612,6 +2684,8 @@ function assertCaseContract(
     fixtureSetId: contract.fixtureSetId,
     sourceBundleContractId: contract.sourceBundleContractId,
     fixtureSchemaVersion: contract.fixtureSchemaVersion,
+    compiledContractsArtifactTreeSha256:
+      contract.compiledContractsArtifactTreeSha256,
   };
   const expected = {
     suiteId: suite.suiteId,
@@ -2628,6 +2702,8 @@ function assertCaseContract(
     fixtureSetId: suite.fixtureSetId,
     sourceBundleContractId: suite.sourceBundleContractId,
     fixtureSchemaVersion: suite.fixtureSchemaVersion,
+    compiledContractsArtifactTreeSha256:
+      suite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? null,
   };
   if (JSON.stringify(fixedContract) !== JSON.stringify(expected)) {
     throw new Error("model evaluation case contract is not canonical");
@@ -2711,6 +2787,7 @@ function runIdentity(
   | "fixtureSha256"
   | "promptSha256"
   | "sourceBundleSha256"
+  | "compiledContractsArtifactTreeSha256"
   | "evaluatorVersion"
   | "evaluatorRubricSha256"
   | "capabilityProbeAttestation"
@@ -2743,6 +2820,8 @@ function runIdentity(
     fixtureSha256: caseContract.fixtureSha256,
     promptSha256: caseContract.promptSha256,
     sourceBundleSha256: caseContract.sourceBundleSha256,
+    compiledContractsArtifactTreeSha256:
+      caseContract.compiledContractsArtifactTreeSha256,
     evaluatorVersion: caseContract.evaluatorVersion,
     evaluatorRubricSha256: caseContract.evaluatorRubricSha256,
     capabilityProbeAttestation,
@@ -3201,6 +3280,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `model evaluation attempt must be within 1..${options.plan.evaluationSuite.repeats}`,
     );
   }
+  assertCompiledContractsRuntimeBeforeDispatch(options.plan.evaluationSuite);
   const evaluationCase = buildCanonicalModelEvaluationCase(
     options.plan,
     options.fixtureId,
@@ -3534,6 +3614,9 @@ export async function runTaskEvaluationAttempt<T>(options: {
     options.plan.evaluationSuite,
     evaluationCase.payload,
   );
+  const compiledContractsRuntimeStable = compiledContractsRuntimeMatchesSuite(
+    options.plan.evaluationSuite,
+  );
   if (!elapsedIsValid) {
     return bindRun({
       ...identity,
@@ -3579,6 +3662,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
   if (
     !completedSettlementCoherent ||
     !sourceBundleStable ||
+    !compiledContractsRuntimeStable ||
     !callIdentityShapeVerified ||
     !usageVerified ||
     !artifactFingerprintVerified
@@ -3604,11 +3688,13 @@ export async function runTaskEvaluationAttempt<T>(options: {
         ? "completed_settlement_incoherent"
         : !sourceBundleStable
           ? "source_bundle_changed_during_dispatch"
-          : !callIdentityShapeVerified
-            ? "call_identity_shape_invalid"
-            : !usageVerified
-              ? "usage_invalid"
-              : "artifact_fingerprint_invalid",
+          : !compiledContractsRuntimeStable
+            ? "compiled_contracts_runtime_changed_during_dispatch"
+            : !callIdentityShapeVerified
+              ? "call_identity_shape_invalid"
+              : !usageVerified
+                ? "usage_invalid"
+                : "artifact_fingerprint_invalid",
     });
   }
   let assessment: TaskArtifactAssessment | null = null;
@@ -3709,6 +3795,7 @@ export interface ModelEvaluationCandidateSummary {
   taskContractFingerprint: string;
   sourceBundleContractId: string;
   sourceBundleSha256: string | null;
+  compiledContractsArtifactTreeSha256: string | null;
   capabilityProbeAttestation: CapabilityProbeAttestation | null;
   alias: string;
   expectedRunCount: number;
@@ -3794,6 +3881,8 @@ function assertCanonicalEvaluationRun(
     run.taskContractFingerprint !== taskContractFingerprint ||
     run.fixtureSetId !== suite.fixtureSetId ||
     run.sourceBundleContractId !== suite.sourceBundleContractId ||
+    run.compiledContractsArtifactTreeSha256 !==
+      evaluationCase.contract.compiledContractsArtifactTreeSha256 ||
     run.evaluatorVersion !== suite.evaluatorVersion ||
     run.evaluatorRubricSha256 !== suite.evaluatorRubricSha256 ||
     (candidate.preflight === "capability_probe"
@@ -4147,6 +4236,8 @@ export function summarizeModelEvaluationCandidate(
     taskContractFingerprint,
     sourceBundleContractId: suite.sourceBundleContractId,
     sourceBundleSha256: runs[0]?.sourceBundleSha256 ?? null,
+    compiledContractsArtifactTreeSha256:
+      suite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? null,
     capabilityProbeAttestation: trustedProbeAttestation,
     alias,
     expectedRunCount,
@@ -4229,6 +4320,8 @@ export function rankModelEvaluationCandidates(
         summary.taskContractFingerprint !== first.taskContractFingerprint ||
         summary.sourceBundleContractId !== first.sourceBundleContractId ||
         summary.sourceBundleSha256 !== first.sourceBundleSha256 ||
+        summary.compiledContractsArtifactTreeSha256 !==
+          first.compiledContractsArtifactTreeSha256 ||
         summary.expectedRunCount !== first.expectedRunCount,
     )
   ) {

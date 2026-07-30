@@ -13,6 +13,7 @@ import {
   prepareDesignSpecEvalFixture,
 } from "../apps/api/src/site-builder/eval/design-spec-eval";
 import {
+  SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
   buildCanonicalModelEvaluationCase,
   buildTaskEvaluationPlan,
 } from "../apps/api/src/site-builder/eval/model-evaluation-harness";
@@ -200,10 +201,7 @@ test("a missing harness id fails documentation verification", async () => {
   const documents = await currentDocuments();
   documents["docs/status/current.md"] = documents[
     "docs/status/current.md"
-  ].replace(
-    "site-builder-model-evaluation-harness/2026-07-30-v6",
-    "missing-harness-id",
-  );
+  ].replace(SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID, "missing-harness-id");
   assert.throws(
     () => verifyModelEvaluationHarness(documents),
     /docs\/status\/current\.md must reference the current evaluation harness id/,

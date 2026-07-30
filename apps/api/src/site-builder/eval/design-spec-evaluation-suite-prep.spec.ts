@@ -15,6 +15,7 @@ import {
   type CompiledContractsAttestation,
 } from "./compiled-contracts-attestation";
 import { sha256CanonicalJson } from "./eval-provenance";
+import { DESIGN_SPEC_COMPILED_CONTRACT_ARTIFACTS } from "./design-spec-compiled-contracts-runtime";
 
 const FIXED_COMMIT = "a".repeat(40);
 
@@ -25,12 +26,9 @@ function compiledContracts(): CompiledContractsAttestation {
       sha256: "1".repeat(64),
     },
   ];
-  const compiledArtifacts = [
-    {
-      path: COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT,
-      sha256: "2".repeat(64),
-    },
-  ];
+  const compiledArtifacts = DESIGN_SPEC_COMPILED_CONTRACT_ARTIFACTS.map(
+    (artifact) => ({ ...artifact }),
+  );
   return {
     schemaVersion: COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
     buildId: COMPILED_CONTRACTS_BUILD_ID,
@@ -64,6 +62,10 @@ describe("design_spec zero-cost suite preparation", () => {
         runtimeEntrypoint: "packages/contracts/dist/index.js",
         staleOutputRemovedBeforeBuild: true,
         suiteImportedAfterBuild: true,
+      },
+      suite: {
+        compiledContractsArtifactTreeSha256:
+          "d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01",
       },
       executionCount: 73,
       maximumWireCallCount: 146,
