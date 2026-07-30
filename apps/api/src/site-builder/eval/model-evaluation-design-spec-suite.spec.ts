@@ -7,7 +7,8 @@ import {
   buildTaskEvaluationPlan,
   runLegacyComparatorEvaluationAttempt,
 } from "./model-evaluation-harness";
-import { sha256CanonicalJson } from "./eval-provenance";
+import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
+import { sha256CanonicalJson, sha256Text } from "./eval-provenance";
 
 describe("design_spec canonical model evaluation suite", () => {
   it("admits exactly three structured candidates over twelve repeated fixtures", () => {
@@ -38,6 +39,7 @@ describe("design_spec canonical model evaluation suite", () => {
       },
       evaluationSuite: {
         taskContractId: "site_builder.design_spec",
+        systemPromptSha256: sha256Text(DESIGN_SPEC_TASK.system ?? ""),
         repeats: 2,
         legacyComparatorAliases: [],
         compiledContractsRuntimeBinding: {

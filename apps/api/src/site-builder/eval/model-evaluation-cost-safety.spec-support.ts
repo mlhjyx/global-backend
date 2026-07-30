@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +28,12 @@ const fakeLedgerRoot = mkdtempSync(
 process.once("exit", () => {
   rmSync(fakeLedgerRoot, { recursive: true, force: true });
 });
+
+function currentTestFixedCommitSha(): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+}
 
 export function createFakeModelEvaluationCostSafety(
   resolverId: string,
@@ -83,7 +90,7 @@ export function createFakeModelEvaluationCostSafety(
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: campaignBudgetCents,
       approvedDispatchExecutions: 500,
-      preparedFixedCommitSha: "a".repeat(40),
+      preparedFixedCommitSha: currentTestFixedCommitSha(),
       preparedSuiteId: suite.suiteId,
       preparedSourceBundleContractId: suite.sourceBundleContractId,
       preparedSourceBundleSha256: preparedCase.contract.sourceBundleSha256,

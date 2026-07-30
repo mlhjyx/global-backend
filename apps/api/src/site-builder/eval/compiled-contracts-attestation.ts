@@ -78,6 +78,8 @@ const ATTESTATION_OBJECT_FREEZE = Object.freeze;
 const ATTESTATION_OBJECT_IS_FROZEN = Object.isFrozen;
 const ATTESTATION_OBJECT_KEYS = Object.keys;
 const ATTESTATION_OBJECT_VALUES = Object.values;
+const ATTESTATION_ARRAY_IS_ARRAY = Array.isArray;
+const ATTESTATION_JSON_STRINGIFY = JSON.stringify;
 const ATTESTATION_WEAK_SET_ADD = WeakSet.prototype.add;
 const ATTESTATION_WEAK_SET_HAS = WeakSet.prototype.has;
 const ATTESTATION_WEAK_MAP_GET = WeakMap.prototype.get;
@@ -194,14 +196,48 @@ function assertCompiledContractsRuntimeNotCached(repositoryRoot: string): void {
 
 function canonicalJson(value: unknown): string {
   if (value === null) return "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
-      .join(",")}}`;
+  if (ATTESTATION_ARRAY_IS_ARRAY(value)) {
+    let encoded = "[";
+    for (let index = 0; index < value.length; index += 1) {
+      if (index > 0) encoded += ",";
+      encoded += canonicalJson(value[index]);
+    }
+    return `${encoded}]`;
   }
-  const encoded = JSON.stringify(value);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const keys = APPLY_ATTESTATION_INTRINSIC(ATTESTATION_OBJECT_KEYS, Object, [
+      record,
+    ]) as string[];
+    for (let left = 0; left < keys.length; left += 1) {
+      let smallest = left;
+      for (let right = left + 1; right < keys.length; right += 1) {
+        if (keys[right]! < keys[smallest]!) smallest = right;
+      }
+      if (smallest !== left) {
+        const current = keys[left]!;
+        keys[left] = keys[smallest]!;
+        keys[smallest] = current;
+      }
+    }
+    let encoded = "{";
+    for (let index = 0; index < keys.length; index += 1) {
+      if (index > 0) encoded += ",";
+      const key = keys[index]!;
+      const encodedKey = APPLY_ATTESTATION_INTRINSIC(
+        ATTESTATION_JSON_STRINGIFY,
+        JSON,
+        [key],
+      ) as string;
+      encoded += `${encodedKey}:${canonicalJson(record[key])}`;
+    }
+    return `${encoded}}`;
+  }
+  const encoded = APPLY_ATTESTATION_INTRINSIC(
+    ATTESTATION_JSON_STRINGIFY,
+    JSON,
+    [value],
+  ) as string | undefined;
   if (typeof encoded !== "string") {
     throw new Error("contracts attestation must be JSON serializable");
   }

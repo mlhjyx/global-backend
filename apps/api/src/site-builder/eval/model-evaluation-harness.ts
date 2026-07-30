@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -83,7 +84,7 @@ import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-co
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-30-v11" as const;
+  "site-builder-model-evaluation-harness/2026-07-30-v12" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -112,6 +113,7 @@ export interface TaskEvaluationSuite {
   adapterId: string;
   taskContractId: SiteBuilderTaskId;
   promptVersion: string;
+  systemPromptSha256: string;
   inputSchemaSha256: string;
   outputSchemaSha256: string;
   repairTaskOutput: boolean;
@@ -222,6 +224,9 @@ const BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
 );
 const BRAND_PROFILE_REPAIR_TASK_OUTPUT =
   BRAND_PROFILE_TASK.repairTaskOutput === true;
+const BRAND_PROFILE_SYSTEM_PROMPT_SHA256 = sha256Text(
+  BRAND_PROFILE_TASK.system ?? "",
+);
 const BUILD_BRAND_PROFILE_PROMPT = BRAND_PROFILE_TASK.buildPrompt;
 const VALIDATE_BRAND_PROFILE_OUTPUT = (() => {
   const validator = BRAND_PROFILE_TASK.validateOutput;
@@ -240,6 +245,9 @@ const DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
 );
 const DESIGN_SPEC_REPAIR_TASK_OUTPUT =
   DESIGN_SPEC_TASK.repairTaskOutput === true;
+const DESIGN_SPEC_SYSTEM_PROMPT_SHA256 = sha256Text(
+  DESIGN_SPEC_TASK.system ?? "",
+);
 const BUILD_DESIGN_SPEC_PROMPT = DESIGN_SPEC_TASK.buildPrompt;
 const VALIDATE_DESIGN_SPEC_OUTPUT = (() => {
   const validator = DESIGN_SPEC_TASK.validateOutput;
@@ -249,6 +257,16 @@ const VALIDATE_DESIGN_SPEC_OUTPUT = (() => {
   return validator;
 })();
 assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
+
+function currentTaskSystemPromptSha256(taskId: SiteBuilderTaskId): string {
+  if (taskId === "site_builder.brand_profile") {
+    return sha256Text(BRAND_PROFILE_TASK.system ?? "");
+  }
+  if (taskId === "site_builder.design_spec") {
+    return sha256Text(DESIGN_SPEC_TASK.system ?? "");
+  }
+  throw new Error(`task system prompt is not canonical: ${taskId}`);
+}
 
 const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
   {
@@ -382,6 +400,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
   adapterId: "site-builder.brand-profile-evaluation-adapter/v2",
   taskContractId: "site_builder.brand_profile",
   promptVersion: BRAND_PROFILE_PROMPT_VERSION,
+  systemPromptSha256: BRAND_PROFILE_SYSTEM_PROMPT_SHA256,
   inputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_INPUT_SCHEMA_SNAPSHOT),
   outputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT),
   repairTaskOutput: BRAND_PROFILE_REPAIR_TASK_OUTPUT,
@@ -736,10 +755,11 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v8",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v7",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-07-30-v9",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v8",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
+  systemPromptSha256: DESIGN_SPEC_SYSTEM_PROMPT_SHA256,
   inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
   outputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT),
   repairTaskOutput: DESIGN_SPEC_REPAIR_TASK_OUTPUT,
@@ -756,7 +776,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v8",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v9",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1235,9 +1255,22 @@ function bindTrustedModelEvaluationExecutor(
     suite === null
       ? null
       : buildCanonicalModelEvaluationCase(plan, suite.fixtureIds[0]);
+  let currentFixedCommitSha: string | null = null;
+  try {
+    const observed = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: REAL_REPOSITORY_ROOT,
+      encoding: "utf8",
+    }).trim();
+    currentFixedCommitSha = /^[a-f0-9]{40}$/.test(observed) ? observed : null;
+  } catch {
+    currentFixedCommitSha = null;
+  }
   if (
     suite === null ||
     preparedCase === null ||
+    currentFixedCommitSha === null ||
+    costSafety.authorization.preparedFixedCommitSha !== currentFixedCommitSha ||
+    suite.systemPromptSha256 !== currentTaskSystemPromptSha256(plan.taskId) ||
     costSafety.authorization.preparedSuiteId !== suite.suiteId ||
     costSafety.authorization.preparedSourceBundleContractId !==
       suite.sourceBundleContractId ||
@@ -2457,6 +2490,7 @@ export function taskEvaluationContractFingerprint(
   return sha256CanonicalJson({
     taskContractId: suite.taskContractId,
     promptVersion: suite.promptVersion,
+    systemPromptSha256: suite.systemPromptSha256,
     inputSchemaSha256: suite.inputSchemaSha256,
     outputSchemaSha256: suite.outputSchemaSha256,
     repairTaskOutput: suite.repairTaskOutput,

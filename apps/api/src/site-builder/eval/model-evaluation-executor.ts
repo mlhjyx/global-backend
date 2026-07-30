@@ -67,6 +67,25 @@ const RETIRED_EVALUATION_COMPARATOR_ALIASES = new Set([
   "doubao-seed-2.0-lite",
 ]);
 
+const CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS = Object.freeze({
+  "site_builder.brand_profile": BRAND_PROFILE_TASK.system ?? "",
+  "site_builder.design_spec": DESIGN_SPEC_TASK.system ?? "",
+} as const);
+
+function capturedTaskSystemPrompt(taskId: SiteBuilderTaskId): string {
+  if (taskId === "site_builder.brand_profile") {
+    return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
+      "site_builder.brand_profile"
+    ];
+  }
+  if (taskId === "site_builder.design_spec") {
+    return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
+      "site_builder.design_spec"
+    ];
+  }
+  throw preDispatchError("evaluation_task_not_admitted");
+}
+
 export interface ModelEvaluationProtocolAdmissionEntry {
   protocol: ModelCandidateProtocol;
   domain: "text" | "image" | "video" | "embedding";
@@ -1710,9 +1729,16 @@ function assertCanonicalRequest(
 }
 
 function taskDefinition(taskId: SiteBuilderTaskId) {
-  if (taskId === "site_builder.brand_profile") return BRAND_PROFILE_TASK;
-  if (taskId === "site_builder.design_spec") return DESIGN_SPEC_TASK;
-  throw preDispatchError("evaluation_task_not_admitted");
+  const definition =
+    taskId === "site_builder.brand_profile"
+      ? BRAND_PROFILE_TASK
+      : taskId === "site_builder.design_spec"
+        ? DESIGN_SPEC_TASK
+        : null;
+  if (definition === null) {
+    throw preDispatchError("evaluation_task_not_admitted");
+  }
+  return definition;
 }
 
 function taskEvaluationOutputConstraint(taskId: SiteBuilderTaskId): string {
@@ -1724,7 +1750,8 @@ function structuredSystemPrompt(
   outputSchema: Readonly<Record<string, unknown>>,
   taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): string {
-  return `${taskDefinition(taskId).system ?? ""}${taskEvaluationOutputConstraint(taskId)}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
+  taskDefinition(taskId);
+  return `${capturedTaskSystemPrompt(taskId)}${taskEvaluationOutputConstraint(taskId)}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
 }
 
 function repairPrompt(prompt: string, kind: string, reason: string): string {
@@ -2398,6 +2425,9 @@ export function createModelEvaluationProtocolExecutor(deps: {
             state: "not_incurred",
             reason: "rejected_before_dispatch",
           });
+          await freezeDurableAuthorization(
+            "compiled_contracts_runtime_attestation_mismatch",
+          );
           throw new ModelEvaluationCallError(
             "compiled_contracts_runtime_attestation_mismatch",
             effectiveSettlement,

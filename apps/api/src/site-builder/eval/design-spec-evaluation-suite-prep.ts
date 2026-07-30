@@ -42,7 +42,7 @@ const DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT =
   captureCompiledContractsSuiteImport(DESIGN_SPEC_SUITE_REPOSITORY_ROOT);
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v8" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v9" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 

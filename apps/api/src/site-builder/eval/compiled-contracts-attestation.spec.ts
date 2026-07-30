@@ -162,9 +162,58 @@ describe("compiled contracts fixed-commit attestation", () => {
         "packages/contracts/dist/index.js",
         "packages/contracts/dist/site-builder/model.js",
       ]);
-      expect(() =>
-        assertCompiledContractsAttestationStable(root, attestation),
-      ).not.toThrow();
+      const nativeMap = Array.prototype.map;
+      const nativeJoin = Array.prototype.join;
+      const nativeSort = Array.prototype.sort;
+      const containsArtifactFingerprint = (values: readonly unknown[]) => {
+        for (let index = 0; index < values.length; index += 1) {
+          const entry = values[index];
+          if (
+            entry &&
+            typeof entry === "object" &&
+            "path" in entry &&
+            "sha256" in entry
+          ) {
+            return true;
+          }
+        }
+        return false;
+      };
+      const arrayMap = vi
+        .spyOn(Array.prototype, "map")
+        .mockImplementation(function guardedMap(callback, thisArg) {
+          if (containsArtifactFingerprint(this)) return [];
+          return Reflect.apply(nativeMap, this, [callback, thisArg]);
+        });
+      const arrayJoin = vi
+        .spyOn(Array.prototype, "join")
+        .mockImplementation(function guardedJoin(separator) {
+          if (
+            this.length > 0 &&
+            typeof this[0] === "string" &&
+            this[0].includes('"sha256"')
+          ) {
+            return "";
+          }
+          return Reflect.apply(nativeJoin, this, [separator]);
+        });
+      const arraySort = vi
+        .spyOn(Array.prototype, "sort")
+        .mockImplementation(function guardedSort(compareFn) {
+          if (containsArtifactFingerprint(this)) return this;
+          return Reflect.apply(nativeSort, this, [compareFn]);
+        });
+      let intrinsicFailure: unknown;
+      try {
+        assertCompiledContractsAttestationStable(root, attestation);
+      } catch (error) {
+        intrinsicFailure = error;
+      } finally {
+        arrayMap.mockRestore();
+        arrayJoin.mockRestore();
+        arraySort.mockRestore();
+      }
+      expect(intrinsicFailure).toBeUndefined();
       const expectedRuntimeBinding =
         compiledContractsRuntimeBindingFromAttestation(attestation);
       expect(

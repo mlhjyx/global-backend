@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 
 const { trustedExecutorIdentity, trustedCostSafety, trustedMonotonicClock } =
   vi.hoisted(() => {
@@ -94,6 +95,11 @@ import { sha256CanonicalJson, sha256Text } from "./eval-provenance";
 
 beforeEach(() => {
   trustedMonotonicClock.offsetMs = 0;
+  trustedCostSafety.authorization.preparedFixedCommitSha = execFileSync(
+    "git",
+    ["rev-parse", "HEAD"],
+    { encoding: "utf8" },
+  ).trim();
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
   const suite = plan.evaluationSuite!;
   trustedCostSafety.authorization.preparedSuiteId = suite.suiteId;
@@ -744,6 +750,35 @@ describe("absolute budget guard", () => {
       committedCents: 0,
       reservedCents: 0,
       unknownUpperBoundCents: 0,
+    });
+  });
+
+  it("rejects a paid run whose authorization names a different prepared fixed commit", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates[0];
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const execute = vi.fn();
+    trustedCostSafety.authorization.preparedFixedCommitSha = "f".repeat(40);
+
+    await expect(
+      runTaskEvaluationAttempt({
+        plan,
+        candidate,
+        fixtureId: "auto-parts-rich",
+        attempt: 1,
+        campaignBudget: guard,
+        execute,
+      }),
+    ).rejects.toMatchObject({
+      failureCode: "evaluation_cost_safety_mismatch",
+      costSettlement: {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 0,
     });
   });
 
