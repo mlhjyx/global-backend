@@ -7,7 +7,7 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 export const COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION =
   "site-builder-compiled-contracts-attestation/v1" as const;
@@ -38,6 +38,29 @@ export interface CompiledContractsAttestation {
   suiteImportedAfterBuild: true;
 }
 
+export interface CompiledContractsBuildReceipt {
+  schemaVersion: typeof COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION;
+  buildId: typeof COMPILED_CONTRACTS_BUILD_ID;
+  buildCommand: typeof COMPILED_CONTRACTS_BUILD_COMMAND;
+  fixedCommitSha: string;
+  trackedSourceFiles: readonly {
+    path: string;
+    sha256: string;
+  }[];
+  trackedSourceTreeSha256: string;
+  runtimeEntrypoint: typeof COMPILED_CONTRACTS_RUNTIME_ENTRYPOINT;
+  compiledArtifacts: readonly {
+    path: string;
+    sha256: string;
+  }[];
+  compiledArtifactTreeSha256: string;
+  staleOutputRemovedBeforeBuild: true;
+}
+
+export interface CompiledContractsSuiteImportReceipt {
+  readonly kind: "compiled_contracts_suite_import_receipt";
+}
+
 export interface CompiledContractsRuntimeBinding {
   schemaVersion: typeof COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION;
   buildId: typeof COMPILED_CONTRACTS_BUILD_ID;
@@ -51,14 +74,112 @@ export interface CompiledContractArtifactFingerprint {
   sha256: string;
 }
 
+const ATTESTATION_OBJECT_FREEZE = Object.freeze;
+const ATTESTATION_OBJECT_IS_FROZEN = Object.isFrozen;
+const ATTESTATION_OBJECT_KEYS = Object.keys;
+const ATTESTATION_OBJECT_VALUES = Object.values;
+const ATTESTATION_WEAK_SET_ADD = WeakSet.prototype.add;
+const ATTESTATION_WEAK_SET_HAS = WeakSet.prototype.has;
+const ATTESTATION_WEAK_MAP_GET = WeakMap.prototype.get;
+const ATTESTATION_WEAK_MAP_SET = WeakMap.prototype.set;
+const ATTESTATION_MAP_GET = Map.prototype.get;
+const ATTESTATION_MAP_SET = Map.prototype.set;
+const APPLY_ATTESTATION_INTRINSIC = Reflect.apply;
+
+const TRUSTED_COMPILED_CONTRACTS_BUILD_RECEIPTS = new WeakSet<object>();
+const TRUSTED_COMPILED_CONTRACTS_SUITE_IMPORT_RECEIPTS = new WeakSet<object>();
 const TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS = new WeakSet<object>();
+const LATEST_BUILD_TOKEN_BY_REPOSITORY = new Map<string, object>();
+const BUILD_RECEIPT_METADATA = new WeakMap<
+  object,
+  Readonly<{ repositoryRoot: string; buildToken: object }>
+>();
+const SUITE_IMPORT_RECEIPT_METADATA = new WeakMap<
+  object,
+  Readonly<{
+    repositoryRoot: string;
+    observedBuildToken: object | null;
+    runtimeBinding: CompiledContractsRuntimeBinding | null;
+  }>
+>();
+const ATTESTATION_SUITE_IMPORT_BINDING = new WeakMap<object, object>();
+
+function intrinsicWeakSetAdd(set: WeakSet<object>, value: object): void {
+  APPLY_ATTESTATION_INTRINSIC(ATTESTATION_WEAK_SET_ADD, set, [value]);
+}
+
+function intrinsicWeakSetHas(set: WeakSet<object>, value: object): boolean {
+  return APPLY_ATTESTATION_INTRINSIC(ATTESTATION_WEAK_SET_HAS, set, [
+    value,
+  ]) as boolean;
+}
+
+function intrinsicWeakMapGet<T>(
+  map: WeakMap<object, T>,
+  key: object,
+): T | undefined {
+  return APPLY_ATTESTATION_INTRINSIC(ATTESTATION_WEAK_MAP_GET, map, [key]) as
+    T | undefined;
+}
+
+function intrinsicWeakMapSet<T>(
+  map: WeakMap<object, T>,
+  key: object,
+  value: T,
+): void {
+  APPLY_ATTESTATION_INTRINSIC(ATTESTATION_WEAK_MAP_SET, map, [key, value]);
+}
+
+function intrinsicMapGet<T>(map: Map<string, T>, key: string): T | undefined {
+  return APPLY_ATTESTATION_INTRINSIC(ATTESTATION_MAP_GET, map, [key]) as
+    T | undefined;
+}
+
+function intrinsicMapSet<T>(map: Map<string, T>, key: string, value: T): void {
+  APPLY_ATTESTATION_INTRINSIC(ATTESTATION_MAP_SET, map, [key, value]);
+}
+
+function intrinsicObjectIsFrozen(value: object): boolean {
+  return APPLY_ATTESTATION_INTRINSIC(ATTESTATION_OBJECT_IS_FROZEN, Object, [
+    value,
+  ]) as boolean;
+}
 
 function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    for (const nested of Object.values(value)) deepFreeze(nested);
-    Object.freeze(value);
+  if (value && typeof value === "object" && !intrinsicObjectIsFrozen(value)) {
+    const children = APPLY_ATTESTATION_INTRINSIC(
+      ATTESTATION_OBJECT_VALUES,
+      Object,
+      [value],
+    ) as unknown[];
+    for (const nested of children) deepFreeze(nested);
+    APPLY_ATTESTATION_INTRINSIC(ATTESTATION_OBJECT_FREEZE, Object, [value]);
   }
   return value;
+}
+
+function assertCompiledContractsRuntimeNotCached(repositoryRoot: string): void {
+  const contractsDist = resolve(repositoryRoot, "packages/contracts/dist");
+  const cachedModulePaths = APPLY_ATTESTATION_INTRINSIC(
+    ATTESTATION_OBJECT_KEYS,
+    Object,
+    [require.cache],
+  ) as string[];
+  if (
+    cachedModulePaths.some((cachedPath) => {
+      const pathFromDist = relative(contractsDist, cachedPath);
+      return (
+        pathFromDist === "" ||
+        (!pathFromDist.startsWith(`..${sep}`) &&
+          pathFromDist !== ".." &&
+          !isAbsolute(pathFromDist))
+      );
+    })
+  ) {
+    throw new Error(
+      "compiled contracts runtime must not be imported before the trusted build",
+    );
+  }
 }
 
 function canonicalJson(value: unknown): string {
@@ -214,21 +335,20 @@ export function compiledContractsRuntimeBindingMatches(
   );
 }
 
-export function buildCompiledContractsAttestation(options: {
+export function buildCompiledContractsForSuiteImport(options: {
   repositoryRoot: string;
   fixedCommitSha: string;
-}): CompiledContractsAttestation {
+}): CompiledContractsBuildReceipt {
+  const repositoryRoot = realpathSync(options.repositoryRoot);
+  assertCompiledContractsRuntimeNotCached(repositoryRoot);
   const trackedSourceFiles = trackedContractsAtFixedCommit(
-    options.repositoryRoot,
+    repositoryRoot,
     options.fixedCommitSha,
   );
-  const contractsDist = resolve(
-    options.repositoryRoot,
-    "packages/contracts/dist",
-  );
+  const contractsDist = resolve(repositoryRoot, "packages/contracts/dist");
   rmSync(contractsDist, { recursive: true, force: true });
   execFileSync("pnpm", ["--filter", "@global/contracts", "build"], {
-    cwd: options.repositoryRoot,
+    cwd: repositoryRoot,
     stdio: "inherit",
     env: {
       PATH: process.env.PATH,
@@ -236,8 +356,8 @@ export function buildCompiledContractsAttestation(options: {
       LC_ALL: process.env.LC_ALL,
     },
   });
-  const compiledArtifacts = compiledContractArtifacts(options.repositoryRoot);
-  const attestation: CompiledContractsAttestation = deepFreeze({
+  const compiledArtifacts = compiledContractArtifacts(repositoryRoot);
+  const receipt: CompiledContractsBuildReceipt = deepFreeze({
     schemaVersion: COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
     buildId: COMPILED_CONTRACTS_BUILD_ID,
     buildCommand: COMPILED_CONTRACTS_BUILD_COMMAND,
@@ -248,9 +368,96 @@ export function buildCompiledContractsAttestation(options: {
     compiledArtifacts,
     compiledArtifactTreeSha256: sha256(canonicalJson(compiledArtifacts)),
     staleOutputRemovedBeforeBuild: true,
+  });
+  const buildToken = deepFreeze({});
+  intrinsicMapSet(LATEST_BUILD_TOKEN_BY_REPOSITORY, repositoryRoot, buildToken);
+  intrinsicWeakMapSet(BUILD_RECEIPT_METADATA, receipt, {
+    repositoryRoot,
+    buildToken,
+  });
+  intrinsicWeakSetAdd(TRUSTED_COMPILED_CONTRACTS_BUILD_RECEIPTS, receipt);
+  return receipt;
+}
+
+export function captureCompiledContractsSuiteImport(
+  repositoryRoot: string,
+): CompiledContractsSuiteImportReceipt {
+  const realRepositoryRoot = realpathSync(repositoryRoot);
+  const runtimeBinding: CompiledContractsRuntimeBinding | null = (() => {
+    try {
+      return deepFreeze(readCompiledContractsRuntimeBinding(realRepositoryRoot));
+    } catch {
+      return null;
+    }
+  })();
+  const receipt: CompiledContractsSuiteImportReceipt = deepFreeze({
+    kind: "compiled_contracts_suite_import_receipt",
+  });
+  intrinsicWeakMapSet(SUITE_IMPORT_RECEIPT_METADATA, receipt, {
+    repositoryRoot: realRepositoryRoot,
+    observedBuildToken:
+      intrinsicMapGet(LATEST_BUILD_TOKEN_BY_REPOSITORY, realRepositoryRoot) ??
+      null,
+    runtimeBinding,
+  });
+  intrinsicWeakSetAdd(
+    TRUSTED_COMPILED_CONTRACTS_SUITE_IMPORT_RECEIPTS,
+    receipt,
+  );
+  return receipt;
+}
+
+export function attestCompiledContractsAfterSuiteImport(
+  buildReceipt: CompiledContractsBuildReceipt,
+  suiteImportReceipt: CompiledContractsSuiteImportReceipt,
+): CompiledContractsAttestation {
+  if (
+    !intrinsicWeakSetHas(
+      TRUSTED_COMPILED_CONTRACTS_BUILD_RECEIPTS,
+      buildReceipt,
+    ) ||
+    !intrinsicWeakSetHas(
+      TRUSTED_COMPILED_CONTRACTS_SUITE_IMPORT_RECEIPTS,
+      suiteImportReceipt,
+    )
+  ) {
+    throw new Error("compiled contracts build/import receipt is not trusted");
+  }
+  const buildMetadata = intrinsicWeakMapGet(
+    BUILD_RECEIPT_METADATA,
+    buildReceipt,
+  );
+  const importMetadata = intrinsicWeakMapGet(
+    SUITE_IMPORT_RECEIPT_METADATA,
+    suiteImportReceipt,
+  );
+  if (
+    !buildMetadata ||
+    !importMetadata ||
+    buildMetadata.repositoryRoot !== importMetadata.repositoryRoot ||
+    importMetadata.observedBuildToken !== buildMetadata.buildToken ||
+    importMetadata.runtimeBinding === null ||
+    !compiledContractsRuntimeBindingMatches(
+      compiledContractsRuntimeBindingFromArtifacts(
+        buildReceipt.compiledArtifacts,
+      ),
+      importMetadata.runtimeBinding,
+    )
+  ) {
+    throw new Error(
+      "compiled contracts suite must be imported after the trusted build",
+    );
+  }
+  const attestation: CompiledContractsAttestation = deepFreeze({
+    ...buildReceipt,
     suiteImportedAfterBuild: true,
   });
-  TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS.add(attestation);
+  intrinsicWeakMapSet(
+    ATTESTATION_SUITE_IMPORT_BINDING,
+    attestation,
+    suiteImportReceipt,
+  );
+  intrinsicWeakSetAdd(TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS, attestation);
   return attestation;
 }
 
@@ -260,8 +467,23 @@ export function isTrustedCompiledContractsAttestation(
   return (
     typeof value === "object" &&
     value !== null &&
-    Object.isFrozen(value) &&
-    TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS.has(value)
+    intrinsicObjectIsFrozen(value) &&
+    intrinsicWeakSetHas(TRUSTED_COMPILED_CONTRACTS_ATTESTATIONS, value)
+  );
+}
+
+export function isCompiledContractsAttestationBoundToSuiteImport(
+  attestation: CompiledContractsAttestation,
+  suiteImportReceipt: CompiledContractsSuiteImportReceipt,
+): boolean {
+  return (
+    isTrustedCompiledContractsAttestation(attestation) &&
+    intrinsicWeakSetHas(
+      TRUSTED_COMPILED_CONTRACTS_SUITE_IMPORT_RECEIPTS,
+      suiteImportReceipt,
+    ) &&
+    intrinsicWeakMapGet(ATTESTATION_SUITE_IMPORT_BINDING, attestation) ===
+      suiteImportReceipt
   );
 }
 

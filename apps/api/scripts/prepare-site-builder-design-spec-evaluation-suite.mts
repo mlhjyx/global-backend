@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertCompiledContractsAttestationStable,
-  buildCompiledContractsAttestation,
+  buildCompiledContractsForSuiteImport,
 } from "../src/site-builder/eval/compiled-contracts-attestation";
 import { SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX } from "../src/site-builder/eval/create-only-json";
 
@@ -113,16 +113,20 @@ async function main(): Promise<void> {
   if (!fixedCommitSha || !outputArgument) throw new Error(HELP);
   const output = outputPath(outputArgument);
   assertFixedRepositoryState(fixedCommitSha);
-  const compiledContracts = buildCompiledContractsAttestation({
+  const compiledContractsBuild = buildCompiledContractsForSuiteImport({
     repositoryRoot: REPOSITORY_ROOT,
     fixedCommitSha,
   });
   assertFixedRepositoryState(fixedCommitSha);
   const {
+    attestDesignSpecCompiledContractsAfterSuiteImport,
     buildDesignSpecEvaluationSuitePrepManifest,
     writeDesignSpecEvaluationSuitePrepManifestCreateOnly,
   } =
     await import("../src/site-builder/eval/design-spec-evaluation-suite-prep");
+  const compiledContracts = attestDesignSpecCompiledContractsAfterSuiteImport(
+    compiledContractsBuild,
+  );
   const manifest = buildDesignSpecEvaluationSuitePrepManifest(
     fixedCommitSha,
     compiledContracts,

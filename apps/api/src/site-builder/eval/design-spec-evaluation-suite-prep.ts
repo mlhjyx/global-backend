@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
 import {
   SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
@@ -17,6 +20,8 @@ import {
   selectDesignSpecDeterministicCandidate,
 } from "./design-spec-eval";
 import {
+  attestCompiledContractsAfterSuiteImport,
+  captureCompiledContractsSuiteImport,
   COMPILED_CONTRACTS_ATTESTATION_SCHEMA_VERSION,
   COMPILED_CONTRACTS_BUILD_COMMAND,
   COMPILED_CONTRACTS_BUILD_ID,
@@ -24,12 +29,20 @@ import {
   assertCompiledContractsAttestationStable,
   compiledContractsRuntimeBindingFromAttestation,
   compiledContractsRuntimeBindingMatches,
+  isCompiledContractsAttestationBoundToSuiteImport,
   isTrustedCompiledContractsAttestation,
+  type CompiledContractsBuildReceipt,
   type CompiledContractsAttestation,
 } from "./compiled-contracts-attestation";
 
+const DESIGN_SPEC_SUITE_REPOSITORY_ROOT = realpathSync(
+  resolve(__dirname, "../../../../.."),
+);
+const DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT =
+  captureCompiledContractsSuiteImport(DESIGN_SPEC_SUITE_REPOSITORY_ROOT);
+
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v5" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v6" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 
@@ -149,6 +162,15 @@ export interface DesignSpecEvaluationSuitePrepManifest {
   ];
   stopConditions: typeof DESIGN_SPEC_EVALUATION_STOP_CONDITIONS;
   manifestSha256: string;
+}
+
+export function attestDesignSpecCompiledContractsAfterSuiteImport(
+  buildReceipt: CompiledContractsBuildReceipt,
+): CompiledContractsAttestation {
+  return attestCompiledContractsAfterSuiteImport(
+    buildReceipt,
+    DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT,
+  );
 }
 
 function executionKey(input: {
@@ -466,6 +488,10 @@ export async function writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
   if (
     manifest.compiledContracts !== compiledContracts ||
     !isTrustedCompiledContractsAttestation(compiledContracts) ||
+    !isCompiledContractsAttestationBoundToSuiteImport(
+      compiledContracts,
+      DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT,
+    ) ||
     manifest.manifestSha256 !==
       sha256CanonicalJson(
         Object.fromEntries(

@@ -8,18 +8,38 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   assertCompiledContractsAttestationStable,
-  buildCompiledContractsAttestation,
+  attestCompiledContractsAfterSuiteImport,
+  buildCompiledContractsForSuiteImport,
+  captureCompiledContractsSuiteImport,
   compiledContractsRuntimeBindingFromAttestation,
   compiledContractsRuntimeBindingMatches,
+  isCompiledContractsAttestationBoundToSuiteImport,
   isTrustedCompiledContractsAttestation,
   readCompiledContractsRuntimeBinding,
 } from "./compiled-contracts-attestation";
 
 describe("compiled contracts fixed-commit attestation", () => {
+  it("uses captured intrinsics for brand and freeze checks", () => {
+    const weakSetHas = vi.spyOn(WeakSet.prototype, "has").mockReturnValue(true);
+    const objectIsFrozen = vi.spyOn(Object, "isFrozen").mockReturnValue(true);
+    try {
+      expect(
+        isTrustedCompiledContractsAttestation(
+          Object.freeze({
+            suiteImportedAfterBuild: true,
+          }),
+        ),
+      ).toBe(false);
+    } finally {
+      weakSetHas.mockRestore();
+      objectIsFrozen.mockRestore();
+    }
+  });
+
   it("removes stale ignored output, binds the rebuilt JS tree, and detects drift", () => {
     const root = mkdtempSync(join(tmpdir(), "compiled-contracts-"));
     try {
@@ -74,10 +94,45 @@ describe("compiled contracts fixed-commit attestation", () => {
         join(root, "packages/contracts/dist/stale.js"),
         "throw new Error('stale');\n",
       );
-      const attestation = buildCompiledContractsAttestation({
-        repositoryRoot: root,
-        fixedCommitSha,
-      });
+      writeFileSync(
+        join(root, "packages/contracts/dist/index.js"),
+        '"use strict";\n',
+      );
+      const cachedRuntimePath = join(root, "packages/contracts/dist/index.js");
+      require(cachedRuntimePath);
+      expect(() =>
+        buildCompiledContractsForSuiteImport({
+          repositoryRoot: root,
+          fixedCommitSha,
+        }),
+      ).toThrow("must not be imported before the trusted build");
+      delete require.cache[require.resolve(cachedRuntimePath)];
+
+      const weakSetAdd = vi
+        .spyOn(WeakSet.prototype, "add")
+        .mockImplementation(function passthrough(_value) {
+          return this;
+        });
+      const objectFreeze = vi
+        .spyOn(Object, "freeze")
+        .mockImplementation((value) => value);
+      const { suiteImportReceipt, attestation } = (() => {
+        try {
+          const buildReceipt = buildCompiledContractsForSuiteImport({
+            repositoryRoot: root,
+            fixedCommitSha,
+          });
+          const suiteImportReceipt = captureCompiledContractsSuiteImport(root);
+          const attestation = attestCompiledContractsAfterSuiteImport(
+            buildReceipt,
+            suiteImportReceipt,
+          );
+          return { buildReceipt, suiteImportReceipt, attestation };
+        } finally {
+          weakSetAdd.mockRestore();
+          objectFreeze.mockRestore();
+        }
+      })();
       expect(existsSync(join(root, "packages/contracts/dist/stale.js"))).toBe(
         false,
       );
@@ -89,6 +144,12 @@ describe("compiled contracts fixed-commit attestation", () => {
         suiteImportedAfterBuild: true,
       });
       expect(isTrustedCompiledContractsAttestation(attestation)).toBe(true);
+      expect(
+        isCompiledContractsAttestationBoundToSuiteImport(
+          attestation,
+          suiteImportReceipt,
+        ),
+      ).toBe(true);
       expect(Object.isFrozen(attestation.compiledArtifacts)).toBe(true);
       expect(attestation.compiledArtifacts.map(({ path }) => path)).toEqual([
         "packages/contracts/dist/index.js",
@@ -124,6 +185,18 @@ describe("compiled contracts fixed-commit attestation", () => {
           ...attestation,
         }),
       ).toThrow("not builder-trusted");
+
+      const importBeforeRebuild = captureCompiledContractsSuiteImport(root);
+      const secondBuildReceipt = buildCompiledContractsForSuiteImport({
+        repositoryRoot: root,
+        fixedCommitSha,
+      });
+      expect(() =>
+        attestCompiledContractsAfterSuiteImport(
+          secondBuildReceipt,
+          importBeforeRebuild,
+        ),
+      ).toThrow("must be imported after the trusted build");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
