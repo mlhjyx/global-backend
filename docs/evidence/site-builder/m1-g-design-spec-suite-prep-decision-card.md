@@ -2,6 +2,8 @@
 
 > 状态：`READY_FOR_SUITE_REVIEW`；dispatch：`NOT_AUTHORIZED`；真实网络调用：`0`；模型费用：`$0.00`。
 
+固定 suite 提交：`667e7629f7481b5d1baa0b44aed0621f633caed3`。create-only runner 已从该提交逐文件复核 34 个 source bundle 成员并生成 [机器 manifest](m1-g-design-spec-suite-prep-manifest.json)；source bundle SHA-256=`f12e56e32041730cbb656e4443346c978c2e384fc1f6c8159208bf898439c847`，manifest SHA-256=`9b60589e1d034d94935d8efd160fa47c51df8f88853be2c22b0f8ce6f9affc2c`。
+
 ## 本 PR 冻结什么
 
 - canonical task：`site_builder.design_spec`

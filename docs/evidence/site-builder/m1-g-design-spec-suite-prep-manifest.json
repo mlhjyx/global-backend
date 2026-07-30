@@ -1,0 +1,1248 @@
+{
+  "schemaVersion": "site-builder-design-spec-evaluation-suite-prep/v1",
+  "prepId": "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v1",
+  "harnessId": "site-builder-model-evaluation-harness/2026-07-30-v4",
+  "taskId": "site_builder.design_spec",
+  "fixedCommitSha": "667e7629f7481b5d1baa0b44aed0621f633caed3",
+  "createOnly": true,
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "actualNetworkCalls": 0,
+  "actualModelCostCents": 0,
+  "suite": {
+    "suiteId": "site-builder.design-spec-evaluation-suite/2026-07-30-v1",
+    "fixtureSetId": "site-builder.design-spec-golden/2026-07-30-v1",
+    "fixtureCount": 12,
+    "repeats": 2,
+    "candidateCount": 3,
+    "sourceBundleContractId": "design-spec-evaluation-source-bundle/v1",
+    "sourceBundleSha256": "f12e56e32041730cbb656e4443346c978c2e384fc1f6c8159208bf898439c847",
+    "sourceFiles": [
+      {
+        "role": "candidate_baseline",
+        "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+        "sha256": "3dbdf5fcdd941d255115e87a6db715b709591ef5d56e3d11b88777bdaf3cd6e3"
+      },
+      {
+        "role": "candidate_baseline",
+        "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+        "sha256": "88a41dfc41837db7dbce937ba08f0504e8a6983eb3be0e2b496c13b057f3fc1c"
+      },
+      {
+        "role": "task",
+        "path": "apps/api/src/site-builder/design/design-brief-producer.ts",
+        "sha256": "a50a6a2faa2868395994bfd7e4474db77b0b74a5b4f98f7aa1252b8bb39e48ea"
+      },
+      {
+        "role": "catalog",
+        "path": "apps/api/src/site-builder/design/catalog.ts",
+        "sha256": "cdeeda19cbb45799e5217348c462dba8046d7a382c64678e89be8e9d4db29bf9"
+      },
+      {
+        "role": "judge",
+        "path": "apps/api/src/site-builder/eval/design-spec-eval.ts",
+        "sha256": "c1910e9ca1eca98703077ae6d20163fdce871e21214c49b1d9a2c12880c4b32b"
+      },
+      {
+        "role": "harness",
+        "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+        "sha256": "3874059a08e907ae8afb55564176d9859865e4ef5630c2ba316605e8401c5889"
+      },
+      {
+        "role": "evaluation_executor",
+        "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+        "sha256": "b413b9af6e503fa9731d14a7517c52425b3e5f8bb04e9024fd32e3cece5ba067"
+      },
+      {
+        "role": "evaluation_cost_safety",
+        "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+        "sha256": "702b15bb7feae41c31cc3b5e06d703cad1afc6f5271f57034d083039b1a056ea"
+      },
+      {
+        "role": "suite_preparation",
+        "path": "apps/api/src/site-builder/eval/design-spec-evaluation-suite-prep.ts",
+        "sha256": "6d7d83736609a6e3c13a8448443e3b5402da49c3c1cc6edbc37da4d05337d308"
+      },
+      {
+        "role": "create_only_writer",
+        "path": "apps/api/src/site-builder/eval/create-only-json.ts",
+        "sha256": "05e2c8c95fb06919dba835203ff95775105bc493e8676159a6f7b7f4bd864ff9"
+      },
+      {
+        "role": "suite_preparation_runner",
+        "path": "apps/api/scripts/prepare-site-builder-design-spec-evaluation-suite.mts",
+        "sha256": "5a377bb1b13df2c4907ed5df14b21ddecb630e73a4bccf4a8df845f832b49a15"
+      },
+      {
+        "role": "api_manifest",
+        "path": "apps/api/package.json",
+        "sha256": "0c56e0a05e04d91d938857eb4baa6756050c4802eabb434fb058d109ef69cf16"
+      },
+      {
+        "role": "provider",
+        "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+        "sha256": "63e9aad11d514b604e92abd803130f2935cfe4601dbc5b39cc3926960fda1207"
+      },
+      {
+        "role": "transport_registry",
+        "path": "apps/api/src/model-gateway/model-transports.ts",
+        "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+      },
+      {
+        "role": "task_runner",
+        "path": "apps/api/src/site-builder/agents/ai-task.ts",
+        "sha256": "1421e89819c05d49240628832150b581e28db794293186e1eaaf359714b6248d"
+      },
+      {
+        "role": "gateway_router",
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "f85850dddf966ef6391ae60eaeeb0d1ec5a0b83d5f045b8b877df5f56667a368"
+      },
+      {
+        "role": "schema_validator",
+        "path": "apps/api/src/model-gateway/schema-validate.ts",
+        "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+      },
+      {
+        "role": "evaluation_provenance",
+        "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+        "sha256": "73d51221f6c153853340cbf236588c42b778a9efd93b0f8a2a4243ee631297bf"
+      },
+      {
+        "role": "task_route",
+        "path": "apps/api/src/site-builder/agents/task-routes.ts",
+        "sha256": "31d95cac279087776447f535d4fc78868f71d18b1b76119f2188d168739b2e70"
+      },
+      {
+        "role": "task_route_binding",
+        "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+        "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+      },
+      {
+        "role": "profile_registry",
+        "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+        "sha256": "50c5d27bb866775594100b583fb29f007e24d0207ec8bd575c0739160c0d81e6"
+      },
+      {
+        "role": "provider_registry",
+        "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+        "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+      },
+      {
+        "role": "model_router",
+        "path": "apps/api/src/model-gateway/model-router.ts",
+        "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+      },
+      {
+        "role": "provider_error",
+        "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+        "sha256": "3ffa9ce576b97f2cf5c377306eb69ad50875e39b73ac00b7f8d687db461bea71"
+      },
+      {
+        "role": "gateway_types",
+        "path": "apps/api/src/model-gateway/types.ts",
+        "sha256": "8953ca1d61c3e1a05dfbefe27f2191b114d9a2e267c5dc28b1a0d6a62d76a740"
+      },
+      {
+        "role": "gateway_contract",
+        "path": "apps/api/src/model-gateway/model-gateway.ts",
+        "sha256": "06fa1ef329af6cc0295a3ea94bc47a1e8247220770bcfb359a2d13597f5fbcc1"
+      },
+      {
+        "role": "provider_contract",
+        "path": "apps/api/src/model-gateway/model-provider.ts",
+        "sha256": "cb9dc6489fde3c6e2e9bad8b3ff4755cb00ed4a441eb4112d03a627ef8d0970c"
+      },
+      {
+        "role": "budget_ledger",
+        "path": "apps/api/src/tools/budget.ts",
+        "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+      },
+      {
+        "role": "contracts_source",
+        "path": "packages/contracts/src/site-builder/model-policy.ts",
+        "sha256": "324a92e7afce5655ad28901e5d31797b674c74cbe99f21c76c99c037f3fab8b4"
+      },
+      {
+        "role": "contracts_source",
+        "path": "packages/contracts/src/site-builder/site-spec.ts",
+        "sha256": "06b4b1025423edc0b723dbee4c0035be120429a1410a723c5eb6462cddb83674"
+      },
+      {
+        "role": "contracts_source",
+        "path": "packages/contracts/src/index.ts",
+        "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+      },
+      {
+        "role": "contracts_build",
+        "path": "packages/contracts/tsconfig.json",
+        "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+      },
+      {
+        "role": "contracts_manifest",
+        "path": "packages/contracts/package.json",
+        "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+      },
+      {
+        "role": "dependency_lock",
+        "path": "pnpm-lock.yaml",
+        "sha256": "edc437e36d140c0e68959d215197c50e3f65f6106ac97377dbe77b999ed6ffea"
+      }
+    ]
+  },
+  "repair": {
+    "enabled": true,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumWireCallsPerExecution": 2
+  },
+  "promptUtf8Bytes": {
+    "maximumCanonicalInitial": 1948,
+    "maximumCanonicalRepair": 6255
+  },
+  "executions": [
+    {
+      "ordinal": 1,
+      "executionKey": "capability_probe/gpt-5.5/openai-responses/natural-origin-rich/1",
+      "kind": "capability_probe",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 2,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/natural-origin-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 3,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/natural-origin-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 4,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/natural-origin-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 5,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/natural-origin-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 6,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/oem-capability-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 7,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/oem-capability-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 8,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/oem-capability-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 9,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/oem-capability-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 10,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/precision-industrial-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 11,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/precision-industrial-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 12,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/precision-industrial-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 13,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/precision-industrial-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 14,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/premium-innovation-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 15,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/premium-innovation-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 16,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/premium-innovation-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 17,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/premium-innovation-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 18,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/scientific-trust-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 19,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/scientific-trust-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 20,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/scientific-trust-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 21,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/scientific-trust-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 22,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/technical-catalog-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 23,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/technical-catalog-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 24,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/technical-catalog-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 25,
+      "executionKey": "target/gpt-5.6-terra/openai-responses/technical-catalog-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 26,
+      "executionKey": "target/gpt-5.5/openai-responses/natural-origin-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 27,
+      "executionKey": "target/gpt-5.5/openai-responses/natural-origin-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 28,
+      "executionKey": "target/gpt-5.5/openai-responses/natural-origin-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 29,
+      "executionKey": "target/gpt-5.5/openai-responses/natural-origin-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "natural-origin-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 30,
+      "executionKey": "target/gpt-5.5/openai-responses/oem-capability-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 31,
+      "executionKey": "target/gpt-5.5/openai-responses/oem-capability-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 32,
+      "executionKey": "target/gpt-5.5/openai-responses/oem-capability-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 33,
+      "executionKey": "target/gpt-5.5/openai-responses/oem-capability-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "oem-capability-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 34,
+      "executionKey": "target/gpt-5.5/openai-responses/precision-industrial-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 35,
+      "executionKey": "target/gpt-5.5/openai-responses/precision-industrial-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 36,
+      "executionKey": "target/gpt-5.5/openai-responses/precision-industrial-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 37,
+      "executionKey": "target/gpt-5.5/openai-responses/precision-industrial-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "precision-industrial-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 38,
+      "executionKey": "target/gpt-5.5/openai-responses/premium-innovation-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 39,
+      "executionKey": "target/gpt-5.5/openai-responses/premium-innovation-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 40,
+      "executionKey": "target/gpt-5.5/openai-responses/premium-innovation-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 41,
+      "executionKey": "target/gpt-5.5/openai-responses/premium-innovation-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "premium-innovation-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 42,
+      "executionKey": "target/gpt-5.5/openai-responses/scientific-trust-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 43,
+      "executionKey": "target/gpt-5.5/openai-responses/scientific-trust-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 44,
+      "executionKey": "target/gpt-5.5/openai-responses/scientific-trust-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 45,
+      "executionKey": "target/gpt-5.5/openai-responses/scientific-trust-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "scientific-trust-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 46,
+      "executionKey": "target/gpt-5.5/openai-responses/technical-catalog-rich/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 47,
+      "executionKey": "target/gpt-5.5/openai-responses/technical-catalog-rich/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 48,
+      "executionKey": "target/gpt-5.5/openai-responses/technical-catalog-sparse/1",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 49,
+      "executionKey": "target/gpt-5.5/openai-responses/technical-catalog-sparse/2",
+      "kind": "target",
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "fixtureId": "technical-catalog-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 50,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/natural-origin-rich/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 51,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/natural-origin-rich/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "natural-origin-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 52,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/natural-origin-sparse/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "natural-origin-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 53,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/natural-origin-sparse/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "natural-origin-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 54,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/oem-capability-rich/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "oem-capability-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 55,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/oem-capability-rich/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "oem-capability-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 56,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/oem-capability-sparse/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "oem-capability-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 57,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/oem-capability-sparse/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "oem-capability-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 58,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/precision-industrial-rich/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "precision-industrial-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 59,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/precision-industrial-rich/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "precision-industrial-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 60,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/precision-industrial-sparse/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "precision-industrial-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 61,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/precision-industrial-sparse/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "precision-industrial-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 62,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/premium-innovation-rich/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "premium-innovation-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 63,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/premium-innovation-rich/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "premium-innovation-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 64,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/premium-innovation-sparse/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "premium-innovation-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 65,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/premium-innovation-sparse/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "premium-innovation-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 66,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/scientific-trust-rich/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "scientific-trust-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 67,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/scientific-trust-rich/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "scientific-trust-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 68,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/scientific-trust-sparse/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "scientific-trust-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 69,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/scientific-trust-sparse/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "scientific-trust-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 70,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/technical-catalog-rich/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "technical-catalog-rich",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 71,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/technical-catalog-rich/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "technical-catalog-rich",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 72,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/technical-catalog-sparse/1",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "technical-catalog-sparse",
+      "attempt": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    },
+    {
+      "ordinal": 73,
+      "executionKey": "target/claude-sonnet-5/anthropic-messages/technical-catalog-sparse/2",
+      "kind": "target",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "fixtureId": "technical-catalog-sparse",
+      "attempt": 2,
+      "maximumWireCalls": 2,
+      "maximumRepairCalls": 1
+    }
+  ],
+  "executionCount": 73,
+  "maximumWireCallCount": 146,
+  "deterministicComparator": {
+    "comparatorId": "deterministic-catalog-selection/v1",
+    "modelAliases": [],
+    "cases": [
+      {
+        "ordinal": 1,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "natural-origin-rich",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 2,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "natural-origin-rich",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 3,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "natural-origin-sparse",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 4,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "natural-origin-sparse",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 5,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "oem-capability-rich",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 6,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "oem-capability-rich",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 7,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "oem-capability-sparse",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 8,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "oem-capability-sparse",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 9,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "precision-industrial-rich",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 10,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "precision-industrial-rich",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 11,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "precision-industrial-sparse",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 12,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "precision-industrial-sparse",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 13,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "premium-innovation-rich",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 14,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "premium-innovation-rich",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 15,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "premium-innovation-sparse",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 16,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "premium-innovation-sparse",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 17,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "scientific-trust-rich",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 18,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "scientific-trust-rich",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 19,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "scientific-trust-sparse",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 20,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "scientific-trust-sparse",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 21,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "technical-catalog-rich",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 22,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "technical-catalog-rich",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 23,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "technical-catalog-sparse",
+        "attempt": 1,
+        "wireCalls": 0,
+        "costCents": 0
+      },
+      {
+        "ordinal": 24,
+        "comparatorId": "deterministic-catalog-selection/v1",
+        "fixtureId": "technical-catalog-sparse",
+        "attempt": 2,
+        "wireCalls": 0,
+        "costCents": 0
+      }
+    ],
+    "caseCount": 24,
+    "wireCallCount": 0,
+    "costCents": 0
+  },
+  "planningHardUpperBound": {
+    "basis": "per_wire_call_task_hard_cap",
+    "perWireCallCents": 20,
+    "maximumWireCalls": 146,
+    "amountCents": 2920,
+    "authorization": "NOT_GRANTED",
+    "expectedCost": "NOT_CALCULATED"
+  },
+  "pricingGate": {
+    "amountBasis": "frozen_openox_public_price_snapshot_required",
+    "newApiPriceAllowed": false,
+    "status": "BLOCKED_UNTIL_SEPARATE_EVIDENCE_PR"
+  },
+  "excludedAliases": [
+    "minimax-m3",
+    "doubao-seed-2.0-pro",
+    "doubao-seed-2.0-lite"
+  ],
+  "deferredScope": [
+    "gemini_text",
+    "image",
+    "video",
+    "other_five_text_tasks",
+    "runtime_route_change",
+    "promotion",
+    "m2_publish"
+  ],
+  "stopConditions": [
+    "fixed_commit_or_source_bundle_drift",
+    "fixture_matrix_or_prompt_drift",
+    "candidate_alias_or_protocol_drift",
+    "retired_or_deferred_alias_present",
+    "execution_or_wire_call_manifest_exhausted",
+    "missing_openox_price_or_price_drift",
+    "missing_limited_credential_attestation",
+    "missing_separate_real_cost_authorization",
+    "unknown_or_over_budget_settlement"
+  ],
+  "manifestSha256": "9b60589e1d034d94935d8efd160fa47c51df8f88853be2c22b0f8ce6f9affc2c"
+}
