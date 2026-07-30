@@ -100,6 +100,8 @@ export interface AiTaskDeps {
   ctx: AiContext;
   /** 测试注入位；生产缺省走 resolveTaskRoute（env 可覆盖）。 */
   route?: TaskRoute;
+  /** Temporal/activity cancellation. Cancellation is terminal and never advances the fallback chain. */
+  signal?: AbortSignal;
 }
 
 const sum = (
@@ -164,6 +166,18 @@ export async function runAiTask<TIn, TOut>(
     // 非付费调用继续以 Promise.race 及时换模型；付费调用在 abort 后必须等待网关完成请求级
     // 结算/冻结，不能让外层 fallback 抢跑并产生第二笔费用。
     const controller = new AbortController();
+    const forwardCancellation = (): void => {
+      controller.abort(
+        deps.signal?.reason instanceof Error
+          ? deps.signal.reason
+          : new Error(`${def.id} cancelled`),
+      );
+    };
+    if (deps.signal?.aborted) forwardCancellation();
+    else
+      deps.signal?.addEventListener('abort', forwardCancellation, {
+        once: true,
+      });
     let timer: NodeJS.Timeout | undefined;
     const timeoutError = () =>
       new Error(`${def.id}@${model} timed out after ${route.timeoutMs}ms`);
@@ -239,6 +253,11 @@ export async function runAiTask<TIn, TOut>(
         fallbackIndex,
       };
     } catch (err) {
+      if (deps.signal?.aborted) {
+        throw deps.signal.reason instanceof Error
+          ? deps.signal.reason
+          : new Error(`${def.id} cancelled`);
+      }
       // A durable paid-call gate or settlement ambiguity is a terminal task
       // condition. Advancing to another model would spend again after an
       // unknown acknowledgement boundary.
@@ -268,6 +287,7 @@ export async function runAiTask<TIn, TOut>(
       });
     } finally {
       clearTimeout(timer);
+      deps.signal?.removeEventListener('abort', forwardCancellation);
     }
   }
 

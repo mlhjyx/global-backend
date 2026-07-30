@@ -53,6 +53,10 @@ describe("R1 production worker Release wiring", () => {
       /new KbService\([\s\S]*?siteBuilderStorage[\s\S]*?\)/,
     );
     expect(worker).toContain("qualityCandidateService,");
+    expect(worker).toMatch(
+      /const qualityNarrativeService = new QualityNarrativeService\(\s*siteBuilderStorage,\s*\)/,
+    );
+    expect(worker).toContain("qualityNarrativeService,");
     expect(worker).toContain("closedRepairService,");
   });
 });

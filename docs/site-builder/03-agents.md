@@ -56,6 +56,7 @@ task 只引用稳定的 **`modelProfile`**（17 档：`deterministic` / `structu
 | `site_builder.qa_summarize`  | 卡8         | deepseek-v4-flash                | doubao-seed-2.0-lite         | currentRoute；3k / 90s                      |
 | `site_builder.seo_review`    | 卡9         | deepseek-v4-flash                | doubao-seed-2.0-lite         | currentRoute；3k / 90s                      |
 
+- **M1-g consumer as-built（2026-07-30 当前交付分支）**：`qa_summarize` / `seo_review` 已成为 P4 后置的私有、非权威消费者。两者只接收 DesignEvaluation v2 已有 deterministic finding；SEO 额外接收与 finding 证据引用一致的 `seo_report` 有界检查投影。输出合同只允许 finding/group/explanation ID，不能写自由文本、严重级别、pass/fail、repair 或新事实；叙事结果不进入质量结论、ReleaseManifest 或公开 API。空 finding、付费拒绝、模型失败/无效输出与 unknown settlement 都有明确 deterministic summary，取消则终止。该接线不代表上表 currentRoute 健康或已获调用授权。
 - **卡片旧标注（gemini-3.1-pro / gpt-image-2 等）与 as-built 路由不一致**：以本表为准；回退链=合法路由（AiTask 基类逐模型尝试），非静默降级。BrandProfile 的 EvidenceRef v2 任务硬门失败也会进入 Sonnet fallback。
 - **未落地为 task 的卡**：卡3 imagePipeline（M1-c 纯 Sharp 确定性，无模型 task；生成式媒体 task 进 M1-c2/M3，引 ADR-018）、卡5 motionVideo（M3）、卡6 的 **aestheticReview 目前无独立路由**——`site_builder.aesthetic_review` 到 M1-f 才增（v3.2 §2.1）。
 - **新增 task 复用 AiTask/MediaGateway，不新增自治框架**（v3.2 §23.5）：M1-f 增 `site_builder.aesthetic_review`；M1-d 可增 `site_builder.localize`；媒体 image/video/audio task 进 M1-c2/M3。均走同一 AiTask 基类 + MediaGateway，**不另建 Agent runtime**。

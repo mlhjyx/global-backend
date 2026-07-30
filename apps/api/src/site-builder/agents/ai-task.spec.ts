@@ -466,4 +466,42 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(settlementFinished).toBe(true);
     expect(calls).toEqual(['model-a']);
   });
+
+  it('treats external activity cancellation as terminal after paid settlement', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    let settlementFinished = false;
+    const gateway = {
+      generateStructured: vi.fn(async (input: GenerateStructuredInput): Promise<ModelResult<EchoOut>> => {
+        calls.push(input.model ?? 'unknown');
+        await new Promise<void>((resolve) => {
+          input.signal?.addEventListener('abort', () => setTimeout(resolve, 5), { once: true });
+          controller.abort(new Error('activity cancelled'));
+        });
+        settlementFinished = true;
+        throw new PaidOperationUnknownError('c'.repeat(64), 'MODEL_SETTLEMENT_UNKNOWN');
+      }),
+    } as unknown as ModelGateway;
+
+    await expect(
+      runAiTask(
+        DEF,
+        { name: 'Acme' },
+        {
+          gateway,
+          route: ROUTE,
+          signal: controller.signal,
+          ctx: {
+            ...CTX,
+            paidCost: {
+              siteId: 'site-1',
+              scopeKey: 'attempt-cancel',
+            },
+          },
+        },
+      ),
+    ).rejects.toThrow('activity cancelled');
+    expect(settlementFinished).toBe(true);
+    expect(calls).toEqual(['model-a']);
+  });
 });
