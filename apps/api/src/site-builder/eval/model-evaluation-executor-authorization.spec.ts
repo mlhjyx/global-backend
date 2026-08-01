@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import * as schemaValidation from "../../model-gateway/schema-validate";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
 import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
@@ -1130,11 +1131,10 @@ describe("model evaluation executor authorization", () => {
       { ledgerId, directory },
     );
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-    const originalValidateOutput = BRAND_PROFILE_TASK.validateOutput;
+    const schemaCheck = vi
+      .spyOn(schemaValidation, "checkAgainstSchema")
+      .mockReturnValue({ valid: false, errors: ["x".repeat(5_000)] });
     const wire = vi.fn(async () => {
-      BRAND_PROFILE_TASK.validateOutput = () => {
-        throw new Error("x".repeat(5_000));
-      };
       return {
         body: {
           status: "completed",
@@ -1207,7 +1207,7 @@ describe("model evaluation executor authorization", () => {
         }),
       );
     } finally {
-      BRAND_PROFILE_TASK.validateOutput = originalValidateOutput;
+      schemaCheck.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -1791,6 +1791,176 @@ describe("model evaluation executor authorization", () => {
       costSettlement: { state: "settled", amountCents: 1 },
     });
     expect(wire).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["maxDispatchExecutions", 74],
+    ["maxWireCalls", 148],
+  ] as const)(
+    "rejects design_spec when %s exceeds the frozen matrix",
+    async (limit, value) => {
+      const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+      const candidate = plan.candidates[0];
+      const wire = vi.fn();
+      const resolver = fakeResolver();
+      const input = designSpecTargetOnlyCostSafetyInput(resolver.resolverId);
+      input.limits[limit] = value;
+      if (limit === "maxDispatchExecutions") {
+        input.authorization.approvedDispatchExecutions = value;
+      }
+      const costSafety = createModelEvaluationCostSafetyAttestation(input);
+      const executor = createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          fakeWireClient(wire),
+          costSafety,
+        ),
+        authorizationLedger:
+          createFakeModelEvaluationAuthorizationLedger(costSafety),
+        settlementResolver: resolver,
+        costSafety,
+      });
+      const budget = new ModelEvaluationBudgetGuard(100);
+      const before = budget.snapshot();
+
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "precision-industrial-rich",
+          attempt: 1,
+          campaignBudget: budget,
+          execute: executor.execute,
+        }),
+      ).rejects.toMatchObject({
+        failureCode: "evaluation_cost_safety_mismatch",
+        costSettlement: {
+          state: "not_incurred",
+          reason: "rejected_before_dispatch",
+        },
+      });
+      expect(wire).not.toHaveBeenCalled();
+      expect(budget.snapshot()).toEqual(before);
+    },
+  );
+
+  it("rejects a mutated design_spec validator before budget reservation", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+    const candidate = plan.candidates[0];
+    const wire = vi.fn();
+    const resolver = fakeResolver();
+    const costSafety = createModelEvaluationCostSafetyAttestation(
+      designSpecTargetOnlyCostSafetyInput(resolver.resolverId),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    const budget = new ModelEvaluationBudgetGuard(100);
+    const before = budget.snapshot();
+    const originalValidator = DESIGN_SPEC_TASK.validateOutput;
+    DESIGN_SPEC_TASK.validateOutput = undefined;
+    try {
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "precision-industrial-rich",
+          attempt: 1,
+          campaignBudget: budget,
+          execute: executor.execute,
+        }),
+      ).rejects.toMatchObject({
+        failureCode: "evaluation_cost_safety_mismatch",
+        costSettlement: {
+          state: "not_incurred",
+          reason: "rejected_before_dispatch",
+        },
+      });
+    } finally {
+      DESIGN_SPEC_TASK.validateOutput = originalValidator;
+    }
+    expect(wire).not.toHaveBeenCalled();
+    expect(budget.snapshot()).toEqual(before);
+  });
+
+  it("uses the captured design_spec validator after admission", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.design_spec");
+    const candidate = plan.candidates[0];
+    const evaluationCase = buildCanonicalModelEvaluationCase(
+      plan,
+      "precision-industrial-rich",
+    );
+    const selected = (
+      evaluationCase.payload.taskInput as {
+        candidates: Array<{ id: string }>;
+      }
+    ).candidates[0]!;
+    const originalValidator = DESIGN_SPEC_TASK.validateOutput;
+    const wire = vi.fn(async () => {
+      DESIGN_SPEC_TASK.validateOutput = undefined;
+      return {
+        body: {
+          status: "completed",
+          model: candidate.alias,
+          output: [
+            {
+              content: [
+                {
+                  type: "output_text",
+                  text: JSON.stringify({
+                    candidateId: selected.id,
+                    reasons: [],
+                    warnings: [],
+                  }),
+                },
+              ],
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 10 },
+        },
+        providerReportedCostCents: 1,
+      };
+    });
+    const resolver = fakeResolver();
+    const costSafety = createModelEvaluationCostSafetyAttestation(
+      designSpecTargetOnlyCostSafetyInput(resolver.resolverId),
+    );
+    const executor = createRawModelEvaluationProtocolExecutor({
+      wireClient: bindFakeModelEvaluationWireCredential(
+        fakeWireClient(wire),
+        costSafety,
+      ),
+      authorizationLedger:
+        createFakeModelEvaluationAuthorizationLedger(costSafety),
+      settlementResolver: resolver,
+      costSafety,
+    });
+    try {
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate,
+          fixtureId: "precision-industrial-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        resultClass: "quality_valid_runtime_on_time",
+        artifactAccepted: true,
+        actualProtocol: "openai-responses",
+        costSettlement: { state: "settled", amountCents: 1 },
+      });
+      expect(wire).toHaveBeenCalledTimes(1);
+    } finally {
+      DESIGN_SPEC_TASK.validateOutput = originalValidator;
+    }
   });
 
   it("rejects a mutated design_spec system prompt before dispatch", async () => {

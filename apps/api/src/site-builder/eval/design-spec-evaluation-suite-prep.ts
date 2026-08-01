@@ -44,15 +44,16 @@ const DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT =
   captureCompiledContractsSuiteImport(DESIGN_SPEC_SUITE_REPOSITORY_ROOT);
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-08-01-v12" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-08-01-v13" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
-  "site-builder-design-spec-evaluation-suite-prep/v1" as const;
+  "site-builder-design-spec-evaluation-suite-prep/v2" as const;
 
 export const DESIGN_SPEC_EVALUATION_STOP_CONDITIONS = Object.freeze([
   "fixed_commit_or_source_bundle_drift",
   "compiled_contracts_runtime_attestation_drift",
   "untrusted_compiled_contracts_build_attestation",
   "fixture_matrix_or_prompt_drift",
+  "fixed_commit_not_reachable_after_merge",
   "candidate_alias_or_protocol_drift",
   "retired_or_deferred_alias_present",
   "execution_or_wire_call_manifest_exhausted",
@@ -99,6 +100,12 @@ export interface DesignSpecEvaluationSuitePrepManifest {
   dispatchAuthorization: "NOT_AUTHORIZED";
   actualNetworkCalls: 0;
   actualModelCostCents: 0;
+  historyPreservationGate: {
+    fixedCommitReachableFromPrepHead: true;
+    requiredMergeMethod: "merge_commit";
+    postMergeReachabilityRequiredBeforeEvidence: true;
+    squashOrRebaseOutcome: "FAIL_CLOSED";
+  };
   compiledContracts: CompiledContractsAttestation;
   suite: {
     suiteId: string;
@@ -200,6 +207,20 @@ export function assertDesignSpecSourceBundleAtFixedCommit(
     throw new Error("design_spec source bundle requires a 40-character commit");
   }
   const realRepositoryRoot = realpathSync(repositoryRoot);
+  try {
+    execFileSync(
+      "git",
+      ["merge-base", "--is-ancestor", fixedCommitSha, "HEAD"],
+      {
+        cwd: realRepositoryRoot,
+        stdio: "ignore",
+      },
+    );
+  } catch {
+    throw new Error(
+      "design_spec fixed commit must be reachable from the current history",
+    );
+  }
   const seen = new Set<string>();
   for (const source of sourceFiles) {
     if (
@@ -493,6 +514,12 @@ export function buildDesignSpecEvaluationSuitePrepManifest(
     dispatchAuthorization: "NOT_AUTHORIZED",
     actualNetworkCalls: 0,
     actualModelCostCents: 0,
+    historyPreservationGate: {
+      fixedCommitReachableFromPrepHead: true,
+      requiredMergeMethod: "merge_commit",
+      postMergeReachabilityRequiredBeforeEvidence: true,
+      squashOrRebaseOutcome: "FAIL_CLOSED",
+    },
     compiledContracts,
     suite: {
       suiteId: suite.suiteId,

@@ -72,6 +72,36 @@ const CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS = Object.freeze({
   "site_builder.design_spec": DESIGN_SPEC_TASK.system ?? "",
 } as const);
 
+const CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT = (() => {
+  const validator = BRAND_PROFILE_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("BrandProfile canonical route validator is required");
+  }
+  return validator;
+})();
+
+const CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT = (() => {
+  const validator = DESIGN_SPEC_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("DesignSpec canonical route validator is required");
+  }
+  return validator;
+})();
+
+function taskValidatorMatchesCapturedIdentity(
+  taskId: SiteBuilderTaskId,
+): boolean {
+  if (taskId === "site_builder.brand_profile") {
+    return true;
+  }
+  if (taskId === "site_builder.design_spec") {
+    return (
+      DESIGN_SPEC_TASK.validateOutput === CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT
+    );
+  }
+  return false;
+}
+
 function capturedTaskSystemPrompt(taskId: SiteBuilderTaskId): string {
   if (taskId === "site_builder.brand_profile") {
     return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
@@ -1625,6 +1655,9 @@ function assertCanonicalRequest(
   if (request.profile !== plan.profile) {
     throw preDispatchError("evaluation_profile_mismatch");
   }
+  if (!taskValidatorMatchesCapturedIdentity(request.taskId)) {
+    throw preDispatchError("evaluation_task_validator_drift");
+  }
 
   let catalog;
   try {
@@ -1957,16 +1990,16 @@ function validationFailure(
   }
   try {
     if (request.taskId === "site_builder.brand_profile") {
-      BRAND_PROFILE_TASK.validateOutput?.(
+      CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT(
         request.casePayload.taskInput as Parameters<
-          NonNullable<typeof BRAND_PROFILE_TASK.validateOutput>
+          typeof CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT
         >[0],
         artifact as never,
       );
     } else if (request.taskId === "site_builder.design_spec") {
-      DESIGN_SPEC_TASK.validateOutput?.(
+      CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT(
         request.casePayload.taskInput as Parameters<
-          NonNullable<typeof DESIGN_SPEC_TASK.validateOutput>
+          typeof CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT
         >[0],
         artifact as never,
       );

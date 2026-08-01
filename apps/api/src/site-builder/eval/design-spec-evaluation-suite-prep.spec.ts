@@ -1,12 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -67,6 +61,12 @@ describe("design_spec zero-cost suite preparation", () => {
       dispatchAuthorization: "NOT_AUTHORIZED",
       actualNetworkCalls: 0,
       actualModelCostCents: 0,
+      historyPreservationGate: {
+        fixedCommitReachableFromPrepHead: true,
+        requiredMergeMethod: "merge_commit",
+        postMergeReachabilityRequiredBeforeEvidence: true,
+        squashOrRebaseOutcome: "FAIL_CLOSED",
+      },
       compiledContracts: {
         fixedCommitSha: FIXED_COMMIT,
         runtimeEntrypoint: "packages/contracts/dist/index.js",
@@ -264,6 +264,27 @@ describe("design_spec zero-cost suite preparation", () => {
         fixedFingerprint,
       ]),
     ).not.toThrow();
+
+    const treeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+    const unrelatedCommitSha = execFileSync(
+      "git",
+      ["commit-tree", treeSha, "-m", "unrelated source history"],
+      { cwd: root, encoding: "utf8" },
+    ).trim();
+    execFileSync("git", ["update-ref", "HEAD", unrelatedCommitSha], {
+      cwd: root,
+    });
+    expect(() =>
+      assertDesignSpecSourceBundleAtFixedCommit(root, fixedCommitSha, [
+        fixedFingerprint,
+      ]),
+    ).toThrow(
+      "design_spec fixed commit must be reachable from the current history",
+    );
+    execFileSync("git", ["update-ref", "HEAD", fixedCommitSha], { cwd: root });
 
     await writeFile(absoluteSourcePath, "export const version = 2;\n");
     const currentBytes = await readFile(absoluteSourcePath);

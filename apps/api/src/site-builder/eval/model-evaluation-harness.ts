@@ -84,7 +84,7 @@ import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-co
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-08-01-v15" as const;
+  "site-builder-model-evaluation-harness/2026-08-01-v16" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -266,6 +266,18 @@ function currentTaskSystemPromptSha256(taskId: SiteBuilderTaskId): string {
     return sha256Text(DESIGN_SPEC_TASK.system ?? "");
   }
   throw new Error(`task system prompt is not canonical: ${taskId}`);
+}
+
+function currentTaskValidatorMatchesCapturedIdentity(
+  taskId: SiteBuilderTaskId,
+): boolean {
+  if (taskId === "site_builder.brand_profile") {
+    return true;
+  }
+  if (taskId === "site_builder.design_spec") {
+    return DESIGN_SPEC_TASK.validateOutput === VALIDATE_DESIGN_SPEC_OUTPUT;
+  }
+  return false;
 }
 
 const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
@@ -755,8 +767,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v12",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v11",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v13",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v12",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   systemPromptSha256: DESIGN_SPEC_SYSTEM_PROMPT_SHA256,
@@ -776,7 +788,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v12",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v13",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1235,6 +1247,7 @@ function bindTrustedModelEvaluationExecutor(
   const actualDispatches = costSafety.credential.allowedDispatches
     .map((entry) => `${entry.mode}:${entry.alias}:${entry.protocol}`)
     .sort();
+  const requiresExactCapacity = comparatorAliases.length === 0;
   const requiredExecutions =
     plan.evaluationSuite === null
       ? 0
@@ -1272,6 +1285,7 @@ function bindTrustedModelEvaluationExecutor(
     currentFixedCommitSha === null ||
     costSafety.authorization.preparedFixedCommitSha !== currentFixedCommitSha ||
     suite.systemPromptSha256 !== currentTaskSystemPromptSha256(plan.taskId) ||
+    !currentTaskValidatorMatchesCapturedIdentity(plan.taskId) ||
     costSafety.authorization.preparedSuiteId !== suite.suiteId ||
     costSafety.authorization.preparedSourceBundleContractId !==
       suite.sourceBundleContractId ||
@@ -1280,8 +1294,12 @@ function bindTrustedModelEvaluationExecutor(
     JSON.stringify(actualDispatches) !== JSON.stringify(expectedDispatches) ||
     budget.campaignBudgetCents > costSafety.limits.campaignBudgetCents ||
     costSafety.limits.maxOutputTokensPerCall < plan.envelope.maxTokens ||
-    costSafety.limits.maxDispatchExecutions < requiredExecutions ||
-    costSafety.limits.maxWireCalls < requiredWireCalls
+    (requiresExactCapacity
+      ? costSafety.limits.maxDispatchExecutions !== requiredExecutions
+      : costSafety.limits.maxDispatchExecutions < requiredExecutions) ||
+    (requiresExactCapacity
+      ? costSafety.limits.maxWireCalls !== requiredWireCalls
+      : costSafety.limits.maxWireCalls < requiredWireCalls)
   ) {
     throw new ModelEvaluationCallError("evaluation_cost_safety_mismatch", {
       state: "not_incurred",
