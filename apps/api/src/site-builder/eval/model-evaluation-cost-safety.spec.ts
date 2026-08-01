@@ -19,6 +19,12 @@ function validInput(): ModelEvaluationCostSafetyInput {
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: 1_000,
       approvedDispatchExecutions: 37,
+      preparedFixedCommitSha: "a".repeat(40),
+      preparedSuiteId:
+        "site-builder.brand-profile-evaluation-suite/2026-07-27-v1",
+      preparedSourceBundleContractId:
+        "brand-profile-evaluation-source-bundle/v7",
+      preparedSourceBundleSha256: "b".repeat(64),
     },
     credential: {
       attestationId: "brand-profile-evaluation-token/2026-07-28-v1",
@@ -247,6 +253,24 @@ describe("model evaluation cost safety contract", () => {
     expect(() => createModelEvaluationCostSafetyAttestation(callDrift)).toThrow(
       "model evaluation cost safety attestation is invalid",
     );
+  });
+
+  it("requires the spend authorization to pin the prepared suite and source bundle", () => {
+    const missing = validInput();
+    delete (
+      missing.authorization as {
+        preparedSourceBundleSha256?: string;
+      }
+    ).preparedSourceBundleSha256;
+    expect(() => createModelEvaluationCostSafetyAttestation(missing)).toThrow(
+      "model evaluation cost safety attestation is invalid",
+    );
+
+    const invalidCommit = validInput();
+    invalidCommit.authorization.preparedFixedCommitSha = "main";
+    expect(() =>
+      createModelEvaluationCostSafetyAttestation(invalidCommit),
+    ).toThrow("model evaluation cost safety attestation is invalid");
   });
 
   it("keeps Chat out of target dispatch and non-Chat out of legacy comparison", () => {

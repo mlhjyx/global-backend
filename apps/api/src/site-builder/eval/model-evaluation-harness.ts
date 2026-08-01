@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+import {
+  assertModelEvaluationRuntimeIntegrity,
+  modelEvaluationRuntimeIntegrityMatches,
+} from "./model-evaluation-runtime-integrity";
 import {
   SITE_BUILDER_MODEL_CANDIDATE_BASELINE,
   SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
@@ -13,7 +18,6 @@ import {
   type ModelCandidateStatus,
 } from "../agents/model-candidate-baseline";
 import type { SiteBuilderModelProfileId } from "../agents/model-profiles";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import {
   BRAND_PROFILE_PROMPT_VERSION,
   BRAND_PROFILE_ROUTE_VALIDATION_VERSION,
@@ -39,6 +43,23 @@ import {
   type BrandProfileEvalFixture,
 } from "./brand-profile-eval";
 import {
+  DESIGN_SPEC_EVALUATOR_RUBRIC,
+  DESIGN_SPEC_EVALUATOR_VERSION,
+  DESIGN_SPEC_EVAL_FIXTURES,
+  DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION,
+  DESIGN_SPEC_PROMPT_VERSION,
+  DESIGN_SPEC_ROUTE_VALIDATION_VERSION,
+  designSpecFixtureFingerprint,
+  evaluateDesignSpecOutput,
+  prepareDesignSpecEvalFixture,
+  type DesignSpecEvalFixture,
+} from "./design-spec-eval";
+import {
+  DESIGN_SPEC_TASK,
+  type DesignSpecTaskInput,
+  type DesignSpecTaskOutput,
+} from "../design/design-brief-producer";
+import {
   inspectEvaluationMatrix,
   sha256Bytes,
   sha256CanonicalJson,
@@ -54,15 +75,20 @@ import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   type ModelEvaluationCostSafetyAttestation,
 } from "./model-evaluation-cost-safety";
+import {
+  compiledContractsRuntimeBindingMatches,
+  type CompiledContractsRuntimeBinding,
+} from "./compiled-contracts-attestation";
+import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-compiled-contracts-runtime";
 
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-07-28-v3" as const;
+  "site-builder-model-evaluation-harness/2026-08-01-v18" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
-  "site-builder-model-evaluation-run/v3" as const;
+  "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
-  "site-builder-model-capability-probe-attestation/v2" as const;
+  "site-builder-model-capability-probe-attestation/v3" as const;
 
 export interface TaskEvaluationEnvelope {
   maxTokens: number;
@@ -87,6 +113,7 @@ export interface TaskEvaluationSuite {
   adapterId: string;
   taskContractId: SiteBuilderTaskId;
   promptVersion: string;
+  systemPromptSha256: string;
   inputSchemaSha256: string;
   outputSchemaSha256: string;
   repairTaskOutput: boolean;
@@ -102,6 +129,8 @@ export interface TaskEvaluationSuite {
     promptSha256: string;
   }[];
   repeats: number;
+  legacyComparatorAliases: readonly string[];
+  compiledContractsRuntimeBinding: CompiledContractsRuntimeBinding | null;
   sourceBundleContractId: string;
   sourceBundleFiles: readonly {
     role: string;
@@ -195,6 +224,9 @@ const BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
 );
 const BRAND_PROFILE_REPAIR_TASK_OUTPUT =
   BRAND_PROFILE_TASK.repairTaskOutput === true;
+const BRAND_PROFILE_SYSTEM_PROMPT_SHA256 = sha256Text(
+  BRAND_PROFILE_TASK.system ?? "",
+);
 const BUILD_BRAND_PROFILE_PROMPT = BRAND_PROFILE_TASK.buildPrompt;
 const VALIDATE_BRAND_PROFILE_OUTPUT = (() => {
   const validator = BRAND_PROFILE_TASK.validateOutput;
@@ -204,6 +236,49 @@ const VALIDATE_BRAND_PROFILE_OUTPUT = (() => {
   return validator;
 })();
 assertModelOutputSchemaCompiles(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT);
+
+const DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(DESIGN_SPEC_TASK.inputSchema),
+);
+const DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(DESIGN_SPEC_TASK.outputSchema),
+);
+const DESIGN_SPEC_REPAIR_TASK_OUTPUT =
+  DESIGN_SPEC_TASK.repairTaskOutput === true;
+const DESIGN_SPEC_SYSTEM_PROMPT_SHA256 = sha256Text(
+  DESIGN_SPEC_TASK.system ?? "",
+);
+const BUILD_DESIGN_SPEC_PROMPT = DESIGN_SPEC_TASK.buildPrompt;
+const VALIDATE_DESIGN_SPEC_OUTPUT = (() => {
+  const validator = DESIGN_SPEC_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("DesignSpec canonical route validator is required");
+  }
+  return validator;
+})();
+assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
+
+function currentTaskSystemPromptSha256(taskId: SiteBuilderTaskId): string {
+  if (taskId === "site_builder.brand_profile") {
+    return sha256Text(BRAND_PROFILE_TASK.system ?? "");
+  }
+  if (taskId === "site_builder.design_spec") {
+    return sha256Text(DESIGN_SPEC_TASK.system ?? "");
+  }
+  throw new Error(`task system prompt is not canonical: ${taskId}`);
+}
+
+function currentTaskValidatorMatchesCapturedIdentity(
+  taskId: SiteBuilderTaskId,
+): boolean {
+  if (taskId === "site_builder.brand_profile") {
+    return true;
+  }
+  if (taskId === "site_builder.design_spec") {
+    return DESIGN_SPEC_TASK.validateOutput === VALIDATE_DESIGN_SPEC_OUTPUT;
+  }
+  return false;
+}
 
 const BRAND_PROFILE_EVALUATION_SOURCE_FILES = deepFreeze([
   {
@@ -337,6 +412,7 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
   adapterId: "site-builder.brand-profile-evaluation-adapter/v2",
   taskContractId: "site_builder.brand_profile",
   promptVersion: BRAND_PROFILE_PROMPT_VERSION,
+  systemPromptSha256: BRAND_PROFILE_SYSTEM_PROMPT_SHA256,
   inputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_INPUT_SCHEMA_SNAPSHOT),
   outputSchemaSha256: sha256CanonicalJson(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT),
   repairTaskOutput: BRAND_PROFILE_REPAIR_TASK_OUTPUT,
@@ -398,13 +474,316 @@ const BRAND_PROFILE_EVALUATION_SUITE = deepFreeze({
     }),
   ]),
   repeats: 2,
+  legacyComparatorAliases: Object.freeze(["deepseek-v4-pro", "glm-5.2"]),
+  compiledContractsRuntimeBinding: null,
   sourceBundleContractId: "brand-profile-evaluation-source-bundle/v7",
   sourceBundleFiles: BRAND_PROFILE_EVALUATION_SOURCE_FILES,
+}) satisfies TaskEvaluationSuite;
+
+const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+  },
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+  },
+  {
+    role: "task",
+    path: "apps/api/src/site-builder/design/design-brief-producer.ts",
+  },
+  {
+    role: "catalog",
+    path: "apps/api/src/site-builder/design/catalog.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-approved.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-b3-drafts.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-b2-drafts.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/catalog-v2-b1-drafts.ts",
+  },
+  {
+    role: "catalog_data",
+    path: "apps/api/src/site-builder/design/renderer-preset-digests.ts",
+  },
+  {
+    role: "judge",
+    path: "apps/api/src/site-builder/eval/design-spec-eval.ts",
+  },
+  {
+    role: "harness",
+    path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+  },
+  {
+    role: "evaluation_executor",
+    path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
+    role: "evaluation_cost_safety",
+    path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+  },
+  {
+    role: "compiled_contracts_attestation",
+    path: "apps/api/src/site-builder/eval/compiled-contracts-attestation.ts",
+  },
+  {
+    role: "compiled_contracts_runtime_binding",
+    path: "apps/api/src/site-builder/eval/design-spec-compiled-contracts-runtime.ts",
+  },
+  {
+    role: "loaded_contracts_runtime_binding",
+    path: "apps/api/src/site-builder/eval/design-spec-loaded-contracts-runtime.ts",
+  },
+  {
+    role: "runtime_integrity",
+    path: "apps/api/src/site-builder/eval/model-evaluation-runtime-integrity.ts",
+  },
+  {
+    role: "api_manifest",
+    path: "apps/api/package.json",
+  },
+  {
+    role: "provider",
+    path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+  },
+  {
+    role: "transport_registry",
+    path: "apps/api/src/model-gateway/model-transports.ts",
+  },
+  {
+    role: "task_runner",
+    path: "apps/api/src/site-builder/agents/ai-task.ts",
+  },
+  {
+    role: "gateway_router",
+    path: "apps/api/src/model-gateway/router-model-gateway.ts",
+  },
+  {
+    role: "schema_validator",
+    path: "apps/api/src/model-gateway/schema-validate.ts",
+  },
+  {
+    role: "evaluation_provenance",
+    path: "apps/api/src/site-builder/eval/eval-provenance.ts",
+  },
+  {
+    role: "task_route",
+    path: "apps/api/src/site-builder/agents/task-routes.ts",
+  },
+  {
+    role: "task_route_binding",
+    path: "apps/api/src/site-builder/agents/task-route-bindings.ts",
+  },
+  {
+    role: "profile_registry",
+    path: "apps/api/src/site-builder/agents/model-profiles.ts",
+  },
+  {
+    role: "provider_registry",
+    path: "apps/api/src/model-gateway/model-provider.registry.ts",
+  },
+  {
+    role: "model_router",
+    path: "apps/api/src/model-gateway/model-router.ts",
+  },
+  {
+    role: "provider_error",
+    path: "apps/api/src/model-gateway/providers/provider-output-error.ts",
+  },
+  { role: "gateway_types", path: "apps/api/src/model-gateway/types.ts" },
+  {
+    role: "gateway_contract",
+    path: "apps/api/src/model-gateway/model-gateway.ts",
+  },
+  {
+    role: "provider_contract",
+    path: "apps/api/src/model-gateway/model-provider.ts",
+  },
+  { role: "budget_ledger", path: "apps/api/src/tools/budget.ts" },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/model-policy.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-catalog-v2.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/component-qualification.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-integrity.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-dna.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-observation.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-source.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/site-spec.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/copy-bundle.ts",
+  },
+  { role: "contracts_source", path: "packages/contracts/src/index.ts" },
+  { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
+  { role: "contracts_manifest", path: "packages/contracts/package.json" },
+  { role: "dependency_lock", path: "pnpm-lock.yaml" },
+] as const);
+
+const DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS = deepFreeze([
+  {
+    fixtureId: "natural-origin-rich",
+    fixtureSha256:
+      "83ac126bf9e019442a028b894c70c13010a68b0c86bf7ee484b987e175692e9b",
+    promptSha256:
+      "b5f95c6c412beddd28e3ffb30dd9226cb0805967831f07af37c75af901dc1a66",
+  },
+  {
+    fixtureId: "natural-origin-sparse",
+    fixtureSha256:
+      "15b4141169e4862cc6fc8a96fd5338e44fa9dc9e6e1cd53c4b83dd58b4ed1be8",
+    promptSha256:
+      "8d658afd3e9f473f2edec47de8dfd3bd6aec885966331b4457697562c3d847c1",
+  },
+  {
+    fixtureId: "oem-capability-rich",
+    fixtureSha256:
+      "cdfb18b5cadc568d794ff87366a001ac0fa10d1380e7ee35af1c7ca28634e581",
+    promptSha256:
+      "3e8780dbb9429801c8c0c77d72e00a92880d75365bd5ba61e82df554e2177a0b",
+  },
+  {
+    fixtureId: "oem-capability-sparse",
+    fixtureSha256:
+      "e8365172be3afe76ac9fd9615f11eb6092807c883a78958d991e003cf22410d9",
+    promptSha256:
+      "f46e796309c1e8bdda632bd1c01a4999abd820c55ce495ea13efee36f2ab5aaa",
+  },
+  {
+    fixtureId: "precision-industrial-rich",
+    fixtureSha256:
+      "8c2a7cfa6207b863c15832cd1ff5abeefce420aa6c5b305db2eae8f5df284ff6",
+    promptSha256:
+      "bb694026658db537945520847e3588f1aceb10c163c4d488532b0213b2b668ec",
+  },
+  {
+    fixtureId: "precision-industrial-sparse",
+    fixtureSha256:
+      "cc1c0e069f613d1d82ec53d4783ed26250ca06eddfb1b76cd3294022ccc5fcf6",
+    promptSha256:
+      "3f740cba234be448bedf15b60833401e43d173708d0ed5d141839d2d7478bfd2",
+  },
+  {
+    fixtureId: "premium-innovation-rich",
+    fixtureSha256:
+      "3f2ec1f8f7519dcbc572e075f84d836cda73874d7ad53df063f92d4c42e251c4",
+    promptSha256:
+      "12c7c55fa40d83954e5e602c282c5e86d038adf943b3ec4a99d9fb72b2220417",
+  },
+  {
+    fixtureId: "premium-innovation-sparse",
+    fixtureSha256:
+      "2946840a353835c9e1c8aa043f22d02eeef1739b75ba03afff6aa4e29fd1eb46",
+    promptSha256:
+      "0659e2871f7673585aa083bce06e98dcb57e96d69ed50ef24a0b1df42a40bfea",
+  },
+  {
+    fixtureId: "scientific-trust-rich",
+    fixtureSha256:
+      "de6bcb2cc3c53390e7f153d23ec6770d429bb2aeb1772e4d3112be419b1a3a89",
+    promptSha256:
+      "7e5b9dde096487a523ac81cae4609ca36a555a0b4a693b65e422937dd09d3ede",
+  },
+  {
+    fixtureId: "scientific-trust-sparse",
+    fixtureSha256:
+      "9f97ed2b08d054da37e15aee4b4ac0ec95aa79827382200e3d329fd1640106c4",
+    promptSha256:
+      "7b901063360f9686f595f3f15c2af3571fe64a4f80c8d639baf28696606b6a7f",
+  },
+  {
+    fixtureId: "technical-catalog-rich",
+    fixtureSha256:
+      "8428714ffc6886f7ddff3448ae6c2ce19dffd5a68aba7e8825e23a9b18fd7404",
+    promptSha256:
+      "2a8f33b841a6239199d10b0e881cee9375451f792a1468fa71597e5cd594daa7",
+  },
+  {
+    fixtureId: "technical-catalog-sparse",
+    fixtureSha256:
+      "31a62190afcee593f172892c20ac0370a43e4d27d4bcf51de95f58606afd4969",
+    promptSha256:
+      "09e634738d1d0cc6b12d2dbddbcd33501fb475717324607622603e08d8bb9983",
+  },
+] as const);
+
+const DESIGN_SPEC_ACTUAL_FIXTURE_FINGERPRINTS = DESIGN_SPEC_EVAL_FIXTURES.map(
+  (fixture) => ({
+    fixtureId: fixture.fixtureId,
+    ...designSpecFixtureFingerprint(fixture),
+  }),
+);
+
+if (
+  JSON.stringify(DESIGN_SPEC_ACTUAL_FIXTURE_FINGERPRINTS) !==
+  JSON.stringify(DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS)
+) {
+  throw new Error("design_spec frozen fixture fingerprints drifted");
+}
+
+const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v13",
+  taskContractId: "site_builder.design_spec",
+  promptVersion: DESIGN_SPEC_PROMPT_VERSION,
+  systemPromptSha256: DESIGN_SPEC_SYSTEM_PROMPT_SHA256,
+  inputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_INPUT_SCHEMA_SNAPSHOT),
+  outputSchemaSha256: sha256CanonicalJson(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT),
+  repairTaskOutput: DESIGN_SPEC_REPAIR_TASK_OUTPUT,
+  routeValidationVersion: DESIGN_SPEC_ROUTE_VALIDATION_VERSION,
+  evaluatorVersion: DESIGN_SPEC_EVALUATOR_VERSION,
+  evaluatorRubricSha256: sha256CanonicalJson(DESIGN_SPEC_EVALUATOR_RUBRIC),
+  fixtureSetId: "site-builder.design-spec-golden/2026-07-30-v3",
+  fixtureSchemaVersion: DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION,
+  fixtureIds: Object.freeze(
+    DESIGN_SPEC_EVAL_FIXTURES.map(({ fixtureId }) => fixtureId),
+  ),
+  fixtureFingerprints: DESIGN_SPEC_EXPECTED_FIXTURE_FINGERPRINTS,
+  repeats: 2,
+  legacyComparatorAliases: Object.freeze([]),
+  compiledContractsRuntimeBinding:
+    DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v14",
+  sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
 const TASK_EVALUATION_SUITES = Object.freeze(
   new Map<SiteBuilderTaskId, TaskEvaluationSuite>([
     ["site_builder.brand_profile", BRAND_PROFILE_EVALUATION_SUITE],
+    ["site_builder.design_spec", DESIGN_SPEC_EVALUATION_SUITE],
   ]),
 );
 
@@ -643,6 +1022,7 @@ export interface CapabilityProbeAttestation {
   taskContractFingerprint: string;
   sourceBundleContractId: string;
   sourceBundleSha256: string;
+  compiledContractsArtifactTreeSha256: string | null;
   probeFixtureId: string;
   probeFixtureSha256: string;
   probePromptSha256: string;
@@ -843,12 +1223,7 @@ function bindTrustedModelEvaluationExecutor(
       reason: "rejected_before_dispatch",
     });
   }
-  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-    plan.taskId,
-  );
-  const comparatorAliases = comparatorRoute
-    ? [comparatorRoute.primary, ...comparatorRoute.fallbacks]
-    : [];
+  const comparatorAliases = plan.evaluationSuite?.legacyComparatorAliases ?? [];
   const expectedDispatches = [
     ...plan.candidates.map(
       (candidate) => `target:${candidate.alias}:${candidate.expectedProtocol}`,
@@ -860,6 +1235,7 @@ function bindTrustedModelEvaluationExecutor(
   const actualDispatches = costSafety.credential.allowedDispatches
     .map((entry) => `${entry.mode}:${entry.alias}:${entry.protocol}`)
     .sort();
+  const requiresExactCapacity = comparatorAliases.length === 0;
   const requiredExecutions =
     plan.evaluationSuite === null
       ? 0
@@ -875,12 +1251,43 @@ function bindTrustedModelEvaluationExecutor(
   const requiredWireCalls =
     requiredExecutions *
     maximumExecutionCallCount(plan.evaluationSuite?.repairTaskOutput === true);
+  const suite = plan.evaluationSuite;
+  const preparedCase =
+    suite === null
+      ? null
+      : buildCanonicalModelEvaluationCase(plan, suite.fixtureIds[0]);
+  const currentFixedCommitSha = (() => {
+    try {
+      const observed = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: REAL_REPOSITORY_ROOT,
+        encoding: "utf8",
+      }).trim();
+      return /^[a-f0-9]{40}$/.test(observed) ? observed : null;
+    } catch {
+      return null;
+    }
+  })();
   if (
+    suite === null ||
+    preparedCase === null ||
+    currentFixedCommitSha === null ||
+    costSafety.authorization.preparedFixedCommitSha !== currentFixedCommitSha ||
+    suite.systemPromptSha256 !== currentTaskSystemPromptSha256(plan.taskId) ||
+    !currentTaskValidatorMatchesCapturedIdentity(plan.taskId) ||
+    costSafety.authorization.preparedSuiteId !== suite.suiteId ||
+    costSafety.authorization.preparedSourceBundleContractId !==
+      suite.sourceBundleContractId ||
+    costSafety.authorization.preparedSourceBundleSha256 !==
+      preparedCase.contract.sourceBundleSha256 ||
     JSON.stringify(actualDispatches) !== JSON.stringify(expectedDispatches) ||
     budget.campaignBudgetCents > costSafety.limits.campaignBudgetCents ||
     costSafety.limits.maxOutputTokensPerCall < plan.envelope.maxTokens ||
-    costSafety.limits.maxDispatchExecutions < requiredExecutions ||
-    costSafety.limits.maxWireCalls < requiredWireCalls
+    (requiresExactCapacity
+      ? costSafety.limits.maxDispatchExecutions !== requiredExecutions
+      : costSafety.limits.maxDispatchExecutions < requiredExecutions) ||
+    (requiresExactCapacity
+      ? costSafety.limits.maxWireCalls !== requiredWireCalls
+      : costSafety.limits.maxWireCalls < requiredWireCalls)
   ) {
     throw new ModelEvaluationCallError("evaluation_cost_safety_mismatch", {
       state: "not_incurred",
@@ -933,7 +1340,6 @@ export class ModelEvaluationBudgetGuard {
     string,
     {
       reservedCents: number;
-      perCallCapCents: number;
     }
   >();
   readonly #completedCalls = new Set<string>();
@@ -983,7 +1389,6 @@ export class ModelEvaluationBudgetGuard {
     }
     this.#reservations.set(callId, {
       reservedCents,
-      perCallCapCents,
     });
     return {
       allowed: true,
@@ -1014,7 +1419,7 @@ export class ModelEvaluationBudgetGuard {
 
     this.#committedCents += normalized.settlement.amountCents;
     if (
-      normalized.settlement.amountCents > reservation.perCallCapCents ||
+      normalized.settlement.amountCents > reservation.reservedCents ||
       this.#committedCents + this.#unknownUpperBoundCents >
         this.#campaignBudgetCents
     ) {
@@ -1023,7 +1428,7 @@ export class ModelEvaluationBudgetGuard {
     return {
       ...normalized,
       capExceeded:
-        normalized.settlement.amountCents > reservation.perCallCapCents,
+        normalized.settlement.amountCents > reservation.reservedCents,
     };
   }
 
@@ -1498,6 +1903,7 @@ export interface ModelEvaluationRun {
   fixtureSha256: string;
   promptSha256: string;
   sourceBundleSha256: string;
+  compiledContractsArtifactTreeSha256: string | null;
   evaluatorVersion: string;
   evaluatorRubricSha256: string;
   capabilityProbeAttestation: CapabilityProbeAttestation | null;
@@ -1538,6 +1944,7 @@ export interface ModelEvaluationCaseContract {
   fixtureSha256: string;
   promptSha256: string;
   sourceBundleSha256: string;
+  compiledContractsArtifactTreeSha256: string | null;
 }
 
 export interface ModelEvaluationSourceFileFingerprint {
@@ -1547,8 +1954,8 @@ export interface ModelEvaluationSourceFileFingerprint {
 }
 
 export interface ModelEvaluationCasePayload {
-  fixture: BrandProfileEvalFixture;
-  taskInput: BrandProfileInput;
+  fixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
+  taskInput: BrandProfileInput | DesignSpecTaskInput;
   prompt: string;
   sourceFiles: readonly ModelEvaluationSourceFileFingerprint[];
 }
@@ -1664,6 +2071,7 @@ function capabilityProbeAttestationIsCanonical(
   );
   const { attestationSha256, ...payload } = attestation;
   return (
+    compiledContractsRuntimeMatchesSuite(plan.evaluationSuite) &&
     attestation.schemaVersion === CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION &&
     CAMPAIGN_ID.test(attestation.campaignId) &&
     attestation.harnessId === SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID &&
@@ -1685,6 +2093,8 @@ function capabilityProbeAttestationIsCanonical(
     attestation.sourceBundleContractId ===
       probeCase.contract.sourceBundleContractId &&
     attestation.sourceBundleSha256 === probeCase.contract.sourceBundleSha256 &&
+    attestation.compiledContractsArtifactTreeSha256 ===
+      probeCase.contract.compiledContractsArtifactTreeSha256 &&
     attestation.probeFixtureId === probeCase.contract.fixtureId &&
     attestation.probeFixtureSha256 === probeCase.contract.fixtureSha256 &&
     attestation.probePromptSha256 === probeCase.contract.promptSha256 &&
@@ -1696,7 +2106,8 @@ function capabilityProbeAttestationIsCanonical(
     !normalizedSettlement.settlementInvalid &&
     normalizedSettlement.settlement.state === "settled" &&
     normalizedSettlement.settlement.amountCents <=
-      plan.envelope.perCallCostCapCents &&
+      plan.envelope.perCallCostCapCents *
+        maximumExecutionCallCount(plan.evaluationSuite.repairTaskOutput) &&
     JSON.stringify(normalizedSettlement.settlement) ===
       JSON.stringify(attestation.costSettlement) &&
     SHA256.test(attestationSha256) &&
@@ -1747,6 +2158,7 @@ export class ModelEvaluationCapabilityCampaign {
         `candidate does not require a canonical capability probe: ${options.plan.taskId}/${options.candidate.alias}`,
       );
     }
+    assertCompiledContractsRuntimeBeforeDispatch(options.plan.evaluationSuite);
     const costSafety = bindTrustedModelEvaluationExecutor(
       this.#budget,
       options.execute,
@@ -1822,7 +2234,7 @@ export class ModelEvaluationCapabilityCampaign {
       hardStopMs: options.plan.envelope.hardStopMs,
       perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
       reasoningEffort: options.plan.envelope.reasoningEffort,
-      outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+      outputSchema: canonicalTaskOutputSchema(options.plan.taskId),
       repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
       caseContract: evaluationCase.contract,
       casePayload: evaluationCase.payload,
@@ -1951,6 +2363,7 @@ export class ModelEvaluationCapabilityCampaign {
         options.plan.evaluationSuite,
         evaluationCase.payload,
       ) &&
+      compiledContractsRuntimeMatchesSuite(options.plan.evaluationSuite) &&
       validCallIdentityShape(outcome.value) &&
       validEvaluationUsage(outcome.value.usage) &&
       validArtifactFingerprint(outcome.value) &&
@@ -1969,7 +2382,7 @@ export class ModelEvaluationCapabilityCampaign {
     }
     if (validation.status !== "capability_proven") return validation;
     try {
-      gradeCanonicalTaskArtifact(
+      assessCanonicalTaskArtifact(
         options.plan,
         evaluationCase.payload,
         outcome.value.artifact,
@@ -2000,6 +2413,8 @@ export class ModelEvaluationCapabilityCampaign {
       taskContractFingerprint: evaluationCase.contract.taskContractFingerprint,
       sourceBundleContractId: evaluationCase.contract.sourceBundleContractId,
       sourceBundleSha256: evaluationCase.contract.sourceBundleSha256,
+      compiledContractsArtifactTreeSha256:
+        evaluationCase.contract.compiledContractsArtifactTreeSha256,
       probeFixtureId: evaluationCase.contract.fixtureId,
       probeFixtureSha256: evaluationCase.contract.fixtureSha256,
       probePromptSha256: evaluationCase.contract.promptSha256,
@@ -2081,6 +2496,7 @@ export function taskEvaluationContractFingerprint(
   return sha256CanonicalJson({
     taskContractId: suite.taskContractId,
     promptVersion: suite.promptVersion,
+    systemPromptSha256: suite.systemPromptSha256,
     inputSchemaSha256: suite.inputSchemaSha256,
     outputSchemaSha256: suite.outputSchemaSha256,
     repairTaskOutput: suite.repairTaskOutput,
@@ -2090,6 +2506,7 @@ export function taskEvaluationContractFingerprint(
     fixtureSetId: suite.fixtureSetId,
     fixtureSchemaVersion: suite.fixtureSchemaVersion,
     fixtureFingerprints: suite.fixtureFingerprints,
+    compiledContractsRuntimeBinding: suite.compiledContractsRuntimeBinding,
     sourceBundleContractId: suite.sourceBundleContractId,
     sourceBundleFiles: suite.sourceBundleFiles,
   });
@@ -2097,6 +2514,35 @@ export function taskEvaluationContractFingerprint(
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const REAL_REPOSITORY_ROOT = realpathSync(REPOSITORY_ROOT);
+
+function compiledContractsRuntimeMatchesSuite(
+  suite: TaskEvaluationSuite,
+): boolean {
+  const expected = suite.compiledContractsRuntimeBinding;
+  if (expected === null) return true;
+  return (
+    compiledContractsRuntimeBindingMatches(
+      expected,
+      DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
+    ) && modelEvaluationRuntimeIntegrityMatches(suite.taskContractId)
+  );
+}
+
+function assertCompiledContractsRuntimeBeforeDispatch(
+  suite: TaskEvaluationSuite,
+): void {
+  try {
+    assertModelEvaluationRuntimeIntegrity(suite.taskContractId);
+  } catch {
+    throw new ModelEvaluationCallError(
+      "compiled_contracts_runtime_attestation_mismatch",
+      {
+        state: "not_incurred",
+        reason: "rejected_before_dispatch",
+      },
+    );
+  }
+}
 
 function resolveRepositorySourcePath(path: string): string {
   if (
@@ -2166,6 +2612,18 @@ function sourceBundleMatchesCase(
   }
 }
 
+function canonicalTaskOutputSchema(
+  taskId: SiteBuilderTaskId,
+): Readonly<Record<string, unknown>> {
+  if (taskId === "site_builder.brand_profile") {
+    return BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  if (taskId === "site_builder.design_spec") {
+    return DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  throw new Error(`task output schema is not canonical: ${taskId}`);
+}
+
 export function buildCanonicalModelEvaluationCase(
   plan: TaskEvaluationPlan,
   fixtureId: string,
@@ -2176,32 +2634,50 @@ export function buildCanonicalModelEvaluationCase(
   }
   assertCandidateBelongsToPlan(plan, firstCandidate);
   const suite = plan.evaluationSuite;
-  if (
-    plan.dispatchAdmission !== "task_evaluation_ready" ||
-    !suite ||
-    plan.taskId !== "site_builder.brand_profile"
-  ) {
+  if (plan.dispatchAdmission !== "task_evaluation_ready" || !suite) {
     throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
   }
   if (!suite.fixtureIds.includes(fixtureId)) {
     throw new Error(`model evaluation fixture is not canonical: ${fixtureId}`);
   }
-  const fixture = JSON.parse(
-    readFileSync(
-      resolve(
-        REPOSITORY_ROOT,
-        "apps/api/test/fixtures/golden-companies/brand-profile",
-        `${fixtureId}.json`,
+  let fixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
+  let taskInput: BrandProfileInput | DesignSpecTaskInput;
+  let prompt: string;
+  if (plan.taskId === "site_builder.brand_profile") {
+    fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          REPOSITORY_ROOT,
+          "apps/api/test/fixtures/golden-companies/brand-profile",
+          `${fixtureId}.json`,
+        ),
+        "utf8",
       ),
-      "utf8",
-    ),
-  ) as BrandProfileEvalFixture;
-  const prepared = prepareBrandProfileEvalFixture(fixture);
+    ) as BrandProfileEvalFixture;
+    const prepared = prepareBrandProfileEvalFixture(fixture);
+    taskInput = prepared.input;
+    prompt = BUILD_BRAND_PROFILE_PROMPT(prepared.input);
+  } else if (plan.taskId === "site_builder.design_spec") {
+    const canonicalFixture = DESIGN_SPEC_EVAL_FIXTURES.find(
+      (entry) => entry.fixtureId === fixtureId,
+    );
+    if (!canonicalFixture) {
+      throw new Error(
+        `model evaluation fixture is not canonical: ${fixtureId}`,
+      );
+    }
+    fixture = canonicalFixture;
+    const prepared = prepareDesignSpecEvalFixture(canonicalFixture);
+    taskInput = prepared.input;
+    prompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else {
+    throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
+  }
   const sourceFiles = currentSourceBundle(suite);
   const payload = deepFreeze({
     fixture,
-    taskInput: prepared.input,
-    prompt: BUILD_BRAND_PROFILE_PROMPT(prepared.input),
+    taskInput,
+    prompt,
     sourceFiles,
   });
   const contract: ModelEvaluationCaseContract = {
@@ -2223,6 +2699,8 @@ export function buildCanonicalModelEvaluationCase(
     fixtureSha256: sha256CanonicalJson(payload.fixture),
     promptSha256: sha256Text(payload.prompt),
     sourceBundleSha256: sha256CanonicalJson(payload.sourceFiles),
+    compiledContractsArtifactTreeSha256:
+      suite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? null,
   };
   const evaluationCase = deepFreeze({ contract, payload });
   assertCaseContract(plan, evaluationCase);
@@ -2253,6 +2731,8 @@ function assertCaseContract(
     fixtureSetId: contract.fixtureSetId,
     sourceBundleContractId: contract.sourceBundleContractId,
     fixtureSchemaVersion: contract.fixtureSchemaVersion,
+    compiledContractsArtifactTreeSha256:
+      contract.compiledContractsArtifactTreeSha256,
   };
   const expected = {
     suiteId: suite.suiteId,
@@ -2269,6 +2749,8 @@ function assertCaseContract(
     fixtureSetId: suite.fixtureSetId,
     sourceBundleContractId: suite.sourceBundleContractId,
     fixtureSchemaVersion: suite.fixtureSchemaVersion,
+    compiledContractsArtifactTreeSha256:
+      suite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? null,
   };
   if (JSON.stringify(fixedContract) !== JSON.stringify(expected)) {
     throw new Error("model evaluation case contract is not canonical");
@@ -2276,8 +2758,27 @@ function assertCaseContract(
   const fixture = suite.fixtureFingerprints.find(
     (entry) => entry.fixtureId === contract.fixtureId,
   );
-  const prepared = prepareBrandProfileEvalFixture(payload.fixture);
   const currentSources = currentSourceBundle(suite);
+  let preparedFixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
+  let preparedInput: BrandProfileInput | DesignSpecTaskInput;
+  let expectedPrompt: string;
+  if (plan.taskId === "site_builder.brand_profile") {
+    const prepared = prepareBrandProfileEvalFixture(
+      payload.fixture as BrandProfileEvalFixture,
+    );
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt = BUILD_BRAND_PROFILE_PROMPT(prepared.input);
+  } else if (plan.taskId === "site_builder.design_spec") {
+    const prepared = prepareDesignSpecEvalFixture(
+      payload.fixture as DesignSpecEvalFixture,
+    );
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else {
+    throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
+  }
   if (
     !fixture ||
     contract.fixtureSha256 !== fixture.fixtureSha256 ||
@@ -2286,10 +2787,10 @@ function assertCaseContract(
     contract.promptSha256 !== sha256Text(payload.prompt) ||
     contract.sourceBundleSha256 !== sha256CanonicalJson(payload.sourceFiles) ||
     sha256CanonicalJson(payload.fixture) !==
-      sha256CanonicalJson(prepared.fixture) ||
+      sha256CanonicalJson(preparedFixture) ||
     sha256CanonicalJson(payload.taskInput) !==
-      sha256CanonicalJson(prepared.input) ||
-    payload.prompt !== BUILD_BRAND_PROFILE_PROMPT(payload.taskInput) ||
+      sha256CanonicalJson(preparedInput) ||
+    payload.prompt !== expectedPrompt ||
     JSON.stringify(payload.sourceFiles) !== JSON.stringify(currentSources) ||
     !SHA256.test(contract.sourceBundleSha256)
   ) {
@@ -2333,6 +2834,7 @@ function runIdentity(
   | "fixtureSha256"
   | "promptSha256"
   | "sourceBundleSha256"
+  | "compiledContractsArtifactTreeSha256"
   | "evaluatorVersion"
   | "evaluatorRubricSha256"
   | "capabilityProbeAttestation"
@@ -2365,6 +2867,8 @@ function runIdentity(
     fixtureSha256: caseContract.fixtureSha256,
     promptSha256: caseContract.promptSha256,
     sourceBundleSha256: caseContract.sourceBundleSha256,
+    compiledContractsArtifactTreeSha256:
+      caseContract.compiledContractsArtifactTreeSha256,
     evaluatorVersion: caseContract.evaluatorVersion,
     evaluatorRubricSha256: caseContract.evaluatorRubricSha256,
     capabilityProbeAttestation,
@@ -2483,61 +2987,116 @@ function validArtifactFingerprint<T>(
   }
 }
 
-function gradeCanonicalTaskArtifact(
+export function assessCanonicalTaskArtifact(
   plan: TaskEvaluationPlan,
   payload: ModelEvaluationCasePayload,
   artifact: unknown,
 ): TaskArtifactAssessment {
-  if (
-    plan.taskId !== "site_builder.brand_profile" ||
-    plan.evaluationSuite?.evaluatorVersion !==
-      BRAND_PROFILE_EVALUATOR_VERSION ||
-    plan.evaluationSuite.outputSchemaSha256 !==
-      sha256CanonicalJson(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT)
-  ) {
-    throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
-  }
-  assertModelOutputSchemaCompiles(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT);
-  const outputCheck = checkAgainstSchema(
-    BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
-    artifact,
-  );
-  if (!outputCheck.valid) {
-    throw new Error(
-      "task artifact does not satisfy the canonical output schema",
+  if (plan.taskId === "site_builder.brand_profile") {
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        BRAND_PROFILE_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT);
+    const outputCheck = checkAgainstSchema(
+      BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+      artifact,
     );
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as BrandProfileOutput;
+    const taskInput = payload.taskInput as BrandProfileInput;
+    const fixture = payload.fixture as BrandProfileEvalFixture;
+    VALIDATE_BRAND_PROFILE_OUTPUT(taskInput, output);
+    const prepared = prepareBrandProfileEvalFixture(fixture);
+    const outcome = evaluateBrandProfileOutput(prepared, output);
+    const qualityPassed =
+      outcome.acceptedFactCount >=
+        prepared.fixture.assertions.minimumAcceptedFacts &&
+      outcome.forbiddenOutputTerms.length === 0;
+    const factualityPassed =
+      outcome.rejectedFactCount === 0 &&
+      outcome.missingAcceptedTerms.length === 0;
+    const findingCodes = [
+      ...(outcome.acceptedFactCount <
+      prepared.fixture.assertions.minimumAcceptedFacts
+        ? ["accepted_fact_minimum"]
+        : []),
+      ...(outcome.rejectedFactCount > 0 ? ["rejected_fact"] : []),
+      ...(outcome.missingAcceptedTerms.length > 0
+        ? ["required_fact_missing"]
+        : []),
+      ...(outcome.forbiddenOutputTerms.length > 0
+        ? ["forbidden_output_term"]
+        : []),
+    ];
+    return {
+      qualityPassed,
+      structurePassed: true,
+      factualityPassed,
+      stabilityKey: sha256CanonicalJson(artifact),
+      findingCodes,
+    };
   }
-  const output = artifact as BrandProfileOutput;
-  VALIDATE_BRAND_PROFILE_OUTPUT(payload.taskInput, output);
-  const prepared = prepareBrandProfileEvalFixture(payload.fixture);
-  const outcome = evaluateBrandProfileOutput(prepared, output);
-  const qualityPassed =
-    outcome.acceptedFactCount >=
-      prepared.fixture.assertions.minimumAcceptedFacts &&
-    outcome.forbiddenOutputTerms.length === 0;
-  const factualityPassed =
-    outcome.rejectedFactCount === 0 &&
-    outcome.missingAcceptedTerms.length === 0;
-  const findingCodes = [
-    ...(outcome.acceptedFactCount <
-    prepared.fixture.assertions.minimumAcceptedFacts
-      ? ["accepted_fact_minimum"]
-      : []),
-    ...(outcome.rejectedFactCount > 0 ? ["rejected_fact"] : []),
-    ...(outcome.missingAcceptedTerms.length > 0
-      ? ["required_fact_missing"]
-      : []),
-    ...(outcome.forbiddenOutputTerms.length > 0
-      ? ["forbidden_output_term"]
-      : []),
-  ];
-  return {
-    qualityPassed,
-    structurePassed: true,
-    factualityPassed,
-    stabilityKey: sha256CanonicalJson(artifact),
-    findingCodes,
-  };
+  if (plan.taskId === "site_builder.design_spec") {
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        DESIGN_SPEC_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
+    const outputCheck = checkAgainstSchema(
+      DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT,
+      artifact,
+    );
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as DesignSpecTaskOutput;
+    const taskInput = payload.taskInput as DesignSpecTaskInput;
+    VALIDATE_DESIGN_SPEC_OUTPUT(taskInput, output);
+    const prepared = prepareDesignSpecEvalFixture(
+      payload.fixture as DesignSpecEvalFixture,
+    );
+    const outcome = evaluateDesignSpecOutput(prepared, output);
+    const factualityPassed =
+      outcome.referencedForbiddenCatalogIdentifiers.length === 0 &&
+      outcome.contradictedMetricClaims.length === 0 &&
+      outcome.invalidExplanationClaims.length === 0;
+    return {
+      qualityPassed: outcome.selectedDeterministicCandidate && factualityPassed,
+      structurePassed: true,
+      factualityPassed,
+      stabilityKey: sha256CanonicalJson(output),
+      findingCodes: [
+        ...(!outcome.selectedDeterministicCandidate
+          ? ["deterministic_catalog_baseline_mismatch"]
+          : []),
+        ...(outcome.referencedForbiddenCatalogIdentifiers.length > 0
+          ? ["forbidden_catalog_identifier"]
+          : []),
+        ...(outcome.contradictedMetricClaims.length > 0
+          ? ["frozen_candidate_metric_contradiction"]
+          : []),
+        ...(outcome.invalidExplanationClaims.length > 0
+          ? ["invalid_explanation_claim"]
+          : []),
+      ],
+    };
+  }
+  throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
 }
 
 export async function runLegacyComparatorEvaluationAttempt<T>(options: {
@@ -2550,6 +3109,16 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
     request: ModelEvaluationExecutionRequest,
   ) => Promise<ModelEvaluationCallResult<T>>;
 }): Promise<ModelEvaluationCallResult<T>> {
+  if (
+    ["minimax-m3", "doubao-seed-2.0-pro", "doubao-seed-2.0-lite"].includes(
+      options.alias,
+    )
+  ) {
+    throw new ModelEvaluationCallError("legacy_comparator_not_admitted", {
+      state: "not_incurred",
+      reason: "rejected_before_dispatch",
+    });
+  }
   if (
     !isTrustedModelEvaluationProtocolExecute(options.executeLegacyComparator)
   ) {
@@ -2574,12 +3143,8 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
       `legacy comparator has no canonical suite: ${options.plan.taskId}`,
     );
   }
-  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-    options.plan.taskId,
-  );
   if (
-    !comparatorRoute ||
-    ![comparatorRoute.primary, ...comparatorRoute.fallbacks].includes(
+    !options.plan.evaluationSuite.legacyComparatorAliases.includes(
       options.alias,
     )
   ) {
@@ -2644,7 +3209,7 @@ export async function runLegacyComparatorEvaluationAttempt<T>(options: {
     hardStopMs: options.plan.envelope.hardStopMs,
     perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
     reasoningEffort: options.plan.envelope.reasoningEffort,
-    outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+    outputSchema: canonicalTaskOutputSchema(options.plan.taskId),
     repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
@@ -2762,6 +3327,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
       `model evaluation attempt must be within 1..${options.plan.evaluationSuite.repeats}`,
     );
   }
+  assertCompiledContractsRuntimeBeforeDispatch(options.plan.evaluationSuite);
   const evaluationCase = buildCanonicalModelEvaluationCase(
     options.plan,
     options.fixtureId,
@@ -2856,7 +3422,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     hardStopMs: options.plan.envelope.hardStopMs,
     perCallCostCapCents: options.plan.envelope.perCallCostCapCents,
     reasoningEffort: options.plan.envelope.reasoningEffort,
-    outputSchema: BRAND_PROFILE_OUTPUT_SCHEMA_SNAPSHOT,
+    outputSchema: canonicalTaskOutputSchema(options.plan.taskId),
     repairTaskOutput: options.plan.evaluationSuite.repairTaskOutput,
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
@@ -3095,6 +3661,9 @@ export async function runTaskEvaluationAttempt<T>(options: {
     options.plan.evaluationSuite,
     evaluationCase.payload,
   );
+  const compiledContractsRuntimeStable = compiledContractsRuntimeMatchesSuite(
+    options.plan.evaluationSuite,
+  );
   if (!elapsedIsValid) {
     return bindRun({
       ...identity,
@@ -3140,6 +3709,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
   if (
     !completedSettlementCoherent ||
     !sourceBundleStable ||
+    !compiledContractsRuntimeStable ||
     !callIdentityShapeVerified ||
     !usageVerified ||
     !artifactFingerprintVerified
@@ -3165,11 +3735,13 @@ export async function runTaskEvaluationAttempt<T>(options: {
         ? "completed_settlement_incoherent"
         : !sourceBundleStable
           ? "source_bundle_changed_during_dispatch"
-          : !callIdentityShapeVerified
-            ? "call_identity_shape_invalid"
-            : !usageVerified
-              ? "usage_invalid"
-              : "artifact_fingerprint_invalid",
+          : !compiledContractsRuntimeStable
+            ? "compiled_contracts_runtime_changed_during_dispatch"
+            : !callIdentityShapeVerified
+              ? "call_identity_shape_invalid"
+              : !usageVerified
+                ? "usage_invalid"
+                : "artifact_fingerprint_invalid",
     });
   }
   let assessment: TaskArtifactAssessment | null = null;
@@ -3180,7 +3752,7 @@ export async function runTaskEvaluationAttempt<T>(options: {
     outcome.value.artifact !== undefined
   ) {
     try {
-      assessment = gradeCanonicalTaskArtifact(
+      assessment = assessCanonicalTaskArtifact(
         options.plan,
         evaluationCase.payload,
         outcome.value.artifact,
@@ -3270,6 +3842,7 @@ export interface ModelEvaluationCandidateSummary {
   taskContractFingerprint: string;
   sourceBundleContractId: string;
   sourceBundleSha256: string | null;
+  compiledContractsArtifactTreeSha256: string | null;
   capabilityProbeAttestation: CapabilityProbeAttestation | null;
   alias: string;
   expectedRunCount: number;
@@ -3320,7 +3893,9 @@ function assertCanonicalEvaluationRun(
   });
   const capExceeded =
     run.costSettlement.state === "settled" &&
-    run.costSettlement.amountCents > plan.envelope.perCallCostCapCents;
+    run.costSettlement.amountCents >
+      plan.envelope.perCallCostCapCents *
+        maximumExecutionCallCount(suite.repairTaskOutput);
   const settlementWasInvalid = normalizedSettlement.settlementInvalid;
   const settlementResultCoherent =
     run.costSettlement.state !== "not_incurred" ||
@@ -3355,6 +3930,8 @@ function assertCanonicalEvaluationRun(
     run.taskContractFingerprint !== taskContractFingerprint ||
     run.fixtureSetId !== suite.fixtureSetId ||
     run.sourceBundleContractId !== suite.sourceBundleContractId ||
+    run.compiledContractsArtifactTreeSha256 !==
+      evaluationCase.contract.compiledContractsArtifactTreeSha256 ||
     run.evaluatorVersion !== suite.evaluatorVersion ||
     run.evaluatorRubricSha256 !== suite.evaluatorRubricSha256 ||
     (candidate.preflight === "capability_probe"
@@ -3421,7 +3998,7 @@ function assertCanonicalEvaluationRun(
     run.identityVerified
   ) {
     try {
-      canonicalAssessment = gradeCanonicalTaskArtifact(
+      canonicalAssessment = assessCanonicalTaskArtifact(
         plan,
         evaluationCase.payload,
         run.artifact,
@@ -3708,6 +4285,8 @@ export function summarizeModelEvaluationCandidate(
     taskContractFingerprint,
     sourceBundleContractId: suite.sourceBundleContractId,
     sourceBundleSha256: runs[0]?.sourceBundleSha256 ?? null,
+    compiledContractsArtifactTreeSha256:
+      suite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? null,
     capabilityProbeAttestation: trustedProbeAttestation,
     alias,
     expectedRunCount,
@@ -3790,6 +4369,8 @@ export function rankModelEvaluationCandidates(
         summary.taskContractFingerprint !== first.taskContractFingerprint ||
         summary.sourceBundleContractId !== first.sourceBundleContractId ||
         summary.sourceBundleSha256 !== first.sourceBundleSha256 ||
+        summary.compiledContractsArtifactTreeSha256 !==
+          first.compiledContractsArtifactTreeSha256 ||
         summary.expectedRunCount !== first.expectedRunCount,
     )
   ) {

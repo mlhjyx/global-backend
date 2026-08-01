@@ -16,12 +16,15 @@ import {
   writeSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+
+import { modelEvaluationRuntimeIntegrityMatches } from "./model-evaluation-runtime-integrity";
 import {
   getModelCandidateCatalogEntry,
   type ModelCandidateProtocol,
 } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
+import type { SiteBuilderTaskId } from "../agents/task-route-bindings";
+import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
 import { checkAgainstSchema } from "../../model-gateway/schema-validate";
 import {
   buildCanonicalModelEvaluationCase,
@@ -57,6 +60,61 @@ export type ModelEvaluationProtocolAdmission =
   | "blocked_requires_media_gateway"
   | "blocked_no_consumer"
   | "blocked_no_evaluation_suite";
+
+const RETIRED_EVALUATION_COMPARATOR_ALIASES = new Set([
+  "minimax-m3",
+  "doubao-seed-2.0-pro",
+  "doubao-seed-2.0-lite",
+]);
+
+const CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS = Object.freeze({
+  "site_builder.brand_profile": BRAND_PROFILE_TASK.system ?? "",
+  "site_builder.design_spec": DESIGN_SPEC_TASK.system ?? "",
+} as const);
+
+const CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT = (() => {
+  const validator = BRAND_PROFILE_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("BrandProfile canonical route validator is required");
+  }
+  return validator;
+})();
+
+const CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT = (() => {
+  const validator = DESIGN_SPEC_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("DesignSpec canonical route validator is required");
+  }
+  return validator;
+})();
+
+function taskValidatorMatchesCapturedIdentity(
+  taskId: SiteBuilderTaskId,
+): boolean {
+  if (taskId === "site_builder.brand_profile") {
+    return true;
+  }
+  if (taskId === "site_builder.design_spec") {
+    return (
+      DESIGN_SPEC_TASK.validateOutput === CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT
+    );
+  }
+  return false;
+}
+
+function capturedTaskSystemPrompt(taskId: SiteBuilderTaskId): string {
+  if (taskId === "site_builder.brand_profile") {
+    return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
+      "site_builder.brand_profile"
+    ];
+  }
+  if (taskId === "site_builder.design_spec") {
+    return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
+      "site_builder.design_spec"
+    ];
+  }
+  throw preDispatchError("evaluation_task_not_admitted");
+}
 
 export interface ModelEvaluationProtocolAdmissionEntry {
   protocol: ModelCandidateProtocol;
@@ -1597,6 +1655,9 @@ function assertCanonicalRequest(
   if (request.profile !== plan.profile) {
     throw preDispatchError("evaluation_profile_mismatch");
   }
+  if (!taskValidatorMatchesCapturedIdentity(request.taskId)) {
+    throw preDispatchError("evaluation_task_validator_drift");
+  }
 
   let catalog;
   try {
@@ -1647,17 +1708,12 @@ function assertCanonicalRequest(
     }
     selectedProtocol = candidate.expectedProtocol;
   } else {
-    const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-      request.taskId,
-    );
     if (
-      !comparatorRoute ||
+      RETIRED_EVALUATION_COMPARATOR_ALIASES.has(request.alias) ||
       catalog.status !== "legacy-only" ||
       catalog.domain !== "text" ||
       request.expectedProtocol !== "openai-chat-completions" ||
-      ![comparatorRoute.primary, ...comparatorRoute.fallbacks].includes(
-        request.alias,
-      )
+      !plan.evaluationSuite.legacyComparatorAliases.includes(request.alias)
     ) {
       throw preDispatchError("legacy_comparator_not_admitted");
     }
@@ -1677,7 +1733,7 @@ function assertCanonicalRequest(
     request.repairTaskOutput !== plan.evaluationSuite.repairTaskOutput ||
     !canonicalJsonEqual(
       request.outputSchema,
-      BRAND_PROFILE_TASK.outputSchema,
+      taskDefinition(request.taskId).outputSchema,
     ) ||
     !canonicalJsonEqual(request.caseContract, canonicalCase.contract) ||
     !canonicalJsonEqual(request.casePayload, canonicalCase.payload)
@@ -1705,10 +1761,30 @@ function assertCanonicalRequest(
   return selectedProtocol;
 }
 
+function taskDefinition(taskId: SiteBuilderTaskId) {
+  const definition =
+    taskId === "site_builder.brand_profile"
+      ? BRAND_PROFILE_TASK
+      : taskId === "site_builder.design_spec"
+        ? DESIGN_SPEC_TASK
+        : null;
+  if (definition === null) {
+    throw preDispatchError("evaluation_task_not_admitted");
+  }
+  return definition;
+}
+
+function taskEvaluationOutputConstraint(taskId: SiteBuilderTaskId): string {
+  if (taskId !== "site_builder.design_spec") return "";
+  return "\n评测输出的 reasons/warnings 必须为空，或每项严格使用以下封闭 claim 之一：selectedCandidateId=<已选 candidate 完整 id>、industryMatchCount=<已选 candidate 数值>、userAssetCoverage=<已选 candidate 数值>、demoFallbackCount=<已选 candidate 数值>。不得返回自由文本、其他字段、其他 candidate 或任何新事实。";
+}
+
 function structuredSystemPrompt(
   outputSchema: Readonly<Record<string, unknown>>,
+  taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): string {
-  return `${BRAND_PROFILE_TASK.system ?? ""}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
+  taskDefinition(taskId);
+  return `${capturedTaskSystemPrompt(taskId)}${taskEvaluationOutputConstraint(taskId)}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
 }
 
 function repairPrompt(prompt: string, kind: string, reason: string): string {
@@ -1718,9 +1794,10 @@ function repairPrompt(prompt: string, kind: string, reason: string): string {
 export function modelEvaluationInitialPromptUtf8Bytes(
   prompt: string,
   outputSchema: Readonly<Record<string, unknown>>,
+  taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): number {
   return (
-    Buffer.byteLength(structuredSystemPrompt(outputSchema), "utf8") +
+    Buffer.byteLength(structuredSystemPrompt(outputSchema, taskId), "utf8") +
     Buffer.byteLength(prompt, "utf8")
   );
 }
@@ -1728,9 +1805,10 @@ export function modelEvaluationInitialPromptUtf8Bytes(
 export function modelEvaluationRepairPromptUtf8BytesUpperBound(
   prompt: string,
   outputSchema: Readonly<Record<string, unknown>>,
+  taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): number {
   return (
-    Buffer.byteLength(structuredSystemPrompt(outputSchema), "utf8") +
+    Buffer.byteLength(structuredSystemPrompt(outputSchema, taskId), "utf8") +
     Buffer.byteLength(
       repairPrompt(
         prompt,
@@ -1911,10 +1989,23 @@ function validationFailure(
     };
   }
   try {
-    BRAND_PROFILE_TASK.validateOutput?.(
-      request.casePayload.taskInput,
-      artifact as never,
-    );
+    if (request.taskId === "site_builder.brand_profile") {
+      CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT(
+        request.casePayload.taskInput as Parameters<
+          typeof CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT
+        >[0],
+        artifact as never,
+      );
+    } else if (request.taskId === "site_builder.design_spec") {
+      CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT(
+        request.casePayload.taskInput as Parameters<
+          typeof CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT
+        >[0],
+        artifact as never,
+      );
+    } else {
+      throw new Error("evaluation_task_not_admitted");
+    }
     return null;
   } catch (error) {
     return {
@@ -2165,11 +2256,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
       complete: true,
     };
     const providerReportedCostCents: (number | null)[] = [];
-    const system = structuredSystemPrompt(request.outputSchema);
+    const system = structuredSystemPrompt(request.outputSchema, request.taskId);
     const maximumWireCalls = request.repairTaskOutput ? 2 : 1;
     const campaignReservationCents =
       request.perCallCostCapCents * maximumWireCalls;
     let campaignReservationActive = false;
+    let executionCostCapExceeded = false;
     const closeCampaignReservation = async (
       settlement: CostSettlement,
     ): Promise<CostSettlement> => {
@@ -2202,8 +2294,16 @@ export function createModelEvaluationProtocolExecutor(deps: {
       }
       if (effectiveSettlement.state === "settled") {
         committedCampaignCents += effectiveSettlement.amountCents;
+        const physicalCallCapExceeded = providerReportedCostCents.some(
+          (amount) =>
+            amount !== null && amount > request.perCallCostCapCents,
+        );
+        const executionReservationExceeded =
+          effectiveSettlement.amountCents > campaignReservationCents;
+        executionCostCapExceeded =
+          physicalCallCapExceeded || executionReservationExceeded;
         if (
-          effectiveSettlement.amountCents > request.perCallCostCapCents ||
+          executionCostCapExceeded ||
           committedCampaignCents > costSafety.limits.campaignBudgetCents
         ) {
           await freezeDurableAuthorization("settled_cost_cap_exceeded");
@@ -2361,7 +2461,52 @@ export function createModelEvaluationProtocolExecutor(deps: {
           effectiveSettlement,
         );
       }
-      let response: ModelEvaluationWireResponse;
+      if (!modelEvaluationRuntimeIntegrityMatches(request.taskId)) {
+        if (usage.callCount === 0) {
+          const effectiveSettlement = await closeCampaignReservation({
+            state: "not_incurred",
+            reason: "rejected_before_dispatch",
+          });
+          await freezeDurableAuthorization(
+            "compiled_contracts_runtime_attestation_mismatch",
+          );
+          throw new ModelEvaluationCallError(
+            "compiled_contracts_runtime_attestation_mismatch",
+            effectiveSettlement,
+          );
+        }
+        const error = new Error(
+          "compiled_contracts_runtime_attestation_mismatch_before_repair",
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        await freezeDurableAuthorization(
+          "compiled_contracts_runtime_attestation_mismatch",
+        );
+        throw new ModelEvaluationCallError(
+          "compiled_contracts_runtime_attestation_mismatch",
+          effectiveSettlement,
+        );
+      }
+      let response: ModelEvaluationWireResponse | undefined;
+      let wireFailed = false;
+      let wireError: unknown;
       try {
         switch (protocol) {
           case "openai-responses":
@@ -2417,13 +2562,24 @@ export function createModelEvaluationProtocolExecutor(deps: {
             break;
         }
       } catch (error) {
+        wireFailed = true;
+        wireError = error;
+      }
+
+      if (!modelEvaluationRuntimeIntegrityMatches(request.taskId)) {
         usage.callCount += 1;
         usage.complete = false;
         providerReportedCostCents.push(
-          error instanceof ModelEvaluationWireHttpError ||
-            error instanceof ModelEvaluationWireResponseBodyError
-            ? responseCost(error.providerReportedCostCents)
-            : null,
+          wireFailed &&
+            (wireError instanceof ModelEvaluationWireHttpError ||
+              wireError instanceof ModelEvaluationWireResponseBodyError)
+            ? responseCost(wireError.providerReportedCostCents)
+            : isRecord(response)
+              ? responseCost(response.providerReportedCostCents)
+              : null,
+        );
+        const error = new Error(
+          "compiled_contracts_runtime_attestation_mismatch_after_wire",
         );
         const settlement = await safeResolveSettlement(
           settlementResolver,
@@ -2439,6 +2595,42 @@ export function createModelEvaluationProtocolExecutor(deps: {
               ...providerReportedCostCents,
             ]),
             error,
+          },
+          costSafety,
+        );
+        const effectiveSettlement = await closeCampaignReservation(settlement);
+        await freezeDurableAuthorization(
+          "compiled_contracts_runtime_attestation_mismatch",
+        );
+        throw new ModelEvaluationCallError(
+          "compiled_contracts_runtime_attestation_mismatch",
+          effectiveSettlement,
+        );
+      }
+
+      if (wireFailed) {
+        usage.callCount += 1;
+        usage.complete = false;
+        providerReportedCostCents.push(
+          wireError instanceof ModelEvaluationWireHttpError ||
+            wireError instanceof ModelEvaluationWireResponseBodyError
+            ? responseCost(wireError.providerReportedCostCents)
+            : null,
+        );
+        const settlement = await safeResolveSettlement(
+          settlementResolver,
+          {
+            executionId: request.executionId,
+            taskId: request.taskId,
+            alias: request.alias,
+            protocol,
+            outcome: "failed",
+            callCount: usage.callCount,
+            usage: settlementUsage(usage),
+            providerReportedCostCents: Object.freeze([
+              ...providerReportedCostCents,
+            ]),
+            error: wireError,
           },
           costSafety,
         );
@@ -2519,7 +2711,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           costSafety,
         );
         const effectiveSettlement = await closeCampaignReservation(settlement);
-        campaignFrozen = true;
+        await freezeDurableAuthorization("output_token_limit_exceeded");
         throw new ModelEvaluationCallError(
           "evaluation_output_token_limit_exceeded",
           effectiveSettlement,
@@ -2542,20 +2734,36 @@ export function createModelEvaluationProtocolExecutor(deps: {
           Buffer.byteLength(failure.reason, "utf8") >
           MODEL_EVALUATION_REPAIR_REASON_UTF8_BYTES_UPPER_BOUND
         ) {
-          throw new Error("evaluation_repair_reason_too_large");
+          const settlement = await safeResolveSettlement(
+            settlementResolver,
+            {
+              executionId: request.executionId,
+              taskId: request.taskId,
+              alias: request.alias,
+              protocol,
+              outcome: "failed",
+              callCount: usage.callCount,
+              usage: settlementUsage(usage),
+              providerReportedCostCents: Object.freeze([
+                ...providerReportedCostCents,
+              ]),
+              error: new Error("evaluation_repair_reason_too_large"),
+            },
+            costSafety,
+          );
+          const effectiveSettlement =
+            await closeCampaignReservation(settlement);
+          await freezeDurableAuthorization("repair_reason_too_large");
+          throw new ModelEvaluationCallError(
+            "evaluation_repair_reason_too_large",
+            effectiveSettlement,
+          );
         }
-        const knownProviderReportedCostCents =
-          providerReportedCostCents.length > 0 &&
-          providerReportedCostCents.every((value) => value !== null)
-            ? providerReportedCostCents.reduce(
-                (total, value) => total + (value ?? 0),
-                0,
-              )
-            : null;
-        if (
-          knownProviderReportedCostCents !== null &&
-          knownProviderReportedCostCents >= request.perCallCostCapCents
-        ) {
+        const physicalCallCapExceeded = providerReportedCostCents.some(
+          (amount) =>
+            amount !== null && amount > request.perCallCostCapCents,
+        );
+        if (physicalCallCapExceeded) {
           const settlement = await safeResolveSettlement(
             settlementResolver,
             {
@@ -2570,7 +2778,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
                 ...providerReportedCostCents,
               ]),
               error: new Error(
-                "evaluation_known_attempt_cost_cap_reached_before_repair",
+                "evaluation_physical_call_cost_cap_exceeded_before_repair",
               ),
             },
             costSafety,
@@ -2578,7 +2786,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           const effectiveSettlement =
             await closeCampaignReservation(settlement);
           await freezeDurableAuthorization(
-            "known_attempt_cost_cap_reached_before_repair",
+            "physical_call_cost_cap_exceeded_before_repair",
           );
           throw new ModelEvaluationCallError(
             "evaluation_cost_safety_rejected",
@@ -2617,6 +2825,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
       costSafety,
     );
     settlement = await closeCampaignReservation(settlement);
+    if (executionCostCapExceeded) {
+      throw new ModelEvaluationCallError(
+        "evaluation_cost_safety_rejected",
+        settlement,
+      );
+    }
     if (!resolvedUsage) {
       throw new ModelEvaluationCallError("usage_unavailable", settlement);
     }

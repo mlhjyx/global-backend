@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
-import { buildTaskEvaluationPlan } from "./model-evaluation-harness";
+import {
+  buildCanonicalModelEvaluationCase,
+  buildTaskEvaluationPlan,
+} from "./model-evaluation-harness";
 import {
   SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
   createModelEvaluationCostSafetyAttestation,
@@ -26,6 +29,12 @@ process.once("exit", () => {
   rmSync(fakeLedgerRoot, { recursive: true, force: true });
 });
 
+function currentTestFixedCommitSha(): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+}
+
 export function createFakeModelEvaluationCostSafety(
   resolverId: string,
   campaignBudgetCents = 10_000,
@@ -38,8 +47,14 @@ export function createFakeModelEvaluationCostSafety(
   const ledgerDirectory =
     ledgerOverride?.directory ?? join(fakeLedgerRoot, suffix);
   const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
-  const legacy = modelPolicyRegistry.getEvaluationComparatorRoute(plan.taskId);
-  if (!legacy) {
+  const suite = plan.evaluationSuite;
+  if (!suite) throw new Error(`${plan.taskId} has no evaluation suite`);
+  const preparedCase = buildCanonicalModelEvaluationCase(
+    plan,
+    suite.fixtureIds[0],
+  );
+  const legacyAliases = plan.evaluationSuite?.legacyComparatorAliases;
+  if (!legacyAliases || legacyAliases.length === 0) {
     throw new Error(`${plan.taskId} has no paid legacy comparator`);
   }
   const allowedDispatches = [
@@ -48,7 +63,7 @@ export function createFakeModelEvaluationCostSafety(
       alias: candidate.alias,
       protocol: candidate.expectedProtocol,
     })),
-    ...[legacy.primary, ...legacy.fallbacks].map((alias) => ({
+    ...legacyAliases.map((alias) => ({
       mode: "legacy_comparator" as const,
       alias,
       protocol: "openai-chat-completions" as const,
@@ -75,6 +90,10 @@ export function createFakeModelEvaluationCostSafety(
       approvedAt: "2026-07-28T00:00:00.000Z",
       approvedCampaignBudgetCents: campaignBudgetCents,
       approvedDispatchExecutions: 500,
+      preparedFixedCommitSha: currentTestFixedCommitSha(),
+      preparedSuiteId: suite.suiteId,
+      preparedSourceBundleContractId: suite.sourceBundleContractId,
+      preparedSourceBundleSha256: preparedCase.contract.sourceBundleSha256,
     },
     credential: {
       attestationId: `fake-evaluation-credential/2026-07-28-${suffix}`,

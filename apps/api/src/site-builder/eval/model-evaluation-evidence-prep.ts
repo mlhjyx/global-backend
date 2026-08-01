@@ -9,7 +9,6 @@ import {
   sep,
 } from "node:path";
 
-import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import type { ModelCandidateProtocol } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
 import {
@@ -153,6 +152,10 @@ export interface ModelEvaluationEvidencePrepBundle {
     approvedAt: string;
     approvedCampaignBudgetCents: number;
     approvedDispatchExecutions: number;
+    preparedFixedCommitSha: string;
+    preparedSuiteId: string;
+    preparedSourceBundleContractId: string;
+    preparedSourceBundleSha256: string;
     costSafetyAttestationSha256: string;
     safeSnapshotEnvelopeSha256: string;
   };
@@ -272,6 +275,10 @@ export function createTrustedModelEvaluationEvidencePrepSnapshots(
       "approvedAt",
       "approvedCampaignBudgetCents",
       "approvedDispatchExecutions",
+      "preparedFixedCommitSha",
+      "preparedSuiteId",
+      "preparedSourceBundleContractId",
+      "preparedSourceBundleSha256",
     ]) ||
     !hasExactKeys(copy.credentialSnapshot, [
       "attestationId",
@@ -398,14 +405,8 @@ export function buildModelEvaluationEvidencePlanningManifest(): ModelEvaluationE
       }
     }
   }
-  const comparatorRoute = modelPolicyRegistry.getEvaluationComparatorRoute(
-    plan.taskId,
-  );
-  if (comparatorRoute) {
-    for (const alias of [
-      comparatorRoute.primary,
-      ...comparatorRoute.fallbacks,
-    ]) {
+  if (suite.legacyComparatorAliases.length > 0) {
+    for (const alias of suite.legacyComparatorAliases) {
       for (const fixtureId of suite.fixtureIds) {
         for (let attempt = 1; attempt <= suite.repeats; attempt += 1) {
           append({
@@ -498,6 +499,11 @@ function assertExactCostSafety(
       JSON.stringify(expectedDispatches(manifest)) ||
     costSafety.authorization.approvedDispatchExecutions !==
       manifest.executionCount ||
+    costSafety.authorization.preparedSuiteId !== manifest.suiteId ||
+    costSafety.authorization.preparedSourceBundleContractId !==
+      manifest.sourceBundleContractId ||
+    costSafety.authorization.preparedSourceBundleSha256 !==
+      manifest.sourceBundleSha256 ||
     costSafety.limits.maxDispatchExecutions !== manifest.executionCount ||
     costSafety.limits.maxWireCalls !== manifest.maximumWireCallCount
   ) {
@@ -566,6 +572,13 @@ export function createModelEvaluationEvidencePrepBundle(input: {
     throw new Error("trusted fixed snapshot evidence required");
   }
   const costSafety = input.snapshots.costSafety;
+  if (
+    costSafety.authorization.preparedFixedCommitSha !== input.fixedCommitSha
+  ) {
+    throw new Error(
+      "cost safety authorization is not bound to the fixed evidence commit",
+    );
+  }
   const planningManifest = buildModelEvaluationEvidencePlanningManifest();
   assertExactCostSafety(planningManifest, costSafety);
   const frozenMaximumCents = frozenPricedMaximumCents(

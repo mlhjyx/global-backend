@@ -4,7 +4,7 @@ import {
 } from "../agents/model-candidate-baseline";
 
 export const SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID =
-  "site-builder-model-evaluation-cost-safety/2026-07-28-v1" as const;
+  "site-builder-model-evaluation-cost-safety/2026-07-30-v2" as const;
 export const MODEL_EVALUATION_ABSOLUTE_LIMITS = Object.freeze({
   credentialQuotaCapCents: 25_000,
   campaignBudgetCents: 10_000,
@@ -38,6 +38,10 @@ export interface ModelEvaluationCostSafetyInput {
     approvedAt: string;
     approvedCampaignBudgetCents: number;
     approvedDispatchExecutions: number;
+    preparedFixedCommitSha: string;
+    preparedSuiteId: string;
+    preparedSourceBundleContractId: string;
+    preparedSourceBundleSha256: string;
   };
   credential: {
     attestationId: string;
@@ -89,6 +93,7 @@ export type ModelEvaluationCostSafetyAttestation =
 const ATTESTATION_ID = /^[a-z0-9][a-z0-9._/-]{7,127}$/;
 const RESOLVER_ID = /^[a-z0-9][a-z0-9._/-]{2,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const SHA1 = /^[a-f0-9]{40}$/;
 const TRUSTED_COST_SAFETY_ATTESTATIONS = new WeakSet<object>();
 const COST_SAFETY_WEAK_SET_ADD = WeakSet.prototype.add;
 const COST_SAFETY_WEAK_SET_HAS = WeakSet.prototype.has;
@@ -229,6 +234,10 @@ export function createModelEvaluationCostSafetyAttestation(
       "approvedAt",
       "approvedCampaignBudgetCents",
       "approvedDispatchExecutions",
+      "preparedFixedCommitSha",
+      "preparedSuiteId",
+      "preparedSourceBundleContractId",
+      "preparedSourceBundleSha256",
     ]) ||
     !hasExactKeys(copy.credential, [
       "attestationId",
@@ -273,6 +282,10 @@ export function createModelEvaluationCostSafetyAttestation(
       copy.limits.campaignBudgetCents ||
     copy.authorization.approvedDispatchExecutions !==
       copy.limits.maxDispatchExecutions ||
+    !SHA1.test(copy.authorization.preparedFixedCommitSha) ||
+    !ATTESTATION_ID.test(copy.authorization.preparedSuiteId) ||
+    !ATTESTATION_ID.test(copy.authorization.preparedSourceBundleContractId) ||
+    !SHA256.test(copy.authorization.preparedSourceBundleSha256) ||
     copy.credential.purpose !== "site_builder_model_evaluation" ||
     copy.credential.quotaMode !== "limited" ||
     copy.credential.scopeExact !== true ||
