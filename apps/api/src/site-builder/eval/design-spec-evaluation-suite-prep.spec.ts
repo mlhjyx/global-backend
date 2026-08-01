@@ -1,9 +1,18 @@
-import { mkdtemp, mkdir, readFile, symlink } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertDesignSpecSourceBundleAtFixedCommit,
   buildDesignSpecEvaluationSuitePrepManifest,
   writeDesignSpecEvaluationSuitePrepManifestCreateOnly,
 } from "./design-spec-evaluation-suite-prep";
@@ -224,6 +233,48 @@ describe("design_spec zero-cost suite preparation", () => {
         compiledContracts(),
       ),
     ).toThrow("40-character commit");
+  });
+
+  it("rejects a source bundle assembled from a different worktree commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "design-spec-source-bundle-"));
+    await mkdir(join(root, "apps/api/src"), { recursive: true });
+    const sourcePath = "apps/api/src/evaluator.ts";
+    const absoluteSourcePath = join(root, sourcePath);
+    await writeFile(absoluteSourcePath, "export const version = 1;\n");
+    execFileSync("git", ["init", "--quiet"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], {
+      cwd: root,
+    });
+    execFileSync("git", ["config", "user.name", "Suite Test"], { cwd: root });
+    execFileSync("git", ["add", sourcePath], { cwd: root });
+    execFileSync("git", ["commit", "--quiet", "-m", "source v1"], {
+      cwd: root,
+    });
+    const fixedCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+    const fixedBytes = await readFile(absoluteSourcePath);
+    const fixedFingerprint = {
+      path: sourcePath,
+      sha256: createHash("sha256").update(fixedBytes).digest("hex"),
+    };
+    expect(() =>
+      assertDesignSpecSourceBundleAtFixedCommit(root, fixedCommitSha, [
+        fixedFingerprint,
+      ]),
+    ).not.toThrow();
+
+    await writeFile(absoluteSourcePath, "export const version = 2;\n");
+    const currentBytes = await readFile(absoluteSourcePath);
+    expect(() =>
+      assertDesignSpecSourceBundleAtFixedCommit(root, fixedCommitSha, [
+        {
+          path: sourcePath,
+          sha256: createHash("sha256").update(currentBytes).digest("hex"),
+        },
+      ]),
+    ).toThrow(`${sourcePath} drifted from the fixed commit`);
   });
 
   it("rejects stale or mismatched compiled contracts attestations", () => {

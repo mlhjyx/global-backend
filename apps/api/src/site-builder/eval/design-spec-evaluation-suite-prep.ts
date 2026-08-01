@@ -1,5 +1,7 @@
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
 import {
@@ -42,7 +44,7 @@ const DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT =
   captureCompiledContractsSuiteImport(DESIGN_SPEC_SUITE_REPOSITORY_ROOT);
 
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_ID =
-  "site-builder-design-spec-evaluation-suite-prep/2026-07-30-v10" as const;
+  "site-builder-design-spec-evaluation-suite-prep/2026-08-01-v11" as const;
 export const DESIGN_SPEC_EVALUATION_SUITE_PREP_SCHEMA_VERSION =
   "site-builder-design-spec-evaluation-suite-prep/v1" as const;
 
@@ -171,6 +173,83 @@ export function attestDesignSpecCompiledContractsAfterSuiteImport(
     buildReceipt,
     DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT,
   );
+}
+
+function sourceFileAtFixedCommit(
+  repositoryRoot: string,
+  fixedCommitSha: string,
+  path: string,
+): Buffer {
+  try {
+    return execFileSync("git", ["show", `${fixedCommitSha}:${path}`], {
+      cwd: repositoryRoot,
+      encoding: null,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch {
+    throw new Error(`${path} must be tracked at the fixed commit`);
+  }
+}
+
+export function assertDesignSpecSourceBundleAtFixedCommit(
+  repositoryRoot: string,
+  fixedCommitSha: string,
+  sourceFiles: readonly { path: string; sha256: string }[],
+): void {
+  if (!/^[a-f0-9]{40}$/.test(fixedCommitSha)) {
+    throw new Error("design_spec source bundle requires a 40-character commit");
+  }
+  const realRepositoryRoot = realpathSync(repositoryRoot);
+  const seen = new Set<string>();
+  for (const source of sourceFiles) {
+    if (
+      source.path.length === 0 ||
+      isAbsolute(source.path) ||
+      source.path.includes("\\") ||
+      source.path.split("/").includes("..") ||
+      !/^[a-f0-9]{64}$/.test(source.sha256) ||
+      seen.has(source.path)
+    ) {
+      throw new Error("design_spec source bundle contains an invalid path");
+    }
+    seen.add(source.path);
+    const resolved = resolve(realRepositoryRoot, source.path);
+    const repositoryRelative = relative(realRepositoryRoot, resolved);
+    if (
+      repositoryRelative.length === 0 ||
+      repositoryRelative === ".." ||
+      repositoryRelative.startsWith(`..${sep}`) ||
+      isAbsolute(repositoryRelative)
+    ) {
+      throw new Error(`${source.path} escapes the repository`);
+    }
+    const realSource = realpathSync(resolved);
+    const realRepositoryRelative = relative(realRepositoryRoot, realSource);
+    if (
+      realRepositoryRelative === ".." ||
+      realRepositoryRelative.startsWith(`..${sep}`) ||
+      isAbsolute(realRepositoryRelative)
+    ) {
+      throw new Error(`${source.path} resolves outside the repository`);
+    }
+    const committed = sourceFileAtFixedCommit(
+      realRepositoryRoot,
+      fixedCommitSha,
+      source.path,
+    );
+    const working = readFileSync(realSource);
+    if (!working.equals(committed)) {
+      throw new Error(`${source.path} drifted from the fixed commit`);
+    }
+    const committedSha256 = createHash("sha256")
+      .update(committed)
+      .digest("hex");
+    if (committedSha256 !== source.sha256) {
+      throw new Error(
+        `${source.path} does not match the fixed source bundle digest`,
+      );
+    }
+  }
 }
 
 function executionKey(input: {
@@ -504,6 +583,21 @@ export async function writeDesignSpecEvaluationSuitePrepManifestCreateOnly(
   ) {
     throw new Error("trusted zero-cost design_spec suite manifest required");
   }
+  const canonicalManifest = buildDesignSpecEvaluationSuitePrepManifest(
+    manifest.fixedCommitSha,
+    compiledContracts,
+  );
+  if (
+    canonicalManifest.manifestSha256 !== manifest.manifestSha256 ||
+    sha256CanonicalJson(canonicalManifest) !== sha256CanonicalJson(manifest)
+  ) {
+    throw new Error("canonical zero-cost design_spec suite manifest required");
+  }
+  assertDesignSpecSourceBundleAtFixedCommit(
+    repositoryRoot,
+    manifest.fixedCommitSha,
+    manifest.suite.sourceFiles,
+  );
   assertCompiledContractsAttestationStable(repositoryRoot, compiledContracts);
   await writeRepositoryJsonCreateOnly(
     repositoryRoot,
