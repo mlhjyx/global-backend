@@ -14,7 +14,7 @@
 
 ## 2. 技术栈 / 架构
 
-- **2026-08-01 source/manifest split 当前真值（覆盖下方旧 harness truth-sync）**：当前源码合同为 `site-builder-model-evaluation-harness/2026-08-01-v17` 与 `design_spec` suite v14。12 fixtures、3 候选、2 次重复、一次 GPT-5.5 probe、24 个确定性 comparator case 及 73 executions / 146 wire calls 规划矩阵不变；admission、repair 和最终评分全部绑定模块加载时捕获的 validator。每个物理调用独立受 20¢ 上限约束，两次合法 repair 的聚合结算按完整 40¢ execution reservation 核验。当前 PR 只含 suite/harness 源码，所有分支内 v1–v13 manifest 与 writer 已撤销；源码经用户授权进入 `origin/main` 后，才能另开零费用 create-only manifest PR 并把主线祖先提交作为 fixed source。当前仍无真实调用、费用、evidence、promotion 或路由变化。
+- **2026-08-01 source/manifest split 当前真值（覆盖下方旧 harness truth-sync）**：当前源码合同为 `site-builder-model-evaluation-harness/2026-08-01-v18` 与 `design_spec` suite v14。12 fixtures、3 候选、2 次重复、一次 GPT-5.5 probe、24 个确定性 comparator case 及 73 executions / 146 wire calls 规划矩阵不变；admission、repair 和最终评分全部绑定模块加载时捕获的 validator。每个物理调用独立受 20¢ 上限约束，两次合法 repair 的聚合结算与 capability attestation 均按完整 40¢ execution reservation 核验。当前 PR 只含 suite/harness 源码，所有分支内 v1–v13 manifest 与 writer 已撤销；源码经用户授权进入 `origin/main` 后，才能另开零费用 create-only manifest PR 并把主线祖先提交作为 fixed source。当前仍无真实调用、费用、evidence、promotion 或路由变化。
 
 - **NestJS 单体（模块化）+ Prisma + PostgreSQL**（多租户 **RLS**：`app_user` 连接 + `set_config('app.current_workspace_id')` + `current_workspace_id()` policy；owner 连接绕 RLS 供 relay/seed）。
 - **Temporal** 持久工作流（understanding / discovery / qualify）；**Transactional Outbox** + relay 发领域事件。

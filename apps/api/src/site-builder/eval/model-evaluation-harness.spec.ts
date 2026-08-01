@@ -1140,6 +1140,45 @@ describe("task attempt observation window", () => {
     expect(probeExecute).toHaveBeenCalledTimes(1);
   });
 
+  it("attests a repaired probe against the full execution reservation", async () => {
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const candidate = plan.candidates.find(
+      (entry) => entry.alias === "gpt-5.5",
+    )!;
+    const guard = new ModelEvaluationBudgetGuard(100);
+    const campaign = new ModelEvaluationCapabilityCampaign(guard);
+    const call = completedCall(
+      candidate.alias,
+      candidate.expectedProtocol,
+      canonicalAcceptedArtifact(),
+      60,
+    );
+    call.usage = {
+      inputTokens: 200,
+      outputTokens: 100,
+      callCount: 2,
+      source: "adapter_aggregated",
+    };
+
+    await expect(
+      campaign.runCanonicalProbe({
+        plan,
+        candidate,
+        execute: async () => call,
+      }),
+    ).resolves.toMatchObject({
+      status: "capability_proven",
+      protocolVerified: true,
+      identityVerified: true,
+      outputVerified: true,
+    });
+    expect(campaign.attestationFor(plan, candidate, guard)).not.toBeNull();
+    expect(guard.snapshot()).toMatchObject({
+      committedCents: 60,
+      blocked: false,
+    });
+  });
+
   it("reuses a canonical probe attestation without dispatch or budget mutation", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates.find(

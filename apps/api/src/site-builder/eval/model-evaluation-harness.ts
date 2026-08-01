@@ -84,7 +84,7 @@ import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-co
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-08-01-v17" as const;
+  "site-builder-model-evaluation-harness/2026-08-01-v18" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -2106,7 +2106,8 @@ function capabilityProbeAttestationIsCanonical(
     !normalizedSettlement.settlementInvalid &&
     normalizedSettlement.settlement.state === "settled" &&
     normalizedSettlement.settlement.amountCents <=
-      plan.envelope.perCallCostCapCents &&
+      plan.envelope.perCallCostCapCents *
+        maximumExecutionCallCount(plan.evaluationSuite.repairTaskOutput) &&
     JSON.stringify(normalizedSettlement.settlement) ===
       JSON.stringify(attestation.costSettlement) &&
     SHA256.test(attestationSha256) &&

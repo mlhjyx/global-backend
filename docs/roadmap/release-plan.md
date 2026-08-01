@@ -8,7 +8,7 @@
 
 ## 0. Site Builder 当前路线
 
-> **2026-08-01 source/manifest split（覆盖下方旧 harness 路线描述）**：当前待合并的是 `site-builder-model-evaluation-harness/2026-08-01-v17` / `design_spec` suite v14 源码 PR，73/146 规划矩阵不变，但不再携带不可达的分支内 manifest。源码进入 `origin/main` 后立即另开零费用 create-only manifest PR；随后才可能进入独立费用卡、真实 evidence 与 promotion。其余五个文本任务、Gemini、媒体、MODEL-2 与 M2-PUBLISH 继续阻断。
+> **2026-08-01 source/manifest split（覆盖下方旧 harness 路线描述）**：当前待合并的是 `site-builder-model-evaluation-harness/2026-08-01-v18` / `design_spec` suite v14 源码 PR，73/146 规划矩阵不变，probe attestation 已与完整 execution reservation 对齐，但不再携带不可达的分支内 manifest。源码进入 `origin/main` 后立即另开零费用 create-only manifest PR；随后才可能进入独立费用卡、真实 evidence 与 promotion。其余五个文本任务、Gemini、媒体、MODEL-2 与 M2-PUBLISH 继续阻断。
 
 ### 已完成到哪里
 

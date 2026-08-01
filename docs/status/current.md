@@ -8,7 +8,7 @@
 
 ## 🟢 当前主线：独立站建设（Site Builder）
 
-- **2026-08-01 模型评测源码/manifest 拆分（覆盖下方旧 harness 状态）**：`site-builder-model-evaluation-harness/2026-08-01-v17` 与 `design_spec` suite v14 源码已准备审查，矩阵为 73/146，单 wire 20¢ 与 execution 40¢ 分层核验；所有分支内 manifest 已撤销。本 PR 合并后仍必须另开零费用 create-only manifest PR，固定当时可从 `origin/main` 到达的源码提交。真实调用、费用、evidence、promotion、active route 与其余五任务均未完成。
+- **2026-08-01 模型评测源码/manifest 拆分（覆盖下方旧 harness 状态）**：`site-builder-model-evaluation-harness/2026-08-01-v18` 与 `design_spec` suite v14 源码已准备审查，矩阵为 73/146，单 wire 20¢ 与 execution 40¢ 分层核验，probe attestation 同样按 execution reservation 复验；所有分支内 manifest 已撤销。本 PR 合并后仍必须另开零费用 create-only manifest PR，固定当时可从 `origin/main` 到达的源码提交。真实调用、费用、evidence、promotion、active route 与其余五任务均未完成。
 
 获客侧 **2026-07-13 起暂停**（用户指示，明确通知才恢复）。当前唯一开发主线 = 为出海企业一键生成 / 精装修独立站。
 

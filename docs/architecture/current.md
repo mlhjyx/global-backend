@@ -5,7 +5,7 @@
 > 当前事实来源：当前代码、共享合同与 [当前状态](../status/current.md)。
 > 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../roadmap/release-plan.md](../roadmap/release-plan.md)。
 > **2026-07-16 补，2026-07-27 模型候选重基线同步**：本文 §1–§8 主体描述**获客后端**（C 核心）as-built 架构。自 2026-07-13 起主线转为**独立站建设子系统（Site Builder）**；其 as-built 快照见下方 §1A，细节与承重决策见 [../site-builder/02-architecture.md](../site-builder/02-architecture.md)、[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md) 和 [../adr/registry.md](../adr/registry.md) ADR-013~021。旧 Word、v3.1/v3.2 和研究稿不是 as-built 权威。
-> **2026-08-01 source/manifest split 当前真值（覆盖下方旧 harness truth-sync）**：当前为 `site-builder-model-evaluation-harness/2026-08-01-v17` / `design_spec` suite v14 源码，矩阵仍为 73 executions、最多 146 wire calls；单个物理调用与整次 execution reservation 分层结算，最终评分也绑定捕获的 validator。本 PR 不含 fixed-commit manifest 或 writer；只有源码合并进入 `origin/main` 后，独立零费用 manifest PR 才能把可达的主线祖先提交冻结为 source。当前无真实调用、费用、evidence、promotion 或 active route 变化。
+> **2026-08-01 source/manifest split 当前真值（覆盖下方旧 harness truth-sync）**：当前为 `site-builder-model-evaluation-harness/2026-08-01-v18` / `design_spec` suite v14 源码，矩阵仍为 73 executions、最多 146 wire calls；单个物理调用与整次 execution reservation 分层结算，probe attestation 也使用完整 execution reservation，最终评分绑定捕获的 validator。本 PR 不含 fixed-commit manifest 或 writer；只有源码合并进入 `origin/main` 后，独立零费用 manifest PR 才能把可达的主线祖先提交冻结为 source。当前无真实调用、费用、evidence、promotion 或 active route 变化。
 
 ## 1. 顶层运行架构
 

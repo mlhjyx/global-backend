@@ -1,6 +1,6 @@
 # Site Builder 模型评测 Harness 基线
 
-> 机器合同：`site-builder-model-evaluation-harness/2026-08-01-v17`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-30-v2`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
+> 机器合同：`site-builder-model-evaluation-harness/2026-08-01-v18`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-30-v2`；候选来源：`site-builder-model-candidate-baseline/2026-07-27-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
 
 ## 范围
 
