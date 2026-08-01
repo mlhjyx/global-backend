@@ -10,7 +10,6 @@
     "test": "vitest run",
     "mg:check": "node scripts/mg-check.cjs",
     "new-api:ensure-embeddings": "node --import tsx scripts/ensure-new-api-embeddings.mts",
-    "prepare:site-builder:design-spec-evaluation-manifest": "node --import tsx scripts/prepare-site-builder-design-spec-evaluation-manifest.mts",
     "prepare:site-builder:current-route-recovery": "node --import tsx scripts/prepare-site-builder-current-route-recovery.mts",
     "verify:site-builder:m1": "node --import tsx scripts/verify-site-builder-m1.mts",
     "lint": "eslint \"src/**/*.ts\""
