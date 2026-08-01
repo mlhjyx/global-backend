@@ -2,7 +2,7 @@
 
 > 状态：`READY_FOR_SUITE_RE_REVIEW`；dispatch：`NOT_AUTHORIZED`；真实网络调用：`0`；模型费用：`$0.00`。
 
-当前固定 suite 源提交：`05732cf25b2989bf3c05c2a9792bbb2ef2829c29`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v11 机器 manifest](m1-g-design-spec-suite-prep-manifest-v11.json)；source bundle SHA-256=`90b13e4e0ec7b9c9454722cf3a9864d5e6517113b8ee23f648ddc149c85b0d85`，manifest semantic SHA-256=`d64ff68de15c5f2a138defdebb57c71878b8bea3b8a020642413af3461584a4a`，文件 SHA-256=`20fe61d6f13608d536d6dbb4ee5f9e04995030a9533da0aa1738e3f0a95c4b66`。v1–v10 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
+当前固定 suite 源提交：`41ad0bf4453b3cbfa6e50dfae91da6c3bf0f6525`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v12 机器 manifest](m1-g-design-spec-suite-prep-manifest-v12.json)；source bundle SHA-256=`d2add85e348f42ed09bec5cefbefc2d816356e6a652b00efaca13253fbf66293`，manifest semantic SHA-256=`d81b5111ee8996b4c1635c9878dd310e7ffe39ac56a300028256e7f450019c34`，文件 SHA-256=`c9eabfbc513fc265350f96b3a2739aba3d47b041e3e5d3ca74182b1c6277390f`。v1–v11 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
 
 ## 本 PR 冻结什么
 
@@ -22,6 +22,7 @@
 - create-only writer 会重新构造 canonical manifest，并逐文件同时比对当前 worktree、`git show <fixedCommit>:<path>` 与 manifest SHA-256；直接绕过 CLI 传入错绑 commit/source bundle 也会在写入前拒绝
 - runner 在导入 suite 前删除并本地重建 ignored 的 `packages/contracts/dist`；manifest 冻结 31 个 fixed-commit tracked contracts 文件（SHA-256=`c95bd7d5c90dd6cbe42dd35f6c58d6d0e1e473a3404efa5377e3547b99d15dd6`）及实际加载的 21 个 JS artifact（SHA-256=`d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01`），artifact-tree serializer 不调用实时 Array `map`/`join`/`sort`；构建后漂移即停止
 - reservation 后、首个物理 wire 前发现 runtime drift 也会持久写入 `authorization_frozen`，恢复文件不能继续使用同一授权
+- schema repair reason 超过冻结字节上限，或 provider 报告 output token 超过 request/attestation 上限时，executor 都会先结算已观察调用并关闭 reservation，再持久写入 `authorization_frozen`；进程重启不能丢失 hard-stop 状态
 
 因此未来真实评测的模型清单为 73 executions、最多 146 wire calls。按任务现有 20¢ 单次物理调用硬门，规划绝对上界为 2920¢（$29.20）；它不是预计费用、凭据额度或支出授权。
 
