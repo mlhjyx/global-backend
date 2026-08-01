@@ -2,7 +2,7 @@
 
 > 状态：`READY_FOR_SUITE_RE_REVIEW`；dispatch：`NOT_AUTHORIZED`；真实网络调用：`0`；模型费用：`$0.00`。
 
-当前固定 suite 源提交：`589533051604e4577155d6ed19afcd934cbb1229`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v10 机器 manifest](m1-g-design-spec-suite-prep-manifest-v10.json)；source bundle SHA-256=`14894eb0832c07da841360c6c7c3ebf7b6d066be18b0d4dfa6033572ddc423f2`，manifest semantic SHA-256=`18dafb1dd97a26a333964fcfb2019cb548e6bcd9eb837733c5262748cf9e5768`，文件 SHA-256=`ca201a6b5b99cc1789ee0e5b0063144353cbccc435abe94d8fdc9dc3209165ae`。v1–v9 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
+当前固定 suite 源提交：`05732cf25b2989bf3c05c2a9792bbb2ef2829c29`。create-only runner 已从该 clean commit 逐文件复核 50 个 source bundle 成员并生成 [v11 机器 manifest](m1-g-design-spec-suite-prep-manifest-v11.json)；source bundle SHA-256=`90b13e4e0ec7b9c9454722cf3a9864d5e6517113b8ee23f648ddc149c85b0d85`，manifest semantic SHA-256=`d64ff68de15c5f2a138defdebb57c71878b8bea3b8a020642413af3461584a4a`，文件 SHA-256=`20fe61d6f13608d536d6dbb4ee5f9e04995030a9533da0aa1738e3f0a95c4b66`。v1–v10 manifest 作为被后续审查发现取代的历史 provenance 保留，不覆盖、不作为后续 evidence 输入。
 
 ## 本 PR 冻结什么
 
@@ -19,6 +19,7 @@
 - comparator：24 个 `deterministic-catalog-selection/v1` case，逐例真实执行确定性选择并冻结 expected/actual/PASS/result digest，不调用模型
 - suite 自身固定 `legacyComparatorAliases=[]`；凭据必须精确覆盖三个 target alias，按 73 executions / 146 wire calls 绑定，MiniMax/Doubao extra scope 在预算和 client 前拒绝
 - spend authorization 的 `preparedFixedCommitSha` 必须逐字等于执行 worktree 当前 `HEAD`，并同时匹配 suite、source-bundle contract 与 digest；任一不一致在预算/client 前拒绝
+- create-only writer 会重新构造 canonical manifest，并逐文件同时比对当前 worktree、`git show <fixedCommit>:<path>` 与 manifest SHA-256；直接绕过 CLI 传入错绑 commit/source bundle 也会在写入前拒绝
 - runner 在导入 suite 前删除并本地重建 ignored 的 `packages/contracts/dist`；manifest 冻结 31 个 fixed-commit tracked contracts 文件（SHA-256=`c95bd7d5c90dd6cbe42dd35f6c58d6d0e1e473a3404efa5377e3547b99d15dd6`）及实际加载的 21 个 JS artifact（SHA-256=`d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01`），artifact-tree serializer 不调用实时 Array `map`/`join`/`sort`；构建后漂移即停止
 - reservation 后、首个物理 wire 前发现 runtime drift 也会持久写入 `authorization_frozen`，恢复文件不能继续使用同一授权
 
