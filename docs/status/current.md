@@ -10,6 +10,7 @@
 
 - **2026-08-01 模型评测源码/manifest 拆分（覆盖下方旧 harness 状态）**：`site-builder-model-evaluation-harness/2026-08-01-v18` 与 `design_spec` suite v14 源码已准备审查，矩阵为 73/146，单 wire 20¢ 与 execution 40¢ 分层核验，probe attestation 同样按 execution reservation 复验；所有分支内 manifest 已撤销。本 PR 合并后仍必须另开零费用 create-only manifest PR，固定当时可从 `origin/main` 到达的源码提交。真实调用、费用、evidence、promotion、active route 与其余五任务均未完成。
 - **2026-08-01 `design_spec` manifest 准备（覆盖上一条“仍必须另开”状态）**：`site-builder-design-spec-evaluation-manifest-prep/2026-08-01-v1` 固定已合并的 source commit `e493ba1d09fe37feea927f70d12f17aadadc5c6a`，create-only 冻结 12 fixtures、3 candidates、1 probe、73 executions / 最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件。它没有 wire client，不读取 `.env`、价格、余额或凭据；dispatch=`NOT_AUTHORIZED`，网络调用与模型费用均为零。真实费用卡、evidence、promotion、active route 与其余五任务继续未完成。
+  - 机器输出：[manifest v1](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json)；精确 file/semantic/source/compiled-contract 摘要与下一费用门见[决策卡](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-prep-decision-card.md)。
 
 获客侧 **2026-07-13 起暂停**（用户指示，明确通知才恢复）。当前唯一开发主线 = 为出海企业一键生成 / 精装修独立站。
 

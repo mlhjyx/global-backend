@@ -11,6 +11,7 @@
 > **2026-08-01 source/manifest split（覆盖下方旧 harness 路线描述）**：当前待合并的是 `site-builder-model-evaluation-harness/2026-08-01-v18` / `design_spec` suite v14 源码 PR，73/146 规划矩阵不变，probe attestation 已与完整 execution reservation 对齐，但不再携带不可达的分支内 manifest。源码进入 `origin/main` 后立即另开零费用 create-only manifest PR；随后才可能进入独立费用卡、真实 evidence 与 promotion。其余五个文本任务、Gemini、媒体、MODEL-2 与 M2-PUBLISH 继续阻断。
 >
 > **2026-08-01 manifest fast-follow（覆盖上一句“立即另开”状态）**：`site-builder-design-spec-evaluation-manifest-prep/2026-08-01-v1` 已以 #251 的主线 squash commit `e493ba1d09fe37feea927f70d12f17aadadc5c6a` 为 fixed source，零费用 create-only writer 只冻结 73/146 规划清单、deterministic comparator、source/compiled-contract digests 与停止条件。它不含 OpenOx 价格、余额、凭据、费用授权或模型 client；合并后下一步才是独立费用卡/evidence PR，真实 dispatch 仍须用户再次明确授权。
+> 机器输出与下一门：[manifest v1](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json) · [零费用决策卡](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-prep-decision-card.md)。
 
 ### 已完成到哪里
 

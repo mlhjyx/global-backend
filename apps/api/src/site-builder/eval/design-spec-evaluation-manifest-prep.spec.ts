@@ -9,6 +9,7 @@ import {
   assertDesignSpecFixedSourceCommitOnMain,
   assertDesignSpecSourceBundleAtFixedCommit,
   buildDesignSpecEvaluationPrepManifest,
+  type DesignSpecEvaluationManifestPrepManifest,
   writeDesignSpecEvaluationPrepManifestCreateOnly,
 } from "./design-spec-evaluation-manifest-prep";
 import {
@@ -50,6 +51,31 @@ function compiledContracts(): CompiledContractsAttestation {
 }
 
 describe("design_spec zero-cost manifest preparation", () => {
+  it("reconstructs the committed create-only manifest exactly", async () => {
+    const manifest = JSON.parse(
+      await readFile(
+        join(
+          __dirname,
+          "../../../../../docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json",
+        ),
+        "utf8",
+      ),
+    ) as DesignSpecEvaluationManifestPrepManifest;
+    const canonical = buildDesignSpecEvaluationPrepManifest(
+      manifest.fixedCommitSha,
+      manifest.compiledContracts,
+    );
+
+    expect(manifest).toEqual(canonical);
+    expect(manifest.fixedCommitSha).toBe(
+      "e493ba1d09fe37feea927f70d12f17aadadc5c6a",
+    );
+    expect(manifest.suite.sourceFiles).toHaveLength(47);
+    expect(manifest.actualNetworkCalls).toBe(0);
+    expect(manifest.actualModelCostCents).toBe(0);
+    expect(manifest.dispatchAuthorization).toBe("NOT_AUTHORIZED");
+  });
+
   it("freezes the paid and deterministic matrices without retired aliases", () => {
     const manifest = buildDesignSpecEvaluationPrepManifest(
       FIXED_COMMIT,
