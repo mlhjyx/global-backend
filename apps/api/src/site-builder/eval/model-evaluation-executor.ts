@@ -2669,7 +2669,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           costSafety,
         );
         const effectiveSettlement = await closeCampaignReservation(settlement);
-        campaignFrozen = true;
+        await freezeDurableAuthorization("output_token_limit_exceeded");
         throw new ModelEvaluationCallError(
           "evaluation_output_token_limit_exceeded",
           effectiveSettlement,
@@ -2692,7 +2692,30 @@ export function createModelEvaluationProtocolExecutor(deps: {
           Buffer.byteLength(failure.reason, "utf8") >
           MODEL_EVALUATION_REPAIR_REASON_UTF8_BYTES_UPPER_BOUND
         ) {
-          throw new Error("evaluation_repair_reason_too_large");
+          const settlement = await safeResolveSettlement(
+            settlementResolver,
+            {
+              executionId: request.executionId,
+              taskId: request.taskId,
+              alias: request.alias,
+              protocol,
+              outcome: "failed",
+              callCount: usage.callCount,
+              usage: settlementUsage(usage),
+              providerReportedCostCents: Object.freeze([
+                ...providerReportedCostCents,
+              ]),
+              error: new Error("evaluation_repair_reason_too_large"),
+            },
+            costSafety,
+          );
+          const effectiveSettlement =
+            await closeCampaignReservation(settlement);
+          await freezeDurableAuthorization("repair_reason_too_large");
+          throw new ModelEvaluationCallError(
+            "evaluation_repair_reason_too_large",
+            effectiveSettlement,
+          );
         }
         const knownProviderReportedCostCents =
           providerReportedCostCents.length > 0 &&

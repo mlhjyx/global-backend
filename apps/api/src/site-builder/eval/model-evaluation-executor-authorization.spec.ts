@@ -1118,6 +1118,173 @@ describe("model evaluation executor authorization", () => {
     }
   });
 
+  it("settles and durably freezes an oversized repair reason", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-repair-reason-freeze-spec-"),
+    );
+    const ledgerId = "repair-reason-freeze-spec-ledger/durable-v1";
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(
+      resolver.resolverId,
+      10_000,
+      { ledgerId, directory },
+    );
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const originalValidateOutput = BRAND_PROFILE_TASK.validateOutput;
+    const wire = vi.fn(async () => {
+      BRAND_PROFILE_TASK.validateOutput = () => {
+        throw new Error("x".repeat(5_000));
+      };
+      return {
+        body: {
+          status: "completed",
+          model: plan.candidates[0]!.alias,
+          output: [
+            {
+              content: [
+                {
+                  type: "output_text",
+                  text: JSON.stringify({
+                    valueProps: [],
+                    glossary: [],
+                    keywords: [],
+                    differentiators: [],
+                    competitors: [],
+                    gaps: [],
+                    factSheet: [],
+                  }),
+                },
+              ],
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 1 },
+        },
+        providerReportedCostCents: 1,
+      };
+    });
+    try {
+      const executor = createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          fakeWireClient(wire),
+          costSafety,
+        ),
+        authorizationLedger: createFileBackedModelEvaluationAuthorizationLedger(
+          { ledgerId, directory },
+        ),
+        settlementResolver: resolver,
+        costSafety,
+      });
+
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        failureCode: "evaluation_repair_reason_too_large",
+        costSettlement: { state: "settled", amountCents: 1 },
+      });
+      expect(wire).toHaveBeenCalledTimes(1);
+      const claimFile = (await readdir(directory)).find((entry) =>
+        entry.endsWith(".jsonl"),
+      );
+      expect(claimFile).toBeDefined();
+      const events = (await readFile(join(directory, claimFile!), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { event: string; reason?: string });
+      expect(events).toContainEqual(
+        expect.objectContaining({ event: "dispatch_settled" }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "authorization_frozen",
+          reason: "repair_reason_too_large",
+        }),
+      );
+    } finally {
+      BRAND_PROFILE_TASK.validateOutput = originalValidateOutput;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("durably freezes a provider output-token overflow", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-output-token-freeze-spec-"),
+    );
+    const ledgerId = "output-token-freeze-spec-ledger/durable-v1";
+    const resolver = fakeResolver();
+    const costSafety = createFakeModelEvaluationCostSafety(
+      resolver.resolverId,
+      10_000,
+      { ledgerId, directory },
+    );
+    const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
+    const wire = vi.fn(async () => ({
+      body: {
+        status: "completed",
+        model: plan.candidates[0]!.alias,
+        output: [{ content: [{ type: "output_text", text: "{}" }] }],
+        usage: {
+          input_tokens: 10,
+          output_tokens: plan.envelope.maxTokens + 1,
+        },
+      },
+      providerReportedCostCents: 1,
+    }));
+    try {
+      const executor = createRawModelEvaluationProtocolExecutor({
+        wireClient: bindFakeModelEvaluationWireCredential(
+          fakeWireClient(wire),
+          costSafety,
+        ),
+        authorizationLedger: createFileBackedModelEvaluationAuthorizationLedger(
+          { ledgerId, directory },
+        ),
+        settlementResolver: resolver,
+        costSafety,
+      });
+
+      await expect(
+        runTaskEvaluationAttempt({
+          plan,
+          candidate: plan.candidates[0],
+          fixtureId: "auto-parts-rich",
+          attempt: 1,
+          campaignBudget: new ModelEvaluationBudgetGuard(100),
+          execute: executor.execute,
+        }),
+      ).resolves.toMatchObject({
+        failureCode: "evaluation_output_token_limit_exceeded",
+        costSettlement: { state: "settled", amountCents: 1 },
+      });
+      expect(wire).toHaveBeenCalledTimes(1);
+      const claimFile = (await readdir(directory)).find((entry) =>
+        entry.endsWith(".jsonl"),
+      );
+      expect(claimFile).toBeDefined();
+      const events = (await readFile(join(directory, claimFile!), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { event: string; reason?: string });
+      expect(events).toContainEqual(
+        expect.objectContaining({ event: "dispatch_settled" }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "authorization_frozen",
+          reason: "output_token_limit_exceeded",
+        }),
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("recovers a complete claim lock whose process identity no longer exists", async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "evaluation-ledger-stale-claim-lock-spec-"),
