@@ -13,10 +13,18 @@ import {
 } from "../design/design-brief-producer";
 import { STATIC_DESIGN_CATALOG_V2 } from "../design/catalog";
 
+const CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT = (() => {
+  const validator = DESIGN_SPEC_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("design_spec output validator is unavailable");
+  }
+  return validator;
+})();
+
 export const DESIGN_SPEC_EVAL_FIXTURE_SCHEMA_VERSION =
   "site-builder-design-spec-eval-fixture/v2" as const;
 export const DESIGN_SPEC_EVALUATOR_VERSION =
-  "site-builder-design-spec-evaluator/2026-07-30-v3" as const;
+  "site-builder-design-spec-evaluator/2026-08-01-v4" as const;
 export const DESIGN_SPEC_ROUTE_VALIDATION_VERSION =
   "site-builder-design-spec-route-validation/2026-07-30-v2" as const;
 export const DESIGN_SPEC_PROMPT_VERSION =
@@ -266,7 +274,7 @@ export function prepareDesignSpecEvalFixture(
       `invalid design_spec evaluation fixture: ${copy.fixtureId}`,
     );
   }
-  DESIGN_SPEC_TASK.validateOutput?.(copy.input, {
+  CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT(copy.input, {
     candidateId: copy.assertions.deterministicCandidateId,
     reasons: [],
     warnings: [],
@@ -311,7 +319,7 @@ export function evaluateDesignSpecOutput(
   prepared: PreparedDesignSpecEvalFixture,
   output: DesignSpecTaskOutput,
 ): DesignSpecEvaluationOutcome {
-  DESIGN_SPEC_TASK.validateOutput?.(prepared.input, output);
+  CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT(prepared.input, output);
   const selected = prepared.input.candidates.find(
     ({ id }) => id === output.candidateId,
   )!;

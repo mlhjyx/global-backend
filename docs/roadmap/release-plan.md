@@ -8,6 +8,8 @@
 
 ## 0. Site Builder 当前路线
 
+> **2026-08-01 source/manifest split（覆盖下方旧 harness 路线描述）**：当前待合并的是 `site-builder-model-evaluation-harness/2026-08-01-v17` / `design_spec` suite v14 源码 PR，73/146 规划矩阵不变，但不再携带不可达的分支内 manifest。源码进入 `origin/main` 后立即另开零费用 create-only manifest PR；随后才可能进入独立费用卡、真实 evidence 与 promotion。其余五个文本任务、Gemini、媒体、MODEL-2 与 M2-PUBLISH 继续阻断。
+
 ### 已完成到哪里
 
 - M0 建站快路径、Astro 渲染器、素材/KB/构建端点继续存在；DQ-1 的 SiteSpec 1.0.0 由 Demo v0 固定使用，M1-e-B/M1-f 新历史使用 SiteSpec 1.1 与可读 v1/v2/v3 的 ReleaseManifest。

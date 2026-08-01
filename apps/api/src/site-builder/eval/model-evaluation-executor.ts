@@ -2261,6 +2261,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
     const campaignReservationCents =
       request.perCallCostCapCents * maximumWireCalls;
     let campaignReservationActive = false;
+    let executionCostCapExceeded = false;
     const closeCampaignReservation = async (
       settlement: CostSettlement,
     ): Promise<CostSettlement> => {
@@ -2293,8 +2294,16 @@ export function createModelEvaluationProtocolExecutor(deps: {
       }
       if (effectiveSettlement.state === "settled") {
         committedCampaignCents += effectiveSettlement.amountCents;
+        const physicalCallCapExceeded = providerReportedCostCents.some(
+          (amount) =>
+            amount !== null && amount > request.perCallCostCapCents,
+        );
+        const executionReservationExceeded =
+          effectiveSettlement.amountCents > campaignReservationCents;
+        executionCostCapExceeded =
+          physicalCallCapExceeded || executionReservationExceeded;
         if (
-          effectiveSettlement.amountCents > request.perCallCostCapCents ||
+          executionCostCapExceeded ||
           committedCampaignCents > costSafety.limits.campaignBudgetCents
         ) {
           await freezeDurableAuthorization("settled_cost_cap_exceeded");
@@ -2750,18 +2759,11 @@ export function createModelEvaluationProtocolExecutor(deps: {
             effectiveSettlement,
           );
         }
-        const knownProviderReportedCostCents =
-          providerReportedCostCents.length > 0 &&
-          providerReportedCostCents.every((value) => value !== null)
-            ? providerReportedCostCents.reduce(
-                (total, value) => total + (value ?? 0),
-                0,
-              )
-            : null;
-        if (
-          knownProviderReportedCostCents !== null &&
-          knownProviderReportedCostCents >= request.perCallCostCapCents
-        ) {
+        const physicalCallCapExceeded = providerReportedCostCents.some(
+          (amount) =>
+            amount !== null && amount > request.perCallCostCapCents,
+        );
+        if (physicalCallCapExceeded) {
           const settlement = await safeResolveSettlement(
             settlementResolver,
             {
@@ -2776,7 +2778,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
                 ...providerReportedCostCents,
               ]),
               error: new Error(
-                "evaluation_known_attempt_cost_cap_reached_before_repair",
+                "evaluation_physical_call_cost_cap_exceeded_before_repair",
               ),
             },
             costSafety,
@@ -2784,7 +2786,7 @@ export function createModelEvaluationProtocolExecutor(deps: {
           const effectiveSettlement =
             await closeCampaignReservation(settlement);
           await freezeDurableAuthorization(
-            "known_attempt_cost_cap_reached_before_repair",
+            "physical_call_cost_cap_exceeded_before_repair",
           );
           throw new ModelEvaluationCallError(
             "evaluation_cost_safety_rejected",
@@ -2823,6 +2825,12 @@ export function createModelEvaluationProtocolExecutor(deps: {
       costSafety,
     );
     settlement = await closeCampaignReservation(settlement);
+    if (executionCostCapExceeded) {
+      throw new ModelEvaluationCallError(
+        "evaluation_cost_safety_rejected",
+        settlement,
+      );
+    }
     if (!resolvedUsage) {
       throw new ModelEvaluationCallError("usage_unavailable", settlement);
     }

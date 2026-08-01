@@ -83,6 +83,25 @@ describe("design_spec canonical evaluation fixtures", () => {
     ).toThrow("design_spec output must select one frozen candidate id");
   });
 
+  it("keeps final assessment bound to the captured production validator", () => {
+    const prepared = prepareDesignSpecEvalFixture(
+      DESIGN_SPEC_EVAL_FIXTURES[0]!,
+    );
+    const originalValidator = DESIGN_SPEC_TASK.validateOutput;
+    DESIGN_SPEC_TASK.validateOutput = () => undefined;
+    try {
+      expect(() =>
+        evaluateDesignSpecOutput(prepared, {
+          candidateId: "invented-candidate",
+          reasons: [],
+          warnings: [],
+        }),
+      ).toThrow("design_spec output must select one frozen candidate id");
+    } finally {
+      DESIGN_SPEC_TASK.validateOutput = originalValidator;
+    }
+  });
+
   it("flags unselected catalog references and contradictory metrics", () => {
     const fixture = DESIGN_SPEC_EVAL_FIXTURES[0]!;
     const prepared = prepareDesignSpecEvalFixture(fixture);

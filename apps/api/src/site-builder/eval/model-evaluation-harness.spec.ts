@@ -532,7 +532,7 @@ describe("absolute budget guard", () => {
     });
   });
 
-  it("reserves a bounded repair call up front without relaxing the attempt cap", () => {
+  it("settles a bounded repair execution against its full reservation", () => {
     const guard = new ModelEvaluationBudgetGuard(100);
     expect(guard.reserve("repairable-call", 20, 2)).toEqual({
       allowed: true,
@@ -545,7 +545,7 @@ describe("absolute budget guard", () => {
     expect(
       guard.settle("repairable-call", {
         state: "settled",
-        amountCents: 19,
+        amountCents: 24,
         basis: "provider_reported@fake-settlement/v1",
       }),
     ).toMatchObject({
@@ -553,7 +553,7 @@ describe("absolute budget guard", () => {
       settlementInvalid: false,
     });
     expect(guard.snapshot()).toMatchObject({
-      committedCents: 19,
+      committedCents: 24,
       reservedCents: 0,
       blocked: false,
     });
@@ -562,7 +562,7 @@ describe("absolute budget guard", () => {
     expect(
       guard.settle("single-call", {
         state: "settled",
-        amountCents: 21,
+        amountCents: 41,
         basis: "provider_reported@fake-settlement/v1",
       }),
     ).toMatchObject({
@@ -1926,7 +1926,7 @@ describe("task attempt observation window", () => {
     });
   });
 
-  it("marks the current quality result when provider cost exceeds the per-call cap", async () => {
+  it("marks the current quality result when aggregate cost exceeds the execution reservation", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const candidate = plan.candidates[0];
     const guard = new ModelEvaluationBudgetGuard(100);
@@ -1941,7 +1941,7 @@ describe("task attempt observation window", () => {
           candidate.alias,
           candidate.expectedProtocol,
           canonicalAcceptedArtifact(),
-          plan.envelope.perCallCostCapCents + 1,
+          plan.envelope.perCallCostCapCents * 2 + 1,
         ),
     });
 
@@ -2281,7 +2281,7 @@ describe("quality-first candidate summary and ranking", () => {
     });
   });
 
-  it("keeps quality observations but makes an over-cap run unrankable", async () => {
+  it("keeps quality observations but makes an over-reservation run unrankable", async () => {
     const runs = await fullMatrix(
       "gpt-5.5",
       async (fixtureId, attempt, index) =>
@@ -2290,7 +2290,7 @@ describe("quality-first candidate summary and ranking", () => {
           fixtureId,
           attempt,
           1000,
-          index === 11 ? plan.envelope.perCallCostCapCents + 1 : 1,
+          index === 11 ? plan.envelope.perCallCostCapCents * 2 + 1 : 1,
         ),
     );
 

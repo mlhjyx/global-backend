@@ -688,7 +688,7 @@ describe("structured output, repair, errors, and settlement", () => {
     );
   });
 
-  it("does not dispatch repair after the first response reaches the known attempt cost cap", async () => {
+  it("permits repair when the first physical call exactly reaches its own cap", async () => {
     const request = canonicalRequest();
     const call = vi
       .fn()
@@ -715,14 +715,14 @@ describe("structured output, repair, errors, and settlement", () => {
       settlementResolver: settlementResolver(),
     });
 
-    await expect(executor.execute(request)).rejects.toMatchObject({
-      failureCode: "evaluation_cost_safety_rejected",
+    await expect(executor.execute(request)).resolves.toMatchObject({
       costSettlement: {
         state: "settled",
-        amountCents: request.perCallCostCapCents,
+        amountCents: request.perCallCostCapCents + 1,
       },
+      usage: { callCount: 2 },
     });
-    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledTimes(2);
   });
 
   it("does not dispatch repair after a hard-stop freeze if the first wire ignored abort", async () => {
@@ -1177,7 +1177,7 @@ describe("structured output, repair, errors, and settlement", () => {
     });
   });
 
-  it("keeps the original attempt cap after a two-call repair", async () => {
+  it("settles two individually bounded repair calls against the execution reservation", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const request = canonicalRequest();
     const accepted = canonicalAcceptedArtifact();
@@ -1210,15 +1210,14 @@ describe("structured output, repair, errors, and settlement", () => {
       resultClass: "quality_valid_runtime_on_time",
       usage: { callCount: 2 },
       costSettlement: { state: "settled", amountCents: 60 },
-      budgetCapExceeded: true,
+      budgetCapExceeded: false,
     });
     expect(wireCall).toHaveBeenCalledTimes(2);
     expect(budget.snapshot()).toMatchObject({
       committedCents: 60,
       reservedCents: 0,
       remainingDispatchableCents: plan.envelope.perCallCostCapCents * 2 - 60,
-      blocked: true,
-      blockReason: "per_call_cap_exceeded",
+      blocked: false,
     });
     await expect(
       runTaskEvaluationAttempt({
@@ -1226,13 +1225,12 @@ describe("structured output, repair, errors, and settlement", () => {
         candidate: plan.candidates[0],
         fixtureId: "industrial-pump-sparse",
         attempt: 1,
-        campaignBudget: new ModelEvaluationBudgetGuard(
-          plan.envelope.perCallCostCapCents * 2,
-        ),
+        campaignBudget: budget,
         execute: executor.execute,
       }),
     ).resolves.toMatchObject({
-      failureCode: "post_dispatch_settlement_incoherent",
+      failureCode: "campaign_budget_exhausted",
+      resultClass: "budget_stop",
     });
     expect(wireCall).toHaveBeenCalledTimes(2);
   });
@@ -1766,7 +1764,7 @@ describe("structured output, repair, errors, and settlement", () => {
     expect(call).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves a settled cost and lets the harness fail a cap exceedance", async () => {
+  it("preserves settlement while rejecting a physical call above its cap", async () => {
     const plan = buildTaskEvaluationPlan("site_builder.brand_profile");
     const request = canonicalRequest();
     const executor = createModelEvaluationProtocolExecutor({
@@ -1796,8 +1794,10 @@ describe("structured output, repair, errors, and settlement", () => {
         state: "settled",
         amountCents: 41,
       },
-      budgetCapExceeded: true,
-      artifactAccepted: true,
+      budgetCapExceeded: false,
+      artifactAccepted: false,
+      failureCode: "evaluation_cost_safety_rejected",
+      resultClass: "capability_unavailable",
     });
   });
 });

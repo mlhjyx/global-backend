@@ -1050,7 +1050,7 @@ describe("model evaluation executor authorization", () => {
     }
   });
 
-  it("durably freezes the authorization when the first call reaches the attempt cap", async () => {
+  it("durably freezes the authorization when one physical call exceeds its cap", async () => {
     const directory = await mkdtemp(
       join(tmpdir(), "evaluation-ledger-at-cap-freeze-spec-"),
     );
@@ -1069,7 +1069,7 @@ describe("model evaluation executor authorization", () => {
         output: [{ content: [{ type: "output_text", text: "{}" }] }],
         usage: { input_tokens: 10, output_tokens: 1 },
       },
-      providerReportedCostCents: plan.envelope.perCallCostCapCents,
+      providerReportedCostCents: plan.envelope.perCallCostCapCents + 1,
     }));
     try {
       const executor = createRawModelEvaluationProtocolExecutor({
@@ -1111,7 +1111,7 @@ describe("model evaluation executor authorization", () => {
       expect(events).toContainEqual(
         expect.objectContaining({
           event: "authorization_frozen",
-          reason: "known_attempt_cost_cap_reached_before_repair",
+          reason: "settled_cost_cap_exceeded",
         }),
       );
     } finally {

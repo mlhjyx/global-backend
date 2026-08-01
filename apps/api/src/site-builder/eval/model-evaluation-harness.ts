@@ -84,7 +84,7 @@ import { DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING } from "./design-spec-co
 export const MODEL_EVALUATION_HARNESS_SCHEMA_VERSION =
   "site-builder-model-evaluation-harness/v1" as const;
 export const SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID =
-  "site-builder-model-evaluation-harness/2026-08-01-v16" as const;
+  "site-builder-model-evaluation-harness/2026-08-01-v17" as const;
 export const MODEL_EVALUATION_RUN_SCHEMA_VERSION =
   "site-builder-model-evaluation-run/v4" as const;
 export const CAPABILITY_PROBE_ATTESTATION_SCHEMA_VERSION =
@@ -534,10 +534,6 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
     path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
   },
   {
-    role: "suite_preparation",
-    path: "apps/api/src/site-builder/eval/design-spec-evaluation-suite-prep.ts",
-  },
-  {
     role: "compiled_contracts_attestation",
     path: "apps/api/src/site-builder/eval/compiled-contracts-attestation.ts",
   },
@@ -552,14 +548,6 @@ const DESIGN_SPEC_EVALUATION_SOURCE_FILES = deepFreeze([
   {
     role: "runtime_integrity",
     path: "apps/api/src/site-builder/eval/model-evaluation-runtime-integrity.ts",
-  },
-  {
-    role: "create_only_writer",
-    path: "apps/api/src/site-builder/eval/create-only-json.ts",
-  },
-  {
-    role: "suite_preparation_runner",
-    path: "apps/api/scripts/prepare-site-builder-design-spec-evaluation-suite.mts",
   },
   {
     role: "api_manifest",
@@ -767,8 +755,8 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v13",
-  adapterId: "site-builder.design-spec-evaluation-adapter/v12",
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+  adapterId: "site-builder.design-spec-evaluation-adapter/v13",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
   systemPromptSha256: DESIGN_SPEC_SYSTEM_PROMPT_SHA256,
@@ -788,7 +776,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v13",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v14",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
@@ -1352,7 +1340,6 @@ export class ModelEvaluationBudgetGuard {
     string,
     {
       reservedCents: number;
-      perCallCapCents: number;
     }
   >();
   readonly #completedCalls = new Set<string>();
@@ -1402,7 +1389,6 @@ export class ModelEvaluationBudgetGuard {
     }
     this.#reservations.set(callId, {
       reservedCents,
-      perCallCapCents,
     });
     return {
       allowed: true,
@@ -1433,7 +1419,7 @@ export class ModelEvaluationBudgetGuard {
 
     this.#committedCents += normalized.settlement.amountCents;
     if (
-      normalized.settlement.amountCents > reservation.perCallCapCents ||
+      normalized.settlement.amountCents > reservation.reservedCents ||
       this.#committedCents + this.#unknownUpperBoundCents >
         this.#campaignBudgetCents
     ) {
@@ -1442,7 +1428,7 @@ export class ModelEvaluationBudgetGuard {
     return {
       ...normalized,
       capExceeded:
-        normalized.settlement.amountCents > reservation.perCallCapCents,
+        normalized.settlement.amountCents > reservation.reservedCents,
     };
   }
 
@@ -3906,7 +3892,9 @@ function assertCanonicalEvaluationRun(
   });
   const capExceeded =
     run.costSettlement.state === "settled" &&
-    run.costSettlement.amountCents > plan.envelope.perCallCostCapCents;
+    run.costSettlement.amountCents >
+      plan.envelope.perCallCostCapCents *
+        maximumExecutionCallCount(suite.repairTaskOutput);
   const settlementWasInvalid = normalizedSettlement.settlementInvalid;
   const settlementResultCoherent =
     run.costSettlement.state !== "not_incurred" ||
