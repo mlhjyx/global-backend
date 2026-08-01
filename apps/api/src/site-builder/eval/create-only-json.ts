@@ -12,23 +12,32 @@ import {
 export const SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX =
   "docs/evidence/site-builder/" as const;
 
-export async function writeRepositoryJsonCreateOnly(
-  repositoryRoot: string,
+function validateCreateOnlyOutputPath(
   repositoryRelativePath: string,
-  value: unknown,
-): Promise<void> {
+  extension: ".json" | ".md",
+): void {
   if (
     repositoryRelativePath.length === 0 ||
     isAbsolute(repositoryRelativePath) ||
     repositoryRelativePath.includes("\\") ||
     repositoryRelativePath.split("/").includes("..") ||
     !repositoryRelativePath.startsWith(SITE_BUILDER_EVIDENCE_OUTPUT_PREFIX) ||
-    !repositoryRelativePath.endsWith(".json")
+    !repositoryRelativePath.endsWith(extension)
   ) {
+    const format = extension === ".json" ? "JSON" : "Markdown";
     throw new Error(
-      "output must be a new repository-relative Site Builder evidence JSON path",
+      `output must be a new repository-relative Site Builder evidence ${format} path`,
     );
   }
+}
+
+async function writeRepositoryFileCreateOnly(
+  repositoryRoot: string,
+  repositoryRelativePath: string,
+  content: string,
+  extension: ".json" | ".md",
+): Promise<void> {
+  validateCreateOnlyOutputPath(repositoryRelativePath, extension);
   const realRepositoryRoot = await realpath(repositoryRoot);
   const lexicalOutput = resolve(realRepositoryRoot, repositoryRelativePath);
   const lexicalRelative = relative(realRepositoryRoot, lexicalOutput);
@@ -37,7 +46,7 @@ export async function writeRepositoryJsonCreateOnly(
     lexicalRelative.startsWith(`..${sep}`) ||
     isAbsolute(lexicalRelative)
   ) {
-    throw new Error("create-only JSON output escapes the repository");
+    throw new Error("create-only output escapes the repository");
   }
 
   const parentParts = dirname(repositoryRelativePath)
@@ -53,7 +62,7 @@ export async function writeRepositoryJsonCreateOnly(
     }
     const metadata = await lstat(next);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
-      throw new Error("create-only JSON parent must be a real directory");
+      throw new Error("create-only parent must be a real directory");
     }
     const realNext = await realpath(next);
     const nextRelative = relative(realRepositoryRoot, realNext);
@@ -62,7 +71,7 @@ export async function writeRepositoryJsonCreateOnly(
       nextRelative.startsWith(`..${sep}`) ||
       isAbsolute(nextRelative)
     ) {
-      throw new Error("create-only JSON parent escapes the repository");
+      throw new Error("create-only parent escapes the repository");
     }
     safeParent = realNext;
   }
@@ -81,7 +90,7 @@ export async function writeRepositoryJsonCreateOnly(
       descriptorRelative.startsWith(`..${sep}`) ||
       isAbsolute(descriptorRelative)
     ) {
-      throw new Error("create-only JSON directory escaped the repository");
+      throw new Error("create-only directory escaped the repository");
     }
     output = await open(
       `${descriptorPath}/${basename(repositoryRelativePath)}`,
@@ -91,10 +100,36 @@ export async function writeRepositoryJsonCreateOnly(
         constants.O_NOFOLLOW,
       0o600,
     );
-    await output.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await output.writeFile(content, "utf8");
     await output.sync();
   } finally {
     await output?.close();
     await directory.close();
   }
+}
+
+export async function writeRepositoryMarkdownCreateOnly(
+  repositoryRoot: string,
+  repositoryRelativePath: string,
+  content: string,
+): Promise<void> {
+  await writeRepositoryFileCreateOnly(
+    repositoryRoot,
+    repositoryRelativePath,
+    content,
+    ".md",
+  );
+}
+
+export async function writeRepositoryJsonCreateOnly(
+  repositoryRoot: string,
+  repositoryRelativePath: string,
+  value: unknown,
+): Promise<void> {
+  await writeRepositoryFileCreateOnly(
+    repositoryRoot,
+    repositoryRelativePath,
+    `${JSON.stringify(value, null, 2)}\n`,
+    ".json",
+  );
 }
