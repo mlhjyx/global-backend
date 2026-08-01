@@ -12,6 +12,7 @@ import {
   DESIGN_SPEC_EVAL_FIXTURES,
   prepareDesignSpecEvalFixture,
 } from "../apps/api/src/site-builder/eval/design-spec-eval";
+import { DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID } from "../apps/api/src/site-builder/eval/design-spec-evaluation-manifest-prep";
 import {
   SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
   buildCanonicalModelEvaluationCase,
@@ -233,6 +234,20 @@ test("a missing cost safety id fails documentation verification", async () => {
   assert.throws(
     () => verifyModelEvaluationHarness(documents),
     /architecture\/current\.md must reference the current evaluation cost safety id/,
+  );
+});
+
+test("a missing design_spec manifest prep id fails documentation verification", async () => {
+  const documents = await currentDocuments();
+  documents["docs/roadmap/release-plan.md"] = documents[
+    "docs/roadmap/release-plan.md"
+  ].replaceAll(
+    DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID,
+    "missing-design-spec-manifest-prep-id",
+  );
+  assert.throws(
+    () => verifyModelEvaluationHarness(documents),
+    /release-plan\.md must reference the current design_spec manifest prep id/,
   );
 });
 

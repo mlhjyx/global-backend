@@ -29,6 +29,7 @@ import {
   SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID,
   buildModelEvaluationEvidencePlanningManifest,
 } from "../apps/api/src/site-builder/eval/model-evaluation-evidence-prep";
+import { DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID } from "../apps/api/src/site-builder/eval/design-spec-evaluation-manifest-prep";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -127,7 +128,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 12 个 sparse/rich fixture 保存完整合成生产输入，并通过与生产运行共用的完整 catalog enumeration、required-role eligibility、ranking 与 top-3 projection 重建；prepare 时逐字重算，不能手工拼 candidate。",
     "- reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言数值、未知字段、其他 candidate 或新事实均事实门失败。",
     "- 稳定性 key 是通过 schema/生产 validator 后的完整标准化输出 SHA-256，覆盖 candidateId、reasons 与 warnings；只选中同一 candidate 不能把内容漂移伪装成稳定。",
-    `- suite 源码固定 tracked contracts source tree 与实际加载的 ${code("dist/**/*.js")} tree；artifact-tree canonical serializer 不调用实时 Array ${code("map")} / ${code("join")} / ${code("sort")}。其 ${designSuite.compiledContractsRuntimeBinding?.compiledArtifactCount ?? 0} 个 artifact / ${code(designSuite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? "unbound")} 摘要进入 suite、case、probe、run 与候选汇总；harness 加载时以及首调/repair 每个物理 wire call 紧邻调用前后均重新指纹。调用前漂移按 ${code("rejected_before_dispatch")} 拒绝；reservation 后发现 runtime drift 会先持久冻结 authorization；首调后漂移会在 repair 前完成已有调用的结算并冻结 authorization，不会发送第二次付费调用；调用中漂移使返回结果成为 ${code("provenance_invalid")}。本源码 PR 不生成 fixed-commit manifest；create-only writer 只能在源码进入 ${code("origin/main")} 后由独立零费用 PR 实现。`,
+    `- suite 源码固定 tracked contracts source tree 与实际加载的 ${code("dist/**/*.js")} tree；artifact-tree canonical serializer 不调用实时 Array ${code("map")} / ${code("join")} / ${code("sort")}。其 ${designSuite.compiledContractsRuntimeBinding?.compiledArtifactCount ?? 0} 个 artifact / ${code(designSuite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? "unbound")} 摘要进入 suite、case、probe、run 与候选汇总；harness 加载时以及首调/repair 每个物理 wire call 紧邻调用前后均重新指纹。调用前漂移按 ${code("rejected_before_dispatch")} 拒绝；reservation 后发现 runtime drift 会先持久冻结 authorization；首调后漂移会在 repair 前完成已有调用的结算并冻结 authorization，不会发送第二次付费调用；调用中漂移使返回结果成为 ${code("provenance_invalid")}。独立零费用 manifest 合同 ${code(DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID)} 只固定已经可从 ${code("origin/main")} 到达的 source commit，不改变该运行时合同。`,
     "",
     "## 闭合结果与排序",
     "",
@@ -148,12 +149,13 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "## Zero-cost evidence 准备",
     "",
     `- 准备合同：${code(SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID)}；固定 task ${code(evidencePrep.taskId)}、suite ${code(evidencePrep.suiteId)}、source bundle ${code(evidencePrep.sourceBundleContractId)}。`,
+    `- ${code("design_spec")} 独立 manifest 合同：${code(DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID)}。它冻结 12 fixtures、3 candidates、1 capability probe、73 executions、最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件；fixed source commit 必须已在 ${code("origin/main")} 上且仍是 prep head 祖先，因此 manifest PR 可 squash 而不丢失 source commit。它不含凭据、价格、余额、wire client 或费用授权。`,
     `- manifest：${evidencePrep.executionCount} executions / 最多 ${evidencePrep.maximumWireCallCount} wire calls；其中 capability probe ${evidencePrep.executions.filter((entry) => entry.kind === "capability_probe").length}、target ${evidencePrep.executions.filter((entry) => entry.kind === "target").length}、legacy comparator ${evidencePrep.executions.filter((entry) => entry.kind === "legacy_comparator").length}。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。`,
     `- prompt 上界从六个 canonical case 的真实 initial/repair payload 派生：initial 最多 ${evidencePrep.promptUtf8Bytes.maximumCanonicalInitial} UTF-8 bytes，repair 最多 ${evidencePrep.promptUtf8Bytes.maximumCanonicalRepair} UTF-8 bytes；repair reason 另受机器常量硬限，不以 attestation 自报上限替代真实 payload。`,
     `- ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.executions} executions / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.wireCalls} wire calls / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.amountCents}¢ 仍标记为 ${code(MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.verification)}，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。`,
     `- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 ${code("wx")} 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 ${code(".env")} 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。`,
     `- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 ${code("READY_FOR_PRODUCT_DECISION")}，同时固定 ${code("dispatchAuthorization=NOT_AUTHORIZED")}。`,
-    "- 当前 PR 没有生成真实费用 attestation、费用卡、fixed-commit manifest 或模型 evidence，没有读取管理面余额/价格，也没有任何模型/媒体费用。BrandProfile evidence-prep 仍只准入其固定任务；`design_spec` 当前仅有 suite/harness 源码，必须在源码合并进入 `origin/main` 后另开 create-only manifest PR。其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。",
+    "- 当前 `design_spec` 阶段只生成 zero-cost、create-only fixed-source manifest，不生成真实费用 attestation、费用卡或模型 evidence，也不读取管理面余额/价格。BrandProfile evidence-prep 仍只准入其固定任务；其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。",
     "",
   ].join("\n");
 }
@@ -321,6 +323,16 @@ export function verifyModelEvaluationHarness(
         ),
       ),
       `${path} must reference the current evaluation evidence prep id`,
+    );
+    assert.match(
+      document,
+      new RegExp(
+        DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID.replaceAll(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `${path} must reference the current design_spec manifest prep id`,
     );
   }
 }
