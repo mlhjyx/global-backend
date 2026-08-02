@@ -528,6 +528,20 @@ export function renderDesignSpecEvidenceDecisionCard(
           .map((alias) => `\`${alias}\``)
           .join(", ")
       : "（空；当前令牌未启用精确模型限制）";
+  const authorizationGate = !report.credential.scopeExact
+    ? `The current token is not a finite exact-scope evaluation credential, so no
+runtime attestation was created or installed. Create a purpose-specific token
+with exactly the three aliases above and a finite cap. Then present a fresh
+fee card and request separate explicit authorization before any capability
+probe or evidence execution.`
+    : report.status !== "READY_FOR_PRODUCT_DECISION"
+      ? `The finite exact-scope credential attestation passed, but the blockers
+above still prevent a spending decision. No runtime attestation was created or
+installed, and model dispatch remains unauthorized.`
+      : `The finite exact-scope credential attestation passed. This preflight did
+not create or install a runtime attestation and did not authorize model
+dispatch. Review this fee card and provide separate explicit authorization
+before any capability probe or evidence execution.`;
   return `# design_spec evidence preflight decision card
 
 Date: ${report.pricing.capturedAt}
@@ -577,11 +591,7 @@ ${rows}
 
 ${report.blockers.length > 0 ? report.blockers.map((blocker) => `- \`${blocker}\``).join("\n") : "- None"}
 
-The current token is not a finite exact-scope evaluation credential, so no
-runtime attestation was created or installed. Create a purpose-specific token
-with exactly the three aliases above and a finite cap. Then present a fresh
-fee card and request separate explicit authorization before any capability
-probe or evidence execution.
+${authorizationGate}
 
 Report SHA-256: \`${report.reportSha256}\`
 `;

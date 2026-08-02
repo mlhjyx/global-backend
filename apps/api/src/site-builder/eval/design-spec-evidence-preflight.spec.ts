@@ -152,6 +152,9 @@ describe("design_spec evidence preflight", () => {
     );
     expect(report.status).toBe("BLOCKED_OPENOX_PRICE_MISSING");
     expect(report.blockers).toContain("OPENOX_PRICE_MISSING");
+    expect(renderDesignSpecEvidenceDecisionCard(report)).toContain(
+      "the blockers\nabove still prevent a spending decision",
+    );
   });
 
   it("renders a decision card without raw credential material or model output", () => {
@@ -160,7 +163,37 @@ describe("design_spec evidence preflight", () => {
     );
     expect(card).toContain("NOT_AUTHORIZED");
     expect(card).toContain("OpenOx");
+    expect(card).toContain(
+      "The finite exact-scope credential attestation passed",
+    );
+    expect(card).not.toContain(
+      "The current token is not a finite exact-scope evaluation credential",
+    );
     expect(card).not.toContain("response body");
     expect(card).not.toContain("Bearer ");
+  });
+
+  it("keeps the finite-scope remediation on a blocked credential card", () => {
+    const card = renderDesignSpecEvidenceDecisionCard(
+      buildDesignSpecEvidencePreflight(
+        input({
+          gatewayUsage: {
+            data: {
+              unlimited_quota: true,
+              model_limits_enabled: false,
+              total_granted: 0,
+              total_available: -1,
+              model_limits: {},
+            },
+          },
+        }),
+      ),
+    );
+    expect(card).toContain(
+      "The current token is not a finite exact-scope evaluation credential",
+    );
+    expect(card).not.toContain(
+      "The finite exact-scope credential attestation passed",
+    );
   });
 });
