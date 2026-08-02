@@ -1,0 +1,243 @@
+{
+  "schemaVersion": "site-builder-design-spec-full-restart-prep/v1",
+  "status": "READY_FOR_CREDENTIAL_PREFLIGHT",
+  "productDecision": "FULL_CANONICAL_CAMPAIGN_RESTART",
+  "preparedFixedCommitSha": "b31100f2a230ba5ece64d7d3371098c108c62e4e",
+  "sourceEvidence": {
+    "manifestSha256": "15813905892f19db58fd600a11f938a31493fea7d7bf8922e5ecbed37a88003d",
+    "resumeDecisionSha256": "fc9b93debed1e87d271b1db592d36971c0593243a1624805b7c89a0de7301866",
+    "stoppedEvidenceSha256": "30f0fa88edbd1ae76e434cd048ef7bb5c8e39a0d7d286f68dedc113a69ff6327",
+    "reconciliationSha256": "24ec1b9909525392969ae6bbbcab98adb7d1cd44b1d88e171d700cee923a1319",
+    "runnerSourceBundle": {
+      "commitSha": "b31100f2a230ba5ece64d7d3371098c108c62e4e",
+      "contractId": "design-spec-full-restart-preflight-source-bundle/v1",
+      "sha256": "6e956857030a6d6fe8f1d776163cd1bff781e2979fa4239c41cb5b7a2a4377b4",
+      "files": [
+        {
+          "path": "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json",
+          "sha256": "15813905892f19db58fd600a11f938a31493fea7d7bf8922e5ecbed37a88003d"
+        },
+        {
+          "path": "apps/api/scripts/prepare-site-builder-design-spec-evidence-preflight.mts",
+          "sha256": "0abab5cf80172c67588f0fc30f310a2753731a63e28b1c9b406c19506f9a091d"
+        },
+        {
+          "path": "apps/api/scripts/run-site-builder-design-spec-real-evidence.mts",
+          "sha256": "05ef1dc265e45cdca942ed15206d2fed0d06573d1a2ce5297c6e97c4b76724d8"
+        },
+        {
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/create-only-json.ts",
+          "sha256": "986c1dfac6c22f59c8b95edf180bf61b1b65219a46d1abfd923c0d6ec9d19f42"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/design-spec-evaluation-manifest-prep.ts",
+          "sha256": "80e8547f4c0b8b480af43bb7cb30c54705b8960f0a2408c8b04d51f9cd987449"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/design-spec-evidence-preflight.ts",
+          "sha256": "c09dd2a0269c9a69a4264071287051391e524f257a7c12c33b2fdc88194e0667"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/design-spec-full-restart-prep.ts",
+          "sha256": "a380f5fdbded24f52602926ccafa5d3abdb1a14944ca64f98f915fde0d996838"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/design-spec-real-evidence.ts",
+          "sha256": "3b1707d7ad8303183da135e612c18ae948e3206018b7d0817a6c213f05680440"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+          "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+          "sha256": "506d6153367867c6fb449c3c179603bc24a4ab2ec80889d1daddad0c8f64adb8"
+        },
+        {
+          "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+          "sha256": "9cdde783d4e85b3fdabf0626599f39e36905f9baf7dfa1d5a7e05eb6d6378615"
+        },
+        {
+          "path": "apps/api/src/site-builder/site-builder-model-settlement.ts",
+          "sha256": "723f65941d0889fcabb9d0c1a3b7e20546a85690d9447f03eac86a5bfd5f94f8"
+        }
+      ]
+    }
+  },
+  "priorCampaign": {
+    "executionsStarted": 17,
+    "settledCostCurrency": "CNY",
+    "settledCostCents": 20.6539,
+    "settledCostUnits": 0.206539,
+    "evidenceReusableForRanking": false,
+    "probeReusable": false,
+    "matrixRunsReusable": false,
+    "ledgerReusable": false
+  },
+  "restart": {
+    "campaignId": "design-spec-full-restart-20260802-v1",
+    "dispatchExecutions": 73,
+    "probeExecutions": 1,
+    "matrixExecutions": 72,
+    "maximumWireCalls": 146,
+    "mechanicalHardCeilingCents": 2920,
+    "requiredQuotaPoints": 14600000,
+    "currentCanonicalRunnerCanExecute": true,
+    "scopedResumeRunnerRequired": false,
+    "targetExecutionsByAlias": {
+      "claude-sonnet-5": 24,
+      "gpt-5.5": 24,
+      "gpt-5.6-terra": 24
+    },
+    "executionKeys": [
+      "capability_probe/gpt-5.5/openai-responses/natural-origin-rich/1",
+      "target/gpt-5.6-terra/openai-responses/natural-origin-rich/1",
+      "target/gpt-5.6-terra/openai-responses/natural-origin-rich/2",
+      "target/gpt-5.6-terra/openai-responses/natural-origin-sparse/1",
+      "target/gpt-5.6-terra/openai-responses/natural-origin-sparse/2",
+      "target/gpt-5.6-terra/openai-responses/oem-capability-rich/1",
+      "target/gpt-5.6-terra/openai-responses/oem-capability-rich/2",
+      "target/gpt-5.6-terra/openai-responses/oem-capability-sparse/1",
+      "target/gpt-5.6-terra/openai-responses/oem-capability-sparse/2",
+      "target/gpt-5.6-terra/openai-responses/precision-industrial-rich/1",
+      "target/gpt-5.6-terra/openai-responses/precision-industrial-rich/2",
+      "target/gpt-5.6-terra/openai-responses/precision-industrial-sparse/1",
+      "target/gpt-5.6-terra/openai-responses/precision-industrial-sparse/2",
+      "target/gpt-5.6-terra/openai-responses/premium-innovation-rich/1",
+      "target/gpt-5.6-terra/openai-responses/premium-innovation-rich/2",
+      "target/gpt-5.6-terra/openai-responses/premium-innovation-sparse/1",
+      "target/gpt-5.6-terra/openai-responses/premium-innovation-sparse/2",
+      "target/gpt-5.6-terra/openai-responses/scientific-trust-rich/1",
+      "target/gpt-5.6-terra/openai-responses/scientific-trust-rich/2",
+      "target/gpt-5.6-terra/openai-responses/scientific-trust-sparse/1",
+      "target/gpt-5.6-terra/openai-responses/scientific-trust-sparse/2",
+      "target/gpt-5.6-terra/openai-responses/technical-catalog-rich/1",
+      "target/gpt-5.6-terra/openai-responses/technical-catalog-rich/2",
+      "target/gpt-5.6-terra/openai-responses/technical-catalog-sparse/1",
+      "target/gpt-5.6-terra/openai-responses/technical-catalog-sparse/2",
+      "target/gpt-5.5/openai-responses/natural-origin-rich/1",
+      "target/gpt-5.5/openai-responses/natural-origin-rich/2",
+      "target/gpt-5.5/openai-responses/natural-origin-sparse/1",
+      "target/gpt-5.5/openai-responses/natural-origin-sparse/2",
+      "target/gpt-5.5/openai-responses/oem-capability-rich/1",
+      "target/gpt-5.5/openai-responses/oem-capability-rich/2",
+      "target/gpt-5.5/openai-responses/oem-capability-sparse/1",
+      "target/gpt-5.5/openai-responses/oem-capability-sparse/2",
+      "target/gpt-5.5/openai-responses/precision-industrial-rich/1",
+      "target/gpt-5.5/openai-responses/precision-industrial-rich/2",
+      "target/gpt-5.5/openai-responses/precision-industrial-sparse/1",
+      "target/gpt-5.5/openai-responses/precision-industrial-sparse/2",
+      "target/gpt-5.5/openai-responses/premium-innovation-rich/1",
+      "target/gpt-5.5/openai-responses/premium-innovation-rich/2",
+      "target/gpt-5.5/openai-responses/premium-innovation-sparse/1",
+      "target/gpt-5.5/openai-responses/premium-innovation-sparse/2",
+      "target/gpt-5.5/openai-responses/scientific-trust-rich/1",
+      "target/gpt-5.5/openai-responses/scientific-trust-rich/2",
+      "target/gpt-5.5/openai-responses/scientific-trust-sparse/1",
+      "target/gpt-5.5/openai-responses/scientific-trust-sparse/2",
+      "target/gpt-5.5/openai-responses/technical-catalog-rich/1",
+      "target/gpt-5.5/openai-responses/technical-catalog-rich/2",
+      "target/gpt-5.5/openai-responses/technical-catalog-sparse/1",
+      "target/gpt-5.5/openai-responses/technical-catalog-sparse/2",
+      "target/claude-sonnet-5/anthropic-messages/natural-origin-rich/1",
+      "target/claude-sonnet-5/anthropic-messages/natural-origin-rich/2",
+      "target/claude-sonnet-5/anthropic-messages/natural-origin-sparse/1",
+      "target/claude-sonnet-5/anthropic-messages/natural-origin-sparse/2",
+      "target/claude-sonnet-5/anthropic-messages/oem-capability-rich/1",
+      "target/claude-sonnet-5/anthropic-messages/oem-capability-rich/2",
+      "target/claude-sonnet-5/anthropic-messages/oem-capability-sparse/1",
+      "target/claude-sonnet-5/anthropic-messages/oem-capability-sparse/2",
+      "target/claude-sonnet-5/anthropic-messages/precision-industrial-rich/1",
+      "target/claude-sonnet-5/anthropic-messages/precision-industrial-rich/2",
+      "target/claude-sonnet-5/anthropic-messages/precision-industrial-sparse/1",
+      "target/claude-sonnet-5/anthropic-messages/precision-industrial-sparse/2",
+      "target/claude-sonnet-5/anthropic-messages/premium-innovation-rich/1",
+      "target/claude-sonnet-5/anthropic-messages/premium-innovation-rich/2",
+      "target/claude-sonnet-5/anthropic-messages/premium-innovation-sparse/1",
+      "target/claude-sonnet-5/anthropic-messages/premium-innovation-sparse/2",
+      "target/claude-sonnet-5/anthropic-messages/scientific-trust-rich/1",
+      "target/claude-sonnet-5/anthropic-messages/scientific-trust-rich/2",
+      "target/claude-sonnet-5/anthropic-messages/scientific-trust-sparse/1",
+      "target/claude-sonnet-5/anthropic-messages/scientific-trust-sparse/2",
+      "target/claude-sonnet-5/anthropic-messages/technical-catalog-rich/1",
+      "target/claude-sonnet-5/anthropic-messages/technical-catalog-rich/2",
+      "target/claude-sonnet-5/anthropic-messages/technical-catalog-sparse/1",
+      "target/claude-sonnet-5/anthropic-messages/technical-catalog-sparse/2"
+    ],
+    "executionListSha256": "3523e91f8530b170a47a9a7190da696b5d6b80357bc1b86cf04dc672edaa96c1",
+    "runBinding": {
+      "campaignId": "design-spec-full-restart-20260802-v1",
+      "preflightPath": "docs/evidence/site-builder/m1-g-design-spec-full-restart-preflight-v1.json",
+      "executionPreflightOutputPath": "docs/evidence/site-builder/m1-g-design-spec-full-restart-execution-preflight-v1.json",
+      "outputPath": "docs/evidence/site-builder/m1-g-design-spec-full-restart-real-evidence-v1.json",
+      "probeOutputPath": "docs/evidence/site-builder/m1-g-design-spec-full-restart-capability-probe-v1.json",
+      "ledgerId": "design-spec-real-evidence-ledger/design-spec-full-restart-20260802-v1",
+      "credentialAttestationId": "design-spec-evaluation-credential/design-spec-full-restart-20260802-v1",
+      "pricingSnapshotId": "openox-design-spec-prices/design-spec-full-restart-20260802-v1"
+    }
+  },
+  "pricingReference": {
+    "authority": "openox_model_marketplace",
+    "capturedAt": "2026-08-02T11:00:07.348Z",
+    "entries": [
+      {
+        "alias": "claude-sonnet-5",
+        "protocol": "anthropic-messages",
+        "currency": "USD",
+        "effectiveInputRatePerMillionTokens": "2.52",
+        "effectiveOutputRatePerMillionTokens": "12.6"
+      },
+      {
+        "alias": "gpt-5.5",
+        "protocol": "openai-responses",
+        "currency": "CNY",
+        "effectiveInputRatePerMillionTokens": "5",
+        "effectiveOutputRatePerMillionTokens": "30"
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "protocol": "openai-responses",
+        "currency": "CNY",
+        "effectiveInputRatePerMillionTokens": "2",
+        "effectiveOutputRatePerMillionTokens": "12"
+      }
+    ],
+    "revalidation": "REQUIRED_BEFORE_COST_AUTHORIZATION",
+    "expectedCost": "PENDING_FRESH_OPENOX_SNAPSHOT_AND_TOKEN_ENVELOPE"
+  },
+  "credentialGate": {
+    "status": "FRESH_FINITE_EXACT_CREDENTIAL_REQUIRED",
+    "purpose": "site_builder_model_evaluation",
+    "quotaMode": "limited",
+    "exactAliases": [
+      "claude-sonnet-5",
+      "gpt-5.5",
+      "gpt-5.6-terra"
+    ],
+    "quotaCapPoints": 14600000,
+    "remainingQuotaPoints": 14600000,
+    "credentialMaterial": "not_persisted"
+  },
+  "stopConditions": [
+    "fresh_preflight_not_exactly_bound_to_fixed_commit",
+    "fresh_finite_exact_credential_missing_or_not_full_cap",
+    "openox_price_missing_or_drifted",
+    "channel_or_protocol_binding_not_exact",
+    "new_authorization_or_ledger_identity_missing_or_reused",
+    "separate_real_cost_authorization_missing",
+    "capability_probe_not_proven",
+    "execution_or_wire_call_manifest_exhausted",
+    "protocol_or_model_identity_mismatch",
+    "unknown_or_over_budget_settlement"
+  ],
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "actualNetworkCalls": 0,
+  "actualModelWireCalls": 0,
+  "actualModelCostCents": 0,
+  "responseMaterial": "not_persisted",
+  "promotion": "NOT_AUTHORIZED"
+}
