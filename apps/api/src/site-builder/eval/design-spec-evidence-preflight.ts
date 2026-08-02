@@ -4,9 +4,9 @@ import type { OpenOxPricingCatalog } from "../site-builder-model-settlement";
 import { settlementOpenOxPrice } from "../site-builder-model-settlement";
 
 export const DESIGN_SPEC_EVIDENCE_PREFLIGHT_ID =
-  "site-builder-design-spec-evidence-preflight/2026-08-01-v1" as const;
+  "site-builder-design-spec-evidence-preflight/2026-08-02-v2" as const;
 export const DESIGN_SPEC_EVIDENCE_PREFLIGHT_SCHEMA_VERSION =
-  "site-builder-design-spec-evidence-preflight/v1" as const;
+  "site-builder-design-spec-evidence-preflight/v2" as const;
 export const OPENOX_PRICING_CATALOG_URL =
   "https://openox.tech/api/public/pricing-catalog" as const;
 export const OPENOX_PRICING_MODELS_PAGE = "https://openox.tech/models" as const;
@@ -23,12 +23,24 @@ const REQUIRED_GROUP_BY_ALIAS: Readonly<Record<string, string>> = Object.freeze(
     "claude-sonnet-5": "special",
   },
 );
+const REQUIRED_EVALUATION_GROUP = "design-spec-eval" as const;
+const REQUIRED_CHANNEL_BY_ALIAS: Readonly<
+  Record<string, { channelId: number; protocol: string }>
+> = Object.freeze({
+  "claude-sonnet-5": {
+    channelId: 19,
+    protocol: "anthropic-messages",
+  },
+  "gpt-5.5": { channelId: 17, protocol: "openai-responses" },
+  "gpt-5.6-terra": { channelId: 17, protocol: "openai-responses" },
+});
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 
 export type DesignSpecEvidencePreflightStatus =
   | "READY_FOR_PRODUCT_DECISION"
   | "BLOCKED_CREDENTIAL_NOT_FINITE_EXACT"
+  | "BLOCKED_CHANNEL_NOT_EXACT"
   | "BLOCKED_OPENOX_PRICE_MISSING"
   | "BLOCKED_READ_ONLY_PREFLIGHT_UNAVAILABLE";
 
@@ -120,6 +132,23 @@ export interface DesignSpecEvidenceCostEstimate {
   conservativeTokenEnvelopeByCurrency: Readonly<{ USD: number; CNY: number }>;
 }
 
+export interface DesignSpecEvidenceChannelBindingSnapshot {
+  source: "new_api_sanitized_control_plane_snapshot";
+  observedAt: string | null;
+  group: string | null;
+  groupRatio: number | null;
+  crossGroupRetry: boolean | null;
+  exact: boolean;
+  credentialMaterial: "not_persisted";
+  entries: readonly {
+    alias: string;
+    protocol: string;
+    channelId: number;
+    channelName: string;
+    enabled: boolean;
+  }[];
+}
+
 export interface DesignSpecEvidencePreflightReport {
   schemaVersion: typeof DESIGN_SPEC_EVIDENCE_PREFLIGHT_SCHEMA_VERSION;
   preflightId: typeof DESIGN_SPEC_EVIDENCE_PREFLIGHT_ID;
@@ -140,6 +169,7 @@ export interface DesignSpecEvidencePreflightReport {
     generativeEndpointsCalled: readonly [];
   };
   credential: DesignSpecEvidenceCredentialSnapshot;
+  channelBinding: DesignSpecEvidenceChannelBindingSnapshot;
   pricing: DesignSpecEvidencePriceSnapshot;
   estimate: DesignSpecEvidenceCostEstimate;
   blockers: readonly string[];
@@ -155,6 +185,7 @@ export interface DesignSpecEvidencePreflightInput {
   credentialMaterial: "not_persisted";
   gatewayModels: unknown | null;
   gatewayUsage: unknown | null;
+  gatewayChannelBinding: unknown | null;
   openOxCatalog: unknown | null;
   openOxHttpStatus: number;
   openOxResponseSha256: string | null;
@@ -166,6 +197,7 @@ const STOP_CONDITIONS = Object.freeze([
   "fixed_commit_or_manifest_drift",
   "source_bundle_drift",
   "missing_or_non_finite_exact_credential_scope",
+  "missing_ambiguous_or_changed_channel_binding",
   "missing_or_changed_openox_price",
   "separate_cost_authorization_missing",
   "execution_or_wire_call_manifest_exhausted",
@@ -273,6 +305,88 @@ function visibleModelIds(input: unknown): string[] {
     .map((entry) => record(entry, "gateway model row").id)
     .filter((id): id is string => typeof id === "string")
     .sort();
+}
+
+function channelBindingSnapshot(
+  input: unknown | null,
+): DesignSpecEvidenceChannelBindingSnapshot {
+  const unavailable: DesignSpecEvidenceChannelBindingSnapshot = {
+    source: "new_api_sanitized_control_plane_snapshot",
+    observedAt: null,
+    group: null,
+    groupRatio: null,
+    crossGroupRetry: null,
+    exact: false,
+    credentialMaterial: "not_persisted",
+    entries: [],
+  };
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    return unavailable;
+  const value = input as Record<string, unknown>;
+  const rawEntries = Array.isArray(value.entries) ? value.entries : [];
+  const entries = rawEntries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry))
+        return null;
+      const row = entry as Record<string, unknown>;
+      if (
+        typeof row.alias !== "string" ||
+        typeof row.protocol !== "string" ||
+        !Number.isSafeInteger(row.channelId) ||
+        typeof row.channelName !== "string" ||
+        row.channelName.length === 0 ||
+        typeof row.enabled !== "boolean"
+      )
+        return null;
+      return {
+        alias: row.alias,
+        protocol: row.protocol,
+        channelId: row.channelId as number,
+        channelName: row.channelName,
+        enabled: row.enabled,
+      };
+    })
+    .filter(
+      (
+        entry,
+      ): entry is DesignSpecEvidenceChannelBindingSnapshot["entries"][number] =>
+        entry !== null,
+    )
+    .sort(
+      (left, right) =>
+        left.alias.localeCompare(right.alias) ||
+        left.channelId - right.channelId,
+    );
+  const expectedAliases = Object.keys(REQUIRED_CHANNEL_BY_ALIAS).sort();
+  const exactEntries =
+    entries.length === expectedAliases.length &&
+    expectedAliases.every((alias) => {
+      const expected = REQUIRED_CHANNEL_BY_ALIAS[alias]!;
+      const matches = entries.filter((entry) => entry.alias === alias);
+      return (
+        matches.length === 1 &&
+        matches[0]!.protocol === expected.protocol &&
+        matches[0]!.channelId === expected.channelId &&
+        matches[0]!.enabled
+      );
+    });
+  const exact =
+    value.source === "new_api_sanitized_control_plane_snapshot" &&
+    value.group === REQUIRED_EVALUATION_GROUP &&
+    value.groupRatio === 1 &&
+    value.crossGroupRetry === false &&
+    exactEntries;
+  return {
+    source: "new_api_sanitized_control_plane_snapshot",
+    observedAt: typeof value.observedAt === "string" ? value.observedAt : null,
+    group: typeof value.group === "string" ? value.group : null,
+    groupRatio: typeof value.groupRatio === "number" ? value.groupRatio : null,
+    crossGroupRetry:
+      typeof value.crossGroupRetry === "boolean" ? value.crossGroupRetry : null,
+    exact,
+    credentialMaterial: "not_persisted",
+    entries,
+  };
 }
 
 function priceEntries(
@@ -431,6 +545,7 @@ export function buildDesignSpecEvidencePreflight(
       ? sha256CanonicalJson(visible)
       : null,
   };
+  const channelBinding = channelBindingSnapshot(input.gatewayChannelBinding);
   const entries = priceEntries(
     manifest,
     input.openOxCatalog as OpenOxPricingCatalog | null,
@@ -469,6 +584,7 @@ export function buildDesignSpecEvidencePreflight(
   };
   const blockers: string[] = [];
   if (!scopeExact) blockers.push("CREDENTIAL_NOT_FINITE_EXACT");
+  if (!channelBinding.exact) blockers.push("CHANNEL_NOT_EXACT");
   if (entries.some((entry) => entry.status !== "published"))
     blockers.push("OPENOX_PRICE_MISSING");
   if (input.openOxCatalog === null)
@@ -480,7 +596,9 @@ export function buildDesignSpecEvidencePreflight(
         ? "BLOCKED_OPENOX_PRICE_MISSING"
         : !scopeExact
           ? "BLOCKED_CREDENTIAL_NOT_FINITE_EXACT"
-          : "READY_FOR_PRODUCT_DECISION";
+          : !channelBinding.exact
+            ? "BLOCKED_CHANNEL_NOT_EXACT"
+            : "READY_FOR_PRODUCT_DECISION";
   const withoutDigest = {
     schemaVersion: DESIGN_SPEC_EVIDENCE_PREFLIGHT_SCHEMA_VERSION,
     preflightId: DESIGN_SPEC_EVIDENCE_PREFLIGHT_ID,
@@ -496,6 +614,7 @@ export function buildDesignSpecEvidencePreflight(
       generativeEndpointsCalled: [] as const,
     },
     credential,
+    channelBinding,
     pricing,
     estimate: estimateCost(manifest, entries),
     blockers,
@@ -528,6 +647,12 @@ export function renderDesignSpecEvidenceDecisionCard(
           .map((alias) => `\`${alias}\``)
           .join(", ")
       : "（空；当前令牌未启用精确模型限制）";
+  const channelRows = report.channelBinding.entries
+    .map(
+      (entry) =>
+        `| \`${entry.alias}\` | ${entry.protocol} | Channel ${entry.channelId} | ${entry.channelName} | ${String(entry.enabled)} |`,
+    )
+    .join("\n");
   const authorizationGate = !report.credential.scopeExact
     ? `The current token is not a finite exact-scope evaluation credential, so no
 runtime attestation was created or installed. Create a purpose-specific token
@@ -586,6 +711,18 @@ ${rows}
 - Exact scope: \`${String(report.credential.scopeExact)}\`
 - Observed allowed aliases: ${allowed}
 - Granted quota points: \`${String(report.credential.quotaCapPoints)}\`; remaining: \`${String(report.credential.remainingQuotaPoints)}\`
+
+## Exact channel binding
+
+- Dedicated group: \`${report.channelBinding.group ?? "unavailable"}\`
+- Group ratio: \`${String(report.channelBinding.groupRatio)}\`
+- Cross-group retry: \`${String(report.channelBinding.crossGroupRetry)}\`
+- Exact one-channel-per-alias binding: \`${String(report.channelBinding.exact)}\`
+- Credential material: not persisted
+
+| Alias | Protocol | Channel | Reviewed channel name | Enabled |
+| --- | --- | --- | --- | --- |
+${channelRows || "| unavailable | unavailable | unavailable | unavailable | false |"}
 
 ## Blockers and authorization gate
 

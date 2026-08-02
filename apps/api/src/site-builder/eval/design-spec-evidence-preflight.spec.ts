@@ -89,6 +89,36 @@ function input(overrides: Record<string, unknown> = {}) {
         model_limits: Object.fromEntries(aliases.map(([id]) => [id, 1000])),
       },
     },
+    gatewayChannelBinding: {
+      source: "new_api_sanitized_control_plane_snapshot",
+      observedAt: "2026-08-01T10:50:00.000Z",
+      group: "design-spec-eval",
+      groupRatio: 1,
+      crossGroupRetry: false,
+      entries: [
+        {
+          alias: "claude-sonnet-5",
+          protocol: "anthropic-messages",
+          channelId: 19,
+          channelName: "claude",
+          enabled: true,
+        },
+        {
+          alias: "gpt-5.5",
+          protocol: "openai-responses",
+          channelId: 17,
+          channelName: "OpenOx GPT Portfolio",
+          enabled: true,
+        },
+        {
+          alias: "gpt-5.6-terra",
+          protocol: "openai-responses",
+          channelId: 17,
+          channelName: "OpenOx GPT Portfolio",
+          enabled: true,
+        },
+      ],
+    },
     openOxCatalog: catalog(),
     openOxHttpStatus: 200,
     openOxResponseSha256: "b".repeat(64),
@@ -115,8 +145,49 @@ describe("design_spec evidence preflight", () => {
       "published",
     ]);
     expect(report.credential.scopeExact).toBe(true);
+    expect(report.channelBinding.exact).toBe(true);
+    expect(report.channelBinding.group).toBe("design-spec-eval");
     expect(report.estimate.maximumWireCallCount).toBe(146);
     expect(report.estimate.mechanicalHardCeilingCents).toBe(2920);
+  });
+
+  it("fails closed when an alias can reach more than one enabled channel", () => {
+    const valid = input().gatewayChannelBinding as {
+      entries: Record<string, unknown>[];
+    };
+    const report = buildDesignSpecEvidencePreflight(
+      input({
+        gatewayChannelBinding: {
+          ...(input().gatewayChannelBinding as Record<string, unknown>),
+          entries: [
+            ...valid.entries,
+            {
+              alias: "claude-sonnet-5",
+              protocol: "anthropic-messages",
+              channelId: 8,
+              channelName: "TeamoRouter Claude",
+              enabled: true,
+            },
+          ],
+        },
+      }),
+    );
+    expect(report.status).toBe("BLOCKED_CHANNEL_NOT_EXACT");
+    expect(report.blockers).toContain("CHANNEL_NOT_EXACT");
+    expect(report.channelBinding.exact).toBe(false);
+  });
+
+  it("fails closed when the token is not bound to the dedicated group", () => {
+    const report = buildDesignSpecEvidencePreflight(
+      input({
+        gatewayChannelBinding: {
+          ...(input().gatewayChannelBinding as Record<string, unknown>),
+          group: "default",
+        },
+      }),
+    );
+    expect(report.status).toBe("BLOCKED_CHANNEL_NOT_EXACT");
+    expect(report.blockers).toContain("CHANNEL_NOT_EXACT");
   });
 
   it("blocks an unlimited or unbounded gateway token without hiding price evidence", () => {
@@ -163,6 +234,8 @@ describe("design_spec evidence preflight", () => {
     );
     expect(card).toContain("NOT_AUTHORIZED");
     expect(card).toContain("OpenOx");
+    expect(card).toContain("Channel 17");
+    expect(card).toContain("Channel 19");
     expect(card).toContain(
       "The finite exact-scope credential attestation passed",
     );

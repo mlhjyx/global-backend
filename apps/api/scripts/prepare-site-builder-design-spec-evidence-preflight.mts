@@ -45,8 +45,21 @@ This command performs only read-only gateway control-plane and public OpenOx
 catalog requests. It never calls a generative endpoint, reads or writes a
 runtime attestation, changes new-api, or dispatches a model. MODEL_GATEWAY_URL
 and MODEL_GATEWAY_KEY must be supplied by the caller when credential scope is
-to be observed; their values are never written to evidence.
+to be observed; their values are never written to evidence. A sanitized
+MODEL_GATEWAY_CHANNEL_BINDING_JSON snapshot is mandatory and contains only the
+dedicated group, group ratio, retry flag, aliases, protocols, channel ids and
+reviewed channel names; it must never contain keys or token identifiers.
 `;
+
+function channelBindingFromEnvironment(): unknown | null {
+  const source = process.env.MODEL_GATEWAY_CHANNEL_BINDING_JSON?.trim();
+  if (!source) return null;
+  const value = JSON.parse(source) as unknown;
+  const serialized = JSON.stringify(value);
+  if (/\b(?:key|token|secret|authorization|password)\b/i.test(serialized))
+    throw new Error("channel binding snapshot contains credential-like fields");
+  return value;
+}
 
 function option(name: string, fallback?: string): string | null {
   const prefix = `--${name}=`;
@@ -211,6 +224,7 @@ async function main(): Promise<void> {
     credentialMaterial: "not_persisted",
     gatewayModels,
     gatewayUsage,
+    gatewayChannelBinding: channelBindingFromEnvironment(),
     openOxCatalog: openOxResponse?.body ?? null,
     openOxHttpStatus: openOxResponse?.status ?? 0,
     openOxResponseSha256: openOxResponse?.responseSha256 ?? null,
