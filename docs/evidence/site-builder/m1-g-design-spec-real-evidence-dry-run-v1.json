@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "site-builder-design-spec-real-evidence-dry-run/v1",
+  "status": "READY_FOR_AUTHORIZED_DISPATCH",
+  "fixedCommitSha": "8fa102785a7435d817c1b8fb682fab68e91dd514",
+  "suiteId": "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+  "preflightReportSha256": "3a4a2e5e5ebbe527fdbf7f12e44f136a76602748aa98829590cab88d706dd971",
+  "costSafetySha256": "bf75d01d62ea6484c3de138d543d8b29fc026b471187511f44b7718780ff306b",
+  "dispatchExecutions": 73,
+  "maximumWireCalls": 146,
+  "mechanicalHardCeilingCents": 2920,
+  "settlementAccounting": "openox_1_to_1_balance_credit_cents; native currencies preserved below; no market FX",
+  "nativePricing": [
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic-messages",
+      "currency": "USD",
+      "effectiveInputRatePerMillionTokens": "2.52",
+      "effectiveOutputRatePerMillionTokens": "12.6"
+    },
+    {
+      "alias": "gpt-5.5",
+      "protocol": "openai-responses",
+      "currency": "CNY",
+      "effectiveInputRatePerMillionTokens": "5",
+      "effectiveOutputRatePerMillionTokens": "30"
+    },
+    {
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "currency": "CNY",
+      "effectiveInputRatePerMillionTokens": "2",
+      "effectiveOutputRatePerMillionTokens": "12"
+    }
+  ],
+  "modelWireCalls": 0,
+  "actualModelCostCents": 0
+}
