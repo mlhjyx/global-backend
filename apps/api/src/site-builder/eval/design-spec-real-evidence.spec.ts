@@ -32,6 +32,7 @@ function context(overrides: Record<string, unknown> = {}) {
 function resolver(
   fetchImpl: typeof fetch,
   ids = new Map([["model-evaluation:test", [requestId]]]),
+  pollDelaysMs: readonly number[] = [],
 ) {
   return createNewApiEvaluationSettlementResolver({
     gatewayOrigin: "http://127.0.0.1:3001",
@@ -47,7 +48,7 @@ function resolver(
       },
     ],
     fetch: fetchImpl,
-    attempts: 1,
+    pollDelaysMs,
   });
 }
 
@@ -148,6 +149,85 @@ describe("design spec real evidence settlement", () => {
       executionId: "model-evaluation:test",
     });
   });
+
+  it("waits through a bounded late-log schedule before settling", async () => {
+    const waits: number[] = [];
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, data: [] }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, data: [] }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: [
+              {
+                request_id: requestId,
+                type: 2,
+                model_name: "gpt-5.5",
+                channel: 17,
+                group: "design-spec-eval",
+                quota: 1000,
+                prompt_tokens: 100,
+                completion_tokens: 50,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    const settlementResolver = createNewApiEvaluationSettlementResolver({
+      gatewayOrigin: "http://127.0.0.1:3001",
+      bearerToken: "limited-token",
+      requestIdsByExecution: new Map([["model-evaluation:test", [requestId]]]),
+      routes: [
+        { alias: "gpt-5.5", protocol: "openai-responses", channelId: 17 },
+      ],
+      prices: [
+        {
+          alias: "gpt-5.5",
+          protocol: "openai-responses",
+          inputCentsPerMillionTokens: 500,
+          outputCentsPerMillionTokens: 3000,
+        },
+      ],
+      fetch: fetchImpl,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+      pollDelaysMs: [250, 500],
+    });
+
+    await expect(settlementResolver.resolve(context())).resolves.toMatchObject({
+      state: "settled",
+      amountCents: 0.2,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(waits).toEqual([250, 500]);
+  });
+
+  it.each([
+    [[0]],
+    [[31_000]],
+    [[15_001, 15_000]],
+    [[100.5]],
+    [Array.from({ length: 17 }, () => 1)],
+  ])(
+    "rejects an invalid or unbounded settlement poll schedule: %j",
+    (delays) => {
+      expect(() =>
+        resolver(vi.fn() as typeof fetch, undefined, delays),
+      ).toThrow("settlement poll schedule must be bounded");
+    },
+  );
 
   it("settles repair attempts only when every physical call has one exact log row", async () => {
     const repairRequestId = "req_repair123";

@@ -10,6 +10,11 @@ import type { DesignSpecEvidencePriceSnapshot } from "./design-spec-evidence-pre
 
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_LOG_RESPONSE_BYTES = 1_048_576;
+const DEFAULT_SETTLEMENT_POLL_DELAYS_MS = Object.freeze([
+  250, 500, 1_000, 2_000, 4_000, 8_000, 12_000,
+]);
+const MAX_SETTLEMENT_POLL_WINDOW_MS = 30_000;
+const MAX_SETTLEMENT_POLL_DELAYS = 16;
 
 export interface DesignSpecEvaluationRouteBinding {
   alias: string;
@@ -153,7 +158,7 @@ export function createNewApiEvaluationSettlementResolver(options: {
   }[];
   fetch: typeof fetch;
   wait?: (milliseconds: number) => Promise<void>;
-  attempts?: number;
+  pollDelaysMs?: readonly number[];
 }): ModelEvaluationSettlementResolver {
   const origin = new URL(options.gatewayOrigin).origin;
   const routes = new Map(
@@ -184,7 +189,17 @@ export function createNewApiEvaluationSettlementResolver(options: {
     options.wait ??
     ((milliseconds) =>
       new Promise((resolve) => setTimeout(resolve, milliseconds)));
-  const attempts = options.attempts ?? 5;
+  const pollDelaysMs = Object.freeze([
+    ...(options.pollDelaysMs ?? DEFAULT_SETTLEMENT_POLL_DELAYS_MS),
+  ]);
+  if (
+    pollDelaysMs.length > MAX_SETTLEMENT_POLL_DELAYS ||
+    pollDelaysMs.some((delay) => !Number.isSafeInteger(delay) || delay <= 0) ||
+    pollDelaysMs.reduce((total, delay) => total + delay, 0) >
+      MAX_SETTLEMENT_POLL_WINDOW_MS
+  ) {
+    throw new Error("settlement poll schedule must be bounded");
+  }
 
   return {
     resolverId: "new-api-request-log-openox/v1",
@@ -202,7 +217,7 @@ export function createNewApiEvaluationSettlementResolver(options: {
       }
 
       let rows: NewApiLogRow[] | null = null;
-      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      for (let attempt = 0; attempt <= pollDelaysMs.length; attempt += 1) {
         try {
           const response = await fetchImpl(`${origin}/api/log/token`, {
             method: "GET",
@@ -222,7 +237,8 @@ export function createNewApiEvaluationSettlementResolver(options: {
         } catch {
           rows = null;
         }
-        if (attempt < attempts) await wait(200 * attempt);
+        const delay = pollDelaysMs[attempt];
+        if (delay !== undefined) await wait(delay);
       }
       if (!rows)
         return { state: "unknown", reason: "invalid_settlement" } as const;
