@@ -33,6 +33,7 @@ import {
 import {
   createNewApiEvaluationSettlementResolver,
   createRequestIdCapturingFetch,
+  designSpecCostAffectingPriceTerms,
   redactModelEvaluationRun,
 } from "../src/site-builder/eval/design-spec-real-evidence";
 import { writeRepositoryJsonCreateOnly } from "../src/site-builder/eval/create-only-json";
@@ -184,10 +185,7 @@ function exactCriticalPreflight(
       exact: value.channelBinding.exact,
       entries: value.channelBinding.entries,
     },
-    pricing: {
-      selectedPricingSha256: value.pricing.selectedPricingSha256,
-      entries: value.pricing.entries,
-    },
+    pricing: designSpecCostAffectingPriceTerms(value.pricing),
     estimate: value.estimate,
   });
   if (

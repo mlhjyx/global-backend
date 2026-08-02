@@ -6,6 +6,7 @@ import type {
   ModelEvaluationSettlementContext,
   ModelEvaluationSettlementResolver,
 } from "./model-evaluation-executor";
+import type { DesignSpecEvidencePriceSnapshot } from "./design-spec-evidence-preflight";
 
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_LOG_RESPONSE_BYTES = 1_048_576;
@@ -115,6 +116,28 @@ function priceCents(
       context.usage.outputTokens * price.outputCentsPerMillionTokens) /
     1_000_000
   );
+}
+
+export function designSpecCostAffectingPriceTerms(
+  pricing: DesignSpecEvidencePriceSnapshot,
+): unknown {
+  return pricing.entries.map((entry) => ({
+    alias: entry.alias,
+    protocol: entry.protocol,
+    groupName: entry.groupName,
+    status: entry.status,
+    currency: entry.currency,
+    productLine: entry.productLine,
+    groupMultiplier: entry.groupMultiplier,
+    inputRate: entry.inputRate,
+    outputRate: entry.outputRate,
+    cacheReadRate: entry.cacheReadRate,
+    cacheWriteRate: entry.cacheWriteRate,
+    effectiveInputRate: entry.effectiveInputRate,
+    effectiveOutputRate: entry.effectiveOutputRate,
+    effectiveCacheReadRate: entry.effectiveCacheReadRate,
+    effectiveCacheWriteRate: entry.effectiveCacheWriteRate,
+  }));
 }
 
 export function createNewApiEvaluationSettlementResolver(options: {

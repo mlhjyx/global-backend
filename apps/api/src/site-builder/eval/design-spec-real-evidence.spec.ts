@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createNewApiEvaluationSettlementResolver,
   createRequestIdCapturingFetch,
+  designSpecCostAffectingPriceTerms,
   redactModelEvaluationRun,
 } from "./design-spec-real-evidence";
 
@@ -51,6 +52,48 @@ function resolver(
 }
 
 describe("design spec real evidence settlement", () => {
+  it("treats catalog timestamp-only refreshes as non-price drift", () => {
+    const base = {
+      entries: [
+        {
+          alias: "gpt-5.5",
+          protocol: "openai-responses",
+          groupName: "gpt-unified",
+          status: "published",
+          currency: "CNY",
+          productLine: "gpt",
+          groupMultiplier: "1",
+          inputRate: "5",
+          outputRate: "30",
+          cacheReadRate: "0.5",
+          cacheWriteRate: "0",
+          effectiveInputRate: "5",
+          effectiveOutputRate: "30",
+          effectiveCacheReadRate: "0.5",
+          effectiveCacheWriteRate: "0",
+          modelUpdatedAt: "old",
+          pricingVersion: "a".repeat(64),
+        },
+      ],
+    } as never;
+    const refreshed = structuredClone(base) as {
+      entries: {
+        modelUpdatedAt: string;
+        pricingVersion: string;
+        outputRate: string;
+      }[];
+    };
+    refreshed.entries[0]!.modelUpdatedAt = "new";
+    refreshed.entries[0]!.pricingVersion = "b".repeat(64);
+    expect(designSpecCostAffectingPriceTerms(base)).toEqual(
+      designSpecCostAffectingPriceTerms(refreshed as never),
+    );
+    refreshed.entries[0]!.outputRate = "31";
+    expect(designSpecCostAffectingPriceTerms(base)).not.toEqual(
+      designSpecCostAffectingPriceTerms(refreshed as never),
+    );
+  });
+
   it("captures the new-api request id without consuming the response", async () => {
     const upstream = vi.fn(
       async () =>
