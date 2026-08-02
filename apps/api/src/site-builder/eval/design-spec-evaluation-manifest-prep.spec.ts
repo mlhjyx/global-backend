@@ -51,7 +51,7 @@ function compiledContracts(): CompiledContractsAttestation {
 }
 
 describe("design_spec zero-cost manifest preparation", () => {
-  it("reconstructs the committed create-only manifest exactly", async () => {
+  it("verifies the committed create-only manifest against its fixed source commit", async () => {
     const manifest = JSON.parse(
       await readFile(
         join(
@@ -61,15 +61,26 @@ describe("design_spec zero-cost manifest preparation", () => {
         "utf8",
       ),
     ) as DesignSpecEvaluationManifestPrepManifest;
-    const canonical = buildDesignSpecEvaluationPrepManifest(
-      manifest.fixedCommitSha,
-      manifest.compiledContracts,
-    );
+    const { manifestSha256, ...withoutDigest } = manifest;
+    const repositoryRoot = join(__dirname, "../../../../../");
 
-    expect(manifest).toEqual(canonical);
     expect(manifest.fixedCommitSha).toBe(
       "e493ba1d09fe37feea927f70d12f17aadadc5c6a",
     );
+    expect(manifestSha256).toBe(sha256CanonicalJson(withoutDigest));
+    expect(manifest.suite.sourceBundleSha256).toBe(
+      sha256CanonicalJson(manifest.suite.sourceFiles),
+    );
+    for (const sourceFile of manifest.suite.sourceFiles) {
+      const fixedContent = execFileSync(
+        "git",
+        ["show", `${manifest.fixedCommitSha}:${sourceFile.path}`],
+        { cwd: repositoryRoot },
+      );
+      expect(createHash("sha256").update(fixedContent).digest("hex")).toBe(
+        sourceFile.sha256,
+      );
+    }
     expect(manifest.suite.sourceFiles).toHaveLength(47);
     expect(manifest.actualNetworkCalls).toBe(0);
     expect(manifest.actualModelCostCents).toBe(0);
