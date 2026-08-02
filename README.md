@@ -3,7 +3,7 @@
 本仓包含两个产品面：
 
 - **买家智能与机会资格后端**：多源发现 → 身份解析 → 证据/权利 → 意向信号 → 决策人与邮箱验证 → 六维评分 → `LeadQualifiedPackage`。边界止于交付包（ADR-001）；身份/Campaign/触达/QGO/归因归外部 SaaS。
-- **Site Builder 独立站建设子系统**：注册引导 → 资料/素材/KB → 有界 AI Task + Temporal 固定 DAG → SiteSpec → Astro 静态站。**这是 2026-07-13 起的当前开发主线**；获客侧暂停开发、保留维护，明确通知后才恢复。
+- **Site Builder 独立站建设子系统**：注册引导 → 资料/素材/KB → 有界 AI Task + Temporal 固定 DAG → SiteSpec → Astro 静态站。**这是 2026-07-13 起、当前仍在施工的主线**；获客侧 2026-07-13 至 2026-08-02 的新增开发冻结已由用户提前解除，M1 收口前只做审计/规划准备，收口后再按最新主线选择首个实施任务。
 
 2026-07-16 truth-sync（#125）已对齐 Ubuntu/Codex 项目真值；R0 contract closeout（#126）已在 #121/#123/#124 的行为与安全修复之上补齐 intake `Idempotency-Key`、`buildId`、稳定错误码、Temporal 启动证据和 code-first OpenAPI，并移除旧响应 `mode`。2026-07-17 R1-safety、R2-A1–A4、MF0-A/B、M1-c 纯 Sharp 与 R3-A BuildRun 数据库背书均已完成；下一施工顺序为 R3-B → R4-A1 → R4-A2 → R4-B-min，再进入 M1-d 多语种事实受限文案，R1-min 预览安全门在 M1-e 前并行收口。Ubuntu 仅为开发/验证环境，不代表生产部署。
 
@@ -18,7 +18,7 @@
 | 收口 backlog 与路线 | [docs/roadmap/release-plan.md](docs/roadmap/release-plan.md)（历史见 [changelog](docs/roadmap/changelog.md)） |
 | Site Builder 活文档与施工图 | [docs/site-builder/](docs/site-builder/) 00–14；施工顺序见 [09](docs/site-builder/09-m1-implementation-design.md) |
 | 全平台顶层基底（L0/L1） | [docs/platform/](docs/platform/) 交付包（待批准评审稿） |
-| 研究归档 | [docs/research/](docs/research/)（含冻结的 v3.0 相关研究；两份 v3.0 Word 评审稿=研究综合稿，不再是权威基线） |
+| 研究归档 | [docs/research/](docs/research/)（含冻结期保留的 v3.0 相关研究；两份 v3.0 Word 评审稿=研究综合稿，不再是权威基线） |
 
 > 跨会话工程上下文与现行规则只读 [AGENTS.md](AGENTS.md)；[CLAUDE.md](CLAUDE.md) 仅为旧 Claude Code 入口兼容。
 

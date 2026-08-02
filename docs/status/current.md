@@ -3,16 +3,16 @@
 > 文档 ID：`DOC-STATUS-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：已合并提交、当前代码与专项验证；历史见下方链接。
-> 2026-07-10 立；**2026-07-30 QA/SEO 非权威消费者边界更新**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
-> 下方「真实具备/缺口/偏差/待拍板」四节是**获客侧快照，冻结于 2026-07-13 获客暂停时点**。测试数量随提交变化，不在活状态文档固化；是否通过以当前分支实际命令和 CI 结果为准。
+> 2026-07-10 立；**2026-08-02 获客开发冻结解除**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
+> 下方「真实具备/缺口/偏差/待拍板」四节仍是**获客侧 2026-07-13 冻结时点的历史快照**，解除冻结不自动把旧验证升级为当前验收。测试数量随提交变化，不在活状态文档固化；是否通过以最新分支实际命令、服务证据和 CI 结果为准。
 
-## 🟢 当前主线：独立站建设（Site Builder）
+## 🟢 当前施工：Site Builder；获客侧已解除冻结、待重排
 
 - **2026-08-01 模型评测源码/manifest 拆分（覆盖下方旧 harness 状态）**：`site-builder-model-evaluation-harness/2026-08-01-v18` 与 `design_spec` suite v14 源码已准备审查，矩阵为 73/146，单 wire 20¢ 与 execution 40¢ 分层核验，probe attestation 同样按 execution reservation 复验；所有分支内 manifest 已撤销。本 PR 合并后仍必须另开零费用 create-only manifest PR，固定当时可从 `origin/main` 到达的源码提交。真实调用、费用、evidence、promotion、active route 与其余五任务均未完成。
 - **2026-08-01 `design_spec` manifest 准备（覆盖上一条“仍必须另开”状态）**：`site-builder-design-spec-evaluation-manifest-prep/2026-08-01-v1` 固定已合并的 source commit `e493ba1d09fe37feea927f70d12f17aadadc5c6a`，create-only 冻结 12 fixtures、3 candidates、1 probe、73 executions / 最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件。它没有 wire client，不读取 `.env`、价格、余额或凭据；dispatch=`NOT_AUTHORIZED`，网络调用与模型费用均为零。真实费用卡、evidence、promotion、active route 与其余五任务继续未完成。
   - 机器输出：[manifest v1](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json)；精确 file/semantic/source/compiled-contract 摘要与下一费用门见[决策卡](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-prep-decision-card.md)。
 
-获客侧 **2026-07-13 起暂停**（用户指示，明确通知才恢复）。当前唯一开发主线 = 为出海企业一键生成 / 精装修独立站。
+获客侧 **2026-07-13 至 2026-08-02 暂停新增开发**；用户现已明确提前解除冻结。Site Builder M1-g 继续作为当前唯一在途产品施工；M1 收口前获客侧可做只读审计、研究、规划和排期准备，M1 收口后才启动首个实现任务。首项、owner 与验收提交尚未选择；旧分支、旧 worktree、旧 provider 状态和历史验证不得自动复用。
 
 - **M0 与兼容边界 as-built**：注册引导、`Site`/`SiteVersion`/`BuildRun`、素材上传与 KB、Demo v0 Temporal 工作流、Astro 渲染器（55 型组件，11 个 theme preset）及 7 个既有有界 AI Task 路由继续存在。`@global/contracts` 的 `SiteSpec` 已演进为显式 `1.0.0 | 1.1.0` 联合；Demo v0 固定生产 1.0，M1-e-B refurbish 新历史生产 1.1，Renderer 与 Preview 双读，旧 ReleaseManifest v1 不回填。
 - **模型网关当前真值（2026-07-27）**：Ubuntu 开发 new-api 已建立按能力域跨供应商划分的三把模型白名单令牌：文本 23 个、图片 4 个、视频 5 个。#140 已合并，自托管 BGE-M3 继续通过私有别名 `site-builder-bge-m3-local` + 专用模型受限令牌由应用统一经 new-api 调用；真实 `EmbeddingsClient` 两条输入均返回 1024 维有限向量，令牌 `/v1/models` 只返回该别名。应用尚未使用新分域令牌，历史 `MODEL_GATEWAY_KEY` 仍是宽权限令牌，故端到端凭据隔离尚未完成。MODEL-0/1 与 `task-routes.ts` 未改：只有 `brand_profile` 是 `gpt-5.6-terra`（Responses）→`claude-sonnet-5`（Messages）的代码级 `promotedRoute`，其余 6 条文本 task 仍是原 currentRoute。通道/型号在令牌 allowlist 可见只证明被允许，不证明当前健康、任务质量、上线或生产部署。
@@ -49,7 +49,7 @@
 
 ---
 
-## 真实具备（获客快照·冻结 2026-07-13；9 组，均有当时的真实数据验证记录）
+## 真实具备（获客历史快照·截至 2026-07-13；9 组，均有当时的真实数据验证记录）
 
 企业理解（Claim/Evidence/冲突/人审）· ICP（规则/回测/查询计划/CPV/FDA 映射）· 发现（public_web/wikidata/OSM/名录/展会/TED/openFDA）· 富集（GLEIF/Wikidata/数字足迹/结构化收割）· 采集监控（4 表+增量 diff）· 买家信号（**一等 Signal**：`source_signal` 平台表两层模型 + `signal_ingest` ingest-once 账本（指纹×6h 窗跨 workspace 只拉一次）+ 状态机（EXPIRED/REVOKED 剔除、撤即脱敏）+ 可复算投影（recompute 同过滤面）；web_watch/TED 招标/510k 清关/决策人/smtp_self）· 资格（六维评分 + **demand_proof 观测维**（需求证据类事件驱动，不进总分待乘法门 backtest）/Reachability 硬门/四队列/人工裁决）· **事件交付**（LeadQualified 快照 v1 契约（demand_proof 已填真值，rule=additive-6dim-v2）/`outbox_delivery` 账本/`GET /events` 拉取+ACK/可选 HMAC webhook）· 平台地基（JWKS 座/RLS/Outbox/Temporal 4 Schedule/模型网关/API 门户 + **统一信封契约**：code-first openapi.json 单一真值、CI 契约三道门 + **ToolBroker 唯一执行闸门**：13 个 L0 工具收编全部主链出网、source_policy fail-closed 分层、预算 reserve-then-settle 真拦截、ExecutionContext 贯穿真租户归账）。
 
@@ -69,7 +69,7 @@ new-api 替代 LiteLLM · 全 TS 无 Python worker · 不用 BullMQ · 自建 ai
 
 1. ~~制裁名单筛查立项~~ **✅ 已落地（#104，2026-07-14）**——OFAC(SDN+Consolidated)/EU FSF 公司实体筛查作 qualify 第五门，命中→`sanctions_hold` + decide 硬拦，默认 DISABLED（翻 ENABLED 免 LIA=不物化 PII）。ADR-010 已更新记档。
 2. **DLP 提单前提核实**——「海关提单」免费方案的前提（DLP FOIA 数据集可再分发）疑似 2023-04 已被拒。需人工上 data-liberation-project.org 核实（10 分钟），结论记入本文件。R3 排期前完成。
-3. **两份 v3.0 Word 最小整改**——修撞号/损坏标题/声明重复章节以 PRD 为准/裁决 M2 口径（QGO vs SAO）。预计 1-2 天；**当前随获客侧一起暂停，不分配执行 owner**，用户明确恢复后再由 Codex 实施、用户验收。与交付包「冻结 v3.0」不冲突（只修结构便于迁移引用）。
+3. **两份 v3.0 Word 最小整改**——修撞号/损坏标题/声明重复章节以 PRD 为准/裁决 M2 口径（QGO vs SAO）。预计 1-2 天；获客开发冻结已提前解除，但 M1 收口前不实施，本项也尚未被选为恢复后的首个任务或分配执行 owner。与交付包「冻结 v3.0」不冲突（只修结构便于迁移引用）。
 4. **首发 Job 二选一**——进口商/采购商发现 vs 经销商招募。现有数据源覆盖明显偏向前者（TED/openFDA/提单/web_watch 求供应商页）。建议：**首发「进口商/采购商发现」**，经销商招募 R3 用 Pack 加入。
 
 **需 A/B 会签（用户方向已认）**：PDR-001 对象词典 / PDR-002 业务层级（GrowthInitiative）/ 三接缝契约 / 对象级 RACI。

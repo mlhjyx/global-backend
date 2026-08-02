@@ -54,7 +54,7 @@ Actor 是体验责任帽子，不等于未定义的 RBAC role 字符串。一个
 | `JRN-FE-001` | 首次进入 → 安全 Demo | `APPROVED`，正式 Shell/前端缺 | 会话、Workspace、intake、ACK 不明、Demo 边界 |
 | `JRN-FE-002` | 资料补全 → 可信开发预览 | 首个批准纵切 | Profile/Asset/KB/Claim/Build/cancel/recover/preview |
 | `JRN-FE-003` | 审核 → 公开发布/域名/回滚 | `APPROVED_NOT_BUILT`，不在首个承诺 | PublishReview、授权、版本、域名、保站 |
-| `JRN-FE-004` | 市场假设 → 可解释 package | 后端真实、前端 Mock、开发冻结 | Evidence、资格、Reachability、拒绝原因 |
+| `JRN-FE-004` | 市场假设 → 可解释 package | 后端真实、前端 Mock；冻结已解除，M1 后恢复实现 | Evidence、资格、Reachability、拒绝原因 |
 | `JRN-FE-005` | package → 销售接受/Outcome | `EXTERNAL_OWNED` | 跨仓 handoff、SLA、反馈 |
 | `JRN-FE-006` | 候选事实 → 跨域可信复用 | 后端地基，用户审核合同缺 | Evidence、Approval、适用范围、撤销影响 |
 | `JRN-FE-007` | 失败 → 安全恢复 | 原则批准，统一前端未建 | 错误、长任务、旧结果、人工兜底 |

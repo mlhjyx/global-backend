@@ -29,9 +29,9 @@
 | `OBJ-FE-006` | Claim / 企业事实声明 | 本仓企业事实域 | `OWN-TRUTH-BE` | `AS_BUILT`；公开审核入口不完整 | 企业与信任 / 公开候选 | `LC-CLAIM-001` |
 | `OBJ-FE-007` | Evidence / 证据 | 本仓企业/数据域 | `OWN-TRUTH-BE` | `AS_BUILT` | 企业与信任 / 来源与权利敏感 | 绑定 Claim、来源、hash、quote、时间和 Asset |
 | `OBJ-FE-008` | Asset、AssetVariant / 素材、派生版本 | Site Builder DB + 对象存储 | `OWN-SITE-BE` | `AS_BUILT` | 企业与信任/Site / 权利与公开范围敏感 | `LC-ASSET-001` |
-| `OBJ-FE-009` | ICP / 理想客户画像 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT/FROZEN` | 客户开发 / Workspace 共享 | 新增前端施工冻结 |
-| `OBJ-FE-010` | CanonicalCompany、Lead / 买家公司、线索 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT/FROZEN` | 客户开发 / 公司共享、联系人受限 | Lead 是 ICP×Company，不回写公司级 fit |
-| `OBJ-FE-011` | LeadQualifiedPackage / 合格线索包 | 本仓不可变快照 + Outbox | `OWN-BUYER-BE` | `AS_BUILT/FROZEN` | 客户开发→SaaS / 交付快照 | `LC-LEAD-PACKAGE-001` |
+| `OBJ-FE-009` | ICP / 理想客户画像 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发 / Workspace 共享 | M1 收口后按重审范围恢复施工；前端仍未接 |
+| `OBJ-FE-010` | CanonicalCompany、Lead / 买家公司、线索 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发 / 公司共享、联系人受限 | Lead 是 ICP×Company，不回写公司级 fit |
+| `OBJ-FE-011` | LeadQualifiedPackage / 合格线索包 | 本仓不可变快照 + Outbox | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发→SaaS / 交付快照 | `LC-LEAD-PACKAGE-001` |
 | `OBJ-FE-012` | Site / 独立站 | 本仓 Site Builder | `OWN-SITE-BE` | `AS_BUILT` | 独立站管理 / Workspace 共享 | `LC-SITE-001`；不能代替 Build/Release/Publish 状态 |
 | `OBJ-FE-013` | SiteVersion / 站点版本 | 本仓 Site Builder | `OWN-SITE-BE` | `AS_BUILT` | 独立站管理 / 不可变内容版本意图 | Build/manual/demo 来源；不是部署产物 |
 | `OBJ-FE-014` | SiteRelease / 构建产物单元 | 本仓 Site Builder | `OWN-SITE-BE` | internal substrate `AS_BUILT`；public management 未建 | 独立站管理 / 不可变产物与运维 | `LC-RELEASE-001` |
@@ -152,7 +152,7 @@ ICP × CanonicalCompany → qualification → immutable package → outbox deliv
 
 - 推荐必须满足总分门和 Reachability；不可只用高 Fit。
 - 本仓交付不可变快照后停止，不在本仓创建 Opportunity。
-- 后端能力保持维护态，新增产品/前端开发冻结。
+- 后端能力冻结已提前解除；M1 收口前只做准备，收口后按重审范围恢复，正式前端仍未接。
 
 ## 5. 目标态生命周期，不得冒充 as-built
 
@@ -173,7 +173,7 @@ QGO 需要需求/互动/时机证据和合法下一步；SAO 需要销售接受�
 | Handoff ID | 上游 SoR | 交付形态 | 下游 SoR | 不变边界 | 当前状态 |
 |---|---|---|---|---|---|
 | `HND-FE-001` | Company/Offering/Claim/Evidence | approved/current snapshot | Site Build/Copy/Version | 派生 snapshot 不回写原事实 | internal `AS_BUILT` |
-| `HND-FE-002` | Buyer Intelligence | `LeadQualifiedPackage` + Outbox/ACK | SaaS Opportunity | Outcome 只回作学习标签 | backend `AS_BUILT/FROZEN`；SaaS side unknown |
+| `HND-FE-002` | Buyer Intelligence | `LeadQualifiedPackage` + Outbox/ACK | SaaS Opportunity | Outcome 只回作学习标签 | backend `AS_BUILT`；SaaS side unknown；恢复前须重验 |
 | `HND-FE-003` | SiteVersion/Release | future PublishReview + Authorization | public service | Build/Release/Preview 不等于 Publish | `APPROVED_NOT_BUILT` |
 | `HND-FE-004` | Site receiver | Inquiry event | SaaS Conversation/Opportunity | Site 不内建第二套 CRM/Inbox | `DEFERRED/OPEN_DECISION` |
 | `HND-FE-005` | SaaS Workspace/Entitlement | token + allowed actions/capability manifest | 本仓 API 与 SaaS UI | 本仓不签发身份、不存用户表 | backend verifier exists；完整 SaaS contract unknown |

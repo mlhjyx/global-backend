@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 当前事实来源：[状态](../status/current.md)；本文的已实现断言须服从代码与共享合同。
 > 历史设计记录：设计中（2026-07-13 需求口述 + 拍板：SiteSpec+组件库路线 ✅ / 付费模型统一走 new-api 网关 ✅ / 站点诊断（二级栏目）后置 ✅ / 预览=独立预览域名 ✅ D7）。
-> 架构详设见 [02-architecture.md](02-architecture.md)。获客侧开发已冻结（用户指示，另行通知恢复）。
+> 架构详设见 [02-architecture.md](02-architecture.md)。获客侧 2026-07-13 至 2026-08-02 的开发冻结已提前解除，但 M1 收口前不启动其实现；获客任务仍不得并入 Site Builder PR 或争抢未明确分配的共享文件 ownership。
 > Reviewed against 12 号 v3.2（2026-07-16 回写；2026-07-17 ADR-020 模型组合同步）。站建承重决策以 [docs/adr/registry.md](../adr/registry.md) **ADR-013~020** 为准，本 PRD 相关处按 ID 引用不复述。
 >
 > **2026-07-24 as-built 覆盖**：M1-e-A/B 已完成六个 approved Family、DesignBrief producer、受控 adapter 组装、asset overlay、SiteSpec 1.1 与 ReleaseManifest v2；Demo v0 仍固定兼容的 1.0 路径。M1-f 的质量循环、DesignEvaluation 与审美评审尚未实施，本文的远期产品愿景不得被读作当前能力。
@@ -167,4 +167,4 @@ Demo 页面不再是固定三页，而从 **Archetype Blueprint** 选择：
 - 不公开未批准的认证、数字、客户名、案例与性能承诺（ADR-017）。
 - 不在 M1 建复杂订单、支付、库存或通用 3D/沉浸式生成器。
 - 不把 GA4、广告像素、聊天脚本或第三方表单**默认**装进站点。
-- 不因独立站优先而删除 AI 获客代码；只**冻结其新增功能与共享资源竞争**。
+- 不因独立站优先而删除 AI 获客代码；M1 收口后获客恢复施工时仍须独立排期、独立 ownership，不与 Site Builder PR 混改共享核心。

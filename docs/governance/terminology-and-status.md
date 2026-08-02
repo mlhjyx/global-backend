@@ -176,7 +176,7 @@ Fixture 必须使用合成企业、合成联系人和有明确使用权的资产
 | `OWN-DOC-GOV` | 文档治理 Owner | `UNASSIGNED`；Phase 3 由产品负责人批准 | Registry schema、唯一归属、迁移与链接完整性 | 各域事实内容 |
 | `OWN-SITE-BE` | Site Builder 后端/契约 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | 本仓 Site API、Schema、Workflow、Renderer/Release 实现事实 | SaaS UI 与产品批准 |
 | `OWN-TRUTH-BE` | 企业事实与知识后端 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | CompanyProfile、Offering、Claim、Evidence 和共享知识对象实现事实 | SaaS UI 与发布批准 |
-| `OWN-BUYER-BE` | Buyer Intelligence 后端 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | 本仓发现、富集、资格、信号和 `LeadQualifiedPackage` 实现事实 | SaaS Opportunity 和新增冻结范围 |
+| `OWN-BUYER-BE` | Buyer Intelligence 后端 Owner | `ROLE_EXISTS_ASSIGNEE_UNRECORDED` | 本仓发现、富集、资格、信号和 `LeadQualifiedPackage` 实现事实 | SaaS Opportunity、产品优先级和正式前端 |
 | `OWN-SAAS-PLATFORM` | SaaS 平台/身份/控制面 Owner | `UNASSIGNED` | Workspace、Membership、Entitlement、跨域控制面和外部业务 SoR | 本仓后端实现 |
 | `OWN-SAAS-FE` | 正式 SaaS 前端 Owner | `UNASSIGNED` | 正式前端仓库、CI、部署、客户端架构和接入 | 产品范围、后端真值 |
 | `OWN-DESIGN` | 产品设计 Owner | `UNASSIGNED` | 旅程、IA 细化、交互、设计资产、内容、a11y | API 可行性和产品拍板 |

@@ -5,7 +5,7 @@
 > 当前事实来源：[当前状态](status/current.md) · [as-built 架构](architecture/current.md) · [路线](roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001~012/OD-01~06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [roadmap/release-plan.md](roadmap/release-plan.md)。
-> **2026-07-16 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。自 2026-07-13 起当前主线为**独立站建设（Site Builder）**——为出海企业一键生成/精装修独立站的第二产品面；其范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。获客侧暂停开发、边界不变。
+> **2026-08-02 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。2026-07-13 至 2026-08-02 获客侧暂停新增开发；用户现已提前解除冻结，产品边界仍不变。当前在途施工仍是**独立站建设（Site Builder）** M1-g；M1 收口前只做获客审计/规划准备，收口后再选择首个实现任务。Site Builder 范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。
 
 ## 0. 术语表
 
@@ -75,7 +75,7 @@ Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost /
 - **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
 - **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
 - **as-built 审计基线**：M0、R0–R4、M1-c、M1-d、R1-min、DI-0、M1-e-A 与 M1-e-B 均已进入主线。Demo v0 固定 `SiteSpec 1.0` / ReleaseManifest v1；受控精装修链使用 `SiteSpec 1.1` / ReleaseManifest v2，旧版本保持双读兼容且不后台迁移。
-- **当前施工**：M1-e-B 已提供六个 approved Family、冻结 DesignBrief、封闭 adapter 组装、tenant/catalog asset overlay 与可重放的局部 v2-base 构建。下一阶段是 M1-f 的确定性与审美质量循环；它不扩 Family、不自动晋级模型、不改变现有发布边界。
+- **当前施工**：M1-e-B/M1-f 已完成六个 approved Family、受控组装与确定性质量循环；M1-g 正在收口统一真链和文本任务路由。获客线 M1 前只准备、M1 后恢复实现；两条线不混改共享 ownership。
 - **权威规则**：承重决策只进 ADR-013~020；具体产品/施工真值在 Site Builder 00–14、当前状态和路线。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
 
 ## 5. 业务层级四层（PDR-002，已收敛=交付包 TA-003，待 A/B 会签）
@@ -125,7 +125,7 @@ Goal（业务目标：如进入德国市场）
 **已拍板**【用户】：① 边界止于 LeadQualifiedPackage（QGO 归 SaaS）；② 身份归属维持 A（+ADR-011 两条硬规矩）；③ 设计类产出先评审后进仓；④ 收敛方案与交付包合流。
 **与交付包裁决对照**：TA-001/002/004/008/009 采纳；TA-003=PDR-002；TA-005 逻辑 Schema=演进方向；TA-006/OD-01/OD-02 按身份拍板修正采纳；TA-007/OD-03=ADR-001；TA-010/011/OD-05=PDR-003；TA-012/OD-06=本次文档迁移；OD-04（Policy 宿主=横向平台模块）方向认可，现阶段以本仓 PolicyPort/DataRightsService 为其获客侧实现。
 **本稿裁定**：北极星保 QGO、SAO 作商业验证层；研究域最小版列 R3 可选；Docling/Langfuse 不进封版 Gate。
-**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧事项在冻结期不进入当前施工序。
+**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧已提前解除冻结，M1 收口前可规划但不启动实现，M1 收口后任何事项进入施工序前仍须重新核验当前价值、代码与服务状态、合规、成本、依赖和验收证据。
 
 ---
 

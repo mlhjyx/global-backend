@@ -4,7 +4,7 @@
 > 层级：`L1 / Registry`
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
-> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
+> 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
 > 工程核验基线：`origin/main@3daa3ebf5fc8218a7006ffd8593e3ff86d3426d3` + `codex/codegraph-pilot` 实施候选
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
@@ -83,7 +83,7 @@
 | `CON-FE-P2-013` | 常驻 AI 是否能绕过结构化对象/权限 | `RESOLVED` 产品原则 | `OWN-PRODUCT` | `DEC-FE-P4-006` 已批准：Global AI 只表达/解释并落结构化对象，不能绕过权限/批准 |
 | `CON-FE-P2-014` | Workspace 权限与数据范围合同缺失 | `CONTRACT_BLOCKED` | `OWN-SAAS-PLATFORM` | [当前权限规范](../frontend/06-permissions-and-data-visibility.md)已定义模型；服务端合同仍缺 |
 | `CON-FE-P2-015` | 管理员是否默认读取个人工作数据 | `RESOLVED_WITH_REMEDIATION` | `OWN-DATA-PRIVACY` | `DEC-FE-P4-004` 已批准“不自动可读”；具体政策、告知和审计合同仍缺 |
-| `CON-FE-P2-016` | Buyer Intelligence 冻结但产品地图需保留 | `RESOLVED` | `OWN-PRODUCT` | IA 保留；日常可见性由 capability/entitlement 决定，不恢复施工 |
+| `CON-FE-P2-016` | Buyer Intelligence 冻结但产品地图需保留 | `RESOLVED`；历史裁决已被 `DEC-FE-POSTGATE-001` 取代 | `OWN-PRODUCT` | IA 继续保留；M1 前只准备、M1 后恢复实现；日常可见性仍由 capability/entitlement 决定 |
 | `CON-FE-P2-017` | Campaign/Conversation/Opportunity SoR 与旧原型冲突 | `RESOLVED` 边界 / `INPUT_BLOCKED` 实现 | `OWN-SAAS-PLATFORM` | 归 SaaS；正式 repo/Owner 仍缺 |
 | `CON-FE-P2-018` | Inquiry 原始接收与 SaaS 投影 ownership | `OPEN_DECISION` | `OWN-PRODUCT` | M2 前 ADR/PDR + privacy/retention contract |
 | `CON-FE-P2-019` | 成功定义被 Build success/Mock 数字替代 | `RESOLVED` 方向 / `INPUT_BLOCKED` 数据 | `OWN-PRODUCT` | 指标+反指标获批；baseline/event/privacy Owner 未定 |
@@ -154,6 +154,14 @@
 | `DEC-FE-P6-010` | 批准 `GAP-FE-P6-001..012` 为后续输入账，不补猜 SoR/API/Owner | `APPROVED_AT_GATE_6` | `OWN-DOC-GOV` |
 | `DEC-FE-P6-011` | Word/GoodJob/本地原型的产品内容迁移已覆盖；技术/OSS 采用只进 Phase 7 | `APPROVED_AT_GATE_6` | `OWN-DOC-GOV` |
 | `DEC-FE-P6-012` | 非 Site 域未来先选最小端到端结果再升级 Dev-Ready Pack，不从 Mock 页面直接拆任务 | `APPROVED_AT_GATE_6` | `OWN-PRODUCT` |
+
+`DEC-FE-P6-006` 保留 2026-07-20 Gate 6 的历史裁决，不用新事实改写；其“保持冻结”部分由下列后续产品决定取代。
+
+## 8.1 Gate 后续产品决定
+
+| Decision ID | 推荐决定 | 状态 | Owner |
+|---|---|---|---|
+| `DEC-FE-POSTGATE-001` | 2026-08-02 提前解除 Buyer Intelligence 新增开发冻结；M1 收口前允许只读审计、研究、规划与排期，M1 收口后才恢复实现。旧 backlog/owner/worktree、默认禁用 provider、历史验证与前端状态均不自动恢复或升级 | `APPROVED` | `OWN-PRODUCT` |
 
 ## 9. Gate 7 已批准决策
 

@@ -16,7 +16,7 @@
 | `SHELL_FOUNDATION` | 所有纵切共同依赖 |
 | `FIRST_VERTICAL` | 首个 Site 可信开发预览纵切 |
 | `NEXT_SITE` | Site 后续能力，需自己的 Gate |
-| `MAP_FROZEN` | 产品地图保留，当前不恢复新增施工 |
+| `MAP_COMPLETE / NOT_DEV_READY` | 产品地图完整，但仍须补当前审计、优先级、合同或实现准备 |
 | `TARGET_EXTERNAL` | 由正式 SaaS/其他 SoR 负责 |
 | `DEFERRED` | 已知后置 |
 | `PROTOTYPE_ONLY` | 只在本地 Mock/旧 API 出现 |
@@ -28,7 +28,7 @@
 | Shell/今日 | `PAGE-FE-001..010` | 登录/会话、Workspace、今日、Search、通知、任务、审批、异常、长任务、帮助 | `CAP-ID-001`、`CAP-SHELL-001`、`CAP-ONB-001`、`CAP-TODAY-001` | IA 批准；正式 repo/合同/部署未知；本地多为 Mock |
 | 企业资料与信任 | `PAGE-FE-020..026` | 企业资料、Offering、事实审查、Evidence drawer、知识、信任评估、Asset 详情 | `CAP-TRUTH-001`、`CAP-KNOW-001` + Site Profile/Asset/Claim 子能力 | 后端对象局部已建；统一 CRUD/审核/UX 不完整 |
 | 独立站管理 | `PAGE-FE-030..057` | 站点、Intake、资料、素材、KB、Claim、Build、Preview、编辑、版本、发布、域名、询盘、分析、诊断、公开输出 | `CAP-SITE-001..005` + 16 个 Site child | 当前主线；首个承诺仅 `PAGE-FE-030..043` 中合同相称子集 |
-| 客户开发 | `PAGE-FE-060..066` | 市场/ICP、客户池、公司/联系人、发现任务、资格包、数据权利 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | 后端真实能力；前端 Mock；新增开发冻结 |
+| 客户开发 | `PAGE-FE-060..066` | 市场/ICP、客户池、公司/联系人、发现任务、资格包、数据权利 | `CAP-BUYER-001`、`CAP-INTENT-001`、`CAP-COMP-001` | 后端真实能力；前端 Mock；冻结已解除，M1 收口后按重审结果恢复实现 |
 | 增长执行 | `PAGE-FE-070..079` | Goal/Initiative、Campaign、Audience、内容、素材、发布任务、渠道账号、日历、实验 | `CAP-CAMP-001`、`CAP-CONTENT-001`、`CAP-PUBLISH-001` | 产品地图/原型；正式 SoR 与前端未知 |
 | 互动与商机 | `PAGE-FE-080..083` | Inbox、Conversation、Opportunity、Outcome | `CAP-ENGAGE-001`、`CAP-OPP-001` | SaaS external-owned；本仓不建主状态 |
 | 洞察 | `PAGE-FE-084..086` | 经营/漏斗、归因、质量/成本/实验 | `CAP-INSIGHT-001` | 目标读模型；Site 仅有局部成本事实 |
@@ -36,7 +36,7 @@
 
 ### 2.1 非 Site 产品域的当前深度
 
-非 Site 区域只在本目录和 [Capability Registry](../governance/capability-register.md)保留用户结果、对象归属、状态与开放输入，继续使用 `MAP_COMPLETE / NOT_DEV_READY`、`FROZEN_MAP_ONLY` 或 `TARGET_EXTERNAL`，不为每个地图级域维护空 Capability Pack。Site 保持独立的详细[模块规格](modules/independent-site-management/README.md)。
+非 Site 区域只在本目录和 [Capability Registry](../governance/capability-register.md)保留用户结果、对象归属、状态与开放输入，继续使用 `MAP_COMPLETE / NOT_DEV_READY` 或 `TARGET_EXTERNAL`，不为每个地图级域维护空 Capability Pack。客户开发解除冻结不自动升级为 Dev-Ready；M1 收口后仍须先选最小端到端结果。Site 保持独立的详细[模块规格](modules/independent-site-management/README.md)。
 
 ## 3. 完整 Page ID 索引
 
@@ -101,13 +101,13 @@
 
 | Page ID | 名称 | 建议阶段 |
 |---|---|---|
-| `PAGE-FE-060` | 市场机会扫描 | `MAP_FROZEN` |
-| `PAGE-FE-061` | 市场研究工作台 | `MAP_FROZEN` |
-| `PAGE-FE-062` | ICP 与购买委员会 | `MAP_FROZEN` |
-| `PAGE-FE-063` | 客户池/Lead Explorer | `MAP_FROZEN` |
-| `PAGE-FE-064` | 客户/Lead 详情 | `MAP_FROZEN` |
-| `PAGE-FE-065` | 发现/富集任务 | `MAP_FROZEN` |
-| `PAGE-FE-066` | 数据权利与 Suppression | `MAP_FROZEN/OPS` |
+| `PAGE-FE-060` | 市场机会扫描 | `MAP_COMPLETE / NOT_DEV_READY` |
+| `PAGE-FE-061` | 市场研究工作台 | `MAP_COMPLETE / NOT_DEV_READY` |
+| `PAGE-FE-062` | ICP 与购买委员会 | `MAP_COMPLETE / NOT_DEV_READY` |
+| `PAGE-FE-063` | 客户池/Lead Explorer | `MAP_COMPLETE / NOT_DEV_READY` |
+| `PAGE-FE-064` | 客户/Lead 详情 | `MAP_COMPLETE / NOT_DEV_READY` |
+| `PAGE-FE-065` | 发现/富集任务 | `MAP_COMPLETE / NOT_DEV_READY` |
+| `PAGE-FE-066` | 数据权利与 Suppression | `MAP_COMPLETE / NOT_DEV_READY / OPS` |
 
 ### 3.4 增长执行
 
