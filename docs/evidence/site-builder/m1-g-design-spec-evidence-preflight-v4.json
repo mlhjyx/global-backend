@@ -1,0 +1,219 @@
+{
+  "schemaVersion": "site-builder-design-spec-evidence-preflight/v2",
+  "preflightId": "site-builder-design-spec-evidence-preflight/2026-08-02-v2",
+  "status": "READY_FOR_PRODUCT_DECISION",
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "fixedSourceCommitSha": "e493ba1d09fe37feea927f70d12f17aadadc5c6a",
+  "manifestSha256": "83dedcb2057d4e375114c42b5c03becbc9b057b1bfa1f3fc511bfec600827e72",
+  "suiteId": "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+  "sourceBundle": {
+    "commitSha": "28df90d1cbbe38b7adf2192b9362f4984dfacd2d",
+    "contractId": "design-spec-evidence-preflight-source-bundle/v1",
+    "sha256": "15cda6b10b0be0b3ceb9f38dd8f7fdfab79c15e5e1a18bde629b905035a6169b",
+    "files": [
+      {
+        "path": "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json",
+        "sha256": "15813905892f19db58fd600a11f938a31493fea7d7bf8922e5ecbed37a88003d"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/create-only-json.ts",
+        "sha256": "986c1dfac6c22f59c8b95edf180bf61b1b65219a46d1abfd923c0d6ec9d19f42"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/design-spec-evidence-preflight.ts",
+        "sha256": "c09dd2a0269c9a69a4264071287051391e524f257a7c12c33b2fdc88194e0667"
+      },
+      {
+        "path": "apps/api/scripts/prepare-site-builder-design-spec-evidence-preflight.mts",
+        "sha256": "1597fa5c67e69ccadb8ec99a21bbd043717a0e979fa2d963052cafce1dfa17f2"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/design-spec-evaluation-manifest-prep.ts",
+        "sha256": "80e8547f4c0b8b480af43bb7cb30c54705b8960f0a2408c8b04d51f9cd987449"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+        "sha256": "9cdde783d4e85b3fdabf0626599f39e36905f9baf7dfa1d5a7e05eb6d6378615"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+        "sha256": "f1a01fae8b9c808c5afbd27c2af406f9e8a154e4fc72007885635625ba168e15"
+      },
+      {
+        "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+        "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+      },
+      {
+        "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+        "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+      },
+      {
+        "path": "apps/api/src/site-builder/site-builder-model-settlement.ts",
+        "sha256": "723f65941d0889fcabb9d0c1a3b7e20546a85690d9447f03eac86a5bfd5f94f8"
+      }
+    ]
+  },
+  "readOnlyNetwork": {
+    "calls": 3,
+    "modelWireCalls": 0,
+    "generativeEndpointsCalled": []
+  },
+  "credential": {
+    "source": "new_api_read_only_control_plane",
+    "observedAt": "2026-08-02T10:31:36.594Z",
+    "gatewayOrigin": "http://127.0.0.1:3001",
+    "credentialMaterial": "not_persisted",
+    "purpose": "site_builder_model_evaluation",
+    "observedQuotaMode": "limited",
+    "modelLimitsEnabled": true,
+    "scopeExact": true,
+    "quotaCapPoints": 14600000,
+    "remainingQuotaPoints": 14600000,
+    "observedAllowedAliases": [
+      "claude-sonnet-5",
+      "gpt-5.5",
+      "gpt-5.6-terra"
+    ],
+    "requiredAllowedAliases": [
+      "claude-sonnet-5",
+      "gpt-5.5",
+      "gpt-5.6-terra"
+    ],
+    "requiredAliasesVisible": [
+      "claude-sonnet-5",
+      "gpt-5.5",
+      "gpt-5.6-terra"
+    ],
+    "visibleModelCount": 3,
+    "visibleModelIdsSha256": "c174293bee049553647302cec1ea9e62dbd10bf4103a019d6d2fccb10a3b2f32"
+  },
+  "channelBinding": {
+    "source": "new_api_sanitized_control_plane_snapshot",
+    "observedAt": "2026-08-02T10:31:35.964Z",
+    "group": "design-spec-eval",
+    "groupRatio": 1,
+    "crossGroupRetry": false,
+    "exact": true,
+    "credentialMaterial": "not_persisted",
+    "entries": [
+      {
+        "alias": "claude-sonnet-5",
+        "protocol": "anthropic-messages",
+        "channelId": 19,
+        "channelName": "claude",
+        "enabled": true
+      },
+      {
+        "alias": "gpt-5.5",
+        "protocol": "openai-responses",
+        "channelId": 17,
+        "channelName": "OpenOx GPT Portfolio",
+        "enabled": true
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "protocol": "openai-responses",
+        "channelId": 17,
+        "channelName": "OpenOx GPT Portfolio",
+        "enabled": true
+      }
+    ]
+  },
+  "pricing": {
+    "authority": "openox_model_marketplace",
+    "modelsPage": "https://openox.tech/models",
+    "catalogEndpoint": "https://openox.tech/api/public/pricing-catalog",
+    "capturedAt": "2026-08-02T10:31:36.594Z",
+    "httpStatus": 200,
+    "catalogResponseSha256": "1fcadc4d70b2119dd6826781755f503a5b542156d620e762dae4858120db8e2f",
+    "fullModelCount": 37,
+    "fullGroupCount": 15,
+    "selectedPricingSha256": "4598c7426bf99595caf7ca6a3f1ed3cc6f02f1abcf659e5e68e3ed6a95b6c4a6",
+    "entries": [
+      {
+        "alias": "claude-sonnet-5",
+        "protocol": "anthropic-messages",
+        "groupName": "special",
+        "status": "published",
+        "currency": "USD",
+        "productLine": "claude",
+        "groupMultiplier": "1.26",
+        "inputRate": "2",
+        "outputRate": "10",
+        "cacheReadRate": "0.2",
+        "cacheWriteRate": "2.5",
+        "effectiveInputRate": "2.52",
+        "effectiveOutputRate": "12.6",
+        "effectiveCacheReadRate": "0.252",
+        "effectiveCacheWriteRate": "3.15",
+        "modelUpdatedAt": "2026-08-02T10:21:26.046Z",
+        "pricingVersion": "8c6eab9c005371463e8c207f61a8887f6aac99aa1a811c9bf99e03dd5e633405"
+      },
+      {
+        "alias": "gpt-5.5",
+        "protocol": "openai-responses",
+        "groupName": "gpt-unified",
+        "status": "published",
+        "currency": "CNY",
+        "productLine": "gpt",
+        "groupMultiplier": "1",
+        "inputRate": "5",
+        "outputRate": "30",
+        "cacheReadRate": "0.5",
+        "cacheWriteRate": "0",
+        "effectiveInputRate": "5",
+        "effectiveOutputRate": "30",
+        "effectiveCacheReadRate": "0.5",
+        "effectiveCacheWriteRate": "0",
+        "modelUpdatedAt": "2026-08-02T10:21:26.048859Z",
+        "pricingVersion": "4f8582be7584ffa52bcf7bce6e44a6c50d05bae4a4e6a9677608de25f7a2b8b3"
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "protocol": "openai-responses",
+        "groupName": "gpt-unified",
+        "status": "published",
+        "currency": "CNY",
+        "productLine": "gpt",
+        "groupMultiplier": "1",
+        "inputRate": "2",
+        "outputRate": "12",
+        "cacheReadRate": "0.2",
+        "cacheWriteRate": "2.5",
+        "effectiveInputRate": "2",
+        "effectiveOutputRate": "12",
+        "effectiveCacheReadRate": "0.2",
+        "effectiveCacheWriteRate": "2.5",
+        "modelUpdatedAt": "2026-08-02T10:21:26.048859Z",
+        "pricingVersion": "5574e07a8ebc9ba2b21ad8d4c65f95a8d346199c974ae9ded3cb2a9cf134b256"
+      }
+    ]
+  },
+  "estimate": {
+    "inputTokenUpperBoundInitial": 6438,
+    "inputTokenUpperBoundRepair": 10745,
+    "outputTokenUpperBoundPerCall": 4000,
+    "maximumWireCallCount": 146,
+    "mechanicalHardCeilingCents": 2920,
+    "perWireCallHardCapCents": 20,
+    "expectedCost": "not_known_before_usage",
+    "conservativeTokenEnvelopeByCurrency": {
+      "USD": 3.458428,
+      "CNY": 11.276659
+    }
+  },
+  "blockers": [],
+  "stopConditions": [
+    "fixed_commit_or_manifest_drift",
+    "source_bundle_drift",
+    "missing_or_non_finite_exact_credential_scope",
+    "missing_ambiguous_or_changed_channel_binding",
+    "missing_or_changed_openox_price",
+    "separate_cost_authorization_missing",
+    "execution_or_wire_call_manifest_exhausted",
+    "protocol_or_model_identity_mismatch",
+    "unknown_or_over_budget_settlement"
+  ],
+  "actualModelCostCents": 0,
+  "reportSha256": "17285a1c7d01687db4a0bb1b3fba457bf10c59a87bd1c10d572f93d197e40616"
+}
