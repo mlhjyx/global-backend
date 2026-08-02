@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "site-builder-design-spec-settlement-reconciliation/v1",
+  "status": "RECONCILED_AFTER_CAMPAIGN_FREEZE",
+  "observedAt": "2026-08-02T11:05:58.000Z",
+  "fixedCommitSha": "c0e7a65300af45695443467d1a5261e1901e672f",
+  "stoppedEvidence": {
+    "path": "docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json",
+    "sha256": "30f0fa88edbd1ae76e434cd048ef7bb5c8e39a0d7d286f68dedc113a69ff6327",
+    "status": "EVIDENCE_STOPPED_REVIEW_REQUIRED",
+    "stopReason": "settlement_budget_protocol_or_identity_gate_failed"
+  },
+  "probeEvidence": {
+    "path": "docs/evidence/site-builder/m1-g-design-spec-capability-probe-v1.json",
+    "sha256": "065ed9dbaffba40c1197c50742440fc7da681ac28f34b654ec14b2db5b25ff83",
+    "status": "capability_proven"
+  },
+  "dispatchAccounting": {
+    "executionsStarted": 17,
+    "wireCallsObserved": 17,
+    "repairsObserved": 0,
+    "gpt55ProbeExecutions": 1,
+    "terraMatrixExecutions": 16,
+    "gpt55MatrixExecutions": 0,
+    "sonnetMatrixExecutions": 0
+  },
+  "lateSettlement": {
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai-responses",
+    "fixtureId": "premium-innovation-sparse",
+    "attempt": 2,
+    "requestIdSha256": "0dd34f3713ee718d9229d7d27a491bf9c33bd9003fcb10339bd6cdc18d3073ac",
+    "logType": 2,
+    "channelId": 17,
+    "group": "design-spec-eval",
+    "inputTokens": 5102,
+    "outputTokens": 146,
+    "newApiQuotaPoints": 7473,
+    "recomputedOpenOxCnyCents": 1.1956,
+    "result": "EXACT_LOG_ROW_VISIBLE_AFTER_RESOLVER_POLL_WINDOW"
+  },
+  "costAccounting": {
+    "authority": "openox_model_marketplace",
+    "currency": "CNY",
+    "probeCnyCents": 2.7575,
+    "settledTerraCnyCents": 16.7008,
+    "lateReconciledTerraCnyCents": 1.1956,
+    "totalReconciledCnyCents": 20.6539,
+    "totalReconciledCny": 0.206539,
+    "newApiQuotaPointsConsumed": 125641,
+    "newApiQuotaPointsRemaining": 14474359,
+    "newApiInternalPriceUsedForAmount": false
+  },
+  "ledger": {
+    "jsonlSha256": "ed363d307f5570ecd81817d719f8fe81fa688e8610ed4ab51c48d4efa021aec0",
+    "authorizationState": "FROZEN_UNKNOWN_SETTLEMENT",
+    "reusable": false
+  },
+  "privacy": {
+    "credentialMaterial": "not_persisted",
+    "responseMaterial": "not_persisted",
+    "rawRequestId": "not_persisted",
+    "customerData": "not_used"
+  },
+  "remainingMatrix": {
+    "executions": 56,
+    "authorization": "NOT_AUTHORIZED",
+    "requiredAction": "SEPARATE_ZERO_MODEL_RESUME_PREP_AND_NEW_EXPLICIT_COST_AUTHORIZATION"
+  },
+  "promotion": "NOT_AUTHORIZED"
+}

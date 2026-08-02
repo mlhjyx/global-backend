@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "site-builder-design-spec-capability-probe-evidence/v1",
+  "fixedCommitSha": "c0e7a65300af45695443467d1a5261e1901e672f",
+  "suiteId": "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+  "alias": "gpt-5.5",
+  "protocol": "openai-responses",
+  "validation": {
+    "status": "capability_proven",
+    "protocolVerified": true,
+    "identityVerified": true,
+    "outputVerified": true
+  },
+  "budget": {
+    "campaignBudgetCents": 2920,
+    "committedCents": 2.7575,
+    "reservedCents": 0,
+    "unknownUpperBoundCents": 0,
+    "remainingDispatchableCents": 2917.2425,
+    "blocked": false,
+    "blockReason": null
+  },
+  "settlementAccounting": "openox_1_to_1_balance_credit_cents; no market FX",
+  "responseMaterial": "not_persisted"
+}

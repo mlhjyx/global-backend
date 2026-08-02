@@ -1,1 +1,36 @@
 5bdb66b5267c721d53b7b9507ae968a11a558683:docs/ai-development/memory-and-context-policy.md:sourcegraph-access-token:8
+# Generated design_spec evidence contains only SHA-256 provenance/stability
+# digests at these immutable create-only lines. The generic-api-key rule keys
+# off the JSON field names; the matched values are hashes, not credentials.
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:55
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:107
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:117
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:169
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:179
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:231
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:241
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:293
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:303
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:355
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:365
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:417
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:427
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:479
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:489
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:541
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:551
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:603
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:613
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:665
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:675
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:727
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:737
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:789
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:799
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:851
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:863
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:915
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:927
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:979
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:989
+docs/evidence/site-builder/m1-g-design-spec-real-evidence-v1.json:generic-api-key:1040
