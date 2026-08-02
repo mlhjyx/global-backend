@@ -12,6 +12,10 @@ import {
   MAX_OPENOX_CATALOG_BYTES,
 } from "../src/site-builder/eval/design-spec-evidence-preflight";
 import {
+  DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_BUNDLE_ID,
+  DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_FILES,
+} from "../src/site-builder/eval/design-spec-full-restart-prep";
+import {
   writeRepositoryJsonCreateOnly,
   writeRepositoryMarkdownCreateOnly,
 } from "../src/site-builder/eval/create-only-json";
@@ -22,19 +26,6 @@ const REPOSITORY_ROOT = resolve(
 );
 const MANIFEST_DEFAULT =
   "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json";
-const SOURCE_FILES = [
-  "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json",
-  "apps/api/src/site-builder/eval/create-only-json.ts",
-  "apps/api/src/site-builder/eval/design-spec-evidence-preflight.ts",
-  "apps/api/scripts/prepare-site-builder-design-spec-evidence-preflight.mts",
-  "apps/api/src/site-builder/eval/design-spec-evaluation-manifest-prep.ts",
-  "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
-  "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
-  "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
-  "apps/api/src/site-builder/agents/task-route-bindings.ts",
-  "apps/api/src/site-builder/site-builder-model-settlement.ts",
-] as const;
-
 const HELP = `Usage:
   pnpm --filter @global/api exec tsx scripts/prepare-site-builder-design-spec-evidence-preflight.mts \\
     --manifest=${MANIFEST_DEFAULT} \\
@@ -164,13 +155,13 @@ function sourceBundle(commitSha: string): {
   sha256: string;
   files: { path: string; sha256: string }[];
 } {
-  const files = SOURCE_FILES.map((path) => {
+  const files = DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_FILES.map((path) => {
     const bytes = Buffer.from(git(["show", `${commitSha}:${path}`], null));
     return { path, sha256: createHash("sha256").update(bytes).digest("hex") };
   });
   return {
     commitSha,
-    contractId: "design-spec-evidence-preflight-source-bundle/v1",
+    contractId: DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_BUNDLE_ID,
     sha256: sha256CanonicalJson(files),
     files,
   };

@@ -750,6 +750,18 @@ export function modelEvaluationLedgerDirectorySha256(
   return resolveLedgerDirectoryIdentity(directory).sha256;
 }
 
+export function modelEvaluationLedgerAuthorizationClaimCount(
+  directory: string,
+): number {
+  if (typeof directory !== "string" || !isAbsolute(directory)) {
+    throw new Error(
+      "absolute durable evaluation authorization ledger directory is required",
+    );
+  }
+  return resolveLedgerDirectoryIdentity(directory).claimedAuthorizationDigests
+    .length;
+}
+
 interface ModelEvaluationClaimLockOwner {
   pid: number;
   bootId: string;

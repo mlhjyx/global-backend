@@ -32,6 +32,7 @@ import {
   createFileBackedModelEvaluationAuthorizationLedger,
   createModelEvaluationProtocolExecutor as createRawModelEvaluationProtocolExecutor,
   MODEL_EVALUATION_TRANSPORT_RESPONSE_BODY_LIMIT_BYTES,
+  modelEvaluationLedgerAuthorizationClaimCount,
   modelEvaluationLedgerDirectorySha256,
   type ModelEvaluationWireClient,
 } from "./model-evaluation-executor";
@@ -746,6 +747,34 @@ describe("model evaluation executor authorization", () => {
       await mkdir(directory);
       const second = modelEvaluationLedgerDirectorySha256(directory);
       expect(second).not.toBe(first);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports whether a durable ledger already claimed an authorization", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "evaluation-ledger-claim-count-spec-"),
+    );
+    const ledgerId = "claim-count-spec-ledger/durable-v1";
+    try {
+      expect(modelEvaluationLedgerAuthorizationClaimCount(directory)).toBe(0);
+      const ledger = createFileBackedModelEvaluationAuthorizationLedger({
+        ledgerId,
+        directory,
+      });
+      await expect(
+        Promise.resolve(
+          ledger.claim({
+            authorizationId: "claim-count-spec-authorization/v1",
+            executorClaimId: "claim-count-spec-executor/v1",
+            campaignBudgetCents: 10,
+            maxDispatchExecutions: 1,
+            maxWireCalls: 2,
+          }),
+        ),
+      ).resolves.toBe(true);
+      expect(modelEvaluationLedgerAuthorizationClaimCount(directory)).toBe(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

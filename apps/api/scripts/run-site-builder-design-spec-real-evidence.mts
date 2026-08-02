@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -17,6 +18,7 @@ import {
   createCredentialBoundModelEvaluationWireClient,
   createFileBackedModelEvaluationAuthorizationLedger,
   createModelEvaluationProtocolExecutor,
+  modelEvaluationLedgerAuthorizationClaimCount,
   modelEvaluationLedgerDirectorySha256,
 } from "../src/site-builder/eval/model-evaluation-executor";
 import {
@@ -36,6 +38,12 @@ import {
   designSpecCostAffectingPriceTerms,
   redactModelEvaluationRun,
 } from "../src/site-builder/eval/design-spec-real-evidence";
+import {
+  assertDesignSpecFullRestartCreateOnlyTargetsAvailable,
+  buildDesignSpecFullRestartRunBinding,
+  DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_BUNDLE_ID,
+  DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_FILES,
+} from "../src/site-builder/eval/design-spec-full-restart-prep";
 import { writeRepositoryJsonCreateOnly } from "../src/site-builder/eval/create-only-json";
 
 const REPOSITORY_ROOT = resolve(
@@ -44,18 +52,8 @@ const REPOSITORY_ROOT = resolve(
 );
 const MANIFEST_PATH =
   "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json";
-const PREFLIGHT_PATH =
-  "docs/evidence/site-builder/m1-g-design-spec-evidence-preflight-v4.json";
 const MAX_CAMPAIGN_CENTS = 2_920;
 const QUOTA_POINTS_PER_CENT = 5_000;
-const EVIDENCE_PATH =
-  /^docs\/evidence\/site-builder\/[A-Za-z0-9][A-Za-z0-9._/-]*\.json$/;
-const RUNNER_FILES = [
-  "apps/api/scripts/run-site-builder-design-spec-real-evidence.mts",
-  "apps/api/src/site-builder/eval/design-spec-real-evidence.ts",
-  "apps/api/src/site-builder/eval/design-spec-real-evidence.spec.ts",
-] as const;
-
 function option(name: string): string | null {
   const values = process.argv
     .slice(2)
@@ -66,19 +64,6 @@ function option(name: string): string | null {
 function requiredOption(name: string): string {
   const value = option(name)?.trim();
   if (!value) throw new Error(`--${name} is required`);
-  return value;
-}
-
-function safeEvidencePath(value: string): string {
-  if (
-    !EVIDENCE_PATH.test(value) ||
-    value.includes("\\") ||
-    value.includes("//") ||
-    value.split("/").includes("..")
-  )
-    throw new Error(
-      "output must be a create-only Site Builder evidence JSON path",
-    );
   return value;
 }
 
@@ -187,6 +172,7 @@ function exactCriticalPreflight(
     },
     pricing: designSpecCostAffectingPriceTerms(value.pricing),
     estimate: value.estimate,
+    sourceBundle: value.sourceBundle,
   });
   if (
     live.status !== "READY_FOR_PRODUCT_DECISION" ||
@@ -197,6 +183,46 @@ function exactCriticalPreflight(
     throw new Error(
       "live credential, channel, price, manifest, or cost envelope drifted",
     );
+}
+
+function exactPreparedSourceBundle(
+  frozen: DesignSpecEvidencePreflightReport,
+  head: string,
+): DesignSpecEvidencePreflightReport["sourceBundle"] {
+  const source = frozen.sourceBundle;
+  if (
+    !/^[a-f0-9]{40}$/.test(source.commitSha) ||
+    source.contractId !== DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_BUNDLE_ID ||
+    JSON.stringify(source.files.map(({ path }) => path)) !==
+      JSON.stringify(DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_FILES)
+  ) {
+    throw new Error("frozen full-restart source bundle identity is invalid");
+  }
+  execFileSync("git", ["merge-base", "--is-ancestor", source.commitSha, head], {
+    cwd: REPOSITORY_ROOT,
+    stdio: "ignore",
+  });
+  const filesAt = (commitSha: string) =>
+    DESIGN_SPEC_FULL_RESTART_PREFLIGHT_SOURCE_FILES.map((path) => ({
+      path,
+      sha256: createHash("sha256")
+        .update(
+          execFileSync("git", ["show", `${commitSha}:${path}`], {
+            cwd: REPOSITORY_ROOT,
+          }),
+        )
+        .digest("hex"),
+    }));
+  const preparedFiles = filesAt(source.commitSha);
+  const currentFiles = filesAt(head);
+  if (
+    JSON.stringify(preparedFiles) !== JSON.stringify(source.files) ||
+    JSON.stringify(currentFiles) !== JSON.stringify(source.files) ||
+    sha256CanonicalJson(preparedFiles) !== source.sha256
+  ) {
+    throw new Error("current runner source differs from frozen preflight");
+  }
+  return source;
 }
 
 async function livePreflight(
@@ -213,16 +239,7 @@ async function livePreflight(
     boundedJson(`${origin}/api/usage/token/`, auth),
     boundedJson(OPENOX_PRICING_CATALOG_URL),
   ]);
-  const runnerFiles = RUNNER_FILES.map((path) => ({
-    path,
-    sha256: createHash("sha256")
-      .update(
-        execFileSync("git", ["show", `${head}:${path}`], {
-          cwd: REPOSITORY_ROOT,
-        }),
-      )
-      .digest("hex"),
-  }));
+  const sourceBundle = exactPreparedSourceBundle(frozen, head);
   const report = buildDesignSpecEvidencePreflight({
     manifest,
     capturedAt: new Date().toISOString(),
@@ -235,12 +252,7 @@ async function livePreflight(
     openOxHttpStatus: catalog.status,
     openOxResponseSha256: catalog.sha256,
     readOnlyNetworkCalls: 3,
-    sourceBundle: {
-      commitSha: head,
-      contractId: "design-spec-real-evidence-runner/v1",
-      sha256: sha256CanonicalJson(runnerFiles),
-      files: runnerFiles,
-    },
+    sourceBundle,
   });
   exactCriticalPreflight(frozen, report);
   return report;
@@ -248,15 +260,31 @@ async function livePreflight(
 
 async function main(): Promise<void> {
   const mode = requiredOption("mode");
-  if (mode !== "dry-run" && mode !== "execute")
-    throw new Error("mode must be dry-run or execute");
-  const output = safeEvidencePath(requiredOption("output"));
-  const probeOutput = safeEvidencePath(requiredOption("probe-output"));
-  if (output === probeOutput)
-    throw new Error("output and probe-output must be distinct");
+  if (mode !== "execute")
+    throw new Error("full-restart runner mode must be execute");
+  const runBinding = buildDesignSpecFullRestartRunBinding({
+    campaignId: requiredOption("campaign-id"),
+    preflightPath: requiredOption("preflight"),
+    executionPreflightOutputPath: requiredOption("execution-preflight-output"),
+    outputPath: requiredOption("output"),
+    probeOutputPath: requiredOption("probe-output"),
+  });
+  const output = runBinding.outputPath;
+  const probeOutput = runBinding.probeOutputPath;
   const ledgerDirectory = safeLedgerDirectory(
     requiredOption("ledger-directory"),
   );
+  if (basename(ledgerDirectory) !== runBinding.campaignId) {
+    throw new Error("ledger directory must end with the exact campaign id");
+  }
+  assertDesignSpecFullRestartCreateOnlyTargetsAvailable(runBinding, (path) =>
+    existsSync(resolve(REPOSITORY_ROOT, path)),
+  );
+  if (modelEvaluationLedgerAuthorizationClaimCount(ledgerDirectory) !== 0) {
+    throw new Error(
+      "full-restart ledger already contains an authorization claim",
+    );
+  }
   const approvedAt = requiredOption("approved-at");
   if (new Date(approvedAt).toISOString() !== approvedAt)
     throw new Error("approved-at must be canonical UTC");
@@ -269,7 +297,7 @@ async function main(): Promise<void> {
   const head = currentHeadAndClean();
   const [manifest, frozen] = await Promise.all([
     readFile(resolve(REPOSITORY_ROOT, MANIFEST_PATH), "utf8").then(JSON.parse),
-    readFile(resolve(REPOSITORY_ROOT, PREFLIGHT_PATH), "utf8").then(
+    readFile(resolve(REPOSITORY_ROOT, runBinding.preflightPath), "utf8").then(
       JSON.parse,
     ) as Promise<DesignSpecEvidencePreflightReport>,
   ]);
@@ -279,6 +307,11 @@ async function main(): Promise<void> {
     gatewayUrl,
     token,
     head,
+  );
+  await writeRepositoryJsonCreateOnly(
+    REPOSITORY_ROOT,
+    runBinding.executionPreflightOutputPath,
+    preflight,
   );
   const plan = buildTaskEvaluationPlan("site_builder.design_spec");
   const suite = plan.evaluationSuite;
@@ -301,7 +334,7 @@ async function main(): Promise<void> {
       "evaluation token quota no longer equals the authorized hard ceiling",
     );
 
-  const ledgerId = "design-spec-real-evidence-ledger/v1";
+  const ledgerId = runBinding.ledgerId;
   const costSafety = createModelEvaluationCostSafetyAttestation({
     contractId: SITE_BUILDER_MODEL_EVALUATION_COST_SAFETY_ID,
     authorization: {
@@ -318,7 +351,7 @@ async function main(): Promise<void> {
       preparedSourceBundleSha256: preparedCase.contract.sourceBundleSha256,
     },
     credential: {
-      attestationId: "design-spec-evaluation-credential/2026-08-02-v1",
+      attestationId: runBinding.credentialAttestationId,
       observedAt: preflight.credential.observedAt!,
       snapshotSha256: sha256CanonicalJson(preflight.credential),
       bearerTokenSha256: createHash("sha256").update(token).digest("hex"),
@@ -335,7 +368,7 @@ async function main(): Promise<void> {
       })),
     },
     pricing: {
-      snapshotId: "openox-design-spec-prices/2026-08-02-v1",
+      snapshotId: runBinding.pricingSnapshotId,
       snapshotSha256: preflight.pricing.selectedPricingSha256!,
       basis: "frozen_unit_price_snapshot",
       defaultOrUnconfiguredRatioAllowed: false,
@@ -362,35 +395,6 @@ async function main(): Promise<void> {
     },
     media: { genericChannelTest: "forbidden", allowedDispatches: [] },
   });
-
-  if (mode === "dry-run") {
-    await writeRepositoryJsonCreateOnly(REPOSITORY_ROOT, output, {
-      schemaVersion: "site-builder-design-spec-real-evidence-dry-run/v1",
-      status: "READY_FOR_AUTHORIZED_DISPATCH",
-      fixedCommitSha: head,
-      suiteId: suite.suiteId,
-      preflightReportSha256: preflight.reportSha256,
-      costSafetySha256: sha256CanonicalJson(costSafety),
-      dispatchExecutions: 73,
-      maximumWireCalls: 146,
-      mechanicalHardCeilingCents: MAX_CAMPAIGN_CENTS,
-      settlementAccounting:
-        "openox_1_to_1_balance_credit_cents; native currencies preserved below; no market FX",
-      nativePricing: preflight.pricing.entries.map((entry) => ({
-        alias: entry.alias,
-        protocol: entry.protocol,
-        currency: entry.currency,
-        effectiveInputRatePerMillionTokens: entry.effectiveInputRate,
-        effectiveOutputRatePerMillionTokens: entry.effectiveOutputRate,
-      })),
-      modelWireCalls: 0,
-      actualModelCostCents: 0,
-    });
-    process.stdout.write(
-      `created ${output}; status=READY_FOR_AUTHORIZED_DISPATCH; model_wire_calls=0; model_cost_cents=0\n`,
-    );
-    return;
-  }
 
   const capture = createRequestIdCapturingFetch(fetch);
   const routes = preflight.channelBinding.entries.map(
@@ -478,8 +482,14 @@ async function main(): Promise<void> {
     probeStatus = probe.status;
     await writeRepositoryJsonCreateOnly(REPOSITORY_ROOT, probeOutput, {
       schemaVersion: "site-builder-design-spec-capability-probe-evidence/v1",
+      campaignId: runBinding.campaignId,
       fixedCommitSha: head,
+      preparedRunnerCommitSha: preflight.sourceBundle.commitSha,
       suiteId: suite.suiteId,
+      frozenPreflightPath: runBinding.preflightPath,
+      frozenPreflightReportSha256: frozen.reportSha256,
+      executionPreflightPath: runBinding.executionPreflightOutputPath,
+      executionPreflightReportSha256: preflight.reportSha256,
       alias: probeCandidate.alias,
       protocol: probeCandidate.expectedProtocol,
       validation: probe,
@@ -548,12 +558,17 @@ async function main(): Promise<void> {
       : null;
   await writeRepositoryJsonCreateOnly(REPOSITORY_ROOT, output, {
     schemaVersion: "site-builder-design-spec-real-evidence/v1",
+    campaignId: runBinding.campaignId,
     status:
       stopReason === null
         ? "EVIDENCE_CAPTURED_REVIEW_REQUIRED"
         : "EVIDENCE_STOPPED_REVIEW_REQUIRED",
     fixedCommitSha: head,
+    preparedRunnerCommitSha: preflight.sourceBundle.commitSha,
     suiteId: suite.suiteId,
+    frozenPreflightPath: runBinding.preflightPath,
+    frozenPreflightReportSha256: frozen.reportSha256,
+    executionPreflightPath: runBinding.executionPreflightOutputPath,
     preflightReportSha256: preflight.reportSha256,
     costSafetySha256: sha256CanonicalJson(costSafety),
     probeEvidencePath: probeOutput,
