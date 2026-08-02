@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { OPENOX_PRICING_AUTHORITY } from "../src/site-builder/site-builder-model-settlement";
 import { writeRepositoryJsonCreateOnly } from "../src/site-builder/eval/create-only-json";
@@ -35,20 +35,24 @@ function option(name: string): string | null {
   return matches.length === 1 ? matches[0]!.slice(prefix.length) : null;
 }
 
-function requiredEvidencePath(): string {
-  const value = option("output")?.trim();
+export function validateEvidenceOutputPath(value: string | null): string {
+  const normalized = value?.trim();
   if (
-    !value ||
-    !EVIDENCE_PATH.test(value) ||
-    value.includes("\\") ||
-    value.includes("//") ||
-    value.split("/").includes("..")
+    !normalized ||
+    !EVIDENCE_PATH.test(normalized) ||
+    normalized.includes("\\") ||
+    normalized.includes("//") ||
+    normalized.split("/").includes("..")
   ) {
     throw new Error(
       "--output must be a new repository-relative evidence JSON path",
     );
   }
-  return value;
+  return normalized;
+}
+
+function requiredEvidencePath(): string {
+  return validateEvidenceOutputPath(option("output"));
 }
 
 function currentCleanHead(): string {
@@ -68,7 +72,7 @@ function currentCleanHead(): string {
   return head;
 }
 
-function assertFixedSourceReachability(manifest: unknown): void {
+export function assertFixedSourceReachability(manifest: unknown): void {
   const fixedCommitSha =
     manifest && typeof manifest === "object" && !Array.isArray(manifest)
       ? (manifest as { fixedCommitSha?: unknown }).fixedCommitSha
@@ -94,15 +98,12 @@ function assertFixedSourceReachability(manifest: unknown): void {
   }
 }
 
-async function readBoundedCatalog(): Promise<{
+export async function decodeBoundedCatalogResponse(
+  response: Response,
+): Promise<{
   catalog: unknown;
   responseSha256: string;
 }> {
-  const url = `${OPENOX_PRICING_AUTHORITY.origin}${OPENOX_PRICING_AUTHORITY.catalogEndpoint}`;
-  const response = await fetch(url, {
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-  });
   if (!response.ok) {
     throw new Error(
       `OpenOx pricing catalog request failed: HTTP ${response.status}`,
@@ -153,6 +154,18 @@ async function readBoundedCatalog(): Promise<{
   };
 }
 
+async function readBoundedCatalog(): Promise<{
+  catalog: unknown;
+  responseSha256: string;
+}> {
+  const url = `${OPENOX_PRICING_AUTHORITY.origin}${OPENOX_PRICING_AUTHORITY.catalogEndpoint}`;
+  const response = await fetch(url, {
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  return decodeBoundedCatalogResponse(response);
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help")) {
     process.stdout.write(HELP);
@@ -199,4 +212,9 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  await main();
+}
