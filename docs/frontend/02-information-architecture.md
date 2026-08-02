@@ -31,7 +31,7 @@
 | Area ID | 区域 | 用户问题 | 拥有/引用对象 | 边界 |
 |---|---|---|---|---|
 | `AREA-FE-001` | 今日 | 我现在最该处理什么 | Task/Approval/Incident 等读模型 | 不创建另一套业务状态 |
-| `AREA-FE-002` | 客户开发 | 去哪里、找谁、为什么现在 | Market/ICP/Company/Lead/package | 本仓止于 `LeadQualifiedPackage`；新增后端开发冻结 |
+| `AREA-FE-002` | 客户开发 | 去哪里、找谁、为什么现在 | Market/ICP/Company/Lead/package | 本仓止于 `LeadQualifiedPackage`；冻结已解除，M1 收口后再恢复实现 |
 | `AREA-FE-003` | 独立站管理 | 如何建立并持续运营可信海外站 | Site/Profile/Asset/KB/Claim/Build/Version/Release | Astro 输出不是平行 SaaS；当前承诺止于开发预览 |
 | `AREA-FE-004` | 增长执行 | 如何把目标转成受控动作 | Initiative/Campaign/Audience/Content/PublishJob | SoR/实现归 SaaS；本仓不补造 |
 | `AREA-FE-005` | 互动与商机 | 如何处理响应并推进商业结果 | Conversation/Opportunity/Outcome | 归 SaaS；Site 只在后续产生 Inquiry 接缝 |
