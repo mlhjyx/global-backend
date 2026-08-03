@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import { PaidModelPreflightError } from '../model-gateway/paid-model-settlement';
-import { resolveTaskRoute, SITE_BUILDER_TASK_IDS } from './agents/task-routes';
+import {
+  resolveTaskExecutionTarget,
+  SITE_BUILDER_TASK_IDS,
+} from './agents/task-routes';
 import {
   NewApiSiteBuilderModelSettlement,
   loadSiteBuilderModelSettlement,
@@ -26,8 +29,6 @@ const GATEWAY_ORIGIN = 'https://gateway.example.test';
 const CHANNEL_ID = 17;
 const REVIEWED_RUNTIME_ROUTE_ENV = {
   SITE_BUILDER_FALLBACKS_COPY: 'glm-5.2',
-  SITE_BUILDER_MODEL_DESIGN_SPEC: 'deepseek-v4-pro',
-  SITE_BUILDER_FALLBACKS_DESIGN_SPEC: 'glm-5.2',
   SITE_BUILDER_FALLBACKS_QA_SUMMARIZE: '',
   SITE_BUILDER_FALLBACKS_SEO_REVIEW: '',
 } satisfies NodeJS.ProcessEnv;
@@ -38,7 +39,9 @@ function protocolFor(alias: string) {
 
 function routeEntries() {
   return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
-    const route = resolveTaskRoute(taskId, REVIEWED_RUNTIME_ROUTE_ENV);
+    const target = resolveTaskExecutionTarget(taskId, REVIEWED_RUNTIME_ROUTE_ENV);
+    if (target.kind === 'deterministic_fallback') return [];
+    const route = target.route;
     return [route.primary, ...route.fallbacks].map((alias) => ({
       taskId,
       alias,
@@ -257,7 +260,7 @@ describe('Site Builder zero-generation model preflight', () => {
           },
           { now: () => NOW },
         ),
-      ).toThrow('RETIRED_ALIAS_STILL_ACTIVE');
+      ).not.toThrow();
       expect(
         loadSiteBuilderModelSettlement(
           {

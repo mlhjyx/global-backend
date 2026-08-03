@@ -158,6 +158,29 @@ const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
     },
     promotionEvidenceId: BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.id,
   },
+  'site_builder.copy': {
+    state: 'currentRoute',
+    lifecycle: 'active',
+    route: { primary: 'deepseek-v4-pro', fallbacks: ['glm-5.2'] },
+  },
+  'site_builder.design_spec': {
+    state: 'deterministicFallback',
+    lifecycle: 'active',
+    fallback: {
+      id: 'safe-blueprint',
+      description: 'Return the validated deterministic safe blueprint.',
+    },
+  },
+  'site_builder.qa_summarize': {
+    state: 'currentRoute',
+    lifecycle: 'active',
+    route: { primary: 'deepseek-v4-flash', fallbacks: [] },
+  },
+  'site_builder.seo_review': {
+    state: 'currentRoute',
+    lifecycle: 'active',
+    route: { primary: 'deepseek-v4-flash', fallbacks: [] },
+  },
 };
 
 /**
@@ -386,7 +409,13 @@ function cloneRollbackTarget(target: ModelRollbackTarget): ModelRollbackTarget {
  */
 export class ModelPolicyRegistry {
   resolveActiveTaskRoute(taskId: SiteBuilderTaskId): ModelRouteSnapshot {
-    return cloneRoute(ACTIVE_TASK_POLICIES[taskId].route);
+    const policy = ACTIVE_TASK_POLICIES[taskId];
+    if (policy.state === 'deterministicFallback') {
+      throw new Error(
+        `${taskId} has an active deterministic fallback, not a model route`,
+      );
+    }
+    return cloneRoute(policy.route);
   }
 
   getActiveTaskPolicy(taskId: SiteBuilderTaskId): ModelActiveRoute {
@@ -397,6 +426,13 @@ export class ModelPolicyRegistry {
         lifecycle: policy.lifecycle,
         route: cloneRoute(policy.route),
         promotionEvidenceId: policy.promotionEvidenceId,
+      };
+    }
+    if (policy.state === 'deterministicFallback') {
+      return {
+        state: policy.state,
+        lifecycle: policy.lifecycle,
+        fallback: { ...policy.fallback },
       };
     }
     return {

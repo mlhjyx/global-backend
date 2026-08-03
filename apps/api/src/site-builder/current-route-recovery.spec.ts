@@ -142,13 +142,13 @@ function build(
 }
 
 describe('current-route zero-model recovery preparation', () => {
-  it('derives all seven tasks, fifteen dispatches and eight exact aliases from the registry', () => {
+  it('derives six model tasks, ten dispatches and five exact aliases from the registry', () => {
     const report = build();
 
-    expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(7);
-    expect(report.dispatches).toHaveLength(15);
-    expect(report.aliases).toHaveLength(8);
-    expect(report.status).toBe('BLOCKED_CURRENT_ROUTE_RECOVERY');
+    expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(6);
+    expect(report.dispatches).toHaveLength(10);
+    expect(report.aliases).toHaveLength(5);
+    expect(report.status).toBe('READY_FOR_RUNTIME_ATTESTATION_DECISION');
     expect(report.credential.requiredModelAllowlist).toEqual([
       'claude-sonnet-5',
       'deepseek-v4-flash',
@@ -156,7 +156,7 @@ describe('current-route zero-model recovery preparation', () => {
       'glm-5.2',
       'gpt-5.6-terra',
     ]);
-    expect(report.blockers).toEqual(['RETIRED_ALIAS_STILL_ACTIVE']);
+    expect(report.blockers).toEqual([]);
     expect(report.modelDispatchAuthorization).toBe('NOT_AUTHORIZED');
     expect(report.modelGenerationCalls).toBe(0);
     expect(report.modelFeesUsd).toBe(0);
@@ -179,19 +179,8 @@ describe('current-route zero-model recovery preparation', () => {
     expect(
       report.dispatches.find(({ alias }) => alias === 'claude-sonnet-5'),
     ).toMatchObject({ protocol: 'anthropic-messages' });
-    for (const alias of [
-      'minimax-m3',
-      'doubao-seed-2.0-pro',
-      'doubao-seed-2.0-lite',
-    ]) {
-      expect(
-        report.aliases.find((entry) => entry.alias === alias),
-      ).toMatchObject({
-        retirementDecision: 'pending_retirement',
-        channelSelection: 'not_applicable',
-        openOxPricing: null,
-        blockers: ['RETIRED_ALIAS_STILL_ACTIVE'],
-      });
+    for (const alias of ['minimax-m3', 'doubao-seed-2.0-pro', 'doubao-seed-2.0-lite']) {
+      expect(report.aliases.find((entry) => entry.alias === alias)).toBeUndefined();
       expect(report.credential.requiredModelAllowlist).not.toContain(alias);
     }
   });
@@ -236,7 +225,6 @@ describe('current-route zero-model recovery preparation', () => {
       'CREDENTIAL_NOT_FINITE_EXACT',
       'ENABLED_CHANNEL_AMBIGUOUS',
       'OPENOX_PRICE_MISSING',
-      'RETIRED_ALIAS_STILL_ACTIVE',
     ]);
     expect(
       report.aliases.find(({ alias }) => alias === 'deepseek-v4-flash'),
@@ -252,26 +240,23 @@ describe('current-route zero-model recovery preparation', () => {
       blockers: ['ENABLED_CHANNEL_AMBIGUOUS', 'CREDENTIAL_NOT_FINITE_EXACT'],
     });
     expect(report.requiredActions).toEqual([
-      'PROMOTE_TASKS_OFF_RETIRED_ALIASES',
       'REQUEST_OPENOX_EXACT_ALIAS_PRICING_OR_OPEN_TASK_EVIDENCE',
       'PIN_ONE_REVIEWED_CHANNEL',
       'CREATE_FINITE_EXACT_ALLOWLIST_TOKEN_AFTER_COVERAGE',
     ]);
-    expect(report.blockedTaskIds).toHaveLength(7);
+    expect(report.blockedTaskIds).toHaveLength(6);
     expect(
       report.requiredActions.includes(
         'RESTORE_EXACT_ALIAS_CHANNEL_OR_OPEN_TASK_EVIDENCE',
       ),
     ).toBe(false);
-    for (const alias of [
-      'minimax-m3',
-      'doubao-seed-2.0-pro',
-      'doubao-seed-2.0-lite',
-    ]) {
-      expect(
-        report.aliases.find((entry) => entry.alias === alias)?.blockers,
-      ).toEqual(['RETIRED_ALIAS_STILL_ACTIVE']);
-    }
+    expect(report.aliases).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ alias: 'minimax-m3' }),
+        expect.objectContaining({ alias: 'doubao-seed-2.0-pro' }),
+        expect.objectContaining({ alias: 'doubao-seed-2.0-lite' }),
+      ]),
+    );
   });
 
   it('ignores process environment route overrides by resolving only the frozen registry', () => {

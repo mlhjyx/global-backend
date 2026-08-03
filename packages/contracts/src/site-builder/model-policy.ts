@@ -72,7 +72,21 @@ export interface ModelPromotedRoute {
   promotionEvidenceId: string;
 }
 
-export type ModelActiveRoute = ModelCurrentRoute | ModelPromotedRoute;
+/**
+ * An active deterministic target is neither a legacy model route nor an
+ * unevaluated candidate. It is used while a retired route has no promotion
+ * replacement yet.
+ */
+export interface ModelDeterministicActiveRoute {
+  state: 'deterministicFallback';
+  lifecycle: 'active';
+  fallback: DeterministicFallback;
+}
+
+export type ModelActiveRoute =
+  | ModelCurrentRoute
+  | ModelPromotedRoute
+  | ModelDeterministicActiveRoute;
 
 /** Candidate registration is deliberately not a traffic-switch instruction. */
 export type ModelCandidateActivation =

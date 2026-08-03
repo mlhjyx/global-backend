@@ -162,21 +162,21 @@
       "domain": "text",
       "status": "legacy-only",
       "expectedProtocols": ["openai-chat-completions"],
-      "boundary": "Unchanged currentRoute only; excluded from every new target pool."
+      "boundary": "Historical provenance only; pending retirement and forbidden from runtime, comparator, rollback, and new target pools."
     },
     {
       "alias": "doubao-seed-2.0-pro",
       "domain": "text",
       "status": "legacy-only",
       "expectedProtocols": ["openai-chat-completions"],
-      "boundary": "Unchanged currentRoute fallback only; excluded from every new target pool."
+      "boundary": "Historical provenance only; pending retirement and forbidden from runtime, comparator, rollback, and new target pools."
     },
     {
       "alias": "doubao-seed-2.0-lite",
       "domain": "text",
       "status": "legacy-only",
       "expectedProtocols": ["openai-chat-completions"],
-      "boundary": "Unchanged currentRoute fallback only; excluded from every new target pool."
+      "boundary": "Historical provenance only; pending retirement and forbidden from runtime, comparator, rollback, and new target pools."
     }
   ],
   "profileCandidatePools": [

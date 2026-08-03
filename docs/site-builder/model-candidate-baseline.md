@@ -9,9 +9,9 @@
 
 ## 边界
 
-本基线 `site-builder-model-candidate-baseline/2026-07-27-v1` 只登记非运行时候选与后续评测顺序。它不修改 `site-builder-model-policy/v3`、`currentRoute`、`promotedRoute`、rollback、环境变量、Temporal、P4、DesignEvaluation、ReleaseManifest、MediaGateway 或公共 API，也不证明模型质量、生产可用性或部署状态。
+本基线 `site-builder-model-candidate-baseline/2026-07-27-v1` 只登记非运行时候选与后续评测顺序。它本身不路由候选、晋级模型、改变 rollback、环境变量、Temporal、P4、DesignEvaluation、ReleaseManifest、MediaGateway 或公共 API，也不证明模型质量、生产可用性或部署状态。
 
-型号可见、渠道启用或一次最小连通，只能支持进入后续 capability probe；不能跳过逐任务评测、失败门、成本结算、rollback 和用户批准。当前 BrandProfile 的 Terra→Sonnet promotion 及其 DeepSeek→GLM rollback 保持不变，其他六个文本任务保持原 currentRoute。
+型号可见、渠道启用或一次最小连通，只能支持进入后续 capability probe；不能跳过逐任务评测、失败门、成本结算、rollback 和用户批准。当前 BrandProfile 的 Terra→Sonnet promotion 及其 DeepSeek→GLM rollback 保持不变；未晋级任务的 active policy 与此候选基线分离，其中 design_spec 已使用确定性安全蓝图，其他任务仍须独立评测后才能路由候选。
 
 ## 状态词表
 
@@ -47,9 +47,9 @@
 | `deepseek-v4-pro` | `text` | `legacy-only` | `openai-chat-completions` | Unchanged currentRoute or rollback only. |
 | `deepseek-v4-flash` | `text` | `legacy-only` | `openai-chat-completions` | Unchanged currentRoute only. |
 | `glm-5.2` | `text` | `legacy-only` | `openai-chat-completions` | Unchanged currentRoute or rollback only. |
-| `minimax-m3` | `text` | `legacy-only` | `openai-chat-completions` | Unchanged currentRoute only; excluded from every new target pool. |
-| `doubao-seed-2.0-pro` | `text` | `legacy-only` | `openai-chat-completions` | Unchanged currentRoute fallback only; excluded from every new target pool. |
-| `doubao-seed-2.0-lite` | `text` | `legacy-only` | `openai-chat-completions` | Unchanged currentRoute fallback only; excluded from every new target pool. |
+| `minimax-m3` | `text` | `legacy-only` | `openai-chat-completions` | Historical provenance only; pending retirement and forbidden from runtime, comparator, rollback, and new target pools. |
+| `doubao-seed-2.0-pro` | `text` | `legacy-only` | `openai-chat-completions` | Historical provenance only; pending retirement and forbidden from runtime, comparator, rollback, and new target pools. |
+| `doubao-seed-2.0-lite` | `text` | `legacy-only` | `openai-chat-completions` | Historical provenance only; pending retirement and forbidden from runtime, comparator, rollback, and new target pools. |
 
 ## Profile 候选池
 

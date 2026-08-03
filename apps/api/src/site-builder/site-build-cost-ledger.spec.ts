@@ -7,7 +7,10 @@ import {
   SITE_BUILD_COST_SUMMARY_VERSION,
 } from './site-build-cost-ledger';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
-import { resolveTaskRoute, SITE_BUILDER_TASK_IDS } from './agents/task-routes';
+import {
+  resolveTaskExecutionTarget,
+  SITE_BUILDER_TASK_IDS,
+} from './agents/task-routes';
 
 describe('R4-B cost truth classification', () => {
   it('uses measured tokens and the frozen MODEL-1 price snapshot without calling it provider-reported', () => {
@@ -73,9 +76,11 @@ describe('R4-B cost truth classification', () => {
     });
   });
 
-  it('accepts request-bound new-api settlement for every current Site Builder dispatch', () => {
+  it('accepts request-bound new-api settlement for every active model dispatch', () => {
     for (const taskId of SITE_BUILDER_TASK_IDS) {
-      const route = resolveTaskRoute(taskId);
+      const target = resolveTaskExecutionTarget(taskId);
+      if (target.kind === 'deterministic_fallback') continue;
+      const route = target.route;
       for (const alias of [route.primary, ...route.fallbacks]) {
         const protocol = VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? 'openai-chat-completions';
         const settlementPreflight = {

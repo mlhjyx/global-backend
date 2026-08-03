@@ -110,10 +110,11 @@ export interface DesignSpecTaskOutput {
 
 interface DesignSpecTaskSelection {
   output?: DesignSpecTaskOutput;
-  deterministicRollback?: {
-    source: "rollback_override";
+  deterministicFallback?: {
+    source: "rollback_override" | "registry_deterministic";
     fallbackId: string;
-    rollbackPolicyVersion: string;
+    rollbackPolicyVersion?: string;
+    policyVersion?: string;
   };
 }
 
@@ -754,11 +755,18 @@ export class DesignBriefProducer {
         );
       }
       return {
-        deterministicRollback: {
-          source: executionTarget.source,
-          fallbackId: executionTarget.fallback.id,
-          rollbackPolicyVersion: executionTarget.rollbackPolicyVersion,
-        },
+        deterministicFallback:
+          executionTarget.source === "rollback_override"
+            ? {
+                source: executionTarget.source,
+                fallbackId: executionTarget.fallback.id,
+                rollbackPolicyVersion: executionTarget.rollbackPolicyVersion,
+              }
+            : {
+                source: executionTarget.source,
+                fallbackId: executionTarget.fallback.id,
+                policyVersion: executionTarget.policyVersion,
+              },
       };
     }
     if (this.deps.executeTask) {
@@ -838,8 +846,8 @@ export class DesignBriefProducer {
       const { archetype, candidates, taskInput } =
         prepareDesignSpecCandidatePipeline(this.catalog, input, variationSeed);
       let modelOutput: DesignSpecTaskOutput | undefined;
-      let deterministicRollback:
-        DesignSpecTaskSelection["deterministicRollback"] | undefined;
+      let deterministicFallback:
+        DesignSpecTaskSelection["deterministicFallback"] | undefined;
       try {
         this.ensureNotCancelled();
         const selection = await this.selectWithModel(taskInput, {
@@ -850,7 +858,7 @@ export class DesignBriefProducer {
           fenceToken: claim.attempt.fenceToken,
         });
         modelOutput = selection.output;
-        deterministicRollback = selection.deterministicRollback;
+        deterministicFallback = selection.deterministicFallback;
       } catch (error) {
         this.ensureNotCancelled();
         if (
@@ -880,12 +888,16 @@ export class DesignBriefProducer {
         candidateId: selected.summary.id,
         selectionSource: modelOutput
           ? "model"
-          : deterministicRollback
-            ? "rollback_deterministic"
+          : deterministicFallback
+            ? deterministicFallback.source === "rollback_override"
+              ? "rollback_deterministic"
+              : "deterministic"
             : "deterministic",
-        ...(deterministicRollback
-          ? { rollbackProvenance: deterministicRollback }
-          : {}),
+        ...(deterministicFallback?.source === "rollback_override"
+          ? { rollbackProvenance: deterministicFallback }
+          : deterministicFallback
+            ? { deterministicProvenance: deterministicFallback }
+            : {}),
         designBriefDigest: designBrief.digest,
       });
       const result: ProducedDesignBrief = {
