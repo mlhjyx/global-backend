@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
 import type { ModelCandidateProtocol } from "../agents/model-candidate-baseline";
 import { COPY_TASK } from "../agents/copy";
 import {
@@ -14,10 +19,6 @@ import {
   type OpenOxPricingCatalog,
 } from "../site-builder-model-settlement";
 import { sha256CanonicalJson } from "./eval-provenance";
-import {
-  assertDesignSpecFixedSourceCommitOnMain,
-  assertDesignSpecSourceBundleAtFixedCommit,
-} from "./design-spec-evaluation-manifest-prep";
 import {
   buildRemainingTextEvaluationPrepManifest,
   type RemainingTextEvaluationManifestPrepManifest,
@@ -199,6 +200,109 @@ function amount(value: bigint): NativeAmount {
   };
 }
 
+function sourceFileAtFixedCommit(
+  repositoryRoot: string,
+  fixedCommitSha: string,
+  path: string,
+): Buffer {
+  try {
+    return execFileSync("git", ["show", `${fixedCommitSha}:${path}`], {
+      cwd: repositoryRoot,
+      encoding: null,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch {
+    throw new Error(`${path} must be tracked at the fixed commit`);
+  }
+}
+
+function isShallowRepository(repositoryRoot: string): boolean {
+  return (
+    execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    }).trim() === "true"
+  );
+}
+
+function assertFixedSourceCommitAvailable(
+  repositoryRoot: string,
+  fixedCommitSha: string,
+): void {
+  if (!/^[a-f0-9]{40}$/.test(fixedCommitSha)) {
+    throw new Error("remaining text task source commit requires a 40-character SHA");
+  }
+  const revisions = ["HEAD", "refs/remotes/origin/main"] as const;
+  try {
+    for (const revision of revisions) {
+      execFileSync("git", ["merge-base", "--is-ancestor", fixedCommitSha, revision], {
+        cwd: repositoryRoot,
+        stdio: "ignore",
+      });
+    }
+  } catch {
+    if (!isShallowRepository(repositoryRoot)) {
+      throw new Error("remaining text task fixed source commit must be reachable from prep history and origin/main");
+    }
+    try {
+      execFileSync("git", ["cat-file", "-e", `${fixedCommitSha}^{commit}`], {
+        cwd: repositoryRoot,
+        stdio: "ignore",
+      });
+    } catch {
+      throw new Error("remaining text task shallow checkout lacks the fixed source commit");
+    }
+  }
+}
+
+function assertSourceBundleAtFixedCommit(
+  repositoryRoot: string,
+  fixedCommitSha: string,
+  sourceFiles: readonly { path: string; sha256: string }[],
+): void {
+  const seen = new Set<string>();
+  for (const source of sourceFiles) {
+    if (
+      source.path.length === 0 ||
+      isAbsolute(source.path) ||
+      source.path.includes("\\") ||
+      source.path.split("/").includes("..") ||
+      !SHA256.test(source.sha256) ||
+      seen.has(source.path)
+    ) {
+      throw new Error("remaining text task source bundle contains an invalid path");
+    }
+    seen.add(source.path);
+    const resolved = resolve(repositoryRoot, source.path);
+    const repositoryRelative = relative(repositoryRoot, resolved);
+    if (
+      repositoryRelative.length === 0 ||
+      repositoryRelative === ".." ||
+      repositoryRelative.startsWith(`..${sep}`) ||
+      isAbsolute(repositoryRelative)
+    ) {
+      throw new Error(`${source.path} escapes the repository`);
+    }
+    const realSource = realpathSync(resolved);
+    const realRelative = relative(repositoryRoot, realSource);
+    if (
+      realRelative === ".." ||
+      realRelative.startsWith(`..${sep}`) ||
+      isAbsolute(realRelative)
+    ) {
+      throw new Error(`${source.path} resolves outside the repository`);
+    }
+    const committed = sourceFileAtFixedCommit(repositoryRoot, fixedCommitSha, source.path);
+    const working = readFileSync(realSource);
+    if (!working.equals(committed)) {
+      throw new Error(`${source.path} drifted from the fixed commit`);
+    }
+    if (createHash("sha256").update(committed).digest("hex") !== source.sha256) {
+      throw new Error(`${source.path} does not match the fixed source bundle digest`);
+    }
+  }
+}
+
 function assertManifest(
   repositoryRoot: string,
   value: unknown,
@@ -222,13 +326,14 @@ function assertManifest(
   if (sha256CanonicalJson(withoutDigest) !== manifestSha256) {
     throw new Error("remaining text task manifest digest drifted");
   }
-  assertDesignSpecFixedSourceCommitOnMain(
-    repositoryRoot,
+  const realRepositoryRoot = realpathSync(repositoryRoot);
+  assertFixedSourceCommitAvailable(
+    realRepositoryRoot,
     REQUIRED_FIXED_SOURCE_COMMIT_SHA,
   );
   for (const task of manifest.tasks) {
-    assertDesignSpecSourceBundleAtFixedCommit(
-      repositoryRoot,
+    assertSourceBundleAtFixedCommit(
+      realRepositoryRoot,
       REQUIRED_FIXED_SOURCE_COMMIT_SHA,
       task.sourceFiles,
     );
