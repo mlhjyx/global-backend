@@ -12,9 +12,9 @@ import { MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND } from "./model-eva
  * public-price artifact is intentionally not present in this source change.
  */
 export const DESIGN_SPEC_V2_NATIVE_FEE_CARD_ID =
-  "site-builder-design-spec-v3-native-fee-card/2026-08-03-v1" as const;
+  "site-builder-design-spec-v4-native-fee-card/2026-08-03-v1" as const;
 export const DESIGN_SPEC_V2_NATIVE_FEE_CARD_SCHEMA_VERSION =
-  "site-builder-design-spec-v3-native-fee-card/v1" as const;
+  "site-builder-design-spec-v4-native-fee-card/v1" as const;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -44,15 +44,15 @@ export const DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES = Object.freeze([
 ] as const);
 
 const REQUIRED_FIXED_SOURCE_COMMIT_SHA =
-  "5e25fd8d544c1f7e46b6d066505fbedf35997bae" as const;
+  "e569ddcc46040397c976258f76a16b2ec24c31eb" as const;
 const REQUIRED_SUITE_ID =
   "site-builder.design-spec-evaluation-suite/2026-08-03-v15" as const;
 const REQUIRED_SOURCE_BUNDLE_CONTRACT_ID =
   "design-spec-evaluation-source-bundle/v15" as const;
 const REQUIRED_SOURCE_BUNDLE_SHA256 =
-  "4721b1fe4bc0d16f296c0f65a80e5748b83fafad94849ca88dd95ab61bdc698d" as const;
+  "a2469fe1fb1522aa90de791506745341796e5b6bbb7e879e8128f26ef79e3e06" as const;
 const REQUIRED_MANIFEST_SHA256 =
-  "969336d24c443414b64f8fba11f346f2da12ed41f84be77472ac5da25edaf286" as const;
+  "560334518f28ea3d6838614702f0f829b8873568aef277bc364c0e4c195a9305" as const;
 
 export type DesignSpecV2NativeCurrency =
   (typeof DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES)[number]["currency"];
