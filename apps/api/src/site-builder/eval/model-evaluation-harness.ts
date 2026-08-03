@@ -60,6 +60,23 @@ import {
   type DesignSpecTaskOutput,
 } from "../design/design-brief-producer";
 import {
+  QA_SUMMARIZE_TASK,
+  SEO_REVIEW_TASK,
+  type QualityNarrativeTaskInputV1,
+  type QualityNarrativeTaskOutputV1,
+} from "../quality/quality-narrative";
+import {
+  QUALITY_NARRATIVE_EVALUATOR_RUBRIC,
+  QUALITY_NARRATIVE_EVALUATOR_VERSION,
+  QUALITY_NARRATIVE_EVAL_FIXTURES,
+  QUALITY_NARRATIVE_EVAL_FIXTURE_SCHEMA_VERSION,
+  QUALITY_NARRATIVE_PROMPT_VERSION,
+  QUALITY_NARRATIVE_ROUTE_VALIDATION_VERSION,
+  evaluateQualityNarrativeOutput,
+  prepareQualityNarrativeEvalFixture,
+  type QualityNarrativeEvalFixture,
+} from "./quality-narrative-eval";
+import {
   inspectEvaluationMatrix,
   sha256Bytes,
   sha256CanonicalJson,
@@ -258,12 +275,59 @@ const VALIDATE_DESIGN_SPEC_OUTPUT = (() => {
 })();
 assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
 
+const QA_SUMMARIZE_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(QA_SUMMARIZE_TASK.inputSchema),
+);
+const QA_SUMMARIZE_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(QA_SUMMARIZE_TASK.outputSchema),
+);
+const QA_SUMMARIZE_REPAIR_TASK_OUTPUT =
+  QA_SUMMARIZE_TASK.repairTaskOutput === true;
+const QA_SUMMARIZE_SYSTEM_PROMPT_SHA256 = sha256Text(
+  QA_SUMMARIZE_TASK.system ?? "",
+);
+const BUILD_QA_SUMMARIZE_PROMPT = QA_SUMMARIZE_TASK.buildPrompt;
+const VALIDATE_QA_SUMMARIZE_OUTPUT = (() => {
+  const validator = QA_SUMMARIZE_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("QA summarize canonical route validator is required");
+  }
+  return validator;
+})();
+assertModelOutputSchemaCompiles(QA_SUMMARIZE_OUTPUT_SCHEMA_SNAPSHOT);
+
+const SEO_REVIEW_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(SEO_REVIEW_TASK.inputSchema),
+);
+const SEO_REVIEW_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(SEO_REVIEW_TASK.outputSchema),
+);
+const SEO_REVIEW_REPAIR_TASK_OUTPUT = SEO_REVIEW_TASK.repairTaskOutput === true;
+const SEO_REVIEW_SYSTEM_PROMPT_SHA256 = sha256Text(
+  SEO_REVIEW_TASK.system ?? "",
+);
+const BUILD_SEO_REVIEW_PROMPT = SEO_REVIEW_TASK.buildPrompt;
+const VALIDATE_SEO_REVIEW_OUTPUT = (() => {
+  const validator = SEO_REVIEW_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("SEO review canonical route validator is required");
+  }
+  return validator;
+})();
+assertModelOutputSchemaCompiles(SEO_REVIEW_OUTPUT_SCHEMA_SNAPSHOT);
+
 function currentTaskSystemPromptSha256(taskId: SiteBuilderTaskId): string {
   if (taskId === "site_builder.brand_profile") {
     return sha256Text(BRAND_PROFILE_TASK.system ?? "");
   }
   if (taskId === "site_builder.design_spec") {
     return sha256Text(DESIGN_SPEC_TASK.system ?? "");
+  }
+  if (taskId === "site_builder.qa_summarize") {
+    return sha256Text(QA_SUMMARIZE_TASK.system ?? "");
+  }
+  if (taskId === "site_builder.seo_review") {
+    return sha256Text(SEO_REVIEW_TASK.system ?? "");
   }
   throw new Error(`task system prompt is not canonical: ${taskId}`);
 }
@@ -276,6 +340,12 @@ function currentTaskValidatorMatchesCapturedIdentity(
   }
   if (taskId === "site_builder.design_spec") {
     return DESIGN_SPEC_TASK.validateOutput === VALIDATE_DESIGN_SPEC_OUTPUT;
+  }
+  if (taskId === "site_builder.qa_summarize") {
+    return QA_SUMMARIZE_TASK.validateOutput === VALIDATE_QA_SUMMARIZE_OUTPUT;
+  }
+  if (taskId === "site_builder.seo_review") {
+    return SEO_REVIEW_TASK.validateOutput === VALIDATE_SEO_REVIEW_OUTPUT;
   }
   return false;
 }
@@ -783,10 +853,233 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
+const QUALITY_NARRATIVE_EVALUATION_SOURCE_FILES = deepFreeze([
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+  },
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+  },
+  {
+    role: "task",
+    path: "apps/api/src/site-builder/quality/quality-narrative.ts",
+  },
+  {
+    role: "quality_narrative_consumer",
+    path: "apps/api/src/site-builder/quality/quality-narrative.service.ts",
+  },
+  {
+    role: "judge",
+    path: "apps/api/src/site-builder/eval/quality-narrative-eval.ts",
+  },
+  {
+    role: "harness",
+    path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+  },
+  {
+    role: "evaluation_executor",
+    path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
+    role: "evaluation_cost_safety",
+    path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+  },
+  {
+    role: "evaluation_provenance",
+    path: "apps/api/src/site-builder/eval/eval-provenance.ts",
+  },
+  {
+    role: "task_route",
+    path: "apps/api/src/site-builder/agents/task-routes.ts",
+  },
+  {
+    role: "task_route_binding",
+    path: "apps/api/src/site-builder/agents/task-route-bindings.ts",
+  },
+  {
+    role: "profile_registry",
+    path: "apps/api/src/site-builder/agents/model-profiles.ts",
+  },
+  {
+    role: "provider",
+    path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+  },
+  {
+    role: "transport_registry",
+    path: "apps/api/src/model-gateway/model-transports.ts",
+  },
+  {
+    role: "task_runner",
+    path: "apps/api/src/site-builder/agents/ai-task.ts",
+  },
+  {
+    role: "schema_validator",
+    path: "apps/api/src/model-gateway/schema-validate.ts",
+  },
+  {
+    role: "gateway_router",
+    path: "apps/api/src/model-gateway/router-model-gateway.ts",
+  },
+  {
+    role: "provider_registry",
+    path: "apps/api/src/model-gateway/model-provider.registry.ts",
+  },
+  {
+    role: "model_router",
+    path: "apps/api/src/model-gateway/model-router.ts",
+  },
+  {
+    role: "provider_error",
+    path: "apps/api/src/model-gateway/providers/provider-output-error.ts",
+  },
+  { role: "gateway_types", path: "apps/api/src/model-gateway/types.ts" },
+  {
+    role: "gateway_contract",
+    path: "apps/api/src/model-gateway/model-gateway.ts",
+  },
+  {
+    role: "provider_contract",
+    path: "apps/api/src/model-gateway/model-provider.ts",
+  },
+  { role: "budget_ledger", path: "apps/api/src/tools/budget.ts" },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/design-evaluation.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/model-policy.ts",
+  },
+  { role: "contracts_source", path: "packages/contracts/src/index.ts" },
+  { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
+  { role: "contracts_manifest", path: "packages/contracts/package.json" },
+  { role: "dependency_lock", path: "pnpm-lock.yaml" },
+] as const);
+
+const QUALITY_NARRATIVE_ACTUAL_FIXTURE_FINGERPRINTS = deepFreeze(
+  QUALITY_NARRATIVE_EVAL_FIXTURES.map((fixture) => {
+    const prepared = prepareQualityNarrativeEvalFixture(fixture);
+    const prompt =
+      fixture.taskId === "site_builder.qa_summarize"
+        ? BUILD_QA_SUMMARIZE_PROMPT(prepared.input)
+        : BUILD_SEO_REVIEW_PROMPT(prepared.input);
+    return {
+      fixtureId: fixture.fixtureId,
+      fixtureSha256: sha256CanonicalJson(fixture),
+      promptSha256: sha256Text(prompt),
+    };
+  }),
+);
+
+const QUALITY_NARRATIVE_EXPECTED_FIXTURE_FINGERPRINTS = deepFreeze([
+  {
+    fixtureId: "qa-multigroup",
+    fixtureSha256:
+      "01dfffef595e77530d897799c2c24d5d8422416146635044f63ed28b5c53d50f",
+    promptSha256:
+      "491c0affcec997403bdbc8326a1c3ee7b1333bffbef2f4c75e69d9dbb89564e0",
+  },
+  {
+    fixtureId: "qa-ordering",
+    fixtureSha256:
+      "db29e8843498fe1e19db46f846825e8e7d44456efeaf9086829f4bee0c4dc342",
+    promptSha256:
+      "f9acc0c526c9a2290e3e2af81da919749a8c87cf00ec347958e432a6180bfcbc",
+  },
+  {
+    fixtureId: "seo-full-rule-matrix",
+    fixtureSha256:
+      "baca3079d7b237e9fcad04b13ee296735bd8f26ab80d35e6c2850ea87f8dacbe",
+    promptSha256:
+      "2285b868e07d58a7ed99e9263f882b539d5a9e67d2393d2ff5f6bcb822e6295a",
+  },
+  {
+    fixtureId: "seo-multilocale-reports",
+    fixtureSha256:
+      "f10c561e6576b72fbcbe2e27b906c43e09d814f809b02b4d11d26b802523c077",
+    promptSha256:
+      "2b7331e2d2e54bab1e4567b4fee4f015d0fc82e7e7e88869fe1ae990e23e3932",
+  },
+] as const);
+
+if (
+  JSON.stringify(QUALITY_NARRATIVE_ACTUAL_FIXTURE_FINGERPRINTS) !==
+  JSON.stringify(QUALITY_NARRATIVE_EXPECTED_FIXTURE_FINGERPRINTS)
+) {
+  throw new Error("quality narrative frozen fixture fingerprints drifted");
+}
+
+function qualityNarrativeFixtureFingerprints(
+  taskId: "site_builder.qa_summarize" | "site_builder.seo_review",
+) {
+  return deepFreeze(
+    QUALITY_NARRATIVE_EXPECTED_FIXTURE_FINGERPRINTS.filter((fingerprint) =>
+      fingerprint.fixtureId.startsWith(
+        taskId === "site_builder.qa_summarize" ? "qa-" : "seo-",
+      ),
+    ),
+  );
+}
+
+function qualityNarrativeSuite(
+  taskId: "site_builder.qa_summarize" | "site_builder.seo_review",
+): TaskEvaluationSuite {
+  const isQa = taskId === "site_builder.qa_summarize";
+  const inputSchema = isQa
+    ? QA_SUMMARIZE_INPUT_SCHEMA_SNAPSHOT
+    : SEO_REVIEW_INPUT_SCHEMA_SNAPSHOT;
+  const outputSchema = isQa
+    ? QA_SUMMARIZE_OUTPUT_SCHEMA_SNAPSHOT
+    : SEO_REVIEW_OUTPUT_SCHEMA_SNAPSHOT;
+  return deepFreeze({
+    suiteId: `site-builder.${isQa ? "qa-summarize" : "seo-review"}-evaluation-suite/2026-08-04-v1`,
+    adapterId: "site-builder-quality-narrative-evaluation-adapter/v1",
+    taskContractId: taskId,
+    promptVersion: QUALITY_NARRATIVE_PROMPT_VERSION,
+    systemPromptSha256: isQa
+      ? QA_SUMMARIZE_SYSTEM_PROMPT_SHA256
+      : SEO_REVIEW_SYSTEM_PROMPT_SHA256,
+    inputSchemaSha256: sha256CanonicalJson(inputSchema),
+    outputSchemaSha256: sha256CanonicalJson(outputSchema),
+    repairTaskOutput: isQa
+      ? QA_SUMMARIZE_REPAIR_TASK_OUTPUT
+      : SEO_REVIEW_REPAIR_TASK_OUTPUT,
+    routeValidationVersion: QUALITY_NARRATIVE_ROUTE_VALIDATION_VERSION,
+    evaluatorVersion: QUALITY_NARRATIVE_EVALUATOR_VERSION,
+    evaluatorRubricSha256: sha256CanonicalJson(
+      QUALITY_NARRATIVE_EVALUATOR_RUBRIC,
+    ),
+    fixtureSetId: "site-builder-quality-narrative-golden/2026-08-04-v1",
+    fixtureSchemaVersion: QUALITY_NARRATIVE_EVAL_FIXTURE_SCHEMA_VERSION,
+    fixtureIds: Object.freeze(
+      QUALITY_NARRATIVE_EVAL_FIXTURES.filter(
+        (fixture) => fixture.taskId === taskId,
+      ).map((fixture) => fixture.fixtureId),
+    ),
+    fixtureFingerprints: qualityNarrativeFixtureFingerprints(taskId),
+    repeats: 2,
+    legacyComparatorAliases: Object.freeze([]),
+    compiledContractsRuntimeBinding: null,
+    sourceBundleContractId: "quality-narrative-evaluation-source-bundle/v1",
+    sourceBundleFiles: QUALITY_NARRATIVE_EVALUATION_SOURCE_FILES,
+  });
+}
+
+const QA_SUMMARIZE_EVALUATION_SUITE = qualityNarrativeSuite(
+  "site_builder.qa_summarize",
+);
+const SEO_REVIEW_EVALUATION_SUITE = qualityNarrativeSuite(
+  "site_builder.seo_review",
+);
+
 const TASK_EVALUATION_SUITES = Object.freeze(
   new Map<SiteBuilderTaskId, TaskEvaluationSuite>([
     ["site_builder.brand_profile", BRAND_PROFILE_EVALUATION_SUITE],
     ["site_builder.design_spec", DESIGN_SPEC_EVALUATION_SUITE],
+    ["site_builder.qa_summarize", QA_SUMMARIZE_EVALUATION_SUITE],
+    ["site_builder.seo_review", SEO_REVIEW_EVALUATION_SUITE],
   ]),
 );
 
@@ -1957,8 +2250,12 @@ export interface ModelEvaluationSourceFileFingerprint {
 }
 
 export interface ModelEvaluationCasePayload {
-  fixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
-  taskInput: BrandProfileInput | DesignSpecTaskInput;
+  fixture:
+    | BrandProfileEvalFixture
+    | DesignSpecEvalFixture
+    | QualityNarrativeEvalFixture;
+  taskInput:
+    BrandProfileInput | DesignSpecTaskInput | QualityNarrativeTaskInputV1;
   prompt: string;
   sourceFiles: readonly ModelEvaluationSourceFileFingerprint[];
 }
@@ -2624,6 +2921,12 @@ function canonicalTaskOutputSchema(
   if (taskId === "site_builder.design_spec") {
     return DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT;
   }
+  if (taskId === "site_builder.qa_summarize") {
+    return QA_SUMMARIZE_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  if (taskId === "site_builder.seo_review") {
+    return SEO_REVIEW_OUTPUT_SCHEMA_SNAPSHOT;
+  }
   throw new Error(`task output schema is not canonical: ${taskId}`);
 }
 
@@ -2643,8 +2946,12 @@ export function buildCanonicalModelEvaluationCase(
   if (!suite.fixtureIds.includes(fixtureId)) {
     throw new Error(`model evaluation fixture is not canonical: ${fixtureId}`);
   }
-  let fixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
-  let taskInput: BrandProfileInput | DesignSpecTaskInput;
+  let fixture:
+    | BrandProfileEvalFixture
+    | DesignSpecEvalFixture
+    | QualityNarrativeEvalFixture;
+  let taskInput:
+    BrandProfileInput | DesignSpecTaskInput | QualityNarrativeTaskInputV1;
   let prompt: string;
   if (plan.taskId === "site_builder.brand_profile") {
     fixture = JSON.parse(
@@ -2673,6 +2980,25 @@ export function buildCanonicalModelEvaluationCase(
     const prepared = prepareDesignSpecEvalFixture(canonicalFixture);
     taskInput = prepared.input;
     prompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else if (
+    plan.taskId === "site_builder.qa_summarize" ||
+    plan.taskId === "site_builder.seo_review"
+  ) {
+    const canonicalFixture = QUALITY_NARRATIVE_EVAL_FIXTURES.find(
+      (entry) => entry.fixtureId === fixtureId && entry.taskId === plan.taskId,
+    );
+    if (!canonicalFixture) {
+      throw new Error(
+        `model evaluation fixture is not canonical: ${fixtureId}`,
+      );
+    }
+    fixture = canonicalFixture;
+    const prepared = prepareQualityNarrativeEvalFixture(canonicalFixture);
+    taskInput = prepared.input;
+    prompt =
+      plan.taskId === "site_builder.qa_summarize"
+        ? BUILD_QA_SUMMARIZE_PROMPT(prepared.input)
+        : BUILD_SEO_REVIEW_PROMPT(prepared.input);
   } else {
     throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
   }
@@ -2762,8 +3088,12 @@ function assertCaseContract(
     (entry) => entry.fixtureId === contract.fixtureId,
   );
   const currentSources = currentSourceBundle(suite);
-  let preparedFixture: BrandProfileEvalFixture | DesignSpecEvalFixture;
-  let preparedInput: BrandProfileInput | DesignSpecTaskInput;
+  let preparedFixture:
+    | BrandProfileEvalFixture
+    | DesignSpecEvalFixture
+    | QualityNarrativeEvalFixture;
+  let preparedInput:
+    BrandProfileInput | DesignSpecTaskInput | QualityNarrativeTaskInputV1;
   let expectedPrompt: string;
   if (plan.taskId === "site_builder.brand_profile") {
     const prepared = prepareBrandProfileEvalFixture(
@@ -2779,6 +3109,24 @@ function assertCaseContract(
     preparedFixture = prepared.fixture;
     preparedInput = prepared.input;
     expectedPrompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else if (
+    plan.taskId === "site_builder.qa_summarize" ||
+    plan.taskId === "site_builder.seo_review"
+  ) {
+    const prepared = prepareQualityNarrativeEvalFixture(
+      payload.fixture as QualityNarrativeEvalFixture,
+    );
+    if (prepared.fixture.taskId !== plan.taskId) {
+      throw new Error(
+        `task evaluation fixture is not canonical: ${plan.taskId}`,
+      );
+    }
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt =
+      plan.taskId === "site_builder.qa_summarize"
+        ? BUILD_QA_SUMMARIZE_PROMPT(prepared.input)
+        : BUILD_SEO_REVIEW_PROMPT(prepared.input);
   } else {
     throw new Error(`task evaluation has no canonical suite: ${plan.taskId}`);
   }
@@ -3096,6 +3444,65 @@ export function assessCanonicalTaskArtifact(
         ...(outcome.invalidExplanationClaims.length > 0
           ? ["invalid_explanation_claim"]
           : []),
+      ],
+    };
+  }
+  if (
+    plan.taskId === "site_builder.qa_summarize" ||
+    plan.taskId === "site_builder.seo_review"
+  ) {
+    const isQa = plan.taskId === "site_builder.qa_summarize";
+    const outputSchema = isQa
+      ? QA_SUMMARIZE_OUTPUT_SCHEMA_SNAPSHOT
+      : SEO_REVIEW_OUTPUT_SCHEMA_SNAPSHOT;
+    const expectedSystemPromptSha256 = isQa
+      ? QA_SUMMARIZE_SYSTEM_PROMPT_SHA256
+      : SEO_REVIEW_SYSTEM_PROMPT_SHA256;
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        QUALITY_NARRATIVE_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(outputSchema) ||
+      plan.evaluationSuite.systemPromptSha256 !== expectedSystemPromptSha256 ||
+      plan.evaluationSuite.evaluatorRubricSha256 !==
+        sha256CanonicalJson(QUALITY_NARRATIVE_EVALUATOR_RUBRIC)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(outputSchema);
+    const outputCheck = checkAgainstSchema(outputSchema, artifact);
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as QualityNarrativeTaskOutputV1;
+    const taskInput = payload.taskInput as QualityNarrativeTaskInputV1;
+    const fixture = payload.fixture as QualityNarrativeEvalFixture;
+    const validateOutput = isQa
+      ? VALIDATE_QA_SUMMARIZE_OUTPUT
+      : VALIDATE_SEO_REVIEW_OUTPUT;
+    validateOutput(taskInput, output);
+    const prepared = prepareQualityNarrativeEvalFixture(fixture);
+    if (
+      prepared.fixture.taskId !== plan.taskId ||
+      sha256CanonicalJson(prepared.input) !== sha256CanonicalJson(taskInput)
+    ) {
+      throw new Error(
+        `task evaluation fixture is not canonical: ${plan.taskId}`,
+      );
+    }
+    const outcome = evaluateQualityNarrativeOutput(prepared, output);
+    return {
+      qualityPassed: outcome.exactDeterministicOutput,
+      structurePassed: true,
+      factualityPassed: outcome.exactDeterministicOutput,
+      stabilityKey: sha256CanonicalJson(output),
+      findingCodes: [
+        ...(outcome.exactDeterministicOutput
+          ? []
+          : ["deterministic_quality_narrative_mismatch"]),
+        ...outcome.rejectedFindingIds,
       ],
     };
   }

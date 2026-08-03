@@ -72,6 +72,14 @@ export function renderModelEvaluationHarnessBaseline(): string {
     (plan) => plan.taskId === "site_builder.design_spec",
   )?.evaluationSuite;
   assert.ok(designSuite, "design_spec canonical evaluation suite is required");
+  const qaSuite = plans.find(
+    (plan) => plan.taskId === "site_builder.qa_summarize",
+  )?.evaluationSuite;
+  assert.ok(qaSuite, "qa_summarize canonical evaluation suite is required");
+  const seoSuite = plans.find(
+    (plan) => plan.taskId === "site_builder.seo_review",
+  )?.evaluationSuite;
+  assert.ok(seoSuite, "seo_review canonical evaluation suite is required");
 
   return [
     "# Site Builder 模型评测 Harness 基线",
@@ -83,7 +91,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 这是 evaluation-only、依赖注入的协议 executor 与内存 harness；只通过显式 wire client/cost resolver seam 执行，未接生产依赖。",
     "- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。",
     "- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。",
-    "- 当前可 dispatch 的 canonical suite 是 BrandProfile 与 `design_spec`；其余 5 个 task fail-closed 为 `blocked_no_evaluation_suite`。`design_spec` 只完成零费用 suite 准备，尚无真实 evidence、费用授权或 promotion。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
+    "- 当前可 dispatch 的 canonical suite 是 BrandProfile、`design_spec`、`qa_summarize` 与 `seo_review`；copy、assemble、assembly_fix 继续 fail-closed 为 `blocked_no_evaluation_suite`。新增 QA/SEO suite 只证明模型能复现封闭的确定性质量叙事，不产生真实 evidence、费用授权、promotion 或运行路由变化。`design_spec` 仍只完成零费用 suite 准备。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
     "- 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。",
     `- zero-cost evidence 准备合同 ${code(SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID)} 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。`,
     "",
@@ -130,6 +138,13 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 稳定性 key 是通过 schema/生产 validator 后的完整标准化输出 SHA-256，覆盖 candidateId、reasons 与 warnings；只选中同一 candidate 不能把内容漂移伪装成稳定。",
     `- suite 源码固定 tracked contracts source tree 与实际加载的 ${code("dist/**/*.js")} tree；artifact-tree canonical serializer 不调用实时 Array ${code("map")} / ${code("join")} / ${code("sort")}。其 ${designSuite.compiledContractsRuntimeBinding?.compiledArtifactCount ?? 0} 个 artifact / ${code(designSuite.compiledContractsRuntimeBinding?.compiledArtifactTreeSha256 ?? "unbound")} 摘要进入 suite、case、probe、run 与候选汇总；harness 加载时以及首调/repair 每个物理 wire call 紧邻调用前后均重新指纹。调用前漂移按 ${code("rejected_before_dispatch")} 拒绝；reservation 后发现 runtime drift 会先持久冻结 authorization；首调后漂移会在 repair 前完成已有调用的结算并冻结 authorization，不会发送第二次付费调用；调用中漂移使返回结果成为 ${code("provenance_invalid")}。独立零费用 manifest 合同 ${code(DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID)} 只固定已经可从 ${code("origin/main")} 到达的 source commit，不改变该运行时合同。`,
     "",
+    "### qa_summarize / seo_review suites",
+    "",
+    `- QA suite：${code(qaSuite.suiteId)}；SEO suite：${code(seoSuite.suiteId)}。二者共享 ${code(qaSuite.adapterId)} 与封闭的 production quality-narrative output contract；各自 ${qaSuite.fixtureIds.length} fixtures × ${qaSuite.repeats} repeats，legacy comparator allowlist 都为空集。`,
+    `- fixture sets：QA ${code(qaSuite.fixtureSetId)} / ${code(qaSuite.fixtureSchemaVersion)}，SEO ${code(seoSuite.fixtureSetId)} / ${code(seoSuite.fixtureSchemaVersion)}。fixture 由 production quality finding index、partition 与 task input builder 重建，并固定 prompt、source bundle 与 evaluator rubric 摘要。`,
+    "- evaluator 先调用捕获的 production output validator，再将 normalized output 与同一 production deterministic summary 作逐字 canonical JSON 等价比较；规则组顺序漂移、遗漏或伪造 finding 都不能以自然语言相似度通过。QA fixture 拒绝混入 SEO reports；SEO fixture 的 report artifact / SHA-256 / target 必须逐项绑定。",
+    "- 这是零调用的 suite-admission 基础，不是 quality evidence、模型晋级、运行路由改变或付费执行授权；后续每个任务仍须独立 fixed-commit manifest、费用卡、有限凭据/known settlement、真实 evidence 与 promotion 决策。",
+    "",
     "## 闭合结果与排序",
     "",
     "- 结果类：`quality_valid_runtime_on_time`、`quality_valid_runtime_late`、`content_invalid`、`protocol_or_identity_invalid`、`provenance_invalid`、`capability_unavailable`、`diagnostic_window_exhausted`、`budget_stop`。",
@@ -155,7 +170,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     `- ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.executions} executions / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.wireCalls} wire calls / ${MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.amountCents}¢ 仍标记为 ${code(MODEL_EVALUATION_UNVERIFIED_PLANNING_UPPER_BOUND.verification)}，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。`,
     `- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 ${code("wx")} 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 ${code(".env")} 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。`,
     `- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 ${code("READY_FOR_PRODUCT_DECISION")}，同时固定 ${code("dispatchAuthorization=NOT_AUTHORIZED")}。`,
-    "- 当前 `design_spec` 阶段只生成 zero-cost、create-only fixed-source manifest，不生成真实费用 attestation、费用卡或模型 evidence，也不读取管理面余额/价格。BrandProfile evidence-prep 仍只准入其固定任务；其他 5 个 task 仍无 suite，图片、视频、embedding、preview 与 deferred 继续在 client 前阻断。",
+    "- 当前 `design_spec` 阶段只生成 zero-cost、create-only fixed-source manifest，不生成真实费用 attestation、费用卡或模型 evidence，也不读取管理面余额/价格。BrandProfile evidence-prep 仍只准入其固定任务；QA/SEO 的 suite 本身不构成 create-only manifest 或 dispatch 授权，copy、assemble、assembly_fix 与图片、视频、embedding、preview、deferred 继续在 client 前阻断。",
     "",
   ].join("\n");
 }
@@ -173,7 +188,12 @@ export function verifyModelEvaluationHarness(
     plans
       .filter((plan) => plan.dispatchAdmission === "task_evaluation_ready")
       .map((plan) => plan.taskId),
-    ["site_builder.brand_profile", "site_builder.design_spec"],
+    [
+      "site_builder.brand_profile",
+      "site_builder.design_spec",
+      "site_builder.qa_summarize",
+      "site_builder.seo_review",
+    ],
     "only tasks with a canonical task/fixture/evaluator suite may dispatch",
   );
   assert.deepEqual(
