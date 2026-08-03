@@ -66,8 +66,8 @@ function input(taskId: Parameters<typeof buildRemainingTextNativeFeeCard>[0]["ta
 describe("remaining text native-currency fee cards", () => {
   it.each([
     ["site_builder.copy", 13, 26, "READY_FOR_CREDENTIAL_ATTESTATION"],
-    ["site_builder.assemble", 73, 146, "BLOCKED_PER_WIRE_COST_CAP"],
-    ["site_builder.assembly_fix", 73, 146, "BLOCKED_PER_WIRE_COST_CAP"],
+    ["site_builder.assemble", 73, 146, "READY_FOR_CREDENTIAL_ATTESTATION"],
+    ["site_builder.assembly_fix", 73, 146, "READY_FOR_CREDENTIAL_ATTESTATION"],
   ] as const)("binds %s to its fixed zero-call execution matrix", (taskId, executions, wires, status) => {
     const card = buildRemainingTextNativeFeeCard(input(taskId));
 
@@ -88,16 +88,25 @@ describe("remaining text native-currency fee cards", () => {
       formatted: "0.2",
       interpretation: "per_currency_without_foreign_exchange",
     });
-    expect(card.entries.every((entry) => entry.exceedsPerWireCostCap)).toBe(true);
+    expect(card.entries.every((entry) => !entry.exceedsPerWireCostCap)).toBe(true);
+    expect(card.tokenEnvelope.outputTokensPerWireCall).toBe(3_600);
   });
 
-  it("refuses the QA price card when its exact candidate is absent publicly", () => {
+  it("refuses the QA price card when an exact current summary candidate is absent publicly", () => {
     expect(() =>
       buildRemainingTextNativeFeeCard({
         ...input("site_builder.qa_summarize"),
-        catalog: catalog(false),
+        catalog: {
+          ...catalog(false),
+          data: {
+            ...catalog(false).data,
+            models: catalog(false).data.models.filter(
+              (model) => model.model_id !== "claude-sonnet-5",
+            ),
+          },
+        },
       }),
-    ).toThrow("OpenOx price is missing or unpublished: gpt-5.4-mini");
+    ).toThrow("OpenOx price is missing or unpublished: claude-sonnet-5");
   });
 
   it("refuses a manifest whose fixed source bundle has drifted", () => {

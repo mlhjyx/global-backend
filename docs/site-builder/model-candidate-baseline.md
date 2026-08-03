@@ -3,13 +3,13 @@
 > 文档 ID：`SITE-MODEL-CANDIDATES-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：`apps/api/src/site-builder/agents/model-candidate-baseline.json`。
-> 机器基线：`site-builder-model-candidate-baseline/2026-07-27-v1`；本文件由机器基线生成并由 `pnpm docs:verify` 校验。
+> 机器基线：`site-builder-model-candidate-baseline/2026-08-04-v1`；本文件由机器基线生成并由 `pnpm docs:verify` 校验。
 
 <!-- BEGIN GENERATED MODEL CANDIDATE BASELINE -->
 
 ## 边界
 
-本基线 `site-builder-model-candidate-baseline/2026-07-27-v1` 只登记非运行时候选与后续评测顺序。它本身不路由候选、晋级模型、改变 rollback、环境变量、Temporal、P4、DesignEvaluation、ReleaseManifest、MediaGateway 或公共 API，也不证明模型质量、生产可用性或部署状态。
+本基线 `site-builder-model-candidate-baseline/2026-08-04-v1` 只登记非运行时候选与后续评测顺序。它本身不路由候选、晋级模型、改变 rollback、环境变量、Temporal、P4、DesignEvaluation、ReleaseManifest、MediaGateway 或公共 API，也不证明模型质量、生产可用性或部署状态。
 
 型号可见、渠道启用或一次最小连通，只能支持进入后续 capability probe；不能跳过逐任务评测、失败门、成本结算、rollback 和用户批准。当前 BrandProfile 的 Terra→Sonnet promotion 及其 DeepSeek→GLM rollback 保持不变；未晋级任务的 active policy 与此候选基线分离，其中 design_spec 已使用确定性安全蓝图，其他任务仍须独立评测后才能路由候选。
 
@@ -31,7 +31,7 @@
 | `gpt-5.5` | `text` | `runnable` | `openai-responses` | Gateway visibility and minimal channel health do not prove structured or task-shaped capability. |
 | `gpt-5.6-sol` | `text` | `runnable` | `openai-responses` | High-reasoning and multimodal-review candidate only; no runtime task promotion. |
 | `gpt-5.6-luna` | `text` | `runnable` | `openai-responses` | Summary and bulk evaluation candidate only. |
-| `gpt-5.4-mini` | `text` | `runnable` | `openai-responses` | Summary and bulk evaluation candidate only. |
+| `gpt-5.4-mini` | `text` | `runnable` | `openai-responses` | Bulk evaluation candidate only. |
 | `gpt-5.4` | `text` | `runnable` | `openai-responses` | Bulk evaluation candidate only. |
 | `gemini-3.5-flash` | `text` | `deferred` | `google-generate-content` | Upstream channel is disabled until a supported inference path is activated and re-probed. |
 | `gpt-image-2` | `image` | `runnable` | `openai-images-generations`<br>`openai-images-edits` | Generation may enter a future probe; edits and mask semantics require a separate capability probe. |
@@ -61,7 +61,7 @@
 | `structured.default` | `requires_task_evaluation` | `gpt-5.6-terra` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`) | per-task structured-output and closed-catalog evaluation<br>capability probe before the per-task matrix<br>per-task structured-output and closed-catalog evaluation |
 | `reasoning.high` | `requires_task_evaluation` | `gpt-5.6-sol` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`) | complex-repair task envelope and deterministic safety fallback<br>complex-repair capability probe before evaluation<br>complex-repair task envelope and deterministic safety fallback |
 | `copy.premium` | `requires_task_evaluation` | `claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`)<br>`gpt-5.6-terra` (`runnable` · `openai-responses` · `none`) | claim-bound multilingual copy evaluation<br>capability probe before claim-bound copy evaluation<br>claim-bound multilingual copy evaluation |
-| `text.summary` | `requires_task_evaluation` | `gpt-5.6-luna` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.4-mini` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.6-terra` (`runnable` · `openai-responses` · `none`) | task-shaped summary validity and omission evaluation<br>task-shaped summary validity and omission evaluation<br>task-shaped summary validity and omission evaluation |
+| `text.summary` | `requires_task_evaluation` | `gpt-5.6-luna` (`runnable` · `openai-responses` · `none`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`)<br>`gpt-5.6-terra` (`runnable` · `openai-responses` · `none`) | task-shaped summary validity and omission evaluation<br>task-shaped summary validity and omission evaluation<br>task-shaped summary validity and omission evaluation |
 | `text.bulk` | `requires_task_evaluation` | `gpt-5.4-mini` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.6-luna` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.4` (`runnable` · `openai-responses` · `none`) | bounded batch quality, stability, and absolute spend stop<br>bounded batch quality, stability, and absolute spend stop<br>bounded batch quality, stability, and absolute spend stop |
 | `multimodal.review` | `requires_task_evaluation` | `gpt-5.6-sol` (`runnable` · `openai-responses` · `none`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`)<br>`gpt-5.6-terra` (`runnable` · `openai-responses` · `none`) | vision-input, closed-output, provenance, and task-shaped review evaluation<br>vision-input, closed-output, provenance, and task-shaped review evaluation<br>vision-input, closed-output, provenance, and task-shaped review evaluation |
 | `image.bulk.creative` | `requires_media_gateway` | `gemini-3.1-flash-image-preview` (`preview` · `openai-images-generations` · `none`)<br>`gpt-image-2` (`runnable` · `openai-images-generations` · `none`) | shadow-only preview plus task-shaped generation and rights evaluation<br>MediaGateway, task-shaped generation, rights, identity, and cost evaluation |

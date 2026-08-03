@@ -51,13 +51,18 @@ const TASK_BINDINGS = Object.freeze({
   }),
   'site_builder.assemble': Object.freeze({
     profile: 'structured.default',
-    maxTokens: 16_000,
+    // The closed selection payloads in the twelve M1-e-B golden fixtures peak
+    // below 7 KB. 3,600 tokens leaves material schema headroom while keeping
+    // every initial and repair wire under the immutable 20-cent native cap.
+    maxTokens: 3_600,
     timeoutMs: ASSEMBLE_TIMEOUT_MS,
     maxCostCents: 20,
   }),
   'site_builder.assembly_fix': Object.freeze({
     profile: 'structured.default',
-    maxTokens: 8000,
+    // Repair returns the same closed selection shape as assemble, plus no
+    // free-form narrative. Keep the exact same bounded response envelope.
+    maxTokens: 3_600,
     timeoutMs: ASSEMBLE_TIMEOUT_MS,
     maxCostCents: 20,
   }),

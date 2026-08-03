@@ -21,7 +21,7 @@ const aliasesFor = (profile: string) =>
 describe('Site Builder model candidate baseline', () => {
   it('uses a candidateBaselineId independent from execution policy v3', () => {
     expect(SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID).toBe(
-      'site-builder-model-candidate-baseline/2026-07-27-v1',
+      'site-builder-model-candidate-baseline/2026-08-04-v1',
     );
     expect(modelPolicyRegistry.getCandidateBaselineId()).toBe(
       SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
@@ -51,7 +51,7 @@ describe('Site Builder model candidate baseline', () => {
       structured: ['gpt-5.6-terra', 'gpt-5.5', 'claude-sonnet-5'],
       reasoning: ['gpt-5.6-sol', 'gpt-5.5', 'claude-sonnet-5'],
       copy: ['claude-sonnet-5', 'gpt-5.5', 'gpt-5.6-terra'],
-      summary: ['gpt-5.6-luna', 'gpt-5.4-mini', 'gpt-5.6-terra'],
+      summary: ['gpt-5.6-luna', 'claude-sonnet-5', 'gpt-5.6-terra'],
       bulk: ['gpt-5.4-mini', 'gpt-5.6-luna', 'gpt-5.4'],
       multimodal: ['gpt-5.6-sol', 'claude-sonnet-5', 'gpt-5.6-terra'],
     });
