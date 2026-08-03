@@ -65,19 +65,30 @@ function input(taskId: Parameters<typeof buildRemainingTextNativeFeeCard>[0]["ta
 
 describe("remaining text native-currency fee cards", () => {
   it.each([
-    ["site_builder.copy", 13, 26],
-    ["site_builder.assemble", 73, 146],
-    ["site_builder.assembly_fix", 73, 146],
-  ] as const)("binds %s to its fixed zero-call execution matrix", (taskId, executions, wires) => {
+    ["site_builder.copy", 13, 26, "READY_FOR_CREDENTIAL_ATTESTATION"],
+    ["site_builder.assemble", 73, 146, "BLOCKED_PER_WIRE_COST_CAP"],
+    ["site_builder.assembly_fix", 73, 146, "BLOCKED_PER_WIRE_COST_CAP"],
+  ] as const)("binds %s to its fixed zero-call execution matrix", (taskId, executions, wires, status) => {
     const card = buildRemainingTextNativeFeeCard(input(taskId));
 
     expect(card.taskId).toBe(taskId);
     expect(card.fixedSourceCommitSha).toBe("0891b374321961b8aad13c8b215985ca623a4c0c");
+    expect(card.status).toBe(status);
     expect(card.dispatchAuthorization).toBe("NOT_AUTHORIZED");
     expect(card.expectedCost).toBe("not_known_before_usage");
     expect(card.noForeignExchangeConversion).toBe(true);
     expect(card.entries.reduce((total, entry) => total + entry.executionCount, 0)).toBe(executions);
     expect(card.entries.reduce((total, entry) => total + entry.maximumWireCalls, 0)).toBe(wires);
+  });
+
+  it("keeps the native 20-cent ceiling separate per currency", () => {
+    const card = buildRemainingTextNativeFeeCard(input("site_builder.assemble"));
+    expect(card.perWireCostCap).toEqual({
+      nativePicoUnits: "200000000000",
+      formatted: "0.2",
+      interpretation: "per_currency_without_foreign_exchange",
+    });
+    expect(card.entries.every((entry) => entry.exceedsPerWireCostCap)).toBe(true);
   });
 
   it("refuses the QA price card when its exact candidate is absent publicly", () => {

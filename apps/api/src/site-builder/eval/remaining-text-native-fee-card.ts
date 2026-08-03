@@ -35,14 +35,15 @@ import {
 import { MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND } from "./model-evaluation-cost-safety";
 
 export const REMAINING_TEXT_NATIVE_FEE_CARD_ID_PREFIX =
-  "site-builder-remaining-text-native-fee-card/2026-08-04-v1" as const;
+  "site-builder-remaining-text-native-fee-card/2026-08-04-v2" as const;
 export const REMAINING_TEXT_NATIVE_FEE_CARD_SCHEMA_VERSION =
-  "site-builder-remaining-text-native-fee-card/v1" as const;
+  "site-builder-remaining-text-native-fee-card/v2" as const;
 
 const REQUIRED_FIXED_SOURCE_COMMIT_SHA =
   "0891b374321961b8aad13c8b215985ca623a4c0c" as const;
 const SHA256 = /^[a-f0-9]{64}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const NATIVE_PER_WIRE_COST_CAP_PICO_UNITS = 200_000_000_000n;
 
 export const REMAINING_TEXT_NATIVE_FEE_CARD_TASK_IDS = Object.freeze([
   "site_builder.copy",
@@ -73,7 +74,9 @@ export interface RemainingTextNativeFeeCardInput {
 export interface RemainingTextNativeFeeCard {
   schemaVersion: typeof REMAINING_TEXT_NATIVE_FEE_CARD_SCHEMA_VERSION;
   feeCardId: string;
-  status: "READY_FOR_CREDENTIAL_ATTESTATION";
+  status:
+    | "READY_FOR_CREDENTIAL_ATTESTATION"
+    | "BLOCKED_PER_WIRE_COST_CAP";
   dispatchAuthorization: "NOT_AUTHORIZED";
   taskId: RemainingTextNativeFeeCardTaskId;
   fixedSourceCommitSha: string;
@@ -110,7 +113,13 @@ export interface RemainingTextNativeFeeCard {
     initialCallMaximum: NativeAmount;
     repairCallMaximum: NativeAmount;
     maximumCost: NativeAmount;
+    exceedsPerWireCostCap: boolean;
   }[];
+  perWireCostCap: {
+    nativePicoUnits: string;
+    formatted: string;
+    interpretation: "per_currency_without_foreign_exchange";
+  };
   totalsByCurrency: Readonly<Record<NativeCurrency, NativeAmount>>;
   expectedCost: "not_known_before_usage";
   mechanicalPolicyCeiling: {
@@ -473,6 +482,9 @@ export function buildRemainingTextNativeFeeCard(
         price.outputPriceMicrounitsPerMillionTokens,
       );
       const maximum = BigInt(executionCount) * (initial + repair);
+      const exceedsPerWireCostCap =
+        initial > NATIVE_PER_WIRE_COST_CAP_PICO_UNITS ||
+        repair > NATIVE_PER_WIRE_COST_CAP_PICO_UNITS;
       totals.set(pricing.currency, (totals.get(pricing.currency) ?? 0n) + maximum);
       return Object.freeze({
         alias: candidate.alias,
@@ -489,6 +501,7 @@ export function buildRemainingTextNativeFeeCard(
         initialCallMaximum: amount(initial),
         repairCallMaximum: amount(repair),
         maximumCost: amount(maximum),
+        exceedsPerWireCostCap,
       });
     })
     .sort((left, right) => left.alias.localeCompare(right.alias));
@@ -503,7 +516,9 @@ export function buildRemainingTextNativeFeeCard(
   const withoutDigest = {
     schemaVersion: REMAINING_TEXT_NATIVE_FEE_CARD_SCHEMA_VERSION,
     feeCardId: `${REMAINING_TEXT_NATIVE_FEE_CARD_ID_PREFIX}/${input.taskId}`,
-    status: "READY_FOR_CREDENTIAL_ATTESTATION" as const,
+    status: entries.some((entry) => entry.exceedsPerWireCostCap)
+      ? ("BLOCKED_PER_WIRE_COST_CAP" as const)
+      : ("READY_FOR_CREDENTIAL_ATTESTATION" as const),
     dispatchAuthorization: "NOT_AUTHORIZED" as const,
     taskId: input.taskId,
     fixedSourceCommitSha: manifest.fixedCommitSha,
@@ -521,6 +536,10 @@ export function buildRemainingTextNativeFeeCard(
     },
     tokenEnvelope,
     entries,
+    perWireCostCap: {
+      ...amount(NATIVE_PER_WIRE_COST_CAP_PICO_UNITS),
+      interpretation: "per_currency_without_foreign_exchange" as const,
+    },
     totalsByCurrency: {
       CNY: amount(totals.get("CNY")!),
       USD: amount(totals.get("USD")!),
