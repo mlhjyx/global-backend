@@ -12,6 +12,10 @@ const COMMITTED_MANIFEST_PATH = join(
   __dirname,
   "../../../../../docs/evidence/site-builder/m1-g-remaining-text-evaluation-manifest-v1.json",
 );
+const CURRENT_MANIFEST_PATH = join(
+  __dirname,
+  "../../../../../docs/evidence/site-builder/m1-g-remaining-text-evaluation-manifest-v2.json",
+);
 
 describe("remaining Site Builder text-task zero-cost manifest preparation", () => {
   it("freezes the five task-specific matrices without retired, legacy, or media aliases", () => {
@@ -88,6 +92,21 @@ describe("remaining Site Builder text-task zero-cost manifest preparation", () =
     });
     expect(manifestSha256).toBeTypeOf("string");
     expect(manifestSha256).toHaveLength(64);
+    expect(manifestSha256).toBe(sha256CanonicalJson(withoutDigest));
+  });
+
+  it("records the current v2 manifest from the post-design-spec-v6 main commit", () => {
+    const manifest = JSON.parse(readFileSync(CURRENT_MANIFEST_PATH, "utf8"));
+    const { manifestSha256, ...withoutDigest } = manifest;
+
+    expect(manifest).toMatchObject({
+      fixedCommitSha: "a04f60f5597762d8fde634552b3be6a8a42c8d1d",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      actualNetworkCalls: 0,
+      actualModelCostCents: 0,
+      executionCount: 133,
+      maximumWireCallCount: 266,
+    });
     expect(manifestSha256).toBe(sha256CanonicalJson(withoutDigest));
   });
 });
