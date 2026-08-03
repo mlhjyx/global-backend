@@ -37,7 +37,7 @@
 |---|---|---|---|---|---:|---:|---:|---:|---:|---|
 | `site_builder.brand_profile` | `structured.workspace_materials` | `task_evaluation_ready` | `site-builder.brand-profile-evaluation-suite/2026-07-27-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe` | 12000 | 240s | 240s | 480s | 40¢ | low |
 | `site_builder.copy` | `copy.premium` | `blocked_no_evaluation_suite` | — | `claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 4000 | 120s | 120s | 240s | 20¢ | low |
-| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-08-01-v14` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
+| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-08-03-v15` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
 | `site_builder.assemble` | `structured.default` | `blocked_no_evaluation_suite` | — | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 16000 | 180s | 180s | 360s | 20¢ | — |
 | `site_builder.assembly_fix` | `structured.default` | `blocked_no_evaluation_suite` | — | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 8000 | 180s | 180s | 360s | 20¢ | — |
 | `site_builder.qa_summarize` | `text.summary` | `blocked_no_evaluation_suite` | — | `gpt-5.6-luna` / `openai-responses` / `none`<br>`gpt-5.4-mini` / `openai-responses` / `none`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 3000 | 90s | 90s | 180s | 20¢ | — |
@@ -57,12 +57,12 @@
 
 ### design_spec suite
 
-- suite：`site-builder.design-spec-evaluation-suite/2026-08-01-v14`；adapter `site-builder.design-spec-evaluation-adapter/v13`；fixture set `site-builder.design-spec-golden/2026-07-30-v3` / schema `site-builder-design-spec-eval-fixture/v2`；12 fixtures × 2 repeats；task system prompt SHA-256 `ff44cb3f0de367d181dd2b9607bf70562963681fef0774a3b194d3732f70e9c7` 纳入 task-contract fingerprint，executor 只发送模块加载时捕获的同一字符串，运行前导出对象漂移会在 budget reserve/client 前拒绝。
-- comparator allowlist：空集（仅零费用 deterministic catalog selection）；source bundle `design-spec-evaluation-source-bundle/v14` 固定 47 份 Git 跟踪文件。
+- suite：`site-builder.design-spec-evaluation-suite/2026-08-03-v15`；adapter `site-builder.design-spec-evaluation-adapter/v13`；fixture set `site-builder.design-spec-golden/2026-07-30-v3` / schema `site-builder-design-spec-eval-fixture/v2`；12 fixtures × 2 repeats；task system prompt SHA-256 `ff44cb3f0de367d181dd2b9607bf70562963681fef0774a3b194d3732f70e9c7` 纳入 task-contract fingerprint，executor 只发送模块加载时捕获的同一字符串，运行前导出对象漂移会在 budget reserve/client 前拒绝。
+- comparator allowlist：空集（仅零费用 deterministic catalog selection）；source bundle `design-spec-evaluation-source-bundle/v15` 固定 47 份 Git 跟踪文件。
 - 12 个 sparse/rich fixture 保存完整合成生产输入，并通过与生产运行共用的完整 catalog enumeration、required-role eligibility、ranking 与 top-3 projection 重建；prepare 时逐字重算，不能手工拼 candidate。
 - reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言数值、未知字段、其他 candidate 或新事实均事实门失败。
 - 稳定性 key 是通过 schema/生产 validator 后的完整标准化输出 SHA-256，覆盖 candidateId、reasons 与 warnings；只选中同一 candidate 不能把内容漂移伪装成稳定。
-- suite 源码固定 tracked contracts source tree 与实际加载的 `dist/**/*.js` tree；artifact-tree canonical serializer 不调用实时 Array `map` / `join` / `sort`。其 21 个 artifact / `d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01` 摘要进入 suite、case、probe、run 与候选汇总；harness 加载时以及首调/repair 每个物理 wire call 紧邻调用前后均重新指纹。调用前漂移按 `rejected_before_dispatch` 拒绝；reservation 后发现 runtime drift 会先持久冻结 authorization；首调后漂移会在 repair 前完成已有调用的结算并冻结 authorization，不会发送第二次付费调用；调用中漂移使返回结果成为 `provenance_invalid`。独立零费用 manifest 合同 `site-builder-design-spec-evaluation-manifest-prep/2026-08-01-v1` 只固定已经可从 `origin/main` 到达的 source commit，不改变该运行时合同。
+- suite 源码固定 tracked contracts source tree 与实际加载的 `dist/**/*.js` tree；artifact-tree canonical serializer 不调用实时 Array `map` / `join` / `sort`。其 21 个 artifact / `d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01` 摘要进入 suite、case、probe、run 与候选汇总；harness 加载时以及首调/repair 每个物理 wire call 紧邻调用前后均重新指纹。调用前漂移按 `rejected_before_dispatch` 拒绝；reservation 后发现 runtime drift 会先持久冻结 authorization；首调后漂移会在 repair 前完成已有调用的结算并冻结 authorization，不会发送第二次付费调用；调用中漂移使返回结果成为 `provenance_invalid`。独立零费用 manifest 合同 `site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2` 只固定已经可从 `origin/main` 到达的 source commit，不改变该运行时合同。
 
 ## 闭合结果与排序
 
@@ -83,7 +83,7 @@
 ## Zero-cost evidence 准备
 
 - 准备合同：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1`；固定 task `site_builder.brand_profile`、suite `site-builder.brand-profile-evaluation-suite/2026-07-27-v1`、source bundle `brand-profile-evaluation-source-bundle/v7`。
-- `design_spec` 独立 manifest 合同：`site-builder-design-spec-evaluation-manifest-prep/2026-08-01-v1`。它冻结 12 fixtures、3 candidates、1 capability probe、73 executions、最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件；fixed source commit 必须已在 `origin/main` 上且仍是 prep head 祖先，因此 manifest PR 可 squash 而不丢失 source commit。它不含凭据、价格、余额、wire client 或费用授权。
+- `design_spec` 独立 manifest 合同：`site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2`。它冻结 12 fixtures、3 candidates、1 capability probe、73 executions、最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件；fixed source commit 必须已在 `origin/main` 上且仍是 prep head 祖先，因此 manifest PR 可 squash 而不丢失 source commit。它不含凭据、价格、余额、wire client 或费用授权。
 - manifest：61 executions / 最多 122 wire calls；其中 capability probe 1、target 36、legacy comparator 24。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。
 - prompt 上界从六个 canonical case 的真实 initial/repair payload 派生：initial 最多 6092 UTF-8 bytes，repair 最多 10399 UTF-8 bytes；repair reason 另受机器常量硬限，不以 attestation 自报上限替代真实 payload。
 - 61 executions / 122 wire calls / 2440¢ 仍标记为 `unverified_planning_upper_bound`，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。

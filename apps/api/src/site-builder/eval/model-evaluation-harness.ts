@@ -755,7 +755,10 @@ if (
 }
 
 const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
-  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+  // v15 deliberately supersedes the historical v14 source contract.  The
+  // prior create-only manifest and fee card remain audit artifacts, but cannot
+  // be used to bind a new native-currency execution authorization.
+  suiteId: "site-builder.design-spec-evaluation-suite/2026-08-03-v15",
   adapterId: "site-builder.design-spec-evaluation-adapter/v13",
   taskContractId: "site_builder.design_spec",
   promptVersion: DESIGN_SPEC_PROMPT_VERSION,
@@ -776,7 +779,7 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   legacyComparatorAliases: Object.freeze([]),
   compiledContractsRuntimeBinding:
     DESIGN_SPEC_COMPILED_CONTRACTS_RUNTIME_BINDING,
-  sourceBundleContractId: "design-spec-evaluation-source-bundle/v14",
+  sourceBundleContractId: "design-spec-evaluation-source-bundle/v15",
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
