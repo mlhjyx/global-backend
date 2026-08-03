@@ -37,8 +37,9 @@ This contract does not:
    stale, unreadable, or invalid installed attestation leaves paid preflight
    unavailable but does not take the API or worker process down.
 2. Verify a maximum 24-hour lifetime, gateway origin, irreversible bearer-token
-   SHA-256, and an exact dispatch matrix generated from all seven current
-   `site_builder.*` task routes.
+   SHA-256, and an exact dispatch matrix generated only from active model
+   routes. Deterministic active targets such as `design_spec` `safe-blueprint`
+   have no model dispatch and therefore cannot appear in an attestation.
 3. Before ledger reserve, use read-only endpoints to verify:
    - the exact gateway alias exists;
    - the new-api token is finite, has model limits enabled, and exposes exactly
@@ -124,6 +125,7 @@ variables unset. The resulting preflight denial is the expected safe state.
 
 As of the 2026-07-29 read-only catalog capture, OpenOx does not publish
 `minimax-m3`, `deepseek-v4-flash`, `doubao-seed-2.0-pro`, or
-`doubao-seed-2.0-lite`. Because those aliases remain in current routes, a
-complete seven-task attestation cannot be installed and dispatch remains
-fail-closed. Missing prices must not be synthesized from new-api defaults.
+`doubao-seed-2.0-lite`. MiniMax/Doubao are `pending_retirement` historical
+provenance and must not be restored, priced, or attested; `deepseek-v4-flash`
+coverage still blocks a complete active-model attestation. Missing prices must
+not be synthesized from new-api defaults.

@@ -41,7 +41,7 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
     const route = resolveTaskRoute('site_builder.copy');
     expect(route.primary).toBe('deepseek-v4-pro');
     expect(route.reasoningEffort).toBe('low');
-    expect(route.fallbacks).toEqual(['glm-5.2', 'doubao-seed-2.0-pro']);
+    expect(route.fallbacks).toEqual(['glm-5.2']);
   });
 
   it('assemble：glm-5.2 主选 + 180s 超时预算 + 回退 deepseek-v4-pro', () => {
@@ -60,9 +60,16 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
     );
   });
 
-  it('全部 task id 都能解析出完整路由（回归守卫：新增 task 忘配路由=测试红）', () => {
+  it('全部 task id 都有完整 model 或 deterministic execution target', () => {
     for (const id of SITE_BUILDER_TASK_IDS) {
-      const route = resolveTaskRoute(id);
+      const target = resolveTaskExecutionTarget(id);
+      if (target.kind === 'deterministic_fallback') {
+        expect(target.fallback.id).toBe('safe-blueprint');
+        expect(target.source).toBe('registry_deterministic');
+        expect(target.policyVersion).toBe('site-builder-model-policy/v3');
+        continue;
+      }
+      const route = target.route;
       expect(route.primary).toBeTruthy();
       expect(Array.isArray(route.fallbacks)).toBe(true);
       expect(route.maxTokens).toBeGreaterThan(0);
@@ -114,6 +121,14 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
       SITE_BUILDER_FALLBACKS_COPY: 'glm-5.2, deepseek-v4-pro,,',
     } as NodeJS.ProcessEnv);
     expect(route.fallbacks).toEqual(['glm-5.2', 'deepseek-v4-pro']);
+  });
+
+  it('退役 alias 不能经环境覆盖重新进入运行时', () => {
+    expect(() =>
+      resolveTaskRoute('site_builder.copy', {
+        SITE_BUILDER_FALLBACKS_COPY: 'doubao-seed-2.0-pro',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/RETIRED_ALIAS_RUNTIME_FORBIDDEN/);
   });
 
   it('SITE_BUILDER_PROFILE_<TASK> 不能改写任务能力与数据政策', () => {
@@ -240,15 +255,10 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       'text.summary',
     );
     expect(
-      modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec'),
-    ).toEqual({
-      primary: 'minimax-m3',
-      fallbacks: ['doubao-seed-2.0-pro'],
-    });
-    expect(
       modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec'),
     ).toMatchObject({
-      state: 'currentRoute',
+      state: 'deterministicFallback',
+      fallback: { id: 'safe-blueprint' },
     });
     expect(
       modelPolicyRegistry.getActiveTaskPolicy('site_builder.brand_profile'),
@@ -258,44 +268,26 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     });
   });
 
-  it('active route 快照只切 BrandProfile，其他 task 逐项保持 pre-MODEL-0 行为', () => {
+  it('active target removes retired aliases without silently promoting candidates', () => {
     expect(
       Object.fromEntries(
         SITE_BUILDER_TASK_IDS.map((taskId) => [
           taskId,
-          modelPolicyRegistry.resolveActiveTaskRoute(taskId),
+          modelPolicyRegistry.getActiveTaskPolicy(taskId),
         ]),
       ),
-    ).toEqual({
-      'site_builder.brand_profile': {
-        primary: 'gpt-5.6-terra',
-        fallbacks: ['claude-sonnet-5'],
-      },
-      'site_builder.copy': {
-        primary: 'deepseek-v4-pro',
-        fallbacks: ['glm-5.2', 'doubao-seed-2.0-pro'],
-      },
+    ).toMatchObject({
+      'site_builder.copy': { route: { fallbacks: ['glm-5.2'] } },
       'site_builder.design_spec': {
-        primary: 'minimax-m3',
-        fallbacks: ['doubao-seed-2.0-pro'],
+        state: 'deterministicFallback',
+        fallback: { id: 'safe-blueprint' },
       },
-      'site_builder.assemble': {
-        primary: 'glm-5.2',
-        fallbacks: ['deepseek-v4-pro'],
-      },
-      'site_builder.assembly_fix': {
-        primary: 'glm-5.2',
-        fallbacks: ['deepseek-v4-pro'],
-      },
-      'site_builder.qa_summarize': {
-        primary: 'deepseek-v4-flash',
-        fallbacks: ['doubao-seed-2.0-lite'],
-      },
-      'site_builder.seo_review': {
-        primary: 'deepseek-v4-flash',
-        fallbacks: ['doubao-seed-2.0-lite'],
-      },
+      'site_builder.qa_summarize': { route: { fallbacks: [] } },
+      'site_builder.seo_review': { route: { fallbacks: [] } },
     });
+    expect(() =>
+      modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec'),
+    ).toThrow(/deterministic fallback/);
   });
 
   it('历史路由与可执行 rollback 分离，MiniMax/Doubao 不进入 rollback target', () => {
@@ -504,9 +496,10 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe(
       'gpt-5.6-terra',
     );
-    expect(resolveTaskRoute('site_builder.design_spec').primary).toBe(
-      'minimax-m3',
-    );
+    expect(resolveTaskExecutionTarget('site_builder.design_spec')).toMatchObject({
+      kind: 'deterministic_fallback',
+      fallback: { id: 'safe-blueprint' },
+    });
   });
 
   it('bounds multimodal review to controlled workspace site material without activating a task route', () => {

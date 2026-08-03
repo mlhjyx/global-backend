@@ -107,6 +107,25 @@ class Ledger implements DesignBriefTaskLedger {
   }
 }
 
+function promoteDesignSpecForModelPathTest() {
+  const original = modelPolicyRegistry.getActiveTaskPolicy.bind(modelPolicyRegistry);
+  return vi
+    .spyOn(modelPolicyRegistry, "getActiveTaskPolicy")
+    .mockImplementation((taskId) =>
+      taskId === "site_builder.design_spec"
+        ? {
+            state: "promotedRoute",
+            lifecycle: "active",
+            route: {
+              primary: "candidate-primary",
+              fallbacks: ["candidate-fallback"],
+            },
+            promotionEvidenceId: "test-design-spec-promotion",
+          }
+        : original(taskId),
+    );
+}
+
 describe("M1-e-B DesignBrief producer", () => {
   it("uses the authoritative five-archetype resolver and BrandProfile priority", () => {
     const resolved = (text: string) =>
@@ -175,6 +194,7 @@ describe("M1-e-B DesignBrief producer", () => {
   it("ranks matching industry and real asset coverage deterministically", async () => {
     const catalog = approvedCatalog();
     const ledger = new Ledger();
+    const policy = promoteDesignSpecForModelPathTest();
     const seen = vi.fn(async (taskInput: DesignSpecTaskInput) => ({
       candidateId: taskInput.candidates[0].id,
       reasons: ["model-confirmed-frozen-candidate"],
@@ -203,6 +223,7 @@ describe("M1-e-B DesignBrief producer", () => {
       selectionSource: "model",
       designBriefDigest: result.designBrief.digest,
     });
+    policy.mockRestore();
   });
 
   it("uses a stable DemoVisualPack fallback for sparse assets", async () => {
@@ -238,6 +259,7 @@ describe("M1-e-B DesignBrief producer", () => {
 
   it("discards unknown model ids and provider failures without structure drift", async () => {
     const catalog = approvedCatalog();
+    const policy = promoteDesignSpecForModelPathTest();
     for (const executeTask of [
       async () => ({
         candidateId: "invented-family:free-form-component",
@@ -268,6 +290,38 @@ describe("M1-e-B DesignBrief producer", () => {
       expect(ledger.stored).toMatchObject({
         selectionSource: "deterministic",
       });
+    }
+    policy.mockRestore();
+  });
+
+  it("records registry deterministic provenance separately from rollback", async () => {
+    const catalog = approvedCatalog();
+    const ledger = new Ledger();
+    await new DesignBriefProducer({ ledger, catalog }).produce(input(catalog));
+    expect(ledger.stored).toMatchObject({
+      selectionSource: "deterministic",
+      deterministicProvenance: {
+        source: "registry_deterministic",
+        fallbackId: "safe-blueprint",
+        policyVersion: "site-builder-model-policy/v3",
+      },
+    });
+    expect(ledger.stored).not.toHaveProperty("rollbackProvenance");
+  });
+
+  it("does not hide a forbidden deterministic-route model override", async () => {
+    const catalog = approvedCatalog();
+    const ledger = new Ledger();
+    vi.stubEnv("SITE_BUILDER_MODEL_DESIGN_SPEC", "minimax-m3");
+    try {
+      await expect(
+        new DesignBriefProducer({ ledger, catalog }).produce(input(catalog)),
+      ).rejects.toThrow(
+        "site_builder.design_spec has an active deterministic fallback and does not accept a model override",
+      );
+      expect(ledger.stored).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 
@@ -335,6 +389,7 @@ describe("M1-e-B DesignBrief producer", () => {
 
   it("does not fallback across budget kill switches or cancellation", async () => {
     const catalog = approvedCatalog();
+    const policy = promoteDesignSpecForModelPathTest();
     const denied = new Ledger();
     await expect(
       new DesignBriefProducer({
@@ -370,11 +425,13 @@ describe("M1-e-B DesignBrief producer", () => {
       }).produce(input(catalog)),
     ).rejects.toMatchObject({ code: "DESIGN_BRIEF_CANCELLED" });
     expect(execute).not.toHaveBeenCalled();
+    policy.mockRestore();
   });
 
   it("does not persist when cancellation arrives while the model is in flight", async () => {
     const catalog = approvedCatalog();
     const ledger = new Ledger();
+    const policy = promoteDesignSpecForModelPathTest();
     let cancelled = false;
     await expect(
       new DesignBriefProducer({
@@ -394,6 +451,7 @@ describe("M1-e-B DesignBrief producer", () => {
     expect(ledger.stored).toBeUndefined();
     expect(ledger.completed).toBeUndefined();
     expect(ledger.released).toBe(1);
+    policy.mockRestore();
   });
 
   it("replays the exact frozen input and survives a completion ACK loss", async () => {

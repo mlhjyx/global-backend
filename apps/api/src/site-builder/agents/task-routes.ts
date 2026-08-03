@@ -51,7 +51,23 @@ export type TaskExecutionTarget =
       fallback: DeterministicFallback;
       source: 'rollback_override';
       rollbackPolicyVersion: string;
+    }
+  | {
+      kind: 'deterministic_fallback';
+      taskId: SiteBuilderTaskId;
+      profile: SiteBuilderModelProfileId;
+      fallback: DeterministicFallback;
+      source: 'registry_deterministic';
+      policyVersion: string;
     };
+
+/** A deployment configuration attempted to bypass an active deterministic route. */
+export class TaskRouteConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TaskRouteConfigurationError';
+  }
+}
 
 type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
   profile: SiteBuilderModelProfileId;
@@ -104,6 +120,21 @@ export function resolveTaskExecutionTarget(
     .map((m) => m.trim())
     .filter(Boolean);
   const emergencyOverride = primary !== undefined || fallbacksRaw !== undefined;
+  if (!rollback && activePolicy.state === 'deterministicFallback') {
+    if (emergencyOverride) {
+      throw new TaskRouteConfigurationError(
+        `${taskId} has an active deterministic fallback and does not accept a model override`,
+      );
+    }
+    return {
+      kind: 'deterministic_fallback',
+      taskId,
+      profile,
+      fallback: { ...activePolicy.fallback },
+      source: 'registry_deterministic',
+      policyVersion: modelPolicyRegistry.getPolicyVersion(),
+    };
+  }
   if (rollbackPolicy?.kind === 'deterministic_fallback' && !emergencyOverride) {
     return {
       kind: 'deterministic_fallback',
@@ -115,12 +146,25 @@ export function resolveTaskExecutionTarget(
     };
   }
   const selectedPolicy = activePolicy;
+  if (selectedPolicy.state === 'deterministicFallback') {
+    // The only supported deterministic state is handled above before a model
+    // execution policy is constructed. A rollback must never silently revive
+    // a model route for a task whose active registry policy is deterministic.
+    throw new Error(
+      `${taskId} has an active deterministic fallback and no model route is available`,
+    );
+  }
   const selectedRoute =
     rollbackPolicy?.kind === 'model_route'
       ? rollbackPolicy.route
       : selectedPolicy.route;
   const resolvedPrimary = primary || selectedRoute.primary;
   const resolvedFallbacks = fallbacks || [...selectedRoute.fallbacks];
+  for (const alias of [resolvedPrimary, ...resolvedFallbacks]) {
+    if (modelPolicyRegistry.getAliasRetirementPolicy(alias)) {
+      throw new Error(`RETIRED_ALIAS_RUNTIME_FORBIDDEN: ${taskId}:${alias}`);
+    }
+  }
   const profileDefinition = modelPolicyRegistry.getProfile(profile);
   const source = emergencyOverride
     ? 'env_override'

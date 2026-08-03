@@ -178,13 +178,15 @@ describe('Site Builder model candidate baseline', () => {
     }
   });
 
-  it('keeps all current, promoted, and rollback routes byte-for-byte unchanged', () => {
+  it('keeps active model routes and the deterministic retirement target explicit', () => {
     expect(
       Object.fromEntries(
-        SITE_BUILDER_TASK_IDS.map((taskId) => [
-          taskId,
-          modelPolicyRegistry.resolveActiveTaskRoute(taskId),
-        ]),
+        SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
+          const policy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
+          return policy.state === 'deterministicFallback'
+            ? []
+            : [[taskId, policy.route]];
+        }),
       ),
     ).toEqual({
       'site_builder.brand_profile': {
@@ -193,11 +195,7 @@ describe('Site Builder model candidate baseline', () => {
       },
       'site_builder.copy': {
         primary: 'deepseek-v4-pro',
-        fallbacks: ['glm-5.2', 'doubao-seed-2.0-pro'],
-      },
-      'site_builder.design_spec': {
-        primary: 'minimax-m3',
-        fallbacks: ['doubao-seed-2.0-pro'],
+        fallbacks: ['glm-5.2'],
       },
       'site_builder.assemble': {
         primary: 'glm-5.2',
@@ -209,12 +207,19 @@ describe('Site Builder model candidate baseline', () => {
       },
       'site_builder.qa_summarize': {
         primary: 'deepseek-v4-flash',
-        fallbacks: ['doubao-seed-2.0-lite'],
+        fallbacks: [],
       },
       'site_builder.seo_review': {
         primary: 'deepseek-v4-flash',
-        fallbacks: ['doubao-seed-2.0-lite'],
+        fallbacks: [],
       },
+    });
+    expect(
+      modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec'),
+    ).toMatchObject({
+      state: 'deterministicFallback',
+      lifecycle: 'active',
+      fallback: { id: 'safe-blueprint' },
     });
     expect(
       resolveTaskRoute('site_builder.brand_profile', {
@@ -240,8 +245,10 @@ describe('Site Builder model candidate baseline', () => {
   it('keeps legacy-only and unavailable candidates out of active routing', () => {
     const activeAliases = new Set(
       SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
-        const route = modelPolicyRegistry.resolveActiveTaskRoute(taskId);
-        return [route.primary, ...route.fallbacks];
+        const policy = modelPolicyRegistry.getActiveTaskPolicy(taskId);
+        return policy.state === 'deterministicFallback'
+          ? []
+          : [policy.route.primary, ...policy.route.fallbacks];
       }),
     );
     const candidateAliases = new Set(

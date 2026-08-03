@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import type { PaidModelProtocol } from '../model-gateway/paid-model-settlement';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import {
-  resolveTaskRoute,
+  resolveTaskExecutionTarget,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
 } from './agents/task-routes';
@@ -236,7 +236,9 @@ function protocolFor(alias: string): PaidModelProtocol {
 
 function canonicalDispatches(): CurrentRouteRecoveryReport['dispatches'] {
   return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
-    const route = resolveTaskRoute(taskId, {});
+    const target = resolveTaskExecutionTarget(taskId, {});
+    if (target.kind === 'deterministic_fallback') return [];
+    const route = target.route;
     return [route.primary, ...route.fallbacks].map((alias) => ({
       taskId,
       alias,
