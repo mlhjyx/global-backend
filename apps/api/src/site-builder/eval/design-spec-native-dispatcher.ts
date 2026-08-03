@@ -14,6 +14,7 @@ import { sha256CanonicalJson } from "./eval-provenance";
 const PICO_UNITS = /^(?:0|[1-9][0-9]*)$/;
 
 type NativeFeeCardEntry = DesignSpecNativeFeeCard["entries"][number];
+type NativeWireAttempt = "initial" | "repair";
 
 function canonicalPicoUnits(value: unknown, label: string): bigint {
   if (typeof value !== "string" || !PICO_UNITS.test(value)) {
@@ -119,6 +120,37 @@ function nativeFeeCardEntry(
   return entry;
 }
 
+function nativeWireAttemptMaximum(
+  entry: NativeFeeCardEntry,
+  wireAttempt: NativeWireAttempt,
+): bigint {
+  switch (wireAttempt) {
+    case "initial":
+      return canonicalPicoUnits(
+        entry.initialCallMaximum.nativePicoUnits,
+        "native fee card initial maximum",
+      );
+    case "repair":
+      return canonicalPicoUnits(
+        entry.repairCallMaximum.nativePicoUnits,
+        "native fee card repair maximum",
+      );
+  }
+}
+
+function nativeWireReservationId(
+  executionId: unknown,
+  wireAttempt: unknown,
+): string {
+  if (typeof executionId !== "string") {
+    throw new Error("native reservation execution id is invalid");
+  }
+  if (wireAttempt !== "initial" && wireAttempt !== "repair") {
+    throw new Error("native wire attempt is invalid");
+  }
+  return `${executionId}:${wireAttempt}`;
+}
+
 /**
  * Computes an observed physical wire cost from the fee card's frozen OpenOx
  * native-unit rates. CNY and USD remain distinct; no NewAPI amount or FX
@@ -184,11 +216,15 @@ export class DesignSpecNativeSettlementCampaign {
     string,
     Readonly<{ alias: string; protocol: DesignSpecNativeTargetProtocol }>
   >();
+  readonly #completedWireReservations = new Set<string>();
+  readonly #executionDispatches = new Map<
+    string,
+    Readonly<{ alias: string; protocol: DesignSpecNativeTargetProtocol }>
+  >();
 
   constructor(input: {
     feeCard: DesignSpecNativeFeeCard;
     authorizedFeeCardSha256: string;
-    caps: Readonly<Record<DesignSpecNativeCurrency, string>>;
   }) {
     if (!input?.feeCard || !Array.isArray(input.feeCard.entries)) {
       throw new Error("design_spec native fee card is required");
@@ -213,47 +249,82 @@ export class DesignSpecNativeSettlementCampaign {
         ),
       ),
     });
-    this.#budget = new DesignSpecNativeCurrencyBudgetGuard(input.caps);
+    this.#budget = new DesignSpecNativeCurrencyBudgetGuard({
+      CNY: input.feeCard.totalsByCurrency.CNY.nativePicoUnits,
+      USD: input.feeCard.totalsByCurrency.USD.nativePicoUnits,
+    });
   }
 
   reserve(input: {
     executionId: string;
+    wireAttempt: NativeWireAttempt;
     alias: string;
     protocol: DesignSpecNativeTargetProtocol;
   }): void {
+    const wireReservationId = nativeWireReservationId(
+      input.executionId,
+      input.wireAttempt,
+    );
     const entry = nativeFeeCardEntry(
       this.#feeCard,
       input.alias,
       input.protocol,
     );
-    const maximumPicoUnits =
-      canonicalPicoUnits(
-        entry.initialCallMaximum.nativePicoUnits,
-        "native fee card initial maximum",
-      ) +
-      canonicalPicoUnits(
-        entry.repairCallMaximum.nativePicoUnits,
-        "native fee card repair maximum",
+    const dispatch = Object.freeze({
+      alias: input.alias,
+      protocol: input.protocol,
+    });
+    const priorDispatch = this.#executionDispatches.get(input.executionId);
+    if (
+      priorDispatch &&
+      (priorDispatch.alias !== dispatch.alias ||
+        priorDispatch.protocol !== dispatch.protocol)
+    ) {
+      throw new Error("native repair dispatch does not match its initial wire");
+    }
+    if (input.wireAttempt === "repair") {
+      const initialReservationId = nativeWireReservationId(
+        input.executionId,
+        "initial",
       );
+      if (!this.#completedWireReservations.has(initialReservationId)) {
+        throw new Error("native repair requires a settled initial wire");
+      }
+    }
+    if (
+      this.#reservations.has(wireReservationId) ||
+      this.#completedWireReservations.has(wireReservationId)
+    ) {
+      throw new Error("native wire attempt is already reserved or settled");
+    }
+    const maximumPicoUnits = nativeWireAttemptMaximum(
+      entry,
+      input.wireAttempt,
+    );
     this.#budget.reserve({
-      ...input,
+      executionId: wireReservationId,
+      alias: input.alias,
+      protocol: input.protocol,
       maximumPicoUnits: maximumPicoUnits.toString(),
     });
-    this.#reservations.set(
-      input.executionId,
-      Object.freeze({ alias: input.alias, protocol: input.protocol }),
-    );
+    this.#reservations.set(wireReservationId, dispatch);
+    this.#executionDispatches.set(input.executionId, dispatch);
   }
 
   settleObservedUsage(input: {
     executionId: string;
+    wireAttempt: NativeWireAttempt;
     inputTokens: number;
     outputTokens: number;
   }): Readonly<{
     currency: DesignSpecNativeCurrency;
     nativePicoUnits: string;
   }> {
-    const reservation = this.#reservations.get(input.executionId);
+    const wireReservationId = nativeWireReservationId(
+      input.executionId,
+      input.wireAttempt,
+    );
+    const reservation = this.#reservations.get(wireReservationId);
     if (!reservation) {
       throw new Error("native settlement has no reserved dispatch identity");
     }
@@ -264,24 +335,32 @@ export class DesignSpecNativeSettlementCampaign {
         outputTokens: input.outputTokens,
       });
       this.#budget.settle({
-        executionId: input.executionId,
+        executionId: wireReservationId,
         currency: observed.currency,
         actualPicoUnits: observed.nativePicoUnits,
       });
-      this.#reservations.delete(input.executionId);
+      this.#reservations.delete(wireReservationId);
+      this.#completedWireReservations.add(wireReservationId);
       return observed;
     } catch (error) {
-      try {
-        this.#budget.freezeUnknownSettlement(input.executionId);
-      } catch {
-        // Preserve the settlement failure that already froze or rejected.
+      if (!this.#budget.snapshot().frozen) {
+        try {
+          this.#budget.freezeUnknownSettlement(wireReservationId);
+        } catch {
+          // Preserve the settlement failure that already froze or rejected.
+        }
       }
       throw error;
     }
   }
 
-  freezeUnknownSettlement(executionId: string): void {
-    this.#budget.freezeUnknownSettlement(executionId);
+  freezeUnknownSettlement(input: {
+    executionId: string;
+    wireAttempt: NativeWireAttempt;
+  }): void {
+    this.#budget.freezeUnknownSettlement(
+      nativeWireReservationId(input.executionId, input.wireAttempt),
+    );
   }
 
   snapshot() {

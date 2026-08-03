@@ -93,7 +93,6 @@ function nativeCampaign(
   return new DesignSpecNativeSettlementCampaign({
     feeCard: card,
     authorizedFeeCardSha256,
-    caps: { CNY: "11276659000000", USD: "3458427840000" },
   });
 }
 
@@ -115,6 +114,16 @@ describe("design_spec native dispatcher settlement bridge", () => {
         outputTokens: 50,
       }),
     ).toEqual({ currency: "USD", nativePicoUnits: "882000000" });
+  });
+
+  it("derives its native campaign caps from the authorized fee card", () => {
+    expect(nativeCampaign().snapshot()).toMatchObject({
+      frozen: false,
+      totalsByCurrency: {
+        CNY: { capPicoUnits: "11276659000000" },
+        USD: { capPicoUnits: "3458427840000" },
+      },
+    });
   });
 
   it("rejects a fee card whose admitted dispatch set has been widened", () => {
@@ -163,11 +172,13 @@ describe("design_spec native dispatcher settlement bridge", () => {
 
     campaign.reserve({
       executionId: "design-spec:gpt-5.5:fixture:attempt:1",
+      wireAttempt: "initial",
       alias: "gpt-5.5",
       protocol: "openai-responses",
     });
     campaign.settleObservedUsage({
       executionId: "design-spec:gpt-5.5:fixture:attempt:1",
+      wireAttempt: "initial",
       inputTokens: 100,
       outputTokens: 50,
     });
@@ -184,16 +195,121 @@ describe("design_spec native dispatcher settlement bridge", () => {
     });
   });
 
+  it("enforces and settles initial and repair wire ceilings independently", () => {
+    const executionId = "design-spec:gpt-5.5:fixture:attempt:per-wire";
+    const initialOverage = nativeCampaign();
+
+    initialOverage.reserve({
+      executionId,
+      wireAttempt: "initial",
+      alias: "gpt-5.5",
+      protocol: "openai-responses",
+    });
+    expect(() =>
+      initialOverage.settleObservedUsage({
+        executionId,
+        wireAttempt: "initial",
+        inputTokens: 6438,
+        outputTokens: 4001,
+      }),
+    ).toThrow("reservation");
+    expect(initialOverage.snapshot()).toMatchObject({
+      frozen: true,
+      freezeReason: "settlement_exceeds_reservation",
+    });
+
+    const campaign = nativeCampaign();
+    campaign.reserve({
+      executionId,
+      wireAttempt: "initial",
+      alias: "gpt-5.5",
+      protocol: "openai-responses",
+    });
+    campaign.settleObservedUsage({
+      executionId,
+      wireAttempt: "initial",
+      inputTokens: 6438,
+      outputTokens: 4000,
+    });
+    campaign.reserve({
+      executionId,
+      wireAttempt: "repair",
+      alias: "gpt-5.5",
+      protocol: "openai-responses",
+    });
+    campaign.settleObservedUsage({
+      executionId,
+      wireAttempt: "repair",
+      inputTokens: 10745,
+      outputTokens: 4000,
+    });
+
+    expect(campaign.snapshot()).toMatchObject({
+      frozen: false,
+      totalsByCurrency: {
+        CNY: {
+          committedPicoUnits: "325915000000",
+          reservedPicoUnits: "0",
+        },
+      },
+    });
+  });
+
+  it("requires a settled initial wire and preserves its dispatch for repair", () => {
+    const campaign = nativeCampaign();
+    const executionId = "design-spec:gpt-5.5:fixture:attempt:ordered-wires";
+
+    expect(() =>
+      campaign.reserve({
+        executionId,
+        wireAttempt: "repair",
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+      }),
+    ).toThrow("settled initial wire");
+
+    campaign.reserve({
+      executionId,
+      wireAttempt: "initial",
+      alias: "gpt-5.5",
+      protocol: "openai-responses",
+    });
+    campaign.settleObservedUsage({
+      executionId,
+      wireAttempt: "initial",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    expect(() =>
+      campaign.reserve({
+        executionId,
+        wireAttempt: "repair",
+        alias: "gpt-5.6-terra",
+        protocol: "openai-responses",
+      }),
+    ).toThrow("does not match");
+    expect(() =>
+      campaign.reserve({
+        executionId,
+        wireAttempt: "initial",
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+      }),
+    ).toThrow("already reserved or settled");
+  });
+
   it("fails closed and freezes after an unknown post-dispatch settlement", () => {
     const campaign = nativeCampaign();
     const executionId = "design-spec:claude:fixture:attempt:1";
 
     campaign.reserve({
       executionId,
+      wireAttempt: "initial",
       alias: "claude-sonnet-5",
       protocol: "anthropic-messages",
     });
-    campaign.freezeUnknownSettlement(executionId);
+    campaign.freezeUnknownSettlement({ executionId, wireAttempt: "initial" });
 
     expect(campaign.snapshot()).toMatchObject({
       frozen: true,
@@ -202,6 +318,7 @@ describe("design_spec native dispatcher settlement bridge", () => {
     expect(() =>
       campaign.reserve({
         executionId: "design-spec:terra:fixture:attempt:1",
+        wireAttempt: "initial",
         alias: "gpt-5.6-terra",
         protocol: "openai-responses",
       }),
