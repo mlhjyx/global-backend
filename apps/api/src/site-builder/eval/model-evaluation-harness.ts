@@ -1602,6 +1602,18 @@ export interface ProfileEvaluationAdmission {
   candidates: readonly ProfileCandidateEvaluationAdmission[];
 }
 
+/**
+ * Evaluation envelopes are deliberately separate from production task routes.
+ * These two closed assembly tasks keep their existing runtime token ceilings;
+ * the smaller value applies only to the finite, paid-evaluation matrix.
+ */
+export const SITE_BUILDER_EVALUATION_ONLY_MAX_TOKENS: Readonly<
+  Partial<Record<SiteBuilderTaskId, number>>
+> = Object.freeze({
+  'site_builder.assemble': 12_000,
+  'site_builder.assembly_fix': 12_000,
+});
+
 function evaluationEnvelope(taskId: SiteBuilderTaskId): TaskEvaluationEnvelope {
   const binding = getSiteBuilderTaskRouteBinding(taskId);
   const runtimeDeadlineMs = binding.timeoutMs;
@@ -1609,7 +1621,8 @@ function evaluationEnvelope(taskId: SiteBuilderTaskId): TaskEvaluationEnvelope {
   // There is deliberately no global 120-second or 800-token evaluator default.
   const diagnosticObservationMs = binding.timeoutMs;
   return {
-    maxTokens: binding.maxTokens,
+    maxTokens:
+      SITE_BUILDER_EVALUATION_ONLY_MAX_TOKENS[taskId] ?? binding.maxTokens,
     runtimeDeadlineMs,
     diagnosticObservationMs,
     hardStopMs: runtimeDeadlineMs + diagnosticObservationMs,

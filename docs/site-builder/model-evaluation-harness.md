@@ -8,6 +8,7 @@
 - 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。
 - 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。
 - 当前 7 个文本 task 都有可 dispatch 的 canonical suite：BrandProfile、copy、`design_spec`、assemble、assembly_fix、`qa_summarize` 与 `seo_review`。这只证明零调用 suite-admission：不产生真实 evidence、费用授权、promotion 或运行路由变化。`design_spec` 仍只完成零费用 suite 准备；其余任务也仍需各自的 fixed-commit manifest、费用卡和真实 evidence 门。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。
+- assembly/assembly_fix 的 12,000-token cap 仅属于评测矩阵；生产 `task-route-bindings` 仍分别保持 16,000/8,000，评测计划不得改写运行路由或其 envelope。
 - 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。
 - zero-cost evidence 准备合同 `site-builder-model-evaluation-evidence-prep/2026-07-29-v1` 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。
 

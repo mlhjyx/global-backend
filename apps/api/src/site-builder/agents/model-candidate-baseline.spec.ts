@@ -164,7 +164,7 @@ describe('Site Builder model candidate baseline', () => {
     }
   });
 
-  it('keeps task-to-profile evaluation pools aligned with current task bindings', () => {
+  it('keeps evaluation pools non-runtime, with only the assembly matrix using its dedicated profile', () => {
     expect(
       SITE_BUILDER_MODEL_CANDIDATE_BASELINE.taskEvaluationPools.map(
         ({ taskId }) => taskId,
@@ -174,7 +174,16 @@ describe('Site Builder model candidate baseline', () => {
       taskId,
       profile,
     } of SITE_BUILDER_MODEL_CANDIDATE_BASELINE.taskEvaluationPools) {
-      expect(getSiteBuilderTaskRouteBinding(taskId).profile).toBe(profile);
+      const runtimeProfile = getSiteBuilderTaskRouteBinding(taskId).profile;
+      if (
+        taskId === 'site_builder.assemble' ||
+        taskId === 'site_builder.assembly_fix'
+      ) {
+        expect(profile).toBe('structured.assembly');
+        expect(runtimeProfile).toBe('structured.default');
+      } else {
+        expect(runtimeProfile).toBe(profile);
+      }
     }
   });
 
