@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "site-builder-design-spec-v4-native-fee-card-evidence/v1",
+  "preparationCommitSha": "0794991b54623e2f14e16b73f232481f141eb290",
+  "card": {
+    "schemaVersion": "site-builder-design-spec-v4-native-fee-card/v1",
+    "feeCardId": "site-builder-design-spec-v4-native-fee-card/2026-08-03-v1",
+    "status": "READY_FOR_CREDENTIAL_ATTESTATION",
+    "dispatchAuthorization": "NOT_AUTHORIZED",
+    "fixedSourceCommitSha": "e569ddcc46040397c976258f76a16b2ec24c31eb",
+    "manifestSha256": "560334518f28ea3d6838614702f0f829b8873568aef277bc364c0e4c195a9305",
+    "suite": {
+      "suiteId": "site-builder.design-spec-evaluation-suite/2026-08-03-v15",
+      "sourceBundleContractId": "design-spec-evaluation-source-bundle/v15",
+      "sourceBundleSha256": "a2469fe1fb1522aa90de791506745341796e5b6bbb7e879e8128f26ef79e3e06"
+    },
+    "pricing": {
+      "authority": "openox_model_marketplace",
+      "catalogEndpoint": "https://openox.tech/api/public/pricing-catalog",
+      "capturedAt": "2026-08-03T16:37:42.246Z",
+      "catalogResponseSha256": "cc1b8947d539b3fd8ddae9c8b7872db6128fc09368ec670d9530796af5717b78"
+    },
+    "tokenEnvelope": {
+      "initialInputTokens": 6438,
+      "repairInputTokens": 10745,
+      "outputTokensPerWireCall": 4000
+    },
+    "entries": [
+      {
+        "alias": "claude-sonnet-5",
+        "protocol": "anthropic-messages",
+        "groupName": "special",
+        "currency": "USD",
+        "executionCount": 24,
+        "maximumWireCalls": 48,
+        "pricingVersion": "d02191cbb07c6a5cafa47eaac6c5d4594a74478000ef05c9dc8d918264cb8bd5",
+        "effectiveInputRateMicrounitsPerMillionTokens": 2520000,
+        "effectiveOutputRateMicrounitsPerMillionTokens": 12600000,
+        "initialCallMaximum": {
+          "nativePicoUnits": "66623760000",
+          "formatted": "0.06662376"
+        },
+        "repairCallMaximum": {
+          "nativePicoUnits": "77477400000",
+          "formatted": "0.0774774"
+        },
+        "maximumCost": {
+          "nativePicoUnits": "3458427840000",
+          "formatted": "3.45842784"
+        }
+      },
+      {
+        "alias": "gpt-5.5",
+        "protocol": "openai-responses",
+        "groupName": "gpt-unified",
+        "currency": "CNY",
+        "executionCount": 25,
+        "maximumWireCalls": 50,
+        "pricingVersion": "d850a359c8597c61849422b6adffee0c9132de479651692271f6a37634aeb6cb",
+        "effectiveInputRateMicrounitsPerMillionTokens": 5000000,
+        "effectiveOutputRateMicrounitsPerMillionTokens": 30000000,
+        "initialCallMaximum": {
+          "nativePicoUnits": "152190000000",
+          "formatted": "0.15219"
+        },
+        "repairCallMaximum": {
+          "nativePicoUnits": "173725000000",
+          "formatted": "0.173725"
+        },
+        "maximumCost": {
+          "nativePicoUnits": "8147875000000",
+          "formatted": "8.147875"
+        }
+      },
+      {
+        "alias": "gpt-5.6-terra",
+        "protocol": "openai-responses",
+        "groupName": "gpt-unified",
+        "currency": "CNY",
+        "executionCount": 24,
+        "maximumWireCalls": 48,
+        "pricingVersion": "36682b8c34ec8dc20a2ca5dfa1429f1683b945f0a8e1bf465c2a86960594bedd",
+        "effectiveInputRateMicrounitsPerMillionTokens": 2000000,
+        "effectiveOutputRateMicrounitsPerMillionTokens": 12000000,
+        "initialCallMaximum": {
+          "nativePicoUnits": "60876000000",
+          "formatted": "0.060876"
+        },
+        "repairCallMaximum": {
+          "nativePicoUnits": "69490000000",
+          "formatted": "0.06949"
+        },
+        "maximumCost": {
+          "nativePicoUnits": "3128784000000",
+          "formatted": "3.128784"
+        }
+      }
+    ],
+    "totalsByCurrency": {
+      "CNY": {
+        "nativePicoUnits": "11276659000000",
+        "formatted": "11.276659"
+      },
+      "USD": {
+        "nativePicoUnits": "3458427840000",
+        "formatted": "3.45842784"
+      }
+    },
+    "expectedCost": "not_known_before_usage",
+    "mechanicalPolicyCeiling": {
+      "amountCents": 2920,
+      "meaning": "mechanical_only_not_a_native_currency_budget"
+    },
+    "noForeignExchangeConversion": true,
+    "cardSha256": "6553dec6013b98a430e3163e43011e206b477373a6dd30e8258694e38913dc1e"
+  },
+  "modelWireCalls": 0,
+  "actualModelCost": {
+    "CNY": "0",
+    "USD": "0"
+  },
+  "dispatchAuthorization": "NOT_AUTHORIZED"
+}
