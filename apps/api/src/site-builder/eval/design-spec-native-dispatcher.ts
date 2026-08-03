@@ -3,10 +3,13 @@ import {
   type DesignSpecNativeCurrency,
 } from "./design-spec-native-currency-budget";
 import {
+  DESIGN_SPEC_NATIVE_FEE_CARD_ID,
+  DESIGN_SPEC_NATIVE_FEE_CARD_SCHEMA_VERSION,
   DESIGN_SPEC_NATIVE_FEE_CARD_DISPATCHES,
   type DesignSpecNativeFeeCard,
   type DesignSpecNativeTargetProtocol,
 } from "./design-spec-native-fee-card";
+import { sha256CanonicalJson } from "./eval-provenance";
 
 const PICO_UNITS = /^(?:0|[1-9][0-9]*)$/;
 
@@ -33,6 +36,42 @@ function assertExactNativeFeeCardDispatchSet(
     actual.some((entry, index) => entry !== expected[index])
   ) {
     throw new Error("design_spec native fee card dispatch set drifted");
+  }
+}
+
+function assertFeeCardIntegrity(feeCard: DesignSpecNativeFeeCard): void {
+  const { cardSha256, ...unsignedCard } = feeCard;
+  if (
+    feeCard.schemaVersion !== DESIGN_SPEC_NATIVE_FEE_CARD_SCHEMA_VERSION ||
+    feeCard.feeCardId !== DESIGN_SPEC_NATIVE_FEE_CARD_ID ||
+    feeCard.status !== "READY_FOR_CREDENTIAL_ATTESTATION" ||
+    feeCard.dispatchAuthorization !== "NOT_AUTHORIZED" ||
+    feeCard.noForeignExchangeConversion !== true ||
+    !PICO_UNITS.test(feeCard.totalsByCurrency.CNY.nativePicoUnits) ||
+    !PICO_UNITS.test(feeCard.totalsByCurrency.USD.nativePicoUnits) ||
+    cardSha256 !== sha256CanonicalJson(unsignedCard)
+  ) {
+    throw new Error("design_spec native fee card integrity is invalid");
+  }
+  assertExactNativeFeeCardDispatchSet(feeCard);
+  const totals = feeCard.entries.reduce(
+    (result, entry) => {
+      const maximum = canonicalPicoUnits(
+        entry.maximumCost.nativePicoUnits,
+        "native fee card maximum",
+      );
+      return {
+        ...result,
+        [entry.currency]: result[entry.currency] + maximum,
+      };
+    },
+    { CNY: 0n, USD: 0n } as Record<DesignSpecNativeCurrency, bigint>,
+  );
+  if (
+    totals.CNY !== BigInt(feeCard.totalsByCurrency.CNY.nativePicoUnits) ||
+    totals.USD !== BigInt(feeCard.totalsByCurrency.USD.nativePicoUnits)
+  ) {
+    throw new Error("design_spec native fee card totals drifted");
   }
 }
 
@@ -86,6 +125,22 @@ function nativeFeeCardEntry(
  * conversion participates in this calculation.
  */
 export function nativePicoUnitsForUsage(
+  feeCard: DesignSpecNativeFeeCard,
+  input: {
+    alias: string;
+    protocol: DesignSpecNativeTargetProtocol;
+    inputTokens: number;
+    outputTokens: number;
+  },
+): Readonly<{
+  currency: DesignSpecNativeCurrency;
+  nativePicoUnits: string;
+}> {
+  assertFeeCardIntegrity(feeCard);
+  return nativePicoUnitsForEntry(feeCard, input);
+}
+
+function nativePicoUnitsForEntry(
   feeCard: Pick<DesignSpecNativeFeeCard, "entries">,
   input: {
     alias: string;
@@ -125,15 +180,39 @@ export function nativePicoUnitsForUsage(
 export class DesignSpecNativeSettlementCampaign {
   readonly #feeCard: Pick<DesignSpecNativeFeeCard, "entries">;
   readonly #budget: DesignSpecNativeCurrencyBudgetGuard;
+  readonly #reservations = new Map<
+    string,
+    Readonly<{ alias: string; protocol: DesignSpecNativeTargetProtocol }>
+  >();
 
   constructor(input: {
-    feeCard: Pick<DesignSpecNativeFeeCard, "entries">;
+    feeCard: DesignSpecNativeFeeCard;
+    authorizedFeeCardSha256: string;
     caps: Readonly<Record<DesignSpecNativeCurrency, string>>;
   }) {
     if (!input?.feeCard || !Array.isArray(input.feeCard.entries)) {
       throw new Error("design_spec native fee card is required");
     }
-    this.#feeCard = input.feeCard;
+    assertFeeCardIntegrity(input.feeCard);
+    if (
+      input.authorizedFeeCardSha256.length !== 64 ||
+      !/^[a-f0-9]{64}$/.test(input.authorizedFeeCardSha256) ||
+      input.authorizedFeeCardSha256 !== input.feeCard.cardSha256
+    ) {
+      throw new Error("design_spec authorized fee card digest is invalid");
+    }
+    this.#feeCard = Object.freeze({
+      entries: Object.freeze(
+        input.feeCard.entries.map((entry) =>
+          Object.freeze({
+            ...entry,
+            initialCallMaximum: Object.freeze({ ...entry.initialCallMaximum }),
+            repairCallMaximum: Object.freeze({ ...entry.repairCallMaximum }),
+            maximumCost: Object.freeze({ ...entry.maximumCost }),
+          }),
+        ),
+      ),
+    });
     this.#budget = new DesignSpecNativeCurrencyBudgetGuard(input.caps);
   }
 
@@ -160,14 +239,45 @@ export class DesignSpecNativeSettlementCampaign {
       ...input,
       maximumPicoUnits: maximumPicoUnits.toString(),
     });
+    this.#reservations.set(
+      input.executionId,
+      Object.freeze({ alias: input.alias, protocol: input.protocol }),
+    );
   }
 
-  settle(input: {
+  settleObservedUsage(input: {
     executionId: string;
+    inputTokens: number;
+    outputTokens: number;
+  }): Readonly<{
     currency: DesignSpecNativeCurrency;
-    actualPicoUnits: string;
-  }): void {
-    this.#budget.settle(input);
+    nativePicoUnits: string;
+  }> {
+    const reservation = this.#reservations.get(input.executionId);
+    if (!reservation) {
+      throw new Error("native settlement has no reserved dispatch identity");
+    }
+    try {
+      const observed = nativePicoUnitsForEntry(this.#feeCard, {
+        ...reservation,
+        inputTokens: input.inputTokens,
+        outputTokens: input.outputTokens,
+      });
+      this.#budget.settle({
+        executionId: input.executionId,
+        currency: observed.currency,
+        actualPicoUnits: observed.nativePicoUnits,
+      });
+      this.#reservations.delete(input.executionId);
+      return observed;
+    } catch (error) {
+      try {
+        this.#budget.freezeUnknownSettlement(input.executionId);
+      } catch {
+        // Preserve the settlement failure that already froze or rejected.
+      }
+      throw error;
+    }
   }
 
   freezeUnknownSettlement(executionId: string): void {
