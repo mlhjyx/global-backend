@@ -14,7 +14,8 @@ function createFeeCard(): DesignSpecNativeFeeCard {
     status: "READY_FOR_CREDENTIAL_ATTESTATION",
     dispatchAuthorization: "NOT_AUTHORIZED",
     fixedSourceCommitSha: "e493ba1d09fe37feea927f70d12f17aadadc5c6a",
-    manifestSha256: "83dedcb2057d4e375114c42b5c03becbc9b057b1bfa1f3fc511bfec600827e72",
+    manifestSha256:
+      "83dedcb2057d4e375114c42b5c03becbc9b057b1bfa1f3fc511bfec600827e72",
     suite: {
       suiteId: "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
       sourceBundleContractId: "design-spec-evaluation-source-bundle/v14",
@@ -24,49 +25,89 @@ function createFeeCard(): DesignSpecNativeFeeCard {
     pricing: {
       authority: "openox_model_marketplace",
       catalogEndpoint: "https://openox.tech/api/public/pricing-catalog",
-      capturedAt: "2026-08-03T00:00:00.000Z",
-      catalogResponseSha256: "a".repeat(64),
+      capturedAt: "2026-08-03T01:52:16.229Z",
+      catalogResponseSha256:
+        "6a3655b12380ab4b229e895bd3c08ae961ef4b05d87b8eb035ff8d1b492593b4",
     },
     tokenEnvelope: {
       initialInputTokens: 6438,
       repairInputTokens: 10745,
       outputTokensPerWireCall: 4000,
     },
-  entries: [
-    {
-      alias: "gpt-5.6-terra",
-      protocol: "openai-responses",
-      currency: "CNY",
-      executionCount: 24,
-      effectiveInputRateMicrounitsPerMillionTokens: 2_000_000,
-      effectiveOutputRateMicrounitsPerMillionTokens: 12_000_000,
-      initialCallMaximum: { nativePicoUnits: "60876000000", formatted: "0" },
-      repairCallMaximum: { nativePicoUnits: "69490000000", formatted: "0" },
-      maximumCost: { nativePicoUnits: "3128784000000", formatted: "0" },
-    },
-    {
-      alias: "gpt-5.5",
-      protocol: "openai-responses",
-      currency: "CNY",
-      executionCount: 25,
-      effectiveInputRateMicrounitsPerMillionTokens: 5_000_000,
-      effectiveOutputRateMicrounitsPerMillionTokens: 30_000_000,
-      initialCallMaximum: { nativePicoUnits: "152190000000", formatted: "0" },
-      repairCallMaximum: { nativePicoUnits: "173725000000", formatted: "0" },
-      maximumCost: { nativePicoUnits: "8147875000000", formatted: "0" },
-    },
-    {
-      alias: "claude-sonnet-5",
-      protocol: "anthropic-messages",
-      currency: "USD",
-      executionCount: 24,
-      effectiveInputRateMicrounitsPerMillionTokens: 2_520_000,
-      effectiveOutputRateMicrounitsPerMillionTokens: 12_600_000,
-      initialCallMaximum: { nativePicoUnits: "66623760000", formatted: "0" },
-      repairCallMaximum: { nativePicoUnits: "77477400000", formatted: "0" },
-      maximumCost: { nativePicoUnits: "3458427840000", formatted: "0" },
-    },
-  ],
+    entries: [
+      {
+        alias: "claude-sonnet-5",
+        protocol: "anthropic-messages",
+        currency: "USD",
+        executionCount: 24,
+        maximumWireCalls: 48,
+        groupName: "special",
+        pricingVersion:
+          "c835a1a0a0b0aa97e176abf40f37cd3b735b807aaef3978e507b34eac629d08b",
+        effectiveInputRateMicrounitsPerMillionTokens: 2_520_000,
+        effectiveOutputRateMicrounitsPerMillionTokens: 12_600_000,
+        initialCallMaximum: {
+          nativePicoUnits: "66623760000",
+          formatted: "0.06662376",
+        },
+        repairCallMaximum: {
+          nativePicoUnits: "77477400000",
+          formatted: "0.0774774",
+        },
+        maximumCost: {
+          nativePicoUnits: "3458427840000",
+          formatted: "3.45842784",
+        },
+      },
+      {
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+        currency: "CNY",
+        executionCount: 25,
+        maximumWireCalls: 50,
+        groupName: "gpt-unified",
+        pricingVersion:
+          "4917874ce52479175007e300a171ce8027bcedbb2c280961b7aa5699c02e44df",
+        effectiveInputRateMicrounitsPerMillionTokens: 5_000_000,
+        effectiveOutputRateMicrounitsPerMillionTokens: 30_000_000,
+        initialCallMaximum: {
+          nativePicoUnits: "152190000000",
+          formatted: "0.15219",
+        },
+        repairCallMaximum: {
+          nativePicoUnits: "173725000000",
+          formatted: "0.173725",
+        },
+        maximumCost: {
+          nativePicoUnits: "8147875000000",
+          formatted: "8.147875",
+        },
+      },
+      {
+        alias: "gpt-5.6-terra",
+        protocol: "openai-responses",
+        currency: "CNY",
+        executionCount: 24,
+        maximumWireCalls: 48,
+        groupName: "gpt-unified",
+        pricingVersion:
+          "f69fc361b1b58c6478d49f08afe0867af2b234af4d96dd941835b3d5bf2590ba",
+        effectiveInputRateMicrounitsPerMillionTokens: 2_000_000,
+        effectiveOutputRateMicrounitsPerMillionTokens: 12_000_000,
+        initialCallMaximum: {
+          nativePicoUnits: "60876000000",
+          formatted: "0.060876",
+        },
+        repairCallMaximum: {
+          nativePicoUnits: "69490000000",
+          formatted: "0.06949",
+        },
+        maximumCost: {
+          nativePicoUnits: "3128784000000",
+          formatted: "3.128784",
+        },
+      },
+    ],
     totalsByCurrency: {
       CNY: { nativePicoUnits: "11276659000000", formatted: "11.276659" },
       USD: { nativePicoUnits: "3458427840000", formatted: "3.45842784" },
@@ -86,14 +127,8 @@ function createFeeCard(): DesignSpecNativeFeeCard {
 
 const feeCard = createFeeCard();
 
-function nativeCampaign(
-  card = feeCard,
-  authorizedFeeCardSha256 = feeCard.cardSha256,
-) {
-  return new DesignSpecNativeSettlementCampaign({
-    feeCard: card,
-    authorizedFeeCardSha256,
-  });
+function nativeCampaign(card = feeCard) {
+  return new DesignSpecNativeSettlementCampaign({ feeCard: card });
 }
 
 describe("design_spec native dispatcher settlement bridge", () => {
@@ -116,7 +151,7 @@ describe("design_spec native dispatcher settlement bridge", () => {
     ).toEqual({ currency: "USD", nativePicoUnits: "882000000" });
   });
 
-  it("derives its native campaign caps from the authorized fee card", () => {
+  it("derives its native campaign caps from the #263 fee card", () => {
     expect(nativeCampaign().snapshot()).toMatchObject({
       frozen: false,
       totalsByCurrency: {
@@ -148,15 +183,11 @@ describe("design_spec native dispatcher settlement bridge", () => {
     ).toThrow("native fee card");
   });
 
-  it("rejects a self-consistent fee card with lower native rates unless its digest was authorized", () => {
+  it("rejects a self-consistent fee card with drifted fixed-source provenance", () => {
     const tampered = createFeeCard();
     const altered = {
       ...tampered,
-      entries: tampered.entries.map((entry) =>
-        entry.alias === "gpt-5.5"
-          ? { ...entry, effectiveInputRateMicrounitsPerMillionTokens: 1 }
-          : entry,
-      ),
+      fixedSourceCommitSha: "a".repeat(40),
     };
     const { cardSha256: _previousDigest, ...unsignedAltered } = altered;
     const lowered = {
@@ -164,7 +195,51 @@ describe("design_spec native dispatcher settlement bridge", () => {
       cardSha256: sha256CanonicalJson(unsignedAltered),
     } as DesignSpecNativeFeeCard;
 
-    expect(() => nativeCampaign(lowered)).toThrow("authorized fee card digest");
+    expect(() =>
+      nativePicoUnitsForUsage(lowered, {
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+        inputTokens: 1,
+        outputTokens: 1,
+      }),
+    ).toThrow("integrity");
+  });
+
+  it("rejects a self-consistent fee card that does not equal the #263 fee card", () => {
+    const altered = structuredClone(feeCard) as DesignSpecNativeFeeCard;
+    const loweredEntry = {
+      ...altered.entries[0]!,
+      effectiveInputRateMicrounitsPerMillionTokens: 1,
+      effectiveOutputRateMicrounitsPerMillionTokens: 1,
+      initialCallMaximum: { nativePicoUnits: "10438", formatted: "0" },
+      repairCallMaximum: { nativePicoUnits: "14745", formatted: "0" },
+      maximumCost: { nativePicoUnits: "604392", formatted: "0" },
+    };
+    const { cardSha256: _previousDigest, ...cardWithoutDigest } = altered;
+    const unsignedAltered = {
+      ...cardWithoutDigest,
+      entries: [loweredEntry, ...altered.entries.slice(1)],
+    };
+    const unsignedLowered = {
+      ...unsignedAltered,
+      totalsByCurrency: {
+        ...unsignedAltered.totalsByCurrency,
+        CNY: { nativePicoUnits: "8147875604392", formatted: "8.147875604392" },
+      },
+    };
+    const lowered = {
+      ...unsignedLowered,
+      cardSha256: sha256CanonicalJson(unsignedLowered),
+    } as DesignSpecNativeFeeCard;
+
+    expect(() =>
+      nativePicoUnitsForUsage(lowered, {
+        alias: "gpt-5.6-terra",
+        protocol: "openai-responses",
+        inputTokens: 1,
+        outputTokens: 1,
+      }),
+    ).toThrow("integrity");
   });
 
   it("reserves the fee-card maximum before dispatch and settles a native amount", () => {
@@ -212,10 +287,30 @@ describe("design_spec native dispatcher settlement bridge", () => {
         inputTokens: 6438,
         outputTokens: 4001,
       }),
-    ).toThrow("reservation");
+    ).toThrow("token envelope");
     expect(initialOverage.snapshot()).toMatchObject({
       frozen: true,
-      freezeReason: "settlement_exceeds_reservation",
+      freezeReason: "unknown_settlement",
+    });
+
+    const initialInputOverage = nativeCampaign();
+    initialInputOverage.reserve({
+      executionId: "design-spec:terra:fixture:attempt:input-overage",
+      wireAttempt: "initial",
+      alias: "gpt-5.6-terra",
+      protocol: "openai-responses",
+    });
+    expect(() =>
+      initialInputOverage.settleObservedUsage({
+        executionId: "design-spec:terra:fixture:attempt:input-overage",
+        wireAttempt: "initial",
+        inputTokens: 6439,
+        outputTokens: 0,
+      }),
+    ).toThrow("token envelope");
+    expect(initialInputOverage.snapshot()).toMatchObject({
+      frozen: true,
+      freezeReason: "unknown_settlement",
     });
 
     const campaign = nativeCampaign();
@@ -297,6 +392,51 @@ describe("design_spec native dispatcher settlement bridge", () => {
         protocol: "openai-responses",
       }),
     ).toThrow("already reserved or settled");
+  });
+
+  it("rejects executions above the fee-card count for one dispatch", () => {
+    const campaign = nativeCampaign();
+    for (let index = 0; index < 25; index += 1) {
+      const executionId = `design-spec:gpt-5.5:fixture:attempt:count-${index}`;
+      campaign.reserve({
+        executionId,
+        wireAttempt: "initial",
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+      });
+      campaign.settleObservedUsage({
+        executionId,
+        wireAttempt: "initial",
+        inputTokens: 1,
+        outputTokens: 1,
+      });
+    }
+    expect(() =>
+      campaign.reserve({
+        executionId: "design-spec:gpt-5.5:fixture:attempt:count-over",
+        wireAttempt: "initial",
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+      }),
+    ).toThrow("execution count");
+  });
+
+  it("does not let a patched Set prototype bypass repair ordering", () => {
+    const campaign = nativeCampaign();
+    const originalHas = Set.prototype.has;
+    Set.prototype.has = () => true;
+    try {
+      expect(() =>
+        campaign.reserve({
+          executionId: "design-spec:gpt-5.5:fixture:attempt:prototype",
+          wireAttempt: "repair",
+          alias: "gpt-5.5",
+          protocol: "openai-responses",
+        }),
+      ).toThrow("settled initial wire");
+    } finally {
+      Set.prototype.has = originalHas;
+    }
   });
 
   it("fails closed and freezes after an unknown post-dispatch settlement", () => {
