@@ -12,9 +12,9 @@ import { MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND } from "./model-eva
  * public-price artifact is intentionally not present in this source change.
  */
 export const DESIGN_SPEC_V2_NATIVE_FEE_CARD_ID =
-  "site-builder-design-spec-v2-native-fee-card/2026-08-03-v1" as const;
+  "site-builder-design-spec-v3-native-fee-card/2026-08-03-v1" as const;
 export const DESIGN_SPEC_V2_NATIVE_FEE_CARD_SCHEMA_VERSION =
-  "site-builder-design-spec-v2-native-fee-card/v1" as const;
+  "site-builder-design-spec-v3-native-fee-card/v1" as const;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;

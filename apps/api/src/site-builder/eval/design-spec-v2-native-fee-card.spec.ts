@@ -63,6 +63,9 @@ describe("design_spec v2 native-currency fee-card source contract", () => {
     expect(card.fixedSourceCommitSha).toBe(
       "5e25fd8d544c1f7e46b6d066505fbedf35997bae",
     );
+    expect(card.feeCardId).toBe(
+      "site-builder-design-spec-v3-native-fee-card/2026-08-03-v1",
+    );
     expect(card.manifestSha256).toBe(
       "969336d24c443414b64f8fba11f346f2da12ed41f84be77472ac5da25edaf286",
     );

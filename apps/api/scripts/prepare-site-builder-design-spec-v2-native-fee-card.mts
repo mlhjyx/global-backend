@@ -207,7 +207,7 @@ async function main(): Promise<void> {
     catalogResponseSha256: responseSha256,
   });
   await writeRepositoryJsonCreateOnly(REPOSITORY_ROOT, output, {
-    schemaVersion: "site-builder-design-spec-v2-native-fee-card-evidence/v1",
+    schemaVersion: "site-builder-design-spec-v3-native-fee-card-evidence/v1",
     preparationCommitSha: head,
     card,
     modelWireCalls: 0,
