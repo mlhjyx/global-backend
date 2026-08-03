@@ -14,6 +14,7 @@ import {
 import {
   SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
   buildAllTaskEvaluationPlans,
+  SITE_BUILDER_EVALUATION_ONLY_MAX_TOKENS,
 } from "../apps/api/src/site-builder/eval/model-evaluation-harness";
 import {
   MODEL_EVALUATION_PROTOCOL_ADMISSIONS,
@@ -92,6 +93,7 @@ export function renderModelEvaluationHarnessBaseline(): string {
     "- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。",
     "- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。",
     "- 当前 7 个文本 task 都有可 dispatch 的 canonical suite：BrandProfile、copy、`design_spec`、assemble、assembly_fix、`qa_summarize` 与 `seo_review`。这只证明零调用 suite-admission：不产生真实 evidence、费用授权、promotion 或运行路由变化。`design_spec` 仍只完成零费用 suite 准备；其余任务也仍需各自的 fixed-commit manifest、费用卡和真实 evidence 门。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。",
+    "- assembly/assembly_fix 的 12,000-token cap 仅属于评测矩阵；生产 `task-route-bindings` 仍分别保持 16,000/8,000，评测计划不得改写运行路由或其 envelope。",
     "- 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。",
     `- zero-cost evidence 准备合同 ${code(SITE_BUILDER_MODEL_EVALUATION_EVIDENCE_PREP_ID)} 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。`,
     "",
@@ -284,18 +286,28 @@ export function verifyModelEvaluationHarness(
     );
 
     const binding = getSiteBuilderTaskRouteBinding(plan.taskId);
+    const evaluationMaxTokens =
+      SITE_BUILDER_EVALUATION_ONLY_MAX_TOKENS[plan.taskId] ??
+      binding.maxTokens;
     assert.deepEqual(
       plan.envelope,
       {
-        maxTokens: binding.maxTokens,
+        maxTokens: evaluationMaxTokens,
         runtimeDeadlineMs: binding.timeoutMs,
         diagnosticObservationMs: binding.timeoutMs,
         hardStopMs: binding.timeoutMs * 2,
         perCallCostCapCents: binding.maxCostCents,
         reasoningEffort: binding.reasoningEffort ?? null,
       },
-      `${plan.taskId} must derive its production and diagnostic envelope from the task binding`,
+      `${plan.taskId} must derive its deadline and cost envelope from the task binding, with only the closed evaluation token override allowed`,
     );
+    if (evaluationMaxTokens !== binding.maxTokens) {
+      assert.ok(
+        plan.taskId === "site_builder.assemble" ||
+          plan.taskId === "site_builder.assembly_fix",
+        `${plan.taskId} cannot override its runtime maxTokens for evaluation`,
+      );
+    }
   }
 
   assert.equal(

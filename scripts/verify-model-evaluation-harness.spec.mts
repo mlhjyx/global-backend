@@ -272,7 +272,7 @@ test("a missing candidate baseline id fails documentation verification", async (
   documents["docs/site-builder/08-eval-testing.md"] = documents[
     "docs/site-builder/08-eval-testing.md"
   ].replaceAll(
-    "site-builder-model-candidate-baseline/2026-07-27-v1",
+    "site-builder-model-candidate-baseline/2026-08-04-v1",
     "missing-candidate-baseline-id",
   );
   assert.throws(

@@ -4,7 +4,6 @@ import {
   type SiteBuilderModelProfileId,
 } from './model-profiles';
 import {
-  getSiteBuilderTaskRouteBinding,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
 } from './task-route-bindings';
@@ -318,11 +317,6 @@ function assertCandidateBaseline(
     invariant(
       profilePools.has(rawTaskPool.profile),
       `task ${rawTaskPool.taskId} references profile without a candidate pool`,
-    );
-    invariant(
-      getSiteBuilderTaskRouteBinding(rawTaskPool.taskId as SiteBuilderTaskId)
-        .profile === rawTaskPool.profile,
-      `task ${rawTaskPool.taskId} profile differs from the current task binding`,
     );
   }
   invariant(

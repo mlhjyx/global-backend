@@ -45,6 +45,13 @@ const profiles = {
     dataPolicy: GATEWAY_COMPANY_FACTS_ONLY,
     description: 'Evidence-constrained structured text and SiteSpec assembly.',
   },
+  'structured.assembly': {
+    id: 'structured.assembly',
+    requiredCapabilities: ['text_generation', 'structured_output'],
+    dataPolicy: GATEWAY_COMPANY_FACTS_ONLY,
+    description:
+      'Closed controlled-assembly selection and repair, isolated from the general structured pool so its evaluation envelope can retain two independently transported candidates within the wire cap.',
+  },
   'structured.workspace_materials': {
     id: 'structured.workspace_materials',
     requiredCapabilities: ['text_generation', 'structured_output'],

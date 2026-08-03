@@ -1,7 +1,7 @@
 {
   "schemaVersion": "site-builder-model-candidate-baseline/v1",
-  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-07-27-v1",
-  "effectiveDate": "2026-07-27",
+  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-08-04-v1",
+  "effectiveDate": "2026-08-04",
   "scope": "non_runtime_evaluation_candidates",
   "statusDefinitions": {
     "runnable": "Admitted to a future capability probe or task-shaped evaluation; not promoted and not production-qualified.",
@@ -50,7 +50,7 @@
       "domain": "text",
       "status": "runnable",
       "expectedProtocols": ["openai-responses"],
-      "boundary": "Summary and bulk evaluation candidate only."
+      "boundary": "Bulk evaluation candidate only."
     },
     {
       "alias": "gpt-5.4",
@@ -229,6 +229,24 @@
       ]
     },
     {
+      "profile": "structured.assembly",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "preflight": "none",
+          "gate": "closed assembly selection and repair evaluation within the native per-wire cost cap"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
+          "gate": "closed assembly selection and repair evaluation within the native per-wire cost cap"
+        }
+      ]
+    },
+    {
       "profile": "reasoning.high",
       "activation": "requires_task_evaluation",
       "candidates": [
@@ -287,8 +305,8 @@
           "gate": "task-shaped summary validity and omission evaluation"
         },
         {
-          "alias": "gpt-5.4-mini",
-          "expectedProtocol": "openai-responses",
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
           "preflight": "none",
           "gate": "task-shaped summary validity and omission evaluation"
         },
@@ -448,11 +466,11 @@
     },
     {
       "taskId": "site_builder.assemble",
-      "profile": "structured.default"
+      "profile": "structured.assembly"
     },
     {
       "taskId": "site_builder.assembly_fix",
-      "profile": "structured.default"
+      "profile": "structured.assembly"
     },
     {
       "taskId": "site_builder.qa_summarize",

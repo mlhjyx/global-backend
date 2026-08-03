@@ -30,12 +30,12 @@ describe("remaining Site Builder text-task zero-cost manifest preparation", () =
       dispatchAuthorization: "NOT_AUTHORIZED",
       actualNetworkCalls: 0,
       actualModelCostCents: 0,
-      executionCount: 183,
-      maximumWireCallCount: 366,
+      executionCount: 133,
+      maximumWireCallCount: 266,
       planningHardUpperBound: {
         perWireCallCents: 20,
-        maximumWireCalls: 366,
-        amountCents: 7320,
+        maximumWireCalls: 266,
+        amountCents: 5320,
         authorization: "NOT_GRANTED",
       },
     });
@@ -47,8 +47,8 @@ describe("remaining Site Builder text-task zero-cost manifest preparation", () =
       ]),
     ).toEqual([
       ["site_builder.copy", 13, 26],
-      ["site_builder.assemble", 73, 146],
-      ["site_builder.assembly_fix", 73, 146],
+      ["site_builder.assemble", 48, 96],
+      ["site_builder.assembly_fix", 48, 96],
       ["site_builder.qa_summarize", 12, 24],
       ["site_builder.seo_review", 12, 24],
     ]);
@@ -74,7 +74,7 @@ describe("remaining Site Builder text-task zero-cost manifest preparation", () =
     expect(manifest.manifestSha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("records the current mainline source as a zero-call audit artifact", () => {
+  it("keeps the superseded v1 manifest as a digest-verifiable historical audit artifact", () => {
     const manifest = JSON.parse(readFileSync(COMMITTED_MANIFEST_PATH, "utf8"));
     const { manifestSha256, ...withoutDigest } = manifest;
 

@@ -205,6 +205,14 @@ const PROFILE_POLICIES: Record<SiteBuilderModelProfileId, ProfilePolicy> = {
       description: 'Return the validated deterministic safe blueprint.',
     },
   },
+  'structured.assembly': {
+    profile: SITE_BUILDER_MODEL_PROFILES['structured.assembly'],
+    candidates: modelCandidateRoutesFromBaseline('structured.assembly'),
+    deterministicFallback: {
+      id: 'safe-blueprint',
+      description: 'Keep the validated deterministic safe blueprint.',
+    },
+  },
   'structured.workspace_materials': {
     profile: SITE_BUILDER_MODEL_PROFILES['structured.workspace_materials'],
     candidates: modelCandidateRoutesFromBaseline(

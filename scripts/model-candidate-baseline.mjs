@@ -26,6 +26,7 @@ const ACTIVATIONS = new Set([
 const MODEL_PROFILE_IDS = new Set([
   'deterministic',
   'structured.default',
+  'structured.assembly',
   'structured.workspace_materials',
   'reasoning.high',
   'copy.premium',
@@ -46,8 +47,8 @@ const CURRENT_TASK_PROFILES = new Map([
   ['site_builder.brand_profile', 'structured.workspace_materials'],
   ['site_builder.copy', 'copy.premium'],
   ['site_builder.design_spec', 'structured.default'],
-  ['site_builder.assemble', 'structured.default'],
-  ['site_builder.assembly_fix', 'structured.default'],
+  ['site_builder.assemble', 'structured.assembly'],
+  ['site_builder.assembly_fix', 'structured.assembly'],
   ['site_builder.qa_summarize', 'text.summary'],
   ['site_builder.seo_review', 'text.summary'],
 ]);

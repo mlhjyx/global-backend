@@ -47,8 +47,13 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
   it('assemble：glm-5.2 主选 + 180s 超时预算 + 回退 deepseek-v4-pro', () => {
     const route = resolveTaskRoute('site_builder.assemble');
     expect(route.primary).toBe('glm-5.2');
+    expect(route.maxTokens).toBe(16_000);
     expect(route.timeoutMs).toBe(180_000);
     expect(route.fallbacks).toContain('deepseek-v4-pro');
+  });
+
+  it('assembly_fix 保持既有运行时 8,000-token envelope', () => {
+    expect(resolveTaskRoute('site_builder.assembly_fix').maxTokens).toBe(8000);
   });
 
   it('qa_summarize / seo_review：flash 快档', () => {
@@ -431,8 +436,8 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     ).toBe(true);
   });
 
-  it('17 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
-    expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(17);
+  it('18 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
+    expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(18);
     for (const profile of [
       'video.premium',
       'speech.production',

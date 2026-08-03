@@ -222,7 +222,7 @@ describe("model evaluation planning", () => {
     expect(buildTaskEvaluationPlan("site_builder.brand_profile")).toMatchObject(
       {
         candidateBaselineId:
-          "site-builder-model-candidate-baseline/2026-07-27-v1",
+          "site-builder-model-candidate-baseline/2026-08-04-v1",
         profile: "structured.workspace_materials",
         dispatchAdmission: "task_evaluation_ready",
         evaluationSuite: {
@@ -270,7 +270,7 @@ describe("model evaluation planning", () => {
       reasoningEffort: "low",
     });
     expect(buildTaskEvaluationPlan("site_builder.assemble").envelope).toEqual({
-      maxTokens: 16_000,
+      maxTokens: 12_000,
       runtimeDeadlineMs: 180_000,
       diagnosticObservationMs: 180_000,
       hardStopMs: 360_000,
