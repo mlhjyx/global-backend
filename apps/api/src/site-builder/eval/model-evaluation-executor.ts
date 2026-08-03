@@ -23,8 +23,11 @@ import {
   type ModelCandidateProtocol,
 } from "../agents/model-candidate-baseline";
 import { BRAND_PROFILE_TASK } from "../agents/brand-profile";
+import { COPY_TASK } from "../agents/copy";
+import { ASSEMBLE_TASK, ASSEMBLY_FIX_TASK } from "../agents/controlled-assembly";
 import type { SiteBuilderTaskId } from "../agents/task-route-bindings";
 import { DESIGN_SPEC_TASK } from "../design/design-brief-producer";
+import { QA_SUMMARIZE_TASK, SEO_REVIEW_TASK } from "../quality/quality-narrative";
 import { checkAgainstSchema } from "../../model-gateway/schema-validate";
 import {
   buildCanonicalModelEvaluationCase,
@@ -69,7 +72,12 @@ const RETIRED_EVALUATION_COMPARATOR_ALIASES = new Set([
 
 const CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS = Object.freeze({
   "site_builder.brand_profile": BRAND_PROFILE_TASK.system ?? "",
+  "site_builder.copy": COPY_TASK.system ?? "",
   "site_builder.design_spec": DESIGN_SPEC_TASK.system ?? "",
+  "site_builder.assemble": ASSEMBLE_TASK.system ?? "",
+  "site_builder.assembly_fix": ASSEMBLY_FIX_TASK.system ?? "",
+  "site_builder.qa_summarize": QA_SUMMARIZE_TASK.system ?? "",
+  "site_builder.seo_review": SEO_REVIEW_TASK.system ?? "",
 } as const);
 
 const CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT = (() => {
@@ -87,6 +95,11 @@ const CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT = (() => {
   }
   return validator;
 })();
+const CAPTURED_COPY_VALIDATE_OUTPUT = COPY_TASK.validateOutput!;
+const CAPTURED_ASSEMBLE_VALIDATE_OUTPUT = ASSEMBLE_TASK.validateOutput!;
+const CAPTURED_ASSEMBLY_FIX_VALIDATE_OUTPUT = ASSEMBLY_FIX_TASK.validateOutput!;
+const CAPTURED_QA_SUMMARIZE_VALIDATE_OUTPUT = QA_SUMMARIZE_TASK.validateOutput!;
+const CAPTURED_SEO_REVIEW_VALIDATE_OUTPUT = SEO_REVIEW_TASK.validateOutput!;
 
 function taskValidatorMatchesCapturedIdentity(
   taskId: SiteBuilderTaskId,
@@ -94,26 +107,23 @@ function taskValidatorMatchesCapturedIdentity(
   if (taskId === "site_builder.brand_profile") {
     return true;
   }
-  if (taskId === "site_builder.design_spec") {
-    return (
-      DESIGN_SPEC_TASK.validateOutput === CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT
-    );
+  return taskDefinition(taskId).validateOutput === capturedTaskValidator(taskId);
+}
+
+function capturedTaskValidator(taskId: SiteBuilderTaskId) {
+  switch (taskId) {
+    case "site_builder.brand_profile": return CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT;
+    case "site_builder.copy": return CAPTURED_COPY_VALIDATE_OUTPUT;
+    case "site_builder.design_spec": return CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT;
+    case "site_builder.assemble": return CAPTURED_ASSEMBLE_VALIDATE_OUTPUT;
+    case "site_builder.assembly_fix": return CAPTURED_ASSEMBLY_FIX_VALIDATE_OUTPUT;
+    case "site_builder.qa_summarize": return CAPTURED_QA_SUMMARIZE_VALIDATE_OUTPUT;
+    case "site_builder.seo_review": return CAPTURED_SEO_REVIEW_VALIDATE_OUTPUT;
   }
-  return false;
 }
 
 function capturedTaskSystemPrompt(taskId: SiteBuilderTaskId): string {
-  if (taskId === "site_builder.brand_profile") {
-    return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
-      "site_builder.brand_profile"
-    ];
-  }
-  if (taskId === "site_builder.design_spec") {
-    return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[
-      "site_builder.design_spec"
-    ];
-  }
-  throw preDispatchError("evaluation_task_not_admitted");
+  return CAPTURED_MODEL_EVALUATION_TASK_SYSTEM_PROMPTS[taskId];
 }
 
 export interface ModelEvaluationProtocolAdmissionEntry {
@@ -1762,16 +1772,15 @@ function assertCanonicalRequest(
 }
 
 function taskDefinition(taskId: SiteBuilderTaskId) {
-  const definition =
-    taskId === "site_builder.brand_profile"
-      ? BRAND_PROFILE_TASK
-      : taskId === "site_builder.design_spec"
-        ? DESIGN_SPEC_TASK
-        : null;
-  if (definition === null) {
-    throw preDispatchError("evaluation_task_not_admitted");
+  switch (taskId) {
+    case "site_builder.brand_profile": return BRAND_PROFILE_TASK;
+    case "site_builder.copy": return COPY_TASK;
+    case "site_builder.design_spec": return DESIGN_SPEC_TASK;
+    case "site_builder.assemble": return ASSEMBLE_TASK;
+    case "site_builder.assembly_fix": return ASSEMBLY_FIX_TASK;
+    case "site_builder.qa_summarize": return QA_SUMMARIZE_TASK;
+    case "site_builder.seo_review": return SEO_REVIEW_TASK;
   }
-  return definition;
 }
 
 function taskEvaluationOutputConstraint(taskId: SiteBuilderTaskId): string {
@@ -1989,23 +1998,10 @@ function validationFailure(
     };
   }
   try {
-    if (request.taskId === "site_builder.brand_profile") {
-      CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT(
-        request.casePayload.taskInput as Parameters<
-          typeof CAPTURED_BRAND_PROFILE_VALIDATE_OUTPUT
-        >[0],
-        artifact as never,
-      );
-    } else if (request.taskId === "site_builder.design_spec") {
-      CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT(
-        request.casePayload.taskInput as Parameters<
-          typeof CAPTURED_DESIGN_SPEC_VALIDATE_OUTPUT
-        >[0],
-        artifact as never,
-      );
-    } else {
-      throw new Error("evaluation_task_not_admitted");
-    }
+    capturedTaskValidator(request.taskId)(
+      request.casePayload.taskInput as never,
+      artifact as never,
+    );
     return null;
   } catch (error) {
     return {

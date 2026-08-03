@@ -60,6 +60,38 @@ import {
   type DesignSpecTaskOutput,
 } from "../design/design-brief-producer";
 import {
+  COPY_TASK,
+  type CopyTaskInput,
+  type CopyTaskOutput,
+} from "../agents/copy";
+import {
+  ASSEMBLE_TASK,
+  ASSEMBLY_FIX_TASK,
+  type ControlledAssemblyTaskInput,
+} from "../agents/controlled-assembly";
+import {
+  COPY_ASSEMBLY_EVALUATOR_RUBRIC,
+  COPY_ASSEMBLY_EVALUATOR_VERSION,
+  COPY_ASSEMBLY_EVAL_FIXTURES,
+  COPY_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION,
+  COPY_ASSEMBLY_PROMPT_VERSION,
+  COPY_ASSEMBLY_ROUTE_VALIDATION_VERSION,
+  evaluateCopyAssemblyOutput,
+  prepareCopyAssemblyEvalFixture,
+  type CopyAssemblyEvalFixture,
+} from "./copy-assembly-eval";
+import {
+  CONTROLLED_ASSEMBLY_EVALUATOR_RUBRIC,
+  CONTROLLED_ASSEMBLY_EVALUATOR_VERSION,
+  CONTROLLED_ASSEMBLY_EVAL_FIXTURES,
+  CONTROLLED_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION,
+  CONTROLLED_ASSEMBLY_PROMPT_VERSION,
+  CONTROLLED_ASSEMBLY_ROUTE_VALIDATION_VERSION,
+  evaluateControlledAssemblyOutput,
+  prepareControlledAssemblyEvalFixture,
+  type ControlledAssemblyEvalFixture,
+} from "./controlled-assembly-eval";
+import {
   QA_SUMMARIZE_TASK,
   SEO_REVIEW_TASK,
   type QualityNarrativeTaskInputV1,
@@ -275,6 +307,61 @@ const VALIDATE_DESIGN_SPEC_OUTPUT = (() => {
 })();
 assertModelOutputSchemaCompiles(DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT);
 
+const COPY_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(COPY_TASK.inputSchema),
+);
+const COPY_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(COPY_TASK.outputSchema),
+);
+const COPY_REPAIR_TASK_OUTPUT = COPY_TASK.repairTaskOutput === true;
+const COPY_SYSTEM_PROMPT_SHA256 = sha256Text(COPY_TASK.system ?? "");
+const BUILD_COPY_PROMPT = COPY_TASK.buildPrompt;
+const VALIDATE_COPY_OUTPUT = (() => {
+  const validator = COPY_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("Copy canonical route validator is required");
+  }
+  return validator;
+})();
+assertModelOutputSchemaCompiles(COPY_OUTPUT_SCHEMA_SNAPSHOT);
+
+const ASSEMBLE_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(ASSEMBLE_TASK.inputSchema),
+);
+const ASSEMBLE_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(ASSEMBLE_TASK.outputSchema),
+);
+const ASSEMBLE_REPAIR_TASK_OUTPUT = ASSEMBLE_TASK.repairTaskOutput === true;
+const ASSEMBLE_SYSTEM_PROMPT_SHA256 = sha256Text(ASSEMBLE_TASK.system ?? "");
+const BUILD_ASSEMBLE_PROMPT = ASSEMBLE_TASK.buildPrompt;
+const VALIDATE_ASSEMBLE_OUTPUT = (() => {
+  const validator = ASSEMBLE_TASK.validateOutput;
+  if (!validator) throw new Error("Assemble canonical route validator is required");
+  return validator;
+})();
+assertModelOutputSchemaCompiles(ASSEMBLE_OUTPUT_SCHEMA_SNAPSHOT);
+
+const ASSEMBLY_FIX_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(ASSEMBLY_FIX_TASK.inputSchema),
+);
+const ASSEMBLY_FIX_OUTPUT_SCHEMA_SNAPSHOT = deepFreeze(
+  structuredClone(ASSEMBLY_FIX_TASK.outputSchema),
+);
+const ASSEMBLY_FIX_REPAIR_TASK_OUTPUT =
+  ASSEMBLY_FIX_TASK.repairTaskOutput === true;
+const ASSEMBLY_FIX_SYSTEM_PROMPT_SHA256 = sha256Text(
+  ASSEMBLY_FIX_TASK.system ?? "",
+);
+const BUILD_ASSEMBLY_FIX_PROMPT = ASSEMBLY_FIX_TASK.buildPrompt;
+const VALIDATE_ASSEMBLY_FIX_OUTPUT = (() => {
+  const validator = ASSEMBLY_FIX_TASK.validateOutput;
+  if (!validator) {
+    throw new Error("AssemblyFix canonical route validator is required");
+  }
+  return validator;
+})();
+assertModelOutputSchemaCompiles(ASSEMBLY_FIX_OUTPUT_SCHEMA_SNAPSHOT);
+
 const QA_SUMMARIZE_INPUT_SCHEMA_SNAPSHOT = deepFreeze(
   structuredClone(QA_SUMMARIZE_TASK.inputSchema),
 );
@@ -323,6 +410,15 @@ function currentTaskSystemPromptSha256(taskId: SiteBuilderTaskId): string {
   if (taskId === "site_builder.design_spec") {
     return sha256Text(DESIGN_SPEC_TASK.system ?? "");
   }
+  if (taskId === "site_builder.copy") {
+    return sha256Text(COPY_TASK.system ?? "");
+  }
+  if (taskId === "site_builder.assemble") {
+    return sha256Text(ASSEMBLE_TASK.system ?? "");
+  }
+  if (taskId === "site_builder.assembly_fix") {
+    return sha256Text(ASSEMBLY_FIX_TASK.system ?? "");
+  }
   if (taskId === "site_builder.qa_summarize") {
     return sha256Text(QA_SUMMARIZE_TASK.system ?? "");
   }
@@ -340,6 +436,15 @@ function currentTaskValidatorMatchesCapturedIdentity(
   }
   if (taskId === "site_builder.design_spec") {
     return DESIGN_SPEC_TASK.validateOutput === VALIDATE_DESIGN_SPEC_OUTPUT;
+  }
+  if (taskId === "site_builder.copy") {
+    return COPY_TASK.validateOutput === VALIDATE_COPY_OUTPUT;
+  }
+  if (taskId === "site_builder.assemble") {
+    return ASSEMBLE_TASK.validateOutput === VALIDATE_ASSEMBLE_OUTPUT;
+  }
+  if (taskId === "site_builder.assembly_fix") {
+    return ASSEMBLY_FIX_TASK.validateOutput === VALIDATE_ASSEMBLY_FIX_OUTPUT;
   }
   if (taskId === "site_builder.qa_summarize") {
     return QA_SUMMARIZE_TASK.validateOutput === VALIDATE_QA_SUMMARIZE_OUTPUT;
@@ -853,6 +958,371 @@ const DESIGN_SPEC_EVALUATION_SUITE = deepFreeze({
   sourceBundleFiles: DESIGN_SPEC_EVALUATION_SOURCE_FILES,
 }) satisfies TaskEvaluationSuite;
 
+const COPY_EVALUATION_SOURCE_FILES = deepFreeze([
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+  },
+  {
+    role: "candidate_baseline",
+    path: "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+  },
+  { role: "task", path: "apps/api/src/site-builder/agents/copy.ts" },
+  {
+    role: "copy_consumer",
+    path: "apps/api/src/site-builder/copy-bundle.service.ts",
+  },
+  {
+    role: "claim_snapshot",
+    path: "apps/api/src/site-builder/publishable-claim-snapshot.ts",
+  },
+  {
+    role: "judge",
+    path: "apps/api/src/site-builder/eval/copy-assembly-eval.ts",
+  },
+  {
+    role: "harness",
+    path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+  },
+  {
+    role: "evaluation_executor",
+    path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+  },
+  {
+    role: "evaluation_cost_safety",
+    path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+  },
+  {
+    role: "evaluation_provenance",
+    path: "apps/api/src/site-builder/eval/eval-provenance.ts",
+  },
+  {
+    role: "task_route",
+    path: "apps/api/src/site-builder/agents/task-routes.ts",
+  },
+  {
+    role: "task_route_binding",
+    path: "apps/api/src/site-builder/agents/task-route-bindings.ts",
+  },
+  {
+    role: "profile_registry",
+    path: "apps/api/src/site-builder/agents/model-profiles.ts",
+  },
+  {
+    role: "provider",
+    path: "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+  },
+  {
+    role: "transport_registry",
+    path: "apps/api/src/model-gateway/model-transports.ts",
+  },
+  {
+    role: "task_runner",
+    path: "apps/api/src/site-builder/agents/ai-task.ts",
+  },
+  {
+    role: "schema_validator",
+    path: "apps/api/src/model-gateway/schema-validate.ts",
+  },
+  {
+    role: "gateway_router",
+    path: "apps/api/src/model-gateway/router-model-gateway.ts",
+  },
+  {
+    role: "provider_registry",
+    path: "apps/api/src/model-gateway/model-provider.registry.ts",
+  },
+  {
+    role: "model_router",
+    path: "apps/api/src/model-gateway/model-router.ts",
+  },
+  {
+    role: "provider_error",
+    path: "apps/api/src/model-gateway/providers/provider-output-error.ts",
+  },
+  { role: "gateway_types", path: "apps/api/src/model-gateway/types.ts" },
+  {
+    role: "gateway_contract",
+    path: "apps/api/src/model-gateway/model-gateway.ts",
+  },
+  {
+    role: "provider_contract",
+    path: "apps/api/src/model-gateway/model-provider.ts",
+  },
+  { role: "budget_ledger", path: "apps/api/src/tools/budget.ts" },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/copy-bundle.ts",
+  },
+  {
+    role: "contracts_source",
+    path: "packages/contracts/src/site-builder/model-policy.ts",
+  },
+  { role: "contracts_source", path: "packages/contracts/src/index.ts" },
+  { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
+  { role: "contracts_manifest", path: "packages/contracts/package.json" },
+  { role: "dependency_lock", path: "pnpm-lock.yaml" },
+] as const);
+
+const COPY_ACTUAL_FIXTURE_FINGERPRINTS = deepFreeze(
+  COPY_ASSEMBLY_EVAL_FIXTURES.map((fixture) => {
+    const prepared = prepareCopyAssemblyEvalFixture(fixture);
+    return {
+      fixtureId: fixture.fixtureId,
+      fixtureSha256: sha256CanonicalJson(fixture),
+      promptSha256: sha256Text(BUILD_COPY_PROMPT(prepared.input)),
+    };
+  }),
+);
+
+const COPY_EXPECTED_FIXTURE_FINGERPRINTS = deepFreeze([
+  {
+    fixtureId: "copy-factual-claims",
+    fixtureSha256:
+      "aad1ee2713691126ef29ea3900b970dde47f8cc0597e0ecccf3fb9f81516f665",
+    promptSha256:
+      "b389bf24f468f64bd2cfdc8a4dab01818686b4cde2e8d0679bdbdfba0343439f",
+  },
+  {
+    fixtureId: "copy-neutral-budget",
+    fixtureSha256:
+      "69540f7687c0d99c3832c47db11e1e7c9ef131ad43687e9947a58d684bfc54f8",
+    promptSha256:
+      "ba62471db01e7d6cd0242e538cf463a2fabf82e68b908673fc1128d79c494cc9",
+  },
+] as const);
+
+if (
+  JSON.stringify(COPY_ACTUAL_FIXTURE_FINGERPRINTS) !==
+  JSON.stringify(COPY_EXPECTED_FIXTURE_FINGERPRINTS)
+) {
+  throw new Error("copy frozen fixture fingerprints drifted");
+}
+
+const COPY_EVALUATION_SUITE = deepFreeze({
+  suiteId: "site-builder.copy-evaluation-suite/2026-08-04-v1",
+  adapterId: "site-builder-copy-evaluation-adapter/v1",
+  taskContractId: "site_builder.copy",
+  promptVersion: COPY_ASSEMBLY_PROMPT_VERSION,
+  systemPromptSha256: COPY_SYSTEM_PROMPT_SHA256,
+  inputSchemaSha256: sha256CanonicalJson(COPY_INPUT_SCHEMA_SNAPSHOT),
+  outputSchemaSha256: sha256CanonicalJson(COPY_OUTPUT_SCHEMA_SNAPSHOT),
+  repairTaskOutput: COPY_REPAIR_TASK_OUTPUT,
+  routeValidationVersion: COPY_ASSEMBLY_ROUTE_VALIDATION_VERSION,
+  evaluatorVersion: COPY_ASSEMBLY_EVALUATOR_VERSION,
+  evaluatorRubricSha256: sha256CanonicalJson(COPY_ASSEMBLY_EVALUATOR_RUBRIC),
+  fixtureSetId: "site-builder-copy-golden/2026-08-04-v1",
+  fixtureSchemaVersion: COPY_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION,
+  fixtureIds: Object.freeze(
+    COPY_ASSEMBLY_EVAL_FIXTURES.map((fixture) => fixture.fixtureId),
+  ),
+  fixtureFingerprints: COPY_EXPECTED_FIXTURE_FINGERPRINTS,
+  repeats: 2,
+  legacyComparatorAliases: Object.freeze([]),
+  compiledContractsRuntimeBinding: null,
+  sourceBundleContractId: "copy-evaluation-source-bundle/v1",
+  sourceBundleFiles: COPY_EVALUATION_SOURCE_FILES,
+}) satisfies TaskEvaluationSuite;
+
+const CONTROLLED_ASSEMBLY_EVALUATION_SOURCE_FILES = deepFreeze([
+  { role: "candidate_baseline", path: "apps/api/src/site-builder/agents/model-candidate-baseline.ts" },
+  { role: "candidate_baseline", path: "apps/api/src/site-builder/agents/model-candidate-baseline.json" },
+  { role: "task", path: "apps/api/src/site-builder/agents/controlled-assembly.ts" },
+  { role: "assembly_consumer", path: "apps/api/src/site-builder/assembly/controlled-assembly.service.ts" },
+  { role: "assembly_validator", path: "apps/api/src/site-builder/assembly/controlled-assembly-validator.ts" },
+  { role: "assembly_adapters", path: "apps/api/src/site-builder/assembly/component-assembly-adapters.ts" },
+  { role: "copy_slot_derivation", path: "apps/api/src/site-builder/assembly/copy-slot-derivation.ts" },
+  { role: "copy_bundle", path: "apps/api/src/site-builder/copy-bundle.service.ts" },
+  { role: "controlled_assets", path: "apps/api/src/site-builder/controlled-asset-materializer.ts" },
+  { role: "qualified_templates", path: "apps/api/src/site-builder/assembly/qualified-component-templates.ts" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/about-block-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/area-gallery-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/area-marquee-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/article-grid-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/axiom-hero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/cert-wall-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/chapter-showcase-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/collection-cards-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/colorway-picker-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/coverage-map-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/crew-grid-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/cta-banner-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/cta-center-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/dishes-showcase-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/dispatch-hero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/dispatch-timeline-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/editorial-hero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/faq-accordion-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/faq-split-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/farmhouse-hero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/feature-cards-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/featured-spotlight-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/hero-banner-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/hero-full-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/industrial-hero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/inquiry-form-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/ledger-stats-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/logo-marquee-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/map-location-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/materials-library-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/media-cta-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/minimal-hero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/photo-gallery-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/pricing-table-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/pricing-tiers-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/process-steps-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/process-timeline-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/product-grid-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/product-showcase-alt-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/projects-grid-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/saa-shero-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/service-rows-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/services-dark-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/services-editorial-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/services-grid-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/split-about-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/statement-block-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/stats-band-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/stats-countup-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/story-chapters-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/tech-systems-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/testimonials-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/trust-split-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/value-strip-spec.json" },
+  { role: "qualified_component_fixture", path: "apps/site-renderer/fixtures/component-qualification/warm-hero-spec.json" },
+  { role: "golden_fixture_source", path: "apps/api/src/site-builder/design/m1eb-golden.ts" },
+  { role: "design_brief_producer", path: "apps/api/src/site-builder/design/design-brief-producer.ts" },
+  { role: "catalog", path: "apps/api/src/site-builder/design/catalog.ts" },
+  { role: "judge", path: "apps/api/src/site-builder/eval/controlled-assembly-eval.ts" },
+  { role: "harness", path: "apps/api/src/site-builder/eval/model-evaluation-harness.ts" },
+  { role: "evaluation_executor", path: "apps/api/src/site-builder/eval/model-evaluation-executor.ts" },
+  { role: "evaluation_cost_safety", path: "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts" },
+  { role: "evaluation_provenance", path: "apps/api/src/site-builder/eval/eval-provenance.ts" },
+  { role: "task_route", path: "apps/api/src/site-builder/agents/task-routes.ts" },
+  { role: "task_route_binding", path: "apps/api/src/site-builder/agents/task-route-bindings.ts" },
+  { role: "profile_registry", path: "apps/api/src/site-builder/agents/model-profiles.ts" },
+  { role: "task_runner", path: "apps/api/src/site-builder/agents/ai-task.ts" },
+  { role: "schema_validator", path: "apps/api/src/model-gateway/schema-validate.ts" },
+  { role: "gateway_router", path: "apps/api/src/model-gateway/router-model-gateway.ts" },
+  { role: "provider_registry", path: "apps/api/src/model-gateway/model-provider.registry.ts" },
+  { role: "model_router", path: "apps/api/src/model-gateway/model-router.ts" },
+  { role: "gateway_types", path: "apps/api/src/model-gateway/types.ts" },
+  { role: "gateway_contract", path: "apps/api/src/model-gateway/model-gateway.ts" },
+  { role: "provider_contract", path: "apps/api/src/model-gateway/model-provider.ts" },
+  { role: "budget_ledger", path: "apps/api/src/tools/budget.ts" },
+  { role: "contracts_source", path: "packages/contracts/src/site-builder/design-brief.ts" },
+  { role: "contracts_source", path: "packages/contracts/src/site-builder/site-spec.ts" },
+  { role: "contracts_source", path: "packages/contracts/src/site-builder/model-policy.ts" },
+  { role: "contracts_source", path: "packages/contracts/src/index.ts" },
+  { role: "contracts_build", path: "packages/contracts/tsconfig.json" },
+  { role: "contracts_manifest", path: "packages/contracts/package.json" },
+  { role: "dependency_lock", path: "pnpm-lock.yaml" },
+] as const);
+
+const CONTROLLED_ASSEMBLY_ACTUAL_FIXTURE_FINGERPRINTS = deepFreeze(
+  CONTROLLED_ASSEMBLY_EVAL_FIXTURES.map((fixture) => {
+    const prepared = prepareControlledAssemblyEvalFixture(fixture);
+    const prompt =
+      fixture.taskId === "site_builder.assemble"
+        ? BUILD_ASSEMBLE_PROMPT(prepared.input)
+        : BUILD_ASSEMBLY_FIX_PROMPT(prepared.input);
+    return {
+      fixtureId: fixture.fixtureId,
+      fixtureSha256: sha256CanonicalJson(fixture),
+      promptSha256: sha256Text(prompt),
+    };
+  }),
+);
+
+const CONTROLLED_ASSEMBLY_EXPECTED_FIXTURE_FINGERPRINTS = deepFreeze([
+  { fixtureId: "assemble-natural-origin-rich", fixtureSha256: "e336e75afd83ee0b05d88530c6b813ee05bfcb6414b9cfd40283c997e497d804", promptSha256: "1a347c5491a1ffd7bd28460a759d4ada7f8dfdf912ea37a1db78157b3f5ed4e7" },
+  { fixtureId: "assembly-fix-natural-origin-rich", fixtureSha256: "5a67d16f90638671c3b44abc46d97517b89cc13dfba5bc22a1014b00896e1fbf", promptSha256: "2eb1a53eb930e5c36c5cc5e2aadc6d493b68210c95ba69c5d7d03f9cfd7c61a4" },
+  { fixtureId: "assemble-natural-origin-sparse", fixtureSha256: "adbcc00018e87965f10d457f291c138cc7162e968954cdfc947020ff509e678b", promptSha256: "d7c7c06c7ae03cafaa09d5c88b77605dd2b5ce160898b26f802e61a12d2d8fac" },
+  { fixtureId: "assembly-fix-natural-origin-sparse", fixtureSha256: "9cd6b83a8f95b7a2f8b18e46147020e729f5e0739609439008c9f651d671ae7d", promptSha256: "bc2d8d2758afffbf970c1840ad2562841875815f1e8a77d7c26153ee89b902e1" },
+  { fixtureId: "assemble-oem-capability-rich", fixtureSha256: "2e1ab13d81ec156d8d3dfee0e2c53c07500c11440bb90263127c9519e64888f9", promptSha256: "031387f9b3c02fb7572dd66d52d2b62638ba9c1ff901ee9b44071e1a6419c826" },
+  { fixtureId: "assembly-fix-oem-capability-rich", fixtureSha256: "8374e444c9b73526e687f802fc638c0dc1142230c147bfe33fa3ce7d02795d50", promptSha256: "42e87adecb20f971b7d93faaede8a3cb67f7e1e11f53b73c80812b6f474771ca" },
+  { fixtureId: "assemble-oem-capability-sparse", fixtureSha256: "72dee9a276aba4aa9175243d3f665cb83b6ba6458f7b6e45f71a23950e07962d", promptSha256: "3f36da79391412848835ba40968b675365df50a80064f0c242cc83918dd01005" },
+  { fixtureId: "assembly-fix-oem-capability-sparse", fixtureSha256: "66f5b3e98b48ca199ca542b4ea8162467b5f9484be6f7d16846115c6726752ab", promptSha256: "550b7dff9fc146172ff25910c37a4e86e7747eec71e41e4e0008f5d9478e030c" },
+  { fixtureId: "assemble-precision-industrial-rich", fixtureSha256: "1036d02308283921527777c9b8518b17608bb78c78ba48fc353d1c1405213af7", promptSha256: "ec6f34f7b9018d51e68eba9fc09dc7d7781a83b0c47aa8c84c09872902802fce" },
+  { fixtureId: "assembly-fix-precision-industrial-rich", fixtureSha256: "64a6ccd1b87f62ba7079d96767a694ec9ef8480c4ba164078e008c2f3d420a5d", promptSha256: "dc4196928c6945fe4c6bbcdc9e7d5bd07b7302e9f6c63963e6e84aaf300231b3" },
+  { fixtureId: "assemble-precision-industrial-sparse", fixtureSha256: "2a8ca890a75647a636471de8e51bcd6e1e5b8f69b039b62688cd62e5d84cd3d4", promptSha256: "352bc9d38464bbc859ab3b2f2f43889fef0f2e70d15eef5cf0efccf73f5b84d4" },
+  { fixtureId: "assembly-fix-precision-industrial-sparse", fixtureSha256: "fe1273073daadde2d5aae836e2bd35e88247d8c3a586a174e68c21792b61ac36", promptSha256: "0f110593e26520e6b986afc3003a0080f557867edef6ba9678779b9770799dce" },
+  { fixtureId: "assemble-premium-innovation-rich", fixtureSha256: "7ccb50754004b8c2483b6194a731033e33d4340521efcd5f6508605ab663f164", promptSha256: "2f8ed2aeb1590f3257383162b59c908b6b205ad3aab756413381dc486fb82be9" },
+  { fixtureId: "assembly-fix-premium-innovation-rich", fixtureSha256: "769a701ec6c4daa924b2b47336ca4bf4246a77e1f425f01d3f5f1493d404d502", promptSha256: "9d59a59b08ab729953f351e2323c1d0926911900b524c94aba0c54d5762b405f" },
+  { fixtureId: "assemble-premium-innovation-sparse", fixtureSha256: "36d1025cb79d13f7561041620b38523011dac6091dd2c2bbdfb05821867e4b00", promptSha256: "aeff4a6866bcda4b26da1ca76c96776a28a96cf6b5de756ddc7cff4a2ae71dc8" },
+  { fixtureId: "assembly-fix-premium-innovation-sparse", fixtureSha256: "28862a918110cc1b11c8a3219e2e08e42bb5481c7f7575ef5822f14a3498eb94", promptSha256: "2e6a56cc0816867e4ad31d20973a811e90b798ede10c213cd779b874143d763f" },
+  { fixtureId: "assemble-scientific-trust-rich", fixtureSha256: "c0f59981a6bd4ed878b36ddcf698cfcabbc93c4011db64d32d101c8b7b5b3028", promptSha256: "e8b87c072a84fafc92bffcc6ebf1c7d694e4446bc909faddd77271a22e40e7b6" },
+  { fixtureId: "assembly-fix-scientific-trust-rich", fixtureSha256: "003277956c4eb5f8ef1c026e221632eeed585028587c085e5debe693fb110ab8", promptSha256: "f041a767a0a64cd3576cb64356fc87145c7424e84f1d2b7277d815f5e322a5bc" },
+  { fixtureId: "assemble-scientific-trust-sparse", fixtureSha256: "a26c2ba841c021075fe19a8b92470fc2b470d731ec81f24f5de7269b4528cdf5", promptSha256: "b9ca2cafe79a3944aeb0d4a58dc89ed536a27312802aa64a282ba18535149c88" },
+  { fixtureId: "assembly-fix-scientific-trust-sparse", fixtureSha256: "4a849000764d2cbdecca2c6b18b3a8e6a93cc5b39f2db91d9f110bec9daac0d2", promptSha256: "878d00c211a5c96cf384005be1e4d226bf28d582c07800e2bb57cd6f6023593d" },
+  { fixtureId: "assemble-technical-catalog-rich", fixtureSha256: "f77d946bbd9c6493f03b1306dc5adf6fa814268655588ef83d8d281c2f705647", promptSha256: "f4aba29ac0f9432a0010fa75bfc3f27f7201c080d2d023bece6c07eb3ff1809a" },
+  { fixtureId: "assembly-fix-technical-catalog-rich", fixtureSha256: "5e7a35bafb70d2af77f6a5637eb8bb4661a4818e6a25e6e2f5faf56cbadaaf61", promptSha256: "8cf20ab71781a4544f60a20f86df46c851c91763fa2d38a90b3ea66337e9e5cd" },
+  { fixtureId: "assemble-technical-catalog-sparse", fixtureSha256: "67d734fa3ffd6585dc710d06efef2a585d5172e1c296c57dd8549046c93833de", promptSha256: "c28614eaadd025f0c11aaf4447e1ea63e45f4e415f66c4e23ddf16d9495b340c" },
+  { fixtureId: "assembly-fix-technical-catalog-sparse", fixtureSha256: "788eb36bc4d3a08e0b14f56fe392522fea13fa01cacce3a979258f459678c1aa", promptSha256: "eefc95eb68c339b6b982a8e3af419015d17d30a8e7cd9ebc5f0c3f71bd279ec8" },
+] as const);
+
+if (
+  JSON.stringify(CONTROLLED_ASSEMBLY_ACTUAL_FIXTURE_FINGERPRINTS) !==
+  JSON.stringify(CONTROLLED_ASSEMBLY_EXPECTED_FIXTURE_FINGERPRINTS)
+) {
+  throw new Error("controlled assembly frozen fixture fingerprints drifted");
+}
+
+function controlledAssemblySuite(
+  taskId: "site_builder.assemble" | "site_builder.assembly_fix",
+): TaskEvaluationSuite {
+  const isAssemble = taskId === "site_builder.assemble";
+  const inputSchema = isAssemble
+    ? ASSEMBLE_INPUT_SCHEMA_SNAPSHOT
+    : ASSEMBLY_FIX_INPUT_SCHEMA_SNAPSHOT;
+  const outputSchema = isAssemble
+    ? ASSEMBLE_OUTPUT_SCHEMA_SNAPSHOT
+    : ASSEMBLY_FIX_OUTPUT_SCHEMA_SNAPSHOT;
+  return deepFreeze({
+    suiteId: `site-builder.${isAssemble ? "assemble" : "assembly-fix"}-evaluation-suite/2026-08-04-v1`,
+    adapterId: "site-builder-controlled-assembly-evaluation-adapter/v1",
+    taskContractId: taskId,
+    promptVersion: CONTROLLED_ASSEMBLY_PROMPT_VERSION,
+    systemPromptSha256: isAssemble
+      ? ASSEMBLE_SYSTEM_PROMPT_SHA256
+      : ASSEMBLY_FIX_SYSTEM_PROMPT_SHA256,
+    inputSchemaSha256: sha256CanonicalJson(inputSchema),
+    outputSchemaSha256: sha256CanonicalJson(outputSchema),
+    repairTaskOutput: isAssemble
+      ? ASSEMBLE_REPAIR_TASK_OUTPUT
+      : ASSEMBLY_FIX_REPAIR_TASK_OUTPUT,
+    routeValidationVersion: CONTROLLED_ASSEMBLY_ROUTE_VALIDATION_VERSION,
+    evaluatorVersion: CONTROLLED_ASSEMBLY_EVALUATOR_VERSION,
+    evaluatorRubricSha256: sha256CanonicalJson(
+      CONTROLLED_ASSEMBLY_EVALUATOR_RUBRIC,
+    ),
+    fixtureSetId: "site-builder-controlled-assembly-golden/2026-08-04-v1",
+    fixtureSchemaVersion: CONTROLLED_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION,
+    fixtureIds: Object.freeze(
+      CONTROLLED_ASSEMBLY_EVAL_FIXTURES.filter(
+        (fixture) => fixture.taskId === taskId,
+      ).map((fixture) => fixture.fixtureId),
+    ),
+    fixtureFingerprints: Object.freeze(
+      CONTROLLED_ASSEMBLY_EXPECTED_FIXTURE_FINGERPRINTS.filter((entry) =>
+        entry.fixtureId.startsWith(isAssemble ? "assemble-" : "assembly-fix-"),
+      ),
+    ),
+    repeats: 2,
+    legacyComparatorAliases: Object.freeze([]),
+    compiledContractsRuntimeBinding: null,
+    sourceBundleContractId: "controlled-assembly-evaluation-source-bundle/v1",
+    sourceBundleFiles: CONTROLLED_ASSEMBLY_EVALUATION_SOURCE_FILES,
+  });
+}
+
+const ASSEMBLE_EVALUATION_SUITE = controlledAssemblySuite(
+  "site_builder.assemble",
+);
+const ASSEMBLY_FIX_EVALUATION_SUITE = controlledAssemblySuite(
+  "site_builder.assembly_fix",
+);
+
 const QUALITY_NARRATIVE_EVALUATION_SOURCE_FILES = deepFreeze([
   {
     role: "candidate_baseline",
@@ -1077,7 +1547,10 @@ const SEO_REVIEW_EVALUATION_SUITE = qualityNarrativeSuite(
 const TASK_EVALUATION_SUITES = Object.freeze(
   new Map<SiteBuilderTaskId, TaskEvaluationSuite>([
     ["site_builder.brand_profile", BRAND_PROFILE_EVALUATION_SUITE],
+    ["site_builder.copy", COPY_EVALUATION_SUITE],
     ["site_builder.design_spec", DESIGN_SPEC_EVALUATION_SUITE],
+    ["site_builder.assemble", ASSEMBLE_EVALUATION_SUITE],
+    ["site_builder.assembly_fix", ASSEMBLY_FIX_EVALUATION_SUITE],
     ["site_builder.qa_summarize", QA_SUMMARIZE_EVALUATION_SUITE],
     ["site_builder.seo_review", SEO_REVIEW_EVALUATION_SUITE],
   ]),
@@ -2253,9 +2726,15 @@ export interface ModelEvaluationCasePayload {
   fixture:
     | BrandProfileEvalFixture
     | DesignSpecEvalFixture
+    | CopyAssemblyEvalFixture
+    | ControlledAssemblyEvalFixture
     | QualityNarrativeEvalFixture;
   taskInput:
-    BrandProfileInput | DesignSpecTaskInput | QualityNarrativeTaskInputV1;
+    | BrandProfileInput
+    | DesignSpecTaskInput
+    | CopyTaskInput
+    | ControlledAssemblyTaskInput
+    | QualityNarrativeTaskInputV1;
   prompt: string;
   sourceFiles: readonly ModelEvaluationSourceFileFingerprint[];
 }
@@ -2921,6 +3400,15 @@ function canonicalTaskOutputSchema(
   if (taskId === "site_builder.design_spec") {
     return DESIGN_SPEC_OUTPUT_SCHEMA_SNAPSHOT;
   }
+  if (taskId === "site_builder.copy") {
+    return COPY_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  if (taskId === "site_builder.assemble") {
+    return ASSEMBLE_OUTPUT_SCHEMA_SNAPSHOT;
+  }
+  if (taskId === "site_builder.assembly_fix") {
+    return ASSEMBLY_FIX_OUTPUT_SCHEMA_SNAPSHOT;
+  }
   if (taskId === "site_builder.qa_summarize") {
     return QA_SUMMARIZE_OUTPUT_SCHEMA_SNAPSHOT;
   }
@@ -2949,9 +3437,15 @@ export function buildCanonicalModelEvaluationCase(
   let fixture:
     | BrandProfileEvalFixture
     | DesignSpecEvalFixture
+    | CopyAssemblyEvalFixture
+    | ControlledAssemblyEvalFixture
     | QualityNarrativeEvalFixture;
   let taskInput:
-    BrandProfileInput | DesignSpecTaskInput | QualityNarrativeTaskInputV1;
+    | BrandProfileInput
+    | DesignSpecTaskInput
+    | CopyTaskInput
+    | ControlledAssemblyTaskInput
+    | QualityNarrativeTaskInputV1;
   let prompt: string;
   if (plan.taskId === "site_builder.brand_profile") {
     fixture = JSON.parse(
@@ -2980,6 +3474,34 @@ export function buildCanonicalModelEvaluationCase(
     const prepared = prepareDesignSpecEvalFixture(canonicalFixture);
     taskInput = prepared.input;
     prompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else if (plan.taskId === "site_builder.copy") {
+    const canonicalFixture = COPY_ASSEMBLY_EVAL_FIXTURES.find(
+      (entry) => entry.fixtureId === fixtureId,
+    );
+    if (!canonicalFixture) {
+      throw new Error(`model evaluation fixture is not canonical: ${fixtureId}`);
+    }
+    fixture = canonicalFixture;
+    const prepared = prepareCopyAssemblyEvalFixture(canonicalFixture);
+    taskInput = prepared.input;
+    prompt = BUILD_COPY_PROMPT(prepared.input);
+  } else if (
+    plan.taskId === "site_builder.assemble" ||
+    plan.taskId === "site_builder.assembly_fix"
+  ) {
+    const canonicalFixture = CONTROLLED_ASSEMBLY_EVAL_FIXTURES.find(
+      (entry) => entry.fixtureId === fixtureId && entry.taskId === plan.taskId,
+    );
+    if (!canonicalFixture) {
+      throw new Error(`model evaluation fixture is not canonical: ${fixtureId}`);
+    }
+    fixture = canonicalFixture;
+    const prepared = prepareControlledAssemblyEvalFixture(canonicalFixture);
+    taskInput = prepared.input;
+    prompt =
+      plan.taskId === "site_builder.assemble"
+        ? BUILD_ASSEMBLE_PROMPT(prepared.input)
+        : BUILD_ASSEMBLY_FIX_PROMPT(prepared.input);
   } else if (
     plan.taskId === "site_builder.qa_summarize" ||
     plan.taskId === "site_builder.seo_review"
@@ -3091,9 +3613,15 @@ function assertCaseContract(
   let preparedFixture:
     | BrandProfileEvalFixture
     | DesignSpecEvalFixture
+    | CopyAssemblyEvalFixture
+    | ControlledAssemblyEvalFixture
     | QualityNarrativeEvalFixture;
   let preparedInput:
-    BrandProfileInput | DesignSpecTaskInput | QualityNarrativeTaskInputV1;
+    | BrandProfileInput
+    | DesignSpecTaskInput
+    | CopyTaskInput
+    | ControlledAssemblyTaskInput
+    | QualityNarrativeTaskInputV1;
   let expectedPrompt: string;
   if (plan.taskId === "site_builder.brand_profile") {
     const prepared = prepareBrandProfileEvalFixture(
@@ -3109,6 +3637,31 @@ function assertCaseContract(
     preparedFixture = prepared.fixture;
     preparedInput = prepared.input;
     expectedPrompt = BUILD_DESIGN_SPEC_PROMPT(prepared.input);
+  } else if (plan.taskId === "site_builder.copy") {
+    const prepared = prepareCopyAssemblyEvalFixture(
+      payload.fixture as CopyAssemblyEvalFixture,
+    );
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt = BUILD_COPY_PROMPT(prepared.input);
+  } else if (
+    plan.taskId === "site_builder.assemble" ||
+    plan.taskId === "site_builder.assembly_fix"
+  ) {
+    const prepared = prepareControlledAssemblyEvalFixture(
+      payload.fixture as ControlledAssemblyEvalFixture,
+    );
+    if (prepared.fixture.taskId !== plan.taskId) {
+      throw new Error(
+        `task evaluation fixture is not canonical: ${plan.taskId}`,
+      );
+    }
+    preparedFixture = prepared.fixture;
+    preparedInput = prepared.input;
+    expectedPrompt =
+      plan.taskId === "site_builder.assemble"
+        ? BUILD_ASSEMBLE_PROMPT(prepared.input)
+        : BUILD_ASSEMBLY_FIX_PROMPT(prepared.input);
   } else if (
     plan.taskId === "site_builder.qa_summarize" ||
     plan.taskId === "site_builder.seo_review"
@@ -3445,6 +3998,117 @@ export function assessCanonicalTaskArtifact(
           ? ["invalid_explanation_claim"]
           : []),
       ],
+    };
+  }
+  if (plan.taskId === "site_builder.copy") {
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        COPY_ASSEMBLY_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(COPY_OUTPUT_SCHEMA_SNAPSHOT) ||
+      plan.evaluationSuite.systemPromptSha256 !== COPY_SYSTEM_PROMPT_SHA256 ||
+      plan.evaluationSuite.evaluatorRubricSha256 !==
+        sha256CanonicalJson(COPY_ASSEMBLY_EVALUATOR_RUBRIC)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(COPY_OUTPUT_SCHEMA_SNAPSHOT);
+    const outputCheck = checkAgainstSchema(COPY_OUTPUT_SCHEMA_SNAPSHOT, artifact);
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as CopyTaskOutput;
+    const taskInput = payload.taskInput as CopyTaskInput;
+    VALIDATE_COPY_OUTPUT(taskInput, output);
+    const prepared = prepareCopyAssemblyEvalFixture(
+      payload.fixture as CopyAssemblyEvalFixture,
+    );
+    if (
+      sha256CanonicalJson(prepared.input) !== sha256CanonicalJson(taskInput)
+    ) {
+      throw new Error(
+        `task evaluation fixture is not canonical: ${plan.taskId}`,
+      );
+    }
+    const outcome = evaluateCopyAssemblyOutput(prepared, output);
+    return {
+      qualityPassed: outcome.exactCanonicalOutput,
+      structurePassed: outcome.productionValidationPassed,
+      factualityPassed: outcome.factualSlotContentMatches,
+      stabilityKey: sha256CanonicalJson(output),
+      findingCodes: [
+        ...(outcome.exactCanonicalOutput
+          ? []
+          : ["canonical_copy_bundle_mismatch"]),
+        ...outcome.rejectedSlotKeys.map(
+          (slotKey) => `factual_claim_text_mismatch:${slotKey}`,
+        ),
+      ],
+    };
+  }
+  if (
+    plan.taskId === "site_builder.assemble" ||
+    plan.taskId === "site_builder.assembly_fix"
+  ) {
+    const isAssemble = plan.taskId === "site_builder.assemble";
+    const outputSchema = isAssemble
+      ? ASSEMBLE_OUTPUT_SCHEMA_SNAPSHOT
+      : ASSEMBLY_FIX_OUTPUT_SCHEMA_SNAPSHOT;
+    const expectedSystemPromptSha256 = isAssemble
+      ? ASSEMBLE_SYSTEM_PROMPT_SHA256
+      : ASSEMBLY_FIX_SYSTEM_PROMPT_SHA256;
+    if (
+      plan.evaluationSuite?.evaluatorVersion !==
+        CONTROLLED_ASSEMBLY_EVALUATOR_VERSION ||
+      plan.evaluationSuite.outputSchemaSha256 !==
+        sha256CanonicalJson(outputSchema) ||
+      plan.evaluationSuite.systemPromptSha256 !== expectedSystemPromptSha256 ||
+      plan.evaluationSuite.evaluatorRubricSha256 !==
+        sha256CanonicalJson(CONTROLLED_ASSEMBLY_EVALUATOR_RUBRIC)
+    ) {
+      throw new Error(`task evaluator is not canonical: ${plan.taskId}`);
+    }
+    assertModelOutputSchemaCompiles(outputSchema);
+    const outputCheck = checkAgainstSchema(outputSchema, artifact);
+    if (!outputCheck.valid) {
+      throw new Error(
+        "task artifact does not satisfy the canonical output schema",
+      );
+    }
+    const output = artifact as Parameters<
+      typeof evaluateControlledAssemblyOutput
+    >[1];
+    const taskInput = payload.taskInput as ControlledAssemblyTaskInput;
+    const fixture = payload.fixture as ControlledAssemblyEvalFixture;
+    const validateOutput = isAssemble
+      ? VALIDATE_ASSEMBLE_OUTPUT
+      : VALIDATE_ASSEMBLY_FIX_OUTPUT;
+    validateOutput(taskInput, output);
+    const prepared = prepareControlledAssemblyEvalFixture(fixture);
+    if (
+      prepared.fixture.taskId !== plan.taskId ||
+      sha256CanonicalJson(prepared.input) !== sha256CanonicalJson(taskInput)
+    ) {
+      throw new Error(
+        `task evaluation fixture is not canonical: ${plan.taskId}`,
+      );
+    }
+    const outcome = evaluateControlledAssemblyOutput(prepared, output);
+    return {
+      qualityPassed: outcome.semanticAssemblyPassed,
+      structurePassed: outcome.productionValidationPassed,
+      factualityPassed: outcome.semanticAssemblyPassed,
+      stabilityKey: outcome.specDigest,
+      findingCodes: outcome.semanticAssemblyPassed
+        ? []
+        : [
+            "controlled_assembly_validation_failed",
+            ...(outcome.explicitSelectionPassed
+              ? []
+              : ["controlled_assembly_selection_mismatch"]),
+          ],
     };
   }
   if (

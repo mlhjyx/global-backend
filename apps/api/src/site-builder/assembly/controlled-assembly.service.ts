@@ -51,6 +51,7 @@ export interface AssemblySelectionGenerator {
   generate(input: {
     taskId: ControlledAssemblyTaskId;
     brief: DesignBriefV2;
+    allowedSectionTargets: readonly { pageKey: string; sectionId: string }[];
     allowedCopySlotKeys: readonly string[];
     allowedAssetReferenceIds: readonly string[];
     allowedClaimIds: readonly string[];
@@ -80,6 +81,12 @@ export interface DeterministicAssemblyInput {
   siteName: string;
 }
 
+export interface ControlledAssemblySelectionEvaluation {
+  selection: AssemblySelection;
+  spec: SiteSpecV1_1;
+  findings: AssemblyFinding[];
+}
+
 export class ControlledAssemblyError extends Error {
   constructor(
     readonly code: "CONTROLLED_ASSEMBLY_INVALID",
@@ -105,6 +112,7 @@ function parseSelection(
   value: unknown,
   bounds: {
     pageSections: ReadonlyMap<string, ReadonlySet<string>>;
+    requiredSectionTargets: ReadonlySet<string>;
     itemBounds: ReadonlyMap<
       string,
       { minimum: number; maximum: number; available: number }
@@ -188,6 +196,17 @@ function parseSelection(
   ) {
     throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
   }
+  const selectedTargets = new Set(
+    sections.map((section) => `${section.pageKey}\0${section.sectionId}`),
+  );
+  if (
+    selectedTargets.size !== bounds.requiredSectionTargets.size ||
+    [...bounds.requiredSectionTargets].some(
+      (target) => !selectedTargets.has(target),
+    )
+  ) {
+    throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
+  }
   return { sections };
 }
 
@@ -213,7 +232,23 @@ function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function deterministicSelection(input: {
+export function controlledAssemblySectionTargets(input: {
+  brief: DesignBriefV2;
+  catalog: DesignCatalogV2;
+}): Array<{ pageKey: string; sectionId: string }> {
+  const family = validateDesignBriefV2AgainstCatalog(
+    input.catalog,
+    input.brief,
+  );
+  return Object.entries(input.brief.blueprintIds).flatMap(
+    ([pageKey, blueprintId]) =>
+      family.blueprints[pageKey]!
+        .find((candidate) => candidate.id === blueprintId)!
+        .sections.map((section) => ({ pageKey, sectionId: section.id })),
+  );
+}
+
+export function deterministicControlledAssemblySelection(input: {
   brief: DesignBriefV2;
   catalog: DesignCatalogV2;
   copyKeys: readonly string[];
@@ -224,25 +259,108 @@ function deterministicSelection(input: {
     input.catalog,
     input.brief,
   );
+  const sectionTargets = controlledAssemblySectionTargets(input);
   return {
-    sections: Object.entries(input.brief.blueprintIds).flatMap(
-      ([pageKey, blueprintId]) => {
-        const blueprint = family.blueprints[pageKey]!.find(
-          (candidate) => candidate.id === blueprintId,
-        )!;
-        return blueprint.sections.map((section) => ({
-          pageKey,
-          sectionId: section.id,
-          copySlotKeys: input.copyKeys.filter((key) =>
-            key.startsWith(`${pageKey}.${section.id}.`),
-          ),
-          assetReferenceIds: [...input.assetIds],
-          claimIds: section.requiresEvidence ? [...input.claimIds] : [],
-          itemIndexes: [],
-        }));
-      },
-    ),
+    sections: sectionTargets.map(({ pageKey, sectionId }) => {
+      const blueprintId = input.brief.blueprintIds[pageKey]!;
+      const section = family.blueprints[pageKey]!
+        .find((candidate) => candidate.id === blueprintId)!
+        .sections.find((candidate) => candidate.id === sectionId)!;
+      return {
+        pageKey,
+        sectionId,
+        copySlotKeys: input.copyKeys.filter((key) =>
+          key.startsWith(`${pageKey}.${sectionId}.`),
+        ),
+        assetReferenceIds: [...input.assetIds],
+        claimIds: section.requiresEvidence ? [...input.claimIds] : [],
+        itemIndexes: [],
+      };
+    }),
   };
+}
+
+/**
+ * Applies one model-visible selection through the same bounded parser,
+ * SiteSpec materializer, and production validator used by controlled assembly.
+ * Evaluation callers receive findings only; no route or durable build state is
+ * changed here.
+ */
+export function evaluateControlledAssemblySelection(input: {
+  assembly: DeterministicAssemblyInput;
+  selection: unknown;
+}): ControlledAssemblySelectionEvaluation {
+  const { assembly } = input;
+  const family = validateDesignBriefV2AgainstCatalog(
+    assembly.catalog,
+    assembly.brief,
+  );
+  const copySlots = deriveCopySlotDefinitions({
+    brief: assembly.brief,
+    catalog: assembly.catalog,
+    templates: assembly.templates,
+  });
+  const bounds = {
+    pageSections: new Map(
+      Object.entries(assembly.brief.blueprintIds).map(
+        ([pageKey, blueprintId]) => [
+          pageKey,
+          new Set(
+            family.blueprints[pageKey]!
+              .find((candidate) => candidate.id === blueprintId)!
+              .sections.map((section) => section.id),
+          ),
+        ],
+      ),
+    ),
+    requiredSectionTargets: new Set(
+      controlledAssemblySectionTargets({
+        brief: assembly.brief,
+        catalog: assembly.catalog,
+      }).map((target) => `${target.pageKey}\0${target.sectionId}`),
+    ),
+    itemBounds: new Map(
+      Object.entries(assembly.brief.blueprintIds).flatMap(
+        ([pageKey, blueprintId]) =>
+          family.blueprints[pageKey]!
+            .find((candidate) => candidate.id === blueprintId)!
+            .sections.map((section) => {
+              const adapter =
+                COMPONENT_ASSEMBLY_ADAPTERS[
+                  section.componentType as keyof typeof COMPONENT_ASSEMBLY_ADAPTERS
+                ];
+              const template = assembly.templates.get(section.componentType);
+              const available =
+                Object.values(template).find((value) => Array.isArray(value))
+                  ?.length ?? 0;
+              return [
+                `${pageKey}\0${section.id}`,
+                {
+                  minimum:
+                    available === 0
+                      ? 0
+                      : Math.min(adapter?.minItems ?? 0, available),
+                  maximum: Math.min(adapter?.maxItems ?? 0, available),
+                  available,
+                },
+              ] as const;
+            }),
+      ),
+    ),
+    copyKeys: new Set(copySlots.map((slot) => slot.key)),
+    assetIds: new Set(Object.keys(assembly.assets)),
+    claimIds: new Set(assembly.claimSnapshot.items.map((item) => item.claimId)),
+  };
+  const selection = parseSelection(input.selection, bounds);
+  const spec = buildSpec({ ...assembly, selection });
+  const findings = validateControlledAssembly({
+    spec,
+    brief: assembly.brief,
+    catalog: assembly.catalog,
+    claimSnapshot: assembly.claimSnapshot,
+    copySlots,
+  });
+  return { selection, spec, findings };
 }
 
 /**
@@ -260,7 +378,7 @@ export function assembleDeterministically(
   });
   const spec = buildSpec({
     ...input,
-    selection: deterministicSelection({
+    selection: deterministicControlledAssemblySelection({
       brief: input.brief,
       catalog: input.catalog,
       copyKeys: copySlots.map((slot) => slot.key),
@@ -516,6 +634,12 @@ export class ControlledAssemblyService {
     );
     const bounds = {
       pageSections,
+      requiredSectionTargets: new Set(
+        controlledAssemblySectionTargets({
+          brief: input.brief,
+          catalog: input.catalog,
+        }).map((target) => `${target.pageKey}\0${target.sectionId}`),
+      ),
       itemBounds: new Map(
         Object.entries(input.brief.blueprintIds).flatMap(
           ([pageKey, blueprintId]) =>
@@ -558,6 +682,10 @@ export class ControlledAssemblyService {
           await this.generator.generate({
             taskId,
             brief: input.brief,
+            allowedSectionTargets: controlledAssemblySectionTargets({
+              brief: input.brief,
+              catalog: input.catalog,
+            }),
             allowedCopySlotKeys: copySlotKeys,
             allowedAssetReferenceIds: Object.keys(input.assets),
             allowedClaimIds: [...bounds.claimIds],
@@ -568,7 +696,7 @@ export class ControlledAssemblyService {
         );
       } catch (error) {
         if (mustNotFallback(error)) throw error;
-        selection = deterministicSelection({
+        selection = deterministicControlledAssemblySelection({
           brief: input.brief,
           catalog: input.catalog,
           copyKeys: copySlotKeys,
@@ -597,7 +725,7 @@ export class ControlledAssemblyService {
     }
 
     const designBrief = safeBrief(input.brief, input.catalog);
-    const selection = deterministicSelection({
+    const selection = deterministicControlledAssemblySelection({
       brief: designBrief,
       catalog: input.catalog,
       copyKeys: copySlotKeys,

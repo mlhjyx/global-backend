@@ -288,8 +288,13 @@ describe("model evaluation planning", () => {
       reasoningEffort: null,
     });
     expect(buildTaskEvaluationPlan("site_builder.copy")).toMatchObject({
-      dispatchAdmission: "blocked_no_evaluation_suite",
-      evaluationSuite: null,
+      dispatchAdmission: "task_evaluation_ready",
+      evaluationSuite: {
+        suiteId: "site-builder.copy-evaluation-suite/2026-08-04-v1",
+        fixtureSetId: "site-builder-copy-golden/2026-08-04-v1",
+        repeats: 2,
+        legacyComparatorAliases: [],
+      },
     });
     for (const taskId of [
       "site_builder.qa_summarize",
@@ -307,7 +312,7 @@ describe("model evaluation planning", () => {
       disposition: "task_evaluation_ready",
     });
     expect(buildProfileEvaluationAdmission("copy.premium")).toMatchObject({
-      disposition: "blocked_no_evaluation_suite",
+      disposition: "task_evaluation_ready",
     });
   });
 
