@@ -103,6 +103,19 @@ export interface NativeModelEvaluationDispatch {
   currency: NativeModelEvaluationCurrency;
 }
 
+/**
+ * A token-log receipt is only meaningful when new-api's channel and purpose
+ * are part of the same credential snapshot as the allowed dispatch scope.
+ */
+export interface NativeModelEvaluationGatewaySettlementRoute {
+  alias: string;
+  protocol: Extract<
+    ModelCandidateProtocol,
+    "openai-responses" | "anthropic-messages"
+  >;
+  channelId: number;
+}
+
 export interface NativeModelEvaluationCostSafetyInput {
   contractId: typeof SITE_BUILDER_MODEL_EVALUATION_NATIVE_COST_SAFETY_ID;
   authorization: {
@@ -130,6 +143,11 @@ export interface NativeModelEvaluationCostSafetyInput {
     quotaMode: "limited";
     scopeExact: true;
     allowedDispatches: NativeModelEvaluationDispatch[];
+    gatewaySettlement: {
+      purposeGroup: "design-spec-eval";
+      tokenLogPath: "/api/log/token";
+      routes: NativeModelEvaluationGatewaySettlementRoute[];
+    };
   };
   pricing: {
     authority: "openox_model_marketplace";
@@ -328,6 +346,50 @@ function exactDispatchSet(
   );
 }
 
+function receiptRouteKey(value: {
+  alias: string;
+  protocol: ModelCandidateProtocol;
+}): string {
+  return `${value.alias}:${value.protocol}`;
+}
+
+function exactGatewaySettlementBinding(
+  value: NativeModelEvaluationCostSafetyInput["credential"]["gatewaySettlement"],
+  allowedDispatches: readonly NativeModelEvaluationDispatch[],
+): boolean {
+  if (
+    !exactKeys(value, ["purposeGroup", "tokenLogPath", "routes"]) ||
+    value.purposeGroup !== "design-spec-eval" ||
+    value.tokenLogPath !== "/api/log/token" ||
+    !NATIVE_ARRAY_IS_ARRAY(value.routes) ||
+    value.routes.length !== allowedDispatches.length
+  ) {
+    return false;
+  }
+  const expected = nativeArraySort(
+    nativeArrayMap(allowedDispatches, receiptRouteKey),
+  );
+  const received: string[] = [];
+  for (let index = 0; index < value.routes.length; index += 1) {
+    const route = value.routes[index];
+    if (
+      !route ||
+      !exactKeys(route, ["alias", "protocol", "channelId"]) ||
+      !positiveSafeInteger(route.channelId) ||
+      (route.protocol !== "openai-responses" &&
+        route.protocol !== "anthropic-messages")
+    ) {
+      return false;
+    }
+    received.push(receiptRouteKey(route));
+  }
+  const actual = nativeArraySort(received);
+  return (
+    actual.length === expected.length &&
+    nativeArrayEvery(actual, (entry, index) => entry === expected[index])
+  );
+}
+
 /**
  * Binds a prepared fee-card identifier to the exact, native-currency OpenOx
  * prices that will later be reserved and settled. This deliberately contains
@@ -477,6 +539,7 @@ function validNativeCostSafetyInput(
       "quotaMode",
       "scopeExact",
       "allowedDispatches",
+      "gatewaySettlement",
     ]) ||
     !exactKeys(pricing, [
       "authority",
@@ -532,6 +595,10 @@ function validNativeCostSafetyInput(
     credential.gatewayOrigin !== REQUIRED_NEW_API_EVALUATION_ORIGIN ||
     !NATIVE_ARRAY_IS_ARRAY(credential.allowedDispatches) ||
     !exactDispatchSet(credential.allowedDispatches) ||
+    !exactGatewaySettlementBinding(
+      credential.gatewaySettlement,
+      credential.allowedDispatches,
+    ) ||
     nativeArraySome(
       credential.allowedDispatches,
       (dispatch) =>
