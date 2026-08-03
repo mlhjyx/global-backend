@@ -21,6 +21,17 @@ const manifest = Object.freeze(
   ),
 );
 const { manifestSha256: _manifestSha256, ...manifestWithoutDigest } = manifest;
+const evidence = Object.freeze(
+  JSON.parse(
+    readFileSync(
+      join(
+        __dirname,
+        "../../../../../docs/evidence/site-builder/m1-g-design-spec-v5-native-fee-card-2026-08-04.json",
+      ),
+      "utf8",
+    ),
+  ),
+);
 
 function catalog() {
   const model = (
@@ -94,6 +105,28 @@ describe("design_spec v5 native-currency fee-card source contract", () => {
     expect(card.noForeignExchangeConversion).toBe(true);
     expect(card.expectedCost).toBe("not_known_before_usage");
     expect(JSON.stringify(card)).not.toContain("exchange");
+  });
+
+  it("records the public catalog result as zero-call, non-dispatch evidence", () => {
+    expect(evidence).toMatchObject({
+      schemaVersion: "site-builder-design-spec-v5-native-fee-card-evidence/v1",
+      preparationCommitSha: "0a32c1737c82f30c3f333fd48d77f572bf1e8318",
+      modelWireCalls: 0,
+      actualModelCost: { CNY: "0", USD: "0" },
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      card: {
+        feeCardId: DESIGN_SPEC_V5_NATIVE_FEE_CARD_ID,
+        fixedSourceCommitSha: "377f8a3ae983bad0e4ae43f767a4bc59d8f7d0a9",
+        manifestSha256:
+          "bcc0ac261f56a5c950e11483a3dc28f33ed678c626891367a45b6c1f56429dc4",
+        totalsByCurrency: {
+          CNY: { formatted: "11.276659" },
+          USD: { formatted: "3.45842784" },
+        },
+        expectedCost: "not_known_before_usage",
+        noForeignExchangeConversion: true,
+      },
+    });
   });
 
   it("rejects historical manifests and exact-matrix drift before pricing", () => {
