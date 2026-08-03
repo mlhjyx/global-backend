@@ -7,13 +7,17 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createNativeModelEvaluationAuthorizationLedger } from "./native-model-evaluation-authorization-ledger";
+import {
+  createNativeModelEvaluationAuthorizationLedger,
+  initializeNativeModelEvaluationAuthorizationLedgerDirectory,
+} from "./native-model-evaluation-authorization-ledger";
 
 const temporaryDirectories: string[] = [];
 
@@ -22,6 +26,16 @@ function createLedgerDirectory(): string {
   chmodSync(directory, 0o700);
   temporaryDirectories.push(directory);
   return directory;
+}
+
+function createLedger(ledgerId: string, directory: string) {
+  const initialized =
+    initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
+  return createNativeModelEvaluationAuthorizationLedger({
+    ledgerId,
+    directory,
+    expectedDirectorySha256: initialized.directorySha256,
+  });
 }
 
 function claimInput(authorizationId = "design-spec-native-authorization-001") {
@@ -51,10 +65,7 @@ afterEach(() => {
 describe("native model evaluation authorization ledger", () => {
   it("claims exactly once and durably reserves then settles native CNY without FX", () => {
     const directory = createLedgerDirectory();
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-001",
-      directory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-001", directory);
 
     expect(ledger.claim(claimInput())).toBe(true);
     expect(ledger.claim(claimInput())).toBe(false);
@@ -124,10 +135,7 @@ describe("native model evaluation authorization ledger", () => {
 
   it("keeps an unknown settlement reservation and durably freezes the authorization", () => {
     const directory = createLedgerDirectory();
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-002",
-      directory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-002", directory);
     expect(ledger.claim(claimInput())).toBe(true);
     expect(
       ledger.reserve({
@@ -171,10 +179,7 @@ describe("native model evaluation authorization ledger", () => {
 
   it("rejects cross-currency settlement, preserving the original reservation and freezing", () => {
     const directory = createLedgerDirectory();
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-003",
-      directory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-003", directory);
     expect(ledger.claim(claimInput())).toBe(true);
     ledger.reserve({
       authorizationId: "design-spec-native-authorization-001",
@@ -210,10 +215,7 @@ describe("native model evaluation authorization ledger", () => {
 
   it("freezes when a settlement does not use the authorization's frozen price basis", () => {
     const directory = createLedgerDirectory();
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-009",
-      directory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-009", directory);
     expect(ledger.claim(claimInput())).toBe(true);
     expect(
       ledger.reserve({
@@ -250,14 +252,21 @@ describe("native model evaluation authorization ledger", () => {
 
   it("does not reissue an authorization after a new ledger instance opens its durable directory", () => {
     const directory = createLedgerDirectory();
-    const first = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-004",
-      directory,
-    });
+    const first = createLedger("design-spec-native-ledger-004", directory);
     expect(first.claim(claimInput())).toBe(true);
+    expect(() =>
+      createNativeModelEvaluationAuthorizationLedger({
+        ledgerId: "design-spec-native-ledger-004",
+        directory,
+        expectedDirectorySha256: first.directorySha256,
+      }),
+    ).toThrow("directory digest");
     const reopened = createNativeModelEvaluationAuthorizationLedger({
       ledgerId: "design-spec-native-ledger-004",
       directory,
+      expectedDirectorySha256:
+        initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory)
+          .directorySha256,
     });
     expect(reopened.claim(claimInput())).toBe(false);
     expect(
@@ -271,12 +280,60 @@ describe("native model evaluation authorization ledger", () => {
     });
   });
 
+  it("does not reissue an authorization after a claim file is deleted between processes", () => {
+    const directory = createLedgerDirectory();
+    const first = createLedger("design-spec-native-ledger-013", directory);
+    expect(first.claim(claimInput())).toBe(true);
+
+    rmSync(claimFilePath(directory, "design-spec-native-authorization-001"));
+    const reopened = createNativeModelEvaluationAuthorizationLedger({
+      ledgerId: "design-spec-native-ledger-013",
+      directory,
+      expectedDirectorySha256:
+        initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory)
+          .directorySha256,
+    });
+
+    expect(reopened.claim(claimInput())).toBe(false);
+    expect(
+      reopened.inspectAuthorization("design-spec-native-authorization-001"),
+    ).toMatchObject({
+      state: "claim_record_missing_after_restart",
+      authorizationId: "design-spec-native-authorization-001",
+      authorizationIdSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      manualReconciliationRequired: true,
+    });
+  });
+
+  it("rejects a marker history truncated after an authorization claim", () => {
+    const directory = createLedgerDirectory();
+    const first = createLedger("design-spec-native-ledger-014", directory);
+    expect(first.claim(claimInput())).toBe(true);
+    const expectedDirectorySha256 =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(
+        directory,
+      ).directorySha256;
+    const markerPath = join(
+      directory,
+      ".site-builder-native-model-evaluation-ledger-id",
+    );
+    writeFileSync(
+      markerPath,
+      `${readFileSync(markerPath, "utf8").split("\n")[0]}\n`,
+    );
+
+    expect(() =>
+      createNativeModelEvaluationAuthorizationLedger({
+        ledgerId: "design-spec-native-ledger-014",
+        directory,
+        expectedDirectorySha256,
+      }),
+    ).toThrow("directory digest");
+  });
+
   it("validates claim inputs before creating a durable claim file", () => {
     const directory = createLedgerDirectory();
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-008",
-      directory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-008", directory);
     const authorizationId = "design-spec-native-authorization-008";
 
     expect(() =>
@@ -293,10 +350,7 @@ describe("native model evaluation authorization ledger", () => {
 
   it("does not recreate a deleted ledger marker while verifying the directory", () => {
     const directory = createLedgerDirectory();
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-012",
-      directory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-012", directory);
     expect(ledger.claim(claimInput())).toBe(true);
 
     const markerPath = join(
@@ -307,6 +361,9 @@ describe("native model evaluation authorization ledger", () => {
     expect(() =>
       ledger.inspectAuthorization("design-spec-native-authorization-001"),
     ).toThrow();
+    expect(() =>
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory),
+    ).toThrow("marker is missing after claims exist");
     expect(() => lstatSync(markerPath)).toThrow();
   });
 
@@ -319,6 +376,7 @@ describe("native model evaluation authorization ledger", () => {
       createNativeModelEvaluationAuthorizationLedger({
         ledgerId: "design-spec-native-ledger-005",
         directory: unsafeDirectory,
+        expectedDirectorySha256: "0".repeat(64),
       }),
     ).toThrow("owner-only");
 
@@ -329,13 +387,11 @@ describe("native model evaluation authorization ledger", () => {
       createNativeModelEvaluationAuthorizationLedger({
         ledgerId: "design-spec-native-ledger-006",
         directory: symbolicDirectory,
+        expectedDirectorySha256: "0".repeat(64),
       }),
     ).toThrow("real directory");
 
-    const ledger = createNativeModelEvaluationAuthorizationLedger({
-      ledgerId: "design-spec-native-ledger-007",
-      directory: realDirectory,
-    });
+    const ledger = createLedger("design-spec-native-ledger-007", realDirectory);
     expect(ledger.claim(claimInput())).toBe(true);
     expect(() =>
       ledger.reserve({
@@ -348,7 +404,10 @@ describe("native model evaluation authorization ledger", () => {
       }),
     ).toThrow("canonical");
 
-    const expectedDirectorySha256 = ledger.directorySha256;
+    const expectedDirectorySha256 =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(
+        realDirectory,
+      ).directorySha256;
     expect(() =>
       createNativeModelEvaluationAuthorizationLedger({
         ledgerId: "design-spec-native-ledger-010",

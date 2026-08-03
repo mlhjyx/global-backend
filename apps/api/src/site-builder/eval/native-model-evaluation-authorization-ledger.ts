@@ -5,6 +5,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   writeSync,
@@ -25,6 +26,7 @@ const NATIVE_CURRENCIES = Object.freeze(["CNY", "USD"] as const);
 const SHA256 = /^[a-f0-9]{64}$/;
 const SETTLEMENT_BASIS = /^frozen_openox_native_pricing@.+$/;
 const CLAIM_FILE_MAX_BYTES = 1024n * 1024n;
+const LEDGER_MARKER = /^[a-f0-9-]{36}$/;
 
 const NATIVE_OBJECT_KEYS = Object.keys;
 const NATIVE_OBJECT_HAS_OWN = Object.hasOwn;
@@ -142,6 +144,14 @@ export interface NativeModelEvaluationAuthorizationLedger {
         ledgerDirectorySha256: string;
       }
     | {
+        state: "claim_record_missing_after_restart";
+        authorizationId: string;
+        ledgerId: string;
+        ledgerDirectorySha256: string;
+        authorizationIdSha256: string;
+        manualReconciliationRequired: true;
+      }
+    | {
         state: "non_resumable_after_restart";
         authorizationId: string;
         ledgerId: string;
@@ -195,6 +205,8 @@ function assertOwnerOnlyDirectory(
   markerInode: bigint;
   markerCtimeNs: bigint;
   markerSize: bigint;
+  markerSeed: string;
+  claimedAuthorizationDigests: readonly string[];
   sha256: string;
 }> {
   if (!isAbsolute(directory)) {
@@ -221,6 +233,31 @@ function assertOwnerOnlyDirectory(
   try {
     if (allowMarkerCreation) {
       try {
+        let markerMissing = false;
+        try {
+          lstatSync(markerPath);
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ENOENT"
+          ) {
+            markerMissing = true;
+          } else {
+            throw error;
+          }
+        }
+        if (
+          markerMissing &&
+          readdirSync(realDirectory).some((name) =>
+            /^[a-f0-9]{64}\.jsonl$/.test(name),
+          )
+        ) {
+          throw new Error(
+            "native evaluation ledger marker is missing after claims exist",
+          );
+        }
         descriptor = openSync(markerPath, "wx", 0o600);
         writeAllSync(descriptor, `${randomUUID()}\n`);
         fsyncSync(descriptor);
@@ -246,13 +283,21 @@ function assertOwnerOnlyDirectory(
     );
     const markerStats = fstatSync(descriptor, { bigint: true });
     const marker = readFileSync(descriptor, "utf8");
+    const markerLines = marker.split("\n");
+    const markerSeed = markerLines.shift();
+    const markerEndsWithNewline = markerLines.pop() === "";
+    const claimedAuthorizationDigests = markerLines;
     if (
       !markerStats.isFile() ||
       markerStats.isSymbolicLink() ||
       markerStats.nlink !== 1n ||
       (markerStats.mode & 0o077n) !== 0n ||
       markerStats.uid !== directoryStats.uid ||
-      !/^[a-f0-9-]{36}\n$/.test(marker)
+      markerStats.size > CLAIM_FILE_MAX_BYTES ||
+      !markerEndsWithNewline ||
+      !markerSeed ||
+      !LEDGER_MARKER.test(markerSeed) ||
+      claimedAuthorizationDigests.some((digest) => !SHA256.test(digest))
     ) {
       throw new Error("native evaluation ledger marker is invalid");
     }
@@ -277,6 +322,10 @@ function assertOwnerOnlyDirectory(
       markerInode: markerStats.ino,
       markerCtimeNs: markerStats.ctimeNs,
       markerSize: markerStats.size,
+      markerSeed,
+      claimedAuthorizationDigests: Object.freeze([
+        ...claimedAuthorizationDigests,
+      ]),
       sha256: createHash("sha256").update(identity).digest("hex"),
     });
   } finally {
@@ -302,7 +351,11 @@ function writeAllSync(descriptor: number, value: string): void {
 }
 
 function claimFileName(authorizationId: string): string {
-  return `${createHash("sha256").update(authorizationId).digest("hex")}.jsonl`;
+  return `${authorizationIdSha256(authorizationId)}.jsonl`;
+}
+
+function authorizationIdSha256(authorizationId: string): string {
+  return createHash("sha256").update(authorizationId).digest("hex");
 }
 
 function assertAuthorizationId(value: unknown): asserts value is string {
@@ -348,23 +401,32 @@ function assertSettlementBasis(
   }
 }
 
+export function initializeNativeModelEvaluationAuthorizationLedgerDirectory(
+  directory: string,
+): Readonly<{ directorySha256: string }> {
+  const identity = assertOwnerOnlyDirectory(directory, true);
+  return Object.freeze({ directorySha256: identity.sha256 });
+}
+
 export function createNativeModelEvaluationAuthorizationLedger(options: {
   ledgerId: string;
   directory: string;
-  expectedDirectorySha256?: string;
+  expectedDirectorySha256: string;
 }): NativeModelEvaluationAuthorizationLedger {
   if (!LEDGER_ID.test(options?.ledgerId ?? "")) {
     throw new Error("native evaluation ledger id is invalid");
   }
-  const identity = assertOwnerOnlyDirectory(options.directory, true);
+  let identity = assertOwnerOnlyDirectory(options.directory, true);
   if (
-    options.expectedDirectorySha256 !== undefined &&
-    (!SHA256.test(options.expectedDirectorySha256) ||
-      options.expectedDirectorySha256 !== identity.sha256)
+    !SHA256.test(options.expectedDirectorySha256) ||
+    options.expectedDirectorySha256 !== identity.sha256
   ) {
     throw new Error("native evaluation ledger directory digest does not match");
   }
   const states = new Map<string, NativeAuthorizationState>();
+  const claimedAuthorizationDigests = new Set(
+    identity.claimedAuthorizationDigests,
+  );
 
   const assertDirectoryIdentity = () => {
     const current = assertOwnerOnlyDirectory(identity.directory, false);
@@ -425,6 +487,56 @@ export function createNativeModelEvaluationAuthorizationLedger(options: {
     }
   };
 
+  const appendAuthorizationClaimDigest = (authorizationId: string): void => {
+    const digest = authorizationIdSha256(authorizationId);
+    if (claimedAuthorizationDigests.has(digest)) return;
+    assertDirectoryIdentity();
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(
+        identity.markerPath,
+        fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+      );
+      const before = fstatSync(descriptor, { bigint: true });
+      if (
+        !before.isFile() ||
+        before.isSymbolicLink() ||
+        before.nlink !== 1n ||
+        (before.mode & 0o077n) !== 0n ||
+        before.dev !== identity.markerDevice ||
+        before.ino !== identity.markerInode ||
+        before.ctimeNs !== identity.markerCtimeNs ||
+        before.size !== identity.markerSize
+      ) {
+        throw new Error("native evaluation ledger marker identity changed");
+      }
+      const payload = `${digest}\n`;
+      writeAllSync(descriptor, payload);
+      fsyncSync(descriptor);
+      const after = fstatSync(descriptor, { bigint: true });
+      if (
+        !after.isFile() ||
+        after.isSymbolicLink() ||
+        after.nlink !== 1n ||
+        after.dev !== before.dev ||
+        after.ino !== before.ino ||
+        after.size !==
+          before.size + NATIVE_BIGINT(Buffer.byteLength(payload, "utf8"))
+      ) {
+        throw new Error(
+          "native evaluation ledger marker changed during append",
+        );
+      }
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
+    identity = assertOwnerOnlyDirectory(identity.directory, false);
+    if (!identity.claimedAuthorizationDigests.includes(digest)) {
+      throw new Error("native evaluation ledger claim marker did not persist");
+    }
+    claimedAuthorizationDigests.add(digest);
+  };
+
   const freeze = (
     authorizationId: string,
     state: NativeAuthorizationState,
@@ -473,8 +585,18 @@ export function createNativeModelEvaluationAuthorizationLedger(options: {
         CNY: canonicalPicoUnits(input.maximumsByCurrency.CNY, "CNY cap"),
         USD: canonicalPicoUnits(input.maximumsByCurrency.USD, "USD cap"),
       });
-      if (states.has(input.authorizationId)) return false;
+      const authorizationDigest = authorizationIdSha256(input.authorizationId);
+      if (
+        states.has(input.authorizationId) ||
+        claimedAuthorizationDigests.has(authorizationDigest)
+      ) {
+        return false;
+      }
       assertDirectoryIdentity();
+      // Claiming the authorization in the append-only marker happens before
+      // creating the per-authorization file. A crash or a later file deletion
+      // can therefore deny a retry, but can never reissue spend authority.
+      appendAuthorizationClaimDigest(input.authorizationId);
       const claimFilePath = join(
         identity.directory,
         claimFileName(input.authorizationId),
@@ -745,6 +867,7 @@ export function createNativeModelEvaluationAuthorizationLedger(options: {
         identity.directory,
         claimFileName(authorizationId),
       );
+      const authorizationDigest = authorizationIdSha256(authorizationId);
       let descriptor: number | undefined;
       try {
         try {
@@ -759,6 +882,16 @@ export function createNativeModelEvaluationAuthorizationLedger(options: {
             "code" in error &&
             error.code === "ENOENT"
           ) {
+            if (claimedAuthorizationDigests.has(authorizationDigest)) {
+              return Object.freeze({
+                state: "claim_record_missing_after_restart" as const,
+                authorizationId,
+                ledgerId: options.ledgerId,
+                ledgerDirectorySha256: identity.sha256,
+                authorizationIdSha256: authorizationDigest,
+                manualReconciliationRequired: true as const,
+              });
+            }
             return Object.freeze({
               state: "not_claimed" as const,
               authorizationId,
