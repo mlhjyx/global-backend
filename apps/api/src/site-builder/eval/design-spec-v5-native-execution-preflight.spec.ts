@@ -136,7 +136,7 @@ describe("design_spec v5 native execution preflight", () => {
         ledger: {} as NativeModelEvaluationAuthorizationLedger,
         fetch: fetch as typeof fetch,
       }),
-    ).toThrow("trusted v5 native model evaluation cost safety is required");
+    ).toThrow("trusted v6 native model evaluation cost safety is required");
   });
 
   it("rejects a v5-branded non-HEAD attestation before claiming its ledger", () => {
@@ -161,7 +161,7 @@ describe("design_spec v5 native execution preflight", () => {
         ledger,
         fetch: vi.fn() as unknown as typeof fetch,
       }),
-    ).toThrow("native evaluation credential or ledger does not match");
+    ).toThrow("trusted v6 native model evaluation cost safety is required");
     expect(claim).not.toHaveBeenCalled();
   });
 });
