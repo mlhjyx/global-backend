@@ -44,6 +44,7 @@ export type NativeModelEvaluationLedgerFreezeReason =
   | "settlement_basis_mismatch"
   | "settlement_exceeds_reservation"
   | "native_budget_exhausted"
+  | "campaign_aborted"
   | "runtime_integrity_drift"
   | "ledger_write_failure";
 
@@ -808,6 +809,7 @@ export function createNativeModelEvaluationAuthorizationLedger(options: {
         input.reason !== "settlement_basis_mismatch" &&
         input.reason !== "settlement_exceeds_reservation" &&
         input.reason !== "native_budget_exhausted" &&
+        input.reason !== "campaign_aborted" &&
         input.reason !== "runtime_integrity_drift" &&
         input.reason !== "ledger_write_failure"
       ) {

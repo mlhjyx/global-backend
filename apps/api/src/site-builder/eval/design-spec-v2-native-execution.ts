@@ -43,6 +43,11 @@ type NativeTargetProtocol = Extract<
 
 const EXECUTION_ID = /^[A-Za-z0-9][A-Za-z0-9:._/-]{7,511}$/;
 const MAX_REPAIR_REASON_BYTES = 16_384;
+const TRUSTED_NATIVE_EXECUTION_RUNNERS = new WeakSet<object>();
+const TRUSTED_NATIVE_EXECUTION_RUNNER_ADD = WeakSet.prototype.add;
+const TRUSTED_NATIVE_EXECUTION_RUNNER_HAS = WeakSet.prototype.has;
+const NATIVE_EXECUTION_RUNNER_APPLY = Reflect.apply;
+const NATIVE_OBJECT_IS_FROZEN = Object.isFrozen;
 
 interface NativeTextResponse {
   rawText: string;
@@ -86,6 +91,22 @@ export interface DesignSpecV2NativeExecutionRunner {
     fixtureId: string;
     attempt: number;
   }): Promise<DesignSpecV2NativeExecutionResult>;
+  abort(): void;
+}
+
+export function isTrustedDesignSpecV2NativeExecutionRunner(
+  value: unknown,
+): value is DesignSpecV2NativeExecutionRunner {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (NATIVE_EXECUTION_RUNNER_APPLY(
+      TRUSTED_NATIVE_EXECUTION_RUNNER_HAS,
+      TRUSTED_NATIVE_EXECUTION_RUNNERS,
+      [value],
+    ) as boolean) &&
+    NATIVE_OBJECT_IS_FROZEN(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,7 +127,10 @@ function parseArtifact(rawText: string): unknown {
   return JSON.parse(stripJsonFence(rawText));
 }
 
-function requireUsage(value: unknown): { inputTokens: number; outputTokens: number } {
+function requireUsage(value: unknown): {
+  inputTokens: number;
+  outputTokens: number;
+} {
   if (!isRecord(value)) throw new Error("native evaluation usage is absent");
   const inputTokens = value.input_tokens;
   const outputTokens = value.output_tokens;
@@ -120,7 +144,11 @@ function requireUsage(value: unknown): { inputTokens: number; outputTokens: numb
 }
 
 function parseOpenAIResponses(body: unknown): NativeTextResponse {
-  if (!isRecord(body) || body.status !== "completed" || typeof body.model !== "string") {
+  if (
+    !isRecord(body) ||
+    body.status !== "completed" ||
+    typeof body.model !== "string"
+  ) {
     throw new Error("native openai responses body is invalid");
   }
   const fragments: string[] = [];
@@ -160,7 +188,9 @@ function parseAnthropicMessages(body: unknown): NativeTextResponse {
   }
   const rawText = body.content
     .flatMap((content) =>
-      isRecord(content) && content.type === "text" && typeof content.text === "string"
+      isRecord(content) &&
+      content.type === "text" &&
+      typeof content.text === "string"
         ? [content.text]
         : [],
     )
@@ -335,7 +365,9 @@ function assertPromptWithinNativeEnvelope(input: {
   const promptBytes =
     Buffer.byteLength(input.system, "utf8") +
     Buffer.byteLength(input.prompt, "utf8");
-  if (promptBytes > promptLimitForAttempt(input.attestation, input.wireAttempt)) {
+  if (
+    promptBytes > promptLimitForAttempt(input.attestation, input.wireAttempt)
+  ) {
     throw new Error("native evaluation prompt exceeds the attested envelope");
   }
 }
@@ -351,7 +383,9 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
   ledger: NativeModelEvaluationAuthorizationLedger;
   fetch: typeof fetch;
 }): DesignSpecV2NativeExecutionRunner {
-  if (!isTrustedNativeModelEvaluationCostSafetyAttestation(options.attestation)) {
+  if (
+    !isTrustedNativeModelEvaluationCostSafetyAttestation(options.attestation)
+  ) {
     throw new Error("trusted native model evaluation cost safety is required");
   }
   const attestation = options.attestation;
@@ -363,7 +397,8 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
     !preparedSourceMatches(attestation) ||
     !ledger ||
     ledger.ledgerId !== attestation.authorization.ledgerId ||
-    ledger.directorySha256 !== attestation.authorization.ledgerDirectorySha256 ||
+    ledger.directorySha256 !==
+      attestation.authorization.ledgerDirectorySha256 ||
     typeof fetchImpl !== "function"
   ) {
     throw new Error("native evaluation credential or ledger does not match");
@@ -416,7 +451,8 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
     const plan = buildTaskEvaluationPlan("site_builder.design_spec");
     const candidate = plan.candidates.find(
       (entry) =>
-        entry.alias === input.alias && entry.expectedProtocol === input.protocol,
+        entry.alias === input.alias &&
+        entry.expectedProtocol === input.protocol,
     );
     if (
       plan.dispatchAdmission !== "task_evaluation_ready" ||
@@ -424,7 +460,9 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
       !candidate ||
       input.attempt > plan.evaluationSuite.repeats
     ) {
-      throw new Error("native design_spec execution is not in the canonical matrix");
+      throw new Error(
+        "native design_spec execution is not in the canonical matrix",
+      );
     }
     assertNativeModelEvaluationDispatch(attestation, {
       mode: "target",
@@ -435,9 +473,16 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
       maxOutputTokens: plan.envelope.maxTokens,
       inputTokens: 0,
     });
-    const evaluationCase = buildCanonicalModelEvaluationCase(plan, input.fixtureId);
+    const evaluationCase = buildCanonicalModelEvaluationCase(
+      plan,
+      input.fixtureId,
+    );
     assertModelEvaluationRuntimeIntegrity("site_builder.design_spec");
-    const reservation = combinedMaximum(attestation, input.alias, input.protocol);
+    const reservation = combinedMaximum(
+      attestation,
+      input.alias,
+      input.protocol,
+    );
     if (
       !ledger.reserve({
         authorizationId: attestation.authorization.authorizationId,
@@ -478,7 +523,9 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
       settled = true;
       return costSettlement;
     };
-    const settleOrFreeze = async (options?: { forceUnknown?: boolean }): Promise<void> => {
+    const settleOrFreeze = async (options?: {
+      forceUnknown?: boolean;
+    }): Promise<void> => {
       if (settled) return;
       try {
         await settle(options);
@@ -505,7 +552,9 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
         inputTokens: 0,
       });
       if (!modelEvaluationRuntimeIntegrityMatches("site_builder.design_spec")) {
-        throw new Error("native evaluation runtime integrity drifted before wire");
+        throw new Error(
+          "native evaluation runtime integrity drifted before wire",
+        );
       }
       const system = structuredSystemPrompt(
         DESIGN_SPEC_TASK.outputSchema,
@@ -558,11 +607,17 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
               : attestation.limits.maxInputTokensRepairWire) ||
           parsed.usage.outputTokens > attestation.limits.maxOutputTokensPerWire
         ) {
-          throw new Error("native evaluation usage exceeds the attested envelope");
+          throw new Error(
+            "native evaluation usage exceeds the attested envelope",
+          );
         }
         wires.push({ wireAttempt, usage: parsed.usage });
-        if (!modelEvaluationRuntimeIntegrityMatches("site_builder.design_spec")) {
-          throw new Error("native evaluation runtime integrity drifted after wire");
+        if (
+          !modelEvaluationRuntimeIntegrityMatches("site_builder.design_spec")
+        ) {
+          throw new Error(
+            "native evaluation runtime integrity drifted after wire",
+          );
         }
         return parsed;
       } catch (error) {
@@ -608,16 +663,24 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
     }
 
     let artifact: unknown;
-    let assessment: ReturnType<typeof assessCanonicalTaskArtifact> | null = null;
+    let assessment: ReturnType<typeof assessCanonicalTaskArtifact> | null =
+      null;
     let invalidReason: string | null = null;
     try {
       artifact = parseArtifact(response.rawText);
-      assessment = assessCanonicalTaskArtifact(plan, evaluationCase.payload, artifact);
+      assessment = assessCanonicalTaskArtifact(
+        plan,
+        evaluationCase.payload,
+        artifact,
+      );
     } catch (error) {
       invalidReason = error instanceof Error ? error.message : "schema_invalid";
       artifact = undefined;
     }
-    if (invalidReason && Buffer.byteLength(invalidReason, "utf8") <= MAX_REPAIR_REASON_BYTES) {
+    if (
+      invalidReason &&
+      Buffer.byteLength(invalidReason, "utf8") <= MAX_REPAIR_REASON_BYTES
+    ) {
       try {
         response = await dispatch(
           repairPrompt(
@@ -682,7 +745,8 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
       attempt: input.attempt,
       outcome: accepted ? "accepted" : "rejected",
       artifactRetention: "digest_only",
-      artifactSha256: artifact === undefined ? null : sha256CanonicalJson(artifact),
+      artifactSha256:
+        artifact === undefined ? null : sha256CanonicalJson(artifact),
       assessment:
         assessment === null
           ? null
@@ -695,12 +759,27 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
       actualProtocol: input.protocol,
       requestedModel: input.alias,
       reportedModel: response.reportedModel,
-      resolvedModel: response.reportedModel === input.alias ? input.alias : null,
+      resolvedModel:
+        response.reportedModel === input.alias ? input.alias : null,
       modelResolutionSource:
         response.reportedModel === input.alias ? "upstream_response" : null,
       usage: { ...usage, callCount },
       costSettlement,
     };
   };
-  return Object.freeze({ execute });
+  const abort = (): void => {
+    freeze(
+      ledger,
+      attestation.authorization.authorizationId,
+      executorClaimId,
+      "campaign_aborted",
+    );
+  };
+  const runner = Object.freeze({ execute, abort });
+  NATIVE_EXECUTION_RUNNER_APPLY(
+    TRUSTED_NATIVE_EXECUTION_RUNNER_ADD,
+    TRUSTED_NATIVE_EXECUTION_RUNNERS,
+    [runner],
+  );
+  return runner;
 }
