@@ -2044,7 +2044,7 @@ describe("harness integration and unchanged runtime routes", () => {
     expect(wireCall).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the promoted BrandProfile route, rollback, and all six other current routes unchanged", () => {
+  it("keeps BrandProfile promotion while retired task routes fail closed", () => {
     expect(
       modelPolicyRegistry.getActiveTaskPolicy("site_builder.brand_profile"),
     ).toMatchObject({
@@ -2075,18 +2075,15 @@ describe("harness integration and unchanged runtime routes", () => {
           state: "currentRoute",
           route: {
             primary: "deepseek-v4-pro",
-            fallbacks: ["glm-5.2", "doubao-seed-2.0-pro"],
+            fallbacks: ["glm-5.2"],
           },
         }),
       ],
       [
         "site_builder.design_spec",
         expect.objectContaining({
-          state: "currentRoute",
-          route: {
-            primary: "minimax-m3",
-            fallbacks: ["doubao-seed-2.0-pro"],
-          },
+          state: "deterministicFallback",
+          fallback: expect.objectContaining({ id: "safe-blueprint" }),
         }),
       ],
       [
@@ -2115,7 +2112,7 @@ describe("harness integration and unchanged runtime routes", () => {
           state: "currentRoute",
           route: {
             primary: "deepseek-v4-flash",
-            fallbacks: ["doubao-seed-2.0-lite"],
+            fallbacks: [],
           },
         }),
       ],
@@ -2125,7 +2122,7 @@ describe("harness integration and unchanged runtime routes", () => {
           state: "currentRoute",
           route: {
             primary: "deepseek-v4-flash",
-            fallbacks: ["doubao-seed-2.0-lite"],
+            fallbacks: [],
           },
         }),
       ],
