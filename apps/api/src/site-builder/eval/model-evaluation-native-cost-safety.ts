@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   MODEL_CANDIDATE_PROTOCOLS,
   type ModelCandidateProtocol,
@@ -12,7 +14,7 @@ import {
  * or summed.
  */
 export const SITE_BUILDER_MODEL_EVALUATION_NATIVE_COST_SAFETY_ID =
-  "site-builder-model-evaluation-native-cost-safety/2026-08-03-v1" as const;
+  "site-builder-model-evaluation-native-cost-safety/2026-08-03-v2" as const;
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -86,6 +88,10 @@ const NATIVE_BIGINT = BigInt;
 const NATIVE_BIGINT_TO_STRING = BigInt.prototype.toString;
 const NATIVE_REGEXP_TEST = RegExp.prototype.test;
 const NATIVE_STRUCTURED_CLONE = structuredClone;
+const NATIVE_CREATE_HASH = createHash;
+const NATIVE_HASH = NATIVE_CREATE_HASH("sha256");
+const NATIVE_HASH_UPDATE = NATIVE_HASH.update;
+const NATIVE_HASH_DIGEST = NATIVE_HASH.digest;
 
 export type NativeModelEvaluationCurrency = "CNY" | "USD";
 export type NativeModelEvaluationWireAttempt = "initial" | "repair";
@@ -244,6 +250,12 @@ function nativeBigIntString(value: bigint): string {
   return NATIVE_APPLY(NATIVE_BIGINT_TO_STRING, value, []) as string;
 }
 
+function nativeSha256Text(value: string): string {
+  const hash = NATIVE_CREATE_HASH("sha256");
+  NATIVE_APPLY(NATIVE_HASH_UPDATE, hash, [value, "utf8"]);
+  return NATIVE_APPLY(NATIVE_HASH_DIGEST, hash, ["hex"]) as string;
+}
+
 function canonicalUtcInstant(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const milliseconds = NATIVE_DATE_PARSE(value);
@@ -270,14 +282,16 @@ function canonicalPicoUnits(value: unknown): value is string {
 }
 
 function exactKeys(value: unknown, expected: readonly string[]): boolean {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    NATIVE_JSON_STRINGIFY(nativeArraySort(NATIVE_OBJECT_KEYS(value))) ===
-      NATIVE_JSON_STRINGIFY(
-        nativeArraySort(nativeArrayMap(expected, (key) => key)),
-      )
+  if (!value || typeof value !== "object") return false;
+  const actual = nativeArraySort(NATIVE_OBJECT_KEYS(value));
+  const expectedKeys = nativeArraySort(
+    nativeArrayMap(expected, (key) => key),
   );
+  if (actual.length !== expectedKeys.length) return false;
+  for (let index = 0; index < actual.length; index += 1) {
+    if (actual[index] !== expectedKeys[index]) return false;
+  }
+  return true;
 }
 
 function dispatchKey(value: {
@@ -295,14 +309,61 @@ function exactDispatchSet(
     currency: NativeModelEvaluationCurrency;
   }[],
 ): boolean {
-  const actual = nativeArraySort(nativeArrayMap(values, dispatchKey));
   const expected = nativeArraySort(
     nativeArrayMap(REQUIRED_TARGET_DISPATCHES, dispatchKey),
   );
+  if (values.length !== expected.length) return false;
+  for (let index = 0; index < values.length; index += 1) {
+    if (
+      !NATIVE_APPLY(NATIVE_OBJECT_HAS_OWN, Object, [values, index]) ||
+      !values[index]
+    ) {
+      return false;
+    }
+  }
+  const actual = nativeArraySort(nativeArrayMap(values, dispatchKey));
   return (
     actual.length === expected.length &&
     nativeArrayEvery(actual, (value, index) => value === expected[index])
   );
+}
+
+/**
+ * Binds a prepared fee-card identifier to the exact, native-currency OpenOx
+ * prices that will later be reserved and settled. This deliberately contains
+ * no FX or generic-cents representation.
+ */
+export function nativeModelEvaluationPricingFeeCardSha256(
+  pricing: NativeModelEvaluationCostSafetyInput["pricing"],
+): string {
+  const entries = nativeArraySort(
+    nativeArrayMap(pricing.entries, (entry) =>
+      NATIVE_JSON_STRINGIFY(entry.alias) +
+      "\u0000" +
+      NATIVE_JSON_STRINGIFY(entry.protocol) +
+      "\u0000" +
+      NATIVE_JSON_STRINGIFY(entry.currency) +
+      "\u0000" +
+      NATIVE_JSON_STRINGIFY(entry.inputRateMicrounitsPerMillionTokens) +
+      "\u0000" +
+      NATIVE_JSON_STRINGIFY(entry.outputRateMicrounitsPerMillionTokens),
+    ),
+  );
+  let canonical =
+    "site-builder-model-evaluation-native-pricing-fee-card/v1\u0000" +
+    NATIVE_JSON_STRINGIFY(pricing.authority) +
+    "\u0000" +
+    NATIVE_JSON_STRINGIFY(pricing.catalogEndpoint) +
+    "\u0000" +
+    NATIVE_JSON_STRINGIFY(pricing.capturedAt) +
+    "\u0000" +
+    NATIVE_JSON_STRINGIFY(pricing.catalogResponseSha256) +
+    "\u0000" +
+    NATIVE_JSON_STRINGIFY(pricing.noForeignExchangeConversion);
+  for (let index = 0; index < entries.length; index += 1) {
+    canonical += `\u0000${entries[index]}`;
+  }
+  return nativeSha256Text(canonical);
 }
 
 function aliasProtocolKey(value: {
@@ -517,7 +578,9 @@ function validNativeCostSafetyInput(
     settlement.requestIdentityField !== "executionId" ||
     settlement.requireVerifiedRequestSettlement !== true ||
     settlement.unknownSettlementPolicy !== "freeze_campaign" ||
-    !matchesExactNativeDesignSpecMatrix(authorization, pricing, limits)
+    !matchesExactNativeDesignSpecMatrix(authorization, pricing, limits) ||
+    authorization.preparedFeeCardSha256 !==
+      nativeModelEvaluationPricingFeeCardSha256(pricing)
   ) {
     return false;
   }

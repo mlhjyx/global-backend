@@ -5,14 +5,15 @@ import {
   createNativeModelEvaluationCostSafetyAttestation,
   isTrustedNativeModelEvaluationCostSafetyAttestation,
   nativeMaximumPicoUnitsForModelEvaluationWire,
+  nativeModelEvaluationPricingFeeCardSha256,
   nativePicoUnitsForModelEvaluationUsage,
   type NativeModelEvaluationCostSafetyInput,
 } from "./model-evaluation-native-cost-safety";
 
 function validInput(): NativeModelEvaluationCostSafetyInput {
-  return {
+  const input: NativeModelEvaluationCostSafetyInput = {
     contractId:
-      "site-builder-model-evaluation-native-cost-safety/2026-08-03-v1",
+      "site-builder-model-evaluation-native-cost-safety/2026-08-03-v2",
     authorization: {
       authorizationId: "design-spec-native-dispatch-authorization-20260803",
       ledgerId: "design-spec-native-dispatch-ledger",
@@ -110,6 +111,9 @@ function validInput(): NativeModelEvaluationCostSafetyInput {
       unknownSettlementPolicy: "freeze_campaign",
     },
   };
+  input.authorization.preparedFeeCardSha256 =
+    nativeModelEvaluationPricingFeeCardSha256(input.pricing);
+  return input;
 }
 
 describe("native model-evaluation cost safety", () => {
@@ -257,6 +261,59 @@ describe("native model-evaluation cost safety", () => {
     expect(() =>
       createNativeModelEvaluationCostSafetyAttestation(aboveApprovedCnyCap),
     ).toThrow("native model evaluation cost safety attestation is invalid");
+  });
+
+  it("binds the prepared fee-card digest to every admitted pricing entry", () => {
+    const rateSubstitution = validInput();
+    // These countervailing input-rate changes retain the aggregate CNY total:
+    // 24 * 429_575 === 25 * 412_392. They must still invalidate the card.
+    rateSubstitution.pricing.entries[0] = {
+      ...rateSubstitution.pricing.entries[0]!,
+      inputRateMicrounitsPerMillionTokens: 2_429_575,
+    };
+    rateSubstitution.pricing.entries[1] = {
+      ...rateSubstitution.pricing.entries[1]!,
+      inputRateMicrounitsPerMillionTokens: 4_587_608,
+    };
+
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(rateSubstitution),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
+  });
+
+  it("rejects sparse dispatch allowlists and live Array toJSON key bypasses", () => {
+    const sparseDispatches = validInput();
+    const admitted = sparseDispatches.credential.allowedDispatches;
+    sparseDispatches.credential.allowedDispatches = [
+      admitted[2]!,
+    ] as typeof sparseDispatches.credential.allowedDispatches;
+    sparseDispatches.credential.allowedDispatches.length = 3;
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(sparseDispatches),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
+
+    const unknownRootField = validInput() as NativeModelEvaluationCostSafetyInput &
+      Record<string, unknown>;
+    unknownRootField.unrecognizedAuthorizationField = true;
+    const originalToJson = Object.getOwnPropertyDescriptor(
+      Array.prototype,
+      "toJSON",
+    );
+    try {
+      Object.defineProperty(Array.prototype, "toJSON", {
+        configurable: true,
+        value: () => [],
+      });
+      expect(() =>
+        createNativeModelEvaluationCostSafetyAttestation(unknownRootField),
+      ).toThrow("native model evaluation cost safety attestation is invalid");
+    } finally {
+      if (originalToJson) {
+        Object.defineProperty(Array.prototype, "toJSON", originalToJson);
+      } else {
+        Reflect.deleteProperty(Array.prototype, "toJSON");
+      }
+    }
   });
 
   it("keeps admission correct after mutable validation intrinsics are tampered", () => {
