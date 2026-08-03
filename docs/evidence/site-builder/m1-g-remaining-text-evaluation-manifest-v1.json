@@ -1,0 +1,3631 @@
+{
+  "schemaVersion": "site-builder-remaining-text-evaluation-manifest-prep/v1",
+  "prepId": "site-builder-remaining-text-evaluation-manifest-prep/2026-08-04-v1",
+  "harnessId": "site-builder-model-evaluation-harness/2026-08-01-v18",
+  "taskIds": [
+    "site_builder.copy",
+    "site_builder.assemble",
+    "site_builder.assembly_fix",
+    "site_builder.qa_summarize",
+    "site_builder.seo_review"
+  ],
+  "fixedCommitSha": "0891b374321961b8aad13c8b215985ca623a4c0c",
+  "createOnly": true,
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "actualNetworkCalls": 0,
+  "actualModelCostCents": 0,
+  "tasks": [
+    {
+      "taskId": "site_builder.copy",
+      "suiteId": "site-builder.copy-evaluation-suite/2026-08-04-v1",
+      "fixtureSetId": "site-builder-copy-golden/2026-08-04-v1",
+      "fixtureCount": 2,
+      "repeats": 2,
+      "sourceBundleContractId": "copy-evaluation-source-bundle/v1",
+      "sourceBundleSha256": "1df4a5d1883250d71d75ac85c226c80e50eee6eb0ac073a82909032906390140",
+      "sourceFiles": [
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+          "sha256": "3dbdf5fcdd941d255115e87a6db715b709591ef5d56e3d11b88777bdaf3cd6e3"
+        },
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+          "sha256": "af295f4f1b431a19a5719c39c0925e545c0813c7d6b16520205e4b6e61c9a701"
+        },
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/agents/copy.ts",
+          "sha256": "a1474cd212f2566a3680b589f11b651518e8ccb83fe594ef52758425b02f2031"
+        },
+        {
+          "role": "copy_consumer",
+          "path": "apps/api/src/site-builder/copy-bundle.service.ts",
+          "sha256": "3be4361fa3af729931f88b2b557d3ffd5c79a8d69f935474b9babeb6f3051cf5"
+        },
+        {
+          "role": "claim_snapshot",
+          "path": "apps/api/src/site-builder/publishable-claim-snapshot.ts",
+          "sha256": "531b9e54118c8586dccb6dbf8aecc9b12e17067bf0d6082ca34a66e9ed22a38c"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/copy-assembly-eval.ts",
+          "sha256": "37effe244be980f0726f764af28bc3496674f0aea5b944db77a62ff3219ea580"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+          "sha256": "afd791e7d6b70430d6aaef4483ecc1de2ff15bbce84ba82cd35f10798a5a2cfe"
+        },
+        {
+          "role": "evaluation_executor",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+          "sha256": "7dae41819d6e547c12b865b629dea072101f80c89d0c5a96f5ec3d0fb9b4cd8d"
+        },
+        {
+          "role": "evaluation_cost_safety",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+          "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "73d51221f6c153853340cbf236588c42b778a9efd93b0f8a2a4243ee631297bf"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "06dd85c27cd782ee925106678ea7a22b02d3f599b1da0eef8bfa84433f02f251"
+        },
+        {
+          "role": "task_route_binding",
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "50c5d27bb866775594100b583fb29f007e24d0207ec8bd575c0739160c0d81e6"
+        },
+        {
+          "role": "provider",
+          "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+          "sha256": "63e9aad11d514b604e92abd803130f2935cfe4601dbc5b39cc3926960fda1207"
+        },
+        {
+          "role": "transport_registry",
+          "path": "apps/api/src/model-gateway/model-transports.ts",
+          "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "1421e89819c05d49240628832150b581e28db794293186e1eaaf359714b6248d"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "f85850dddf966ef6391ae60eaeeb0d1ec5a0b83d5f045b8b877df5f56667a368"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "provider_error",
+          "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+          "sha256": "3ffa9ce576b97f2cf5c377306eb69ad50875e39b73ac00b7f8d687db461bea71"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "8953ca1d61c3e1a05dfbefe27f2191b114d9a2e267c5dc28b1a0d6a62d76a740"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "06fa1ef329af6cc0295a3ea94bc47a1e8247220770bcfb359a2d13597f5fbcc1"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "cb9dc6489fde3c6e2e9bad8b3ff4755cb00ed4a441eb4112d03a627ef8d0970c"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/copy-bundle.ts",
+          "sha256": "0149362f77e94fba6259006a52d026a2169f89d1d166c434628ef99404a224a1"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/model-policy.ts",
+          "sha256": "168d8cc048a7f24c0c7c04c8b0e5d9ead6042d97f1444c438b40500afbf2db13"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/index.ts",
+          "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+        },
+        {
+          "role": "contracts_build",
+          "path": "packages/contracts/tsconfig.json",
+          "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+        },
+        {
+          "role": "contracts_manifest",
+          "path": "packages/contracts/package.json",
+          "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "edc437e36d140c0e68959d215197c50e3f65f6106ac97377dbe77b999ed6ffea"
+        }
+      ],
+      "candidates": [
+        {
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "preflight": "capability_probe"
+        },
+        {
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        }
+      ],
+      "legacyComparatorAliases": [],
+      "deterministicComparator": {
+        "applicable": false,
+        "caseCount": 0,
+        "wireCallCount": 0,
+        "costCents": 0
+      },
+      "executions": [
+        {
+          "ordinal": 1,
+          "executionKey": "capability_probe/gpt-5.5/openai-responses/copy-factual-claims/1",
+          "kind": "capability_probe",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 2,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/copy-factual-claims/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 3,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/copy-factual-claims/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 4,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/copy-neutral-budget/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "copy-neutral-budget",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 5,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/copy-neutral-budget/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "copy-neutral-budget",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 6,
+          "executionKey": "target/gpt-5.5/openai-responses/copy-factual-claims/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 7,
+          "executionKey": "target/gpt-5.5/openai-responses/copy-factual-claims/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 8,
+          "executionKey": "target/gpt-5.5/openai-responses/copy-neutral-budget/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-neutral-budget",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 9,
+          "executionKey": "target/gpt-5.5/openai-responses/copy-neutral-budget/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-neutral-budget",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 10,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/copy-factual-claims/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 11,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/copy-factual-claims/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-factual-claims",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 12,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/copy-neutral-budget/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-neutral-budget",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 13,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/copy-neutral-budget/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "copy-neutral-budget",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        }
+      ],
+      "executionCount": 13,
+      "maximumWireCallCount": 26
+    },
+    {
+      "taskId": "site_builder.assemble",
+      "suiteId": "site-builder.assemble-evaluation-suite/2026-08-04-v1",
+      "fixtureSetId": "site-builder-controlled-assembly-golden/2026-08-04-v1",
+      "fixtureCount": 12,
+      "repeats": 2,
+      "sourceBundleContractId": "controlled-assembly-evaluation-source-bundle/v1",
+      "sourceBundleSha256": "1a17813835b6c3d776aaa51b47522e65acc1eab081dcd69b3d0f9b00d8011e2e",
+      "sourceFiles": [
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+          "sha256": "3dbdf5fcdd941d255115e87a6db715b709591ef5d56e3d11b88777bdaf3cd6e3"
+        },
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+          "sha256": "af295f4f1b431a19a5719c39c0925e545c0813c7d6b16520205e4b6e61c9a701"
+        },
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/agents/controlled-assembly.ts",
+          "sha256": "b47de3f2ab6819691fcf0e8e09156f974413762cf5933018a6a54532a94f0a75"
+        },
+        {
+          "role": "assembly_consumer",
+          "path": "apps/api/src/site-builder/assembly/controlled-assembly.service.ts",
+          "sha256": "958f48282b547f9e13dcc204ab93e2250b2583a913ccbe0df17daaf9678c84df"
+        },
+        {
+          "role": "assembly_validator",
+          "path": "apps/api/src/site-builder/assembly/controlled-assembly-validator.ts",
+          "sha256": "13c333dcf1ae348193dde6a9eea6e9e1de780ad28be7e7b40d53ed80d1929cf6"
+        },
+        {
+          "role": "assembly_adapters",
+          "path": "apps/api/src/site-builder/assembly/component-assembly-adapters.ts",
+          "sha256": "35edfb19233c8620674ba377f6d602febdd50c6afdcfb5ada7cdf5ed432ff94b"
+        },
+        {
+          "role": "copy_slot_derivation",
+          "path": "apps/api/src/site-builder/assembly/copy-slot-derivation.ts",
+          "sha256": "8a11d4fca7b2a8ca9f3a0277fda51726faf9e94103ffd8f56076f6fdaaf8b48e"
+        },
+        {
+          "role": "copy_bundle",
+          "path": "apps/api/src/site-builder/copy-bundle.service.ts",
+          "sha256": "3be4361fa3af729931f88b2b557d3ffd5c79a8d69f935474b9babeb6f3051cf5"
+        },
+        {
+          "role": "controlled_assets",
+          "path": "apps/api/src/site-builder/controlled-asset-materializer.ts",
+          "sha256": "813725bf1c6d16d86f544664d7f2b698ed4955316b38d9758d6ef285e56b1e31"
+        },
+        {
+          "role": "qualified_templates",
+          "path": "apps/api/src/site-builder/assembly/qualified-component-templates.ts",
+          "sha256": "9794032c70d598153b8b5e981bd87b5926acb3ee0fbf7c28984b8c2330d37497"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/about-block-spec.json",
+          "sha256": "fd5d2460ecf6e3382385430a1b9a1e698edc7f0f6fc40eafd826f19ed1625bcc"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/area-gallery-spec.json",
+          "sha256": "58080dc30d969344d129d64f9761847dca020283d046b76c0fcf41958c38c357"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/area-marquee-spec.json",
+          "sha256": "bc71d8577068cd23a3046bdf0199fdba7b12916ec203431580ae4d50c9849ecd"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/article-grid-spec.json",
+          "sha256": "ed34d3dd092236905a7b6b35958fa683b26b8d1c13466bf4b0cdc11e4291bf2e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/axiom-hero-spec.json",
+          "sha256": "61cba628977712d454e4248a62ac57d4f43c21b3e571caba5589f0425bfa361e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/cert-wall-spec.json",
+          "sha256": "c15d7f6caff45a6f13bff2fdf6af073456163ad952046ba94c4bd60e4ae22d10"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/chapter-showcase-spec.json",
+          "sha256": "4c93ac0ae61c9d3b06f9c98e61d431e153e998d3c3083484628bf8f87b4348e5"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/collection-cards-spec.json",
+          "sha256": "bcc12e112851bc32d3a9a26b5df151565de6276e150ae4dce978340094df44c6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/colorway-picker-spec.json",
+          "sha256": "3846fcaec7139f77168835ae0cf96d9df891475d091b42684877c823d0dc4b66"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/coverage-map-spec.json",
+          "sha256": "1e2a6d5e386d3542ef1910c494963fdad5188d8939019ce535993aec3bbe0ae6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/crew-grid-spec.json",
+          "sha256": "fcdda19366e9eb1d7f71d00a0745a3263aa783df4a253b4d3a17522eee9371ac"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/cta-banner-spec.json",
+          "sha256": "78c9fadfcf97efe15229beaeb45e0c6c00f25f3d40549b632f49edb8b336e0c4"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/cta-center-spec.json",
+          "sha256": "0d934b001191ab659d1a47baf5d010dfbde19074a716b42871beefc011e7a482"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/dishes-showcase-spec.json",
+          "sha256": "4375d31569a7a6997b0d6b5b9a6936df409084f6bb7670a923ac43ca6efef44e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/dispatch-hero-spec.json",
+          "sha256": "2fc5f25bc36d925e95b123a7bce1f91ca10bee2260ae11a3927c98c68e98a720"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/dispatch-timeline-spec.json",
+          "sha256": "193e024b9981b2d76244505469fe309a57c9c90cf79db046dcd13ae82a57bae6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/editorial-hero-spec.json",
+          "sha256": "317affd5b037dda4d5364c6afe069d9a1e58a9b67de16ad8504186b44458f5a6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/faq-accordion-spec.json",
+          "sha256": "e2e11d8577738f8aa75f3e817cfbf735c9b56419dd3d25b9529468d5bfe37779"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/faq-split-spec.json",
+          "sha256": "2cc909e3eec80652c88a0d95dad5358f11f2140fe92744566a3f7a118a55bbae"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/farmhouse-hero-spec.json",
+          "sha256": "2125a3b47f5d2c6773d9eb542ba44836f375334e8a84a142960196140ddbe93c"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/feature-cards-spec.json",
+          "sha256": "0b9616347ab440b2d1a2f00139984851a4c68927c08a953d3c5edec89c62b453"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/featured-spotlight-spec.json",
+          "sha256": "862b5a8c93b8bf923384964da563505354e3f8fec8383b33770e54264c7fd767"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/hero-banner-spec.json",
+          "sha256": "5e2c912bfb236056b6b06e86f219c8a23946b8a67d56fbcd6f75d91bb04ed03e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/hero-full-spec.json",
+          "sha256": "7ff507c5dd59093ae98ba077cf7d7a016c39b435f9ad67c5e6f71ee3c5003761"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/industrial-hero-spec.json",
+          "sha256": "ed7208d5e2c2ac73582462bf201d96e067a887db99bcb6b13a228753554372f0"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/inquiry-form-spec.json",
+          "sha256": "4b07a8e02732d237ee78ed942daff8dc2c88091752d0221cfeb5d5a1044a398f"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/ledger-stats-spec.json",
+          "sha256": "0cb9ac67fa2171b157287164fce0fab4e6d59f47a82a3b626e34f6eda058564f"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/logo-marquee-spec.json",
+          "sha256": "4f71a52397917533f325e217fc18c8228fd9bf7c260f7b5ec0dcabb6d5d7235f"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/map-location-spec.json",
+          "sha256": "7a773b1b1c4470684120685f36460c63d0d78e553bd24966a43313cdeca96293"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/materials-library-spec.json",
+          "sha256": "e1e8f4a485e3afe90bc6b551c1282397f0424cdc57303ccb85d48e1ca700a81e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/media-cta-spec.json",
+          "sha256": "627d7e5653b807c1ab8862eb4266785a53e21b332e7dde9a15178f9c0a358300"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/minimal-hero-spec.json",
+          "sha256": "2e9e03bcca7df08d997524e1478f182018186d4fc1624000dbce0d9efeb7eac6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/photo-gallery-spec.json",
+          "sha256": "d540e6e12e105f5fa80867ffd07a2461dd76589c2e42ea1ad361b8ad4f6bc316"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/pricing-table-spec.json",
+          "sha256": "be699e53bf9b990429c56a2dc46b5027e72c80a7cf4d4d098e00f62dcdb4a988"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/pricing-tiers-spec.json",
+          "sha256": "55e56c9470f431dce847723b3f88ed363f1bae63217ebe34ee60ec4fa144164d"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/process-steps-spec.json",
+          "sha256": "4a15571db7a6a7bedb1654792f209da4d132f5c3e13f732c9d62150ed1300371"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/process-timeline-spec.json",
+          "sha256": "cdb8b14f17c4d302317123c681e76ef9556ba7880b329b1286132ddffd3ddd83"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/product-grid-spec.json",
+          "sha256": "27f14e26db403da4a077f568863b0b91ef7e7989b95387147a377fd8ed89686b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/product-showcase-alt-spec.json",
+          "sha256": "2801026f16f1c06e44094e6f3e904d1ccdd1f5e94d3c715224320d4317bd2633"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/projects-grid-spec.json",
+          "sha256": "f86b13fd1a7ec311b2a92b2760211ab6ec0a6f6e660a276272f40ea41d4c9e2b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/saa-shero-spec.json",
+          "sha256": "b4dd044ce78ded12d96203d5980f72d2996d89fad6cf13bc38c1d4e667504d2b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/service-rows-spec.json",
+          "sha256": "dff888a79c43512f1f44ca29c9cd0371cb6df4d4b24bbb5d0ef0e0009bba7c81"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/services-dark-spec.json",
+          "sha256": "df5277e2a7fd22cf9c89479885234e5425f9e34813d25387b3bf4f4d3ff85c69"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/services-editorial-spec.json",
+          "sha256": "013c7c7068fc88c5d356ffd096d998168684b59bfd436dd750e4f9558d6a51b6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/services-grid-spec.json",
+          "sha256": "a7b4b495f058889663f4817d9c322850e9bdab3db0bfed936b9773c86d7836cc"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/split-about-spec.json",
+          "sha256": "cd2b4d11bf498cb0e207d81245de47b37ffc647ad81fd0d89ab9f83f33e49e85"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/statement-block-spec.json",
+          "sha256": "73aa05d631c4fdabbaff64a5629089d288f21209de5699655b9bc465ce9d3663"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/stats-band-spec.json",
+          "sha256": "0385f26082bdf4c97df3a3fcd95a4f485a8127df5d2e7de60f675d36afadd295"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/stats-countup-spec.json",
+          "sha256": "f4c46c7f93d40e8c17ae8f07962078a28ef6329ace4f087bd572f5866fdb58a2"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/story-chapters-spec.json",
+          "sha256": "cab395546c5b0dad7f18e7f7024916db089aa345ef70c05ef21ffaf6b3d50d97"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/tech-systems-spec.json",
+          "sha256": "807b3ab10ca3b263ff0b4385845c31180512b60c7ec96d857f7151ef4900565b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/testimonials-spec.json",
+          "sha256": "7d14e2556beee78f1fddb823c67ebdc85cfa2de890066458a1052503755321a7"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/trust-split-spec.json",
+          "sha256": "5f1448ca2dee530ea289c77a3f893d767ec7d41713faf6fd2919c41af79d0c76"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/value-strip-spec.json",
+          "sha256": "b2abc8c854f26012951ac1a4780f866132aac8f1ba83eff08ea496c810d2c5ca"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/warm-hero-spec.json",
+          "sha256": "72e15ddab78cf2fa976baa6fa553538ebb24b68a8cc41ac5d7f7b535bd839f33"
+        },
+        {
+          "role": "golden_fixture_source",
+          "path": "apps/api/src/site-builder/design/m1eb-golden.ts",
+          "sha256": "806e178315210a98f53ceaa7841fa7d0eba7799285378527a2b4aa39546d1295"
+        },
+        {
+          "role": "design_brief_producer",
+          "path": "apps/api/src/site-builder/design/design-brief-producer.ts",
+          "sha256": "f97d7fe4c7975ee5529cb13d2f64f68d787ba2c2d06d1f2f10bcbcac6b9f3dfd"
+        },
+        {
+          "role": "catalog",
+          "path": "apps/api/src/site-builder/design/catalog.ts",
+          "sha256": "cdeeda19cbb45799e5217348c462dba8046d7a382c64678e89be8e9d4db29bf9"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/controlled-assembly-eval.ts",
+          "sha256": "03b242f707ef57d74a8f5aa6d9493ce97df37604049fd38f24c9a58404b3360a"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+          "sha256": "afd791e7d6b70430d6aaef4483ecc1de2ff15bbce84ba82cd35f10798a5a2cfe"
+        },
+        {
+          "role": "evaluation_executor",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+          "sha256": "7dae41819d6e547c12b865b629dea072101f80c89d0c5a96f5ec3d0fb9b4cd8d"
+        },
+        {
+          "role": "evaluation_cost_safety",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+          "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "73d51221f6c153853340cbf236588c42b778a9efd93b0f8a2a4243ee631297bf"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "06dd85c27cd782ee925106678ea7a22b02d3f599b1da0eef8bfa84433f02f251"
+        },
+        {
+          "role": "task_route_binding",
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "50c5d27bb866775594100b583fb29f007e24d0207ec8bd575c0739160c0d81e6"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "1421e89819c05d49240628832150b581e28db794293186e1eaaf359714b6248d"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "f85850dddf966ef6391ae60eaeeb0d1ec5a0b83d5f045b8b877df5f56667a368"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "8953ca1d61c3e1a05dfbefe27f2191b114d9a2e267c5dc28b1a0d6a62d76a740"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "06fa1ef329af6cc0295a3ea94bc47a1e8247220770bcfb359a2d13597f5fbcc1"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "cb9dc6489fde3c6e2e9bad8b3ff4755cb00ed4a441eb4112d03a627ef8d0970c"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/design-brief.ts",
+          "sha256": "122036af8d18ed76ebc7524a0555c046e195246e23f94e15be6ae40719c607d2"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/site-spec.ts",
+          "sha256": "06b4b1025423edc0b723dbee4c0035be120429a1410a723c5eb6462cddb83674"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/model-policy.ts",
+          "sha256": "168d8cc048a7f24c0c7c04c8b0e5d9ead6042d97f1444c438b40500afbf2db13"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/index.ts",
+          "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+        },
+        {
+          "role": "contracts_build",
+          "path": "packages/contracts/tsconfig.json",
+          "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+        },
+        {
+          "role": "contracts_manifest",
+          "path": "packages/contracts/package.json",
+          "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "edc437e36d140c0e68959d215197c50e3f65f6106ac97377dbe77b999ed6ffea"
+        }
+      ],
+      "candidates": [
+        {
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "preflight": "capability_probe"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "preflight": "none"
+        }
+      ],
+      "legacyComparatorAliases": [],
+      "deterministicComparator": {
+        "applicable": false,
+        "caseCount": 0,
+        "wireCallCount": 0,
+        "costCents": 0
+      },
+      "executions": [
+        {
+          "ordinal": 1,
+          "executionKey": "capability_probe/gpt-5.5/openai-responses/assemble-natural-origin-rich/1",
+          "kind": "capability_probe",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 2,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-natural-origin-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 3,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-natural-origin-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 4,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-natural-origin-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 5,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-natural-origin-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 6,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-oem-capability-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 7,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-oem-capability-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 8,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-oem-capability-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 9,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-oem-capability-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 10,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-precision-industrial-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 11,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-precision-industrial-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 12,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-precision-industrial-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 13,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-precision-industrial-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 14,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-premium-innovation-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 15,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-premium-innovation-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 16,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-premium-innovation-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 17,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-premium-innovation-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 18,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-scientific-trust-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 19,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-scientific-trust-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 20,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-scientific-trust-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 21,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-scientific-trust-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 22,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-technical-catalog-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 23,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-technical-catalog-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 24,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-technical-catalog-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 25,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assemble-technical-catalog-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 26,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-natural-origin-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 27,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-natural-origin-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 28,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-natural-origin-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 29,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-natural-origin-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-natural-origin-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 30,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-oem-capability-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 31,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-oem-capability-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 32,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-oem-capability-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 33,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-oem-capability-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-oem-capability-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 34,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-precision-industrial-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 35,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-precision-industrial-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 36,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-precision-industrial-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 37,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-precision-industrial-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-precision-industrial-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 38,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-premium-innovation-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 39,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-premium-innovation-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 40,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-premium-innovation-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 41,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-premium-innovation-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-premium-innovation-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 42,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-scientific-trust-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 43,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-scientific-trust-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 44,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-scientific-trust-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 45,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-scientific-trust-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-scientific-trust-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 46,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-technical-catalog-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 47,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-technical-catalog-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 48,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-technical-catalog-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 49,
+          "executionKey": "target/gpt-5.5/openai-responses/assemble-technical-catalog-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assemble-technical-catalog-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 50,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-natural-origin-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 51,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-natural-origin-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-natural-origin-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 52,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-natural-origin-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-natural-origin-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 53,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-natural-origin-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-natural-origin-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 54,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-oem-capability-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-oem-capability-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 55,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-oem-capability-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-oem-capability-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 56,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-oem-capability-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-oem-capability-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 57,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-oem-capability-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-oem-capability-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 58,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-precision-industrial-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-precision-industrial-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 59,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-precision-industrial-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-precision-industrial-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 60,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-precision-industrial-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-precision-industrial-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 61,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-precision-industrial-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-precision-industrial-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 62,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-premium-innovation-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-premium-innovation-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 63,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-premium-innovation-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-premium-innovation-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 64,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-premium-innovation-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-premium-innovation-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 65,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-premium-innovation-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-premium-innovation-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 66,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-scientific-trust-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-scientific-trust-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 67,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-scientific-trust-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-scientific-trust-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 68,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-scientific-trust-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-scientific-trust-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 69,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-scientific-trust-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-scientific-trust-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 70,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-technical-catalog-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-technical-catalog-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 71,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-technical-catalog-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-technical-catalog-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 72,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-technical-catalog-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-technical-catalog-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 73,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assemble-technical-catalog-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assemble-technical-catalog-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        }
+      ],
+      "executionCount": 73,
+      "maximumWireCallCount": 146
+    },
+    {
+      "taskId": "site_builder.assembly_fix",
+      "suiteId": "site-builder.assembly-fix-evaluation-suite/2026-08-04-v1",
+      "fixtureSetId": "site-builder-controlled-assembly-golden/2026-08-04-v1",
+      "fixtureCount": 12,
+      "repeats": 2,
+      "sourceBundleContractId": "controlled-assembly-evaluation-source-bundle/v1",
+      "sourceBundleSha256": "1a17813835b6c3d776aaa51b47522e65acc1eab081dcd69b3d0f9b00d8011e2e",
+      "sourceFiles": [
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+          "sha256": "3dbdf5fcdd941d255115e87a6db715b709591ef5d56e3d11b88777bdaf3cd6e3"
+        },
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+          "sha256": "af295f4f1b431a19a5719c39c0925e545c0813c7d6b16520205e4b6e61c9a701"
+        },
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/agents/controlled-assembly.ts",
+          "sha256": "b47de3f2ab6819691fcf0e8e09156f974413762cf5933018a6a54532a94f0a75"
+        },
+        {
+          "role": "assembly_consumer",
+          "path": "apps/api/src/site-builder/assembly/controlled-assembly.service.ts",
+          "sha256": "958f48282b547f9e13dcc204ab93e2250b2583a913ccbe0df17daaf9678c84df"
+        },
+        {
+          "role": "assembly_validator",
+          "path": "apps/api/src/site-builder/assembly/controlled-assembly-validator.ts",
+          "sha256": "13c333dcf1ae348193dde6a9eea6e9e1de780ad28be7e7b40d53ed80d1929cf6"
+        },
+        {
+          "role": "assembly_adapters",
+          "path": "apps/api/src/site-builder/assembly/component-assembly-adapters.ts",
+          "sha256": "35edfb19233c8620674ba377f6d602febdd50c6afdcfb5ada7cdf5ed432ff94b"
+        },
+        {
+          "role": "copy_slot_derivation",
+          "path": "apps/api/src/site-builder/assembly/copy-slot-derivation.ts",
+          "sha256": "8a11d4fca7b2a8ca9f3a0277fda51726faf9e94103ffd8f56076f6fdaaf8b48e"
+        },
+        {
+          "role": "copy_bundle",
+          "path": "apps/api/src/site-builder/copy-bundle.service.ts",
+          "sha256": "3be4361fa3af729931f88b2b557d3ffd5c79a8d69f935474b9babeb6f3051cf5"
+        },
+        {
+          "role": "controlled_assets",
+          "path": "apps/api/src/site-builder/controlled-asset-materializer.ts",
+          "sha256": "813725bf1c6d16d86f544664d7f2b698ed4955316b38d9758d6ef285e56b1e31"
+        },
+        {
+          "role": "qualified_templates",
+          "path": "apps/api/src/site-builder/assembly/qualified-component-templates.ts",
+          "sha256": "9794032c70d598153b8b5e981bd87b5926acb3ee0fbf7c28984b8c2330d37497"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/about-block-spec.json",
+          "sha256": "fd5d2460ecf6e3382385430a1b9a1e698edc7f0f6fc40eafd826f19ed1625bcc"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/area-gallery-spec.json",
+          "sha256": "58080dc30d969344d129d64f9761847dca020283d046b76c0fcf41958c38c357"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/area-marquee-spec.json",
+          "sha256": "bc71d8577068cd23a3046bdf0199fdba7b12916ec203431580ae4d50c9849ecd"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/article-grid-spec.json",
+          "sha256": "ed34d3dd092236905a7b6b35958fa683b26b8d1c13466bf4b0cdc11e4291bf2e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/axiom-hero-spec.json",
+          "sha256": "61cba628977712d454e4248a62ac57d4f43c21b3e571caba5589f0425bfa361e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/cert-wall-spec.json",
+          "sha256": "c15d7f6caff45a6f13bff2fdf6af073456163ad952046ba94c4bd60e4ae22d10"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/chapter-showcase-spec.json",
+          "sha256": "4c93ac0ae61c9d3b06f9c98e61d431e153e998d3c3083484628bf8f87b4348e5"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/collection-cards-spec.json",
+          "sha256": "bcc12e112851bc32d3a9a26b5df151565de6276e150ae4dce978340094df44c6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/colorway-picker-spec.json",
+          "sha256": "3846fcaec7139f77168835ae0cf96d9df891475d091b42684877c823d0dc4b66"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/coverage-map-spec.json",
+          "sha256": "1e2a6d5e386d3542ef1910c494963fdad5188d8939019ce535993aec3bbe0ae6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/crew-grid-spec.json",
+          "sha256": "fcdda19366e9eb1d7f71d00a0745a3263aa783df4a253b4d3a17522eee9371ac"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/cta-banner-spec.json",
+          "sha256": "78c9fadfcf97efe15229beaeb45e0c6c00f25f3d40549b632f49edb8b336e0c4"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/cta-center-spec.json",
+          "sha256": "0d934b001191ab659d1a47baf5d010dfbde19074a716b42871beefc011e7a482"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/dishes-showcase-spec.json",
+          "sha256": "4375d31569a7a6997b0d6b5b9a6936df409084f6bb7670a923ac43ca6efef44e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/dispatch-hero-spec.json",
+          "sha256": "2fc5f25bc36d925e95b123a7bce1f91ca10bee2260ae11a3927c98c68e98a720"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/dispatch-timeline-spec.json",
+          "sha256": "193e024b9981b2d76244505469fe309a57c9c90cf79db046dcd13ae82a57bae6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/editorial-hero-spec.json",
+          "sha256": "317affd5b037dda4d5364c6afe069d9a1e58a9b67de16ad8504186b44458f5a6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/faq-accordion-spec.json",
+          "sha256": "e2e11d8577738f8aa75f3e817cfbf735c9b56419dd3d25b9529468d5bfe37779"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/faq-split-spec.json",
+          "sha256": "2cc909e3eec80652c88a0d95dad5358f11f2140fe92744566a3f7a118a55bbae"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/farmhouse-hero-spec.json",
+          "sha256": "2125a3b47f5d2c6773d9eb542ba44836f375334e8a84a142960196140ddbe93c"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/feature-cards-spec.json",
+          "sha256": "0b9616347ab440b2d1a2f00139984851a4c68927c08a953d3c5edec89c62b453"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/featured-spotlight-spec.json",
+          "sha256": "862b5a8c93b8bf923384964da563505354e3f8fec8383b33770e54264c7fd767"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/hero-banner-spec.json",
+          "sha256": "5e2c912bfb236056b6b06e86f219c8a23946b8a67d56fbcd6f75d91bb04ed03e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/hero-full-spec.json",
+          "sha256": "7ff507c5dd59093ae98ba077cf7d7a016c39b435f9ad67c5e6f71ee3c5003761"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/industrial-hero-spec.json",
+          "sha256": "ed7208d5e2c2ac73582462bf201d96e067a887db99bcb6b13a228753554372f0"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/inquiry-form-spec.json",
+          "sha256": "4b07a8e02732d237ee78ed942daff8dc2c88091752d0221cfeb5d5a1044a398f"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/ledger-stats-spec.json",
+          "sha256": "0cb9ac67fa2171b157287164fce0fab4e6d59f47a82a3b626e34f6eda058564f"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/logo-marquee-spec.json",
+          "sha256": "4f71a52397917533f325e217fc18c8228fd9bf7c260f7b5ec0dcabb6d5d7235f"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/map-location-spec.json",
+          "sha256": "7a773b1b1c4470684120685f36460c63d0d78e553bd24966a43313cdeca96293"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/materials-library-spec.json",
+          "sha256": "e1e8f4a485e3afe90bc6b551c1282397f0424cdc57303ccb85d48e1ca700a81e"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/media-cta-spec.json",
+          "sha256": "627d7e5653b807c1ab8862eb4266785a53e21b332e7dde9a15178f9c0a358300"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/minimal-hero-spec.json",
+          "sha256": "2e9e03bcca7df08d997524e1478f182018186d4fc1624000dbce0d9efeb7eac6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/photo-gallery-spec.json",
+          "sha256": "d540e6e12e105f5fa80867ffd07a2461dd76589c2e42ea1ad361b8ad4f6bc316"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/pricing-table-spec.json",
+          "sha256": "be699e53bf9b990429c56a2dc46b5027e72c80a7cf4d4d098e00f62dcdb4a988"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/pricing-tiers-spec.json",
+          "sha256": "55e56c9470f431dce847723b3f88ed363f1bae63217ebe34ee60ec4fa144164d"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/process-steps-spec.json",
+          "sha256": "4a15571db7a6a7bedb1654792f209da4d132f5c3e13f732c9d62150ed1300371"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/process-timeline-spec.json",
+          "sha256": "cdb8b14f17c4d302317123c681e76ef9556ba7880b329b1286132ddffd3ddd83"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/product-grid-spec.json",
+          "sha256": "27f14e26db403da4a077f568863b0b91ef7e7989b95387147a377fd8ed89686b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/product-showcase-alt-spec.json",
+          "sha256": "2801026f16f1c06e44094e6f3e904d1ccdd1f5e94d3c715224320d4317bd2633"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/projects-grid-spec.json",
+          "sha256": "f86b13fd1a7ec311b2a92b2760211ab6ec0a6f6e660a276272f40ea41d4c9e2b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/saa-shero-spec.json",
+          "sha256": "b4dd044ce78ded12d96203d5980f72d2996d89fad6cf13bc38c1d4e667504d2b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/service-rows-spec.json",
+          "sha256": "dff888a79c43512f1f44ca29c9cd0371cb6df4d4b24bbb5d0ef0e0009bba7c81"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/services-dark-spec.json",
+          "sha256": "df5277e2a7fd22cf9c89479885234e5425f9e34813d25387b3bf4f4d3ff85c69"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/services-editorial-spec.json",
+          "sha256": "013c7c7068fc88c5d356ffd096d998168684b59bfd436dd750e4f9558d6a51b6"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/services-grid-spec.json",
+          "sha256": "a7b4b495f058889663f4817d9c322850e9bdab3db0bfed936b9773c86d7836cc"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/split-about-spec.json",
+          "sha256": "cd2b4d11bf498cb0e207d81245de47b37ffc647ad81fd0d89ab9f83f33e49e85"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/statement-block-spec.json",
+          "sha256": "73aa05d631c4fdabbaff64a5629089d288f21209de5699655b9bc465ce9d3663"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/stats-band-spec.json",
+          "sha256": "0385f26082bdf4c97df3a3fcd95a4f485a8127df5d2e7de60f675d36afadd295"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/stats-countup-spec.json",
+          "sha256": "f4c46c7f93d40e8c17ae8f07962078a28ef6329ace4f087bd572f5866fdb58a2"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/story-chapters-spec.json",
+          "sha256": "cab395546c5b0dad7f18e7f7024916db089aa345ef70c05ef21ffaf6b3d50d97"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/tech-systems-spec.json",
+          "sha256": "807b3ab10ca3b263ff0b4385845c31180512b60c7ec96d857f7151ef4900565b"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/testimonials-spec.json",
+          "sha256": "7d14e2556beee78f1fddb823c67ebdc85cfa2de890066458a1052503755321a7"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/trust-split-spec.json",
+          "sha256": "5f1448ca2dee530ea289c77a3f893d767ec7d41713faf6fd2919c41af79d0c76"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/value-strip-spec.json",
+          "sha256": "b2abc8c854f26012951ac1a4780f866132aac8f1ba83eff08ea496c810d2c5ca"
+        },
+        {
+          "role": "qualified_component_fixture",
+          "path": "apps/site-renderer/fixtures/component-qualification/warm-hero-spec.json",
+          "sha256": "72e15ddab78cf2fa976baa6fa553538ebb24b68a8cc41ac5d7f7b535bd839f33"
+        },
+        {
+          "role": "golden_fixture_source",
+          "path": "apps/api/src/site-builder/design/m1eb-golden.ts",
+          "sha256": "806e178315210a98f53ceaa7841fa7d0eba7799285378527a2b4aa39546d1295"
+        },
+        {
+          "role": "design_brief_producer",
+          "path": "apps/api/src/site-builder/design/design-brief-producer.ts",
+          "sha256": "f97d7fe4c7975ee5529cb13d2f64f68d787ba2c2d06d1f2f10bcbcac6b9f3dfd"
+        },
+        {
+          "role": "catalog",
+          "path": "apps/api/src/site-builder/design/catalog.ts",
+          "sha256": "cdeeda19cbb45799e5217348c462dba8046d7a382c64678e89be8e9d4db29bf9"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/controlled-assembly-eval.ts",
+          "sha256": "03b242f707ef57d74a8f5aa6d9493ce97df37604049fd38f24c9a58404b3360a"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+          "sha256": "afd791e7d6b70430d6aaef4483ecc1de2ff15bbce84ba82cd35f10798a5a2cfe"
+        },
+        {
+          "role": "evaluation_executor",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+          "sha256": "7dae41819d6e547c12b865b629dea072101f80c89d0c5a96f5ec3d0fb9b4cd8d"
+        },
+        {
+          "role": "evaluation_cost_safety",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+          "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "73d51221f6c153853340cbf236588c42b778a9efd93b0f8a2a4243ee631297bf"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "06dd85c27cd782ee925106678ea7a22b02d3f599b1da0eef8bfa84433f02f251"
+        },
+        {
+          "role": "task_route_binding",
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "50c5d27bb866775594100b583fb29f007e24d0207ec8bd575c0739160c0d81e6"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "1421e89819c05d49240628832150b581e28db794293186e1eaaf359714b6248d"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "f85850dddf966ef6391ae60eaeeb0d1ec5a0b83d5f045b8b877df5f56667a368"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "8953ca1d61c3e1a05dfbefe27f2191b114d9a2e267c5dc28b1a0d6a62d76a740"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "06fa1ef329af6cc0295a3ea94bc47a1e8247220770bcfb359a2d13597f5fbcc1"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "cb9dc6489fde3c6e2e9bad8b3ff4755cb00ed4a441eb4112d03a627ef8d0970c"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/design-brief.ts",
+          "sha256": "122036af8d18ed76ebc7524a0555c046e195246e23f94e15be6ae40719c607d2"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/site-spec.ts",
+          "sha256": "06b4b1025423edc0b723dbee4c0035be120429a1410a723c5eb6462cddb83674"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/model-policy.ts",
+          "sha256": "168d8cc048a7f24c0c7c04c8b0e5d9ead6042d97f1444c438b40500afbf2db13"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/index.ts",
+          "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+        },
+        {
+          "role": "contracts_build",
+          "path": "packages/contracts/tsconfig.json",
+          "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+        },
+        {
+          "role": "contracts_manifest",
+          "path": "packages/contracts/package.json",
+          "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "edc437e36d140c0e68959d215197c50e3f65f6106ac97377dbe77b999ed6ffea"
+        }
+      ],
+      "candidates": [
+        {
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "preflight": "capability_probe"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "preflight": "none"
+        }
+      ],
+      "legacyComparatorAliases": [],
+      "deterministicComparator": {
+        "applicable": false,
+        "caseCount": 0,
+        "wireCallCount": 0,
+        "costCents": 0
+      },
+      "executions": [
+        {
+          "ordinal": 1,
+          "executionKey": "capability_probe/gpt-5.5/openai-responses/assembly-fix-natural-origin-rich/1",
+          "kind": "capability_probe",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 2,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-natural-origin-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 3,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-natural-origin-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 4,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-natural-origin-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 5,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-natural-origin-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 6,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-oem-capability-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 7,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-oem-capability-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 8,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-oem-capability-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 9,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-oem-capability-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 10,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-precision-industrial-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 11,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-precision-industrial-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 12,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-precision-industrial-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 13,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-precision-industrial-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 14,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-premium-innovation-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 15,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-premium-innovation-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 16,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-premium-innovation-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 17,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-premium-innovation-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 18,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-scientific-trust-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 19,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-scientific-trust-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 20,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-scientific-trust-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 21,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-scientific-trust-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 22,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-technical-catalog-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 23,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-technical-catalog-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 24,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-technical-catalog-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 25,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/assembly-fix-technical-catalog-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 26,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-natural-origin-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 27,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-natural-origin-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 28,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-natural-origin-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 29,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-natural-origin-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-natural-origin-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 30,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-oem-capability-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 31,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-oem-capability-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 32,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-oem-capability-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 33,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-oem-capability-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-oem-capability-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 34,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-precision-industrial-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 35,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-precision-industrial-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 36,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-precision-industrial-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 37,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-precision-industrial-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-precision-industrial-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 38,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-premium-innovation-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 39,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-premium-innovation-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 40,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-premium-innovation-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 41,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-premium-innovation-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-premium-innovation-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 42,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-scientific-trust-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 43,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-scientific-trust-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 44,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-scientific-trust-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 45,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-scientific-trust-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-scientific-trust-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 46,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-technical-catalog-rich/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 47,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-technical-catalog-rich/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 48,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-technical-catalog-sparse/1",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 49,
+          "executionKey": "target/gpt-5.5/openai-responses/assembly-fix-technical-catalog-sparse/2",
+          "kind": "target",
+          "alias": "gpt-5.5",
+          "protocol": "openai-responses",
+          "fixtureId": "assembly-fix-technical-catalog-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 50,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-natural-origin-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 51,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-natural-origin-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-natural-origin-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 52,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-natural-origin-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-natural-origin-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 53,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-natural-origin-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-natural-origin-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 54,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-oem-capability-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-oem-capability-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 55,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-oem-capability-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-oem-capability-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 56,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-oem-capability-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-oem-capability-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 57,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-oem-capability-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-oem-capability-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 58,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-precision-industrial-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-precision-industrial-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 59,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-precision-industrial-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-precision-industrial-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 60,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-precision-industrial-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-precision-industrial-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 61,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-precision-industrial-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-precision-industrial-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 62,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-premium-innovation-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-premium-innovation-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 63,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-premium-innovation-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-premium-innovation-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 64,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-premium-innovation-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-premium-innovation-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 65,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-premium-innovation-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-premium-innovation-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 66,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-scientific-trust-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-scientific-trust-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 67,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-scientific-trust-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-scientific-trust-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 68,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-scientific-trust-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-scientific-trust-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 69,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-scientific-trust-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-scientific-trust-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 70,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-technical-catalog-rich/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-technical-catalog-rich",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 71,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-technical-catalog-rich/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-technical-catalog-rich",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 72,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-technical-catalog-sparse/1",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-technical-catalog-sparse",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 73,
+          "executionKey": "target/claude-sonnet-5/anthropic-messages/assembly-fix-technical-catalog-sparse/2",
+          "kind": "target",
+          "alias": "claude-sonnet-5",
+          "protocol": "anthropic-messages",
+          "fixtureId": "assembly-fix-technical-catalog-sparse",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        }
+      ],
+      "executionCount": 73,
+      "maximumWireCallCount": 146
+    },
+    {
+      "taskId": "site_builder.qa_summarize",
+      "suiteId": "site-builder.qa-summarize-evaluation-suite/2026-08-04-v1",
+      "fixtureSetId": "site-builder-quality-narrative-golden/2026-08-04-v1",
+      "fixtureCount": 2,
+      "repeats": 2,
+      "sourceBundleContractId": "quality-narrative-evaluation-source-bundle/v1",
+      "sourceBundleSha256": "c4c1c9ff1bfddc067487e9e1569f668cc187679b67280766f64d71a6bcc30f6d",
+      "sourceFiles": [
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+          "sha256": "3dbdf5fcdd941d255115e87a6db715b709591ef5d56e3d11b88777bdaf3cd6e3"
+        },
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+          "sha256": "af295f4f1b431a19a5719c39c0925e545c0813c7d6b16520205e4b6e61c9a701"
+        },
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/quality/quality-narrative.ts",
+          "sha256": "966c6e90f58456f5c530872689823bd03550eb58f755b083ae9a1577d58a19e0"
+        },
+        {
+          "role": "quality_narrative_consumer",
+          "path": "apps/api/src/site-builder/quality/quality-narrative.service.ts",
+          "sha256": "f452b70f27650134e75af218b604b86f7fb84bd74fdfdf8733e611228a59c973"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/quality-narrative-eval.ts",
+          "sha256": "82824413033d22cc45371da7e2d13a2cd8f0d33402934779be60e849db689471"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+          "sha256": "afd791e7d6b70430d6aaef4483ecc1de2ff15bbce84ba82cd35f10798a5a2cfe"
+        },
+        {
+          "role": "evaluation_executor",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+          "sha256": "7dae41819d6e547c12b865b629dea072101f80c89d0c5a96f5ec3d0fb9b4cd8d"
+        },
+        {
+          "role": "evaluation_cost_safety",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+          "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "73d51221f6c153853340cbf236588c42b778a9efd93b0f8a2a4243ee631297bf"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "06dd85c27cd782ee925106678ea7a22b02d3f599b1da0eef8bfa84433f02f251"
+        },
+        {
+          "role": "task_route_binding",
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "50c5d27bb866775594100b583fb29f007e24d0207ec8bd575c0739160c0d81e6"
+        },
+        {
+          "role": "provider",
+          "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+          "sha256": "63e9aad11d514b604e92abd803130f2935cfe4601dbc5b39cc3926960fda1207"
+        },
+        {
+          "role": "transport_registry",
+          "path": "apps/api/src/model-gateway/model-transports.ts",
+          "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "1421e89819c05d49240628832150b581e28db794293186e1eaaf359714b6248d"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "f85850dddf966ef6391ae60eaeeb0d1ec5a0b83d5f045b8b877df5f56667a368"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "provider_error",
+          "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+          "sha256": "3ffa9ce576b97f2cf5c377306eb69ad50875e39b73ac00b7f8d687db461bea71"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "8953ca1d61c3e1a05dfbefe27f2191b114d9a2e267c5dc28b1a0d6a62d76a740"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "06fa1ef329af6cc0295a3ea94bc47a1e8247220770bcfb359a2d13597f5fbcc1"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "cb9dc6489fde3c6e2e9bad8b3ff4755cb00ed4a441eb4112d03a627ef8d0970c"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/design-evaluation.ts",
+          "sha256": "557d5c372e52f677825580b15c07b3f699443aae78bbd2b697fcb52502959bd3"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/model-policy.ts",
+          "sha256": "168d8cc048a7f24c0c7c04c8b0e5d9ead6042d97f1444c438b40500afbf2db13"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/index.ts",
+          "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+        },
+        {
+          "role": "contracts_build",
+          "path": "packages/contracts/tsconfig.json",
+          "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+        },
+        {
+          "role": "contracts_manifest",
+          "path": "packages/contracts/package.json",
+          "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "edc437e36d140c0e68959d215197c50e3f65f6106ac97377dbe77b999ed6ffea"
+        }
+      ],
+      "candidates": [
+        {
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        }
+      ],
+      "legacyComparatorAliases": [],
+      "deterministicComparator": {
+        "applicable": false,
+        "caseCount": 0,
+        "wireCallCount": 0,
+        "costCents": 0
+      },
+      "executions": [
+        {
+          "ordinal": 1,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/qa-multigroup/1",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-multigroup",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 2,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/qa-multigroup/2",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-multigroup",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 3,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/qa-ordering/1",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-ordering",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 4,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/qa-ordering/2",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-ordering",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 5,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/qa-multigroup/1",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-multigroup",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 6,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/qa-multigroup/2",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-multigroup",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 7,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/qa-ordering/1",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-ordering",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 8,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/qa-ordering/2",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-ordering",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 9,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/qa-multigroup/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-multigroup",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 10,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/qa-multigroup/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-multigroup",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 11,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/qa-ordering/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-ordering",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 12,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/qa-ordering/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "qa-ordering",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        }
+      ],
+      "executionCount": 12,
+      "maximumWireCallCount": 24
+    },
+    {
+      "taskId": "site_builder.seo_review",
+      "suiteId": "site-builder.seo-review-evaluation-suite/2026-08-04-v1",
+      "fixtureSetId": "site-builder-quality-narrative-golden/2026-08-04-v1",
+      "fixtureCount": 2,
+      "repeats": 2,
+      "sourceBundleContractId": "quality-narrative-evaluation-source-bundle/v1",
+      "sourceBundleSha256": "c4c1c9ff1bfddc067487e9e1569f668cc187679b67280766f64d71a6bcc30f6d",
+      "sourceFiles": [
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+          "sha256": "3dbdf5fcdd941d255115e87a6db715b709591ef5d56e3d11b88777bdaf3cd6e3"
+        },
+        {
+          "role": "candidate_baseline",
+          "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+          "sha256": "af295f4f1b431a19a5719c39c0925e545c0813c7d6b16520205e4b6e61c9a701"
+        },
+        {
+          "role": "task",
+          "path": "apps/api/src/site-builder/quality/quality-narrative.ts",
+          "sha256": "966c6e90f58456f5c530872689823bd03550eb58f755b083ae9a1577d58a19e0"
+        },
+        {
+          "role": "quality_narrative_consumer",
+          "path": "apps/api/src/site-builder/quality/quality-narrative.service.ts",
+          "sha256": "f452b70f27650134e75af218b604b86f7fb84bd74fdfdf8733e611228a59c973"
+        },
+        {
+          "role": "judge",
+          "path": "apps/api/src/site-builder/eval/quality-narrative-eval.ts",
+          "sha256": "82824413033d22cc45371da7e2d13a2cd8f0d33402934779be60e849db689471"
+        },
+        {
+          "role": "harness",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-harness.ts",
+          "sha256": "afd791e7d6b70430d6aaef4483ecc1de2ff15bbce84ba82cd35f10798a5a2cfe"
+        },
+        {
+          "role": "evaluation_executor",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-executor.ts",
+          "sha256": "7dae41819d6e547c12b865b629dea072101f80c89d0c5a96f5ec3d0fb9b4cd8d"
+        },
+        {
+          "role": "evaluation_cost_safety",
+          "path": "apps/api/src/site-builder/eval/model-evaluation-cost-safety.ts",
+          "sha256": "44e58a911c748e6bd0d55d4f3719d9158a40d1a60a84a94c6528aa5cdf178c71"
+        },
+        {
+          "role": "evaluation_provenance",
+          "path": "apps/api/src/site-builder/eval/eval-provenance.ts",
+          "sha256": "73d51221f6c153853340cbf236588c42b778a9efd93b0f8a2a4243ee631297bf"
+        },
+        {
+          "role": "task_route",
+          "path": "apps/api/src/site-builder/agents/task-routes.ts",
+          "sha256": "06dd85c27cd782ee925106678ea7a22b02d3f599b1da0eef8bfa84433f02f251"
+        },
+        {
+          "role": "task_route_binding",
+          "path": "apps/api/src/site-builder/agents/task-route-bindings.ts",
+          "sha256": "41d09de071ecfda81980398e1cd1380a9251916f8f096ddda8059e0b231db6ff"
+        },
+        {
+          "role": "profile_registry",
+          "path": "apps/api/src/site-builder/agents/model-profiles.ts",
+          "sha256": "50c5d27bb866775594100b583fb29f007e24d0207ec8bd575c0739160c0d81e6"
+        },
+        {
+          "role": "provider",
+          "path": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
+          "sha256": "63e9aad11d514b604e92abd803130f2935cfe4601dbc5b39cc3926960fda1207"
+        },
+        {
+          "role": "transport_registry",
+          "path": "apps/api/src/model-gateway/model-transports.ts",
+          "sha256": "f8df9aa82c11b04d655a2adfc19f599b2de0a45baacd22aacba9298264b48ba4"
+        },
+        {
+          "role": "task_runner",
+          "path": "apps/api/src/site-builder/agents/ai-task.ts",
+          "sha256": "1421e89819c05d49240628832150b581e28db794293186e1eaaf359714b6248d"
+        },
+        {
+          "role": "schema_validator",
+          "path": "apps/api/src/model-gateway/schema-validate.ts",
+          "sha256": "bf9fad696c938e92ec5f38c253db88dd5c6b888e9542c3be26115a89bc5c6887"
+        },
+        {
+          "role": "gateway_router",
+          "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+          "sha256": "f85850dddf966ef6391ae60eaeeb0d1ec5a0b83d5f045b8b877df5f56667a368"
+        },
+        {
+          "role": "provider_registry",
+          "path": "apps/api/src/model-gateway/model-provider.registry.ts",
+          "sha256": "011c2c31bf807b546cbb57915a66bf09d86c1a9f5b1adc0518b1c04e2ed3712e"
+        },
+        {
+          "role": "model_router",
+          "path": "apps/api/src/model-gateway/model-router.ts",
+          "sha256": "38a24b993037b309d1e9c9199268350af435e0dc60f4f2e0e24b53056ccb5df3"
+        },
+        {
+          "role": "provider_error",
+          "path": "apps/api/src/model-gateway/providers/provider-output-error.ts",
+          "sha256": "3ffa9ce576b97f2cf5c377306eb69ad50875e39b73ac00b7f8d687db461bea71"
+        },
+        {
+          "role": "gateway_types",
+          "path": "apps/api/src/model-gateway/types.ts",
+          "sha256": "8953ca1d61c3e1a05dfbefe27f2191b114d9a2e267c5dc28b1a0d6a62d76a740"
+        },
+        {
+          "role": "gateway_contract",
+          "path": "apps/api/src/model-gateway/model-gateway.ts",
+          "sha256": "06fa1ef329af6cc0295a3ea94bc47a1e8247220770bcfb359a2d13597f5fbcc1"
+        },
+        {
+          "role": "provider_contract",
+          "path": "apps/api/src/model-gateway/model-provider.ts",
+          "sha256": "cb9dc6489fde3c6e2e9bad8b3ff4755cb00ed4a441eb4112d03a627ef8d0970c"
+        },
+        {
+          "role": "budget_ledger",
+          "path": "apps/api/src/tools/budget.ts",
+          "sha256": "b6a0d3aab65c011bac255eb7abbed8dd247b4b4a02730c85e80694c510456003"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/design-evaluation.ts",
+          "sha256": "557d5c372e52f677825580b15c07b3f699443aae78bbd2b697fcb52502959bd3"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/site-builder/model-policy.ts",
+          "sha256": "168d8cc048a7f24c0c7c04c8b0e5d9ead6042d97f1444c438b40500afbf2db13"
+        },
+        {
+          "role": "contracts_source",
+          "path": "packages/contracts/src/index.ts",
+          "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+        },
+        {
+          "role": "contracts_build",
+          "path": "packages/contracts/tsconfig.json",
+          "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+        },
+        {
+          "role": "contracts_manifest",
+          "path": "packages/contracts/package.json",
+          "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+        },
+        {
+          "role": "dependency_lock",
+          "path": "pnpm-lock.yaml",
+          "sha256": "edc437e36d140c0e68959d215197c50e3f65f6106ac97377dbe77b999ed6ffea"
+        }
+      ],
+      "candidates": [
+        {
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        },
+        {
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "preflight": "none"
+        }
+      ],
+      "legacyComparatorAliases": [],
+      "deterministicComparator": {
+        "applicable": false,
+        "caseCount": 0,
+        "wireCallCount": 0,
+        "costCents": 0
+      },
+      "executions": [
+        {
+          "ordinal": 1,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/seo-full-rule-matrix/1",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-full-rule-matrix",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 2,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/seo-full-rule-matrix/2",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-full-rule-matrix",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 3,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/seo-multilocale-reports/1",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-multilocale-reports",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 4,
+          "executionKey": "target/gpt-5.6-luna/openai-responses/seo-multilocale-reports/2",
+          "kind": "target",
+          "alias": "gpt-5.6-luna",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-multilocale-reports",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 5,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/seo-full-rule-matrix/1",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-full-rule-matrix",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 6,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/seo-full-rule-matrix/2",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-full-rule-matrix",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 7,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/seo-multilocale-reports/1",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-multilocale-reports",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 8,
+          "executionKey": "target/gpt-5.4-mini/openai-responses/seo-multilocale-reports/2",
+          "kind": "target",
+          "alias": "gpt-5.4-mini",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-multilocale-reports",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 9,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/seo-full-rule-matrix/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-full-rule-matrix",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 10,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/seo-full-rule-matrix/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-full-rule-matrix",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 11,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/seo-multilocale-reports/1",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-multilocale-reports",
+          "attempt": 1,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        },
+        {
+          "ordinal": 12,
+          "executionKey": "target/gpt-5.6-terra/openai-responses/seo-multilocale-reports/2",
+          "kind": "target",
+          "alias": "gpt-5.6-terra",
+          "protocol": "openai-responses",
+          "fixtureId": "seo-multilocale-reports",
+          "attempt": 2,
+          "maximumWireCalls": 2,
+          "maximumRepairCalls": 1
+        }
+      ],
+      "executionCount": 12,
+      "maximumWireCallCount": 24
+    }
+  ],
+  "executionCount": 183,
+  "maximumWireCallCount": 366,
+  "planningHardUpperBound": {
+    "basis": "per_wire_call_task_hard_cap",
+    "perWireCallCents": 20,
+    "maximumWireCalls": 366,
+    "amountCents": 7320,
+    "authorization": "NOT_GRANTED",
+    "expectedCost": "NOT_CALCULATED"
+  },
+  "pricingGate": {
+    "amountBasis": "frozen_openox_public_price_snapshot_required",
+    "newApiPriceAllowed": false,
+    "status": "BLOCKED_UNTIL_SEPARATE_EVIDENCE_PR"
+  },
+  "excludedAliases": [
+    "minimax-m3",
+    "doubao-seed-2.0-pro",
+    "doubao-seed-2.0-lite"
+  ],
+  "deferredScope": [
+    "gemini_text",
+    "image",
+    "video",
+    "runtime_route_change",
+    "promotion",
+    "m2_publish"
+  ],
+  "manifestSha256": "adf15d18775d820bdccb4d5deb30ec3b1e8b69e8e56fde13b55a07c22d979067"
+}
