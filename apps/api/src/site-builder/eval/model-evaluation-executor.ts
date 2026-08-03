@@ -1779,7 +1779,7 @@ function taskEvaluationOutputConstraint(taskId: SiteBuilderTaskId): string {
   return "\n评测输出的 reasons/warnings 必须为空，或每项严格使用以下封闭 claim 之一：selectedCandidateId=<已选 candidate 完整 id>、industryMatchCount=<已选 candidate 数值>、userAssetCoverage=<已选 candidate 数值>、demoFallbackCount=<已选 candidate 数值>。不得返回自由文本、其他字段、其他 candidate 或任何新事实。";
 }
 
-function structuredSystemPrompt(
+export function structuredSystemPrompt(
   outputSchema: Readonly<Record<string, unknown>>,
   taskId: SiteBuilderTaskId = "site_builder.brand_profile",
 ): string {
@@ -1787,7 +1787,7 @@ function structuredSystemPrompt(
   return `${capturedTaskSystemPrompt(taskId)}${taskEvaluationOutputConstraint(taskId)}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(outputSchema)}`;
 }
 
-function repairPrompt(prompt: string, kind: string, reason: string): string {
+export function repairPrompt(prompt: string, kind: string, reason: string): string {
   return `${prompt}\n\n上一次输出未通过${kind}校验，错误：\n${reason}\n请只修正被拒字段，不得新增、猜测或放宽任何事实；重新只输出同时通过 JSON Schema 和任务硬门的合法 JSON。`;
 }
 

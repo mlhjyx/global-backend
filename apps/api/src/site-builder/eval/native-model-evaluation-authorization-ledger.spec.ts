@@ -177,6 +177,35 @@ describe("native model evaluation authorization ledger", () => {
     ).toThrow("frozen");
   });
 
+  it("persists a runtime-integrity freeze after a dispatched evaluation", () => {
+    const directory = createLedgerDirectory();
+    const ledger = createLedger("design-spec-native-ledger-runtime", directory);
+    expect(ledger.claim(claimInput())).toBe(true);
+    expect(
+      ledger.reserve({
+        authorizationId: "design-spec-native-authorization-001",
+        executorClaimId: "design-spec-native-executor-claim-001",
+        executionId: "design-spec-native-execution-runtime-001",
+        currency: "CNY",
+        nativePicoUnits: "10",
+        wireCalls: 1,
+      }),
+    ).toBe(true);
+    expect(
+      ledger.freeze({
+        authorizationId: "design-spec-native-authorization-001",
+        executorClaimId: "design-spec-native-executor-claim-001",
+        reason: "runtime_integrity_drift",
+      }),
+    ).toBe(true);
+    expect(
+      ledger.snapshot("design-spec-native-authorization-001"),
+    ).toMatchObject({
+      frozen: true,
+      freezeReason: "runtime_integrity_drift",
+    });
+  });
+
   it("rejects cross-currency settlement, preserving the original reservation and freezing", () => {
     const directory = createLedgerDirectory();
     const ledger = createLedger("design-spec-native-ledger-003", directory);

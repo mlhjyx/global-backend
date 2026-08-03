@@ -122,6 +122,8 @@ function validInput(): NativeModelEvaluationCostSafetyInput {
       },
       maxDispatchExecutions: 73,
       maxWireCalls: 146,
+      maxInitialPromptUtf8Bytes: 2342,
+      maxRepairPromptUtf8Bytes: 6649,
       maxInputTokensInitialWire: 6438,
       maxInputTokensRepairWire: 10745,
       maxOutputTokensPerWire: 4000,
@@ -147,6 +149,20 @@ describe("native model-evaluation cost safety", () => {
     ).toBe(true);
     expect(Object.isFrozen(attestation)).toBe(true);
     expect(Object.isFrozen(attestation.pricing.entries)).toBe(true);
+  });
+
+  it("rejects prompt-byte limits that drift from the prepared v2 envelope", () => {
+    const initialDrift = validInput();
+    initialDrift.limits.maxInitialPromptUtf8Bytes += 1;
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(initialDrift),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
+
+    const repairDrift = validInput();
+    repairDrift.limits.maxRepairPromptUtf8Bytes -= 1;
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(repairDrift),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
   });
 
   it("rejects widened, retired, deferred, media, and legacy dispatch scope before pricing", () => {

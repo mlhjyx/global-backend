@@ -113,6 +113,8 @@ function attestation() {
       },
       maxDispatchExecutions: 73,
       maxWireCalls: 146,
+      maxInitialPromptUtf8Bytes: 2342,
+      maxRepairPromptUtf8Bytes: 6649,
       maxInputTokensInitialWire: 6438,
       maxInputTokensRepairWire: 10745,
       maxOutputTokensPerWire: 4000,
