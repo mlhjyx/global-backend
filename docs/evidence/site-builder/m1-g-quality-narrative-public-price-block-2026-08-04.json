@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "site-builder-quality-narrative-public-price-block/v1",
+  "preparationCommitSha": "945b123135662e619571dd22d171cb61f8f71da3",
+  "fixedSourceCommitSha": "0891b374321961b8aad13c8b215985ca623a4c0c",
+  "manifestSha256": "adf15d18775d820bdccb4d5deb30ec3b1e8b69e8e56fde13b55a07c22d979067",
+  "taskIds": [
+    "site_builder.qa_summarize",
+    "site_builder.seo_review"
+  ],
+  "pricing": {
+    "authority": "openox_model_marketplace",
+    "catalogEndpoint": "https://openox.tech/api/public/pricing-catalog",
+    "capturedAt": "2026-08-03T20:55:16.263Z",
+    "catalogResponseSha256": "69dd4337872df5235e6d3db1b672acadd1322fc0c7a7e23249dc0f33d979abed"
+  },
+  "candidates": [
+    {
+      "alias": "gpt-5.6-luna",
+      "protocol": "openai-responses",
+      "groupName": "gpt-unified",
+      "currency": "CNY",
+      "publicPriceStatus": "PUBLISHED"
+    },
+    {
+      "alias": "gpt-5.4-mini",
+      "protocol": "openai-responses",
+      "groupName": "gpt-unified",
+      "currency": "CNY",
+      "publicPriceStatus": "MISSING"
+    },
+    {
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai-responses",
+      "groupName": "gpt-unified",
+      "currency": "CNY",
+      "publicPriceStatus": "PUBLISHED"
+    }
+  ],
+  "missingAliases": [
+    "gpt-5.4-mini"
+  ],
+  "status": "BLOCKED_MISSING_PUBLIC_PRICE",
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "modelWireCalls": 0,
+  "actualModelCost": {
+    "CNY": "0",
+    "USD": "0"
+  }
+}
