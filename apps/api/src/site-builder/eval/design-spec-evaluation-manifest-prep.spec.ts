@@ -51,6 +51,31 @@ function compiledContracts(): CompiledContractsAttestation {
 }
 
 describe("design_spec zero-cost manifest preparation", () => {
+  it("records the current #276 fixed source as a zero-call v5 audit artifact", async () => {
+    const manifest = JSON.parse(
+      await readFile(
+        join(
+          __dirname,
+          "../../../../../docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v5.json",
+        ),
+        "utf8",
+      ),
+    ) as DesignSpecEvaluationManifestPrepManifest;
+    const { manifestSha256, ...withoutDigest } = manifest;
+
+    expect(manifest).toMatchObject({
+      fixedCommitSha: "377f8a3ae983bad0e4ae43f767a4bc59d8f7d0a9",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      actualNetworkCalls: 0,
+      actualModelCostCents: 0,
+      suite: {
+        suiteId: "site-builder.design-spec-evaluation-suite/2026-08-03-v15",
+        sourceBundleContractId: "design-spec-evaluation-source-bundle/v15",
+      },
+    });
+    expect(manifestSha256).toBe(sha256CanonicalJson(withoutDigest));
+  });
+
   it("keeps the historical v14 manifest as an audit artifact and rebuilds a v15 source contract", async () => {
     const historicalManifest = JSON.parse(
       await readFile(
