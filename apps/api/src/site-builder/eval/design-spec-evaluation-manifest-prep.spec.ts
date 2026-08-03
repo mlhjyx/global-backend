@@ -51,8 +51,8 @@ function compiledContracts(): CompiledContractsAttestation {
 }
 
 describe("design_spec zero-cost manifest preparation", () => {
-  it("reconstructs the committed create-only manifest exactly", async () => {
-    const manifest = JSON.parse(
+  it("keeps the historical v14 manifest as an audit artifact and rebuilds a v15 source contract", async () => {
+    const historicalManifest = JSON.parse(
       await readFile(
         join(
           __dirname,
@@ -62,18 +62,29 @@ describe("design_spec zero-cost manifest preparation", () => {
       ),
     ) as DesignSpecEvaluationManifestPrepManifest;
     const canonical = buildDesignSpecEvaluationPrepManifest(
-      manifest.fixedCommitSha,
-      manifest.compiledContracts,
+      historicalManifest.fixedCommitSha,
+      historicalManifest.compiledContracts,
     );
 
-    expect(manifest).toEqual(canonical);
-    expect(manifest.fixedCommitSha).toBe(
+    expect(historicalManifest).not.toEqual(canonical);
+    expect(historicalManifest.fixedCommitSha).toBe(
       "e493ba1d09fe37feea927f70d12f17aadadc5c6a",
     );
-    expect(manifest.suite.sourceFiles).toHaveLength(47);
-    expect(manifest.actualNetworkCalls).toBe(0);
-    expect(manifest.actualModelCostCents).toBe(0);
-    expect(manifest.dispatchAuthorization).toBe("NOT_AUTHORIZED");
+    expect(historicalManifest.suite.suiteId).toBe(
+      "site-builder.design-spec-evaluation-suite/2026-08-01-v14",
+    );
+    expect(canonical.prepId).toBe(
+      "site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2",
+    );
+    expect(canonical.suite.suiteId).toBe(
+      "site-builder.design-spec-evaluation-suite/2026-08-03-v15",
+    );
+    expect(canonical.suite.sourceBundleContractId).toBe(
+      "design-spec-evaluation-source-bundle/v15",
+    );
+    expect(canonical.actualNetworkCalls).toBe(0);
+    expect(canonical.actualModelCostCents).toBe(0);
+    expect(canonical.dispatchAuthorization).toBe("NOT_AUTHORIZED");
   });
 
   it("freezes the paid and deterministic matrices without retired aliases", () => {

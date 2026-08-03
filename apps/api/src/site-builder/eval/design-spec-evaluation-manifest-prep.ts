@@ -44,9 +44,9 @@ const DESIGN_SPEC_COMPILED_CONTRACTS_SUITE_IMPORT =
   captureCompiledContractsSuiteImport(DESIGN_SPEC_SUITE_REPOSITORY_ROOT);
 
 export const DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID =
-  "site-builder-design-spec-evaluation-manifest-prep/2026-08-01-v1" as const;
+  "site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2" as const;
 export const DESIGN_SPEC_EVALUATION_MANIFEST_PREP_SCHEMA_VERSION =
-  "site-builder-design-spec-evaluation-manifest-prep/v1" as const;
+  "site-builder-design-spec-evaluation-manifest-prep/v2" as const;
 
 export const DESIGN_SPEC_EVALUATION_STOP_CONDITIONS = Object.freeze([
   "fixed_commit_or_source_bundle_drift",
