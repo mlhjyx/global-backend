@@ -74,6 +74,7 @@ import {
   ModelEvaluationBudgetGuard,
   ModelEvaluationCallError,
   ModelEvaluationCapabilityCampaign,
+  assessCanonicalTaskArtifact,
   buildAllTaskEvaluationPlans,
   buildCanonicalModelEvaluationCase,
   buildProfileEvaluationAdmission,
@@ -91,6 +92,7 @@ import {
   BRAND_PROFILE_TASK,
   type BrandProfileOutput,
 } from "../agents/brand-profile";
+import { deterministicQualityNarrativeOutput } from "../quality/quality-narrative";
 import { sha256CanonicalJson, sha256Text } from "./eval-provenance";
 
 beforeEach(() => {
@@ -289,6 +291,21 @@ describe("model evaluation planning", () => {
       dispatchAdmission: "blocked_no_evaluation_suite",
       evaluationSuite: null,
     });
+    for (const taskId of [
+      "site_builder.qa_summarize",
+      "site_builder.seo_review",
+    ] as const) {
+      expect(buildTaskEvaluationPlan(taskId)).toMatchObject({
+        dispatchAdmission: "task_evaluation_ready",
+        evaluationSuite: {
+          repeats: 2,
+          legacyComparatorAliases: [],
+        },
+      });
+    }
+    expect(buildProfileEvaluationAdmission("text.summary")).toMatchObject({
+      disposition: "task_evaluation_ready",
+    });
     expect(buildProfileEvaluationAdmission("copy.premium")).toMatchObject({
       disposition: "blocked_no_evaluation_suite",
     });
@@ -349,6 +366,42 @@ describe("model evaluation planning", () => {
       buildCanonicalModelEvaluationCase(forged, "auto-parts-rich"),
     ).toThrow("task evaluation plan is not canonical");
   });
+});
+
+describe("quality narrative canonical suites", () => {
+  for (const taskId of [
+    "site_builder.qa_summarize",
+    "site_builder.seo_review",
+  ] as const) {
+    it(`${taskId} accepts only its exact deterministic closed output`, () => {
+      const plan = buildTaskEvaluationPlan(taskId);
+      const fixtureId = plan.evaluationSuite!.fixtureIds[0]!;
+      const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
+      const output = deterministicQualityNarrativeOutput(
+        evaluationCase.payload.taskInput as Parameters<
+          typeof deterministicQualityNarrativeOutput
+        >[0],
+      );
+      expect(
+        assessCanonicalTaskArtifact(plan, evaluationCase.payload, output),
+      ).toMatchObject({
+        qualityPassed: true,
+        structurePassed: true,
+        factualityPassed: true,
+        findingCodes: [],
+      });
+
+      expect(
+        assessCanonicalTaskArtifact(plan, evaluationCase.payload, {
+          groups: [...output.groups].reverse(),
+        }),
+      ).toMatchObject({
+        qualityPassed: false,
+        factualityPassed: false,
+        findingCodes: ["deterministic_quality_narrative_mismatch"],
+      });
+    });
+  }
 });
 
 describe("capability and protocol validation", () => {
