@@ -11,7 +11,7 @@ const manifest = Object.freeze(
     readFileSync(
       join(
         __dirname,
-        "../../../../../docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v2.json",
+        "../../../../../docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v3.json",
       ),
       "utf8",
     ),
@@ -61,16 +61,16 @@ describe("design_spec v2 native-currency fee-card source contract", () => {
     });
 
     expect(card.fixedSourceCommitSha).toBe(
-      "295038d323b4bd09ed16ab73ea981d24e1f010df",
+      "5e25fd8d544c1f7e46b6d066505fbedf35997bae",
     );
     expect(card.manifestSha256).toBe(
-      "aeb50d9f6cfb631b3a4fc20d94a0f42e11f4478fe02c181c408d589fe9280164",
+      "969336d24c443414b64f8fba11f346f2da12ed41f84be77472ac5da25edaf286",
     );
     expect(card.suite).toEqual({
       suiteId: "site-builder.design-spec-evaluation-suite/2026-08-03-v15",
       sourceBundleContractId: "design-spec-evaluation-source-bundle/v15",
       sourceBundleSha256:
-        "9419952c08330c7dc4eafc2bf2d54c8804a9f3ca36fc5ba9d85d0458118d654f",
+        "4721b1fe4bc0d16f296c0f65a80e5748b83fafad94849ca88dd95ab61bdc698d",
     });
     expect(card.entries.map((entry) => entry.alias)).toEqual([
       "claude-sonnet-5",
