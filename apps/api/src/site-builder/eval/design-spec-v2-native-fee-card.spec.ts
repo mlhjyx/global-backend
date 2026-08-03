@@ -11,7 +11,7 @@ const manifest = Object.freeze(
     readFileSync(
       join(
         __dirname,
-        "../../../../../docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v3.json",
+        "../../../../../docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v4.json",
       ),
       "utf8",
     ),
@@ -61,19 +61,19 @@ describe("design_spec v2 native-currency fee-card source contract", () => {
     });
 
     expect(card.fixedSourceCommitSha).toBe(
-      "5e25fd8d544c1f7e46b6d066505fbedf35997bae",
+      "e569ddcc46040397c976258f76a16b2ec24c31eb",
     );
     expect(card.feeCardId).toBe(
-      "site-builder-design-spec-v3-native-fee-card/2026-08-03-v1",
+      "site-builder-design-spec-v4-native-fee-card/2026-08-03-v1",
     );
     expect(card.manifestSha256).toBe(
-      "969336d24c443414b64f8fba11f346f2da12ed41f84be77472ac5da25edaf286",
+      "560334518f28ea3d6838614702f0f829b8873568aef277bc364c0e4c195a9305",
     );
     expect(card.suite).toEqual({
       suiteId: "site-builder.design-spec-evaluation-suite/2026-08-03-v15",
       sourceBundleContractId: "design-spec-evaluation-source-bundle/v15",
       sourceBundleSha256:
-        "4721b1fe4bc0d16f296c0f65a80e5748b83fafad94849ca88dd95ab61bdc698d",
+        "a2469fe1fb1522aa90de791506745341796e5b6bbb7e879e8128f26ef79e3e06",
     });
     expect(card.entries.map((entry) => entry.alias)).toEqual([
       "claude-sonnet-5",
