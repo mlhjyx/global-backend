@@ -84,7 +84,7 @@
 
 - 准备合同：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1`；固定 task `site_builder.brand_profile`、suite `site-builder.brand-profile-evaluation-suite/2026-07-27-v1`、source bundle `brand-profile-evaluation-source-bundle/v7`。
 - `design_spec` 独立 manifest 合同：`site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2`。它冻结 12 fixtures、3 candidates、1 capability probe、73 executions、最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件；fixed source commit 必须已在 `origin/main` 上且仍是 prep head 祖先，因此 manifest PR 可 squash 而不丢失 source commit。它不含凭据、价格、余额、wire client 或费用授权。
-- manifest：61 executions / 最多 122 wire calls；其中 capability probe 1、target 36、legacy comparator 24。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。
+- BrandProfile evidence-prep manifest：61 executions / 最多 122 wire calls；其中 capability probe 1、target 36、legacy comparator 24。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。
 - prompt 上界从六个 canonical case 的真实 initial/repair payload 派生：initial 最多 6092 UTF-8 bytes，repair 最多 10399 UTF-8 bytes；repair reason 另受机器常量硬限，不以 attestation 自报上限替代真实 payload。
 - 61 executions / 122 wire calls / 2440¢ 仍标记为 `unverified_planning_upper_bound`，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。
 - create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 `wx` 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 `.env` 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。
