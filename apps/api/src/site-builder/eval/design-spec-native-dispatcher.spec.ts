@@ -64,6 +64,28 @@ describe("design_spec native dispatcher settlement bridge", () => {
     ).toEqual({ currency: "USD", nativePicoUnits: "882000000" });
   });
 
+  it("rejects a fee card whose admitted dispatch set has been widened", () => {
+    const widened = {
+      ...feeCard,
+      entries: [
+        ...feeCard.entries,
+        {
+          ...feeCard.entries[0]!,
+          alias: "retired-model",
+        },
+      ],
+    } as DesignSpecNativeFeeCard;
+
+    expect(() =>
+      nativePicoUnitsForUsage(widened, {
+        alias: "gpt-5.5",
+        protocol: "openai-responses",
+        inputTokens: 1,
+        outputTokens: 1,
+      }),
+    ).toThrow("dispatch set drifted");
+  });
+
   it("reserves the fee-card maximum before dispatch and settles a native amount", () => {
     const campaign = new DesignSpecNativeSettlementCampaign({
       feeCard,
