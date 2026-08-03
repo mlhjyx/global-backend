@@ -8,15 +8,15 @@ import { createNativeModelEvaluationCostSafetyAttestation } from "./model-evalua
 import type { NativeModelEvaluationAuthorizationLedger } from "./native-model-evaluation-authorization-ledger";
 import { createDesignSpecV2NativeExecutionRunner } from "./design-spec-v2-native-execution";
 import {
-  createDesignSpecV5NativeExecutionAttestation,
-  isTrustedDesignSpecV5NativeExecutionAttestation,
-} from "./design-spec-v5-native-execution-preflight";
+  createDesignSpecV6NativeExecutionAttestation,
+  isTrustedDesignSpecV6NativeExecutionAttestation,
+} from "./design-spec-v6-native-execution-preflight";
 
 const evidence = JSON.parse(
   readFileSync(
     join(
       __dirname,
-      "../../../../../docs/evidence/site-builder/m1-g-design-spec-v5-native-fee-card-2026-08-04.json",
+      "../../../../../docs/evidence/site-builder/m1-g-design-spec-v6-native-fee-card-2026-08-04.json",
     ),
     "utf8",
   ),
@@ -26,8 +26,8 @@ function input() {
   const bearerToken = "limited-evaluation-token";
   return {
     authorization: {
-      authorizationId: "design-spec-v5-native-authorization",
-      ledgerId: "design-spec-v5-native-ledger",
+      authorizationId: "design-spec-v6-native-authorization",
+      ledgerId: "design-spec-v6-native-ledger",
       ledgerDirectorySha256: "a".repeat(64),
       approvedAt: "2026-08-04T00:00:00.000Z",
       approvedMaximumsByCurrency: {
@@ -39,7 +39,7 @@ function input() {
       preparedFixedCommitSha: "b".repeat(40),
     },
     credential: {
-      attestationId: "design-spec-v5-native-credential",
+      attestationId: "design-spec-v6-native-credential",
       observedAt: "2026-08-04T00:00:00.000Z",
       snapshotSha256: "c".repeat(64),
       bearerTokenSha256: createHash("sha256").update(bearerToken).digest("hex"),
@@ -93,41 +93,41 @@ function input() {
   };
 }
 
-describe("design_spec v5 native execution preflight", () => {
-  it("brands only an attestation bound to the committed v5 public price evidence", () => {
-    const attestation = createDesignSpecV5NativeExecutionAttestation(input());
+describe("design_spec v6 native execution preflight", () => {
+  it("brands only an attestation bound to the committed v6 public price evidence", () => {
+    const attestation = createDesignSpecV6NativeExecutionAttestation(input());
 
-    expect(isTrustedDesignSpecV5NativeExecutionAttestation(attestation)).toBe(
+    expect(isTrustedDesignSpecV6NativeExecutionAttestation(attestation)).toBe(
       true,
     );
     expect(attestation.authorization.preparedManifestSha256).toBe(
-      "bcc0ac261f56a5c950e11483a3dc28f33ed678c626891367a45b6c1f56429dc4",
+      "1a74fab9ac803bfc50636fdb51ab7ac1b04623a8053c8d17a37a60294c99facd",
     );
-    expect(attestation.pricing.capturedAt).toBe("2026-08-03T19:25:08.607Z");
+    expect(attestation.pricing.capturedAt).toBe("2026-08-03T22:34:29.485Z");
   });
 
   it("rejects a modified or non-zero-call price evidence wrapper before any runner exists", () => {
     const modifiedCard = structuredClone(input());
     modifiedCard.feeCardEvidence.card.entries[0].effectiveInputRateMicrounitsPerMillionTokens = 1;
     expect(() =>
-      createDesignSpecV5NativeExecutionAttestation(modifiedCard),
-    ).toThrow("design_spec v5 fee-card evidence is invalid");
+      createDesignSpecV6NativeExecutionAttestation(modifiedCard),
+    ).toThrow("design_spec v6 fee-card evidence is invalid");
 
     const nonZeroCall = structuredClone(input());
     nonZeroCall.feeCardEvidence.modelWireCalls = 1;
     expect(() =>
-      createDesignSpecV5NativeExecutionAttestation(nonZeroCall),
-    ).toThrow("design_spec v5 fee-card evidence is invalid");
+      createDesignSpecV6NativeExecutionAttestation(nonZeroCall),
+    ).toThrow("design_spec v6 fee-card evidence is invalid");
   });
 
   it("rejects a generic native attestation at the execution entry point", () => {
-    const v5Attestation = createDesignSpecV5NativeExecutionAttestation(input());
+    const v6Attestation = createDesignSpecV6NativeExecutionAttestation(input());
     const genericAttestation = createNativeModelEvaluationCostSafetyAttestation(
-      structuredClone(v5Attestation),
+      structuredClone(v6Attestation),
     );
 
     expect(
-      isTrustedDesignSpecV5NativeExecutionAttestation(genericAttestation),
+      isTrustedDesignSpecV6NativeExecutionAttestation(genericAttestation),
     ).toBe(false);
     expect(() =>
       createDesignSpecV2NativeExecutionRunner({
@@ -139,29 +139,29 @@ describe("design_spec v5 native execution preflight", () => {
     ).toThrow("trusted v6 native model evaluation cost safety is required");
   });
 
-  it("rejects a v5-branded non-HEAD attestation before claiming its ledger", () => {
-    const v5Attestation = createDesignSpecV5NativeExecutionAttestation(input());
+  it("rejects a v6-branded non-HEAD attestation before claiming its ledger", () => {
+    const v6Attestation = createDesignSpecV6NativeExecutionAttestation(input());
     const claim = vi.fn(() => true);
     const ledger = {
-      ledgerId: v5Attestation.authorization.ledgerId,
-      directorySha256: v5Attestation.authorization.ledgerDirectorySha256,
+      ledgerId: v6Attestation.authorization.ledgerId,
+      directorySha256: v6Attestation.authorization.ledgerDirectorySha256,
       claim,
     } as unknown as NativeModelEvaluationAuthorizationLedger;
 
     expect(() =>
       createDesignSpecV2NativeExecutionRunner({
-        attestation: v5Attestation,
+        attestation: v6Attestation,
         credential: {
-          attestationId: v5Attestation.credential.attestationId,
-          snapshotSha256: v5Attestation.credential.snapshotSha256,
-          bearerTokenSha256: v5Attestation.credential.bearerTokenSha256,
-          gatewayOrigin: v5Attestation.credential.gatewayOrigin,
+          attestationId: v6Attestation.credential.attestationId,
+          snapshotSha256: v6Attestation.credential.snapshotSha256,
+          bearerTokenSha256: v6Attestation.credential.bearerTokenSha256,
+          gatewayOrigin: v6Attestation.credential.gatewayOrigin,
           bearerToken: "limited-evaluation-token",
         },
         ledger,
         fetch: vi.fn() as unknown as typeof fetch,
       }),
-    ).toThrow("trusted v6 native model evaluation cost safety is required");
+    ).toThrow("native evaluation credential or ledger does not match");
     expect(claim).not.toHaveBeenCalled();
   });
 });
