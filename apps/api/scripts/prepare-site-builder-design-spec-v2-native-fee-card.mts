@@ -104,8 +104,8 @@ export function assertV2FixedSourceReachability(manifest: unknown): void {
 }
 
 export function assertV2ManifestForPublicPriceRead(manifest: unknown): void {
-  assertV2FixedSourceReachability(manifest);
   assertDesignSpecV2NativeFeeCardManifest(manifest);
+  assertV2FixedSourceReachability(manifest);
 }
 
 export async function decodeBoundedCatalogResponse(

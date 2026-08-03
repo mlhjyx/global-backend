@@ -54,6 +54,12 @@ describe("design_spec v2 native fee-card CLI guards", () => {
     expect(() => assertV2ManifestForPublicPriceRead(historical)).toThrow(
       "design_spec v2 manifest identity or envelope is invalid",
     );
+    expect(() =>
+      assertV2ManifestForPublicPriceRead({
+        ...historical,
+        fixedCommitSha: "f".repeat(40),
+      }),
+    ).toThrow("design_spec v2 manifest identity or envelope is invalid");
   });
 
   it("decodes and hashes a bounded public catalog response without fetching", async () => {
