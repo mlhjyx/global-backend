@@ -18,7 +18,9 @@ import {
 } from "./native-model-evaluation-authorization-ledger";
 import {
   createDesignSpecV2NativeExecutionRunner,
+  isTrustedDesignSpecV2NativeExecutionRunner,
 } from "./design-spec-v2-native-execution";
+import { runDesignSpecV2NativeCampaign } from "./design-spec-v2-native-campaign";
 import {
   createNativeModelEvaluationCostSafetyAttestation,
   nativeModelEvaluationPricingFeeCardSha256,
@@ -46,9 +48,7 @@ function temporaryLedgerDirectory() {
   return directory;
 }
 
-function attestation(
-  ledgerDirectorySha256: string,
-) {
+function attestation(ledgerDirectorySha256: string) {
   const plan = buildTaskEvaluationPlan("site_builder.design_spec");
   const canonicalCase = buildCanonicalModelEvaluationCase(
     plan,
@@ -187,14 +187,16 @@ function acceptedOutput() {
     plan,
     plan.evaluationSuite!.fixtureIds[0]!,
   );
-  const selected = (evaluationCase.payload.taskInput as {
-    candidates: Array<{
-      id: string;
-      industryMatchCount: number;
-      userAssetCoverage: number;
-      demoFallbackCount: number;
-    }>;
-  }).candidates[0]!;
+  const selected = (
+    evaluationCase.payload.taskInput as {
+      candidates: Array<{
+        id: string;
+        industryMatchCount: number;
+        userAssetCoverage: number;
+        demoFallbackCount: number;
+      }>;
+    }
+  ).candidates[0]!;
   return {
     fixtureId: evaluationCase.contract.fixtureId,
     output: {
@@ -213,9 +215,8 @@ function acceptedOutput() {
 describe("design_spec v2 native execution", () => {
   it("uses canonical input, settles a request-bound receipt, and returns redacted evidence", async () => {
     const directory = temporaryLedgerDirectory();
-    const identity = initializeNativeModelEvaluationAuthorizationLedgerDirectory(
-      directory,
-    );
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
     const ledger = createNativeModelEvaluationAuthorizationLedger({
       ledgerId: "design-spec-native-ledger",
       directory,
@@ -289,14 +290,16 @@ describe("design_spec v2 native execution", () => {
       },
     });
     expect(result).not.toHaveProperty("artifact");
-    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject({
-      frozen: false,
-      dispatchExecutions: 1,
-      wireCalls: 2,
-      totalsByCurrency: {
-        CNY: { committedPicoUnits: "2000000000", reservedPicoUnits: "0" },
+    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject(
+      {
+        frozen: false,
+        dispatchExecutions: 1,
+        wireCalls: 2,
+        totalsByCurrency: {
+          CNY: { committedPicoUnits: "2000000000", reservedPicoUnits: "0" },
+        },
       },
-    });
+    );
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(
       assessCanonicalTaskArtifact(
@@ -313,9 +316,8 @@ describe("design_spec v2 native execution", () => {
 
   it("freezes the authorization when a dispatched wire has no verified token-log settlement", async () => {
     const directory = temporaryLedgerDirectory();
-    const identity = initializeNativeModelEvaluationAuthorizationLedgerDirectory(
-      directory,
-    );
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
     const ledger = createNativeModelEvaluationAuthorizationLedger({
       ledgerId: "design-spec-native-ledger",
       directory,
@@ -363,19 +365,20 @@ describe("design_spec v2 native execution", () => {
         attempt: 1,
       }),
     ).rejects.toThrow("native design_spec settlement was rejected");
-    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject({
-      frozen: true,
-      freezeReason: "unknown_settlement",
-      dispatchExecutions: 1,
-      wireCalls: 2,
-    });
+    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject(
+      {
+        frozen: true,
+        freezeReason: "unknown_settlement",
+        dispatchExecutions: 1,
+        wireCalls: 2,
+      },
+    );
   });
 
   it("permits one validator-bound repair and settles both physical wires together", async () => {
     const directory = temporaryLedgerDirectory();
-    const identity = initializeNativeModelEvaluationAuthorizationLedgerDirectory(
-      directory,
-    );
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
     const ledger = createNativeModelEvaluationAuthorizationLedger({
       ledgerId: "design-spec-native-ledger",
       directory,
@@ -401,8 +404,7 @@ describe("design_spec v2 native execution", () => {
           }),
           {
             headers: {
-              "x-oneapi-request-id":
-                wire === 1 ? REQUEST_ID : repairRequestId,
+              "x-oneapi-request-id": wire === 1 ? REQUEST_ID : repairRequestId,
             },
           },
         );
@@ -469,9 +471,8 @@ describe("design_spec v2 native execution", () => {
 
   it("freezes rather than settling only the initial wire after a repair may have dispatched", async () => {
     const directory = temporaryLedgerDirectory();
-    const identity = initializeNativeModelEvaluationAuthorizationLedgerDirectory(
-      directory,
-    );
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
     const ledger = createNativeModelEvaluationAuthorizationLedger({
       ledgerId: "design-spec-native-ledger",
       directory,
@@ -524,13 +525,190 @@ describe("design_spec v2 native execution", () => {
         attempt: 1,
       }),
     ).rejects.toThrow("evaluation transport HTTP 500");
-    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject({
-      frozen: true,
-      freezeReason: "unknown_settlement",
-      dispatchExecutions: 1,
-      wireCalls: 2,
-    });
+    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject(
+      {
+        frozen: true,
+        freezeReason: "unknown_settlement",
+        dispatchExecutions: 1,
+        wireCalls: 2,
+      },
+    );
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("durably closes the authorization when its campaign is aborted before another matrix call", () => {
+    const directory = temporaryLedgerDirectory();
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
+    const ledger = createNativeModelEvaluationAuthorizationLedger({
+      ledgerId: "design-spec-native-ledger",
+      directory,
+      expectedDirectorySha256: identity.directorySha256,
+    });
+    const safety = attestation(identity.directorySha256);
+    const runner = createDesignSpecV2NativeExecutionRunner({
+      attestation: safety,
+      credential: {
+        attestationId: safety.credential.attestationId,
+        snapshotSha256: safety.credential.snapshotSha256,
+        bearerTokenSha256: safety.credential.bearerTokenSha256,
+        gatewayOrigin: safety.credential.gatewayOrigin,
+        bearerToken: testBearerToken(),
+      },
+      ledger,
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+
+    runner.abort();
+
+    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject(
+      {
+        frozen: true,
+        freezeReason: "campaign_aborted",
+        dispatchExecutions: 0,
+        wireCalls: 0,
+      },
+    );
+  });
+
+  it("brands only frozen runners created by the native execution factory", () => {
+    const directory = temporaryLedgerDirectory();
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
+    const ledger = createNativeModelEvaluationAuthorizationLedger({
+      ledgerId: "design-spec-native-ledger",
+      directory,
+      expectedDirectorySha256: identity.directorySha256,
+    });
+    const safety = attestation(identity.directorySha256);
+    const runner = createDesignSpecV2NativeExecutionRunner({
+      attestation: safety,
+      credential: {
+        attestationId: safety.credential.attestationId,
+        snapshotSha256: safety.credential.snapshotSha256,
+        bearerTokenSha256: safety.credential.bearerTokenSha256,
+        gatewayOrigin: safety.credential.gatewayOrigin,
+        bearerToken: testBearerToken(),
+      },
+      ledger,
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+
+    expect(isTrustedDesignSpecV2NativeExecutionRunner(runner)).toBe(true);
+    expect(
+      isTrustedDesignSpecV2NativeExecutionRunner(
+        Object.freeze({ execute: runner.execute, abort: runner.abort }),
+      ),
+    ).toBe(false);
+  });
+
+  it("retains settled rejected matrix results as non-rankable evidence without aborting the campaign", async () => {
+    const directory = temporaryLedgerDirectory();
+    const identity =
+      initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
+    const ledger = createNativeModelEvaluationAuthorizationLedger({
+      ledgerId: "design-spec-native-ledger",
+      directory,
+      expectedDirectorySha256: identity.directorySha256,
+    });
+    const safety = attestation(identity.directorySha256);
+    const accepted = acceptedOutput();
+    const tokenRows: Array<Record<string, unknown>> = [];
+    let modelCalls = 0;
+    const fetchImpl = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (
+          url.pathname === "/v1/responses" ||
+          url.pathname === "/v1/messages"
+        ) {
+          const body = JSON.parse(await request.clone().text()) as {
+            model: string;
+          };
+          const requestId = `req_${String(modelCalls + 1).padStart(8, "0")}`;
+          const route = safety.credential.gatewaySettlement.routes.find(
+            (entry) => entry.alias === body.model,
+          );
+          if (!route) throw new Error("unexpected model route");
+          tokenRows.push({
+            request_id: requestId,
+            type: 2,
+            model_name: body.model,
+            channel: route.channelId,
+            group: "design-spec-eval",
+            quota: 1,
+            prompt_tokens: 100,
+            completion_tokens: 50,
+          });
+          const outputText =
+            modelCalls === 0 ? JSON.stringify(accepted.output) : "{}";
+          modelCalls += 1;
+          return url.pathname === "/v1/responses"
+            ? new Response(
+                JSON.stringify({
+                  status: "completed",
+                  model: body.model,
+                  output_text: outputText,
+                  usage: { input_tokens: 100, output_tokens: 50 },
+                }),
+                { headers: { "x-oneapi-request-id": requestId } },
+              )
+            : new Response(
+                JSON.stringify({
+                  model: body.model,
+                  stop_reason: "end_turn",
+                  content: [{ type: "text", text: outputText }],
+                  usage: { input_tokens: 100, output_tokens: 50 },
+                }),
+                { headers: { "x-oneapi-request-id": requestId } },
+              );
+        }
+        if (url.pathname === "/api/log/token") {
+          return new Response(
+            JSON.stringify({ success: true, data: tokenRows }),
+          );
+        }
+        throw new Error(`unexpected URL: ${url}`);
+      },
+    );
+    const runner = createDesignSpecV2NativeExecutionRunner({
+      attestation: safety,
+      credential: {
+        attestationId: safety.credential.attestationId,
+        snapshotSha256: safety.credential.snapshotSha256,
+        bearerTokenSha256: safety.credential.bearerTokenSha256,
+        gatewayOrigin: safety.credential.gatewayOrigin,
+        bearerToken: testBearerToken(),
+      },
+      ledger,
+      fetch: fetchImpl as typeof fetch,
+    });
+
+    const result = await runDesignSpecV2NativeCampaign({
+      campaignId: "8b0ee1a5-58b5-4e51-a84e-698ebd7ecbd6",
+      runner,
+    });
+
+    expect(modelCalls).toBe(145);
+    expect(result.executions).toHaveLength(73);
+    expect(result.matrixExecutions).toHaveLength(72);
+    expect(
+      result.matrixExecutions.every((entry) => entry.outcome === "rejected"),
+    ).toBe(true);
+    expect(result.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ alias: "gpt-5.6-terra", rankable: false }),
+        expect.objectContaining({ alias: "gpt-5.5", rankable: false }),
+        expect.objectContaining({ alias: "claude-sonnet-5", rankable: false }),
+      ]),
+    );
+    expect(ledger.snapshot(safety.authorization.authorizationId)).toMatchObject(
+      {
+        frozen: false,
+        dispatchExecutions: 73,
+        wireCalls: 146,
+      },
+    );
+  }, 15_000);
 });
