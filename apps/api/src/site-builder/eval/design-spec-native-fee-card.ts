@@ -11,11 +11,10 @@ export const DESIGN_SPEC_NATIVE_FEE_CARD_ID =
 export const DESIGN_SPEC_NATIVE_FEE_CARD_SCHEMA_VERSION =
   "site-builder-design-spec-native-fee-card/v1" as const;
 
-const MILLION = 1_000_000;
 const SHA256 = /^[a-f0-9]{64}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-const REQUIRED_DISPATCHES = Object.freeze([
+export const DESIGN_SPEC_NATIVE_FEE_CARD_DISPATCHES = Object.freeze([
   {
     alias: "gpt-5.6-terra",
     protocol: "openai-responses",
@@ -49,8 +48,9 @@ const REQUIRED_SOURCE_BUNDLE_SHA256 =
 const REQUIRED_MANIFEST_SHA256 =
   "83dedcb2057d4e375114c42b5c03becbc9b057b1bfa1f3fc511bfec600827e72" as const;
 
-type NativeCurrency = "CNY" | "USD";
-type TargetProtocol = Extract<
+export type DesignSpecNativeCurrency =
+  (typeof DESIGN_SPEC_NATIVE_FEE_CARD_DISPATCHES)[number]["currency"];
+export type DesignSpecNativeTargetProtocol = Extract<
   ModelCandidateProtocol,
   "openai-responses" | "anthropic-messages"
 >;
@@ -58,7 +58,7 @@ type TargetProtocol = Extract<
 interface ManifestExecution {
   kind: "capability_probe" | "target";
   alias: string;
-  protocol: TargetProtocol;
+  protocol: DesignSpecNativeTargetProtocol;
   maximumWireCalls: 2;
   maximumRepairCalls: 1;
 }
@@ -101,9 +101,9 @@ export interface DesignSpecNativeFeeCard {
   };
   entries: readonly {
     alias: string;
-    protocol: TargetProtocol;
+    protocol: DesignSpecNativeTargetProtocol;
     groupName: string;
-    currency: NativeCurrency;
+    currency: DesignSpecNativeCurrency;
     executionCount: number;
     maximumWireCalls: number;
     pricingVersion: string;
@@ -113,7 +113,7 @@ export interface DesignSpecNativeFeeCard {
     repairCallMaximum: NativeAmount;
     maximumCost: NativeAmount;
   }[];
-  totalsByCurrency: Readonly<Record<NativeCurrency, NativeAmount>>;
+  totalsByCurrency: Readonly<Record<DesignSpecNativeCurrency, NativeAmount>>;
   expectedCost: "not_known_before_usage";
   mechanicalPolicyCeiling: {
     amountCents: number;
@@ -233,12 +233,12 @@ function assertManifest(value: unknown): ValidatedManifest {
     const key = expectedDispatchKey(entry);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const expected = REQUIRED_DISPATCHES.map((entry) =>
+  const expected = DESIGN_SPEC_NATIVE_FEE_CARD_DISPATCHES.map((entry) =>
     expectedDispatchKey(entry),
   ).sort();
   if (
     JSON.stringify([...counts.keys()].sort()) !== JSON.stringify(expected) ||
-    REQUIRED_DISPATCHES.some(
+    DESIGN_SPEC_NATIVE_FEE_CARD_DISPATCHES.some(
       (entry) =>
         counts.get(expectedDispatchKey(entry)) !== entry.executionCount,
     ) ||
@@ -328,11 +328,11 @@ export function buildDesignSpecNativeFeeCard(
       MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND,
     outputTokensPerWireCall: 4_000,
   };
-  const totals = new Map<NativeCurrency, bigint>([
+  const totals = new Map<DesignSpecNativeCurrency, bigint>([
     ["CNY", 0n],
     ["USD", 0n],
   ]);
-  const entries = REQUIRED_DISPATCHES.map((dispatch) => {
+  const entries = DESIGN_SPEC_NATIVE_FEE_CARD_DISPATCHES.map((dispatch) => {
     const price = settlementOpenOxPrice(
       input.catalog,
       dispatch.alias,
