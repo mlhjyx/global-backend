@@ -43,6 +43,24 @@ export const DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES = Object.freeze([
   },
 ] as const);
 
+export interface DesignSpecNativeFeeCardContract {
+  feeCardId: string;
+  schemaVersion: string;
+  fixedSourceCommitSha: string;
+  suiteId: string;
+  sourceBundleContractId: string;
+  sourceBundleSha256: string;
+  manifestSha256: string;
+  dispatches: readonly {
+    alias: string;
+    protocol: "openai-responses" | "anthropic-messages";
+    groupName: string;
+    currency: "CNY" | "USD";
+    executionCount: number;
+  }[];
+  errorPrefix: string;
+}
+
 const REQUIRED_FIXED_SOURCE_COMMIT_SHA =
   "e569ddcc46040397c976258f76a16b2ec24c31eb" as const;
 const REQUIRED_SUITE_ID =
@@ -53,6 +71,18 @@ const REQUIRED_SOURCE_BUNDLE_SHA256 =
   "a2469fe1fb1522aa90de791506745341796e5b6bbb7e879e8128f26ef79e3e06" as const;
 const REQUIRED_MANIFEST_SHA256 =
   "560334518f28ea3d6838614702f0f829b8873568aef277bc364c0e4c195a9305" as const;
+
+const V2_CONTRACT: DesignSpecNativeFeeCardContract = Object.freeze({
+  feeCardId: DESIGN_SPEC_V2_NATIVE_FEE_CARD_ID,
+  schemaVersion: DESIGN_SPEC_V2_NATIVE_FEE_CARD_SCHEMA_VERSION,
+  fixedSourceCommitSha: REQUIRED_FIXED_SOURCE_COMMIT_SHA,
+  suiteId: REQUIRED_SUITE_ID,
+  sourceBundleContractId: REQUIRED_SOURCE_BUNDLE_CONTRACT_ID,
+  sourceBundleSha256: REQUIRED_SOURCE_BUNDLE_SHA256,
+  manifestSha256: REQUIRED_MANIFEST_SHA256,
+  dispatches: DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES,
+  errorPrefix: "design_spec v2",
+});
 
 export type DesignSpecV2NativeCurrency =
   (typeof DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES)[number]["currency"];
@@ -121,6 +151,14 @@ export interface DesignSpecV2NativeFeeCard {
   cardSha256: string;
 }
 
+export type DesignSpecNativeFeeCard = Omit<
+  DesignSpecV2NativeFeeCard,
+  "schemaVersion" | "feeCardId"
+> & {
+  schemaVersion: string;
+  feeCardId: string;
+};
+
 interface ValidatedManifest {
   fixedCommitSha: string;
   manifestSha256: string;
@@ -161,9 +199,12 @@ function dispatchKey(value: { alias: string; protocol: string }): string {
   return `${value.alias}:${value.protocol}`;
 }
 
-function assertManifest(value: unknown): ValidatedManifest {
+function assertManifest(
+  value: unknown,
+  contract: DesignSpecNativeFeeCardContract,
+): ValidatedManifest {
   if (!isRecord(value)) {
-    throw new Error("design_spec v2 manifest must be an object");
+    throw new Error(`${contract.errorPrefix} manifest must be an object`);
   }
   const promptUtf8Bytes = value.promptUtf8Bytes;
   const suite = value.suite;
@@ -173,7 +214,7 @@ function assertManifest(value: unknown): ValidatedManifest {
     value.schemaVersion !==
       "site-builder-design-spec-evaluation-manifest-prep/v2" ||
     value.taskId !== "site_builder.design_spec" ||
-    value.fixedCommitSha !== REQUIRED_FIXED_SOURCE_COMMIT_SHA ||
+    value.fixedCommitSha !== contract.fixedSourceCommitSha ||
     value.createOnly !== true ||
     value.dispatchAuthorization !== "NOT_AUTHORIZED" ||
     value.actualNetworkCalls !== 0 ||
@@ -184,9 +225,9 @@ function assertManifest(value: unknown): ValidatedManifest {
     !positiveSafeInteger(promptUtf8Bytes.maximumCanonicalInitial) ||
     !positiveSafeInteger(promptUtf8Bytes.maximumCanonicalRepair) ||
     !isRecord(suite) ||
-    suite.suiteId !== REQUIRED_SUITE_ID ||
-    suite.sourceBundleContractId !== REQUIRED_SOURCE_BUNDLE_CONTRACT_ID ||
-    suite.sourceBundleSha256 !== REQUIRED_SOURCE_BUNDLE_SHA256 ||
+    suite.suiteId !== contract.suiteId ||
+    suite.sourceBundleContractId !== contract.sourceBundleContractId ||
+    suite.sourceBundleSha256 !== contract.sourceBundleSha256 ||
     !isRecord(planningHardUpperBound) ||
     !positiveSafeInteger(planningHardUpperBound.amountCents) ||
     value.executionCount !== 73 ||
@@ -194,13 +235,15 @@ function assertManifest(value: unknown): ValidatedManifest {
     !Array.isArray(executions) ||
     executions.length !== 73
   ) {
-    throw new Error("design_spec v2 manifest identity or envelope is invalid");
+    throw new Error(
+      `${contract.errorPrefix} manifest identity or envelope is invalid`,
+    );
   }
 
   const { manifestSha256: declaredManifestSha256, ...manifestWithoutDigest } =
     value;
   if (sha256CanonicalJson(manifestWithoutDigest) !== declaredManifestSha256) {
-    throw new Error("design_spec v2 manifest digest drifted");
+    throw new Error(`${contract.errorPrefix} manifest digest drifted`);
   }
 
   const counts = new Map<string, number>();
@@ -216,7 +259,9 @@ function assertManifest(value: unknown): ValidatedManifest {
       execution.maximumWireCalls !== 2 ||
       execution.maximumRepairCalls !== 1
     ) {
-      throw new Error("design_spec v2 execution alias or protocol drifted");
+      throw new Error(
+        `${contract.errorPrefix} execution alias or protocol drifted`,
+      );
     }
     if (execution.kind === "capability_probe") {
       capabilityProbeCount += 1;
@@ -225,7 +270,9 @@ function assertManifest(value: unknown): ValidatedManifest {
         execution.alias !== "gpt-5.5" ||
         execution.protocol !== "openai-responses"
       ) {
-        throw new Error("design_spec v2 execution alias or protocol drifted");
+        throw new Error(
+          `${contract.errorPrefix} execution alias or protocol drifted`,
+        );
       }
     }
     const key = dispatchKey({
@@ -234,22 +281,24 @@ function assertManifest(value: unknown): ValidatedManifest {
     });
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const expected = DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES.map(dispatchKey)
-    .sort()
-    .join("\u0000");
+  const expected = contract.dispatches.map(dispatchKey).sort().join("\u0000");
   const actual = [...counts.keys()].sort().join("\u0000");
   if (
     capabilityProbeCount !== 1 ||
     actual !== expected ||
-    DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES.some(
+    contract.dispatches.some(
       (dispatch) =>
         counts.get(dispatchKey(dispatch)) !== dispatch.executionCount,
     )
   ) {
-    throw new Error("design_spec v2 execution alias or protocol drifted");
+    throw new Error(
+      `${contract.errorPrefix} execution alias or protocol drifted`,
+    );
   }
-  if (value.manifestSha256 !== REQUIRED_MANIFEST_SHA256) {
-    throw new Error("design_spec v2 manifest identity or envelope is invalid");
+  if (value.manifestSha256 !== contract.manifestSha256) {
+    throw new Error(
+      `${contract.errorPrefix} manifest identity or envelope is invalid`,
+    );
   }
 
   return {
@@ -272,7 +321,14 @@ function assertManifest(value: unknown): ValidatedManifest {
 
 /** Validates the exact v2 manifest identity before any public catalog read. */
 export function assertDesignSpecV2NativeFeeCardManifest(value: unknown): void {
-  assertManifest(value);
+  assertManifest(value, V2_CONTRACT);
+}
+
+export function assertDesignSpecNativeFeeCardManifestForContract(
+  value: unknown,
+  contract: DesignSpecNativeFeeCardContract,
+): void {
+  assertManifest(value, contract);
 }
 
 function nativePicoUnits(
@@ -309,16 +365,19 @@ function amount(value: bigint): NativeAmount {
   };
 }
 
-export function buildDesignSpecV2NativeFeeCard(
+export function buildDesignSpecNativeFeeCardForContract(
   input: DesignSpecV2NativeFeeCardInput,
-): DesignSpecV2NativeFeeCard {
+  contract: DesignSpecNativeFeeCardContract,
+): DesignSpecNativeFeeCard {
   if (
     !canonicalInstant(input.capturedAt) ||
     !SHA256.test(input.catalogResponseSha256)
   ) {
-    throw new Error("v2 fee-card capture binding is invalid");
+    throw new Error(
+      `${contract.errorPrefix} fee-card capture binding is invalid`,
+    );
   }
-  const manifest = assertManifest(input.manifest);
+  const manifest = assertManifest(input.manifest, contract);
   const tokenEnvelope = {
     initialInputTokens:
       manifest.promptUtf8Bytes.maximumCanonicalInitial +
@@ -332,57 +391,59 @@ export function buildDesignSpecV2NativeFeeCard(
     ["CNY", 0n],
     ["USD", 0n],
   ]);
-  const entries = DESIGN_SPEC_V2_NATIVE_FEE_CARD_DISPATCHES.map((dispatch) => {
-    const price = settlementOpenOxPrice(
-      input.catalog,
-      dispatch.alias,
-      dispatch.groupName,
-    );
-    if (!price || price.currency !== dispatch.currency) {
-      throw new Error(
-        `OpenOx price is missing or unpublished: ${dispatch.alias}`,
+  const entries = contract.dispatches
+    .map((dispatch) => {
+      const price = settlementOpenOxPrice(
+        input.catalog,
+        dispatch.alias,
+        dispatch.groupName,
       );
-    }
-    const initial = nativePicoUnits(
-      tokenEnvelope.initialInputTokens,
-      tokenEnvelope.outputTokensPerWireCall,
-      price.inputPriceMicrounitsPerMillionTokens,
-      price.outputPriceMicrounitsPerMillionTokens,
-    );
-    const repair = nativePicoUnits(
-      tokenEnvelope.repairInputTokens,
-      tokenEnvelope.outputTokensPerWireCall,
-      price.inputPriceMicrounitsPerMillionTokens,
-      price.outputPriceMicrounitsPerMillionTokens,
-    );
-    const maximum = BigInt(dispatch.executionCount) * (initial + repair);
-    totals.set(
-      dispatch.currency,
-      (totals.get(dispatch.currency) ?? 0n) + maximum,
-    );
-    return Object.freeze({
-      alias: dispatch.alias,
-      protocol: dispatch.protocol,
-      groupName: dispatch.groupName,
-      currency: dispatch.currency,
-      executionCount: dispatch.executionCount,
-      maximumWireCalls: dispatch.executionCount * 2,
-      pricingVersion: price.pricingVersion,
-      effectiveInputRateMicrounitsPerMillionTokens:
+      if (!price || price.currency !== dispatch.currency) {
+        throw new Error(
+          `OpenOx price is missing or unpublished: ${dispatch.alias}`,
+        );
+      }
+      const initial = nativePicoUnits(
+        tokenEnvelope.initialInputTokens,
+        tokenEnvelope.outputTokensPerWireCall,
         price.inputPriceMicrounitsPerMillionTokens,
-      effectiveOutputRateMicrounitsPerMillionTokens:
         price.outputPriceMicrounitsPerMillionTokens,
-      initialCallMaximum: amount(initial),
-      repairCallMaximum: amount(repair),
-      maximumCost: amount(maximum),
-    });
-  }).sort((left, right) =>
-    left.alias < right.alias ? -1 : left.alias > right.alias ? 1 : 0,
-  );
+      );
+      const repair = nativePicoUnits(
+        tokenEnvelope.repairInputTokens,
+        tokenEnvelope.outputTokensPerWireCall,
+        price.inputPriceMicrounitsPerMillionTokens,
+        price.outputPriceMicrounitsPerMillionTokens,
+      );
+      const maximum = BigInt(dispatch.executionCount) * (initial + repair);
+      totals.set(
+        dispatch.currency,
+        (totals.get(dispatch.currency) ?? 0n) + maximum,
+      );
+      return Object.freeze({
+        alias: dispatch.alias,
+        protocol: dispatch.protocol,
+        groupName: dispatch.groupName,
+        currency: dispatch.currency,
+        executionCount: dispatch.executionCount,
+        maximumWireCalls: dispatch.executionCount * 2,
+        pricingVersion: price.pricingVersion,
+        effectiveInputRateMicrounitsPerMillionTokens:
+          price.inputPriceMicrounitsPerMillionTokens,
+        effectiveOutputRateMicrounitsPerMillionTokens:
+          price.outputPriceMicrounitsPerMillionTokens,
+        initialCallMaximum: amount(initial),
+        repairCallMaximum: amount(repair),
+        maximumCost: amount(maximum),
+      });
+    })
+    .sort((left, right) =>
+      left.alias < right.alias ? -1 : left.alias > right.alias ? 1 : 0,
+    );
 
   const withoutDigest = {
-    schemaVersion: DESIGN_SPEC_V2_NATIVE_FEE_CARD_SCHEMA_VERSION,
-    feeCardId: DESIGN_SPEC_V2_NATIVE_FEE_CARD_ID,
+    schemaVersion: contract.schemaVersion,
+    feeCardId: contract.feeCardId,
     status: "READY_FOR_CREDENTIAL_ATTESTATION" as const,
     dispatchAuthorization: "NOT_AUTHORIZED" as const,
     fixedSourceCommitSha: manifest.fixedCommitSha,
@@ -412,4 +473,13 @@ export function buildDesignSpecV2NativeFeeCard(
     ...withoutDigest,
     cardSha256: sha256CanonicalJson(withoutDigest),
   });
+}
+
+export function buildDesignSpecV2NativeFeeCard(
+  input: DesignSpecV2NativeFeeCardInput,
+): DesignSpecV2NativeFeeCard {
+  return buildDesignSpecNativeFeeCardForContract(
+    input,
+    V2_CONTRACT,
+  ) as DesignSpecV2NativeFeeCard;
 }
