@@ -5,6 +5,10 @@ import test from "node:test";
 import { BRAND_PROFILE_TASK } from "../apps/api/src/site-builder/agents/brand-profile";
 import { DESIGN_SPEC_TASK } from "../apps/api/src/site-builder/design/design-brief-producer";
 import {
+  QA_SUMMARIZE_TASK,
+  SEO_REVIEW_TASK,
+} from "../apps/api/src/site-builder/quality/quality-narrative";
+import {
   prepareBrandProfileEvalFixture,
   type BrandProfileEvalFixture,
 } from "../apps/api/src/site-builder/eval/brand-profile-eval";
@@ -12,6 +16,10 @@ import {
   DESIGN_SPEC_EVAL_FIXTURES,
   prepareDesignSpecEvalFixture,
 } from "../apps/api/src/site-builder/eval/design-spec-eval";
+import {
+  QUALITY_NARRATIVE_EVAL_FIXTURES,
+  prepareQualityNarrativeEvalFixture,
+} from "../apps/api/src/site-builder/eval/quality-narrative-eval";
 import { DESIGN_SPEC_EVALUATION_MANIFEST_PREP_ID } from "../apps/api/src/site-builder/eval/design-spec-evaluation-manifest-prep";
 import {
   SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
@@ -198,14 +206,68 @@ test("the design_spec suite pins all six sparse/rich catalog pairs", () => {
   }
 });
 
+test("QA and SEO suites pin closed quality-narrative fixtures and prompts", () => {
+  for (const taskId of [
+    "site_builder.qa_summarize",
+    "site_builder.seo_review",
+  ] as const) {
+    const plan = buildTaskEvaluationPlan(taskId);
+    const suite = plan.evaluationSuite;
+    assert.ok(suite);
+    assert.equal(suite.fixtureIds.length, 2);
+    assert.equal(suite.repeats, 2);
+    assert.deepEqual(suite.legacyComparatorAliases, []);
+    assert.equal(
+      suite.sourceBundleContractId,
+      "quality-narrative-evaluation-source-bundle/v1",
+    );
+    for (const fingerprint of suite.fixtureFingerprints) {
+      const fixture = QUALITY_NARRATIVE_EVAL_FIXTURES.find(
+        (entry) => entry.fixtureId === fingerprint.fixtureId,
+      );
+      assert.ok(fixture);
+      assert.equal(fixture.taskId, taskId);
+      const prepared = prepareQualityNarrativeEvalFixture(fixture);
+      const task =
+        taskId === "site_builder.qa_summarize"
+          ? QA_SUMMARIZE_TASK
+          : SEO_REVIEW_TASK;
+      assert.equal(
+        sha256CanonicalJson(fixture),
+        fingerprint.fixtureSha256,
+        `${fingerprint.fixtureId} fixture fingerprint drifted`,
+      );
+      assert.equal(
+        sha256Text(task.buildPrompt(prepared.input)),
+        fingerprint.promptSha256,
+        `${fingerprint.fixtureId} prompt fingerprint drifted`,
+      );
+      const evaluationCase = buildCanonicalModelEvaluationCase(
+        plan,
+        fingerprint.fixtureId,
+      );
+      assert.deepEqual(evaluationCase.payload.fixture, fixture);
+      assert.deepEqual(evaluationCase.payload.taskInput, prepared.input);
+      assert.equal(
+        evaluationCase.payload.prompt,
+        task.buildPrompt(prepared.input),
+      );
+    }
+  }
+});
+
 test("a missing harness id fails documentation verification", async () => {
   const documents = await currentDocuments();
-  documents["docs/status/current.md"] = documents[
-    "docs/status/current.md"
-  ].replace(SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID, "missing-harness-id");
+  for (const path of MODEL_EVALUATION_HARNESS_DOCUMENTS) {
+    if (path === "docs/site-builder/model-evaluation-harness.md") continue;
+    documents[path] = documents[path].replaceAll(
+      SITE_BUILDER_MODEL_EVALUATION_HARNESS_ID,
+      "missing-harness-id",
+    );
+  }
   assert.throws(
     () => verifyModelEvaluationHarness(documents),
-    /docs\/status\/current\.md must reference the current evaluation harness id/,
+    /AGENTS\.md must reference the current evaluation harness id/,
   );
 });
 
