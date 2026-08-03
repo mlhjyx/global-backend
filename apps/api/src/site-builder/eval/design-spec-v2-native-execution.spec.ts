@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,15 +21,23 @@ import {
   isTrustedDesignSpecV2NativeExecutionRunner,
 } from "./design-spec-v2-native-execution";
 import { runDesignSpecV2NativeCampaign } from "./design-spec-v2-native-campaign";
-import {
-  createNativeModelEvaluationCostSafetyAttestation,
-  nativeModelEvaluationPricingFeeCardSha256,
-  type NativeModelEvaluationCostSafetyInput,
-} from "./model-evaluation-native-cost-safety";
+import type { NativeModelEvaluationCostSafetyInput } from "./model-evaluation-native-cost-safety";
+import { createDesignSpecV5NativeExecutionAttestation } from "./design-spec-v5-native-execution-preflight";
 
 const EXECUTION_ID = "design-spec-native-execution-0001";
 const REQUEST_ID = "req_12345678";
 const directories: string[] = [];
+const v5FeeCardEvidence = Object.freeze(
+  JSON.parse(
+    readFileSync(
+      join(
+        __dirname,
+        "../../../../../docs/evidence/site-builder/m1-g-design-spec-v5-native-fee-card-2026-08-04.json",
+      ),
+      "utf8",
+    ),
+  ),
+);
 
 function testBearerToken(): string {
   return ["limited", "evaluation", "token"].join("-");
@@ -176,9 +184,11 @@ function attestation(ledgerDirectorySha256: string) {
       unknownSettlementPolicy: "freeze_campaign",
     },
   };
-  input.authorization.preparedFeeCardSha256 =
-    nativeModelEvaluationPricingFeeCardSha256(input.pricing);
-  return createNativeModelEvaluationCostSafetyAttestation(input);
+  return createDesignSpecV5NativeExecutionAttestation({
+    authorization: input.authorization,
+    credential: input.credential,
+    feeCardEvidence: v5FeeCardEvidence,
+  });
 }
 
 function acceptedOutput() {
