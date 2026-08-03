@@ -16,7 +16,7 @@ const REPOSITORY_ROOT = resolve(
   "../../..",
 );
 const MANIFEST_PATH =
-  "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v2.json";
+  "docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v3.json";
 const MAX_CATALOG_BYTES = 1_048_576;
 const EVIDENCE_PATH =
   /^docs\/evidence\/site-builder\/[A-Za-z0-9][A-Za-z0-9._/-]*\.json$/;
@@ -207,7 +207,7 @@ async function main(): Promise<void> {
     catalogResponseSha256: responseSha256,
   });
   await writeRepositoryJsonCreateOnly(REPOSITORY_ROOT, output, {
-    schemaVersion: "site-builder-design-spec-v2-native-fee-card-evidence/v1",
+    schemaVersion: "site-builder-design-spec-v3-native-fee-card-evidence/v1",
     preparationCommitSha: head,
     card,
     modelWireCalls: 0,
