@@ -242,9 +242,9 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 ## 6. 模型路由（currentRoute 与 ADR-020 目标组合分层）
 
-2026-07-27 起，非运行时候选由 ADR-021 与 `site-builder-model-candidate-baseline/2026-07-27-v1` 接管；本节标题保留旧 anchor 以兼容历史设计稿链接。
+2026-07-27 起，非运行时候选由 ADR-021 与 `site-builder-model-candidate-baseline/2026-08-04-v1` 接管；本节标题保留旧 anchor 以兼容历史设计稿链接。
 
-> **代码事实优先**：`task-routes.ts` 是现役唯一真值；7 个文本 task 中只有 BrandProfile 经真实 endpoint 协议探针、同形 6×2 Golden、成本/质量、失败门和 rollback 成为代码级 `promotedRoute`，其余仍是 `currentRoute`。非运行时候选唯一看 ADR-021 的 `site-builder-model-candidate-baseline/2026-07-27-v1` 与[生成文档](model-candidate-baseline.md)；ADR-020 和 [10-model-selection-study.md](10-model-selection-study.md) 只保留历史决策/实测 provenance，不再复制当前候选表。
+> **代码事实优先**：`task-routes.ts` 是现役唯一真值；7 个文本 task 中只有 BrandProfile 经真实 endpoint 协议探针、同形 6×2 Golden、成本/质量、失败门和 rollback 成为代码级 `promotedRoute`，其余仍是 `currentRoute`。非运行时候选唯一看 ADR-021 的 `site-builder-model-candidate-baseline/2026-08-04-v1` 与[生成文档](model-candidate-baseline.md)；ADR-020 和 [10-model-selection-study.md](10-model-selection-study.md) 只保留历史决策/实测 provenance，不再复制当前候选表。
 
 **active route（as-built）**：
 

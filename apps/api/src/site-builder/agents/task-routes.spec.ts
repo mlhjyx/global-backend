@@ -431,8 +431,8 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     ).toBe(true);
   });
 
-  it('17 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
-    expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(17);
+  it('18 个稳定 profile 都有能力、数据处理声明；未接入的语音/视频/审核档 fail-closed', () => {
+    expect(Object.keys(SITE_BUILDER_MODEL_PROFILES)).toHaveLength(18);
     for (const profile of [
       'video.premium',
       'speech.production',

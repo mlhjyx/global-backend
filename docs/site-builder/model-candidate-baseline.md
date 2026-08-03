@@ -59,6 +59,7 @@
 |---|---|---|---|
 | `structured.workspace_materials` | `requires_task_evaluation` | `gpt-5.6-terra` (`runnable` · `openai-responses` · `none`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`) | task-shaped structure, evidence, factuality, stability, latency, and cost<br>task-shaped structure, evidence, factuality, stability, latency, and cost<br>capability probe before the task-shaped matrix |
 | `structured.default` | `requires_task_evaluation` | `gpt-5.6-terra` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`) | per-task structured-output and closed-catalog evaluation<br>capability probe before the per-task matrix<br>per-task structured-output and closed-catalog evaluation |
+| `structured.assembly` | `requires_task_evaluation` | `gpt-5.6-terra` (`runnable` · `openai-responses` · `none`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`) | closed assembly selection and repair evaluation within the native per-wire cost cap<br>closed assembly selection and repair evaluation within the native per-wire cost cap |
 | `reasoning.high` | `requires_task_evaluation` | `gpt-5.6-sol` (`runnable` · `openai-responses` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`) | complex-repair task envelope and deterministic safety fallback<br>complex-repair capability probe before evaluation<br>complex-repair task envelope and deterministic safety fallback |
 | `copy.premium` | `requires_task_evaluation` | `claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`)<br>`gpt-5.5` (`runnable` · `openai-responses` · `capability_probe`)<br>`gpt-5.6-terra` (`runnable` · `openai-responses` · `none`) | claim-bound multilingual copy evaluation<br>capability probe before claim-bound copy evaluation<br>claim-bound multilingual copy evaluation |
 | `text.summary` | `requires_task_evaluation` | `gpt-5.6-luna` (`runnable` · `openai-responses` · `none`)<br>`claude-sonnet-5` (`runnable` · `anthropic-messages` · `none`)<br>`gpt-5.6-terra` (`runnable` · `openai-responses` · `none`) | task-shaped summary validity and omission evaluation<br>task-shaped summary validity and omission evaluation<br>task-shaped summary validity and omission evaluation |
@@ -78,8 +79,8 @@
 | `site_builder.brand_profile` | `structured.workspace_materials` |
 | `site_builder.copy` | `copy.premium` |
 | `site_builder.design_spec` | `structured.default` |
-| `site_builder.assemble` | `structured.default` |
-| `site_builder.assembly_fix` | `structured.default` |
+| `site_builder.assemble` | `structured.assembly` |
+| `site_builder.assembly_fix` | `structured.assembly` |
 | `site_builder.qa_summarize` | `text.summary` |
 | `site_builder.seo_review` | `text.summary` |
 

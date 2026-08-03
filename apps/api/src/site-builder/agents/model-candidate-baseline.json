@@ -229,6 +229,24 @@
       ]
     },
     {
+      "profile": "structured.assembly",
+      "activation": "requires_task_evaluation",
+      "candidates": [
+        {
+          "alias": "gpt-5.6-terra",
+          "expectedProtocol": "openai-responses",
+          "preflight": "none",
+          "gate": "closed assembly selection and repair evaluation within the native per-wire cost cap"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "preflight": "none",
+          "gate": "closed assembly selection and repair evaluation within the native per-wire cost cap"
+        }
+      ]
+    },
+    {
       "profile": "reasoning.high",
       "activation": "requires_task_evaluation",
       "candidates": [
@@ -448,11 +466,11 @@
     },
     {
       "taskId": "site_builder.assemble",
-      "profile": "structured.default"
+      "profile": "structured.assembly"
     },
     {
       "taskId": "site_builder.assembly_fix",
-      "profile": "structured.default"
+      "profile": "structured.assembly"
     },
     {
       "taskId": "site_builder.qa_summarize",

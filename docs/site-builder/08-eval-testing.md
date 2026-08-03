@@ -2,7 +2,7 @@
 
 > 文档 ID：`SITE-EVAL-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：资格证据、Golden 资产、[状态](../status/current.md)与候选基线 `site-builder-model-candidate-baseline/2026-07-27-v1`。
+> 当前事实来源：资格证据、Golden 资产、[状态](../status/current.md)与候选基线 `site-builder-model-candidate-baseline/2026-08-04-v1`。
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 refurbish build 内的确定性 QA/SEO/a11y/genericness 与 capability-gated 审美评审，02 §4 P4，M1-f 已落）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
 > **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；只有 BrandProfile 已完成 MODEL-1 task-shaped 晋级。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**。M1-e-B 已使 design/assemble 成为真实受控消费者，但其 402 后确定性降级不构成模型成功证据。M1-f 已落确定性 P4 与 closed repair；Gemini task-shaped 矩阵超时，因此审美状态只能明确为 unavailable，未晋级、不得冒充模型成功。55 型均为 `m1_e_a_qualified`，不是蒸馏产物状态。
@@ -23,7 +23,7 @@
 >
 > **2026-08-03 v2 原生双币费用卡（zero-call）**：[`design_spec` v2 price card](../evidence/site-builder/m1-g-design-spec-v2-native-fee-card-2026-08-03.json) 将一次 OpenOx 公共目录读取限定到上述 v2 source/suite/source-bundle/digest 与 target-only 73/146 矩阵。它冻结 CNY `11.276659` 与 USD `3.45842784` 的独立机械最高上限、目录响应 SHA-256，并固定 `modelWireCalls=0`、实际模型费用 CNY/USD 均为 `0`、`dispatchAuthorization=NOT_AUTHORIZED` 与 `READY_FOR_CREDENTIAL_ATTESTATION`；不读取凭据或余额、不调用模型、不改变 dispatcher、cost-safety、active route 或模型调用权限。下一步仍须在独立 evidence PR 中核验 purpose-specific 有限凭据、精确 alias/protocol scope、余额/限额和 known settlement，再取得产品负责人对该精确金额的第二次授权。
 >
-> **代码级 harness（`design_spec` 尚无真实 evidence）**：`site-builder-model-evaluation-harness/2026-08-01-v18` 从保持不变的 `site-builder-model-candidate-baseline/2026-07-27-v1` 与当前 task binding 生成计划；精确 task/protocol/envelope、canonical suite、结果类、排序、预算、协议 admission 与 provenance 只认[生成评测基线](model-evaluation-harness.md)，不得在本文件再抄矩阵。BrandProfile 既有 suite 保持；`design_spec` v15 suite 固定 12 个六 Family sparse/rich 合成 fixture、3 个 runnable 候选、2 次重复、一次 GPT-5.5 capability probe 与零调用 deterministic catalog comparator。copy 有 2 个 Claim/slot fixture；assemble 与 assembly_fix 各有 12 个 M1-e-B fixture，其中 repair 固定 prior candidate digest 与 findings；`qa_summarize` 与 `seo_review` 各有 2 fixtures × 2 repeats 的 quality-narrative suite。所有新增 suite 的 legacy comparator allowlist 为空，Gemini 文本继续 deferred。未来真实执行仍由 `site-builder-model-evaluation-cost-safety/2026-07-30-v2` 强制把 spend authorization 绑定到 fixed commit、suite、source-bundle contract/digest、有限凭据、精确 scope、冻结显式价格和 request 级结算；当前只用 fake wire/fetch/settlement，未读 `.env`、未发真实模型或媒体请求、未产生费用/evidence、未改 new-api token/channel、P4/DesignEvaluation/ReleaseManifest/Temporal/active route/env、公共 API 或 DB。
+> **代码级 harness（`design_spec` 尚无真实 evidence）**：`site-builder-model-evaluation-harness/2026-08-01-v18` 从保持不变的 `site-builder-model-candidate-baseline/2026-08-04-v1` 与当前 task binding 生成计划；精确 task/protocol/envelope、canonical suite、结果类、排序、预算、协议 admission 与 provenance 只认[生成评测基线](model-evaluation-harness.md)，不得在本文件再抄矩阵。BrandProfile 既有 suite 保持；`design_spec` v15 suite 固定 12 个六 Family sparse/rich 合成 fixture、3 个 runnable 候选、2 次重复、一次 GPT-5.5 capability probe 与零调用 deterministic catalog comparator。copy 有 2 个 Claim/slot fixture；assemble 与 assembly_fix 各有 12 个 M1-e-B fixture，其中 repair 固定 prior candidate digest 与 findings；`qa_summarize` 与 `seo_review` 各有 2 fixtures × 2 repeats 的 quality-narrative suite。所有新增 suite 的 legacy comparator allowlist 为空，Gemini 文本继续 deferred。未来真实执行仍由 `site-builder-model-evaluation-cost-safety/2026-07-30-v2` 强制把 spend authorization 绑定到 fixed commit、suite、source-bundle contract/digest、有限凭据、精确 scope、冻结显式价格和 request 级结算；当前只用 fake wire/fetch/settlement，未读 `.env`、未发真实模型或媒体请求、未产生费用/evidence、未改 new-api token/channel、P4/DesignEvaluation/ReleaseManifest/Temporal/active route/env、公共 API 或 DB。
 >
 > **零费用 evidence 准备**：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1` 只生成 fixed-commit/create-only BrandProfile 执行清单与费用决策卡，不含 executor/client。机器清单为 1 capability probe + 36 target + 24 legacy comparator = 61 executions，每次最多一次 repair，最多 122 wire calls；61/122/2440¢ 仍为未验证规划上界。真实决策卡必须消费同一 fixed commit 已跟踪的脱敏 safe-snapshot envelope，逐文件核对 Git source bundle，并保留不可逆 credential fingerprint、精确有限 scope、余额采样时间、spend authorization/ledger、冻结价格与计费单位及其 digest；输出即使是 `READY_FOR_PRODUCT_DECISION` 也保持 `dispatchAuthorization=NOT_AUTHORIZED`。准备 runner 拒绝 `.env`、手写未跟踪输入和既有输出路径；当前未生成真实费用卡/evidence、未调用模型或媒体。
 
@@ -334,7 +334,7 @@ CI 只跑**纯单测 + 契约快照**（仓库规矩，无 DB/网络）；集成
 ## 10. 待拍板
 
 1. 真实工厂资料进 Golden Set 的**授权方式**（2~3 家合作工厂：口头授权+书面记录 or 简单授权书模板）。
-2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。2026-07-27 非运行时候选只认 ADR-021 的 `site-builder-model-candidate-baseline/2026-07-27-v1`；Gemini 文本虽仍在上游目录可见，但当前渠道已 fail-closed 禁用并只记 `deferred`。不能由目录可见或一次最小连通直接指定 Judge；多模态与跨 provider Judge 均须后续 harness 用真实任务输入、固定 snapshot 校准，并以独立 evidence/ADR 收口。
+2. **Judge 固定 ModelProfile 选型**（ADR-016）：需固定模型+snapshot+温度 0，且**尽量异 provider 于被评 candidate**（§3.6 反串谋）。2026-07-27 非运行时候选只认 ADR-021 的 `site-builder-model-candidate-baseline/2026-08-04-v1`；Gemini 文本虽仍在上游目录可见，但当前渠道已 fail-closed 禁用并只记 `deferred`。不能由目录可见或一次最小连通直接指定 Judge；多模态与跨 provider Judge 均须后续 harness 用真实任务输入、固定 snapshot 校准，并以独立 evidence/ADR 收口。
 3. Bootstrap 6 fixture 的 sparse/rich 素材与期望锚点**由谁产出、何时冻结**（EVAL-bootstrap PR 前置）。
 
 ---

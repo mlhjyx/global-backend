@@ -270,7 +270,7 @@ describe("model evaluation planning", () => {
       reasoningEffort: "low",
     });
     expect(buildTaskEvaluationPlan("site_builder.assemble").envelope).toEqual({
-      maxTokens: 16_000,
+      maxTokens: 12_000,
       runtimeDeadlineMs: 180_000,
       diagnosticObservationMs: 180_000,
       hardStopMs: 360_000,

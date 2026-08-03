@@ -2,7 +2,7 @@
 
 > 文档 ID：`SITE-M1-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：[状态](../status/current.md)、[路线](../roadmap/release-plan.md)、当前代码与候选基线 `site-builder-model-candidate-baseline/2026-07-27-v1`。
+> 当前事实来源：[状态](../status/current.md)、[路线](../roadmap/release-plan.md)、当前代码与候选基线 `site-builder-model-candidate-baseline/2026-08-04-v1`。
 > 历史设计记录：**已认可（2026-07-14 用户拍板；2026-07-17 ADR-020 模型组合补充；2026-07-27 ADR-021 候选重基线）**。设计真值 = 本目录活文档；决策真值 = `docs/adr/registry.md`（ADR-013~021）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
 >
 > **2026-07-16 回写（v3.2 §24/§26 分发入本文，Reviewed against 12 v3.2）**：新增 §10 生产化审计（R0–R4 定点修复 + 各阶段前置门）、§11 施工 PR 图（粒度/顺序/风险分级）、§12 目标态消费契约与 schema；并就地校正过时表述（组件库 17→55 型/ADR-015；rembg 移出 M1-c/ADR-018；「终选」改四态路由 currentRoute/targetCandidate/ADR-016；R0-3 禁虚构身份引 ADR-017）。**严格区分 as-built（§2 触点 + `@global/contracts` SiteSpec 1.0.0 type-only）与目标态（§12，SiteSpec 1.1 / 内容生命周期，未落地）**。
@@ -89,7 +89,7 @@
 
 > **2026-07-19 路由裁决/首个逐任务晋级 fast-follow**：本节旧 targetCandidate/“四通道”清单保留为施工历史；2026-07-27 起非运行时候选由[生成候选基线](model-candidate-baseline.md)覆盖，现役唯一认 `task-routes.ts`。final-code 同一 6×2 source bundle 下，BrandProfile 候选 Terra/Responses 12/12、Sonnet/Messages 12/12；完整 legacy DeepSeek Pro→GLM 路由也为 12/12（GLM probe 通过、正文 fallback 0 次）。因此不再用旧 10/12 基线失败作晋级理由，而以三路全过硬门后的 accepted-artifact 成本、原生 transport/provenance、任务失败门与 rollback 保持首个代码级 `promotedRoute`=`gpt-5.6-terra → claude-sonnet-5`。active evidence id=`model1-brand-profile-20260719-v20`；旧失败/诊断报告全部保留。其他 task、图片、视频仍未继承该结论。R4-B-min 只持久记录该现役路由的 provenance/usage，未重跑或改写 MODEL-1；M1-d 也未晋级 `copy` route，不等于已生产部署或完成真实流量 canary。
 
-旧“四通道升级位”表已从施工入口撤下，只在 [10 §0](10-model-selection-study.md#0-2026-07-14-dated-结论按任务路由保留为历史实测证据) 保留 dated provenance。下面抄录 `task-routes.ts` 的 active route；新候选只看 `site-builder-model-candidate-baseline/2026-07-27-v1`，两者之间必须逐 task 经过 ADR-016 promotion 门。
+旧“四通道升级位”表已从施工入口撤下，只在 [10 §0](10-model-selection-study.md#0-2026-07-14-dated-结论按任务路由保留为历史实测证据) 保留 dated provenance。下面抄录 `task-routes.ts` 的 active route；新候选只看 `site-builder-model-candidate-baseline/2026-08-04-v1`，两者之间必须逐 task 经过 ADR-016 promotion 门。
 
 | task                          | active primary               | fallback                          | state                                                                                |
 | ----------------------------- | ---------------------------- | --------------------------------- | ------------------------------------------------------------------------------------ |
