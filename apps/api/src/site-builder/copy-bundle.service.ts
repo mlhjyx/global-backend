@@ -150,7 +150,7 @@ export function neutralCopySlotContent(key: string, locale: string): string {
     : "Further information is available on request.";
 }
 
-function canonicalSlotOutput(
+export function canonicalizeCopySlotOutput(
   locale: string,
   slot: CopySlotDefinition,
   output: CopySlotGeneratorResult,
@@ -266,7 +266,7 @@ export class CopyBundleService {
             inputHash,
             slots: Object.fromEntries(
               generated.map(({ slot, output }) => {
-                const canonical = canonicalSlotOutput(
+                const canonical = canonicalizeCopySlotOutput(
                   locale,
                   slot,
                   output,

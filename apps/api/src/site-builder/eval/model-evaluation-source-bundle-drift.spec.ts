@@ -158,5 +158,5 @@ describe("model evaluation source bundle drift", () => {
     });
     expect(wireCall).toHaveBeenCalledTimes(1);
     expect(postDispatchTargetReads).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

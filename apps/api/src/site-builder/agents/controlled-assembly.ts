@@ -10,6 +10,7 @@ import { runAiTask, type SiteBuilderTaskDefinition } from "./ai-task";
 
 export interface ControlledAssemblyTaskInput {
   designBriefDigest: string;
+  allowedSectionTargets?: Array<{ pageKey: string; sectionId: string }>;
   allowedCopySlotKeys: string[];
   allowedAssetReferenceIds: string[];
   allowedClaimIds: string[];
@@ -17,7 +18,10 @@ export interface ControlledAssemblyTaskInput {
   findings: AssemblyFinding[];
 }
 
-function closedSelection(value: AssemblySelection): void {
+function closedSelection(
+  input: ControlledAssemblyTaskInput,
+  value: AssemblySelection,
+): void {
   if (
     !value ||
     typeof value !== "object" ||
@@ -25,6 +29,39 @@ function closedSelection(value: AssemblySelection): void {
     !Array.isArray(value.sections)
   ) {
     throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
+  }
+  if (input.allowedSectionTargets) {
+    const required = new Set(
+      input.allowedSectionTargets.map(
+        (target) => `${target.pageKey}\0${target.sectionId}`,
+      ),
+    );
+    const selected = new Set(
+      value.sections.map(
+        (section) => `${section.pageKey}\0${section.sectionId}`,
+      ),
+    );
+    if (
+      selected.size !== value.sections.length ||
+      selected.size !== required.size ||
+      [...required].some((target) => !selected.has(target))
+    ) {
+      throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
+    }
+  }
+  const allowedCopySlotKeys = new Set(input.allowedCopySlotKeys);
+  const allowedAssetReferenceIds = new Set(input.allowedAssetReferenceIds);
+  const allowedClaimIds = new Set(input.allowedClaimIds);
+  for (const section of value.sections) {
+    if (
+      section.copySlotKeys.some((key) => !allowedCopySlotKeys.has(key)) ||
+      section.assetReferenceIds.some(
+        (referenceId) => !allowedAssetReferenceIds.has(referenceId),
+      ) ||
+      section.claimIds.some((claimId) => !allowedClaimIds.has(claimId))
+    ) {
+      throw new Error("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
+    }
   }
 }
 
@@ -45,6 +82,18 @@ function definition(
       ],
       properties: {
         designBriefDigest: { type: "string" },
+        allowedSectionTargets: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["pageKey", "sectionId"],
+            properties: {
+              pageKey: { type: "string" },
+              sectionId: { type: "string" },
+            },
+          },
+        },
         allowedCopySlotKeys: { type: "array", items: { type: "string" } },
         allowedAssetReferenceIds: {
           type: "array",
@@ -96,20 +145,21 @@ function definition(
     buildPrompt: (input) =>
       [
         `DesignBrief digest: ${input.designBriefDigest}`,
+        `Required section targets: ${JSON.stringify(input.allowedSectionTargets ?? [])}`,
         `Allowed copy slots: ${JSON.stringify(input.allowedCopySlotKeys)}`,
         `Allowed asset refs: ${JSON.stringify(input.allowedAssetReferenceIds)}`,
         `Allowed Claim IDs: ${JSON.stringify(input.allowedClaimIds)}`,
         `Previous candidate digest: ${input.previousCandidateDigest ?? "none"}`,
         `Structured findings: ${JSON.stringify(input.findings)}`,
-        "Return only the closed sections selection envelope. An empty sections array is valid and lets server adapters use deterministic defaults.",
+        "Return only the closed sections selection envelope. Select exactly one entry for every required section target; missing or duplicate targets are invalid.",
       ].join("\n"),
-    validateOutput: (_input, output) => closedSelection(output),
+    validateOutput: (input, output) => closedSelection(input, output),
     repairTaskOutput: true,
   };
 }
 
-const ASSEMBLE_TASK = definition("site_builder.assemble");
-const FIX_TASK = definition("site_builder.assembly_fix");
+export const ASSEMBLE_TASK = definition("site_builder.assemble");
+export const ASSEMBLY_FIX_TASK = definition("site_builder.assembly_fix");
 
 export function createLedgerAssemblyGenerator(input: {
   ledger: SiteBuildCostLedger;
@@ -152,6 +202,10 @@ export function createLedgerAssemblyGenerator(input: {
       try {
         const candidate: ControlledAssemblyTaskInput = {
           designBriefDigest: request.brief.digest,
+          allowedSectionTargets: request.allowedSectionTargets.map((target) => ({
+            pageKey: target.pageKey,
+            sectionId: target.sectionId,
+          })),
           allowedCopySlotKeys: [...request.allowedCopySlotKeys],
           allowedAssetReferenceIds: [...request.allowedAssetReferenceIds],
           allowedClaimIds: [...request.allowedClaimIds],
@@ -166,7 +220,9 @@ export function createLedgerAssemblyGenerator(input: {
         );
         assertActive();
         const task =
-          request.taskId === "site_builder.assemble" ? ASSEMBLE_TASK : FIX_TASK;
+          request.taskId === "site_builder.assemble"
+            ? ASSEMBLE_TASK
+            : ASSEMBLY_FIX_TASK;
         const selection = (
           await runAiTask(
             task,

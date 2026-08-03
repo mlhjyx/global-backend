@@ -3,6 +3,12 @@ import {
   BRAND_PROFILE_TASK,
   type BrandProfileOutput,
 } from "../agents/brand-profile";
+import { COPY_TASK } from "../agents/copy";
+import {
+  ASSEMBLE_TASK,
+  ASSEMBLY_FIX_TASK,
+} from "../agents/controlled-assembly";
+import type { SiteBuilderTaskId } from "../agents/task-route-bindings";
 import { SITE_BUILDER_TASK_IDS } from "../agents/task-route-bindings";
 import { modelPolicyRegistry } from "../agents/model-policy.registry";
 import {
@@ -83,6 +89,52 @@ function canonicalRequest(
     perCallCostCapCents: plan.envelope.perCallCostCapCents,
     reasoningEffort: plan.envelope.reasoningEffort,
     outputSchema: BRAND_PROFILE_TASK.outputSchema,
+    repairTaskOutput: plan.evaluationSuite.repairTaskOutput,
+    caseContract: evaluationCase.contract,
+    casePayload: evaluationCase.payload,
+    signal: new AbortController().signal,
+  };
+}
+
+function taskOutputSchema(taskId: SiteBuilderTaskId) {
+  switch (taskId) {
+    case "site_builder.brand_profile":
+      return BRAND_PROFILE_TASK.outputSchema;
+    case "site_builder.copy":
+      return COPY_TASK.outputSchema;
+    case "site_builder.assemble":
+      return ASSEMBLE_TASK.outputSchema;
+    case "site_builder.assembly_fix":
+      return ASSEMBLY_FIX_TASK.outputSchema;
+    default:
+      throw new Error(`test has no task output schema: ${taskId}`);
+  }
+}
+
+function canonicalRequestForTask(
+  taskId: "site_builder.copy" | "site_builder.assemble" | "site_builder.assembly_fix",
+  fixtureId: string,
+): ModelEvaluationExecutionRequest {
+  const plan = buildTaskEvaluationPlan(taskId);
+  const candidate = plan.candidates[0];
+  if (!candidate || !plan.evaluationSuite) {
+    throw new Error(`test requires canonical suite: ${taskId}`);
+  }
+  const evaluationCase = buildCanonicalModelEvaluationCase(plan, fixtureId);
+  return {
+    executionId: `executor-spec:${taskId}:${candidate.alias}:${fixtureId}:1`,
+    taskId,
+    profile: plan.profile,
+    alias: candidate.alias,
+    expectedProtocol: candidate.expectedProtocol,
+    fixtureId,
+    attempt: 1,
+    maxTokens: plan.envelope.maxTokens,
+    runtimeDeadlineMs: plan.envelope.runtimeDeadlineMs,
+    hardStopMs: plan.envelope.hardStopMs,
+    perCallCostCapCents: plan.envelope.perCallCostCapCents,
+    reasoningEffort: plan.envelope.reasoningEffort,
+    outputSchema: taskOutputSchema(taskId),
     repairTaskOutput: plan.evaluationSuite.repairTaskOutput,
     caseContract: evaluationCase.contract,
     casePayload: evaluationCase.payload,
@@ -333,11 +385,11 @@ describe("model evaluation protocol admission", () => {
     },
   );
 
-  it("rejects a task without a canonical suite before wire dispatch", async () => {
+  it("rejects a task/profile mismatch before wire dispatch", async () => {
     const request = {
       ...canonicalRequest(),
       taskId: "site_builder.copy" as const,
-      profile: "copy.premium" as const,
+      profile: "structured.default" as const,
       alias: "claude-sonnet-5",
       expectedProtocol: "anthropic-messages" as const,
     };
@@ -347,7 +399,7 @@ describe("model evaluation protocol admission", () => {
       settlementResolver: settlementResolver(),
     });
     await expect(executor.execute(request)).rejects.toMatchObject({
-      failureCode: "task_has_no_canonical_evaluation_suite",
+      failureCode: "evaluation_profile_mismatch",
       costSettlement: {
         state: "not_incurred",
         reason: "rejected_before_dispatch",
@@ -355,6 +407,41 @@ describe("model evaluation protocol admission", () => {
     });
     expect(call).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["site_builder.copy", "copy-factual-claims"],
+    ["site_builder.assemble", "assemble-natural-origin-sparse"],
+    ["site_builder.assembly_fix", "assembly-fix-natural-origin-sparse"],
+  ] as const)(
+    "admits canonical %s through its captured validator before dispatch",
+    async (taskId, fixtureId) => {
+      const request = canonicalRequestForTask(taskId, fixtureId);
+      const artifact = (
+        request.casePayload.fixture as { expectedOutput: unknown }
+      ).expectedOutput;
+      const call = vi.fn(async () =>
+        wireResponse(
+          request.expectedProtocol === "anthropic-messages"
+            ? anthropicBody(request.alias, artifact)
+            : openAIResponsesBody(request.alias, artifact),
+        ),
+      );
+      const executor = createModelEvaluationProtocolExecutor({
+        wireClient: wireClient({
+          openAIResponses: call,
+          anthropicMessages: call,
+        }),
+        settlementResolver: settlementResolver(),
+      });
+
+      await expect(executor.execute(request)).resolves.toMatchObject({
+        artifactState: "complete",
+        artifact,
+        requestedModel: request.alias,
+      });
+      expect(call).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe("model evaluation text wire adapters", () => {

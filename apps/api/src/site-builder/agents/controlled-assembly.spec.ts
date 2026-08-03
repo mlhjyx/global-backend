@@ -3,7 +3,10 @@ import type { GenerateStructuredInput } from "../../model-gateway/types";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SiteBuildCostLedger } from "../site-build-cost-ledger";
 import { buildM1ebGoldenFixtures } from "../design/m1eb-golden";
-import { createLedgerAssemblyGenerator } from "./controlled-assembly";
+import {
+  ASSEMBLE_TASK,
+  createLedgerAssemblyGenerator,
+} from "./controlled-assembly";
 
 let brief: Awaited<
   ReturnType<typeof buildM1ebGoldenFixtures>
@@ -21,6 +24,7 @@ function request(taskId = "site_builder.assembly_fix:2" as const) {
   return {
     taskId,
     brief,
+    allowedSectionTargets: [{ pageKey: "home", sectionId: "hero" }],
     allowedCopySlotKeys: ["home.hero.title"],
     allowedAssetReferenceIds: ["catalog-hero"],
     allowedClaimIds: ["claim-1"],
@@ -49,7 +53,18 @@ describe("controlled assembly durable task ledger", () => {
     } as unknown as SiteBuildCostLedger;
     const gateway = {
       generateStructured: vi.fn(async (input: GenerateStructuredInput) => {
-        const data = { sections: [] };
+        const data = {
+          sections: [
+            {
+              pageKey: "home",
+              sectionId: "hero",
+              copySlotKeys: ["home.hero.title"],
+              assetReferenceIds: ["catalog-hero"],
+              claimIds: ["claim-1"],
+              itemIndexes: [],
+            },
+          ],
+        };
         input.validateOutput?.(data);
         return {
           data,
@@ -70,7 +85,16 @@ describe("controlled assembly durable task ledger", () => {
     });
 
     await expect(generator.generate(request())).resolves.toEqual({
-      sections: [],
+      sections: [
+        {
+          pageKey: "home",
+          sectionId: "hero",
+          copySlotKeys: ["home.hero.title"],
+          assetReferenceIds: ["catalog-hero"],
+          claimIds: ["claim-1"],
+          itemIndexes: [],
+        },
+      ],
     });
     expect(ledger.claimTaskAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: "site_builder.assembly_fix:2" }),
@@ -79,6 +103,7 @@ describe("controlled assembly durable task ledger", () => {
       expect.anything(),
       expect.objectContaining({
         designBriefDigest: brief.digest,
+        allowedSectionTargets: [{ pageKey: "home", sectionId: "hero" }],
         allowedCopySlotKeys: ["home.hero.title"],
         previousCandidateDigest: "a".repeat(64),
       }),
@@ -91,7 +116,18 @@ describe("controlled assembly durable task ledger", () => {
       expect.anything(),
       expect.objectContaining({
         taskAttemptId: "attempt-1",
-        selection: { sections: [] },
+        selection: {
+          sections: [
+            {
+              pageKey: "home",
+              sectionId: "hero",
+              copySlotKeys: ["home.hero.title"],
+              assetReferenceIds: ["catalog-hero"],
+              claimIds: ["claim-1"],
+              itemIndexes: [],
+            },
+          ],
+        },
       }),
     );
   });
@@ -120,5 +156,39 @@ describe("controlled assembly durable task ledger", () => {
       generator.generate(request("site_builder.assemble")),
     ).resolves.toEqual({ sections: [] });
     expect(gateway.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("keeps pre-upgrade frozen inputs replayable while closing every current selector bound", () => {
+    const validate = ASSEMBLE_TASK.validateOutput!;
+    const legacyInput = {
+      designBriefDigest: "a".repeat(64),
+      allowedCopySlotKeys: ["home.hero.title"],
+      allowedAssetReferenceIds: ["catalog-hero"],
+      allowedClaimIds: ["claim-1"],
+      findings: [],
+    };
+    expect(() => validate(legacyInput, { sections: [] })).not.toThrow();
+
+    const currentInput = {
+      ...legacyInput,
+      allowedSectionTargets: [{ pageKey: "home", sectionId: "hero" }],
+    };
+    expect(() => validate(currentInput, { sections: [] })).toThrow(
+      "CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID",
+    );
+    expect(() =>
+      validate(currentInput, {
+        sections: [
+          {
+            pageKey: "home",
+            sectionId: "hero",
+            copySlotKeys: ["invented.slot"],
+            assetReferenceIds: ["catalog-hero"],
+            claimIds: ["claim-1"],
+            itemIndexes: [],
+          },
+        ],
+      }),
+    ).toThrow("CONTROLLED_ASSEMBLY_MODEL_OUTPUT_INVALID");
   });
 });

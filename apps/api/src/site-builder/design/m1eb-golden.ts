@@ -1,16 +1,23 @@
 import { createHash } from "node:crypto";
 import {
+  COPY_BUNDLE_SCHEMA_VERSION,
+  COPY_BUNDLE_SET_SCHEMA_VERSION,
+  COPY_SLOT_CATALOG_VERSION,
+  copyBundleInputHash,
   DESIGN_BRIEF_V2_SCHEMA_VERSION,
   demoVisualPackV2Digest,
   designStylePresetV2Digest,
   designTemplateFamilyV2Digest,
+  finalizeCopyBundle,
   finalizeDesignBriefV2,
   type AssetRefV1_1,
+  type CopyBundleSetV1,
   type DesignBriefV2,
   type SiteSpecComponentType,
   type SiteSpecV1_1,
 } from "@global/contracts";
 import {
+  canonicalizeCopySlotOutput,
   CopyBundleService,
   neutralCopySlotContent,
 } from "../copy-bundle.service";
@@ -18,6 +25,7 @@ import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
 import { controlledAssetUrls } from "../controlled-asset-materializer";
 import {
   ControlledAssemblyService,
+  type DeterministicAssemblyInput,
   type AssemblySelectionGenerator,
 } from "../assembly/controlled-assembly.service";
 import { deriveCopySlotDefinitions } from "../assembly/copy-slot-derivation";
@@ -32,6 +40,12 @@ export interface M1ebGoldenFixture {
   mode: "sparse" | "rich";
   designBrief: DesignBriefV2;
   spec: SiteSpecV1_1;
+}
+
+export interface M1ebGoldenAssemblyInput {
+  id: string;
+  mode: "sparse" | "rich";
+  assembly: DeterministicAssemblyInput;
 }
 
 function sha256(value: string): string {
@@ -166,6 +180,127 @@ function fixtureSnapshot(id: string): PublishableClaimSnapshot {
     digest: sha256(`m1-e-b-golden-snapshot:${id}`),
     items: [],
   };
+}
+
+function neutralCopyBundleSet(input: {
+  fixtureId: string;
+  slots: ReturnType<typeof deriveCopySlotDefinitions>;
+  snapshot: PublishableClaimSnapshot;
+}): CopyBundleSetV1 {
+  const claims = new Map<
+    string,
+    { statement: string; protectedTokens: readonly string[] }
+  >();
+  const slots = Object.fromEntries(
+    input.slots.map((slot) => {
+      const canonical = canonicalizeCopySlotOutput(
+        "en",
+        slot,
+        { content: neutralCopySlotContent(slot.key, "en"), claimRefs: [] },
+        claims,
+      );
+      return [
+        slot.key,
+        {
+          type: slot.type,
+          maxGraphemes: slot.maxGraphemes,
+          factual: canonical.factual,
+          content: canonical.content,
+          claimRefs: canonical.claimRefs,
+        },
+      ];
+    }),
+  );
+  const bundle = finalizeCopyBundle(
+    {
+      schemaVersion: COPY_BUNDLE_SCHEMA_VERSION,
+      slotCatalogVersion: COPY_SLOT_CATALOG_VERSION,
+      locale: "en",
+      sourceLocale: "en",
+      status: "complete",
+      claimSnapshot: {
+        id: `snapshot-${sha256(input.fixtureId).slice(0, 16)}`,
+        digest: input.snapshot.digest,
+      },
+      inputHash: copyBundleInputHash({
+        claimSnapshotDigest: input.snapshot.digest,
+        locale: "en",
+        sourceLocale: "en",
+        slots: input.slots,
+      }),
+      slots,
+    },
+    {
+      supportedLocales: ["en"],
+      claims,
+      approvedOutboundDomains: [],
+    },
+  );
+  return {
+    schemaVersion: COPY_BUNDLE_SET_SCHEMA_VERSION,
+    sourceLocale: "en",
+    bundles: { en: bundle },
+  };
+}
+
+/**
+ * Synchronous, zero-call source for evaluation fixtures.  It rebuilds the
+ * approved M1-e-B golden inputs, but intentionally does not invoke a model or
+ * create a BuildRun.
+ */
+export function buildM1ebGoldenAssemblyInputs(
+  repositoryRoot = process.cwd(),
+): M1ebGoldenAssemblyInput[] {
+  const templates = loadQualifiedComponentTemplates(repositoryRoot);
+  const output: M1ebGoldenAssemblyInput[] = [];
+  for (const family of STATIC_DESIGN_CATALOG_V2.families) {
+    for (const id of family.goldenFixtureIds) {
+      const mode = id.endsWith("-sparse") ? "sparse" : "rich";
+      const brief = fixtureBrief(family, id, mode);
+      const slots = deriveCopySlotDefinitions({
+        brief,
+        catalog: STATIC_DESIGN_CATALOG_V2,
+        templates,
+      });
+      const snapshot = fixtureSnapshot(id);
+      const pack = STATIC_DESIGN_CATALOG_V2.demoVisualPacks.find(
+        (candidate) =>
+          candidate.id === brief.assetStrategy.demoVisualPackId,
+      )!;
+      const assets: Record<string, AssetRefV1_1> = Object.fromEntries(
+        pack.assets.map((asset) => [
+          `catalog-${asset.id}`,
+          {
+            source: "catalog",
+            packId: pack.id,
+            packVersion: pack.version,
+            catalogAssetId: asset.id,
+            sha256: asset.sha256,
+            mimeType: asset.mimeType,
+          },
+        ]),
+      );
+      output.push({
+        id,
+        mode,
+        assembly: {
+          brief,
+          catalog: STATIC_DESIGN_CATALOG_V2,
+          copyBundleSet: neutralCopyBundleSet({
+            fixtureId: id,
+            slots,
+            snapshot,
+          }),
+          templates,
+          assets,
+          assetUrls: controlledAssetUrls(assets),
+          claimSnapshot: snapshot,
+          siteName: `${family.id} ${mode}`,
+        },
+      });
+    }
+  }
+  return output.sort((left, right) => left.id.localeCompare(right.id));
 }
 
 export async function buildM1ebGoldenFixtures(
