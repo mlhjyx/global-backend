@@ -11,7 +11,7 @@ const manifest = Object.freeze(
     readFileSync(
       join(
         repositoryRoot,
-        "docs/evidence/site-builder/m1-g-remaining-text-evaluation-manifest-v1.json",
+        "docs/evidence/site-builder/m1-g-remaining-text-evaluation-manifest-v2.json",
       ),
       "utf8",
     ),
@@ -70,10 +70,13 @@ describe("remaining text native-currency fee cards", () => {
     "site_builder.assembly_fix",
     "site_builder.qa_summarize",
     "site_builder.seo_review",
-  ] as const)("rejects the superseded v1 manifest for %s before price calculation", (taskId) => {
-    expect(() => buildRemainingTextNativeFeeCard(input(taskId))).toThrow(
-      "does not match the fixed source bundle digest",
-    );
+  ] as const)("builds a v3 card from the current v2 manifest for %s", (taskId) => {
+    expect(buildRemainingTextNativeFeeCard(input(taskId))).toMatchObject({
+      schemaVersion: "site-builder-remaining-text-native-fee-card/v3",
+      fixedSourceCommitSha: "a04f60f5597762d8fde634552b3be6a8a42c8d1d",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      taskId,
+    });
   });
 
   it("refuses a manifest whose fixed source bundle has drifted", () => {
