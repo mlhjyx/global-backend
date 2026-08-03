@@ -12,6 +12,8 @@
 >
 > **2026-08-03 zero-cost manifest**：`site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2` 已以 `origin/main@295038d323b4bd09ed16ab73ea981d24e1f010df` 固定 v15 source、73/146 规划清单、deterministic comparator、source/compiled-contract digests 与停止条件。2026-08-01 v1（#251 的 `e493ba1d09fe37feea927f70d12f17aadadc5c6a`）留作审计，不能进入新原生双币 execution。v2 不含 OpenOx 价格、余额、凭据、费用授权或模型 client；之后仍需要独立费用卡/evidence PR，真实 dispatch 仍须用户再次明确授权。
 > 机器输出与下一门：[manifest v2](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-v2.json) · [v2 零费用决策卡](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-v2-decision-card.md)；[v1](../evidence/site-builder/m1-g-design-spec-evaluation-manifest-v1.json) 继续仅作审计。
+>
+> **v2 原生双币费用卡源码合同（尚无价格 artifact）**：v2 fee-card builder 只绑定该 v2 manifest 的 fixed source、suite/source-bundle digest 与 target-only 73/146 矩阵，历史 v1 不能输入。prepare CLI 日后只可从 OpenOx 公共目录创建新的 `NOT_AUTHORIZED` JSON；本源码阶段没有运行 CLI、读取凭据/余额/实时价格、写入费用卡或 evidence，也不改变 dispatcher、cost-safety 或运行路由。
 
 ### 已完成到哪里
 
