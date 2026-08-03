@@ -25,7 +25,7 @@ import {
   type NativeModelEvaluationCostSafetyAttestation,
   type NativeModelEvaluationCostSettlement,
 } from "./model-evaluation-native-cost-safety";
-import { isTrustedDesignSpecV5NativeExecutionAttestation } from "./design-spec-v5-native-execution-preflight";
+import { isTrustedDesignSpecV6NativeExecutionAttestation } from "./design-spec-v6-native-execution-preflight";
 import type {
   NativeModelEvaluationAuthorizationLedger,
   NativeModelEvaluationLedgerFreezeReason,
@@ -386,10 +386,10 @@ export function createDesignSpecV2NativeExecutionRunner(options: {
 }): DesignSpecV2NativeExecutionRunner {
   if (
     !isTrustedNativeModelEvaluationCostSafetyAttestation(options.attestation) ||
-    !isTrustedDesignSpecV5NativeExecutionAttestation(options.attestation)
+    !isTrustedDesignSpecV6NativeExecutionAttestation(options.attestation)
   ) {
     throw new Error(
-      "trusted v5 native model evaluation cost safety is required",
+      "trusted v6 native model evaluation cost safety is required",
     );
   }
   const attestation = options.attestation;

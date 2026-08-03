@@ -184,7 +184,7 @@ function attestation(ledgerDirectorySha256: string) {
 }
 
 describe("design_spec v2 native execution", () => {
-  it("rejects the stale v5 source bundle before it can claim a ledger or dispatch a wire", () => {
+  it("rejects the retired v5 attestation before it can claim a ledger or dispatch a wire", () => {
     const directory = temporaryLedgerDirectory();
     const identity =
       initializeNativeModelEvaluationAuthorizationLedgerDirectory(directory);
@@ -209,7 +209,7 @@ describe("design_spec v2 native execution", () => {
         ledger,
         fetch: fetchImpl,
       }),
-    ).toThrow("native evaluation credential or ledger does not match");
+    ).toThrow("trusted v6 native model evaluation cost safety is required");
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(() => ledger.snapshot(safety.authorization.authorizationId)).toThrow(
       "native evaluation authorization is not claimed",
