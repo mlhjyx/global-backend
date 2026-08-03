@@ -61,6 +61,14 @@ export type TaskExecutionTarget =
       policyVersion: string;
     };
 
+/** A deployment configuration attempted to bypass an active deterministic route. */
+export class TaskRouteConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TaskRouteConfigurationError';
+  }
+}
+
 type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
   profile: SiteBuilderModelProfileId;
 };
@@ -114,7 +122,7 @@ export function resolveTaskExecutionTarget(
   const emergencyOverride = primary !== undefined || fallbacksRaw !== undefined;
   if (!rollback && activePolicy.state === 'deterministicFallback') {
     if (emergencyOverride) {
-      throw new Error(
+      throw new TaskRouteConfigurationError(
         `${taskId} has an active deterministic fallback and does not accept a model override`,
       );
     }

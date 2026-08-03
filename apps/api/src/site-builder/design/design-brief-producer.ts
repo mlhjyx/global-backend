@@ -23,7 +23,10 @@ import {
 } from "../site-build-cost-ledger";
 import type { SiteBuilderTaskDefinition } from "../agents/ai-task";
 import { runAiTask } from "../agents/ai-task";
-import { resolveTaskExecutionTarget } from "../agents/task-routes";
+import {
+  resolveTaskExecutionTarget,
+  TaskRouteConfigurationError,
+} from "../agents/task-routes";
 import { STATIC_DESIGN_CATALOG_V2 } from "./catalog";
 
 export const DESIGN_SPEC_INPUT_VERSION = "site-builder-design-spec-input/v1";
@@ -864,6 +867,7 @@ export class DesignBriefProducer {
         if (
           error instanceof PaidCallDeniedError ||
           error instanceof PaidOperationUnknownError ||
+          error instanceof TaskRouteConfigurationError ||
           isCancellation(error)
         ) {
           throw error;

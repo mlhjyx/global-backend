@@ -309,6 +309,22 @@ describe("M1-e-B DesignBrief producer", () => {
     expect(ledger.stored).not.toHaveProperty("rollbackProvenance");
   });
 
+  it("does not hide a forbidden deterministic-route model override", async () => {
+    const catalog = approvedCatalog();
+    const ledger = new Ledger();
+    vi.stubEnv("SITE_BUILDER_MODEL_DESIGN_SPEC", "minimax-m3");
+    try {
+      await expect(
+        new DesignBriefProducer({ ledger, catalog }).produce(input(catalog)),
+      ).rejects.toThrow(
+        "site_builder.design_spec has an active deterministic fallback and does not accept a model override",
+      );
+      expect(ledger.stored).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("persists explicit safe-blueprint rollback provenance separately from provider failure", async () => {
     const catalog = approvedCatalog();
     const ledger = new Ledger();
