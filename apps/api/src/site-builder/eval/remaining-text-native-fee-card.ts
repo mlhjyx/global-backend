@@ -35,12 +35,12 @@ import {
 import { MODEL_EVALUATION_PROTOCOL_FRAMING_TOKEN_UPPER_BOUND } from "./model-evaluation-cost-safety";
 
 export const REMAINING_TEXT_NATIVE_FEE_CARD_ID_PREFIX =
-  "site-builder-remaining-text-native-fee-card/2026-08-04-v2" as const;
+  "site-builder-remaining-text-native-fee-card/2026-08-04-v3" as const;
 export const REMAINING_TEXT_NATIVE_FEE_CARD_SCHEMA_VERSION =
-  "site-builder-remaining-text-native-fee-card/v2" as const;
+  "site-builder-remaining-text-native-fee-card/v3" as const;
 
 const REQUIRED_FIXED_SOURCE_COMMIT_SHA =
-  "0891b374321961b8aad13c8b215985ca623a4c0c" as const;
+  "a04f60f5597762d8fde634552b3be6a8a42c8d1d" as const;
 const SHA256 = /^[a-f0-9]{64}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const NATIVE_PER_WIRE_COST_CAP_PICO_UNITS = 200_000_000_000n;

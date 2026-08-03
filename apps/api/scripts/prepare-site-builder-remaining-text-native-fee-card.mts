@@ -14,7 +14,7 @@ import {
 } from "../src/site-builder/eval/remaining-text-native-fee-card";
 
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const MANIFEST_PATH = "docs/evidence/site-builder/m1-g-remaining-text-evaluation-manifest-v1.json";
+const MANIFEST_PATH = "docs/evidence/site-builder/m1-g-remaining-text-evaluation-manifest-v2.json";
 const MAX_CATALOG_BYTES = 1_048_576;
 const EVIDENCE_PATH = /^docs\/evidence\/site-builder\/[A-Za-z0-9][A-Za-z0-9._/-]*\.json$/;
 
