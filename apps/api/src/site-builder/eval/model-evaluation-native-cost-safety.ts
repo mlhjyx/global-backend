@@ -57,6 +57,10 @@ const REQUIRED_WIRE_CALLS = 146;
 const REQUIRED_INITIAL_INPUT_TOKENS = 6438;
 const REQUIRED_REPAIR_INPUT_TOKENS = 10745;
 const REQUIRED_OUTPUT_TOKENS_PER_WIRE = 4000;
+// Fixed by the create-only design_spec v2 manifest and carried into the
+// native OpenOx fee card's token envelope (plus protocol framing tokens).
+const REQUIRED_INITIAL_PROMPT_UTF8_BYTES = 2342;
+const REQUIRED_REPAIR_PROMPT_UTF8_BYTES = 6649;
 const USER_AUTHORIZED_MAXIMUMS_BY_CURRENCY = Object.freeze({
   CNY: 11276659000000n,
   USD: 3458427840000n,
@@ -103,6 +107,19 @@ export interface NativeModelEvaluationDispatch {
   currency: NativeModelEvaluationCurrency;
 }
 
+/**
+ * A token-log receipt is only meaningful when new-api's channel and purpose
+ * are part of the same credential snapshot as the allowed dispatch scope.
+ */
+export interface NativeModelEvaluationGatewaySettlementRoute {
+  alias: string;
+  protocol: Extract<
+    ModelCandidateProtocol,
+    "openai-responses" | "anthropic-messages"
+  >;
+  channelId: number;
+}
+
 export interface NativeModelEvaluationCostSafetyInput {
   contractId: typeof SITE_BUILDER_MODEL_EVALUATION_NATIVE_COST_SAFETY_ID;
   authorization: {
@@ -130,6 +147,11 @@ export interface NativeModelEvaluationCostSafetyInput {
     quotaMode: "limited";
     scopeExact: true;
     allowedDispatches: NativeModelEvaluationDispatch[];
+    gatewaySettlement: {
+      purposeGroup: "design-spec-eval";
+      tokenLogPath: "/api/log/token";
+      routes: NativeModelEvaluationGatewaySettlementRoute[];
+    };
   };
   pricing: {
     authority: "openox_model_marketplace";
@@ -149,6 +171,8 @@ export interface NativeModelEvaluationCostSafetyInput {
     maximumsByCurrency: Record<NativeModelEvaluationCurrency, string>;
     maxDispatchExecutions: number;
     maxWireCalls: number;
+    maxInitialPromptUtf8Bytes: number;
+    maxRepairPromptUtf8Bytes: number;
     maxInputTokensInitialWire: number;
     maxInputTokensRepairWire: number;
     maxOutputTokensPerWire: number;
@@ -328,6 +352,50 @@ function exactDispatchSet(
   );
 }
 
+function receiptRouteKey(value: {
+  alias: string;
+  protocol: ModelCandidateProtocol;
+}): string {
+  return `${value.alias}:${value.protocol}`;
+}
+
+function exactGatewaySettlementBinding(
+  value: NativeModelEvaluationCostSafetyInput["credential"]["gatewaySettlement"],
+  allowedDispatches: readonly NativeModelEvaluationDispatch[],
+): boolean {
+  if (
+    !exactKeys(value, ["purposeGroup", "tokenLogPath", "routes"]) ||
+    value.purposeGroup !== "design-spec-eval" ||
+    value.tokenLogPath !== "/api/log/token" ||
+    !NATIVE_ARRAY_IS_ARRAY(value.routes) ||
+    value.routes.length !== allowedDispatches.length
+  ) {
+    return false;
+  }
+  const expected = nativeArraySort(
+    nativeArrayMap(allowedDispatches, receiptRouteKey),
+  );
+  const received: string[] = [];
+  for (let index = 0; index < value.routes.length; index += 1) {
+    const route = value.routes[index];
+    if (
+      !route ||
+      !exactKeys(route, ["alias", "protocol", "channelId"]) ||
+      !positiveSafeInteger(route.channelId) ||
+      (route.protocol !== "openai-responses" &&
+        route.protocol !== "anthropic-messages")
+    ) {
+      return false;
+    }
+    received.push(receiptRouteKey(route));
+  }
+  const actual = nativeArraySort(received);
+  return (
+    actual.length === expected.length &&
+    nativeArrayEvery(actual, (entry, index) => entry === expected[index])
+  );
+}
+
 /**
  * Binds a prepared fee-card identifier to the exact, native-currency OpenOx
  * prices that will later be reserved and settled. This deliberately contains
@@ -401,6 +469,8 @@ function matchesExactNativeDesignSpecMatrix(
     authorization.approvedWireCalls !== REQUIRED_WIRE_CALLS ||
     limits.maxDispatchExecutions !== REQUIRED_DISPATCH_EXECUTIONS ||
     limits.maxWireCalls !== REQUIRED_WIRE_CALLS ||
+    limits.maxInitialPromptUtf8Bytes !== REQUIRED_INITIAL_PROMPT_UTF8_BYTES ||
+    limits.maxRepairPromptUtf8Bytes !== REQUIRED_REPAIR_PROMPT_UTF8_BYTES ||
     limits.maxInputTokensInitialWire !== REQUIRED_INITIAL_INPUT_TOKENS ||
     limits.maxInputTokensRepairWire !== REQUIRED_REPAIR_INPUT_TOKENS ||
     limits.maxOutputTokensPerWire !== REQUIRED_OUTPUT_TOKENS_PER_WIRE
@@ -477,6 +547,7 @@ function validNativeCostSafetyInput(
       "quotaMode",
       "scopeExact",
       "allowedDispatches",
+      "gatewaySettlement",
     ]) ||
     !exactKeys(pricing, [
       "authority",
@@ -490,6 +561,8 @@ function validNativeCostSafetyInput(
       "maximumsByCurrency",
       "maxDispatchExecutions",
       "maxWireCalls",
+      "maxInitialPromptUtf8Bytes",
+      "maxRepairPromptUtf8Bytes",
       "maxInputTokensInitialWire",
       "maxInputTokensRepairWire",
       "maxOutputTokensPerWire",
@@ -532,6 +605,10 @@ function validNativeCostSafetyInput(
     credential.gatewayOrigin !== REQUIRED_NEW_API_EVALUATION_ORIGIN ||
     !NATIVE_ARRAY_IS_ARRAY(credential.allowedDispatches) ||
     !exactDispatchSet(credential.allowedDispatches) ||
+    !exactGatewaySettlementBinding(
+      credential.gatewaySettlement,
+      credential.allowedDispatches,
+    ) ||
     nativeArraySome(
       credential.allowedDispatches,
       (dispatch) =>
@@ -571,6 +648,9 @@ function validNativeCostSafetyInput(
       authorization.approvedMaximumsByCurrency.CNY ||
     limits.maximumsByCurrency.USD !==
       authorization.approvedMaximumsByCurrency.USD ||
+    !positiveSafeInteger(limits.maxInitialPromptUtf8Bytes) ||
+    !positiveSafeInteger(limits.maxRepairPromptUtf8Bytes) ||
+    limits.maxRepairPromptUtf8Bytes < limits.maxInitialPromptUtf8Bytes ||
     !positiveSafeInteger(limits.maxInputTokensInitialWire) ||
     !positiveSafeInteger(limits.maxInputTokensRepairWire) ||
     limits.maxInputTokensRepairWire < limits.maxInputTokensInitialWire ||

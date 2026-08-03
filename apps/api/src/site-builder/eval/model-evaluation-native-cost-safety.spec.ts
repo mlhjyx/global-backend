@@ -63,6 +63,27 @@ function validInput(): NativeModelEvaluationCostSafetyInput {
           currency: "USD",
         },
       ],
+      gatewaySettlement: {
+        purposeGroup: "design-spec-eval",
+        tokenLogPath: "/api/log/token",
+        routes: [
+          {
+            alias: "gpt-5.6-terra",
+            protocol: "openai-responses",
+            channelId: 11,
+          },
+          {
+            alias: "gpt-5.5",
+            protocol: "openai-responses",
+            channelId: 12,
+          },
+          {
+            alias: "claude-sonnet-5",
+            protocol: "anthropic-messages",
+            channelId: 13,
+          },
+        ],
+      },
     },
     pricing: {
       authority: "openox_model_marketplace",
@@ -101,6 +122,8 @@ function validInput(): NativeModelEvaluationCostSafetyInput {
       },
       maxDispatchExecutions: 73,
       maxWireCalls: 146,
+      maxInitialPromptUtf8Bytes: 2342,
+      maxRepairPromptUtf8Bytes: 6649,
       maxInputTokensInitialWire: 6438,
       maxInputTokensRepairWire: 10745,
       maxOutputTokensPerWire: 4000,
@@ -126,6 +149,20 @@ describe("native model-evaluation cost safety", () => {
     ).toBe(true);
     expect(Object.isFrozen(attestation)).toBe(true);
     expect(Object.isFrozen(attestation.pricing.entries)).toBe(true);
+  });
+
+  it("rejects prompt-byte limits that drift from the prepared v2 envelope", () => {
+    const initialDrift = validInput();
+    initialDrift.limits.maxInitialPromptUtf8Bytes += 1;
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(initialDrift),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
+
+    const repairDrift = validInput();
+    repairDrift.limits.maxRepairPromptUtf8Bytes -= 1;
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(repairDrift),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
   });
 
   it("rejects widened, retired, deferred, media, and legacy dispatch scope before pricing", () => {
@@ -166,6 +203,28 @@ describe("native model-evaluation cost safety", () => {
         inputTokens: 6439,
       }),
     ).toThrow("native model evaluation dispatch is not authorized");
+  });
+
+  it("requires the credential snapshot to bind exact token-log purpose and channels", () => {
+    const missingChannel = validInput();
+    missingChannel.credential.gatewaySettlement.routes[1]!.channelId = 0;
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(missingChannel),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
+
+    const substitutedRoute = validInput();
+    substitutedRoute.credential.gatewaySettlement.routes[1]!.alias =
+      "gpt-5.6-terra";
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(substitutedRoute),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
+
+    const wrongPurpose = validInput();
+    wrongPurpose.credential.gatewaySettlement.purposeGroup =
+      "general-purpose" as "design-spec-eval";
+    expect(() =>
+      createNativeModelEvaluationCostSafetyAttestation(wrongPurpose),
+    ).toThrow("native model evaluation cost safety attestation is invalid");
   });
 
   it("prices CNY and USD independently in pico-units without a cents or FX path", () => {
