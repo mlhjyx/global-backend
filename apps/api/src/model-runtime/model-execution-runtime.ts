@@ -127,6 +127,18 @@ function cacheIdentity<Input, Output>(plan: ModelExecutionPlan<Input, Output>): 
   };
 }
 
+function validateContextSources<Input, Output>(plan: ModelExecutionPlan<Input, Output>): void {
+  const allowed = new Set(plan.contract.contextPolicy.allowedSourceRefs);
+  if (plan.context.policyVersion !== plan.contract.contextPolicy.version) {
+    throw new Error('context policy version mismatch');
+  }
+  for (const segment of plan.context.segments) {
+    if (!allowed.has(segment.sourceRef)) {
+      throw new Error(`context source is not allowed: ${segment.sourceRef}`);
+    }
+  }
+}
+
 export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
   constructor(private readonly dependencies: RuntimeDependencies<Input, Output>) {}
 
@@ -145,7 +157,7 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
   async execute(plan: ModelExecutionPlan<Input, Output>): Promise<ModelExecutionResult<Output>> {
     const states: ModelExecutionState[] = [];
     let transportAttempts = 0;
-    let repairAttempts = 0;
+    const repairAttempts = 0;
     const transition = (state: ModelExecutionState, detail?: Readonly<Record<string, string | number | boolean>>): void => {
       states.push(state);
       try {
@@ -182,6 +194,7 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
     }
     try {
       verifyContextEnvelope(plan.context);
+      validateContextSources(plan);
       if (plan.context.workspaceId !== plan.workspaceId || plan.context.digest !== plan.contextDigest) {
         throw new Error('context envelope execution identity mismatch');
       }
@@ -253,7 +266,7 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
       }
     }
 
-    let currentPlan = plan;
+    const currentPlan = plan;
     let observation: ModelObservation<Output> | undefined;
     while (true) {
       let logicalAttempts = 0;
@@ -298,27 +311,39 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
         transition('frozen');
         throw new ModelExecutionError('model settlement is unknown', states);
       }
+      if (plan.contract.capabilityRequirements.reportsRequestId
+        && (typeof observation.requestId !== 'string' || observation.requestId.trim().length === 0)) {
+        transition('frozen');
+        throw new ModelExecutionError('model observation is missing a request ID', states);
+      }
+      if (plan.contract.capabilityRequirements.reportsUsage && observation.usageComplete !== true) {
+        transition('frozen');
+        throw new ModelExecutionError('model observation usage is incomplete', states);
+      }
+      if (plan.contract.capabilityRequirements.reportsModel
+        && (typeof observation.reportedModel !== 'string' || observation.reportedModel.trim().length === 0)) {
+        transition('frozen');
+        throw new ModelExecutionError('model observation is missing the reported model', states);
+      }
+      if (plan.contract.capabilityRequirements.exactReportedModel
+        && observation.reportedModel !== currentPlan.resolvedAlias) {
+        transition('frozen');
+        throw new ModelExecutionError('model observation reported model is not exact', states);
+      }
+      if (plan.contract.capabilityRequirements.forbidWarnings && observation.warnings?.length) {
+        transition('frozen');
+        throw new ModelExecutionError('model observation contains provider warnings', states);
+      }
 
       try {
         plan.contract.validateOutput(plan.input, observation.output);
       } catch (error) {
-        if (repairAttempts >= plan.contract.retryPolicy.contentRepairMaxAttempts) {
-          transition('frozen');
-          throw new ModelExecutionError('model output validation failed', states, { cause: error });
-        }
-        repairAttempts += 1;
-        transition('repaired', { repairAttempt: repairAttempts });
-        const finding = error instanceof Error ? error.message : String(error);
-        currentPlan = {
-          ...plan,
-          repair: {
-            priorOutputDigest: canonicalDigest(observation.output),
-            findingsDigest: canonicalDigest(finding),
-            originalInputDigest: plan.inputDigest,
-            originalContextDigest: plan.contextDigest,
-          },
-        };
-        continue;
+        transition('frozen');
+        throw new ModelExecutionError(
+          'model output validation failed; Runtime content repair is not admitted',
+          states,
+          { cause: error },
+        );
       }
       transition('validated');
       break;
