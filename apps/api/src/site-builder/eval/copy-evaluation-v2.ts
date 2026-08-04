@@ -6,6 +6,7 @@ import {
 import { COPY_TASK } from "../agents/copy";
 import {
   COPY_ASSEMBLY_EVALUATOR_VERSION,
+  COPY_ASSEMBLY_EVALUATOR_RUBRIC,
   COPY_ASSEMBLY_EVAL_FIXTURES,
   COPY_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION,
 } from "./copy-assembly-eval";
@@ -107,6 +108,40 @@ const PILOT_EXECUTIONS = CANDIDATES.length;
 const TASK_MATRIX_EXECUTIONS =
   CANDIDATES.length * REQUIRED_FIXTURE_COUNT * REPEATS;
 
+const TASK_CONTEXT_FIELD_IDS = Object.freeze({
+  audience: "audience",
+  brandVoice: "brand_voice",
+  prohibitedAssertions: "prohibited_assertions",
+  ctaPolicy: "cta_policy",
+} as const);
+
+function currentTaskContext(): readonly string[] {
+  const schema = COPY_TASK.inputSchema as {
+    required?: readonly string[];
+    properties?: Record<string, { required?: readonly string[] } | undefined>;
+  };
+  if (!schema.required?.includes("context")) return Object.freeze([]);
+  const required = schema.properties?.context?.required ?? [];
+  return Object.freeze(
+    required.map(
+      (field) =>
+        TASK_CONTEXT_FIELD_IDS[field as keyof typeof TASK_CONTEXT_FIELD_IDS] ??
+        `unknown:${field}`,
+    ),
+  );
+}
+
+const CURRENT_TASK_CONTEXT = currentTaskContext();
+const CURRENT_SCORED_DIMENSIONS = Object.freeze([
+  ...COPY_ASSEMBLY_EVALUATOR_RUBRIC.scoredDimensions,
+]);
+const EVALUATOR_ADMISSION_STATUS = exactList(
+  CURRENT_SCORED_DIMENSIONS,
+  SCORED_DIMENSIONS,
+)
+  ? "READY"
+  : "BLOCKED_ON_SCORED_EVALUATOR";
+
 function exactList(left: readonly string[], right: readonly string[]): boolean {
   return (
     left.length === right.length &&
@@ -122,6 +157,66 @@ function deepFreeze<T>(value: T): T {
     deepFreeze(nested);
   }
   return Object.freeze(value);
+}
+
+function nonJson(path: string): never {
+  throw new Error(`COPY_EVALUATION_V2_PLAN_NON_JSON: ${path}`);
+}
+
+function assertExactJsonDomain(
+  value: unknown,
+  path = "$",
+  ancestors = new Set<object>(),
+): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) nonJson(path);
+    return;
+  }
+  if (typeof value !== "object") nonJson(path);
+  if (ancestors.has(value)) nonJson(`${path}:cycle`);
+  const nextAncestors = new Set(ancestors).add(value);
+
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) nonJson(path);
+    const expectedKeys = [
+      ...Array.from({ length: value.length }, (_, index) => String(index)),
+      "length",
+    ];
+    const ownKeys = Reflect.ownKeys(value);
+    if (
+      ownKeys.length !== expectedKeys.length ||
+      ownKeys.some((key, index) => key !== expectedKeys[index])
+    ) {
+      nonJson(path);
+    }
+    value.forEach((nested, index) =>
+      assertExactJsonDomain(nested, `${path}[${index}]`, nextAncestors),
+    );
+    return;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) nonJson(path);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") nonJson(path);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      !descriptor?.enumerable ||
+      !("value" in descriptor) ||
+      descriptor.get ||
+      descriptor.set
+    ) {
+      nonJson(`${path}.${key}`);
+    }
+    assertExactJsonDomain(descriptor.value, `${path}.${key}`, nextAncestors);
+  }
 }
 
 const PLAN = {
@@ -145,14 +240,18 @@ const PLAN = {
     source: "apps/api/src/site-builder/agents/copy.ts",
     currentVersion: CURRENT_TASK_CONTRACT_VERSION,
     requiredVersion: REQUIRED_TASK_CONTRACT_VERSION,
-    missingContext:
-      CURRENT_TASK_CONTRACT_VERSION === REQUIRED_TASK_CONTRACT_VERSION
-        ? Object.freeze([])
-        : REQUIRED_TASK_CONTEXT,
+    currentContext: CURRENT_TASK_CONTEXT,
+    missingContext: Object.freeze(
+      REQUIRED_TASK_CONTEXT.filter(
+        (field) => !CURRENT_TASK_CONTEXT.includes(field),
+      ),
+    ),
     status:
-      CURRENT_TASK_CONTRACT_VERSION === REQUIRED_TASK_CONTRACT_VERSION
-        ? "READY"
-        : "BLOCKED_ON_CONTEXT_V2",
+      CURRENT_TASK_CONTRACT_VERSION !== REQUIRED_TASK_CONTRACT_VERSION
+        ? "BLOCKED_ON_CONTEXT_V2"
+        : exactList(CURRENT_TASK_CONTEXT, REQUIRED_TASK_CONTEXT)
+          ? "READY"
+          : "BLOCKED_ON_CONTEXT_FIELDS",
   },
   creativeOutputAdmission: {
     currentPolicy: "validated_non_factual_copy_is_preserved",
@@ -173,6 +272,12 @@ const PLAN = {
       ? "READY"
       : "BLOCKED_ON_FIXTURE_EXPANSION",
   },
+  evaluatorAdmission: {
+    evaluatorVersion: COPY_ASSEMBLY_EVALUATOR_VERSION,
+    currentScoredDimensions: CURRENT_SCORED_DIMENSIONS,
+    requiredScoredDimensions: SCORED_DIMENSIONS,
+    status: EVALUATOR_ADMISSION_STATUS,
+  },
   requiredContext: REQUIRED_CONTEXT,
   capabilityPilot: {
     purpose: "protocol_schema_reasoning_usage_and_identity_only",
@@ -190,11 +295,18 @@ const PLAN = {
     plannedExecutions: TASK_MATRIX_EXECUTIONS,
     maximumRepairCallsPerExecution: 1,
     maximumWireCalls: TASK_MATRIX_EXECUTIONS * 2,
-    status: "BLOCKED_BEFORE_PILOT_RESULT",
+    status:
+      EVALUATOR_ADMISSION_STATUS === "READY"
+        ? "BLOCKED_BEFORE_PILOT_RESULT"
+        : EVALUATOR_ADMISSION_STATUS,
   },
   hardGates: HARD_GATES,
   scoredDimensions: SCORED_DIMENSIONS,
-  cachePolicy: "durable_same_build_run_replay_only",
+  cachePolicy: {
+    exactResultCache: "disabled_for_evaluation",
+    repeatIdentity: "distinct_execution_and_cache_identity_per_repeat",
+    durableReplay: "same_physical_execution_only",
+  },
   settlementPolicy: "known_per_physical_call_required",
   decisionBoundaries: DECISION_BOUNDARIES,
 } as const;
@@ -211,6 +323,7 @@ function canonicalize(value: unknown): unknown {
   );
 }
 
+assertExactJsonDomain(PLAN);
 const EXPECTED_PLAN_DIGEST_INPUT = JSON.stringify(canonicalize(PLAN));
 
 /**
@@ -218,6 +331,7 @@ const EXPECTED_PLAN_DIGEST_INPUT = JSON.stringify(canonicalize(PLAN));
  * complete zero-call contract, not merely the candidate names.
  */
 export function validateCopyEvaluationV2Plan(plan: unknown): void {
+  assertExactJsonDomain(plan);
   if (JSON.stringify(canonicalize(plan)) !== EXPECTED_PLAN_DIGEST_INPUT) {
     throw new Error("COPY_EVALUATION_V2_PLAN_DRIFT");
   }
