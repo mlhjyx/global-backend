@@ -1,0 +1,119 @@
+import { jsonSchema, NoObjectGeneratedError, type LanguageModelUsage } from 'ai';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+import type {
+  NativeAdapterUsage,
+  NativeAdapterWarning,
+  NativeModelProtocol,
+} from './ai-sdk-native-adapter.contract';
+import { NativeModelOutputError } from './ai-sdk-native-adapter.contract';
+
+const schemaValidator = addFormats(new Ajv({ allErrors: true, strict: true }));
+
+export function createValidatedAiSdkSchema<OutputValue>(
+  schema: Readonly<Record<string, unknown>>,
+) {
+  const validate = schemaValidator.compile(schema);
+  return jsonSchema<OutputValue>(schema, {
+    validate: (value) =>
+      validate(value)
+        ? { success: true, value: value as OutputValue }
+        : {
+            success: false,
+            error: new Error(
+              `JSON Schema validation failed: ${schemaValidator.errorsText(validate.errors)}`,
+            ),
+          },
+  });
+}
+
+export function normalizeAiSdkWarnings(
+  warnings: readonly unknown[] | undefined,
+): readonly NativeAdapterWarning[] {
+  return Object.freeze(
+    (warnings ?? []).map((warning) => {
+      const value =
+        warning != null && typeof warning === 'object'
+          ? (warning as Readonly<Record<string, unknown>>)
+          : {};
+      return Object.freeze({
+        type: typeof value.type === 'string' ? value.type : 'provider-warning',
+        ...(typeof value.feature === 'string'
+          ? { feature: value.feature }
+          : {}),
+        ...(typeof value.details === 'string'
+          ? { details: value.details }
+          : {}),
+      });
+    }),
+  );
+}
+
+export function normalizeAiSdkUsage(
+  usage: LanguageModelUsage,
+): NativeAdapterUsage {
+  return Object.freeze({
+    ...(usage.inputTokens == null ? {} : { inputTokens: usage.inputTokens }),
+    ...(usage.inputTokenDetails.noCacheTokens == null
+      ? {}
+      : { uncachedInputTokens: usage.inputTokenDetails.noCacheTokens }),
+    ...(usage.outputTokens == null ? {} : { outputTokens: usage.outputTokens }),
+    ...(usage.outputTokenDetails.reasoningTokens == null
+      ? {}
+      : { reasoningTokens: usage.outputTokenDetails.reasoningTokens }),
+    ...(usage.inputTokenDetails.cacheReadTokens == null
+      ? {}
+      : { cacheReadTokens: usage.inputTokenDetails.cacheReadTokens }),
+    ...(usage.inputTokenDetails.cacheWriteTokens == null
+      ? {}
+      : { cacheWriteTokens: usage.inputTokenDetails.cacheWriteTokens }),
+    ...(usage.totalTokens == null ? {} : { totalTokens: usage.totalTokens }),
+  });
+}
+
+export function readOneApiRequestId(
+  headers: Readonly<Record<string, string>> | undefined,
+): string | undefined {
+  if (headers == null) return undefined;
+  return Object.entries(headers).find(
+    ([name]) => name.toLowerCase() === 'x-oneapi-request-id',
+  )?.[1];
+}
+
+const PROTECTED_HEADERS = new Set([
+  'authorization',
+  'x-api-key',
+  'anthropic-version',
+  'content-type',
+]);
+
+export function assertSafeRequestHeaders(
+  headers: Readonly<Record<string, string>> | undefined,
+): void {
+  const overriddenHeader = Object.keys(headers ?? {}).find((name) =>
+    PROTECTED_HEADERS.has(name.toLowerCase()),
+  );
+  if (overriddenHeader != null) {
+    throw new Error(
+      `Model adapter request cannot override protected header '${overriddenHeader}'`,
+    );
+  }
+}
+
+export function throwNormalizedOutputError(input: {
+  error: unknown;
+  protocol: NativeModelProtocol;
+  requestedModel: string;
+}): never {
+  if (!NoObjectGeneratedError.isInstance(input.error)) throw input.error;
+  throw new NativeModelOutputError({
+    protocol: input.protocol,
+    requestedModel: input.requestedModel,
+    reportedModel: input.error.response?.modelId,
+    requestId: readOneApiRequestId(input.error.response?.headers),
+    usage:
+      input.error.usage == null
+        ? undefined
+        : normalizeAiSdkUsage(input.error.usage),
+  });
+}
