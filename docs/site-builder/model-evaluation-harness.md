@@ -1,100 +1,16 @@
-# Site Builder 模型评测 Harness 基线
+# Site Builder 旧模型评测 Harness（已退役）
 
-> 机器合同：`site-builder-model-evaluation-harness/2026-08-01-v18`；成本安全合同：`site-builder-model-evaluation-cost-safety/2026-07-30-v2`；候选来源：`site-builder-model-candidate-baseline/2026-08-04-v1`。本文件由代码计划生成并由 `pnpm docs:verify` 精确校验，不得手抄另一个任务矩阵。
+> 状态：`RETIRED`
+> 退役日期：2026-08-04
 
-## 范围
+M1 的一次性 fixed-commit、fee-card、native runner、授权账本与结算实现已从可执行源码中删除。它们为已结束的 M1 诊断执行服务，不再是后续评测或生产调用的机器合同。
 
-- 这是 evaluation-only、依赖注入的协议 executor 与内存 harness；只通过显式 wire client/cost resolver seam 执行，未接生产依赖。
-- 本 PR 只使用 fake gateway/fetch 与 fake settlement；没有真实模型/媒体请求、评测 evidence、运行路由、env、公共 API、DB、Temporal 或发布行为。
-- 7 个 task 都有候选与生产 envelope 计划；只有具备 canonical task contract、fixture set、重复次数和 evaluator 的 task 才允许 dispatch。
-- 当前 7 个文本 task 都有可 dispatch 的 canonical suite：BrandProfile、copy、`design_spec`、assemble、assembly_fix、`qa_summarize` 与 `seo_review`。这只证明零调用 suite-admission：不产生真实 evidence、费用授权、promotion 或运行路由变化。`design_spec` 仍只完成零费用 suite 准备；其余任务也仍需各自的 fixed-commit manifest、费用卡和真实 evidence 门。媒体、无 task consumer、preview、deferred 与 legacy-only 候选继续由 candidate baseline 阻断。
-- assembly/assembly_fix 的 12,000-token cap 仅属于评测矩阵；生产 `task-route-bindings` 仍分别保持 16,000/8,000，评测计划不得改写运行路由或其 envelope。
-- 任何未来真实 dispatch 还必须先提供机器品牌化的成本安全 attestation；本阶段没有读取 `.env`、创建/修改 new-api token 或调用真实 client。
-- zero-cost evidence 准备合同 `site-builder-model-evaluation-evidence-prep/2026-07-29-v1` 只生成 fixed-commit/create-only 清单与费用决策卡；它没有 wire client，不能 dispatch。
+保留的内容只有：
 
-## 协议执行边界
+- 不触发模型调用的纯 fixture、suite adapter 与 validator；
+- [M1 最终诊断产物](../evidence/site-builder/m1-g-text-evaluation-real-evidence-v1.json)，其分类固定为 `diagnostic_only`、`promotionEligible=false`；
+- [M1-g 确定性收口基线](../evidence/site-builder/m1-g-stage-closeout-baseline.json)。
 
-- admission contract：`site-builder-model-evaluation-protocol-admission/v1`；它独立于生产 `VERIFIED_GATEWAY_MODEL_TRANSPORTS`，不能改变 runtime provider/route。
-- `openai-responses` 与 `anthropic-messages` 仅接受 candidate baseline 中 task pool 的精确 runnable alias+protocol；`openai-chat-completions` 只保留隔离的 legacy comparator，且 alias 必须逐字属于该 canonical suite 冻结的 `legacyComparatorAliases`，不在执行时从 current/rollback route 推导。BrandProfile 固定 DeepSeek Pro/GLM，`design_spec` 固定空集，因此 MiniMax/Doubao 不会扩大其凭据或 execution/wire-call 额度。raw target/legacy execute 都必须消费 harness 在预算 reserve 后签发的一次性 request authorization；legacy comparator 只能由 `runLegacyComparatorEvaluationAttempt` 以同一 canonical suite/fixture/envelope、campaign budget、hard stop 和 trusted executor identity 编排，direct dispatch 在任何 client 前 fail-closed，其他 task 的 legacy-only alias 也不能混入 comparator 或 target dispatch。
-- actualProtocol 来自固定 adapter，不能由 caller 或 wire response 声称；missing/wrong reported model、requested fallback、协议错配均 fail-closed。
-- trusted probe/run 只接受 `createModelEvaluationProtocolExecutor` 私有 WeakMap 品牌化并冻结的 target 或 legacy execute；同一 budget campaign 在首次 probe/run 时绑定一个不可伪造 executor identity，后续换 factory 即在 reserve/client 前拒绝。executor、budget、run 与 capability campaign 的 WeakMap/WeakSet `get`/`set`/`has`/`add`，以及 run deep-freeze 的 Object `freeze`/`isFrozen`/`values` 都在模块加载时捕获并通过固定 intrinsic 调用；run 整棵递归确认不可变后才允许写入品牌 map，任意 callback、wrapper/Proxy 或运行时 prototype monkeypatch 均不能生成 identity、改写已授权 run 或把伪造 run 纳入排序；品牌模块不暴露 register 或测试注入入口。
-- adapter 不建立生产 240s timeout：harness 独占 runtime deadline、diagnostic window 与 hard stop，且同一个 AbortSignal 原样传到底层 wire client。
-- wire/settlement dependencies 在 branding 时固定：transport 只能由 factory 使用 attested credential handle 的 bearer secret、HTTPS base URL（或 Ubuntu 开发机显式 loopback 的 `http://localhost`/`127.0.0.1`/`[::1]`）与 fetch 构造，不再接受独立预配置 client 加身份元数据；非 loopback HTTP 一律拒绝。factory 必须先验证 bearer SHA-256 与成本 attestation 中冻结的 secret digest 一致，并确认 URL 的 canonical allowed origin 与 attested gateway origin 完全相同，再把 secret 捕获进闭包，外部修改 handle、把历史宽权限 token 配上专用凭据元数据或把 token 发送到其他 origin 都不能通过。Anthropic Messages 固定发送 `anthropic-version: 2023-06-01`。cost settlement 只认显式注入、带 canonical resolverId 的 resolver；factory 冻结真实 resolver receiver，并捕获/bind validated resolverId 与 resolve 函数引用，既保留 class/private-state receiver 语义，也禁止创建后替换公开身份/方法。settled basis 以 `<basis>@<resolverId>` 绑定可审计 resolver/价格快照身份，且每个 settled resolution 必须回传与 resolver context 完全相同的 `executionId`，缺失或错绑即 invalid/unknown。wire request 与 resolver context 共用 harness 生成的稳定 `executionId`，使 verified billing row 精确绑定 campaign/probe 或 fixture/attempt；resolver 只收到独立深冻结 usage/cost observation，不能改写返回 evidence。token 与聚合值必须是 safe integer。`provider_reported` 必须闭合全部 call cost observation；非 2xx 或成功响应的 JSON/UTF-8/stream/size 解析失败若已携带合法 provider cost header，transport 都以结构化错误保留该 observation 并进入同一结算，不能丢成 null；非 2xx body cancel 仅 best-effort，cancel 自身失败不得覆盖已解析的 status/cost。`frozen_pricing_snapshot` 必须有完整 usage 与 callCount，partial repair usage 不可结算；`verified_billing_export` 表示独立核验且覆盖该 executionId 整个 attempt 的账单依据，可不依赖 usage 完整性。没有上述依据即 `unknown`，绝不记 0。dispatch 后缺成本 observation 只表示未知，不能证明未收费；本合同尚未定义 execution-bound no-charge proof，因此 resolver 返回 `provider_attested_not_incurred` 一律 invalid/unknown 并持久冻结，后续若要支持必须先独立升级结算合同。repair 失败时 resolver 仍收到既有 token 合计、完整 callCount 与 `complete=false`，不能把未知部分当 0；成功 repair 的 usage 与 callCount 必须完整合并。
+后续模型评测必须使用统一 Model Execution Runtime 的同一 task contract、context、capability negotiation、validation、settlement 与 tracing 生命周期。旧 manifest、费用卡或诊断产物都不能授权调用、候选晋级或生产路由变更。
 
-| protocol | domain | admission | operations |
-|---|---|---|---|
-| `openai-responses` | text | `target_text_dispatch` | `structured_text` |
-| `anthropic-messages` | text | `target_text_dispatch` | `structured_text` |
-| `openai-chat-completions` | text | `legacy_comparator_only` | `structured_text_comparator` |
-| `google-generate-content` | text | `blocked_deferred` | `structured_text` |
-| `openai-images-generations` | image | `blocked_requires_media_gateway` | `generate` |
-| `openai-images-edits` | image | `blocked_requires_media_gateway` | `edit`、`mask` |
-| `openai-videos` | video | `blocked_no_consumer` | `create`、`query`、`cancel` |
-| `openai-embeddings` | embedding | `blocked_no_evaluation_suite` | `embed` |
-
-## Task 计划
-
-| task | profile | dispatch | canonical suite | candidate / protocol / preflight | max tokens | runtime deadline | diagnostic window | hard stop | per-call cap | reasoning |
-|---|---|---|---|---|---:|---:|---:|---:|---:|---|
-| `site_builder.brand_profile` | `structured.workspace_materials` | `task_evaluation_ready` | `site-builder.brand-profile-evaluation-suite/2026-07-27-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe` | 12000 | 240s | 240s | 480s | 40¢ | low |
-| `site_builder.copy` | `copy.premium` | `task_evaluation_ready` | `site-builder.copy-evaluation-suite/2026-08-04-v1` | `claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 4000 | 120s | 120s | 240s | 20¢ | low |
-| `site_builder.design_spec` | `structured.default` | `task_evaluation_ready` | `site-builder.design-spec-evaluation-suite/2026-08-03-v15` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`gpt-5.5` / `openai-responses` / `capability_probe`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 4000 | 120s | 120s | 240s | 20¢ | — |
-| `site_builder.assemble` | `structured.assembly` | `task_evaluation_ready` | `site-builder.assemble-evaluation-suite/2026-08-04-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 12000 | 180s | 180s | 360s | 20¢ | — |
-| `site_builder.assembly_fix` | `structured.assembly` | `task_evaluation_ready` | `site-builder.assembly-fix-evaluation-suite/2026-08-04-v1` | `gpt-5.6-terra` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none` | 12000 | 180s | 180s | 360s | 20¢ | — |
-| `site_builder.qa_summarize` | `text.summary` | `task_evaluation_ready` | `site-builder.qa-summarize-evaluation-suite/2026-08-04-v1` | `gpt-5.6-luna` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 3000 | 90s | 90s | 180s | 20¢ | — |
-| `site_builder.seo_review` | `text.summary` | `task_evaluation_ready` | `site-builder.seo-review-evaluation-suite/2026-08-04-v1` | `gpt-5.6-luna` / `openai-responses` / `none`<br>`claude-sonnet-5` / `anthropic-messages` / `none`<br>`gpt-5.6-terra` / `openai-responses` / `none` | 3000 | 90s | 90s | 180s | 20¢ | — |
-
-## Canonical suite
-
-- suite：`site-builder.brand-profile-evaluation-suite/2026-07-27-v1`
-- adapter：`site-builder.brand-profile-evaluation-adapter/v2`
-- task contract：`site_builder.brand_profile` / prompt `brand-profile/14` / route validation `brand-profile-route-validation/14`；dispatch 同时绑定冻结 output schema 与 `repairTaskOutput=true`
-- fixture set：`site-builder.brand-profile-golden/2026-07-18-v1`；schema `brand-profile-eval-fixture/v1`；6 fixtures × 2 repeats = 12 runs/model
-- fixtures：`auto-parts-rich`、`auto-parts-sparse`、`industrial-pump-rich`、`industrial-pump-sparse`、`lab-instrument-rich`、`lab-instrument-sparse`
-- source bundle contract：`brand-profile-evaluation-source-bundle/v7`；固定 37 份 Git 跟踪的源码/合同文件（不引用 ignored build output），路径条目深度冻结且禁止绝对/逃逸路径，同一比较组必须固定为一个 source bundle SHA-256，且每次调用完成后必须重新指纹
-- dispatch payload：fixture、prepared task input、prompt 与 source fingerprints 全部由 canonical case builder 构造、冻结并纳入 case SHA-256；executor 不能替换为未绑定内容。
-- capability probe：machine baseline 的 closed `preflight=capability_probe` 是唯一 admission 真值，不解析 `gate` prose。该候选只能由 harness-owned campaign 发起 canonical task-shaped probe；probe 与矩阵共享预算，绑定 harness/baseline/task/candidate/protocol/source scope，只有协议、requested/reported/resolved identity、完整输出、schema/生产 PII gate、usage、成本结算和调用后 source re-fingerprint 全部闭合才生成 attestation。同一 campaign/candidate 的重复请求复用既有 canonical attestation，不重复 dispatch、reserve 或擦除有效证明。run/summary/ranker 只信模块私有 WeakSet/WeakMap、私有 campaign 状态与捕获的原型读取器，裸 observation、duck-typed object、不同预算 campaign 或公开字段 self-hash 均不能解锁。本 PR 仅保证同进程内存信任；后续持久 evidence 必须另建 create-only/signed trust anchor，不能复用 self-hash 冒充验真。
-- evaluator：`brand-profile-evaluator/10`；rubric SHA-256 `c94e11eff737b0ac9459bde0fe14ad848e35bb0b288c24ff0ac756e2620e1e3c`；harness 内部依次执行 output schema、生产 `validateOutput` 与 canonical task rubric，不接受 caller 自带 grader。
-
-### design_spec suite
-
-- suite：`site-builder.design-spec-evaluation-suite/2026-08-03-v15`；adapter `site-builder.design-spec-evaluation-adapter/v13`；fixture set `site-builder.design-spec-golden/2026-07-30-v3` / schema `site-builder-design-spec-eval-fixture/v2`；12 fixtures × 2 repeats；task system prompt SHA-256 `ff44cb3f0de367d181dd2b9607bf70562963681fef0774a3b194d3732f70e9c7` 纳入 task-contract fingerprint，executor 只发送模块加载时捕获的同一字符串，运行前导出对象漂移会在 budget reserve/client 前拒绝。
-- comparator allowlist：空集（仅零费用 deterministic catalog selection）；source bundle `design-spec-evaluation-source-bundle/v15` 固定 47 份 Git 跟踪文件。
-- 12 个 sparse/rich fixture 保存完整合成生产输入，并通过与生产运行共用的完整 catalog enumeration、required-role eligibility、ranking 与 top-3 projection 重建；prepare 时逐字重算，不能手工拼 candidate。
-- reasons/warnings 只能为空或使用 `selectedCandidateId`、`industryMatchCount`、`userAssetCoverage`、`demoFallbackCount` 四种封闭 claim；自由文本、自然语言数值、未知字段、其他 candidate 或新事实均事实门失败。
-- 稳定性 key 是通过 schema/生产 validator 后的完整标准化输出 SHA-256，覆盖 candidateId、reasons 与 warnings；只选中同一 candidate 不能把内容漂移伪装成稳定。
-- suite 源码固定 tracked contracts source tree 与实际加载的 `dist/**/*.js` tree；artifact-tree canonical serializer 不调用实时 Array `map` / `join` / `sort`。其 21 个 artifact / `d65642cc5f9b20001b4a167ec4acbd5cb9a1dac1d5e335b02da0208ffdc9cc01` 摘要进入 suite、case、probe、run 与候选汇总；harness 加载时以及首调/repair 每个物理 wire call 紧邻调用前后均重新指纹。调用前漂移按 `rejected_before_dispatch` 拒绝；reservation 后发现 runtime drift 会先持久冻结 authorization；首调后漂移会在 repair 前完成已有调用的结算并冻结 authorization，不会发送第二次付费调用；调用中漂移使返回结果成为 `provenance_invalid`。独立零费用 manifest 合同 `site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2` 只固定已经可从 `origin/main` 到达的 source commit，不改变该运行时合同。
-
-### qa_summarize / seo_review suites
-
-- QA suite：`site-builder.qa-summarize-evaluation-suite/2026-08-04-v1`；SEO suite：`site-builder.seo-review-evaluation-suite/2026-08-04-v1`。二者共享 `site-builder-quality-narrative-evaluation-adapter/v1` 与封闭的 production quality-narrative output contract；各自 2 fixtures × 2 repeats，legacy comparator allowlist 都为空集。
-- fixture sets：QA `site-builder-quality-narrative-golden/2026-08-04-v1` / `site-builder-quality-narrative-eval-fixture/v1`，SEO `site-builder-quality-narrative-golden/2026-08-04-v1` / `site-builder-quality-narrative-eval-fixture/v1`。fixture 由 production quality finding index、partition 与 task input builder 重建，并固定 prompt、source bundle 与 evaluator rubric 摘要。
-- evaluator 先调用捕获的 production output validator，再将 normalized output 与同一 production deterministic summary 作逐字 canonical JSON 等价比较；规则组顺序漂移、遗漏或伪造 finding 都不能以自然语言相似度通过。QA fixture 拒绝混入 SEO reports；SEO fixture 的 report artifact / SHA-256 / target 必须逐项绑定。
-- 这是零调用的 suite-admission 基础，不是 quality evidence、模型晋级、运行路由改变或付费执行授权；后续每个任务仍须独立 fixed-commit manifest、费用卡、有限凭据/known settlement、真实 evidence 与 promotion 决策。
-
-## 闭合结果与排序
-
-- 结果类：`quality_valid_runtime_on_time`、`quality_valid_runtime_late`、`content_invalid`、`protocol_or_identity_invalid`、`provenance_invalid`、`capability_unavailable`、`diagnostic_window_exhausted`、`budget_stop`。
-- 单次 runtime deadline 只把结果标记为 late 并保留质量观察；候选 accepted-artifact P95 超过生产 deadline 时不得 rankable/晋级。hard stop 才中止，使用 monotonic clock 记录实际耗时，异常时钟 fail-closed，且 hard-stop 后观测到的完成不能回写成质量有效。
-- 先按 quality → structure → factuality → fixture 内 stability；任一 `content_invalid` 都是 hard failure，完整矩阵必须每次通过结构、质量与事实门才可 rankable。通过生产 P95 硬门后，再按 accepted-artifact P95 latency → canonical capability probe 与矩阵全部已结算尝试成本/accepted artifact 排序。
-- matrix 必须精确等于 suite 的 fixtureIds × repeats；缺失、意外或重复 key 均不可排名；超出 repeats 的尝试在 dispatch 前拒绝；ranker 只接受 plan + raw runs 并在内部重新生成 summary。
-
-## 预算与 provenance
-
-- 成本安全合同 `site-builder-model-evaluation-cost-safety/2026-07-30-v2` 在 executor branding 时强制绑定：独立 spend authorization 的批准金额/execution 数必须与 campaign limits 精确一致，且必须固定准备阶段的 fixed commit、suite、source-bundle contract 与 SHA-256；`preparedFixedCommitSha` 还必须逐字等于执行 worktree 的当前 `git rev-parse HEAD`，Git 身份不可读、提交不等或当前 canonical case 的 source-bundle digest 不一致时均在预算 reserve/client 前拒绝，authorizationId 在同一进程也只能被一个 executor factory 认领。凭据 purpose 必须是 `site_builder_model_evaluation`、quota 必须 limited，wire client 必须先由同一模块私有 WeakMap 品牌化且其不可变 credential attestation/snapshot identity 必须相符，所有 WeakMap/WeakSet 品牌读写以及 attestation deep-freeze/is-frozen/values 遍历均通过模块加载时捕获的原生 intrinsic，品牌化前必须递归确认整个副本不可变，运行中 monkeypatch 不能伪造品牌或改写限额；target 与 canonical legacy comparator 的完整 alias+protocol scope、冻结价格表必须精确覆盖且禁止默认/未配置倍率；resolverId 必须匹配价格快照，resolver 以 frozen pricing 结算的金额必须与 attested unit price 和完整 usage 重新计算结果一致。仓库绝对止损为 credential 25000¢、campaign 10000¢、500 executions、1000 wire calls、单次 prompt 1048576 bytes 与 output 100000 tokens；具体 campaign 只能更低。
-- attestation branding 只证明输入满足机器合同，不冒充 new-api 管理面真值。后续真实 evidence runner 必须从固定提交读取并保存脱敏凭据管理快照及其 SHA-256、bearer secret digest、canonical gateway origin、价格快照和 resolver 实现，先核验真实 token quota/scope 再构造 attestation；还必须为 executor 提供 authorization 已绑定 ledgerId + Linux boot/mount generation + resolved absolute path/device/inode + 持久随机 directory marker 及当时完整 claim prefix SHA-256 的 append-only、fsync 文件账本；每次操作保留并核对已观察 claim history 只能追加，原地替换同长度 digest、截断或回滚均 fail-closed。删除再创建即使复用 inode 也会生成不同 marker，symlink、换目录、重启/remount、mount generation 或 target identity 漂移都不能重新开户。directory marker 同时是 append-only claimed-authorization digest index，必须以完整写入并 fsync 后再 hard-link 发布的 boot ID + PID + process-start-time owner lock 串行执行 check+append；活 owner 锁竞争在写入前拒绝且只清除 transient claim cache，允许同一 spend authorization 用新的 harness request 重试；进程/主机崩溃后的完整 stale lock 只有在 owner 身份确定消失后才按 device/inode 核对并恢复，不能永久封死账本或误删活锁；必须先持久记录 claim digest 再创建对应 JSONL，因此单独删除 claim file 后重启仍永久拒绝同一 authorizationId。authorizationId 以 exclusive-create claim，claim file 与其父目录 entry 都在成功返回前 fsync；claim file 自身的 device/inode/ctime/size 在每次 append 前固定核对，以 `O_NOFOLLOW` 打开且不得被删除、替换或改为 symlink；claim/reserve/settle/freeze 的 JSONL 写入必须循环到完整 payload 落盘，partial write 先失败且不得更新内存状态；进程或主机崩溃后该 authorization 永久 fail-closed，不能重领整份 campaign 额度。本 PR 不提供绕过这些步骤的默认值、环境变量读取或 live introspection。
-- harness 在任何 budget reserve/client dispatch 前重新核对 target + canonical legacy comparator 完整 scope 与 canonical plan，并确认完整矩阵所需的 execution/wire-call headroom；executor 先完成 side-effect-free canonical request 检查和一次性 harness request authorization 消费，只有合法 request 才能 exclusive-create durable campaign claim，伪造或畸形请求不能提前占用未来 campaign。之后在每个请求和每次实际 wire call 前重新核对 alias、协议、实际 prompt bytes、output 上限、冻结/abort 状态与冻结价格的最坏费用，repair 扩展 prompt 不能沿用首调字节数，并保守占用 repair 最坏调用数。transport 在 JSON parse 前以 stream 累计字节并执行 2097152 bytes 绝对上限，content-length 或 chunked body 越界立即 cancel/reject；每次响应还必须核对 provider-reported output usage 没有超过 request/attestation 上限，越界输出不进入 artifact/evidence。executor 的 authorization 级 execution/wire/费用账本不因换一个 budget guard 而重置；harness timer 触发 hard stop，或事件循环延迟导致 completed/failed/probe outcome 先返回但模块加载时捕获的 monotonic clock 已达到 hard stop 时，都立即 abort 并通过 trusted executor identity 持久冻结同一 authorization；公开 evidence clock 只可提供更保守的 elapsed，不能用 stale/monkeypatch 值压低安全计时。即使底层随后返回 schema-invalid 结果，也不能以 repair 或新 budget 继续 dispatch。`executionId` 是唯一 request billing identity。缺 request 级可核验结算、冻结价格金额漂移或出现 unknown 时继续沿用 `freeze_campaign`，不得记零或继续下一调用。媒体 generic channel test 固定 forbidden。
-- 每次 task/probe 在任何 wire dispatch 前，按 `repairTaskOutput` 的最坏调用数（当前最多 2 次）一次性 reserve execution 全部上界，因此 repair 不能在只预留首调预算时超发。每个可观测物理调用分别比较 `perCallCostCapCents`；两次均未超限的 repair 聚合结算与完整 execution reservation 比较，不能把合法的两次调用合计误判为一次调用超限。任一物理调用或 execution 聚合超过各自上限时持久 freeze authorization。budget guard 使用模块私有 WeakMap 品牌、JavaScript 私有状态与捕获的 reserve/settle 原型方法，duck/Proxy budget 或实例/prototype monkeypatch 都不能绕过。每个返回 run 使用模块加载时捕获的 `freeze`/`isFrozen`/`values` 整棵 deep-freeze 并复验，再由模块私有 WeakMap 绑定实际 guard；summary/ranker 必须显式收到同一个 genuine guard，并逐 run 核验对象身份与 campaignId，因此逐次新建 genuine guard、混用 guard、运行时替换 Object intrinsic、原地改写已绑定 run、clone/JSON reload 或只改公开 campaignId 都 fail-closed。unknown、malformed 或无法持久化的 settlement 保留完整最坏上界并冻结后续 dispatch。`rejected_before_dispatch` 只允许本地 reserve 拒绝路径，probe/matrix 在 executor 进入后声称该 reason 一律归 unknown 并冻结。
-- 每个 run（schema v4）固定保存 campaignId、expected/actual protocol、requested/reported/resolved model、resolution source、usage source/call count、cost basis，以及 task contract、fixture、prompt、source bundle contract/source bundle、compiled contracts artifact tree、evaluator rubric、成本安全合同/attestation/凭据快照/价格快照 SHA-256 和所需 capability-probe attestation；probe attestation v3 绑定同一组成本安全与 compiled-runtime 摘要，矩阵内漂移即拒绝。终态原始 artifact 只有先通过 output schema 与生产 PII/route gate 才可保留；终态被拒输出只留 SHA-256 digest 与 failureCode，不把 PII/schema-invalid 原文写入 evidence。v2 adapter 对 repair 中间输出只聚合 usage/callCount，不保存其中间 digest 或 rejection reason，也不得把它称为已持久化 evidence；后续 fixed-commit evidence 若要求中间 repair provenance，必须先在独立 PR 显式升级 run schema/source contract。汇总时重新执行 canonical evaluator，不信任记录中的通过标志。
-- 可用性、协议、身份、probe attestation、usage、artifact fingerprint、matrix、生产 P95、预算和成本任一未闭合，都不能生成可晋级排名。
-
-## Zero-cost evidence 准备
-
-- 准备合同：`site-builder-model-evaluation-evidence-prep/2026-07-29-v1`；固定 task `site_builder.brand_profile`、suite `site-builder.brand-profile-evaluation-suite/2026-07-27-v1`、source bundle `brand-profile-evaluation-source-bundle/v7`。
-- `design_spec` 独立 manifest 合同：`site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2`。它冻结 12 fixtures、3 candidates、1 capability probe、73 executions、最多 146 wire calls、24 个零调用 deterministic comparator case、source bundle、compiled contracts 与停止条件；fixed source commit 必须已在 `origin/main` 上且仍是 prep head 祖先，因此 manifest PR 可 squash 而不丢失 source commit。它不含凭据、价格、余额、wire client 或费用授权。
-- BrandProfile evidence-prep manifest：61 executions / 最多 122 wire calls；其中 capability probe 1、target 36、legacy comparator 24。每个 execution 最多 1 次 schema repair；停止条件由机器清单冻结。
-- prompt 上界从六个 canonical case 的真实 initial/repair payload 派生：initial 最多 6092 UTF-8 bytes，repair 最多 10399 UTF-8 bytes；repair reason 另受机器常量硬限，不以 attestation 自报上限替代真实 payload。
-- 61 executions / 122 wire calls / 2440¢ 仍标记为 `unverified_planning_upper_bound`，不得充当确认预算。实际决策卡只从受信 cost-safety attestation 的真实冻结价格、计费单位、精确 scope、有限额度与余额采样生成。
-- create-only runner 只接受完整 fixed commit、clean worktree、该 fixed commit 已跟踪且内容一致的脱敏 safe-snapshot envelope，以及新的 repository-relative 输出路径；它逐文件从 Git object 复核 source bundle digest 后才以 `wx` 写入。任意手写未跟踪 JSON、ignored build output、工作区漂移或 `.env` 均拒绝；runner 不导入 executor/client，不保存 token、response body、个人或客户数据。
-- 决策 bundle 显式保留 spend authorization/ledger identity、批准金额与 execution 数，并绑定 cost-safety attestation 与 safe-snapshot envelope SHA-256；输出状态最多为 `READY_FOR_PRODUCT_DECISION`，同时固定 `dispatchAuthorization=NOT_AUTHORIZED`。
-- 当前 `design_spec` 阶段只生成 zero-cost、create-only fixed-source manifest，不生成真实费用 attestation、费用卡或模型 evidence，也不读取管理面余额/价格。BrandProfile evidence-prep 仍只准入其固定任务；所有其余文本 task 的 suite 本身都不构成 create-only manifest 或 dispatch 授权。图片、视频、embedding、preview、deferred 继续在 client 前阻断。
+`design_spec`、`assemble`、`assembly_fix`、`qa_summarize` 与 `seo_review` 已归入确定性任务，不再建立模型评测矩阵。后续只为真正的生成式任务维护评测：当前是 `brand_profile` 与 `copy`。

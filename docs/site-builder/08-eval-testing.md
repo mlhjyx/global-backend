@@ -7,6 +7,8 @@
 >
 > **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；只有 BrandProfile 已完成 MODEL-1 task-shaped 晋级。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**。M1-e-B 已使 design/assemble 成为真实受控消费者，但其 402 后确定性降级不构成模型成功证据。M1-f 已落确定性 P4 与 closed repair；Gemini task-shaped 矩阵超时，因此审美状态只能明确为 unavailable，未晋级、不得冒充模型成功。55 型均为 `m1_e_a_qualified`，不是蒸馏产物状态。
 >
+> **2026-08-04 旧执行链退役（覆盖下方历史 harness/manifest/fee-card 叙述）**：M1 一次性 fixed-commit、fee-card、native runner、授权账本与结算实现已从可执行源码删除；纯 fixture/suite/validator、确定性收口基线和最终 `diagnostic_only` 产物保留。旧 manifest、费用卡与 206/262 诊断 campaign 均不能授权新调用、晋级或切换生产路由。后续评测必须与统一 Model Execution Runtime 共用 task contract、context、capability、validation、settlement 与 tracing；五个确定性任务不再进入模型矩阵，生成式评测仅保留 `brand_profile` 与 `copy`。
+>
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 >
 > **2026-07-27 候选重基线**：后续可评测型号、精确 alias、状态、预期协议与 task/Profile 池只认[生成候选基线](model-candidate-baseline.md)，不得从 `/models` 可见性直接推导能力、质量或晋级。后续真实评测必须按各 task 的生产 envelope 加扩展诊断观察窗，分别记录 `quality_valid_runtime_late` 与 `content_invalid`；先按质量、结构、事实、稳定性判断，P95 与 accepted-artifact cost 后评判，同时保留绝对预算止损、未知结算 fail-closed。此规则不回写本文件下方的历史报告。
