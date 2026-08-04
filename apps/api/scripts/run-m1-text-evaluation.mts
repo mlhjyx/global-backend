@@ -336,6 +336,14 @@ function nonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
+function isRetryableGatewayFailure(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === "ModelEvaluationWireHttpError" &&
+    /HTTP 5\d\d$/.test(error.message)
+  );
+}
+
 function stripJsonFence(value: string): string {
   const trimmed = value.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -559,11 +567,13 @@ export async function runM1TextEvaluation(input: {
       inputTokens: number;
       outputTokens: number;
     }> = [];
+    let executionNetworkCalls = 0;
     const dispatch = async (prompt: string): Promise<NativeTextResponse> => {
       if (actualNetworkCalls >= plan.maximumWireCallCount) {
         throw new Error("M1 evaluation wire-call cap is exhausted");
       }
       actualNetworkCalls += 1;
+      executionNetworkCalls += 1;
       const signal = AbortSignal.timeout(taskPlan.envelope.hardStopMs);
       const response =
         entry.protocol === "openai-responses"
@@ -606,12 +616,25 @@ export async function runM1TextEvaluation(input: {
       observedUsage.push(parsed.usage);
       return parsed;
     };
-    let response = await dispatch(evaluationCase.payload.prompt);
+    let response: NativeTextResponse | null = null;
     let artifact: unknown;
     let assessment: ReturnType<typeof assessCanonicalTaskArtifact> | null =
       null;
     let invalidReason: string | null = null;
     try {
+      response = await dispatch(evaluationCase.payload.prompt);
+    } catch (error) {
+      if (!isRetryableGatewayFailure(error)) throw error;
+      invalidReason = "retryable_gateway_failure";
+      try {
+        response = await dispatch(evaluationCase.payload.prompt);
+        invalidReason = null;
+      } catch (retryError) {
+        if (!isRetryableGatewayFailure(retryError)) throw retryError;
+      }
+    }
+    try {
+      if (!response) throw new Error(invalidReason ?? "model_response_absent");
       artifact = JSON.parse(stripJsonFence(response.rawText));
       assessment = assessCanonicalTaskArtifact(
         taskPlan,
@@ -622,7 +645,7 @@ export async function runM1TextEvaluation(input: {
       invalidReason =
         error instanceof Error ? error.message : "task_output_invalid";
     }
-    if (invalidReason) {
+    if (invalidReason && response && executionNetworkCalls < 2) {
       response = await dispatch(
         repairPrompt(
           evaluationCase.payload.prompt,
@@ -655,9 +678,13 @@ export async function runM1TextEvaluation(input: {
       (total, current) => ({
         inputTokens: total.inputTokens + current.inputTokens,
         outputTokens: total.outputTokens + current.outputTokens,
-        callCount: total.callCount + 1,
+        callCount: total.callCount,
       }),
-      { inputTokens: 0, outputTokens: 0, callCount: 0 },
+      {
+        inputTokens: 0,
+        outputTokens: 0,
+        callCount: executionNetworkCalls,
+      },
     );
     const receipts = requestIds.get(executionId) ?? [];
     if (receipts.length !== usage.callCount || receipts.length > 2) {
@@ -687,7 +714,7 @@ export async function runM1TextEvaluation(input: {
               findingCodes: Object.freeze([...assessment.findingCodes]),
             }),
       requestedModel: entry.alias,
-      reportedModel: response.reportedModel,
+      reportedModel: response?.reportedModel ?? null,
       usage: Object.freeze(usage),
       requestIds: Object.freeze([...receipts]),
     });
