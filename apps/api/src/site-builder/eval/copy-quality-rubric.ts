@@ -1,7 +1,7 @@
 export const COPY_QUALITY_REVIEW_SCHEMA_VERSION =
-  "site-builder-copy-quality-review/2026-08-05-v1" as const;
+  "site-builder-copy-quality-review/2026-08-04-v1" as const;
 export const COPY_QUALITY_RUBRIC_VERSION =
-  "site-builder-copy-quality-rubric/2026-08-05-v1" as const;
+  "site-builder-copy-quality-rubric/2026-08-04-v1" as const;
 
 export const COPY_QUALITY_SCORED_DIMENSIONS = Object.freeze([
   "language_quality",

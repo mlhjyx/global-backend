@@ -93,9 +93,9 @@ describe("Copy Evaluation v2 admission plan", () => {
       status: "READY",
     });
     expect(COPY_EVALUATION_V2_PLAN.evaluatorAdmission).toEqual({
-      evaluatorVersion: "site-builder-copy-assembly-evaluator/2026-08-05-v3",
-      reviewSchemaVersion: "site-builder-copy-quality-review/2026-08-05-v1",
-      rubricVersion: "site-builder-copy-quality-rubric/2026-08-05-v1",
+      evaluatorVersion: "site-builder-copy-assembly-evaluator/2026-08-04-v3",
+      reviewSchemaVersion: "site-builder-copy-quality-review/2026-08-04-v1",
+      rubricVersion: "site-builder-copy-quality-rubric/2026-08-04-v1",
       currentScoredDimensions: [
         "language_quality",
         "brand_voice",

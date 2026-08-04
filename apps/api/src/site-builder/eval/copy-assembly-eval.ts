@@ -32,7 +32,7 @@ const CAPTURED_COPY_VALIDATE_OUTPUT = (() => {
 export const COPY_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION =
   "site-builder-copy-assembly-eval-fixture/v2" as const;
 export const COPY_ASSEMBLY_EVALUATOR_VERSION =
-  "site-builder-copy-assembly-evaluator/2026-08-05-v3" as const;
+  "site-builder-copy-assembly-evaluator/2026-08-04-v3" as const;
 export const COPY_ASSEMBLY_ROUTE_VALIDATION_VERSION =
   "site-builder-copy-assembly-route-validation/2026-08-04-v2" as const;
 export const COPY_ASSEMBLY_PROMPT_VERSION =
