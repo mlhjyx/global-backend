@@ -25,7 +25,7 @@
     "@nestjs/serve-static": "^4.0.2",
     "@nestjs/swagger": "^11.4.6",
     "@nestjs/throttler": "^6.5.0",
-    "@prisma/client": "^6.1.0",
+    "@prisma/client": "^7.9.1",
     "@scalar/nestjs-api-reference": "^1.2.11",
     "@temporalio/activity": "^1.20.3",
     "@temporalio/client": "^1.20.3",
