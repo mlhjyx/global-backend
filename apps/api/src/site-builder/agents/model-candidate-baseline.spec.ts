@@ -21,7 +21,7 @@ const aliasesFor = (profile: string) =>
 describe('Site Builder model candidate baseline', () => {
   it('uses a candidateBaselineId independent from execution policy v3', () => {
     expect(SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID).toBe(
-      'site-builder-model-candidate-baseline/2026-08-04-v1',
+      'site-builder-model-candidate-baseline/2026-08-04-v2',
     );
     expect(modelPolicyRegistry.getCandidateBaselineId()).toBe(
       SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
@@ -50,7 +50,7 @@ describe('Site Builder model candidate baseline', () => {
       structuredWorkspace: ['gpt-5.6-terra', 'claude-sonnet-5', 'gpt-5.5'],
       structured: ['gpt-5.6-terra', 'gpt-5.5', 'claude-sonnet-5'],
       reasoning: ['gpt-5.6-sol', 'gpt-5.5', 'claude-sonnet-5'],
-      copy: ['claude-sonnet-5', 'gpt-5.5', 'gpt-5.6-terra'],
+      copy: ['gpt-5.6-terra', 'gpt-5.6-sol', 'claude-sonnet-5'],
       summary: ['gpt-5.6-luna', 'claude-sonnet-5', 'gpt-5.6-terra'],
       bulk: ['gpt-5.4-mini', 'gpt-5.6-luna', 'gpt-5.4'],
       multimodal: ['gpt-5.6-sol', 'claude-sonnet-5', 'gpt-5.6-terra'],
@@ -85,7 +85,9 @@ describe('Site Builder model candidate baseline', () => {
       { profile: 'structured.workspace_materials', alias: 'gpt-5.5' },
       { profile: 'structured.default', alias: 'gpt-5.5' },
       { profile: 'reasoning.high', alias: 'gpt-5.5' },
-      { profile: 'copy.premium', alias: 'gpt-5.5' },
+      { profile: 'copy.premium', alias: 'gpt-5.6-terra' },
+      { profile: 'copy.premium', alias: 'gpt-5.6-sol' },
+      { profile: 'copy.premium', alias: 'claude-sonnet-5' },
     ]);
     expect(
       candidates.every(

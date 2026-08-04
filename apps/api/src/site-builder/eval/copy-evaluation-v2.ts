@@ -1,7 +1,9 @@
 import {
   getModelProfileCandidatePool,
   SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
+  type ModelCandidateProtocol,
 } from "../agents/model-candidate-baseline";
+import type { ModelProtocol } from "../../model-runtime";
 import { COPY_TASK } from "../agents/copy";
 import {
   COPY_ASSEMBLY_EVALUATOR_VERSION,
@@ -73,10 +75,32 @@ const CANDIDATES: readonly CopyEvaluationV2Candidate[] =
 const REQUIRED_ALIASES = Object.freeze(
   CANDIDATES.map((candidate) => candidate.alias),
 );
+const BASELINE_PROTOCOL_BY_RUNTIME_PROTOCOL: Readonly<
+  Record<ModelProtocol, ModelCandidateProtocol>
+> = Object.freeze({
+  openai_responses: "openai-responses",
+  openai_chat_completions: "openai-chat-completions",
+  anthropic_messages: "anthropic-messages",
+  google_native: "google-generate-content",
+});
 const currentPool = getModelProfileCandidatePool(COPY_PROFILE);
 if (!currentPool) throw new Error("COPY_EVALUATION_V2_PROFILE_MISSING");
 const CURRENT_ALIASES = Object.freeze(
   currentPool.candidates.map((candidate) => candidate.alias),
+);
+const CURRENT_BASELINE_CANDIDATES = Object.freeze(
+  currentPool.candidates.map(({ alias, expectedProtocol, preflight }) =>
+    Object.freeze({ alias, expectedProtocol, preflight }),
+  ),
+);
+const REQUIRED_BASELINE_CANDIDATES = Object.freeze(
+  CANDIDATES.map(({ alias, protocol }) =>
+    Object.freeze({
+      alias,
+      expectedProtocol: BASELINE_PROTOCOL_BY_RUNTIME_PROTOCOL[protocol],
+      preflight: "capability_probe" as const,
+    }),
+  ),
 );
 const CURRENT_FIXTURE_IDS = Object.freeze(
   COPY_ASSEMBLY_EVAL_FIXTURES.map((fixture) => fixture.fixtureId),
@@ -124,7 +148,12 @@ const EVALUATOR_ADMISSION_STATUS = exactList(
   ? "READY"
   : "BLOCKED_ON_SCORED_EVALUATOR";
 const CANDIDATE_ADMISSION_STATUS = exactList(CURRENT_ALIASES, REQUIRED_ALIASES)
-  ? "READY"
+  ? exactList(
+      CURRENT_BASELINE_CANDIDATES.map(candidateAdmissionKey),
+      REQUIRED_BASELINE_CANDIDATES.map(candidateAdmissionKey),
+    )
+    ? "READY"
+    : "BLOCKED_ON_CANDIDATE_CAPABILITY_PREFLIGHT"
   : "BLOCKED_ON_CANDIDATE_REBASELINE";
 
 function exactList(left: readonly string[], right: readonly string[]): boolean {
@@ -132,6 +161,14 @@ function exactList(left: readonly string[], right: readonly string[]): boolean {
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   );
+}
+
+function candidateAdmissionKey(candidate: {
+  alias: string;
+  expectedProtocol: ModelCandidateProtocol;
+  preflight: string;
+}): string {
+  return `${candidate.alias}:${candidate.expectedProtocol}:${candidate.preflight}`;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -216,6 +253,8 @@ const PLAN = {
     profile: COPY_PROFILE,
     currentAliases: CURRENT_ALIASES,
     requiredAliases: REQUIRED_ALIASES,
+    currentCandidates: CURRENT_BASELINE_CANDIDATES,
+    requiredCandidates: REQUIRED_BASELINE_CANDIDATES,
     status: CANDIDATE_ADMISSION_STATUS,
   },
   taskContract: {

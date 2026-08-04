@@ -19,7 +19,7 @@ describe("Copy Evaluation v2 admission plan", () => {
     });
   });
 
-  it("freezes Terra, Sol, and Sonnet without rewriting the current baseline", () => {
+  it("admits the rebaselined Terra, Sol, and Sonnet pool", () => {
     expect(
       COPY_EVALUATION_V2_PLAN.candidates.map((candidate) => ({
         alias: candidate.alias,
@@ -45,9 +45,43 @@ describe("Copy Evaluation v2 admission plan", () => {
     ]);
     expect(COPY_EVALUATION_V2_PLAN.candidateAdmission).toMatchObject({
       profile: "copy.premium",
-      status: "BLOCKED_ON_CANDIDATE_REBASELINE",
-      currentAliases: ["claude-sonnet-5", "gpt-5.5", "gpt-5.6-terra"],
+      status: "READY",
+      currentAliases: ["gpt-5.6-terra", "gpt-5.6-sol", "claude-sonnet-5"],
       requiredAliases: ["gpt-5.6-terra", "gpt-5.6-sol", "claude-sonnet-5"],
+      currentCandidates: [
+        {
+          alias: "gpt-5.6-terra",
+          expectedProtocol: "openai-responses",
+          preflight: "capability_probe",
+        },
+        {
+          alias: "gpt-5.6-sol",
+          expectedProtocol: "openai-responses",
+          preflight: "capability_probe",
+        },
+        {
+          alias: "claude-sonnet-5",
+          expectedProtocol: "anthropic-messages",
+          preflight: "capability_probe",
+        },
+      ],
+      requiredCandidates: [
+        {
+          alias: "gpt-5.6-terra",
+          expectedProtocol: "openai-responses",
+          preflight: "capability_probe",
+        },
+        {
+          alias: "gpt-5.6-sol",
+          expectedProtocol: "openai-responses",
+          preflight: "capability_probe",
+        },
+        {
+          alias: "claude-sonnet-5",
+          expectedProtocol: "anthropic-messages",
+          preflight: "capability_probe",
+        },
+      ],
     });
   });
 
@@ -144,12 +178,12 @@ describe("Copy Evaluation v2 admission plan", () => {
     expect(COPY_EVALUATION_V2_PLAN.capabilityPilot).toMatchObject({
       plannedExecutions: 3,
       maximumWireCalls: 6,
-      status: "BLOCKED_ON_CANDIDATE_REBASELINE",
+      status: "NOT_AUTHORIZED",
     });
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,
       maximumWireCalls: 72,
-      status: "BLOCKED_ON_CANDIDATE_REBASELINE",
+      status: "BLOCKED_BEFORE_PILOT_RESULT",
     });
     expect(COPY_EVALUATION_V2_PLAN.cachePolicy).toEqual({
       exactResultCache: "disabled_for_evaluation",
