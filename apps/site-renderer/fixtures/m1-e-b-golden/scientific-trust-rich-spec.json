@@ -457,7 +457,7 @@
           "id": "snapshot-39fbbb8bd1dbc2ee",
           "digest": "0ef54e1b5c3b71af07d944d8e90f5818f0a8b314483211dfc5698b5854fbfb63"
         },
-        "inputHash": "1737329ea4fa2a7e29fc72b2caf93204bab3c3029b6b04a63b675c49a0534acf",
+        "inputHash": "7b3d3b1fd1b886cec55786242789eb509c4dfa8fb699923a461e02cc989d2c42",
         "slots": {
           "detail.scientific-solution-faq.items.0.a": {
             "type": "plain_text",
@@ -1636,7 +1636,7 @@
             "claimRefs": []
           }
         },
-        "digest": "b75f256f0a053acb5fa8bf8223559a8cd8e1fce82abcd0d8cf08462bc5595d46"
+        "digest": "755dae3654faba52a286d20984341097c14608122ded07825419f9264a8d9c21"
       }
     }
   }

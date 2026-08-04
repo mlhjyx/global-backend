@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { COPY_BUNDLE_SET_SCHEMA_VERSION } from "@global/contracts";
 import { buildPublishableClaimSnapshot } from "./publishable-claim-snapshot";
 import {
+  buildCopyGenerationContext,
   CopyBundleGenerationError,
   CopyBundleService,
+  copyGenerationContextDigest,
   neutralCopySlotContent,
   type CopySlotGenerator,
 } from "./copy-bundle.service";
@@ -33,10 +35,38 @@ const slots = [
   },
 ];
 
+const generationContexts = Object.fromEntries(
+  ["en", "de-DE"].map((locale) => {
+    const context = buildCopyGenerationContext({
+      locale,
+      intake: {
+        industry: "industrial equipment",
+        products: ["pumps"],
+        targetMarkets: ["engineering buyers"],
+      },
+      brandProfile: {
+        id: "brand-profile-1",
+        version: 1,
+        tone: { voice: "clear and assured", style: ["concise"] },
+      },
+    });
+    return [
+      locale,
+      { context, contextDigest: copyGenerationContextDigest(context) },
+    ];
+  }),
+);
+
 function generator(failLocale?: string): CopySlotGenerator {
   return {
     generateSlot: vi.fn(async (input) => {
       if (input.locale === failLocale) throw new Error("model unavailable");
+      if (input.slot.type === "cta_label") {
+        return {
+          content: input.context.ctaPolicy.allowedLabels[0]!,
+          claimRefs: [],
+        };
+      }
       return {
         content:
           input.locale === "de-DE"
@@ -90,6 +120,7 @@ describe("CopyBundleService", () => {
       snapshotId: "55555555-5555-4555-8555-555555555555",
       snapshot,
       slots,
+      generationContexts,
       approvedOutboundDomains: [],
     });
 
@@ -115,6 +146,7 @@ describe("CopyBundleService", () => {
       snapshotId: "55555555-5555-4555-8555-555555555555",
       snapshot,
       slots,
+      generationContexts,
       approvedOutboundDomains: [],
     });
     expect(Object.keys(result.set.bundles)).toEqual(["en"]);
@@ -129,6 +161,7 @@ describe("CopyBundleService", () => {
         snapshotId: "55555555-5555-4555-8555-555555555555",
         snapshot,
         slots,
+        generationContexts,
         approvedOutboundDomains: [],
       }),
     ).rejects.toMatchObject<Partial<CopyBundleGenerationError>>({
@@ -136,7 +169,7 @@ describe("CopyBundleService", () => {
     });
   });
 
-  it("replaces model embellishment with the exact cited Claim statement", async () => {
+  it("rejects model embellishment instead of silently treating it as valid", async () => {
     const claimId = "66666666-6666-4666-8666-666666666666";
     const factualSnapshot = snapshotWithClaim("Industrial pumps up to 400 bar");
     const model: CopySlotGenerator = {
@@ -146,31 +179,32 @@ describe("CopyBundleService", () => {
         claimRefs: [claimId],
       })),
     };
-    const result = await new CopyBundleService(model, () => NOW).generate({
-      locales: ["en"],
-      sourceLocale: "en",
-      snapshotId: "55555555-5555-4555-8555-555555555555",
-      snapshot: factualSnapshot,
-      slots: [
-        {
-          key: "home.hero.headline",
-          type: "plain_text",
-          maxGraphemes: 50,
-          factual: true,
-        },
-      ],
-      approvedOutboundDomains: [],
+    await expect(
+      new CopyBundleService(model, () => NOW).generate({
+        locales: ["en"],
+        sourceLocale: "en",
+        snapshotId: "55555555-5555-4555-8555-555555555555",
+        snapshot: factualSnapshot,
+        slots: [
+          {
+            key: "home.hero.headline",
+            type: "plain_text",
+            maxGraphemes: 50,
+            factual: true,
+          },
+        ],
+        generationContexts,
+        approvedOutboundDomains: [],
+      }),
+    ).rejects.toMatchObject<Partial<CopyBundleGenerationError>>({
+      code: "COPY_DEFAULT_LOCALE_FAILED",
     });
-
-    expect(result.set.bundles.en.slots["home.hero.headline"].content).toBe(
-      "Industrial pumps up to 400 bar",
-    );
   });
 
-  it("uses deterministic neutral copy when no Claim supports a slot", async () => {
+  it("preserves validated non-factual creative copy", async () => {
     const model: CopySlotGenerator = {
       generateSlot: vi.fn(async () => ({
-        content: "Market-leading pumps for every application",
+        content: "Clear engineering for confident decisions",
         claimRefs: [],
       })),
     };
@@ -189,13 +223,44 @@ describe("CopyBundleService", () => {
           factual: false,
         },
       ],
+      generationContexts,
       approvedOutboundDomains: [],
     });
 
     expect(result.set.bundles.en.slots["seo.home.title"]).toMatchObject({
       factual: false,
-      content: "Company website",
+      content: "Clear engineering for confident decisions",
       claimRefs: [],
+    });
+  });
+
+  it("rejects unsupported creative assertions instead of publishing them", async () => {
+    const model: CopySlotGenerator = {
+      generateSlot: vi.fn(async () => ({
+        content: "Market-leading pumps for 40 countries",
+        claimRefs: [],
+      })),
+    };
+
+    await expect(
+      new CopyBundleService(model, () => NOW).generate({
+        locales: ["en"],
+        sourceLocale: "en",
+        snapshotId: "55555555-5555-4555-8555-555555555555",
+        snapshot,
+        slots: [
+          {
+            key: "home.hero.headline",
+            type: "plain_text",
+            maxGraphemes: 60,
+            factual: false,
+          },
+        ],
+        generationContexts,
+        approvedOutboundDomains: [],
+      }),
+    ).rejects.toMatchObject<Partial<CopyBundleGenerationError>>({
+      code: "COPY_DEFAULT_LOCALE_FAILED",
     });
   });
 });

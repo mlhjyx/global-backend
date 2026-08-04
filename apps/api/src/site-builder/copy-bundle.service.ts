@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   COPY_BUNDLE_SCHEMA_VERSION,
   COPY_BUNDLE_SET_SCHEMA_VERSION,
@@ -13,6 +15,9 @@ import type {
   PublishableClaimSnapshotItem,
 } from "./publishable-claim-snapshot";
 
+export const COPY_GENERATION_CONTRACT_VERSION =
+  "site-builder-task-contract/site_builder.copy/v2" as const;
+
 export interface CopySlotDefinition {
   key: string;
   type: CopySlotType;
@@ -20,11 +25,46 @@ export interface CopySlotDefinition {
   factual: boolean;
 }
 
+export interface CopyAudienceContext {
+  industry: string | null;
+  products: string[];
+  targetMarkets: string[];
+}
+
+export interface CopyBrandVoiceContext {
+  voice: string;
+  style: string[];
+  sourceRef: string;
+}
+
+export interface CopyCtaPolicy {
+  intent: "contact";
+  allowedLabels: string[];
+}
+
+export interface CopyGenerationContext {
+  audience: CopyAudienceContext;
+  brandVoice: CopyBrandVoiceContext;
+  prohibitedAssertions: string[];
+  ctaPolicy: CopyCtaPolicy;
+}
+
+export interface CopyBrandProfileContextSource {
+  id: string;
+  version: number;
+  tone: unknown;
+}
+
+export type CopySlotContentMode =
+  "claim_exact" | "creative_non_factual" | "cta_allowlist" | "deterministic";
+
 export interface CopySlotGeneratorInput {
   locale: string;
   sourceLocale: string;
   slot: CopySlotDefinition;
   snapshot: Pick<PublishableClaimSnapshot, "digest" | "items">;
+  context: CopyGenerationContext;
+  contextDigest: string;
 }
 
 export interface CopySlotGeneratorResult {
@@ -53,6 +93,9 @@ export interface GenerateCopyBundlesInput {
   snapshotId: string;
   snapshot: PublishableClaimSnapshot;
   slots: readonly CopySlotDefinition[];
+  generationContexts: Readonly<
+    Record<string, { context: CopyGenerationContext; contextDigest: string }>
+  >;
   approvedOutboundDomains: readonly string[];
 }
 
@@ -63,6 +106,232 @@ export interface GenerateCopyBundlesResult {
 
 const PROTECTED_FACT =
   /\b(?:ISO\s*\d{3,5}(?::\d{4})?|CE|FDA|UL|\d+(?:[.,]\d+)?\s*(?:%|bar|mbar|pa|kpa|mpa|psi|hz|khz|mhz|ghz|rpm|v|mv|kv|a|ma|w|kw|mw|mm|cm|m|km|mg|g|kg|lb|ml|l))\b/giu;
+const PROTECTED_FACT_ASSERTION =
+  /\b(?:ISO\s*\d{3,5}(?::\d{4})?|CE|FDA|UL|\d+(?:[.,]\d+)?\s*(?:%|bar|mbar|pa|kpa|mpa|psi|hz|khz|mhz|ghz|rpm|v|mv|kv|a|ma|w|kw|mw|mm|cm|m|km|mg|g|kg|lb|ml|l))\b/iu;
+
+const DEFAULT_PROHIBITED_ASSERTIONS = Object.freeze([
+  "market-leading",
+  "industry-leading",
+  "world-class",
+  "best-in-class",
+  "award-winning",
+  "trusted by",
+  "certified",
+  "compliant",
+  "approved",
+  "guaranteed",
+  "marktführend",
+  "weltklasse",
+  "preisgekrönt",
+  "zertifiziert",
+  "konform",
+  "garantiert",
+]);
+
+const UNSUPPORTED_ASSERTION =
+  /(?:\p{N}|\b(?:we|our|we['’](?:re|ve)|wir|unser(?:e|er|es|en)?|certif(?:ied|ication)|compliant|approved|guaranteed|leading|trusted\s+by|serving|since|customers?|countries|years?|patented|award[- ]winning|zertifiziert|konform|garantiert|führend|kunden|länder|jahren?)\b)/iu;
+const UNSUPPORTED_CONTACT =
+  /(?:https?:\/\/|www\.|\b[^\s@]+@[^\s@]+\.[^\s@]+\b|(?:^|\s)\+?\d[\d ()-]{6,}\d(?:\s|$))/iu;
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+    .join(",")}}`;
+}
+
+function safetyFold(value: string, locale?: string): string {
+  const normalized = value
+    .normalize("NFKC")
+    .replace(/\p{Cf}/gu, "")
+    .replace(/\p{Dash_Punctuation}/gu, "-")
+    .replace(/\s+/gu, " ");
+  return locale ? normalized.toLocaleLowerCase(locale) : normalized;
+}
+
+function boundedText(value: unknown, maximum: number): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.normalize("NFC").trim();
+  if (
+    !normalized ||
+    normalized.length > maximum ||
+    [...normalized].some((character) => {
+      const code = character.codePointAt(0)!;
+      return code < 32 || code === 127;
+    })
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function boundedTextList(
+  value: unknown,
+  maximumItems: number,
+  maximumLength: number,
+): string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((item) => boundedText(item, maximumLength))
+        .filter((item): item is string => item !== null),
+    ),
+  ].slice(0, maximumItems);
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function ctaLabels(locale: string): string[] {
+  return locale === "de-DE"
+    ? ["Kontakt aufnehmen", "Kontaktieren Sie uns", "Informationen anfragen"]
+    : ["Get in touch", "Contact us", "Request information"];
+}
+
+export function buildCopyGenerationContext(input: {
+  locale: string;
+  intake: unknown;
+  brandProfile: CopyBrandProfileContextSource | null;
+}): CopyGenerationContext {
+  const intake = record(input.intake);
+  const company = record(intake.company);
+  const tone = record(input.brandProfile?.tone);
+  const voice = boundedText(tone.voice, 160) ?? "restrained and professional";
+  const style = boundedTextList(tone.style, 8, 80);
+  const industry = boundedText(intake.industry, 160);
+  const products = boundedTextList(intake.products, 24, 160);
+  const targetMarkets = boundedTextList(intake.targetMarkets, 24, 160);
+  const companyNames = [
+    boundedText(company.nameEn, 160),
+    boundedText(company.nameZh, 160),
+  ].filter(
+    (value): value is string => value !== null && Array.from(value).length >= 4,
+  );
+  return {
+    audience: {
+      industry,
+      products,
+      targetMarkets,
+    },
+    brandVoice: {
+      voice,
+      style: style.length > 0 ? style : ["clear", "concise"],
+      sourceRef: input.brandProfile
+        ? `brand-profile:${input.brandProfile.id}:v${input.brandProfile.version}`
+        : "copy-default-brand-voice/v1",
+    },
+    prohibitedAssertions: [
+      ...new Set(
+        [...DEFAULT_PROHIBITED_ASSERTIONS, ...companyNames].map((value) =>
+          value.slice(0, 80).trim(),
+        ),
+      ),
+    ].slice(0, 32),
+    ctaPolicy: { intent: "contact", allowedLabels: ctaLabels(input.locale) },
+  };
+}
+
+export function copyGenerationContextDigest(
+  context: CopyGenerationContext,
+): string {
+  return createHash("sha256")
+    .update(canonicalJson(context), "utf8")
+    .digest("hex");
+}
+
+export function copySlotContentMode(
+  slot: CopySlotDefinition,
+): CopySlotContentMode {
+  if (slot.factual) return "claim_exact";
+  if (slot.type === "cta_label") return "cta_allowlist";
+  if (
+    slot.type === "form_label" ||
+    /^(?:nav\.|inquiry\.|faq\.q)/u.test(slot.key)
+  ) {
+    return "deterministic";
+  }
+  return "creative_non_factual";
+}
+
+function plainGeneratorContent(output: CopySlotGeneratorResult): string {
+  if (typeof output.content !== "string") {
+    throw new Error("COPY_OUTPUT_CONTENT_MALFORMED");
+  }
+  const content = output.content.normalize("NFC");
+  if (
+    !content ||
+    content !== content.trim() ||
+    /<\/?[a-z][^>]*>/iu.test(safetyFold(content))
+  ) {
+    throw new Error("COPY_OUTPUT_CONTENT_MALFORMED");
+  }
+  return content;
+}
+
+export function validateCopySlotGeneratorOutput(input: {
+  locale: string;
+  slot: CopySlotDefinition;
+  output: CopySlotGeneratorResult;
+  claims: ReadonlyMap<string, { statement: string }>;
+  context: CopyGenerationContext;
+}): void {
+  const content = plainGeneratorContent(input.output);
+  if (graphemeCount(content) > input.slot.maxGraphemes) {
+    throw new Error("COPY_SLOT_BUDGET_EXCEEDED");
+  }
+  if (new Set(input.output.claimRefs).size !== input.output.claimRefs.length) {
+    throw new Error("COPY_CLAIM_REF_REPEATED");
+  }
+  const cited = input.output.claimRefs.map((claimId) => {
+    const claim = input.claims.get(claimId);
+    if (!claim) throw new Error("COPY_CLAIM_REF_UNKNOWN");
+    return claim.statement;
+  });
+  if (cited.length > 0) {
+    if (content !== cited.join(" · ")) {
+      throw new Error("COPY_FACT_ASSERTION_UNSUPPORTED");
+    }
+    return;
+  }
+
+  const mode = copySlotContentMode(input.slot);
+  if (mode === "claim_exact" || mode === "deterministic") {
+    if (
+      content !==
+      neutralCopySlotGeneratorResult(input.slot, input.locale).content
+    ) {
+      throw new Error("COPY_DETERMINISTIC_SLOT_VIOLATION");
+    }
+    return;
+  }
+  if (mode === "cta_allowlist") {
+    if (!input.context.ctaPolicy.allowedLabels.includes(content)) {
+      throw new Error("COPY_CTA_POLICY_VIOLATION");
+    }
+    return;
+  }
+  const folded = safetyFold(content, input.locale);
+  if (UNSUPPORTED_CONTACT.test(folded)) {
+    throw new Error("COPY_UNSUPPORTED_CONTACT");
+  }
+  if (
+    PROTECTED_FACT_ASSERTION.test(folded) ||
+    UNSUPPORTED_ASSERTION.test(folded) ||
+    input.context.prohibitedAssertions.some((phrase) =>
+      folded.includes(safetyFold(phrase, input.locale)),
+    )
+  ) {
+    throw new Error("COPY_UNSUPPORTED_ASSERTION");
+  }
+}
 
 /** Tokens that translation/tone may not silently normalize or convert. */
 export function protectedFactTokens(
@@ -150,6 +419,19 @@ export function neutralCopySlotContent(key: string, locale: string): string {
     : "Further information is available on request.";
 }
 
+export function neutralCopySlotGeneratorResult(
+  slot: CopySlotDefinition,
+  locale: string,
+): CopySlotGeneratorResult {
+  return {
+    content: constrainGraphemes(
+      neutralCopySlotContent(slot.key, locale),
+      slot.maxGraphemes,
+    ),
+    claimRefs: [],
+  };
+}
+
 export function canonicalizeCopySlotOutput(
   locale: string,
   slot: CopySlotDefinition,
@@ -158,27 +440,20 @@ export function canonicalizeCopySlotOutput(
     string,
     { statement: string; protectedTokens: readonly string[] }
   >,
+  context: CopyGenerationContext,
 ): CopySlotGeneratorResult & { factual: boolean } {
-  const claimRefs: string[] = [];
-  let content = "";
-  for (const claimId of output.claimRefs) {
-    if (claimRefs.includes(claimId)) continue;
-    const claim = claims.get(claimId);
-    if (!claim) continue;
-    const candidate = [...claimRefs, claimId]
-      .map((id) => claims.get(id)!.statement)
-      .join(" · ");
-    if (graphemeCount(candidate) <= slot.maxGraphemes) {
-      claimRefs.push(claimId);
-      content = candidate;
-    }
-  }
-  if (claimRefs.length === 0) {
-    content = constrainGraphemes(
-      neutralCopySlotContent(slot.key, locale),
-      slot.maxGraphemes,
-    );
-  }
+  validateCopySlotGeneratorOutput({ locale, slot, output, claims, context });
+  const claimRefs = [...output.claimRefs];
+  const mode = copySlotContentMode(slot);
+  const content =
+    claimRefs.length > 0
+      ? claimRefs.map((claimId) => claims.get(claimId)!.statement).join(" · ")
+      : mode === "claim_exact" || mode === "deterministic"
+        ? constrainGraphemes(
+            neutralCopySlotContent(slot.key, locale),
+            slot.maxGraphemes,
+          )
+        : (output.content as string);
   return {
     content:
       slot.type === "rich_text"
@@ -217,6 +492,19 @@ export class CopyBundleService {
         "source locale must be first and locales/slots must be unique",
       );
     }
+    for (const locale of input.locales) {
+      const frozenContext = input.generationContexts[locale];
+      if (
+        !frozenContext ||
+        copyGenerationContextDigest(frozenContext.context) !==
+          frozenContext.contextDigest
+      ) {
+        throw new CopyBundleGenerationError(
+          "COPY_LOCALE_SET_INVALID",
+          `generation context for ${locale} is missing or does not match its digest`,
+        );
+      }
+    }
 
     const claims = new Map(
       input.snapshot.items.map((item) => [
@@ -232,6 +520,7 @@ export class CopyBundleService {
 
     for (const locale of input.locales) {
       try {
+        const frozenContext = input.generationContexts[locale]!;
         const generated = await Promise.all(
           input.slots.map(async (slot) => ({
             slot,
@@ -243,14 +532,18 @@ export class CopyBundleService {
                 digest: input.snapshot.digest,
                 items: input.snapshot.items,
               },
+              context: frozenContext.context,
+              contextDigest: frozenContext.contextDigest,
             }),
           })),
         );
         const inputHash = copyBundleInputHash({
           claimSnapshotDigest: input.snapshot.digest,
+          taskContractVersion: COPY_GENERATION_CONTRACT_VERSION,
           locale,
           sourceLocale: input.sourceLocale,
           slots: input.slots,
+          contextDigest: frozenContext.contextDigest,
         });
         bundles[locale] = finalizeCopyBundle(
           {
@@ -271,6 +564,7 @@ export class CopyBundleService {
                   slot,
                   output,
                   claims,
+                  frozenContext.context,
                 );
                 return [
                   slot.key,

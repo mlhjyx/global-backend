@@ -432,7 +432,7 @@
           "id": "snapshot-7a7eceadd5c31c13",
           "digest": "89a7b29dc7df5b03dd996c9ee331c7bf2a2dbd51c0cce4df676e86f5c5918e5c"
         },
-        "inputHash": "7189d9f032b29463e7b04e0d3dc81eeb615822a0653f683ae91668f9fad71d93",
+        "inputHash": "24f3f6d255c3a11fff98ea1dd2a0e84e24a7d16f473344e95d5eb3a9cf12773d",
         "slots": {
           "detail.oem-capability-features.eyebrow": {
             "type": "plain_text",
@@ -1708,7 +1708,7 @@
             "claimRefs": []
           }
         },
-        "digest": "e58377f77e346e21f3436a42dc456d06a31417ca4c6bd6eeee690945adc6df19"
+        "digest": "e448952382df1ae69f5d4fb4ac2598b410bef5f1c7ea8810fa90da699852cb8f"
       }
     }
   }

@@ -372,7 +372,7 @@
           "id": "snapshot-ce2a948a64b299e3",
           "digest": "f7673067c456b20148f0694472ab4590e19c8dbbd8fcd9f823546a6d783a744a"
         },
-        "inputHash": "6868e74c1d95868ac355a07d01eda15af61433c9f381ab5f187aa3b359fc81ff",
+        "inputHash": "90a21d1d7becd7761885d9b4b7361f11fe8fa3359d1e75adbdd91d695c4d568c",
         "slots": {
           "detail.premium-innovation-chapter.chapter": {
             "type": "plain_text",
@@ -994,7 +994,7 @@
             "claimRefs": []
           }
         },
-        "digest": "3627aaf723782c075c956567e206937a27f0c6a3bc85b5a68a0b5f6ac3066462"
+        "digest": "003a9569515dbe6c4b4f83fff03f753d18291f5b8c70af1e7de089308db283f2"
       }
     }
   }

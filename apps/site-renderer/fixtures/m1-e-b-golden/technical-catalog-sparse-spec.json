@@ -265,7 +265,7 @@
           "id": "snapshot-9a13f60a58b9b98c",
           "digest": "befc89ec1acff9e415310aae801917349d0da27efba9aeb5236bf60a154b713e"
         },
-        "inputHash": "b39c45c3d307b7ae780e8a29ff62f0a220c21a031382e75bcfbe7fba62f7b1c8",
+        "inputHash": "6db9b3d80bdfd79097422f4f4ebab686521bca1482300a9a8ed97b00141c1812",
         "slots": {
           "detail.catalog-detail-faq.items.0.a": {
             "type": "plain_text",
@@ -624,7 +624,7 @@
             "claimRefs": []
           }
         },
-        "digest": "dd4a18b1fa7be3c4380fb9b313f863594f88cf5bcd31da092a4ee218ba9289c1"
+        "digest": "43c24ba2d71dcbb2a538492a12081873bb1deec115c4b0ff8e557dd791fe3d99"
       }
     }
   }
