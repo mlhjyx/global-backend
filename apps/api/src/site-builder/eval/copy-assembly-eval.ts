@@ -21,6 +21,7 @@ import {
   copySlotContentMode,
   type CopySlotDefinition,
 } from "../copy-bundle.service";
+import { COPY_QUALITY_SCORED_DIMENSIONS } from "./copy-quality-rubric";
 
 const CAPTURED_COPY_VALIDATE_OUTPUT = (() => {
   const validator = COPY_TASK.validateOutput;
@@ -31,7 +32,7 @@ const CAPTURED_COPY_VALIDATE_OUTPUT = (() => {
 export const COPY_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION =
   "site-builder-copy-assembly-eval-fixture/v2" as const;
 export const COPY_ASSEMBLY_EVALUATOR_VERSION =
-  "site-builder-copy-assembly-evaluator/2026-08-04-v2" as const;
+  "site-builder-copy-assembly-evaluator/2026-08-05-v3" as const;
 export const COPY_ASSEMBLY_ROUTE_VALIDATION_VERSION =
   "site-builder-copy-assembly-route-validation/2026-08-04-v2" as const;
 export const COPY_ASSEMBLY_PROMPT_VERSION =
@@ -45,7 +46,7 @@ export const COPY_ASSEMBLY_EVALUATOR_RUBRIC = Object.freeze({
   factualClaimTextMustBeExact: true,
   validatedNonFactualCopyIsPreserved: true,
   creativeQualityIsScoredNotExactMatched: true,
-  scoredDimensions: Object.freeze([] as string[]),
+  scoredDimensions: COPY_QUALITY_SCORED_DIMENSIONS,
   freeFormFactsAllowed: false,
   prohibitedBehavior: Object.freeze([
     "invent_claim_reference",

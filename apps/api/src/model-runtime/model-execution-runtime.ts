@@ -51,6 +51,57 @@ interface RuntimeDependencies<Input, Output> {
   random?: () => number;
 }
 
+export interface TrustedModelExecutionMetadata {
+  executionId: string;
+  taskId: string;
+  taskVersion: string;
+  requestedAlias: string;
+  resolvedAlias: string;
+  reportedModel?: string;
+  protocol: ModelExecutionPlan<unknown, unknown>['protocol'];
+  reasoning: ModelExecutionPlan<unknown, unknown>['reasoning'];
+  cacheMode: ModelExecutionPlan<unknown, unknown>['contract']['cachePolicy']['mode'];
+  settlement: 'known' | 'unknown' | 'not_applicable';
+  outputDigest: string;
+  cacheHit: boolean;
+}
+
+const TRUSTED_MODEL_EXECUTION_RESULTS = new WeakMap<object, TrustedModelExecutionMetadata>();
+
+export function getTrustedModelExecutionMetadata(
+  result: ModelExecutionResult<unknown>,
+): TrustedModelExecutionMetadata | undefined {
+  return TRUSTED_MODEL_EXECUTION_RESULTS.get(result);
+}
+
+function completeExecutionResult<Input, Output>(
+  plan: ModelExecutionPlan<Input, Output>,
+  result: ModelExecutionResult<Output>,
+): ModelExecutionResult<Output> {
+  const completed = Object.freeze({
+    ...result,
+    states: Object.freeze([...result.states]),
+  });
+  TRUSTED_MODEL_EXECUTION_RESULTS.set(completed, Object.freeze({
+    executionId: plan.executionId,
+    taskId: plan.contract.taskId,
+    taskVersion: plan.contract.version,
+    requestedAlias: plan.requestedAlias,
+    resolvedAlias: plan.resolvedAlias,
+    ...(result.observation?.reportedModel === undefined
+      ? {}
+      : { reportedModel: result.observation.reportedModel }),
+    protocol: plan.protocol,
+    reasoning: plan.reasoning,
+    cacheMode: plan.contract.cachePolicy.mode,
+    settlement: result.observation?.settlement
+      ?? (plan.contract.executionMode === 'deterministic' ? 'not_applicable' : 'unknown'),
+    outputDigest: canonicalDigest(result.output),
+    cacheHit: result.cacheHit,
+  }));
+  return completed;
+}
+
 function cacheIdentity<Input, Output>(plan: ModelExecutionPlan<Input, Output>): ExactResultCacheIdentity {
   return {
     workspaceId: plan.workspaceId,
@@ -171,7 +222,13 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
       }
       transition('validated');
       transition('completed');
-      return { output, states, transportAttempts, repairAttempts, cacheHit: false };
+      return completeExecutionResult(plan, {
+        output,
+        states,
+        transportAttempts,
+        repairAttempts,
+        cacheHit: false,
+      });
     }
 
     const identity = cacheIdentity(plan);
@@ -186,7 +243,13 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
         }
         transition('validated', { cacheHit: true });
         transition('completed', { cacheHit: true });
-        return { output: cached.output, states, transportAttempts, repairAttempts, cacheHit: true };
+        return completeExecutionResult(plan, {
+          output: cached.output,
+          states,
+          transportAttempts,
+          repairAttempts,
+          cacheHit: true,
+        });
       }
     }
 
@@ -271,7 +334,14 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
       }
     }
     transition('completed');
-    return { output: observation.output, observation, states, transportAttempts, repairAttempts, cacheHit: false };
+    return completeExecutionResult(plan, {
+      output: observation.output,
+      observation,
+      states,
+      transportAttempts,
+      repairAttempts,
+      cacheHit: false,
+    });
   }
 }
 
