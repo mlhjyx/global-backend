@@ -181,6 +181,12 @@ describe("minimal M1 text evaluation plan", () => {
         });
       }
       modelCalls += 1;
+      if (modelCalls === 100) {
+        return new Response("temporary upstream failure", {
+          status: 502,
+          headers: { "x-oneapi-request-id": "request_0100" },
+        });
+      }
       const executionId = outgoing.headers.get(
         "x-site-builder-evaluation-execution-id",
       );
@@ -248,15 +254,18 @@ describe("minimal M1 text evaluation plan", () => {
       fetch: fakeFetch,
     });
 
-    expect(modelCalls).toBe(206);
-    expect(evidence.actualNetworkCalls).toBe(206);
+    expect(modelCalls).toBe(207);
+    expect(evidence.actualNetworkCalls).toBe(207);
     expect(evidence.results).toHaveLength(206);
     expect(
       evidence.results.every(({ outcome }) => outcome === "accepted"),
     ).toBe(true);
     expect(
-      evidence.results.every(({ requestIds }) => requestIds.length === 1),
+      evidence.results.every(({ requestIds }) => requestIds.length <= 2),
     ).toBe(true);
+    expect(
+      evidence.results.filter(({ requestIds }) => requestIds.length === 2),
+    ).toHaveLength(1);
     expect(evidence.candidates.every(({ rankable }) => rankable)).toBe(true);
     expect(JSON.stringify(evidence)).not.toContain("x".repeat(16));
   }, 30_000);
