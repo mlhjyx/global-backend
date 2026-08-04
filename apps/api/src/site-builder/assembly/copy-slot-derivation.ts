@@ -102,21 +102,22 @@ function collectTemplateSlots(input: {
   for (const [key, value] of Object.entries(input.value)) {
     const childPath = [...path, key];
     if (key.endsWith("Key") && typeof value === "string") {
+      const semanticProperty = childPath.map(String).join(".");
+      const isCta = semanticProperty.toLowerCase().includes("cta");
       input.output.push({
         key: slotKey(input.pageKey, input.sectionId, childPath),
-        type: /body|description|intro|statement|answer/i.test(key)
-          ? "rich_text"
-          : "plain_text",
+        type: isCta
+          ? "cta_label"
+          : /body|description|intro|statement|answer/i.test(key)
+            ? "rich_text"
+            : "plain_text",
         maxGraphemes: Math.min(
           input.familyMaximum,
           compositeTitleLimit !== undefined && compositeTitleKeys.includes(key)
             ? compositeTitleLimit
-            : semanticLimit(
-                input.componentLimits,
-                childPath.map(String).join("."),
-              ),
+            : semanticLimit(input.componentLimits, semanticProperty),
         ),
-        factual: input.factual,
+        factual: isCta ? false : input.factual,
       });
       continue;
     }

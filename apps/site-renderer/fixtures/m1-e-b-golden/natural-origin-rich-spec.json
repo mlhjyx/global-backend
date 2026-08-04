@@ -297,8 +297,8 @@
       "detail.natural-catalog-hero.cta.label": "Get in touch",
       "detail.natural-catalog-hero.headline": "Practical solutions",
       "detail.natural-catalog-hero.subhead": "Further information is available on request.",
-      "detail.natural-catalog-materials.ctaprimarylabel": "Further information is…",
-      "detail.natural-catalog-materials.ctasecondarylabel": "Further information is…",
+      "detail.natural-catalog-materials.ctaprimarylabel": "Get in touch",
+      "detail.natural-catalog-materials.ctasecondarylabel": "Get in touch",
       "detail.natural-catalog-materials.eyebrow": "Further information is available on req…",
       "detail.natural-catalog-materials.intro": "Further information is available on request.",
       "detail.natural-catalog-materials.items.0.name": "Further information is available on request.",
@@ -359,8 +359,8 @@
       "home.natural-home-origin-hero.primarycta.label": "Get in touch",
       "home.natural-home-origin-hero.scroll": "Further information is available on request.",
       "home.natural-home-origin-hero.secondarycta.label": "Get in touch",
-      "home.natural-home-origin-materials.ctaprimarylabel": "Further information is…",
-      "home.natural-home-origin-materials.ctasecondarylabel": "Further information is…",
+      "home.natural-home-origin-materials.ctaprimarylabel": "Get in touch",
+      "home.natural-home-origin-materials.ctasecondarylabel": "Get in touch",
       "home.natural-home-origin-materials.eyebrow": "Further information is available on req…",
       "home.natural-home-origin-materials.intro": "Further information is available on request.",
       "home.natural-home-origin-materials.items.0.name": "Further information is available on request.",
@@ -443,7 +443,7 @@
           "id": "snapshot-3b9ebc699306d11d",
           "digest": "03770ddc07191984b3c0c4aa8a33403649061974efabe70a27810b3fd0ff55be"
         },
-        "inputHash": "003de598c7c2937e70a78191a171079b343dc3db10bc4d2813839a741e4f1266",
+        "inputHash": "9254bb3780e1706a05dd688b1fe1b9c4d4e4b6c1581361e22cf82363dc848b9f",
         "slots": {
           "detail.natural-catalog-cta.eyebrow": {
             "type": "plain_text",
@@ -453,14 +453,14 @@
             "claimRefs": []
           },
           "detail.natural-catalog-cta.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "detail.natural-catalog-cta.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -523,7 +523,7 @@
             "claimRefs": []
           },
           "detail.natural-catalog-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -544,17 +544,17 @@
             "claimRefs": []
           },
           "detail.natural-catalog-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.natural-catalog-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.natural-catalog-materials.eyebrow": {
@@ -690,7 +690,7 @@
             "claimRefs": []
           },
           "detail.natural-provenance-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1039,7 +1039,7 @@
             "claimRefs": []
           },
           "home.natural-home-origin-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1074,7 +1074,7 @@
             "claimRefs": []
           },
           "home.natural-home-origin-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1088,24 +1088,24 @@
             "claimRefs": []
           },
           "home.natural-home-origin-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "home.natural-home-origin-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.natural-home-origin-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.natural-home-origin-materials.eyebrow": {
@@ -1503,7 +1503,7 @@
             "claimRefs": []
           },
           "home.natural-home-seasonal-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1517,7 +1517,7 @@
             "claimRefs": []
           },
           "home.natural-home-seasonal-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1636,7 +1636,7 @@
             "claimRefs": []
           }
         },
-        "digest": "1c577719767f3be6e857f4262f4955edc5c3166b0c19e7487b1dc7d8f3adcce4"
+        "digest": "bb8a1511100bc0bf10a2c13bd9eae0b4c3854358357a0f16044328d898a91899"
       }
     }
   }

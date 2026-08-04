@@ -248,6 +248,25 @@ describe("M1-e-B controlled assembly", () => {
     });
     expect(repeated).toEqual(slots);
     expect(new Set(slots.map((slot) => slot.key)).size).toBe(slots.length);
+    const componentCtaSlots = slots.filter((slot) => {
+      const parts = slot.key.split(".");
+      const semanticProperty = parts.slice(2).join(".");
+      return semanticProperty.toLowerCase().includes("cta");
+    });
+    expect(componentCtaSlots.length).toBeGreaterThan(0);
+    expect(
+      componentCtaSlots.map(({ key, type, factual }) => ({
+        key,
+        type,
+        factual,
+      })),
+    ).toEqual(
+      componentCtaSlots.map(({ key }) => ({
+        key,
+        type: "cta_label",
+        factual: false,
+      })),
+    );
     const family = catalog.families.find(
       (candidate) => candidate.id === designBrief.familyId,
     )!;

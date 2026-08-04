@@ -296,10 +296,10 @@
           "id": "snapshot-e18f6078cb2731c9",
           "digest": "e88d8b75aa68bb5004cde28d75a0cec042d4a60053e269c66e312b7bff7aab2e"
         },
-        "inputHash": "0371fbc8a13cf1d9707d3e3fade9139959dfce6f05c1eb64f3b7319b98820dcd",
+        "inputHash": "7eec55516b4b2754b6ab29dde5563935d814e8d84f6aaccef940ec17e916ffc3",
         "slots": {
           "detail.precision-application-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -313,7 +313,7 @@
             "claimRefs": []
           },
           "detail.precision-application-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -403,7 +403,7 @@
             "claimRefs": []
           },
           "detail.precision-detail-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -540,7 +540,7 @@
             "claimRefs": []
           },
           "home.precision-home-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -596,7 +596,7 @@
             "claimRefs": []
           },
           "home.precision-home-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -631,7 +631,7 @@
             "claimRefs": []
           },
           "home.precision-home-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -819,7 +819,7 @@
             "claimRefs": []
           }
         },
-        "digest": "3d47d14e878d9436051db9f4370240d24e1f9e99cb311973ec11ceabdca202c5"
+        "digest": "7de2df031324b485f24fd1261d825dcb9319ae71ce788c3761993c6305591cb6"
       }
     }
   }

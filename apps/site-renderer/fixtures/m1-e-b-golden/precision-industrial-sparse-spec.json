@@ -281,10 +281,10 @@
           "id": "snapshot-e572bc3aaa577563",
           "digest": "0fb38dee57daf8fcb2d2f3964364bda0677afe53d5b7496423ebe14e747a29b3"
         },
-        "inputHash": "30a121a1b36647a62cd3478d9c0b4e6b1270e385a767841308a6d6cf657fac57",
+        "inputHash": "1e410558f7a23fcc8fba652eb70209cddfc48c06ec13bb57a4790c8339c22e66",
         "slots": {
           "detail.precision-detail-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -421,7 +421,7 @@
             "claimRefs": []
           },
           "home.precision-home-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -477,7 +477,7 @@
             "claimRefs": []
           },
           "home.precision-home-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -512,7 +512,7 @@
             "claimRefs": []
           },
           "home.precision-home-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -700,7 +700,7 @@
             "claimRefs": []
           }
         },
-        "digest": "87ead04701ab35182d7a3f09b3b316ce473a77e7809c6ec002ae6b9b87fe750e"
+        "digest": "dcb1b2f07661d93ce0ffd1e9fc15c7c82b197180d0daa61c762abbff79b0e386"
       }
     }
   }

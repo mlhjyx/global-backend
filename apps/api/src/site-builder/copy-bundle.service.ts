@@ -131,7 +131,7 @@ const DEFAULT_PROHIBITED_ASSERTIONS = Object.freeze([
 const UNSUPPORTED_ASSERTION =
   /(?:\p{N}|\b(?:we|our|we['’](?:re|ve)|wir|unser(?:e|er|es|en)?|certif(?:ied|ication)|compliant|approved|guaranteed|leading|trusted\s+by|serving|since|customers?|countries|years?|patented|award[- ]winning|zertifiziert|konform|garantiert|führend|kunden|länder|jahren?)\b)/iu;
 const UNSUPPORTED_CONTACT =
-  /(?:https?:\/\/|www\.|\b[^\s@]+@[^\s@]+\.[^\s@]+\b|(?:^|\s)\+?\d[\d ()-]{6,}\d(?:\s|$))/iu;
+  /(?:https?:\/\/|\/\/[a-z0-9]|www\.|\b[^\s@]+@[^\s@]+\.[^\s@]+\b|\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}\b|(?:^|[^\p{L}\p{N}])\+?\d(?:[\s().-]*\d){6,}(?=$|[^\p{L}\p{N}]))/iu;
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -151,6 +151,10 @@ function safetyFold(value: string, locale?: string): string {
     .replace(/\p{Dash_Punctuation}/gu, "-")
     .replace(/\s+/gu, " ");
   return locale ? normalized.toLocaleLowerCase(locale) : normalized;
+}
+
+function assertionFold(value: string, locale: string): string {
+  return safetyFold(value, locale).replace(/[-\s]+/gu, " ");
 }
 
 function boundedText(value: unknown, maximum: number): string | null {
@@ -247,11 +251,25 @@ export function copyGenerationContextDigest(
     .digest("hex");
 }
 
+function semanticCopySlotKey(key: string): string {
+  const parts = key.split(".");
+  return parts.length > 2 ? parts.slice(2).join(".") : key;
+}
+
 export function copySlotContentMode(
   slot: CopySlotDefinition,
 ): CopySlotContentMode {
+  const semanticKey = semanticCopySlotKey(slot.key);
+  if (
+    slot.type === "cta_label" ||
+    semanticKey
+      .replace(/[^a-z0-9]/giu, "")
+      .toLowerCase()
+      .includes("cta")
+  ) {
+    return "cta_allowlist";
+  }
   if (slot.factual) return "claim_exact";
-  if (slot.type === "cta_label") return "cta_allowlist";
   if (
     slot.type === "form_label" ||
     /^(?:nav\.|inquiry\.|faq\.q)/u.test(slot.key)
@@ -284,6 +302,7 @@ export function validateCopySlotGeneratorOutput(input: {
   context: CopyGenerationContext;
 }): void {
   const content = plainGeneratorContent(input.output);
+  const mode = copySlotContentMode(input.slot);
   if (graphemeCount(content) > input.slot.maxGraphemes) {
     throw new Error("COPY_SLOT_BUDGET_EXCEEDED");
   }
@@ -296,13 +315,18 @@ export function validateCopySlotGeneratorOutput(input: {
     return claim.statement;
   });
   if (cited.length > 0) {
+    if (mode === "cta_allowlist") {
+      throw new Error("COPY_CTA_POLICY_VIOLATION");
+    }
+    if (mode === "deterministic") {
+      throw new Error("COPY_DETERMINISTIC_SLOT_VIOLATION");
+    }
     if (content !== cited.join(" · ")) {
       throw new Error("COPY_FACT_ASSERTION_UNSUPPORTED");
     }
     return;
   }
 
-  const mode = copySlotContentMode(input.slot);
   if (mode === "claim_exact" || mode === "deterministic") {
     if (
       content !==
@@ -326,7 +350,9 @@ export function validateCopySlotGeneratorOutput(input: {
     PROTECTED_FACT_ASSERTION.test(folded) ||
     UNSUPPORTED_ASSERTION.test(folded) ||
     input.context.prohibitedAssertions.some((phrase) =>
-      folded.includes(safetyFold(phrase, input.locale)),
+      assertionFold(content, input.locale).includes(
+        assertionFold(phrase, input.locale),
+      ),
     )
   ) {
     throw new Error("COPY_UNSUPPORTED_ASSERTION");
@@ -381,10 +407,14 @@ function constrainGraphemes(value: string, maximum: number): string {
 
 export function neutralCopySlotContent(key: string, locale: string): string {
   const german = locale === "de-DE";
+  const semanticKey = semanticCopySlotKey(key)
+    .replace(/[^a-z0-9]/giu, "")
+    .toLowerCase();
   if (/^nav\.home$/.test(key)) return german ? "Startseite" : "Home";
   if (/^nav\.products$/.test(key)) return german ? "Lösungen" : "Solutions";
   if (/^nav\.contact$/.test(key)) return german ? "Kontakt" : "Contact";
   if (
+    semanticKey.includes("cta") ||
     /(?:^|\.)(?:primary|secondary)?cta(?:\.label)?$|(?:^|\.)submit$|(?:all|add)label$/.test(
       key,
     )

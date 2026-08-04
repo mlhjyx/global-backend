@@ -9,6 +9,7 @@ import {
   createSiteBuilderActivities,
   buildCompensatedSteps,
   controlledAssemblyEffectiveBrief,
+  durableCopyTaskCompletion,
   intakeToMarkdown,
   neutralCopyOutput,
   qualityNarrativePaidGateDecision,
@@ -207,6 +208,49 @@ describe("neutralCopyOutput — M1-d empty fact snapshot", () => {
     expect(activity).toBeGreaterThanOrEqual(0);
     expect(validation).toBeGreaterThan(activity);
     expect(completion).toBeGreaterThan(validation);
+  });
+
+  it("persists rich-text Copy output in the original task wire shape", () => {
+    const durable = durableCopyTaskCompletion({
+      taskAttemptId: "attempt-copy-en",
+      contextDigest: "a".repeat(64),
+      taskOutput: {
+        slots: {
+          "home.about.body": {
+            content: "Engineering details for confident decisions",
+            claimRefs: [],
+          },
+        },
+      },
+    });
+
+    expect(durable.storedOutput.slots["home.about.body"]!.content).toBe(
+      "Engineering details for confident decisions",
+    );
+    expect(durable.completionResult.slots["home.about.body"]!.content).toBe(
+      "Engineering details for confident decisions",
+    );
+    expect(durable.storedOutput).not.toBe(durable.completionResult);
+  });
+
+  it("rejects a canonical rich-text AST at the durable replay boundary", () => {
+    expect(() =>
+      durableCopyTaskCompletion({
+        taskAttemptId: "attempt-copy-en",
+        contextDigest: "a".repeat(64),
+        taskOutput: {
+          slots: {
+            "home.about.body": {
+              content: {
+                type: "doc",
+                content: [],
+              },
+              claimRefs: [],
+            },
+          },
+        },
+      }),
+    ).toThrow("COPY_DURABLE_REPLAY_WIRE_SHAPE_INVALID");
   });
 
   it("freezes Copy v2 context and reuses partial-build copy without a model call", async () => {

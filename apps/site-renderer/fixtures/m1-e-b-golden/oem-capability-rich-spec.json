@@ -277,8 +277,8 @@
       "detail.oem-capability-hero.subhead": "Further information is available on request.",
       "detail.oem-capability-inquiry.sub": "Further information is available on request.",
       "detail.oem-capability-inquiry.title": "Practical solutions",
-      "detail.oem-capability-materials.ctaprimarylabel": "Further information is…",
-      "detail.oem-capability-materials.ctasecondarylabel": "Further information is…",
+      "detail.oem-capability-materials.ctaprimarylabel": "Get in touch",
+      "detail.oem-capability-materials.ctasecondarylabel": "Get in touch",
       "detail.oem-capability-materials.eyebrow": "Further information is available on req…",
       "detail.oem-capability-materials.intro": "Further information is available on request.",
       "detail.oem-capability-materials.items.0.name": "Further information is available on request.",
@@ -375,9 +375,9 @@
       "home.oem-home-proof-hero.chapter": "Further information is available on request.",
       "home.oem-home-proof-hero.coveragelabel": "Further information is available on request.",
       "home.oem-home-proof-hero.coveragevalue": "Further information is available on request.",
-      "home.oem-home-proof-hero.cta1": "Further information is…",
-      "home.oem-home-proof-hero.cta2": "Further information is…",
-      "home.oem-home-proof-hero.cta2phone": "Further information is…",
+      "home.oem-home-proof-hero.cta1": "Get in touch",
+      "home.oem-home-proof-hero.cta2": "Get in touch",
+      "home.oem-home-proof-hero.cta2phone": "Get in touch",
       "home.oem-home-proof-hero.etalabel": "Further information is available on request.",
       "home.oem-home-proof-hero.etavalue": "Further information is available on request.",
       "home.oem-home-proof-hero.eyebrow": "Further information is available on request.",
@@ -432,7 +432,7 @@
           "id": "snapshot-7a7eceadd5c31c13",
           "digest": "89a7b29dc7df5b03dd996c9ee331c7bf2a2dbd51c0cce4df676e86f5c5918e5c"
         },
-        "inputHash": "24f3f6d255c3a11fff98ea1dd2a0e84e24a7d16f473344e95d5eb3a9cf12773d",
+        "inputHash": "94f902379e647583ff9ff2586974086c496fd7667fbfb9f612252a3169c5b27d",
         "slots": {
           "detail.oem-capability-features.eyebrow": {
             "type": "plain_text",
@@ -518,7 +518,7 @@
             "claimRefs": []
           },
           "detail.oem-capability-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -553,17 +553,17 @@
             "claimRefs": []
           },
           "detail.oem-capability-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.oem-capability-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.oem-capability-materials.eyebrow": {
@@ -780,14 +780,14 @@
             "claimRefs": []
           },
           "detail.oem-quality-cta.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "detail.oem-quality-cta.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -850,7 +850,7 @@
             "claimRefs": []
           },
           "detail.oem-quality-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -947,7 +947,7 @@
             "claimRefs": []
           },
           "home.oem-home-process-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1003,7 +1003,7 @@
             "claimRefs": []
           },
           "home.oem-home-process-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1038,7 +1038,7 @@
             "claimRefs": []
           },
           "home.oem-home-process-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1382,24 +1382,24 @@
             "claimRefs": []
           },
           "home.oem-home-proof-hero.cta1": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.oem-home-proof-hero.cta2": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.oem-home-proof-hero.cta2phone": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.oem-home-proof-hero.etalabel": {
@@ -1708,7 +1708,7 @@
             "claimRefs": []
           }
         },
-        "digest": "e448952382df1ae69f5d4fb4ac2598b410bef5f1c7ea8810fa90da699852cb8f"
+        "digest": "76accc64307df1417098eb691173ba0ccb475f50126b9770c15acff64c21b075"
       }
     }
   }

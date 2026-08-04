@@ -361,6 +361,36 @@ export interface SiteBuilderActivityDeps {
   repositoryRoot?: string;
 }
 
+export function durableCopyTaskCompletion(input: {
+  taskAttemptId: string;
+  contextDigest: string;
+  taskOutput: CopyTaskOutput;
+}): {
+  storedOutput: CopyTaskOutput;
+  completionResult: {
+    taskAttemptId: string;
+    contractVersion: typeof COPY_GENERATION_CONTRACT_VERSION;
+    contextDigest: string;
+    slots: CopyTaskOutput["slots"];
+  };
+} {
+  for (const [key, slot] of Object.entries(input.taskOutput.slots)) {
+    if (typeof slot.content !== "string") {
+      throw new Error(`COPY_DURABLE_REPLAY_WIRE_SHAPE_INVALID: ${key}`);
+    }
+  }
+  const storedOutput = structuredClone(input.taskOutput);
+  return {
+    storedOutput,
+    completionResult: {
+      taskAttemptId: input.taskAttemptId,
+      contractVersion: COPY_GENERATION_CONTRACT_VERSION,
+      contextDigest: input.contextDigest,
+      slots: structuredClone(input.taskOutput.slots),
+    },
+  };
+}
+
 export interface RefurbishActivityInput {
   workspaceId: string;
   siteId: string;
@@ -2984,24 +3014,23 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             settledLocales.add(locale);
             continue;
           }
-          const canonicalOutput: CopyTaskOutput = {
-            slots: Object.fromEntries(
-              Object.entries(bundle.slots).map(([key, slot]) => [
-                key,
-                { content: slot.content, claimRefs: slot.claimRefs },
-              ]),
-            ),
-          };
+          const taskOutput = await localeOutputs.get(locale);
+          if (!taskOutput) {
+            throw new Error(`copy task output for ${locale} disappeared`);
+          }
+          const durable = durableCopyTaskCompletion({
+            taskAttemptId: pending.attemptId,
+            contextDigest: generationContexts[locale]!.contextDigest,
+            taskOutput,
+          });
           await costLedger.storeTaskOutput(
             pending.fence,
-            canonicalOutput as unknown as Record<string, unknown>,
+            durable.storedOutput as unknown as Record<string, unknown>,
           );
-          await costLedger.completeTask(pending.fence, {
-            taskAttemptId: pending.attemptId,
-            contractVersion: COPY_GENERATION_CONTRACT_VERSION,
-            contextDigest: generationContexts[locale]!.contextDigest,
-            slots: canonicalOutput.slots,
-          });
+          await costLedger.completeTask(
+            pending.fence,
+            durable.completionResult,
+          );
           settledLocales.add(locale);
         }
       } finally {

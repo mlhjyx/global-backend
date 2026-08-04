@@ -388,7 +388,7 @@
       "home.premium-home-editorial-featured.items.1.name": "Further information is available on request.",
       "home.premium-home-editorial-featured.items.1.price": "Further information is…",
       "home.premium-home-editorial-featured.title": "Practical solutions",
-      "home.premium-home-editorial-hero.ctalabel": "Further information is…",
+      "home.premium-home-editorial-hero.ctalabel": "Get in touch",
       "home.premium-home-editorial-hero.eyebrow": "Further information is available on req…",
       "home.premium-home-editorial-hero.headline": "Practical solutions",
       "home.premium-home-editorial-hero.scroll": "Further information is available on request.",
@@ -405,8 +405,8 @@
       "home.premium-home-product-hero.sub": "Further information is available on request.",
       "home.premium-home-product-inquiry.sub": "Further information is available on req…",
       "home.premium-home-product-inquiry.title": "Practical solutions",
-      "home.premium-home-product-materials.ctaprimarylabel": "Further information is…",
-      "home.premium-home-product-materials.ctasecondarylabel": "Further information is…",
+      "home.premium-home-product-materials.ctaprimarylabel": "Get in touch",
+      "home.premium-home-product-materials.ctasecondarylabel": "Get in touch",
       "home.premium-home-product-materials.eyebrow": "Further information is available on req…",
       "home.premium-home-product-materials.intro": "Further information is available on request.",
       "home.premium-home-product-materials.items.0.name": "Further information is available on request.",
@@ -425,7 +425,7 @@
       "home.premium-home-product-projects.title": "Practical solutions",
       "home.premium-home-product-showcase.capacitylabel": "Further information is available on request.",
       "home.premium-home-product-showcase.chapter": "Further information is available on req…",
-      "home.premium-home-product-showcase.configurecta.label": "Further information is…",
+      "home.premium-home-product-showcase.configurecta.label": "Get in touch",
       "home.premium-home-product-showcase.cycleslabel": "Further information is available on request.",
       "home.premium-home-product-showcase.f1": "Further information is…",
       "home.premium-home-product-showcase.f2": "Further information is…",
@@ -467,7 +467,7 @@
           "id": "snapshot-c1f0924f8fe22560",
           "digest": "6593f11b876615e1ed0d7449ca3411c70a7e355566e533fdd46c2a6061b5ffd7"
         },
-        "inputHash": "f0948a9c2c3562c184d90c1824c92a0a145d2e643e6fff9abffe13c6c439ae22",
+        "inputHash": "f2211b394d5e30d220e8d12276ce2a400292afecf9dcab49125771863cb95934",
         "slots": {
           "detail.premium-innovation-chapter.chapter": {
             "type": "plain_text",
@@ -533,7 +533,7 @@
             "claimRefs": []
           },
           "detail.premium-innovation-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -616,7 +616,7 @@
             "claimRefs": []
           },
           "detail.premium-innovation-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -775,7 +775,7 @@
             "claimRefs": []
           },
           "detail.premium-proof-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1053,14 +1053,14 @@
             "claimRefs": []
           },
           "home.premium-home-editorial-cta.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-editorial-cta.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1151,10 +1151,10 @@
             "claimRefs": []
           },
           "home.premium-home-editorial-hero.ctalabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-editorial-hero.eyebrow": {
@@ -1241,7 +1241,7 @@
             "claimRefs": []
           },
           "home.premium-home-product-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1255,7 +1255,7 @@
             "claimRefs": []
           },
           "home.premium-home-product-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1283,17 +1283,17 @@
             "claimRefs": []
           },
           "home.premium-home-product-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-product-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-product-materials.eyebrow": {
@@ -1436,10 +1436,10 @@
             "claimRefs": []
           },
           "home.premium-home-product-showcase.configurecta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-product-showcase.cycleslabel": {
@@ -1631,7 +1631,7 @@
             "claimRefs": []
           }
         },
-        "digest": "6ae21612d3733461d6cfe8e276227db8d5d72608bc3dcf34c7e0f80344b01622"
+        "digest": "ebc090c03abc687a9957f8e74c0176ec7c24e1d97fa1cc0fe37b2258debf4f39"
       }
     }
   }

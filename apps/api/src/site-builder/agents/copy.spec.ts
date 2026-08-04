@@ -107,6 +107,8 @@ describe("COPY_TASK v2", () => {
 
   it.each([
     "Market-leading pumps for 40 countries",
+    "Best in class systems",
+    "World class engineering",
     "Best\u200B-in\u200B-class systems",
     "Flow for ４０ paths",
     "We build pumps for complex projects",
@@ -149,8 +151,11 @@ describe("COPY_TASK v2", () => {
 
   it.each([
     "Visit https://example.com",
+    "Visit //example.com",
+    "Visit example.com",
     "Email sales@example.com",
     "Call +1 555 123 4567",
+    "Call:+15551234567",
   ])(
     "rejects contact data or links outside the CTA target contract: %s",
     (content) => {

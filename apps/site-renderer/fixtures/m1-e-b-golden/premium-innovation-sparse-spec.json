@@ -338,7 +338,7 @@
       "home.premium-home-editorial-featured.items.1.name": "Further information is available on request.",
       "home.premium-home-editorial-featured.items.1.price": "Further information is…",
       "home.premium-home-editorial-featured.title": "Practical solutions",
-      "home.premium-home-editorial-hero.ctalabel": "Further information is…",
+      "home.premium-home-editorial-hero.ctalabel": "Get in touch",
       "home.premium-home-editorial-hero.eyebrow": "Further information is available on req…",
       "home.premium-home-editorial-hero.headline": "Practical solutions",
       "home.premium-home-editorial-hero.scroll": "Further information is available on request.",
@@ -372,7 +372,7 @@
           "id": "snapshot-ce2a948a64b299e3",
           "digest": "f7673067c456b20148f0694472ab4590e19c8dbbd8fcd9f823546a6d783a744a"
         },
-        "inputHash": "90a21d1d7becd7761885d9b4b7361f11fe8fa3359d1e75adbdd91d695c4d568c",
+        "inputHash": "bee59715482ee5df1db74b32b9ca96ca3cfd89379bf0f6a855e03c31a3cb537c",
         "slots": {
           "detail.premium-innovation-chapter.chapter": {
             "type": "plain_text",
@@ -438,7 +438,7 @@
             "claimRefs": []
           },
           "detail.premium-innovation-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -521,7 +521,7 @@
             "claimRefs": []
           },
           "detail.premium-innovation-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -757,14 +757,14 @@
             "claimRefs": []
           },
           "home.premium-home-editorial-cta.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-editorial-cta.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -855,10 +855,10 @@
             "claimRefs": []
           },
           "home.premium-home-editorial-hero.ctalabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.premium-home-editorial-hero.eyebrow": {
@@ -994,7 +994,7 @@
             "claimRefs": []
           }
         },
-        "digest": "003a9569515dbe6c4b4f83fff03f753d18291f5b8c70af1e7de089308db283f2"
+        "digest": "2e64f7a8fbe41251880ae133cebd734b998341a6a5c7d07ce7d22cc92c95030d"
       }
     }
   }

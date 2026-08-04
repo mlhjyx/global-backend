@@ -225,7 +225,7 @@ function makeRunMiss(run: BlindVisualCallRecord): void {
 describe("blind visual calibration fixture and invocation plans", () => {
   it("forecasts all original-image calls without making cost an execution gate", () => {
     const preflight = buildBlindVisualCampaignPreflight(pairs);
-    expect(preflight.estimatedTotalCostCents).toBeCloseTo(683.0855, 6);
+    expect(preflight.estimatedTotalCostCents).toBeCloseTo(682.9775, 6);
     expect(preflight.models.map((model) => model.model)).toEqual(
       BLIND_VISUAL_CAMPAIGN_MODELS,
     );
