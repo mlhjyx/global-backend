@@ -1,6 +1,15 @@
 {
   "schemaVersion": "site-builder-m1-minimal-text-evaluation-evidence/v1",
   "campaignId": "7c2e1b2d-2d91-4a6e-9c9c-34a006920804",
+  "evidenceClassification": "diagnostic_only",
+  "promotionEligible": false,
+  "executionCommitSha": "326acedb807f30a1884be092f4957fb008bb6009",
+  "limitations": [
+    "This artifact was not produced by the canonical fixed-HEAD cost-safe executor and cannot support candidate ranking, promotion, or runtime adoption.",
+    "The run records request receipts and token usage but does not contain frozen prices, a spend ledger, per-wire settlement, or durable freeze state; HTTP 5xx calls may still be billable.",
+    "Requested and response-reported aliases do not establish the resolved upstream model and channel because no digest-bound sanitized consume-log attestation is embedded.",
+    "Transport failures are not model-quality failures; all candidate quality conclusions remain inconclusive and no paid rerun is authorized by this artifact."
+  ],
   "gatewayOrigin": "http://127.0.0.1:3001",
   "tokenScopeModels": [
     "claude-sonnet-5",
@@ -2505,7 +2514,40 @@
     "priceCalculation": "external_owner_observed"
   },
   "actualNetworkCalls": 262,
-  "priceCalculation": "external_owner_observed",
+  "priceCalculation": "not_recorded_diagnostic_only",
+  "diagnosticSummary": {
+    "acceptedExecutions": 62,
+    "validatorRejectedExecutions": 99,
+    "transportFailedExecutions": 45,
+    "qualityConclusion": "inconclusive",
+    "transportFailuresByCandidate": [
+      {
+        "taskId": "site_builder.design_spec",
+        "alias": "gpt-5.6-terra",
+        "count": 3
+      },
+      {
+        "taskId": "site_builder.design_spec",
+        "alias": "gpt-5.5",
+        "count": 24
+      },
+      {
+        "taskId": "site_builder.design_spec",
+        "alias": "claude-sonnet-5",
+        "count": 3
+      },
+      {
+        "taskId": "site_builder.assemble",
+        "alias": "gpt-5.6-terra",
+        "count": 12
+      },
+      {
+        "taskId": "site_builder.assembly_fix",
+        "alias": "gpt-5.6-terra",
+        "count": 3
+      }
+    ]
+  },
   "results": [
     {
       "executionId": "m1-7c2e1b2d-2d91-4a6e-9c9c-34a006920804-site_builder.design_spec-1",
@@ -8531,7 +8573,7 @@
       "taskId": "site_builder.seo_review",
       "alias": "claude-sonnet-5",
       "protocol": "anthropic-messages",
-      "rankable": true,
+      "rankable": false,
       "executionCount": 4,
       "acceptedExecutionCount": 4,
       "stableFixtureCount": 2,
