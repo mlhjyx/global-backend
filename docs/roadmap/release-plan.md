@@ -6,6 +6,8 @@
 > 2026-07-10 v2（获客合流定稿）；**2026-07-27 模型候选重基线更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成。获客 R1–R3 与所有新 provider 在 2026-07-13 至 2026-08-02 暂停新增开发；用户已解除冻结。**Site Builder M1 于 2026-08-04 完成阶段收口**；下一步是重新审计并选择获客侧首个恢复任务。旧 Word、v3.1/v3.2、研究稿、旧 owner 与旧 worktree 不具有排期权威。
 
+> **2026-08-04 Model Runtime 实施覆盖**：当前施工顺序改为 Runtime/Context/缓存与两生成式消费者收口 → 可选 Langfuse 旁路 → Copy Evaluation v2。旧 design_spec/remaining-text manifest、价格卡与 runner 只供审计，不再推进真实执行；assemble/fix/QA/SEO 已移出模型矩阵。Copy v2 只允许 Terra、Sol、Sonnet 的独立小型 capability pilot，真实调用、promotion、production adoption 与 Gemini native 仍分别授权、分别 PR。
+
 > **2026-08-04 M1-g diagnostic closeout**：campaign 完成 206 executions / 262 wires，但复审确认其 provenance、resolved upstream/channel 与逐 wire settlement 不满足 promotion evidence 合同，故机器产物明确标为 `diagnostic_only`、`promotionEligible=false`。62 accepted、99 validator rejected、45 transport failed 分开记录，传输失败不作模型质量结论；所有候选均不可排序或晋级，运行路由不变。一次性执行器从主线删除，通用 suite/validator 和诊断产物保留。该决定闭合 M1 的 12 视觉集、确定性发布门与“不晋级”收口，不冒充 MODEL-2、30+ 成熟系统集、生产部署或 M2-PUBLISH。
 
 ## 0. Site Builder 当前路线

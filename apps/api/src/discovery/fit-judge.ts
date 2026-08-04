@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetExceededError } from '../tools/budget';
+import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -110,7 +111,8 @@ export async function judgeFitCompany(
   const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
   let out: FitOutput;
   try {
-    const result = await gateway.generateStructured<FitOutput>(
+    const result = await executeStructuredTaskWithRuntime<FitOutput>(
+      gateway,
       {
         task: contract.id,
         prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${JSON.stringify(

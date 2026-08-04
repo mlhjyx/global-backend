@@ -4,9 +4,12 @@ import {
   modelPolicyRegistry,
 } from './model-policy.registry';
 import { SITE_BUILDER_MODEL_PROFILES } from './model-profiles';
+import { getSiteBuilderTaskRouteBinding } from './task-route-bindings';
 import {
   resolveTaskExecutionTarget,
   resolveTaskRoute,
+  SITE_BUILDER_DETERMINISTIC_TASK_IDS,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
   SITE_BUILDER_TASK_IDS,
 } from './task-routes';
 
@@ -44,32 +47,59 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
     expect(route.fallbacks).toEqual(['glm-5.2']);
   });
 
-  it('assemble：glm-5.2 主选 + 180s 超时预算 + 回退 deepseek-v4-pro', () => {
-    const route = resolveTaskRoute('site_builder.assemble');
-    expect(route.primary).toBe('glm-5.2');
-    expect(route.maxTokens).toBe(16_000);
-    expect(route.timeoutMs).toBe(180_000);
-    expect(route.fallbacks).toContain('deepseek-v4-pro');
-  });
-
-  it('assembly_fix 保持既有运行时 8,000-token envelope', () => {
-    expect(resolveTaskRoute('site_builder.assembly_fix').maxTokens).toBe(8000);
-  });
-
-  it('qa_summarize / seo_review：flash 快档', () => {
-    expect(resolveTaskRoute('site_builder.qa_summarize').primary).toBe(
-      'deepseek-v4-flash',
-    );
-    expect(resolveTaskRoute('site_builder.seo_review').primary).toBe(
-      'deepseek-v4-flash',
-    );
+  it('only BrandProfile and Copy remain generative while the other five task IDs stay deterministic', () => {
+    expect(SITE_BUILDER_TASK_IDS).toHaveLength(7);
+    expect(SITE_BUILDER_GENERATIVE_TASK_IDS).toEqual([
+      'site_builder.brand_profile',
+      'site_builder.copy',
+    ]);
+    expect(SITE_BUILDER_DETERMINISTIC_TASK_IDS).toEqual([
+      'site_builder.design_spec',
+      'site_builder.assemble',
+      'site_builder.assembly_fix',
+      'site_builder.qa_summarize',
+      'site_builder.seo_review',
+    ]);
+    for (const taskId of SITE_BUILDER_DETERMINISTIC_TASK_IDS) {
+      expect(getSiteBuilderTaskRouteBinding(taskId).executionMode).toBe(
+        'deterministic',
+      );
+      expect(resolveTaskExecutionTarget(taskId)).toMatchObject({
+        kind: 'deterministic_fallback',
+        taskId,
+      });
+      expect(() => resolveTaskRoute(taskId)).toThrow(
+        /must execute deterministic fallback/,
+      );
+      const suffix = taskId.split('.')[1].toUpperCase();
+      expect(() =>
+        resolveTaskExecutionTarget(taskId, {
+          [`SITE_BUILDER_MODEL_${suffix}`]: 'operator-bypass',
+        } as NodeJS.ProcessEnv),
+      ).toThrow(/does not accept a model override/);
+    }
+    for (const taskId of SITE_BUILDER_GENERATIVE_TASK_IDS) {
+      expect(getSiteBuilderTaskRouteBinding(taskId).executionMode).toBe(
+        'generative',
+      );
+      expect(resolveTaskExecutionTarget(taskId).kind).toBe('model_route');
+    }
   });
 
   it('全部 task id 都有完整 model 或 deterministic execution target', () => {
+    const deterministicFallbacks = {
+      'site_builder.design_spec': 'safe-blueprint',
+      'site_builder.assemble': 'safe-blueprint',
+      'site_builder.assembly_fix': 'safe-blueprint',
+      'site_builder.qa_summarize': 'rule-summary',
+      'site_builder.seo_review': 'rule-summary',
+    } as const;
     for (const id of SITE_BUILDER_TASK_IDS) {
       const target = resolveTaskExecutionTarget(id);
       if (target.kind === 'deterministic_fallback') {
-        expect(target.fallback.id).toBe('safe-blueprint');
+        expect(target.fallback.id).toBe(
+          deterministicFallbacks[id as keyof typeof deterministicFallbacks],
+        );
         expect(target.source).toBe('registry_deterministic');
         expect(target.policyVersion).toBe('site-builder-model-policy/v3');
         continue;
@@ -256,9 +286,12 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
       'structured.workspace_materials',
     );
     expect(resolveTaskRoute('site_builder.copy').profile).toBe('copy.premium');
-    expect(resolveTaskRoute('site_builder.qa_summarize').profile).toBe(
-      'text.summary',
-    );
+    expect(
+      resolveTaskExecutionTarget('site_builder.qa_summarize'),
+    ).toMatchObject({
+      kind: 'deterministic_fallback',
+      profile: 'text.summary',
+    });
     expect(
       modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec'),
     ).toMatchObject({
@@ -287,8 +320,22 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         state: 'deterministicFallback',
         fallback: { id: 'safe-blueprint' },
       },
-      'site_builder.qa_summarize': { route: { fallbacks: [] } },
-      'site_builder.seo_review': { route: { fallbacks: [] } },
+      'site_builder.assemble': {
+        state: 'deterministicFallback',
+        fallback: { id: 'safe-blueprint' },
+      },
+      'site_builder.assembly_fix': {
+        state: 'deterministicFallback',
+        fallback: { id: 'safe-blueprint' },
+      },
+      'site_builder.qa_summarize': {
+        state: 'deterministicFallback',
+        fallback: { id: 'rule-summary' },
+      },
+      'site_builder.seo_review': {
+        state: 'deterministicFallback',
+        fallback: { id: 'rule-summary' },
+      },
     });
     expect(() =>
       modelPolicyRegistry.resolveActiveTaskRoute('site_builder.design_spec'),
@@ -326,18 +373,12 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         fallback: expect.objectContaining({ id: 'safe-blueprint' }),
       },
       'site_builder.assemble': {
-        kind: 'model_route',
-        route: {
-          primary: 'glm-5.2',
-          fallbacks: ['deepseek-v4-pro'],
-        },
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'safe-blueprint' }),
       },
       'site_builder.assembly_fix': {
-        kind: 'model_route',
-        route: {
-          primary: 'glm-5.2',
-          fallbacks: ['deepseek-v4-pro'],
-        },
+        kind: 'deterministic_fallback',
+        fallback: expect.objectContaining({ id: 'safe-blueprint' }),
       },
       'site_builder.qa_summarize': {
         kind: 'deterministic_fallback',
@@ -375,6 +416,14 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     expect(
       modelPolicyRegistry.getEvaluationComparatorRoute(
         'site_builder.design_spec',
+      ),
+    ).toBeNull();
+    expect(
+      modelPolicyRegistry.getEvaluationComparatorRoute('site_builder.assemble'),
+    ).toBeNull();
+    expect(
+      modelPolicyRegistry.getEvaluationComparatorRoute(
+        'site_builder.assembly_fix',
       ),
     ).toBeNull();
     expect(
@@ -501,7 +550,9 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
     expect(resolveTaskRoute('site_builder.brand_profile').primary).toBe(
       'gpt-5.6-terra',
     );
-    expect(resolveTaskExecutionTarget('site_builder.design_spec')).toMatchObject({
+    expect(
+      resolveTaskExecutionTarget('site_builder.design_spec'),
+    ).toMatchObject({
       kind: 'deterministic_fallback',
       fallback: { id: 'safe-blueprint' },
     });

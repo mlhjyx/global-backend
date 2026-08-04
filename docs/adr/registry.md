@@ -5,7 +5,7 @@
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
 > 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。以下均 ACCEPTED（按各批追加日期拍板/收敛），标注 ⚠ 者待 A/B 会签。
-> 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**，2026-07-27 追加 **ADR-021**，2026-07-29 追加 **ADR-022**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档）。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
+> 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**，2026-07-27 追加 **ADR-021**，2026-07-29 追加 **ADR-022**，2026-08-04 追加 **ADR-023**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档）。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
 
 ## PDR（产品决策）
 
@@ -47,5 +47,7 @@
 22. **ADR-022 LEGACY-ROUTE-RETIREMENT 历史路由与可执行回滚分离**：`minimax-m3`、`doubao-seed-2.0-pro`、`doubao-seed-2.0-lite` 进入 `pending_retirement`；六个非 BrandProfile 运行中路由暂时保持历史快照不变，但恢复门只报 `RETIRED_ALIAS_STILL_ACTIVE`，不得恢复其渠道、索取其价格或把它们放入 runtime token、attestation、comparator 和可执行 rollback。
     历史 route 保留作 provenance；可执行 rollback 另由 `site-builder-model-rollback-policy/v1` 管理：BrandProfile 与 copy=`DeepSeek Pro→GLM`，assemble/assembly_fix=`GLM→DeepSeek Pro`，design_spec=`safe-blueprint`，qa_summarize/seo_review=`rule-summary`。Gemini 文本保持 `deferred`，不进入本轮 target/comparator/runtime price coverage。该决策本身不调用模型、不改 new-api、不切 active route；各任务仍需独立 evidence 与路由决策，runtime token/attestation 与最终运行授权继续分 PR、分费用门和分合并授权。
     **2026-08-03 实施记录**：active policy 已应用该 retirement plan：design_spec 为 `safe-blueprint`，copy/QA/SEO 移除 Doubao fallback；所有 active model route 与环境覆盖在 client 前拒绝 retired alias。历史 snapshot 继续只作审计 provenance，未产生模型调用、候选 promotion、凭据或 attestation 变更。
+23. **ADR-023 UNIFIED-MODEL-EXECUTION-RUNTIME 统一模型任务执行生命周期**：new-api 继续是文本、媒体与 embedding 的唯一模型网络出口，只负责渠道/别名/令牌/配额/转发/消费记录；业务上下文、任务合同、能力协商、reasoning、缓存、transport retry、内容 repair、fallback、验证与 settlement 统一由应用内 `ModelExecutionRuntime` 负责。合同、prompt、schema 与生产 route 以 Git/代码为唯一权威，Langfuse 仅通过 OpenTelemetry 异步接收默认不含正文的脱敏事件，故障必须 fail-open，不能进入 BuildRun 判定或热加载生产 prompt。Vercel AI SDK 7 仅作为保持 Responses/Messages 等原生协议的 adapter；任何未通过 fake-gateway 协议保真测试的 adapter 继续停用，禁止引入第二层代理或把供应商能力压成 Chat Completions 最低公分母。
+    Site Builder 保留七个历史 task ID 与账本身份，但生产 execution mode 固定为：`brand_profile`、`copy`=`generative`；`design_spec`、`assemble`、`assembly_fix`、`qa_summarize`、`seo_review`=`deterministic`。确定性任务在任何 model client 前拒绝模型/env override，旧评测 runner/fee-card/fixed-digest 代码退役，最终 M1 campaign 只保留 `diagnostic_only` evidence。缓存只允许 workspace 隔离的 durable replay、确定性上下文缓存、完整精确命中的已验证且 known-settlement 结果，以及 capability probe 已证明的供应商原生 prefix cache；禁止跨租户或语义相似结果复用。该 ADR 不构成 Copy 晋级、生产 route adoption、Gemini native 启用、真实模型调用或生产部署证明。
 
 > Site Builder 的滚动实现状态与施工顺序不在 ADR 注册表维护；统一见 [status/current](../status/current.md) 与 [release-plan](../roadmap/release-plan.md)。`ACCEPTED` 始终不等于已实现。

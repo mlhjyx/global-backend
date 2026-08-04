@@ -11,6 +11,7 @@ import {
   ContactDiscoveryResult,
   ExecutionContext,
 } from '../provider-contract';
+import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -211,7 +212,8 @@ export class DecisionMakerProvider {
   ): Promise<NonNullable<ExtractedPeople['people']>> {
     const contract = getTask('contact.find_decision_makers');
     try {
-      const result = await this.deps.gateway.generateStructured<ExtractedPeople>(
+      const result = await executeStructuredTaskWithRuntime<ExtractedPeople>(
+        this.deps.gateway,
         {
           task: contract?.id ?? 'contact.find_decision_makers',
           prompt:

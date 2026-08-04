@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
+import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 
@@ -111,7 +112,8 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await this.gateway.generateStructured<{ code: string | null }>(
+      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
+        this.gateway,
         {
           task: contract.id,
           system: contract.description,
@@ -180,7 +182,8 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await this.gateway.generateStructured<{ code: string | null }>(
+      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
+        this.gateway,
         {
           task: contract.id,
           system: contract.description,
@@ -248,7 +251,8 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await this.gateway.generateStructured<{ code: string | null }>(
+      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
+        this.gateway,
         {
           task: contract.id,
           system: contract.description,
@@ -316,7 +320,8 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await this.gateway.generateStructured<{ code: string | null }>(
+      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
+        this.gateway,
         {
           task: contract.id,
           system: contract.description,

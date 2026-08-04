@@ -20,8 +20,6 @@ import {
 } from "./site-builder.activities";
 import type { CopySlotDefinition } from "@global/contracts";
 import { budgetLedger, siteBuildBudgetCents } from "../tools/budget";
-import type { ModelGateway } from "../model-gateway/model-gateway";
-import { PaidOperationUnknownError } from "../site-builder/site-build-cost-ledger";
 import { buildDemoSpec, DEMO_SPEC_VERSION } from "../site-builder/demo-spec";
 
 /**
@@ -978,18 +976,6 @@ const INTAKE = {
   businessEmail: "sales@acme.com",
 };
 
-/** gateway 桩：generateStructured 记录调用 ctx，返回合法 polish（供 sanitizePolish 透传）。 */
-function fakeGateway() {
-  const generateStructured = vi.fn(async (_input: unknown, _ctx: unknown) => ({
-    data: { headline: "H", subhead: "S", aboutBody: "A" },
-    model: "stub",
-  }));
-  return {
-    gateway: { generateStructured } as unknown as ModelGateway,
-    generateStructured,
-  };
-}
-
 /** assembleAndBuild 用 prisma 桩：首个 withWorkspace 返回站点（existing=null），
  *  第二个（写版本行）抛错——停在 runAstroBuild 之前，令用例只覆盖 polishCopy/入口逻辑。 */
 function assembleStopAfterPolishPrisma(site: unknown): PrismaService {
@@ -1009,86 +995,26 @@ function assembleStopAfterPolishPrisma(site: unknown): PrismaService {
   } as unknown as PrismaService;
 }
 
-describe("polishCopy — 计入 run 预算账户（FIX A / Codex P2）", () => {
-  it("assembleAndBuild 调 polishCopy → gateway ctx.runId=buildRunId（refurbish demo_copy 计账）", async () => {
-    spyBudget(); // 隔离真实 ledger（本用例只验 gateway ctx）
-    const { gateway, generateStructured } = fakeGateway();
-    const site = {
-      id: "site-1",
-      name: "Acme",
-      slug: "acme",
-      stylePreset: "clean",
-      intake: INTAKE,
-    };
-    const acts = createSiteBuilderActivities({
-      prisma: assembleStopAfterPolishPrisma(site),
-      gateway,
-      costLedger: {} as never,
-    });
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
-      "stop-after-polish",
-    );
-    expect(generateStructured).toHaveBeenCalledTimes(1);
-    const ctxArg = generateStructured.mock.calls[0][1] as {
-      workspaceId: string;
-      runId?: string;
-      paidCost?: {
-        durableReplayResult?: (
-          result: Record<string, unknown>,
-        ) => Record<string, unknown>;
-      };
-    };
-    expect(ctxArg.runId).toBe("run-1"); // 归账键：refurbish demo_copy 计入 buildRunId 上限
-    expect(ctxArg.workspaceId).toBe("ws-1");
-    expect(ctxArg).toMatchObject({
-      paidCost: {
-        siteId: "site-1",
-        scopeKey: "assemble-demo-copy",
-      },
-    });
-    const durableReplayResult = ctxArg.paidCost?.durableReplayResult;
-    expect(durableReplayResult).toBeTypeOf("function");
-    expect(
-      durableReplayResult?.({
-        data: {
-          headline: "Trusted Pump Manufacturer",
-          subhead: "Reliable pumps for global buyers",
-        },
-        provider: "new-api",
-        model: "gpt-5.6-terra",
-      }),
-    ).toEqual({
-      data: { subhead: "Reliable pumps for global buyers" },
-      provider: "new-api",
-      model: "gpt-5.6-terra",
-    });
-  });
-
-  it("does not publish a degraded template after paid demo-copy acknowledgement ambiguity", async () => {
+describe("assembleAndBuild — deterministic demo compatibility", () => {
+  it("does not dispatch a model even when a gateway is configured", async () => {
     spyBudget();
+    const gateway = { generateStructured: vi.fn() };
     const site = {
       id: "site-1",
       name: "Acme",
       slug: "acme",
       stylePreset: "clean",
       intake: INTAKE,
-    };
-    const ambiguity = new PaidOperationUnknownError(
-      "a".repeat(64),
-      "DURABLE_REPLAY_UNAVAILABLE",
-    );
-    const gateway = {
-      generateStructured: vi.fn(async () => {
-        throw ambiguity;
-      }),
     };
     const acts = createSiteBuilderActivities({
       prisma: assembleStopAfterPolishPrisma(site),
       gateway: gateway as never,
       costLedger: {} as never,
     });
-
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toBe(ambiguity);
+    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
+      "stop-after-polish",
+    );
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
 });
 
@@ -1479,7 +1405,23 @@ describe("R4-B BrandProfile paid attempt recovery", () => {
           model: "gpt-5.6-terra",
           reportedModel: "gpt-5.6-terra",
           modelResolutionSource: "upstream_response",
-          usage: { inputTokens: 11, outputTokens: 7 },
+          usage: {
+            inputTokens: 11,
+            outputTokens: 7,
+            gatewaySettlements: [{
+              status: "settled",
+              requestId: ["request", "fixture"].join("-"),
+              resolverId: "fixture-resolver",
+              alias: "gpt-5.6-terra",
+              protocol: "openai-responses",
+              channelId: 1,
+              basis: "openox_catalog_token_pricing",
+              quota: 1,
+              costMicrousd: 1,
+              inputTokens: 11,
+              outputTokens: 7,
+            }],
+          },
         };
       }),
     };
@@ -1929,31 +1871,6 @@ describe("R0-4 intakeToMarkdown — businessEmail 不进 KB（隐私红线，与
     expect(md).toContain("Acme");
     expect(md).toContain("pumps");
     expect(md).toContain("DE");
-  });
-});
-
-describe("R0-5 polishCopy — 传真 AbortSignal（超时即 abort 底层 fetch，不留后台烧钱）", () => {
-  it("generateStructured 调用带 input.signal:AbortSignal（透传网关→fetch）", async () => {
-    spyBudget();
-    const { gateway, generateStructured } = fakeGateway();
-    const site = {
-      id: "site-1",
-      name: "Acme",
-      slug: "acme",
-      stylePreset: "clean",
-      intake: INTAKE,
-    };
-    const acts = createSiteBuilderActivities({
-      prisma: assembleStopAfterPolishPrisma(site),
-      gateway,
-    });
-    await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
-      "stop-after-polish",
-    );
-    const inputArg = generateStructured.mock.calls[0][0] as {
-      signal?: unknown;
-    };
-    expect(inputArg.signal).toBeInstanceOf(AbortSignal);
   });
 });
 

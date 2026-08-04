@@ -103,6 +103,27 @@ const okResult = (model: string): ModelResult<EchoOut> => ({
   usage: { inputTokens: 10, outputTokens: 5 },
 });
 
+const settledResult = (model: string): ModelResult<EchoOut> => ({
+  ...okResult(model),
+  usage: {
+    inputTokens: 10,
+    outputTokens: 5,
+    gatewaySettlements: [{
+      status: 'settled',
+      requestId: `request-${model}`,
+      resolverId: 'fixture-resolver',
+      alias: model,
+      protocol: 'openai-chat-completions',
+      channelId: 1,
+      basis: 'openox_catalog_token_pricing',
+      quota: 1,
+      costMicrousd: 1,
+      inputTokens: 10,
+      outputTokens: 5,
+    }],
+  },
+});
+
 const CTX = { workspaceId: 'ws-1', runId: 'run-1' };
 
 describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
@@ -128,6 +149,14 @@ describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
     expect(out).toMatchObject({
       reportedModel: 'upstream/model-a',
       modelResolutionSource: 'upstream_response',
+      runtimeExecution: {
+        contractVersion: 'site-builder-task-contract/site_builder.brand_profile/v1',
+        contextDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        promptDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        states: ['planned', 'admitted', 'dispatched', 'observed', 'validated', 'settled', 'completed'],
+        transportAttempts: 1,
+        repairAttempts: 0,
+      },
     });
     expect(calls[0]).toMatchObject({
       task: 'site_builder.brand_profile',
@@ -165,6 +194,17 @@ describe('runAiTask — 输入 fail-fast 与 prompt 固化', () => {
       },
     );
     expect(calls[0].reasoningEffort).toBe('low');
+  });
+
+  it('deterministic task ids fail before the gateway even when a model route is injected', async () => {
+    const { gateway } = gatewayReturning(async () => okResult('model-a'));
+
+    await expect(runAiTask({ ...DEF, id: 'site_builder.design_spec' }, { name: 'Acme' }, {
+      gateway,
+      ctx: CTX,
+      route: ROUTE,
+    })).rejects.toThrow(/deterministic.*cannot dispatch/i);
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
 });
 
@@ -365,7 +405,7 @@ describe('runAiTask — 回退链与显式失败', () => {
   it('R4-B: each task fallback gets a distinct durable paid-operation scope', async () => {
     const { gateway, contexts } = gatewayReturning(async (input) => {
       if (input.model === 'model-a') throw new Error('primary down');
-      return okResult(input.model ?? '?');
+      return settledResult(input.model ?? '?');
     });
 
     await runAiTask(DEF, { name: 'Acme' }, {

@@ -16,6 +16,7 @@ import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -189,7 +190,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<ExtractedList | null> {
     const contract = getTask('discovery.extract_list');
     try {
-      const result = await this.deps.gateway.generateStructured<ExtractedList>(
+      const result = await executeStructuredTaskWithRuntime<ExtractedList>(
+        this.deps.gateway,
         {
           task: contract?.id ?? 'discovery.extract_list',
           prompt: `目标画像（仅用于相关性判断，禁止照抄进字段）：${JSON.stringify({

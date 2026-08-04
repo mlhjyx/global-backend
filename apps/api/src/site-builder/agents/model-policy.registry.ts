@@ -7,7 +7,6 @@ import type {
   ModelActiveRoute,
   ModelAliasRetirementPolicy,
   ModelCandidateRoute,
-  ModelCurrentRoute,
   ModelProfileDefinition,
   ModelRollbackTarget,
   ModelRouteSnapshot,
@@ -26,58 +25,6 @@ interface ProfilePolicy {
   candidates: readonly ModelCandidateRoute[];
   deterministicFallback: DeterministicFallback;
 }
-
-/**
- * Exact pre-MODEL-0 routes retained as historical provenance. They are not an
- * executable rollback policy: a provider may be retired while this snapshot
- * remains available for audit and evidence interpretation.
- */
-const LEGACY_TASK_POLICIES: Record<SiteBuilderTaskId, ModelCurrentRoute> = {
-  'site_builder.brand_profile': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: { primary: 'deepseek-v4-pro', fallbacks: ['glm-5.2'] },
-  },
-  'site_builder.copy': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: {
-      primary: 'deepseek-v4-pro',
-      fallbacks: ['glm-5.2', 'doubao-seed-2.0-pro'],
-    },
-  },
-  'site_builder.design_spec': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: { primary: 'minimax-m3', fallbacks: ['doubao-seed-2.0-pro'] },
-  },
-  'site_builder.assemble': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: { primary: 'glm-5.2', fallbacks: ['deepseek-v4-pro'] },
-  },
-  'site_builder.assembly_fix': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: { primary: 'glm-5.2', fallbacks: ['deepseek-v4-pro'] },
-  },
-  'site_builder.qa_summarize': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: {
-      primary: 'deepseek-v4-flash',
-      fallbacks: ['doubao-seed-2.0-lite'],
-    },
-  },
-  'site_builder.seo_review': {
-    state: 'currentRoute',
-    lifecycle: 'active',
-    route: {
-      primary: 'deepseek-v4-flash',
-      fallbacks: ['doubao-seed-2.0-lite'],
-    },
-  },
-};
 
 export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
   id: 'model1-brand-profile-20260719-v20',
@@ -148,7 +95,6 @@ export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
 
 /** Only BrandProfile has completed a task-shaped MODEL-1 promotion gate. */
 const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
-  ...LEGACY_TASK_POLICIES,
   'site_builder.brand_profile': {
     state: 'promotedRoute',
     lifecycle: 'active',
@@ -171,15 +117,38 @@ const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
       description: 'Return the validated deterministic safe blueprint.',
     },
   },
-  'site_builder.qa_summarize': {
-    state: 'currentRoute',
+  'site_builder.assemble': {
+    state: 'deterministicFallback',
     lifecycle: 'active',
-    route: { primary: 'deepseek-v4-flash', fallbacks: [] },
+    fallback: {
+      id: 'safe-blueprint',
+      description:
+        'Assemble the validated blueprint through the fixed code path.',
+    },
+  },
+  'site_builder.assembly_fix': {
+    state: 'deterministicFallback',
+    lifecycle: 'active',
+    fallback: {
+      id: 'safe-blueprint',
+      description: 'Repair assembly findings through the fixed code path.',
+    },
+  },
+  'site_builder.qa_summarize': {
+    state: 'deterministicFallback',
+    lifecycle: 'active',
+    fallback: {
+      id: 'rule-summary',
+      description: 'Return deterministic findings without a model summary.',
+    },
   },
   'site_builder.seo_review': {
-    state: 'currentRoute',
+    state: 'deterministicFallback',
     lifecycle: 'active',
-    route: { primary: 'deepseek-v4-flash', fallbacks: [] },
+    fallback: {
+      id: 'rule-summary',
+      description: 'Return deterministic findings without a model summary.',
+    },
   },
 };
 
@@ -359,12 +328,19 @@ const EXECUTABLE_ROLLBACK_POLICIES: Record<
     },
   },
   'site_builder.assemble': {
-    kind: 'model_route',
-    route: { primary: 'glm-5.2', fallbacks: ['deepseek-v4-pro'] },
+    kind: 'deterministic_fallback',
+    fallback: {
+      id: 'safe-blueprint',
+      description:
+        'Assemble the validated blueprint through the fixed code path.',
+    },
   },
   'site_builder.assembly_fix': {
-    kind: 'model_route',
-    route: { primary: 'glm-5.2', fallbacks: ['deepseek-v4-pro'] },
+    kind: 'deterministic_fallback',
+    fallback: {
+      id: 'safe-blueprint',
+      description: 'Repair assembly findings through the fixed code path.',
+    },
   },
   'site_builder.qa_summarize': {
     kind: 'deterministic_fallback',
@@ -443,15 +419,6 @@ export class ModelPolicyRegistry {
         fallback: { ...policy.fallback },
       };
     }
-    return {
-      state: policy.state,
-      lifecycle: policy.lifecycle,
-      route: cloneRoute(policy.route),
-    };
-  }
-
-  getLegacyTaskPolicy(taskId: SiteBuilderTaskId): ModelCurrentRoute {
-    const policy = LEGACY_TASK_POLICIES[taskId];
     return {
       state: policy.state,
       lifecycle: policy.lifecycle,

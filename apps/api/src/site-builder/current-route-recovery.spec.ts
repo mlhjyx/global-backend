@@ -142,16 +142,15 @@ function build(
 }
 
 describe('current-route zero-model recovery preparation', () => {
-  it('derives six model tasks, ten dispatches and five exact aliases from the registry', () => {
+  it('derives only the two generative tasks and four exact aliases from the registry', () => {
     const report = build();
 
-    expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(6);
-    expect(report.dispatches).toHaveLength(10);
-    expect(report.aliases).toHaveLength(5);
+    expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(2);
+    expect(report.dispatches).toHaveLength(4);
+    expect(report.aliases).toHaveLength(4);
     expect(report.status).toBe('READY_FOR_RUNTIME_ATTESTATION_DECISION');
     expect(report.credential.requiredModelAllowlist).toEqual([
       'claude-sonnet-5',
-      'deepseek-v4-flash',
       'deepseek-v4-pro',
       'glm-5.2',
       'gpt-5.6-terra',
@@ -201,7 +200,7 @@ describe('current-route zero-model recovery preparation', () => {
       weight: 0,
     });
     const catalog = sourceBundle();
-    const missing = ['deepseek-v4-flash'];
+    const missing = ['deepseek-v4-pro'];
     catalog.modelIds = catalog.modelIds.filter(
       (alias) => !missing.includes(alias),
     );
@@ -227,7 +226,7 @@ describe('current-route zero-model recovery preparation', () => {
       'OPENOX_PRICE_MISSING',
     ]);
     expect(
-      report.aliases.find(({ alias }) => alias === 'deepseek-v4-flash'),
+      report.aliases.find(({ alias }) => alias === 'deepseek-v4-pro'),
     ).toMatchObject({
       channelSelection: 'unique',
       openOxPricing: null,
@@ -244,7 +243,7 @@ describe('current-route zero-model recovery preparation', () => {
       'PIN_ONE_REVIEWED_CHANNEL',
       'CREATE_FINITE_EXACT_ALLOWLIST_TOKEN_AFTER_COVERAGE',
     ]);
-    expect(report.blockedTaskIds).toHaveLength(6);
+    expect(report.blockedTaskIds).toHaveLength(2);
     expect(
       report.requiredActions.includes(
         'RESTORE_EXACT_ALIAS_CHANNEL_OR_OPEN_TASK_EVIDENCE',

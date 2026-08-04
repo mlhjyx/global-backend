@@ -13,6 +13,7 @@ import { qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
+import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 
 interface IcpModelOutput {
   name: string;
@@ -86,7 +87,8 @@ export class IcpService {
       : '';
     const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
 
-    const result = await this.gateway.generateStructured<IcpModelOutput>(
+    const result = await executeStructuredTaskWithRuntime<IcpModelOutput>(
+      this.gateway,
       {
         task: contract.id,
         prompt,
@@ -426,7 +428,8 @@ export class IcpService {
       exclusions: icp.exclusions,
       rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
     };
-    const result = await this.gateway.generateStructured<QueryPlanModelOutput>(
+    const result = await executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
+      this.gateway,
       {
         task: contract.id,
         prompt: `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`,
