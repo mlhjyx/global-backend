@@ -74,6 +74,8 @@ export interface CopyBundleValidationContext {
 
 export interface CopyBundleInputHashInput {
   claimSnapshotDigest: string;
+  contextDigest: string;
+  taskContractVersion: string;
   locale: string;
   sourceLocale: string;
   slots: readonly {

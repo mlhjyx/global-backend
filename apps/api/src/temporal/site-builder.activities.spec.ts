@@ -119,12 +119,9 @@ describe("M1-g non-authoritative quality narrative failure boundaries", () => {
     const cancellation = new Error("activity cancelled");
     controller.abort(cancellation);
     await expect(
-      runNonAuthoritativeQualityNarrative(
-        async () => {
-          throw new Error("storage aborted");
-        },
-        controller.signal,
-      ),
+      runNonAuthoritativeQualityNarrative(async () => {
+        throw new Error("storage aborted");
+      }, controller.signal),
     ).rejects.toBe(cancellation);
   });
 
@@ -146,12 +143,9 @@ describe("M1-g non-authoritative quality narrative failure boundaries", () => {
   it("still surfaces a standalone task-release failure", async () => {
     const releaseFailure = new Error("lease release failed");
     await expect(
-      releaseTaskWithoutMaskingPrimaryFailure(
-        async () => {
-          throw releaseFailure;
-        },
-        false,
-      ),
+      releaseTaskWithoutMaskingPrimaryFailure(async () => {
+        throw releaseFailure;
+      }, false),
     ).rejects.toBe(releaseFailure);
   });
 });
@@ -213,6 +207,51 @@ describe("neutralCopyOutput — M1-d empty fact snapshot", () => {
     expect(activity).toBeGreaterThanOrEqual(0);
     expect(validation).toBeGreaterThan(activity);
     expect(completion).toBeGreaterThan(validation);
+  });
+
+  it("freezes Copy v2 context and reuses partial-build copy without a model call", async () => {
+    const source = await readFile(
+      new URL("./site-builder.activities.ts", import.meta.url),
+      "utf8",
+    );
+    const activity = source.indexOf("async generateCopyBundles(");
+    const brandTone = source.indexOf(
+      "select: { id: true, version: true, tone: true }",
+      activity,
+    );
+    const partialReuse = source.indexOf("if (baseCopySet)", activity);
+    const gatewayGuard = source.indexOf(
+      'if (!gateway) throw new Error("copy: model gateway unavailable")',
+      activity,
+    );
+    const contextDigest = source.indexOf(
+      "copyGenerationContextDigest(context)",
+      activity,
+    );
+    const freeze = source.indexOf("costLedger.freezeTaskInput", activity);
+    const contractMismatch = source.indexOf(
+      'throw new Error("COPY_FROZEN_INPUT_CONTRACT_MISMATCH")',
+      activity,
+    );
+    const versionedTaskKey = source.indexOf(
+      "`${COPY_TASK.id}:${COPY_GENERATION_CONTRACT_VERSION}:${locale}`",
+      activity,
+    );
+    const activityEnd = source.indexOf(
+      "async assembleQualityCandidate(",
+      activity,
+    );
+
+    expect(brandTone).toBeGreaterThan(activity);
+    expect(partialReuse).toBeGreaterThan(brandTone);
+    expect(gatewayGuard).toBeGreaterThan(partialReuse);
+    expect(contextDigest).toBeGreaterThan(gatewayGuard);
+    expect(freeze).toBeGreaterThan(contextDigest);
+    expect(contractMismatch).toBeGreaterThan(freeze);
+    expect(versionedTaskKey).toBeGreaterThan(contextDigest);
+    expect(source.slice(activity, activityEnd)).not.toContain(
+      "snapshot.items.length === 0",
+    );
   });
 });
 
@@ -1408,19 +1447,21 @@ describe("R4-B BrandProfile paid attempt recovery", () => {
           usage: {
             inputTokens: 11,
             outputTokens: 7,
-            gatewaySettlements: [{
-              status: "settled",
-              requestId: ["request", "fixture"].join("-"),
-              resolverId: "fixture-resolver",
-              alias: "gpt-5.6-terra",
-              protocol: "openai-responses",
-              channelId: 1,
-              basis: "openox_catalog_token_pricing",
-              quota: 1,
-              costMicrousd: 1,
-              inputTokens: 11,
-              outputTokens: 7,
-            }],
+            gatewaySettlements: [
+              {
+                status: "settled",
+                requestId: ["request", "fixture"].join("-"),
+                resolverId: "fixture-resolver",
+                alias: "gpt-5.6-terra",
+                protocol: "openai-responses",
+                channelId: 1,
+                basis: "openox_catalog_token_pricing",
+                quota: 1,
+                costMicrousd: 1,
+                inputTokens: 11,
+                outputTokens: 7,
+              },
+            ],
           },
         };
       }),

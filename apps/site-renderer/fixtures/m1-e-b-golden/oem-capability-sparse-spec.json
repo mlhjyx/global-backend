@@ -435,7 +435,7 @@
           "id": "snapshot-c36150ea2c18d6f5",
           "digest": "efafa48830ce4e38e1abebbb4a94c8bba4bd58570d564305f7553721d5ac1e22"
         },
-        "inputHash": "bc52ce049dc334567816d15742e57615851cee0a196ef0de2898218c8cb2cfae",
+        "inputHash": "397f88ef6cdc4441315058c807abfaf915ec853064b183a510dc6e9978749083",
         "slots": {
           "detail.oem-capability-features.eyebrow": {
             "type": "plain_text",
@@ -1198,7 +1198,7 @@
             "claimRefs": []
           }
         },
-        "digest": "1bb3bfbcfa8fc33f24efb8c1e3412b82fd58453f3112a0b26869052f93fc4648"
+        "digest": "3c7bfe6ece0dcfa608497c20f05b9d5a7d445566480d7bc8cc25cde83c87f45c"
       }
     }
   }

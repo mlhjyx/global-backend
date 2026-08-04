@@ -398,7 +398,7 @@
           "id": "snapshot-74b3d8688f33a503",
           "digest": "34eaff70dfad824261883ff7fe990ecc37d8906e6f08b6fd870f9683374f965c"
         },
-        "inputHash": "62bb6f05082fca88fac2cf936064f573ea21220379d36d35c05d2f4312711c25",
+        "inputHash": "dc2b3384b6abfc88e36e1c43c642616bae67b3ecb67bac9e1f6405226a057150",
         "slots": {
           "detail.natural-catalog-cta.eyebrow": {
             "type": "plain_text",
@@ -1025,7 +1025,7 @@
             "claimRefs": []
           }
         },
-        "digest": "c234290f4aa07695f942062e406bf7a06993a90d03385f202166c5584e427304"
+        "digest": "9ebf46b36b24af2ac6a6c5a3dc71742dab21dcb035ac9f7ccb3fd62bd2a31532"
       }
     }
   }

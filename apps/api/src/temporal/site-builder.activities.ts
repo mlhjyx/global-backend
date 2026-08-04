@@ -92,14 +92,18 @@ import {
   type SiteBuildCostSummary,
 } from "../site-builder/site-build-cost-ledger";
 import {
+  buildCopyGenerationContext,
+  COPY_GENERATION_CONTRACT_VERSION,
   CopyBundleService,
-  neutralCopySlotContent,
+  copyGenerationContextDigest,
+  neutralCopySlotGeneratorResult,
   protectedFactTokens,
   type CopySlotDefinition,
   type CopySlotGenerator,
 } from "../site-builder/copy-bundle.service";
 import {
   COPY_TASK,
+  isCopyTaskInputV2,
   type CopyTaskInput,
   type CopyTaskOutput,
 } from "../site-builder/agents/copy";
@@ -196,7 +200,6 @@ export function buildCompensatedSteps(
     return { key, status: "aborted" };
   });
 }
-
 
 /**
  * BrandProfile append and Claim projection share one transaction. PostgreSQL
@@ -629,7 +632,7 @@ export function neutralCopyOutput(
     slots: Object.fromEntries(
       slots.map((slot) => [
         slot.key,
-        { content: neutralCopySlotContent(slot.key, locale), claimRefs: [] },
+        neutralCopySlotGeneratorResult(slot, locale),
       ]),
     ),
   };
@@ -2746,48 +2749,69 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     ): Promise<CopyGenerationSummary> {
       const { workspaceId, siteId, buildRunId } = input;
       ensureRunBudget(buildRunId);
-      if (!gateway) throw new Error("copy: model gateway unavailable");
-      if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
 
       assertPartialBuildContract(input.scope);
-      const { site, snapshot, snapshotId, inheritedTaskAttemptIds } =
-        await prisma.withWorkspace(workspaceId, async (tx) => {
-          const repository = new PrismaPublishableClaimSnapshotRepository(tx);
-          const partial = isPartialBuild(input.scope)
-            ? await loadPartialBuildBase(tx, {
-                siteId,
-                baseVersionId: input.scope!.baseVersionId!,
-              })
-            : undefined;
-          const snapshotService = new PublishableClaimSnapshotService(
-            repository,
-          );
-          const captured = partial
-            ? await repository.findById(workspaceId, partial.claimSnapshotId)
-            : await snapshotService.capture(
-                { userId: "system", workspaceId, roles: [] },
-                { siteId, buildRunId },
-              );
-          const stored = partial
-            ? { id: partial.claimSnapshotId }
-            : await tx.sitePublishableClaimSnapshot.findUnique({
-                where: { buildRunId },
-                select: { id: true },
-              });
-          const currentSite = await tx.site.findFirst({
-            where: { id: siteId, workspaceId },
-            select: { name: true, intake: true, stylePreset: true },
-          });
-          if (!stored || !currentSite || !captured) {
-            throw new Error("copy snapshot or Site disappeared during capture");
-          }
-          return {
-            site: currentSite,
-            snapshot: captured,
-            snapshotId: stored.id,
-            inheritedTaskAttemptIds: partial?.taskAttemptIds ?? {},
-          };
+      const {
+        site,
+        snapshot,
+        snapshotId,
+        inheritedTaskAttemptIds,
+        baseCopySet,
+      } = await prisma.withWorkspace(workspaceId, async (tx) => {
+        const repository = new PrismaPublishableClaimSnapshotRepository(tx);
+        const partial = isPartialBuild(input.scope)
+          ? await loadPartialBuildBase(tx, {
+              siteId,
+              baseVersionId: input.scope!.baseVersionId!,
+            })
+          : undefined;
+        const snapshotService = new PublishableClaimSnapshotService(repository);
+        const captured = partial
+          ? await repository.findById(workspaceId, partial.claimSnapshotId)
+          : await snapshotService.capture(
+              { userId: "system", workspaceId, roles: [] },
+              { siteId, buildRunId },
+            );
+        const stored = partial
+          ? { id: partial.claimSnapshotId }
+          : await tx.sitePublishableClaimSnapshot.findUnique({
+              where: { buildRunId },
+              select: { id: true },
+            });
+        const currentSite = await tx.site.findFirst({
+          where: { id: siteId, workspaceId },
+          select: {
+            name: true,
+            intake: true,
+            stylePreset: true,
+            brandProfiles: {
+              orderBy: [{ version: "desc" }, { id: "desc" }],
+              take: 1,
+              select: { id: true, version: true, tone: true },
+            },
+          },
         });
+        if (!stored || !currentSite || !captured) {
+          throw new Error("copy snapshot or Site disappeared during capture");
+        }
+        return {
+          site: currentSite,
+          snapshot: captured,
+          snapshotId: stored.id,
+          inheritedTaskAttemptIds: partial?.taskAttemptIds ?? {},
+          baseCopySet: partial?.spec.copyBundleSet,
+        };
+      });
+      if (baseCopySet) {
+        return {
+          snapshotId,
+          set: baseCopySet,
+          degradedLocales: [],
+          taskAttemptIds: inheritedTaskAttemptIds,
+        };
+      }
+      if (!gateway) throw new Error("copy: model gateway unavailable");
+      if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
       const designBrief = input.designBrief?.designBrief;
       if (designBrief) {
         validateDesignBriefV2AgainstCatalog(
@@ -2807,6 +2831,19 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       const taskAttemptIds: Record<string, string> = {
         ...inheritedTaskAttemptIds,
       };
+      const generationContexts = Object.fromEntries(
+        locales.map((locale) => {
+          const context = buildCopyGenerationContext({
+            locale,
+            intake: site.intake,
+            brandProfile: site.brandProfiles[0] ?? null,
+          });
+          return [
+            locale,
+            { context, contextDigest: copyGenerationContextDigest(context) },
+          ];
+        }),
+      );
       const localeOutputs = new Map<string, Promise<CopyTaskOutput>>();
       const pendingLocaleTasks = new Map<
         string,
@@ -2824,7 +2861,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         const existing = localeOutputs.get(locale);
         if (existing) return existing;
         const execution = (async () => {
-          const taskId = `${COPY_TASK.id}:${locale}`;
+          const taskId = `${COPY_TASK.id}:${COPY_GENERATION_CONTRACT_VERSION}:${locale}`;
           const taskClaim = await costLedger.claimTaskAttempt({
             workspaceId,
             siteId,
@@ -2834,9 +2871,17 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           if (taskClaim.kind === "completed") {
             const replay = taskClaim.result as unknown as {
               taskAttemptId: string;
+              contractVersion: string;
+              contextDigest: string;
               slots: CopyTaskOutput["slots"];
             };
-            if (!replay.taskAttemptId || !replay.slots) {
+            if (
+              !replay.taskAttemptId ||
+              replay.contractVersion !== COPY_GENERATION_CONTRACT_VERSION ||
+              replay.contextDigest !==
+                generationContexts[locale]!.contextDigest ||
+              !replay.slots
+            ) {
               throw new Error(`completed ${taskId} result is malformed`);
             }
             taskAttemptIds[locale] = replay.taskAttemptId;
@@ -2857,36 +2902,37 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               snapshotDigest: snapshot.digest,
               claims: snapshot.items,
               slots,
+              ...generationContexts[locale]!,
             };
             const frozen = await costLedger.freezeTaskInput(
               fence,
               candidate as unknown as Record<string, unknown>,
             );
-            const taskOutput =
-              snapshot.items.length === 0
-                ? neutralCopyOutput(slots, locale)
-                : (
-                    await runAiTask<CopyTaskInput, CopyTaskOutput>(
-                      COPY_TASK,
-                      frozen.input as unknown as CopyTaskInput,
-                      {
-                        gateway,
-                        runtimeTelemetry: deps.runtimeTelemetry,
-                        ctx: {
-                          workspaceId,
-                          runId: buildRunId,
-                          paidCost: {
-                            siteId,
-                            taskAttemptId: attempt.id,
-                            fenceToken: attempt.fenceToken,
-                            scopeKey: `copy:${locale}`,
-                            durableReplayResult: (providerResult) =>
-                              providerResult,
-                          },
-                        },
-                      },
-                    )
-                  ).data;
+            const frozenInput = frozen.input as unknown;
+            if (!isCopyTaskInputV2(frozenInput)) {
+              throw new Error("COPY_FROZEN_INPUT_CONTRACT_MISMATCH");
+            }
+            const taskOutput = (
+              await runAiTask<CopyTaskInput, CopyTaskOutput>(
+                COPY_TASK,
+                frozenInput,
+                {
+                  gateway,
+                  runtimeTelemetry: deps.runtimeTelemetry,
+                  ctx: {
+                    workspaceId,
+                    runId: buildRunId,
+                    paidCost: {
+                      siteId,
+                      taskAttemptId: attempt.id,
+                      fenceToken: attempt.fenceToken,
+                      scopeKey: `copy:${locale}`,
+                      durableReplayResult: (providerResult) => providerResult,
+                    },
+                  },
+                },
+              )
+            ).data;
             pendingLocaleTasks.set(locale, {
               attemptId: attempt.id,
               fence,
@@ -2918,6 +2964,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           snapshotId,
           snapshot,
           slots,
+          generationContexts,
           approvedOutboundDomains: [],
         });
       } catch (error) {
@@ -2951,6 +2998,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           );
           await costLedger.completeTask(pending.fence, {
             taskAttemptId: pending.attemptId,
+            contractVersion: COPY_GENERATION_CONTRACT_VERSION,
+            contextDigest: generationContexts[locale]!.contextDigest,
             slots: canonicalOutput.slots,
           });
           settledLocales.add(locale);

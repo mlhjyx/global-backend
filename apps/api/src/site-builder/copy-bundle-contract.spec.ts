@@ -27,6 +27,8 @@ function draft(overrides: Partial<CopyBundleDraftV1> = {}): CopyBundleDraftV1 {
     },
     inputHash: copyBundleInputHash({
       claimSnapshotDigest: "a".repeat(64),
+      contextDigest: "b".repeat(64),
+      taskContractVersion: "site-builder-task-contract/site_builder.copy/v2",
       locale: "de-DE",
       sourceLocale: "en",
       slots: [
@@ -66,6 +68,27 @@ const context = {
 };
 
 describe("CopyBundle v1 contract", () => {
+  it("binds generation context changes into the input hash", () => {
+    const base = {
+      claimSnapshotDigest: "a".repeat(64),
+      taskContractVersion: "site-builder-task-contract/site_builder.copy/v2",
+      locale: "en",
+      sourceLocale: "en",
+      slots: [],
+    } as const;
+    expect(
+      copyBundleInputHash({ ...base, contextDigest: "b".repeat(64) }),
+    ).not.toBe(copyBundleInputHash({ ...base, contextDigest: "c".repeat(64) }));
+    expect(
+      copyBundleInputHash({ ...base, contextDigest: "b".repeat(64) }),
+    ).not.toBe(
+      copyBundleInputHash({
+        ...base,
+        contextDigest: "b".repeat(64),
+        taskContractVersion: "site-builder-task-contract/site_builder.copy/v1",
+      }),
+    );
+  });
   it("produces a deterministic digest and legacy projection", () => {
     const left = finalizeCopyBundle(draft(), context);
     const right = finalizeCopyBundle(

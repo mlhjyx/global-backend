@@ -17,9 +17,12 @@ import {
   type SiteSpecV1_1,
 } from "@global/contracts";
 import {
+  buildCopyGenerationContext,
+  COPY_GENERATION_CONTRACT_VERSION,
   canonicalizeCopySlotOutput,
   CopyBundleService,
-  neutralCopySlotContent,
+  copyGenerationContextDigest,
+  neutralCopySlotGeneratorResult,
 } from "../copy-bundle.service";
 import type { PublishableClaimSnapshot } from "../publishable-claim-snapshot";
 import { controlledAssetUrls } from "../controlled-asset-materializer";
@@ -187,6 +190,11 @@ function neutralCopyBundleSet(input: {
   slots: ReturnType<typeof deriveCopySlotDefinitions>;
   snapshot: PublishableClaimSnapshot;
 }): CopyBundleSetV1 {
+  const context = buildCopyGenerationContext({
+    locale: "en",
+    intake: {},
+    brandProfile: null,
+  });
   const claims = new Map<
     string,
     { statement: string; protectedTokens: readonly string[] }
@@ -196,8 +204,9 @@ function neutralCopyBundleSet(input: {
       const canonical = canonicalizeCopySlotOutput(
         "en",
         slot,
-        { content: neutralCopySlotContent(slot.key, "en"), claimRefs: [] },
+        neutralCopySlotGeneratorResult(slot, "en"),
         claims,
+        context,
       );
       return [
         slot.key,
@@ -224,9 +233,11 @@ function neutralCopyBundleSet(input: {
       },
       inputHash: copyBundleInputHash({
         claimSnapshotDigest: input.snapshot.digest,
+        taskContractVersion: COPY_GENERATION_CONTRACT_VERSION,
         locale: "en",
         sourceLocale: "en",
         slots: input.slots,
+        contextDigest: copyGenerationContextDigest(context),
       }),
       slots,
     },
@@ -264,8 +275,7 @@ export function buildM1ebGoldenAssemblyInputs(
       });
       const snapshot = fixtureSnapshot(id);
       const pack = STATIC_DESIGN_CATALOG_V2.demoVisualPacks.find(
-        (candidate) =>
-          candidate.id === brief.assetStrategy.demoVisualPackId,
+        (candidate) => candidate.id === brief.assetStrategy.demoVisualPackId,
       )!;
       const assets: Record<string, AssetRefV1_1> = Object.fromEntries(
         pack.assets.map((asset) => [
@@ -321,18 +331,27 @@ export async function buildM1ebGoldenFixtures(
         templates,
       });
       const snapshot = fixtureSnapshot(id);
+      const copyContext = buildCopyGenerationContext({
+        locale: "en",
+        intake: {},
+        brandProfile: null,
+      });
       const copyBundleSet = (
         await new CopyBundleService({
-          generateSlot: async ({ slot, locale }) => ({
-            content: neutralCopySlotContent(slot.key, locale),
-            claimRefs: [],
-          }),
+          generateSlot: async ({ slot, locale }) =>
+            neutralCopySlotGeneratorResult(slot, locale),
         }).generate({
           locales: ["en"],
           sourceLocale: "en",
           snapshotId: `snapshot-${sha256(id).slice(0, 16)}`,
           snapshot,
           slots,
+          generationContexts: {
+            en: {
+              context: copyContext,
+              contextDigest: copyGenerationContextDigest(copyContext),
+            },
+          },
           approvedOutboundDomains: [],
         })
       ).set;

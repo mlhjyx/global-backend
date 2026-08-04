@@ -419,7 +419,7 @@
           "id": "snapshot-0d05ab79c4205e20",
           "digest": "498d368afbf2ef75975911b3e579b0ec6b9f92ed9730baf17913e9b14fcd0a9b"
         },
-        "inputHash": "da584ad7cef4cc18437bdca99f8c675a767317347ac02e2e53a39a58f4556a9a",
+        "inputHash": "c4bc4551b424b2e4d5dd4f3d7b5357573f4c518b036792504359ffb5f7bcc558",
         "slots": {
           "detail.catalog-application-features.eyebrow": {
             "type": "plain_text",
@@ -1341,7 +1341,7 @@
             "claimRefs": []
           }
         },
-        "digest": "1dbc701d563fa972ffaa17455ebde189ec19b867291db454c32e9297ee0b9405"
+        "digest": "88786c466aacbab573cbe0671b59a8bc1b1a36346dd970540d4b0af0f9e9fa06"
       }
     }
   }
