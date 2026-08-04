@@ -1,6 +1,6 @@
 {
   "schemaVersion": "site-builder-model-candidate-baseline/v1",
-  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-08-04-v1",
+  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-08-04-v2",
   "effectiveDate": "2026-08-04",
   "scope": "non_runtime_evaluation_candidates",
   "statusDefinitions": {
@@ -36,7 +36,7 @@
       "domain": "text",
       "status": "runnable",
       "expectedProtocols": ["openai-responses"],
-      "boundary": "High-reasoning and multimodal-review candidate only; no runtime task promotion."
+      "boundary": "High-reasoning Copy and multimodal-review candidate; each task still requires independent evaluation and promotion."
     },
     {
       "alias": "gpt-5.6-luna",
@@ -275,22 +275,22 @@
       "activation": "requires_task_evaluation",
       "candidates": [
         {
-          "alias": "claude-sonnet-5",
-          "expectedProtocol": "anthropic-messages",
-          "preflight": "none",
-          "gate": "claim-bound multilingual copy evaluation"
-        },
-        {
-          "alias": "gpt-5.5",
-          "expectedProtocol": "openai-responses",
-          "preflight": "capability_probe",
-          "gate": "capability probe before claim-bound copy evaluation"
-        },
-        {
           "alias": "gpt-5.6-terra",
           "expectedProtocol": "openai-responses",
-          "preflight": "none",
-          "gate": "claim-bound multilingual copy evaluation"
+          "preflight": "capability_probe",
+          "gate": "capability pilot before claim-bound multilingual copy evaluation"
+        },
+        {
+          "alias": "gpt-5.6-sol",
+          "expectedProtocol": "openai-responses",
+          "preflight": "capability_probe",
+          "gate": "capability pilot before claim-bound multilingual copy evaluation"
+        },
+        {
+          "alias": "claude-sonnet-5",
+          "expectedProtocol": "anthropic-messages",
+          "preflight": "capability_probe",
+          "gate": "capability pilot before claim-bound multilingual copy evaluation"
         }
       ]
     },
