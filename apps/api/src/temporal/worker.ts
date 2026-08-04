@@ -54,12 +54,14 @@ import { DeterministicQualityService } from "../site-builder/quality/determinist
 import { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
 import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
+import { startLangfuseRuntimeTelemetry } from "../model-runtime";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
  * directly — no Nest bootstrap — so it never starts HTTP or the relay.
  */
 async function main(): Promise<void> {
+  const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
   await prisma.$connect();
   const costLedger = new SiteBuildCostLedger(prisma);
@@ -222,6 +224,7 @@ async function main(): Promise<void> {
         costLedger,
         ownerDb,
         gateway,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
         broker,
         imagePipeline,
         releaseService,
@@ -248,7 +251,11 @@ async function main(): Promise<void> {
   console.log(
     `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
   );
-  await worker.run();
+  try {
+    await worker.run();
+  } finally {
+    await runtimeTelemetry.shutdown();
+  }
 }
 
 main().catch((err) => {
