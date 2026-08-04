@@ -19,7 +19,7 @@ describe("Copy Evaluation v2 admission plan", () => {
     });
   });
 
-  it("freezes Terra, Sol, and Sonnet without claiming the current baseline admits them", () => {
+  it("freezes Terra, Sol, and Sonnet without rewriting the current baseline", () => {
     expect(
       COPY_EVALUATION_V2_PLAN.candidates.map((candidate) => ({
         alias: candidate.alias,
@@ -93,8 +93,16 @@ describe("Copy Evaluation v2 admission plan", () => {
       status: "READY",
     });
     expect(COPY_EVALUATION_V2_PLAN.evaluatorAdmission).toEqual({
-      evaluatorVersion: "site-builder-copy-assembly-evaluator/2026-08-04-v2",
-      currentScoredDimensions: [],
+      evaluatorVersion: "site-builder-copy-assembly-evaluator/2026-08-04-v3",
+      reviewSchemaVersion: "site-builder-copy-quality-review/2026-08-04-v1",
+      rubricVersion: "site-builder-copy-quality-rubric/2026-08-04-v1",
+      currentScoredDimensions: [
+        "language_quality",
+        "brand_voice",
+        "cta_quality",
+        "cross_locale_quality",
+        "stability",
+      ],
       requiredScoredDimensions: [
         "language_quality",
         "brand_voice",
@@ -102,7 +110,23 @@ describe("Copy Evaluation v2 admission plan", () => {
         "cross_locale_quality",
         "stability",
       ],
-      status: "BLOCKED_ON_SCORED_EVALUATOR",
+      findingVocabulary: "closed_code_only",
+      reviewerPolicy:
+        "human_blind_or_independent_model_with_provider_separation",
+      candidateIdentityVisibleToReviewer: false,
+      executionReceiptPolicy: "model_runtime_branded_known_settlement_no_cache",
+      repeatBindingPolicy: "candidate_fixture_repeat_execution_output_digest",
+      stabilityPolicy: "deterministic_two_repeat_normalized_token_dice",
+      qualityGate: {
+        scaleMinimum: 0,
+        scaleMaximum: 4,
+        observationMinimum: 2,
+        dimensionMeanMinimum: 3,
+        allHardGatesRequired: true,
+        promotionDecision: "SEPARATE_PR_REQUIRED",
+        routeAdoptionAuthorized: false,
+      },
+      status: "READY",
     });
     expect(COPY_EVALUATION_V2_PLAN.requiredContext).toEqual([
       "claim_snapshot",
@@ -120,12 +144,12 @@ describe("Copy Evaluation v2 admission plan", () => {
     expect(COPY_EVALUATION_V2_PLAN.capabilityPilot).toMatchObject({
       plannedExecutions: 3,
       maximumWireCalls: 6,
-      status: "NOT_AUTHORIZED",
+      status: "BLOCKED_ON_CANDIDATE_REBASELINE",
     });
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,
       maximumWireCalls: 72,
-      status: "BLOCKED_ON_SCORED_EVALUATOR",
+      status: "BLOCKED_ON_CANDIDATE_REBASELINE",
     });
     expect(COPY_EVALUATION_V2_PLAN.cachePolicy).toEqual({
       exactResultCache: "disabled_for_evaluation",

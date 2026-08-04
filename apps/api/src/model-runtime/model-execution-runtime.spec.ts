@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ModelExecutionRuntime, TransportDispatchError } from './model-execution-runtime';
+import {
+  getTrustedModelExecutionMetadata,
+  ModelExecutionRuntime,
+  TransportDispatchError,
+} from './model-execution-runtime';
 import { canonicalDigest, ContextEngine } from './context-engine';
 import type { ModelExecutionPlan, ModelObservation, RuntimeTelemetry, TaskModelContract } from './types';
 
@@ -89,6 +93,26 @@ describe('ModelExecutionRuntime', () => {
       'planned', 'admitted', 'dispatched', 'dispatched', 'observed', 'repaired',
       'dispatched', 'observed', 'validated', 'settled', 'completed',
     ]);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.states)).toBe(true);
+    expect(getTrustedModelExecutionMetadata(result)).toMatchObject({
+      executionId: 'exec-1',
+      taskId: 'site_builder.copy',
+      taskVersion: '2',
+      requestedAlias: 'gpt-terra',
+      resolvedAlias: 'gpt-terra',
+      reportedModel: 'gpt-5.6-terra',
+      protocol: 'openai_responses',
+      reasoning: 'medium',
+      cacheMode: 'build-run-replay',
+      settlement: 'known',
+      outputDigest: canonicalDigest(result.output),
+      cacheHit: false,
+    });
+    expect(getTrustedModelExecutionMetadata({
+      ...result,
+      states: [...result.states],
+    })).toBeUndefined();
     expect(dispatch.mock.calls[2]?.[0].repair).toMatchObject({ priorOutputDigest: expect.any(String), findingsDigest: expect.any(String) });
   });
 

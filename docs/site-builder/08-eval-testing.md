@@ -8,6 +8,8 @@
 > **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；只有 BrandProfile 已完成 MODEL-1 task-shaped 晋级。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**。M1-e-B 已使 design/assemble 成为真实受控消费者，但其 402 后确定性降级不构成模型成功证据。M1-f 已落确定性 P4 与 closed repair；Gemini task-shaped 矩阵超时，因此审美状态只能明确为 unavailable，未晋级、不得冒充模型成功。55 型均为 `m1_e_a_qualified`，不是蒸馏产物状态。
 >
 > **2026-08-04 旧执行链退役（覆盖下方历史 harness/manifest/fee-card 叙述）**：M1 一次性 fixed-commit、fee-card、native runner、授权账本与结算实现已从可执行源码删除；纯 fixture/suite/validator、确定性收口基线和最终 `diagnostic_only` 产物保留。旧 manifest、费用卡与 206/262 诊断 campaign 均不能授权新调用、晋级或切换生产路由。后续评测必须与统一 Model Execution Runtime 共用 task contract、context、capability、validation、settlement 与 tracing；五个确定性任务不再进入模型矩阵，生成式评测仅保留 `brand_profile` 与 `copy`。
+
+> **2026-08-04 Copy Evaluation v2 评分器（当前交付分支）**：六个生产形态场景各执行两次；schema、Claim provenance、禁用断言、字符预算与 CTA policy 继续由生产 validator 作硬门。通过硬门的输出再按语言质量、品牌语气、CTA 质量、跨 locale 质量与重复稳定性五维评分：前四维只接受盲评的闭合 finding code，模型评审必须与候选供应商分离；稳定性由两次已验证输出确定性计算。候选、协议、reasoning、无缓存、known settlement 与 output digest 只接受 Model Runtime 完成时生成的品牌元数据，repeat 0/1 的 execution/output digest 必须与评分逐项一致，嵌套评分深冻结。评分器已具备精确 fixture 覆盖与独立 promotion/route 边界，但候选基线仍含 GPT-5.5，尚未改基为 Terra/Sol/Sonnet，故 capability pilot、真实执行、evidence、晋级和路由切换均未发生。
 >
 > 模型档相关一律遵 **ADR-016**（ModelProfile 四态路由：`currentRoute`/`evaluatedCandidate`/`targetCandidate`/`promotedRoute` + `deterministicFallback`）；deepseek 只用显式 `v4-pro`/`v4-flash`（`chat`/`reasoner` 别名官方 2026-07-24 关停）。
 >

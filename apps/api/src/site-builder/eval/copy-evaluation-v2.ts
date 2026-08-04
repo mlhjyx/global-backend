@@ -1,4 +1,3 @@
-import type { ModelProtocol, ReasoningLevel } from "../../model-runtime";
 import {
   getModelProfileCandidatePool,
   SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
@@ -10,9 +9,19 @@ import {
   COPY_ASSEMBLY_EVAL_FIXTURES,
   COPY_ASSEMBLY_EVAL_FIXTURE_SCHEMA_VERSION,
 } from "./copy-assembly-eval";
+import {
+  COPY_EVALUATION_V2_CANDIDATES,
+  type CopyEvaluationV2Candidate,
+} from "./copy-evaluation-v2-candidates";
+import {
+  COPY_QUALITY_GATE,
+  COPY_QUALITY_REVIEW_SCHEMA_VERSION,
+  COPY_QUALITY_RUBRIC_VERSION,
+  COPY_QUALITY_SCORED_DIMENSIONS,
+} from "./copy-quality-rubric";
 
 export const COPY_EVALUATION_V2_SCHEMA_VERSION =
-  "site-builder-copy-evaluation-plan/2026-08-04-v2" as const;
+  "site-builder-copy-evaluation-plan/2026-08-04-v3" as const;
 
 const COPY_PROFILE = "copy.premium" as const;
 const CURRENT_TASK_CONTRACT_VERSION =
@@ -50,13 +59,7 @@ const HARD_GATES = Object.freeze([
   "character_budget",
   "cta_policy",
 ] as const);
-const SCORED_DIMENSIONS = Object.freeze([
-  "language_quality",
-  "brand_voice",
-  "cta_quality",
-  "cross_locale_quality",
-  "stability",
-] as const);
+const SCORED_DIMENSIONS = COPY_QUALITY_SCORED_DIMENSIONS;
 const DECISION_BOUNDARIES = Object.freeze([
   "capability_pilot_dispatch_requires_separate_user_authorization",
   "task_matrix_dispatch_requires_separate_user_authorization",
@@ -64,29 +67,8 @@ const DECISION_BOUNDARIES = Object.freeze([
   "runtime_route_adoption_requires_separate_pr_and_user_authorization",
 ] as const);
 
-export interface CopyEvaluationV2Candidate {
-  alias: string;
-  protocol: ModelProtocol;
-  reasoning: ReasoningLevel;
-}
-
-const CANDIDATES = Object.freeze([
-  Object.freeze({
-    alias: "gpt-5.6-terra",
-    protocol: "openai_responses" as const,
-    reasoning: "medium" as const,
-  }),
-  Object.freeze({
-    alias: "gpt-5.6-sol",
-    protocol: "openai_responses" as const,
-    reasoning: "high" as const,
-  }),
-  Object.freeze({
-    alias: "claude-sonnet-5",
-    protocol: "anthropic_messages" as const,
-    reasoning: "medium" as const,
-  }),
-] satisfies readonly CopyEvaluationV2Candidate[]);
+const CANDIDATES: readonly CopyEvaluationV2Candidate[] =
+  COPY_EVALUATION_V2_CANDIDATES;
 
 const REQUIRED_ALIASES = Object.freeze(
   CANDIDATES.map((candidate) => candidate.alias),
@@ -141,6 +123,9 @@ const EVALUATOR_ADMISSION_STATUS = exactList(
 )
   ? "READY"
   : "BLOCKED_ON_SCORED_EVALUATOR";
+const CANDIDATE_ADMISSION_STATUS = exactList(CURRENT_ALIASES, REQUIRED_ALIASES)
+  ? "READY"
+  : "BLOCKED_ON_CANDIDATE_REBASELINE";
 
 function exactList(left: readonly string[], right: readonly string[]): boolean {
   return (
@@ -231,9 +216,7 @@ const PLAN = {
     profile: COPY_PROFILE,
     currentAliases: CURRENT_ALIASES,
     requiredAliases: REQUIRED_ALIASES,
-    status: exactList(CURRENT_ALIASES, REQUIRED_ALIASES)
-      ? "READY"
-      : "BLOCKED_ON_CANDIDATE_REBASELINE",
+    status: CANDIDATE_ADMISSION_STATUS,
   },
   taskContract: {
     taskId: COPY_TASK.id,
@@ -274,8 +257,17 @@ const PLAN = {
   },
   evaluatorAdmission: {
     evaluatorVersion: COPY_ASSEMBLY_EVALUATOR_VERSION,
+    reviewSchemaVersion: COPY_QUALITY_REVIEW_SCHEMA_VERSION,
+    rubricVersion: COPY_QUALITY_RUBRIC_VERSION,
     currentScoredDimensions: CURRENT_SCORED_DIMENSIONS,
     requiredScoredDimensions: SCORED_DIMENSIONS,
+    findingVocabulary: "closed_code_only",
+    reviewerPolicy: "human_blind_or_independent_model_with_provider_separation",
+    candidateIdentityVisibleToReviewer: false,
+    executionReceiptPolicy: "model_runtime_branded_known_settlement_no_cache",
+    repeatBindingPolicy: "candidate_fixture_repeat_execution_output_digest",
+    stabilityPolicy: "deterministic_two_repeat_normalized_token_dice",
+    qualityGate: COPY_QUALITY_GATE,
     status: EVALUATOR_ADMISSION_STATUS,
   },
   requiredContext: REQUIRED_CONTEXT,
@@ -285,7 +277,10 @@ const PLAN = {
     plannedExecutions: PILOT_EXECUTIONS,
     maximumRepairCallsPerExecution: 1,
     maximumWireCalls: PILOT_EXECUTIONS * 2,
-    status: "NOT_AUTHORIZED",
+    status:
+      CANDIDATE_ADMISSION_STATUS === "READY"
+        ? "NOT_AUTHORIZED"
+        : CANDIDATE_ADMISSION_STATUS,
   },
   taskMatrix: {
     purpose: "task_shaped_quality_after_capability_pilot",
@@ -296,9 +291,11 @@ const PLAN = {
     maximumRepairCallsPerExecution: 1,
     maximumWireCalls: TASK_MATRIX_EXECUTIONS * 2,
     status:
-      EVALUATOR_ADMISSION_STATUS === "READY"
-        ? "BLOCKED_BEFORE_PILOT_RESULT"
-        : EVALUATOR_ADMISSION_STATUS,
+      CANDIDATE_ADMISSION_STATUS !== "READY"
+        ? CANDIDATE_ADMISSION_STATUS
+        : EVALUATOR_ADMISSION_STATUS === "READY"
+          ? "BLOCKED_BEFORE_PILOT_RESULT"
+          : EVALUATOR_ADMISSION_STATUS,
   },
   hardGates: HARD_GATES,
   scoredDimensions: SCORED_DIMENSIONS,
