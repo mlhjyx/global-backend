@@ -89,7 +89,7 @@ final-code v4 均绑定 new-api 镜像 digest、起止源码 hash 与脱敏失�
 
 Bootstrap 通过后扩为 **6 个 Family × sparse/rich**，补 CNC/五金、包装机械、食品原料/创新材料等（v3.2 §27.2）。每个 Family **必须在层级、hero 构图、section rhythm、卡片语法、密度上可区分，不能只换颜色**（呼应审美 rubric 的原创性维与通用感检测）。
 
-**2026-07-29 当前交付分支实况**：12 个 SiteSpec 与 36 张三断点截图已由统一 verifier 逐字节复核；固定 10 站样本包含 9 种首页结构，最高完全重复 2/10，卡片 section 峰值 20%，空 Claim 下的模板认证、客户名、指标、承诺与徽章已全部中性化。该结果只证明确定性视觉/事实基线，不是独立审美 Gold。现役产品路由整链仍因未知结算在 P4 前 fail-closed，详见 [runtime decision card](../evidence/site-builder/m1-g-runtime-decision-card.md)，故 M1-g 尚未完成。
+**2026-08-04 收口实况**：12 个 SiteSpec 与 36 张三断点截图已由统一 verifier 逐字节复核；固定 10 站样本包含 9 种首页结构，最高完全重复 2/10，卡片 section 峰值 20%，空 Claim 下的模板认证、客户名、指标、承诺与徽章已全部中性化。六个剩余文本 task 的 campaign 完成 206 executions / 262 wires，但复审后只作 `diagnostic_only`：62 accepted、99 validator rejected、45 transport failed，缺少 canonical fixed-HEAD、resolved upstream/channel 和逐 wire settlement 绑定，所有候选均 `rankable=false`。该结论闭合 M1-g 的视觉/事实门与“不晋级”决策，不是独立审美 Gold、MODEL-2、promotion evidence 或生产部署。
 
 ### 1.3 成熟系统集：逐步达 30+（M2 / 真实流量后，含对抗样本）
 
