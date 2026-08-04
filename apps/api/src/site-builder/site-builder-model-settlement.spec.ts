@@ -7,7 +7,7 @@ import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transp
 import { PaidModelPreflightError } from '../model-gateway/paid-model-settlement';
 import {
   resolveTaskExecutionTarget,
-  SITE_BUILDER_TASK_IDS,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
 } from './agents/task-routes';
 import {
   NewApiSiteBuilderModelSettlement,
@@ -29,8 +29,6 @@ const GATEWAY_ORIGIN = 'https://gateway.example.test';
 const CHANNEL_ID = 17;
 const REVIEWED_RUNTIME_ROUTE_ENV = {
   SITE_BUILDER_FALLBACKS_COPY: 'glm-5.2',
-  SITE_BUILDER_FALLBACKS_QA_SUMMARIZE: '',
-  SITE_BUILDER_FALLBACKS_SEO_REVIEW: '',
 } satisfies NodeJS.ProcessEnv;
 
 function protocolFor(alias: string) {
@@ -38,7 +36,7 @@ function protocolFor(alias: string) {
 }
 
 function routeEntries() {
-  return SITE_BUILDER_TASK_IDS.flatMap((taskId) => {
+  return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
     const target = resolveTaskExecutionTarget(taskId, REVIEWED_RUNTIME_ROUTE_ENV);
     if (target.kind === 'deterministic_fallback') return [];
     const route = target.route;

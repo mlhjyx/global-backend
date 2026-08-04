@@ -19,12 +19,19 @@ import { modelPolicyRegistry } from './model-policy.registry';
 import type { SiteBuilderModelProfileId } from './model-profiles';
 import {
   getSiteBuilderTaskRouteBinding,
+  SITE_BUILDER_DETERMINISTIC_TASK_IDS,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
   SITE_BUILDER_TASK_IDS,
   type SiteBuilderTaskId,
   type SiteBuilderTaskRouteBinding,
 } from './task-route-bindings';
 
-export { SITE_BUILDER_TASK_IDS, type SiteBuilderTaskId };
+export {
+  SITE_BUILDER_DETERMINISTIC_TASK_IDS,
+  SITE_BUILDER_GENERATIVE_TASK_IDS,
+  SITE_BUILDER_TASK_IDS,
+  type SiteBuilderTaskId,
+};
 
 export interface TaskRoute {
   profile: SiteBuilderModelProfileId;
@@ -190,8 +197,7 @@ export function resolveTaskExecutionTarget(
       : {}),
     ...(rollback && !emergencyOverride
       ? {
-          rollbackPolicyVersion:
-            modelPolicyRegistry.getRollbackPolicyVersion(),
+          rollbackPolicyVersion: modelPolicyRegistry.getRollbackPolicyVersion(),
         }
       : {}),
     dataPolicy: profileDefinition.dataPolicy,

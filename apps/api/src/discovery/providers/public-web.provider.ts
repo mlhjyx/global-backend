@@ -24,6 +24,7 @@ import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 
 const PARSER_VERSION = 'public_web/v1';
 
@@ -157,7 +158,8 @@ export class PublicWebDiscoveryProvider
     }
 
     const contract = getTask('discovery.extract_company');
-    const result = await this.deps.gateway.generateStructured<ExtractedCompany>(
+    const result = await executeStructuredTaskWithRuntime<ExtractedCompany>(
+      this.deps.gateway,
       {
         task: contract?.id ?? 'discovery.extract_company',
         prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({

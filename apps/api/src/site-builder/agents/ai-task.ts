@@ -16,6 +16,13 @@ import {
   PaidCallDeniedError,
   PaidOperationUnknownError,
 } from '../site-build-cost-ledger';
+import {
+  executeSiteBuilderModelAttempt,
+  type SiteBuilderRuntimeExecutionMetadata,
+} from '../../model-runtime/site-builder-ai-task-bridge';
+import { unwrapModelExecutionError } from '../../model-runtime/model-execution-runtime';
+import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { SITE_BUILDER_GENERATIVE_TASK_IDS } from './task-route-bindings';
 
 /**
  * L2 AiTask 统一执行器（09 §2.4，镜像获客侧「有界任务契约，非超级 Agent」哲学）。
@@ -32,6 +39,8 @@ import {
 
 export interface SiteBuilderTaskDefinition<TIn, TOut> {
   id: SiteBuilderTaskId;
+  /** Semantic contract version; defaults to the first unified-runtime contract. */
+  contractVersion?: string;
   /** 输入契约（ajv 校验，fail-fast：不合格绝不调模型）。 */
   inputSchema: Record<string, unknown>;
   /** 输出契约（透传网关 generateStructured 做校验+修复重试）。 */
@@ -62,6 +71,8 @@ export interface AiTaskRunResult<TOut> {
   modelSnapshot: ModelRouteSnapshot;
   /** Zero-based position in modelSnapshot that produced this result. */
   fallbackIndex: number;
+  /** Unified runtime provenance surrounding the existing durable gateway call. */
+  runtimeExecution: SiteBuilderRuntimeExecutionMetadata;
 }
 
 export interface AiTaskAttempt {
@@ -102,6 +113,8 @@ export interface AiTaskDeps {
   route?: TaskRoute;
   /** Temporal/activity cancellation. Cancellation is terminal and never advances the fallback chain. */
   signal?: AbortSignal;
+  /** Optional fail-open telemetry sink; never participates in routing or settlement. */
+  runtimeTelemetry?: RuntimeTelemetry;
 }
 
 const sum = (
@@ -139,6 +152,9 @@ export async function runAiTask<TIn, TOut>(
   rawInput: TIn,
   deps: AiTaskDeps,
 ): Promise<AiTaskRunResult<TOut>> {
+  if (!SITE_BUILDER_GENERATIVE_TASK_IDS.some((taskId) => taskId === def.id)) {
+    throw new Error(`deterministic Site Builder task ${def.id} cannot dispatch through the model runtime`);
+  }
   const inputCheck = checkAgainstSchema(def.inputSchema, rawInput);
   if (!inputCheck.valid) {
     throw new Error(
@@ -196,26 +212,18 @@ export async function runAiTask<TIn, TOut>(
       });
     }
     try {
-      const execution = deps.gateway.generateStructured<TOut>(
-        {
-          task: def.id,
-          prompt,
-          system: def.system,
-          schema: def.outputSchema,
-          ...(def.validateOutput
-            ? {
-                validateOutput: (output: unknown) =>
-                  def.validateOutput?.(rawInput, output as TOut),
-              }
-            : {}),
-          ...(def.repairTaskOutput ? { repairTaskOutput: true } : {}),
-          model,
-          maxTokens: route.maxTokens,
-          maxCostCents: route.maxCostCents,
-          reasoningEffort: route.reasoningEffort,
-          signal: controller.signal,
-        },
-        {
+      const execution = executeSiteBuilderModelAttempt({
+        definition: def,
+        input: rawInput,
+        prompt,
+        route,
+        model,
+        fallbackIndex,
+        gateway: deps.gateway,
+        signal: controller.signal,
+        allowInjectedTestAlias: deps.route !== undefined,
+        telemetry: deps.runtimeTelemetry,
+        context: {
           ...deps.ctx,
           ...(deps.ctx.paidCost
             ? {
@@ -230,10 +238,11 @@ export async function runAiTask<TIn, TOut>(
             fallbackIndex,
           },
         },
-      );
-      const result: ModelResult<TOut> = deps.ctx.paidCost
+      });
+      const runtimeResult = deps.ctx.paidCost
         ? await execution
         : await Promise.race([execution, timeout!]);
+      const result: ModelResult<TOut> = runtimeResult.gatewayResult;
       usage = addUsage(usage, result.usage, result.callCount ?? 1);
       if (result.provider === 'stub') {
         // 🔴 stub 兜底绝不写真实产物：dev 网关瞬时失败会 fallback 到 stub（罐头输出）。
@@ -251,6 +260,7 @@ export async function runAiTask<TIn, TOut>(
         routePolicy,
         modelSnapshot,
         fallbackIndex,
+        runtimeExecution: runtimeResult.runtime,
       };
     } catch (err) {
       if (deps.signal?.aborted) {
@@ -261,27 +271,31 @@ export async function runAiTask<TIn, TOut>(
       // A durable paid-call gate or settlement ambiguity is a terminal task
       // condition. Advancing to another model would spend again after an
       // unknown acknowledgement boundary.
+      const executionError = unwrapModelExecutionError(err);
       if (
-        err instanceof PaidCallDeniedError ||
-        err instanceof PaidOperationUnknownError
+        executionError instanceof PaidCallDeniedError ||
+        executionError instanceof PaidOperationUnknownError
       ) {
-        throw err;
+        throw executionError;
       }
       // A malformed/truncated provider response can have consumed tokens even
       // though it has no usable artifact. Keep that usage through a fallback
       // or final AiTaskError so evaluations and later cost reconciliation do
       // not silently make rejected attempts look free.
-      if (err instanceof ProviderOutputError)
-        usage = addUsage(usage, err.usage, err.callCount);
+      if (executionError instanceof ProviderOutputError)
+        usage = addUsage(usage, executionError.usage, executionError.callCount);
       attempts.push({
         model,
-        error: err instanceof Error ? err.message : String(err),
-        ...(err instanceof ProviderOutputError
+        error:
+          executionError instanceof Error
+            ? executionError.message
+            : String(executionError),
+        ...(executionError instanceof ProviderOutputError
           ? {
-              provider: err.provider,
-              resolvedModel: err.model,
-              reportedModel: err.reportedModel,
-              modelResolutionSource: err.modelResolutionSource,
+              provider: executionError.provider,
+              resolvedModel: executionError.model,
+              reportedModel: executionError.reportedModel,
+              modelResolutionSource: executionError.modelResolutionSource,
             }
           : {}),
       });

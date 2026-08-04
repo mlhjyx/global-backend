@@ -206,30 +206,28 @@ describe('Site Builder model candidate baseline', () => {
         primary: 'deepseek-v4-pro',
         fallbacks: ['glm-5.2'],
       },
-      'site_builder.assemble': {
-        primary: 'glm-5.2',
-        fallbacks: ['deepseek-v4-pro'],
-      },
-      'site_builder.assembly_fix': {
-        primary: 'glm-5.2',
-        fallbacks: ['deepseek-v4-pro'],
-      },
-      'site_builder.qa_summarize': {
-        primary: 'deepseek-v4-flash',
-        fallbacks: [],
-      },
-      'site_builder.seo_review': {
-        primary: 'deepseek-v4-flash',
-        fallbacks: [],
-      },
     });
-    expect(
-      modelPolicyRegistry.getActiveTaskPolicy('site_builder.design_spec'),
-    ).toMatchObject({
-      state: 'deterministicFallback',
-      lifecycle: 'active',
-      fallback: { id: 'safe-blueprint' },
-    });
+    for (const taskId of [
+      'site_builder.design_spec',
+      'site_builder.assemble',
+      'site_builder.assembly_fix',
+    ] as const) {
+      expect(modelPolicyRegistry.getActiveTaskPolicy(taskId)).toMatchObject({
+        state: 'deterministicFallback',
+        lifecycle: 'active',
+        fallback: { id: 'safe-blueprint' },
+      });
+    }
+    for (const taskId of [
+      'site_builder.qa_summarize',
+      'site_builder.seo_review',
+    ] as const) {
+      expect(modelPolicyRegistry.getActiveTaskPolicy(taskId)).toMatchObject({
+        state: 'deterministicFallback',
+        lifecycle: 'active',
+        fallback: { id: 'rule-summary' },
+      });
+    }
     expect(
       resolveTaskRoute('site_builder.brand_profile', {
         SITE_BUILDER_MODEL_ROLLBACK_BRAND_PROFILE: 'true',

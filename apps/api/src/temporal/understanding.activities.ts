@@ -6,6 +6,7 @@ import type { CrawlResult } from '../adapters/web-crawler';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links';
 import { extractPublicContacts } from '../adapters/contact-extractor';
+import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -109,7 +110,8 @@ export function createUnderstandingActivities(deps: {
 
     async extractClaims(args: { workspaceId: string; text: string }): Promise<{ claims: ExtractedClaim[] }> {
       const contract = getTask('company_understanding.extract_claims');
-      const result = await deps.gateway.generateStructured(
+      const result = await executeStructuredTaskWithRuntime(
+        deps.gateway,
         {
           task: contract?.id ?? 'company_understanding.extract_claims',
           prompt: args.text,
@@ -131,7 +133,8 @@ export function createUnderstandingActivities(deps: {
     /** 画像回填（KNW-002/5.2.3）：行业 + 简介，只在首页文本上跑一次。 */
     async extractAndPersistProfile(args: UnderstandingInput & { text: string }): Promise<void> {
       const contract = getTask('company_understanding.extract_profile');
-      const result = await deps.gateway.generateStructured(
+      const result = await executeStructuredTaskWithRuntime(
+        deps.gateway,
         {
           task: contract?.id ?? 'company_understanding.extract_profile',
           prompt: args.text,
@@ -159,7 +162,8 @@ export function createUnderstandingActivities(deps: {
       text: string;
     }): Promise<{ offerings: ExtractedOffering[] }> {
       const contract = getTask('company_understanding.extract_offerings');
-      const result = await deps.gateway.generateStructured(
+      const result = await executeStructuredTaskWithRuntime(
+        deps.gateway,
         {
           task: contract?.id ?? 'company_understanding.extract_offerings',
           prompt: args.text,

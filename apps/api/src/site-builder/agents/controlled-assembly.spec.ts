@@ -1,11 +1,9 @@
-import type { ModelGateway } from "../../model-gateway/model-gateway";
-import type { GenerateStructuredInput } from "../../model-gateway/types";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SiteBuildCostLedger } from "../site-build-cost-ledger";
 import { buildM1ebGoldenFixtures } from "../design/m1eb-golden";
 import {
-  ASSEMBLE_TASK,
   createLedgerAssemblyGenerator,
+  validateDeterministicAssemblySelection,
 } from "./controlled-assembly";
 
 let brief: Awaited<
@@ -51,34 +49,8 @@ describe("controlled assembly durable task ledger", () => {
       completeTask,
       releaseTask: vi.fn(async () => undefined),
     } as unknown as SiteBuildCostLedger;
-    const gateway = {
-      generateStructured: vi.fn(async (input: GenerateStructuredInput) => {
-        const data = {
-          sections: [
-            {
-              pageKey: "home",
-              sectionId: "hero",
-              copySlotKeys: ["home.hero.title"],
-              assetReferenceIds: ["catalog-hero"],
-              claimIds: ["claim-1"],
-              itemIndexes: [],
-            },
-          ],
-        };
-        input.validateOutput?.(data);
-        return {
-          data,
-          provider: "gateway",
-          model: "minimax-m3",
-          reportedModel: "minimax-m3",
-          modelResolutionSource: "requested_model",
-          usage: { inputTokens: 10, outputTokens: 2 },
-        };
-      }),
-    } as unknown as ModelGateway;
     const generator = createLedgerAssemblyGenerator({
       ledger,
-      gateway,
       workspaceId: "workspace-1",
       siteId: "site-1",
       buildRunId: "run-1",
@@ -108,10 +80,6 @@ describe("controlled assembly durable task ledger", () => {
         previousCandidateDigest: "a".repeat(64),
       }),
     );
-    expect(gateway.generateStructured).toHaveBeenCalledWith(
-      expect.objectContaining({ task: "site_builder.assembly_fix" }),
-      expect.anything(),
-    );
     expect(completeTask).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -132,10 +100,7 @@ describe("controlled assembly durable task ledger", () => {
     );
   });
 
-  it("returns the stored selection after ACK loss without another model call", async () => {
-    const gateway = {
-      generateStructured: vi.fn(),
-    } as unknown as ModelGateway;
+  it("returns the stored selection after ACK loss without recomputing", async () => {
     const ledger = {
       claimTaskAttempt: vi.fn(async () => ({
         kind: "completed",
@@ -147,7 +112,6 @@ describe("controlled assembly durable task ledger", () => {
     } as unknown as SiteBuildCostLedger;
     const generator = createLedgerAssemblyGenerator({
       ledger,
-      gateway,
       workspaceId: "workspace-1",
       siteId: "site-1",
       buildRunId: "run-1",
@@ -155,11 +119,10 @@ describe("controlled assembly durable task ledger", () => {
     await expect(
       generator.generate(request("site_builder.assemble")),
     ).resolves.toEqual({ sections: [] });
-    expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
 
   it("keeps pre-upgrade frozen inputs replayable while closing every current selector bound", () => {
-    const validate = ASSEMBLE_TASK.validateOutput!;
+    const validate = validateDeterministicAssemblySelection;
     const legacyInput = {
       designBriefDigest: "a".repeat(64),
       allowedCopySlotKeys: ["home.hero.title"],

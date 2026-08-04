@@ -1,4 +1,3 @@
-import type { ModelGateway } from "../../model-gateway/model-gateway";
 import type { SiteBuildCostLedger } from "../site-build-cost-ledger";
 import type { AssemblyFinding } from "../assembly/controlled-assembly-validator";
 import type {
@@ -6,7 +5,6 @@ import type {
   AssemblySelectionGenerator,
   ControlledAssemblyTaskId,
 } from "../assembly/controlled-assembly.service";
-import { runAiTask, type SiteBuilderTaskDefinition } from "./ai-task";
 
 export interface ControlledAssemblyTaskInput {
   designBriefDigest: string;
@@ -18,7 +16,7 @@ export interface ControlledAssemblyTaskInput {
   findings: AssemblyFinding[];
 }
 
-function closedSelection(
+export function validateDeterministicAssemblySelection(
   input: ControlledAssemblyTaskInput,
   value: AssemblySelection,
 ): void {
@@ -65,105 +63,30 @@ function closedSelection(
   }
 }
 
-function definition(
-  id: "site_builder.assemble" | "site_builder.assembly_fix",
-): SiteBuilderTaskDefinition<ControlledAssemblyTaskInput, AssemblySelection> {
-  return {
-    id,
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: [
-        "designBriefDigest",
-        "allowedCopySlotKeys",
-        "allowedAssetReferenceIds",
-        "allowedClaimIds",
-        "findings",
-      ],
-      properties: {
-        designBriefDigest: { type: "string" },
-        allowedSectionTargets: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["pageKey", "sectionId"],
-            properties: {
-              pageKey: { type: "string" },
-              sectionId: { type: "string" },
-            },
-          },
-        },
-        allowedCopySlotKeys: { type: "array", items: { type: "string" } },
-        allowedAssetReferenceIds: {
-          type: "array",
-          items: { type: "string" },
-        },
-        allowedClaimIds: { type: "array", items: { type: "string" } },
-        previousCandidateDigest: { type: "string" },
-        findings: { type: "array", items: { type: "object" } },
-      },
-    },
-    outputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["sections"],
-      properties: {
-        sections: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "pageKey",
-              "sectionId",
-              "copySlotKeys",
-              "assetReferenceIds",
-              "claimIds",
-              "itemIndexes",
-            ],
-            properties: {
-              pageKey: { type: "string" },
-              sectionId: { type: "string" },
-              copySlotKeys: { type: "array", items: { type: "string" } },
-              assetReferenceIds: {
-                type: "array",
-                items: { type: "string" },
-              },
-              claimIds: { type: "array", items: { type: "string" } },
-              itemIndexes: {
-                type: "array",
-                items: { type: "integer", minimum: 0, maximum: 127 },
-              },
-            },
-          },
-        },
-      },
-    },
-    system:
-      "Select only frozen page, section, copy slot, asset, Claim, and item IDs. Never output props, prose, component types, variants, CSS, HTML, URLs, or paths.",
-    buildPrompt: (input) =>
-      [
-        `DesignBrief digest: ${input.designBriefDigest}`,
-        `Required section targets: ${JSON.stringify(input.allowedSectionTargets ?? [])}`,
-        `Allowed copy slots: ${JSON.stringify(input.allowedCopySlotKeys)}`,
-        `Allowed asset refs: ${JSON.stringify(input.allowedAssetReferenceIds)}`,
-        `Allowed Claim IDs: ${JSON.stringify(input.allowedClaimIds)}`,
-        `Previous candidate digest: ${input.previousCandidateDigest ?? "none"}`,
-        `Structured findings: ${JSON.stringify(input.findings)}`,
-        "Return only the closed sections selection envelope. Select exactly one entry for every required section target; missing or duplicate targets are invalid.",
-      ].join("\n"),
-    validateOutput: (input, output) => closedSelection(input, output),
-    repairTaskOutput: true,
+function deterministicSelection(
+  input: ControlledAssemblyTaskInput,
+): AssemblySelection {
+  if (!input.allowedSectionTargets) {
+    throw new Error("CONTROLLED_ASSEMBLY_SECTION_TARGETS_REQUIRED");
+  }
+  const selection = {
+    sections: input.allowedSectionTargets.map(({ pageKey, sectionId }) => ({
+      pageKey,
+      sectionId,
+      copySlotKeys: input.allowedCopySlotKeys.filter((key) =>
+        key.startsWith(`${pageKey}.${sectionId}.`),
+      ),
+      assetReferenceIds: [...input.allowedAssetReferenceIds],
+      claimIds: [...input.allowedClaimIds],
+      itemIndexes: [],
+    })),
   };
+  validateDeterministicAssemblySelection(input, selection);
+  return selection;
 }
-
-export const ASSEMBLE_TASK = definition("site_builder.assemble");
-export const ASSEMBLY_FIX_TASK = definition("site_builder.assembly_fix");
 
 export function createLedgerAssemblyGenerator(input: {
   ledger: SiteBuildCostLedger;
-  gateway: ModelGateway;
   workspaceId: string;
   siteId: string;
   buildRunId: string;
@@ -219,30 +142,13 @@ export function createLedgerAssemblyGenerator(input: {
           candidate as unknown as Record<string, unknown>,
         );
         assertActive();
-        const task =
-          request.taskId === "site_builder.assemble"
-            ? ASSEMBLE_TASK
-            : ASSEMBLY_FIX_TASK;
-        const selection = (
-          await runAiTask(
-            task,
-            frozen.input as unknown as ControlledAssemblyTaskInput,
-            {
-              gateway: input.gateway,
-              ctx: {
-                workspaceId: input.workspaceId,
-                runId: input.buildRunId,
-                paidCost: {
-                  siteId: input.siteId,
-                  taskAttemptId: claimed.attempt.id,
-                  fenceToken: claimed.attempt.fenceToken,
-                  scopeKey: request.taskId,
-                  durableReplayResult: (result) => result,
-                },
-              },
-            },
-          )
-        ).data;
+        const frozenInput =
+          frozen.input as unknown as ControlledAssemblyTaskInput;
+        const selection = deterministicSelection({
+          ...frozenInput,
+          allowedSectionTargets:
+            frozenInput.allowedSectionTargets ?? candidate.allowedSectionTargets,
+        });
         assertActive();
         await input.ledger.storeTaskOutput(
           fence,

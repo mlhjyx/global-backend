@@ -6,12 +6,11 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { Context as ActivityContext } from "@temporalio/activity";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelGateway } from "../model-gateway/model-gateway";
+import type { RuntimeTelemetry } from "../model-runtime/types";
 import {
   buildDemoSpec,
   collectTextKeys,
   DEMO_SPEC_VERSION,
-  DemoCopyPolish,
-  sanitizePolish,
 } from "../site-builder/demo-spec";
 import type { IntakeInput } from "../site-builder/intake.service";
 import type { KbService } from "../site-builder/kb.service";
@@ -89,7 +88,6 @@ import {
 import { compareClaimProjectionOrder } from "../site-builder/claim-projection-order";
 import { gateCertificationFactsForPersistence } from "../site-builder/claim-evidence-persistence-gate";
 import {
-  PaidOperationUnknownError,
   SiteBuildCostLedger,
   type SiteBuildCostSummary,
 } from "../site-builder/site-build-cost-ledger";
@@ -161,18 +159,8 @@ import {
 import type { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import type { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
 import type { QualityCandidateIdentity } from "../site-builder/quality/quality-candidate.service";
-import {
-  QA_SUMMARIZE_TASK,
-  SEO_REVIEW_TASK,
-  type QualityNarrativeEvidenceRefV1,
-  type QualityNarrativeModelProvenanceV1,
-  type QualityNarrativeTaskInputV1,
-  type QualityNarrativeTaskOutputV1,
-} from "../site-builder/quality/quality-narrative";
-import type {
-  QualityNarrativeExecutionResult,
-  QualityNarrativeService,
-} from "../site-builder/quality/quality-narrative.service";
+import type { QualityNarrativeEvidenceRefV1 } from "../site-builder/quality/quality-narrative";
+import type { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -209,7 +197,6 @@ export function buildCompensatedSteps(
   });
 }
 
-const POLISH_TIMEOUT_MS = 2_000; // R0-5：硬超时压到 2s 内不破 Demo 10s P95；超时即 abort 底层 fetch，不烧钱
 
 /**
  * BrandProfile append and Claim projection share one transaction. PostgreSQL
@@ -323,6 +310,8 @@ export interface SiteBuilderActivityDeps {
   /** R4-B durable budget, spend and task-attempt ledger. */
   costLedger?: SiteBuildCostLedger;
   gateway?: ModelGateway;
+  /** Fail-open model lifecycle telemetry; never participates in routing or settlement. */
+  runtimeTelemetry?: RuntimeTelemetry;
   /** KB 服务（intake 资料入库 + queued 文档消化 + digest 取材）；worker 装配 KbService，测试可注 stub。 */
   kb?: {
     ingestText: KbService["ingestText"];
@@ -827,235 +816,16 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     }
   };
 
-  const qualityNarrativeDispatchDecision = async (input: {
-    workspaceId: string;
-    buildRunId: string;
-  }): Promise<
-    "allowed" | "paid_gate_denied" | "prior_settlement_unknown"
-  > =>
-    prisma.withWorkspace(input.workspaceId, async (tx) => {
-      const [budget, unresolvedSpends] = await Promise.all([
-        tx.siteBuildBudget.findUnique({
-          where: { buildRunId: input.buildRunId },
-          select: { paidCallsEnabled: true },
-        }),
-        tx.siteBuildSpend.count({
-          where: {
-            buildRunId: input.buildRunId,
-            OR: [
-              { status: { in: ["RESERVED", "UNKNOWN"] } },
-              { costBasis: "unknown" },
-            ],
-          },
-        }),
-      ]);
-      return qualityNarrativePaidGateDecision({
-        paidCallsEnabled: budget?.paidCallsEnabled === true,
-        unresolvedSpends,
-      });
-    });
-
-  const qualityNarrativeExecutionResult = (
-    value: Record<string, unknown>,
-  ): QualityNarrativeExecutionResult => {
-    if (
-      !value.output ||
-      typeof value.output !== "object" ||
-      Array.isArray(value.output) ||
-      !value.provenance ||
-      typeof value.provenance !== "object" ||
-      Array.isArray(value.provenance)
-    ) {
-      throw new Error("QUALITY_NARRATIVE_TASK_REPLAY_INVALID");
-    }
-    return {
-      output: value.output as QualityNarrativeTaskOutputV1,
-      provenance:
-        value.provenance as unknown as QualityNarrativeModelProvenanceV1,
-    };
-  };
-
-  const executeQualityNarrativeTask = async (
-    workspaceId: string,
-    siteId: string,
-    buildRunId: string,
-    input: QualityNarrativeTaskInputV1,
-    signal?: AbortSignal,
-  ): Promise<QualityNarrativeExecutionResult> => {
-    if (!gateway || !costLedger) {
-      throw new Error("QUALITY_NARRATIVE_CONSUMER_UNAVAILABLE");
-    }
-    const logicalTaskId = `${input.taskId}:round:${input.round}`;
-    const taskClaim = await costLedger.claimTaskAttempt({
-      workspaceId,
-      siteId,
-      buildRunId,
-      taskId: logicalTaskId,
-    });
-    if (taskClaim.kind === "completed") {
-      return qualityNarrativeExecutionResult(taskClaim.result);
-    }
-    const attempt = taskClaim.attempt;
-    const fence = {
-      workspaceId,
-      attemptId: attempt.id,
-      fenceToken: attempt.fenceToken,
-    };
-    let completed = false;
-    let primaryFailure = false;
-    try {
-      const frozen = await costLedger.freezeTaskInput(
-        fence,
-        input as unknown as Record<string, unknown>,
-      );
-      const replay =
-        attempt.status === "MODEL_SUCCEEDED" &&
-        attempt.outputJson &&
-        typeof attempt.outputJson === "object" &&
-        !Array.isArray(attempt.outputJson)
-          ? qualityNarrativeExecutionResult(
-              attempt.outputJson as Record<string, unknown>,
-            )
-          : null;
-      const result =
-        replay ??
-        (await (async (): Promise<QualityNarrativeExecutionResult> => {
-          const definition =
-            input.taskId === "site_builder.qa_summarize"
-              ? QA_SUMMARIZE_TASK
-              : SEO_REVIEW_TASK;
-          const run = await runAiTask<
-            QualityNarrativeTaskInputV1,
-            QualityNarrativeTaskOutputV1
-          >(
-            definition,
-            frozen.input as unknown as QualityNarrativeTaskInputV1,
-            {
-              gateway,
-              signal,
-              ctx: {
-                workspaceId,
-                runId: buildRunId,
-                paidCost: {
-                  siteId,
-                  taskAttemptId: attempt.id,
-                  fenceToken: attempt.fenceToken,
-                  scopeKey: `${input.taskId}:round:${input.round}`,
-                  durableReplayResult: (providerResult) => providerResult,
-                },
-              },
-            },
-          );
-          return {
-            output: run.data,
-            provenance: {
-              taskAttemptId: attempt.id,
-              model: run.model,
-              provider: run.provider,
-              reportedModel: run.reportedModel ?? null,
-              modelResolutionSource: run.modelResolutionSource ?? null,
-              fallbackIndex: run.fallbackIndex,
-              usage: run.usage,
-              routePolicy: run.routePolicy,
-            },
-          };
-        })());
-      if (!replay) {
-        await costLedger.storeTaskOutput(
-          fence,
-          result as unknown as Record<string, unknown>,
-        );
-      }
-      await costLedger.completeTask(
-        fence,
-        result as unknown as Record<string, unknown>,
-      );
-      completed = true;
-      return result;
-    } catch (error) {
-      primaryFailure = true;
-      throw error;
-    } finally {
-      if (!completed) {
-        await releaseTaskWithoutMaskingPrimaryFailure(
-          () => costLedger.releaseTask(fence),
-          primaryFailure,
-          (error) =>
-            log.error(
-              `Quality narrative task release failed after primary failure (${error instanceof Error ? error.name : "UnknownError"})`,
-            ),
-        );
-      }
-    }
-  };
-
   async function polishCopy(
-    workspaceId: string,
-    intake: IntakeInput,
-    runId?: string,
-    siteId?: string,
-    paidScopeKey?: string,
-  ): Promise<DemoCopyPolish | undefined> {
-    if (!gateway) return undefined;
-    try {
-      // R0-5：真 AbortSignal 硬超时取代 setTimeout race——超时即 abort 底层 fetch（不留后台弃单继续
-      // 烧钱），signal 由网关合并进 AbortSignal.any 透传到 fetch。失败/超时/abort 一律回退确定性模板。
-      const result = await gateway.generateStructured<DemoCopyPolish>(
-        {
-          task: "site_builder.demo_copy",
-          prompt: [
-            "Write concise English website copy for a B2B supplier landing page.",
-            `Company: ${intake.company.nameEn ?? intake.company.nameZh}`,
-            `Products: ${intake.products.join(", ")}`,
-            `Target markets (ISO country codes): ${intake.targetMarkets.join(", ")}`,
-            "Return headline (<=70 chars), subhead (<=160 chars), aboutBody (<=420 chars).",
-            "Rules: use ONLY the facts above; describe the company only as a supplier of the listed products; do NOT call it a manufacturer or claim an engineering team, quality control or export operations; never invent years in business, certificates, factory size or client names.",
-          ].join("\n"),
-          schema: {
-            type: "object",
-            properties: {
-              headline: { type: "string" },
-              subhead: { type: "string" },
-              aboutBody: { type: "string" },
-            },
-            additionalProperties: false,
-          },
-          maxTokens: 400,
-          // R0-5：真 abort 硬超时——超时即断底层 fetch（不留后台弃单烧钱），压在 Demo 10s P95 内
-          signal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
-        },
-        // FIX A（Codex P2）：带 runId 归账——refurbish 路径 assembleAndBuild→polishCopy 的
-        // demo_copy 调用必须计入 buildRunId 上限（gateway 按 ctx.runId ?? ctx.workspaceId 归账）；
-        // demo_v0 路径未开账户，gateway 命中未开账户=不限额，行为不变。
-        {
-          workspaceId,
-          runId,
-          ...(costLedger && runId && siteId && paidScopeKey
-            ? {
-                paidCost: {
-                  siteId,
-                  scopeKey: paidScopeKey,
-                  durableReplayResult: (providerResult) => ({
-                    ...providerResult,
-                    data: sanitizePolish(
-                      providerResult.data &&
-                        typeof providerResult.data === "object" &&
-                        !Array.isArray(providerResult.data)
-                        ? (providerResult.data as DemoCopyPolish)
-                        : undefined,
-                    ),
-                  }),
-                },
-              }
-            : {}),
-        },
-      );
-      // 确定性防造假闸（Codex P2）：模型若无视提示编造年限/认证，弃字段回退模板
-      return sanitizePolish(result.data ?? undefined);
-    } catch (error) {
-      if (error instanceof PaidOperationUnknownError) throw error;
-      return undefined; // 超时/失败=模板默认文案（fail-safe，不阻塞 demo）
-    }
+    _workspaceId: string,
+    _intake: IntakeInput,
+    _runId?: string,
+    _siteId?: string,
+    _paidScopeKey?: string,
+  ): Promise<undefined> {
+    // Demo v0 copy is a deterministic compatibility path. Generative copy is
+    // owned exclusively by the versioned `site_builder.copy` Runtime task.
+    return undefined;
   }
 
   /** 消化该站全部 queued KB 文档（refurbish P1 与 kbIngestWorkflow 共用）。 */
@@ -1203,20 +973,13 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       throw new Error(`run ${buildRunId} has a non-retryable SiteVersion`);
     }
 
-    const generator = gateway
-      ? createLedgerAssemblyGenerator({
-          ledger: costLedger,
-          gateway,
-          workspaceId,
-          siteId,
-          buildRunId,
-          isCancelled: activityCancelled,
-        })
-      : {
-          generate: async () => {
-            throw new Error("controlled assembly model gateway unavailable");
-          },
-        };
+    const generator = createLedgerAssemblyGenerator({
+      ledger: costLedger,
+      workspaceId,
+      siteId,
+      buildRunId,
+      isCancelled: activityCancelled,
+    });
     const assetUrls = controlledAssetUrls(state.assets);
     const assembled = await new ControlledAssemblyService(generator).assemble({
       brief,
@@ -2634,6 +2397,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             BrandProfileOutput
           >(BRAND_PROFILE_TASK, brandProfileInput, {
             gateway,
+            runtimeTelemetry: deps.runtimeTelemetry,
             ctx: {
               workspaceId,
               runId: buildRunId,
@@ -3107,6 +2871,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                       frozen.input as unknown as CopyTaskInput,
                       {
                         gateway,
+                        runtimeTelemetry: deps.runtimeTelemetry,
                         ctx: {
                           workspaceId,
                           runId: buildRunId,
@@ -3264,15 +3029,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         "timeout",
       );
       const narrativeSignal = activityCancellationSignal();
-      const narrativeDispatchDecision =
-        qualityNarrativeService && gateway && costLedger
-          ? await qualityNarrativeDispatchDecision(input).catch((error) => {
-              log.warn(
-                `Quality narrative paid gate unavailable; dispatch denied (${error instanceof Error ? error.name : "UnknownError"})`,
-              );
-              return "paid_gate_denied" as const;
-            })
-          : ("consumer_unavailable" as const);
       const qualityNarrativeRef = qualityNarrativeService
         ? await runNonAuthoritativeQualityNarrative(
             () =>
@@ -3282,21 +3038,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
                 evaluation,
                 artifactSet: deterministic.artifactSet,
                 signal: narrativeSignal,
-                ...(narrativeDispatchDecision === "allowed"
-                  ? {
-                      execute: (taskInput, signal) =>
-                        executeQualityNarrativeTask(
-                          input.workspaceId,
-                          input.siteId,
-                          input.buildRunId,
-                          taskInput,
-                          signal,
-                        ),
-                    }
-                  : {
-                      executionUnavailableReason:
-                        narrativeDispatchDecision,
-                    }),
+                executionUnavailableReason: "consumer_unavailable",
               }),
             narrativeSignal,
             (error) =>
