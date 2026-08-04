@@ -12,6 +12,7 @@ import {
   ExecutionContext,
 } from '../provider-contract';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
+import type { RuntimeTelemetry } from '../../model-runtime/types';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -75,7 +76,11 @@ interface ExtractedPeople {
 export class DecisionMakerProvider {
   readonly key = 'decision_maker';
 
-  constructor(private readonly deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: {
+    gateway: ModelGateway;
+    broker?: ExecutionBroker;
+    runtimeTelemetry?: RuntimeTelemetry;
+  }) {}
 
   private log(msg: string): void {
 
@@ -227,6 +232,7 @@ export class DecisionMakerProvider {
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
         { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data?.people ?? [];
     } catch (err) {
@@ -246,7 +252,11 @@ export class DecisionMakerContactAdapter implements ContactDiscoveryAdapter {
   readonly key = 'decision_maker';
   private readonly inner: DecisionMakerProvider;
 
-  constructor(deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {
+  constructor(deps: {
+    gateway: ModelGateway;
+    broker?: ExecutionBroker;
+    runtimeTelemetry?: RuntimeTelemetry;
+  }) {
     this.inner = new DecisionMakerProvider(deps);
   }
 

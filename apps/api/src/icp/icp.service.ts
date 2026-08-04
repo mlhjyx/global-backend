@@ -14,6 +14,7 @@ import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
+import { LangfuseRuntimeTelemetryService } from '../model-runtime';
 
 interface IcpModelOutput {
   name: string;
@@ -56,6 +57,7 @@ export class IcpService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: ModelGateway,
+    private readonly runtimeTelemetry: LangfuseRuntimeTelemetryService,
   ) {}
 
   /** AI-design an ICP from the seller company's APPROVED claims (PRD 5.4 / 7.5). */
@@ -97,6 +99,7 @@ export class IcpService {
         schema: contract.outputSchema,
       },
       { workspaceId: ctx.workspaceId, userId: ctx.userId },
+      { telemetry: this.runtimeTelemetry },
     );
     const out = result.data;
 
@@ -438,6 +441,7 @@ export class IcpService {
         schema: contract.outputSchema,
       },
       { workspaceId: ctx.workspaceId, userId: ctx.userId },
+      { telemetry: this.runtimeTelemetry },
     );
     const out = result.data;
 
@@ -475,7 +479,7 @@ export class IcpService {
     const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
     const targetCountries = splitTerms(icp.targetMarkets);
     try {
-      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway);
+      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry);
       const cpv = await resolveIcpToCpv(
         taxonomy,
         { industryTerms, product: attrs.product ? String(attrs.product) : undefined, targetCountries },
@@ -502,7 +506,7 @@ export class IcpService {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
     const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
     try {
-      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway);
+      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry);
       const fda = await resolveIcpToFda(
         taxonomy,
         {

@@ -160,7 +160,11 @@ async function main(): Promise<void> {
     sourcePolicyReader,
     paidLedger: costLedger,
   });
-  const taxonomy = new TaxonomyResolver(prisma, gateway); // discovery + external-intent sweep 共享一实例
+  const taxonomy = new TaxonomyResolver(
+    prisma,
+    gateway,
+    runtimeTelemetry.telemetry,
+  ); // discovery + external-intent sweep 共享一实例
   // 第五门制裁筛查引擎（worker 侧）：qualify 活动 screen 公司名 + 刷新活动重建索引。手工构造（非 Nest DI）；
   // 平台表无 RLS、app_user 只读 → prisma 读即可。DISABLED（Phase 1 默认）→ 空索引 → not_screened，no-op。
   const sanctionsScreening = new SanctionsScreeningService(prisma);
@@ -172,7 +176,12 @@ async function main(): Promise<void> {
       ),
     );
   // prisma（app_user）给专利缓存读/enqueue 闭包（平台表无 RLS）——PATENT_SOURCE_MODE=cache 时零 BQ 字节读缓存。
-  const providers = new DiscoveryProviderRegistry({ gateway, broker, prisma });
+  const providers = new DiscoveryProviderRegistry({
+    gateway,
+    broker,
+    prisma,
+    runtimeTelemetry: runtimeTelemetry.telemetry,
+  });
 
   const worker = await Worker.create({
     connection,
@@ -180,13 +189,19 @@ async function main(): Promise<void> {
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve("./workflows"),
     activities: {
-      ...createUnderstandingActivities({ prisma, gateway, broker }),
+      ...createUnderstandingActivities({
+        prisma,
+        gateway,
+        broker,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
+      }),
       ...createDiscoveryActivities({
         prisma,
         providers,
         gateway,
         taxonomy,
         broker,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
       }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createAcquisitionActivities({
@@ -205,6 +220,7 @@ async function main(): Promise<void> {
         gateway,
         ownerDb,
         broker,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
       }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
       ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),

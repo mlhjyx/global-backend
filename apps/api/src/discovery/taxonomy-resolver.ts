@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 
@@ -53,6 +54,7 @@ export class TaxonomyResolver {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: ModelGateway,
+    private readonly runtimeTelemetry?: RuntimeTelemetry,
   ) {}
 
   /** 归一单个词到规范节点；无法归一返回 null。allowLlm=false 则只走确定性。 */
@@ -122,6 +124,7 @@ export class TaxonomyResolver {
           prompt: `把词「${term}」归一到下面 ${kind} 标准码表中最匹配的一个 code（只能选表中已有的 code，选不到就返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
         { workspaceId },
+        { telemetry: this.runtimeTelemetry },
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -192,6 +195,7 @@ export class TaxonomyResolver {
           prompt: `把产品「${product}」精修到下面 CPV 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
         { workspaceId: opts.workspaceId },
+        { telemetry: this.runtimeTelemetry },
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -261,6 +265,7 @@ export class TaxonomyResolver {
           prompt: `把产品「${product}」精修到下面 NAICS 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
         { workspaceId: opts.workspaceId },
+        { telemetry: this.runtimeTelemetry },
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -330,6 +335,7 @@ export class TaxonomyResolver {
           prompt: `把医疗器械产品「${product}」精修到下面 FDA product code 表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
         { workspaceId: opts.workspaceId },
+        { telemetry: this.runtimeTelemetry },
       );
       const code = result.data?.code;
       if (!code) return null;

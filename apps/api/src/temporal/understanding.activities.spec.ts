@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 import { createUnderstandingActivities } from './understanding.activities';
 
 /**
@@ -24,5 +25,31 @@ describe('understanding.activities — crawl4ai.fetch 显式声明 discovery/enr
     const [toolId, , ctx] = invoke.mock.calls[0] as [string, unknown, { purpose?: string[] }];
     expect(toolId).toBe('crawl4ai.fetch');
     expect(ctx.purpose).toEqual(['discovery', 'enrichment']);
+  });
+});
+
+describe('understanding.activities — unified runtime telemetry', () => {
+  it('propagates the worker telemetry lifecycle into structured model calls', async () => {
+    const emit = vi.fn();
+    const generateStructured = vi.fn(async () => ({
+      data: { claims: [] },
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      usage: { inputTokens: 4, outputTokens: 2 },
+    }));
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured } as unknown as ModelGateway,
+      runtimeTelemetry: { emit } as RuntimeTelemetry,
+    });
+
+    await acts.extractClaims({ workspaceId: 'ws-1', text: 'Acme makes pumps.' });
+
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'company_understanding.extract_claims',
+      workspaceId: 'ws-1',
+      reasoning: expect.any(String),
+      fallbackIndex: 0,
+    }));
   });
 });

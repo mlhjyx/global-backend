@@ -25,6 +25,7 @@ import { extractPublicContacts } from '../../adapters/contact-extractor';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
+import type { RuntimeTelemetry } from '../../model-runtime/types';
 
 const PARSER_VERSION = 'public_web/v1';
 
@@ -74,7 +75,11 @@ export class PublicWebDiscoveryProvider
   readonly key = 'public_web';
   readonly classes: SourceClass[] = ['public_intelligence', 'industry_data'];
 
-  constructor(private readonly deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: {
+    gateway: ModelGateway;
+    broker?: ExecutionBroker;
+    runtimeTelemetry?: RuntimeTelemetry;
+  }) {}
 
   private log(msg: string): void {
 
@@ -172,6 +177,7 @@ export class PublicWebDiscoveryProvider
       },
       // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
       { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+      { telemetry: this.deps.runtimeTelemetry },
     );
     const out = result.data;
     if (!out?.is_company_site || !out.name?.trim()) {

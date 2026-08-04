@@ -53,6 +53,7 @@ services:
     restart: unless-stopped
     depends_on: *langfuse-depends-on
     environment: *langfuse-environment
+    networks: [ai-observability]
 
   langfuse-web:
     profiles: [ai-observability]
@@ -65,17 +66,17 @@ services:
     environment:
       <<: *langfuse-environment
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9092
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME}
       LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID}
       LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME}
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_INIT_PROJECT_RETENTION: "30"
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
       LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
+    networks: [ai-observability]
 
   langfuse-clickhouse:
     profiles: [ai-observability]
@@ -95,6 +96,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks: [ai-observability]
 
   langfuse-redis:
     profiles: [ai-observability]
@@ -105,10 +107,11 @@ services:
     volumes:
       - langfuse-redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a '$${REDIS_AUTH:-${LANGFUSE_REDIS_PASSWORD}}' ping | grep -q PONG"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_AUTH}\" ping | grep -q PONG"]
       interval: 3s
       timeout: 10s
       retries: 20
+    networks: [ai-observability]
 
   langfuse-postgres:
     profiles: [ai-observability]
@@ -128,6 +131,7 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+    networks: [ai-observability]
 
   langfuse-minio:
     profiles: [ai-observability]
@@ -148,6 +152,7 @@ services:
       interval: 3s
       timeout: 5s
       retries: 20
+    networks: [ai-observability]
 
   langfuse-minio-init:
     profiles: [ai-observability]
@@ -163,6 +168,7 @@ services:
         mc mb --ignore-existing local/langfuse-events;
         mc mb --ignore-existing local/langfuse-media
     restart: "no"
+    networks: [ai-observability]
 
 volumes:
   langfuse-postgres-data:
@@ -170,3 +176,7 @@ volumes:
   langfuse-clickhouse-data:
   langfuse-clickhouse-logs:
   langfuse-minio-data:
+
+networks:
+  ai-observability:
+    internal: true

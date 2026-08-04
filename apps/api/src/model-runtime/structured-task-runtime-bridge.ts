@@ -183,6 +183,7 @@ export async function executeStructuredTaskWithRuntime<Output>(
     const prompt = { system: input.system ?? '', user: input.prompt };
     const result = await runtime.execute({
       executionId: `structured:${context.runId ?? context.correlationId ?? context.workspaceId}:${input.task}:${canonicalDigest(requestMaterial).slice(0, 16)}`,
+      fallbackIndex: 0,
       workspaceId: context.workspaceId,
       buildRunId: context.runId ?? context.correlationId ?? context.workspaceId,
       contract,

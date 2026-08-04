@@ -108,6 +108,8 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
           requestedAlias: plan.requestedAlias,
           resolvedAlias: plan.resolvedAlias,
           protocol: plan.protocol,
+          reasoning: plan.reasoning,
+          fallbackIndex: plan.fallbackIndex ?? 0,
           detail,
         })).catch(() => undefined);
       } catch {

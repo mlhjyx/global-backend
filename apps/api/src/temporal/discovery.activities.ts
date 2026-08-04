@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
@@ -45,6 +46,7 @@ export function createDiscoveryActivities(deps: {
   taxonomy?: TaxonomyResolver;
   /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
   broker?: ExecutionBroker;
+  runtimeTelemetry?: RuntimeTelemetry;
 }) {
   // 收口② D「真开账」：每个活动入口幂等 open（open 取较大值，重复无害；账本进程内，
   // 活动重试/换 worker 也能重新立账）。run 结束由 finalizeRun close。
@@ -364,7 +366,10 @@ export function createDiscoveryActivities(deps: {
         const c = companies[i];
         let judgment;
         try {
-          judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, { runId: args.runId });
+          judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
+            runId: args.runId,
+            runtimeTelemetry: deps.runtimeTelemetry,
+          });
         } catch (err) {
           if (err instanceof BudgetExceededError) {
             // 预算耗尽=本批余下全部会失败 → 中断并显性计数（复审 HIGH：绝不静默漏判假 DONE）

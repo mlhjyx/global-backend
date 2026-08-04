@@ -6,6 +6,7 @@ import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, Provi
 import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 import { persistDiscoveredContacts } from '../discovery/contact-persist';
 import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
 import { persistGuessedEmail } from '../discovery/email-guess-persist';
@@ -118,6 +119,7 @@ export function createBacklogActivities(deps: {
   ownerDb: PrismaClient;
   /** 收口②：registerWatch 的 sitemap 探测出网经此闸门。 */
   broker?: ExecutionBroker;
+  runtimeTelemetry?: RuntimeTelemetry;
 }) {
   const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
 
@@ -199,7 +201,10 @@ export function createBacklogActivities(deps: {
           const c = companies[i];
           let judgment;
           try {
-            judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, { runId: budget.key });
+            judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
+              runId: budget.key,
+              runtimeTelemetry: deps.runtimeTelemetry,
+            });
           } catch (err) {
             if (err instanceof BudgetExceededError) {
               // 预算耗尽 → 中断本页并显性计数；游标**不**吞掉这些行（下轮 sweep 重判）

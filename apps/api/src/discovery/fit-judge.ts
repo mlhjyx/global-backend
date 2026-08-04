@@ -3,6 +3,7 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetExceededError } from '../tools/budget';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -105,7 +106,7 @@ export async function judgeFitCompany(
   workspaceId: string,
   icpBrief: IcpBrief | Record<string, never>,
   company: FitJudgeCompany,
-  opts?: { runId?: string },
+  opts?: { runId?: string; runtimeTelemetry?: RuntimeTelemetry },
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
   const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
@@ -126,6 +127,7 @@ export async function judgeFitCompany(
       },
       // runId=预算归账键（run 内 fit 判定消耗计入该 run 的账；sweep 无 runId 则按 workspace 归账）
       { workspaceId, runId: opts?.runId },
+      { telemetry: opts?.runtimeTelemetry },
     );
     // 🔴 stub 兜底绝不写真实判定：dev 里网关瞬时失败会 fallback 到 stub（罐头 null 输出），
     // 归一化后变成 weak 假判定污染 canonical（实测抓到 2 家：fit_reasons 全 null）。宁可不判、

@@ -17,6 +17,7 @@ import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
+import type { RuntimeTelemetry } from '../../model-runtime/types';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -57,7 +58,11 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'directory';
   readonly classes: SourceClass[] = ['industry_data'];
 
-  constructor(private readonly deps: { gateway: ModelGateway; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: {
+    gateway: ModelGateway;
+    broker?: ExecutionBroker;
+    runtimeTelemetry?: RuntimeTelemetry;
+  }) {}
 
   private log(msg: string): void {
 
@@ -204,6 +209,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
         { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data;
     } catch (err) {

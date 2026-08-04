@@ -108,13 +108,18 @@ describe('ModelExecutionRuntime', () => {
   });
 
   it('treats telemetry as a fail-open side channel', async () => {
-    const telemetry: RuntimeTelemetry = { emit: vi.fn(() => { throw new Error('offline'); }) };
+    const emit = vi.fn(() => { throw new Error('offline'); });
+    const telemetry: RuntimeTelemetry = { emit };
     const runtime = new ModelExecutionRuntime<Input, Output>({
       transport: { dispatch: vi.fn().mockResolvedValue(observed({ headline: 'A' })) },
       telemetry,
     });
 
     await expect(runtime.execute(plan)).resolves.toMatchObject({ output: { headline: 'A' } });
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      reasoning: 'medium',
+      fallbackIndex: 0,
+    }));
   });
 
   it('never dispatches a deterministic task through the model transport', async () => {
