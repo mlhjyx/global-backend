@@ -26,6 +26,7 @@ import { SelfHostedEmailVerifier } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { readPatentCache, enqueuePatentLookup } from '../adapters/patent-inventor-cache';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -50,7 +51,12 @@ export class DiscoveryProviderRegistry {
    *  绝不塞进 enrichRun 的 2 分钟活动（否则 50 家 × 抓取会超时重试整段富集）。 */
   private readonly signalEnrichers: CompanyEnrichmentAdapter[] = [];
 
-  constructor(deps?: { gateway?: ModelGateway; broker?: ExecutionBroker; prisma?: PrismaClient }) {
+  constructor(deps?: {
+    gateway?: ModelGateway;
+    broker?: ExecutionBroker;
+    prisma?: PrismaClient;
+    runtimeTelemetry?: RuntimeTelemetry;
+  }) {
     const broker = deps?.broker;
     // 专利缓存读/攒集队列 enqueue 闭包（绑 app_user prisma；平台表无 RLS）——仅当注入 prisma 时可用
     // （seed-only 构造无 prisma → cache 模式降级空，direct 仍走 broker）。读缓存零 egress、不经 broker。
@@ -70,15 +76,27 @@ export class DiscoveryProviderRegistry {
     // source_policy fail-closed/预算/限流/Trace）；无 broker = 不做任何原始出网（诚实降级空/miss）。
     this.emailVerifiers.push(new SelfHostedEmailVerifier(broker));
     if (deps?.gateway) {
-      const web = new PublicWebDiscoveryProvider({ gateway: deps.gateway, broker });
+      const web = new PublicWebDiscoveryProvider({
+        gateway: deps.gateway,
+        broker,
+        runtimeTelemetry: deps.runtimeTelemetry,
+      });
       this.discovery.push(web);
       // 决策人抽取排联系人发现**首位**（调用方取 adapters[0]）：Impressum/管理层页的具名决策人
       // 优先于 public_web 的正则邮箱扫描（后者只挖到 info@，Role/Reachability 维恒零的根因之一）。
-      this.contacts.push(new DecisionMakerContactAdapter({ gateway: deps.gateway, broker }));
+      this.contacts.push(new DecisionMakerContactAdapter({
+        gateway: deps.gateway,
+        broker,
+        runtimeTelemetry: deps.runtimeTelemetry,
+      }));
       this.contacts.push(web);
       this.emailVerifiers.push(web);
       // 名录/列表发现（协会会员名录 + 展会参展商 + 行业目录）——同 SearXNG+Crawl4AI+Gemini 栈。
-      this.discovery.push(new DirectoryDiscoveryProvider({ gateway: deps.gateway, broker }));
+      this.discovery.push(new DirectoryDiscoveryProvider({
+        gateway: deps.gateway,
+        broker,
+        runtimeTelemetry: deps.runtimeTelemetry,
+      }));
     }
     // 结构化开放数据源（零爬取、CC0/ODbL）——不依赖 gateway，始终可用。
     this.discovery.push(new WikidataDiscoveryProvider({ broker }));

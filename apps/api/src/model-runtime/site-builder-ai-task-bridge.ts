@@ -247,6 +247,7 @@ export async function executeSiteBuilderModelAttempt<Input, Output>(
   const promptMaterial = { system: options.definition.system ?? '', user: options.prompt };
   const result = await runtime.execute({
     executionId: `site-builder:${options.context.runId ?? options.context.workspaceId}:${options.definition.id}:${options.fallbackIndex}`,
+    fallbackIndex: options.fallbackIndex,
     workspaceId: options.context.workspaceId,
     buildRunId: options.context.runId ?? options.context.workspaceId,
     contract,

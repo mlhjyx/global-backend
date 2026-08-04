@@ -3,6 +3,8 @@ export * from './context-engine';
 export * from './context-assembly-cache';
 export * from './exact-result-cache';
 export * from './langfuse-runtime-telemetry';
+export * from './langfuse-runtime-telemetry.service';
+export * from './model-runtime.module';
 export * from './model-execution-runtime';
 export * from './prompt-compiler';
 export * from './task-contract-registry';

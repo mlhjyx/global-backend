@@ -18,6 +18,7 @@ import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
+import { ModelRuntimeModule } from './model-runtime';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -35,6 +36,7 @@ import { SiteBuilderModule } from './site-builder/site-builder.module';
     PrismaModule,
     AuthModule,
     ModelGatewayModule,
+    ModelRuntimeModule,
     TemporalModule,
     RelayModule,
     CompanyModule,

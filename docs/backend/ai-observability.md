@@ -29,10 +29,24 @@ Create the untracked secret file, replacing every placeholder:
 ```bash
 mkdir -p .secrets
 cp infra/ai-observability.env.example .secrets/ai-observability.env
+chmod 600 .secrets/ai-observability.env
 ```
 
-Generate the encryption key with `openssl rand -hex 32`; generate every other
-password/key independently. Then validate and start the profile:
+Use URL-safe hexadecimal for the PostgreSQL password because it is interpolated
+into `DATABASE_URL`. Langfuse project credentials must keep their required
+prefixes. Generate independent values locally, for example:
+
+```bash
+openssl rand -hex 32                              # PostgreSQL password
+openssl rand -hex 32                              # encryption key
+pk-lf-$(openssl rand -hex 16)                     # project public key
+sk-lf-$(openssl rand -hex 16)                     # project secret key
+```
+
+Put the generated `pk-lf-...` and `sk-lf-...` values in `LANGFUSE_PUBLIC_KEY`
+and `LANGFUSE_SECRET_KEY`. Compose uses that same pair for headless project
+initialization, so there is no second key pair to drift. Then validate and start
+the profile:
 
 ```bash
 docker compose --env-file .secrets/ai-observability.env -p global \
@@ -42,6 +56,24 @@ docker compose --env-file .secrets/ai-observability.env -p global \
   -f docker-compose.yml -f infra/ai-observability.compose.yml \
   --profile ai-observability up -d
 ```
+
+Load the same file separately into both application processes. `--env-file`
+configures Compose interpolation only; it does not modify the host API or
+Temporal worker environment. In the API shell:
+
+```bash
+set -a
+. .secrets/ai-observability.env
+set +a
+pnpm --filter @global/api start:dev
+```
+
+Repeat the same three environment-loading lines in a separate worker shell,
+then run `pnpm --filter @global/api worker`. For systemd-managed processes,
+configure the equivalent absolute `EnvironmentFile=` on both the API and worker
+units and restart them instead of sourcing the file in a shell. Confirm both
+processes can reach `LANGFUSE_BASE_URL=http://127.0.0.1:3002` before expecting
+runtime spans.
 
 Stop without deleting volumes:
 
@@ -74,6 +106,13 @@ references.
 
 The application exporter must use a bounded queue and drop with a local warning
 when Langfuse is unavailable. It must never block or fail a model operation.
+
+All Langfuse containers attach only to the internal `ai-observability` network;
+they do not join the business Compose default network. The web process keeps
+the server-side media endpoint at `http://langfuse-minio:9000`. Browser/SDK
+media uploads are outside this metadata-only profile and require a separately
+reviewed externally resolvable MinIO endpoint; do not replace the container's
+internal endpoint with host `localhost`.
 
 ## Version provenance
 

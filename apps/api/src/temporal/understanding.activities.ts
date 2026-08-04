@@ -7,6 +7,7 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links';
 import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
+import type { RuntimeTelemetry } from '../model-runtime/types';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -50,6 +51,7 @@ export function createUnderstandingActivities(deps: {
   gateway: ModelGateway;
   /** 收口②：页面抓取经 ToolBroker（crawl4ai.fetch，白名单绑定 extract_claims 契约）。 */
   broker?: ExecutionBroker;
+  runtimeTelemetry?: RuntimeTelemetry;
 }) {
   const crawlViaBroker = async (workspaceId: string, url: string): Promise<string> => {
     if (!deps.broker) throw new Error('understanding: broker unavailable (fail-closed, no raw egress)');
@@ -120,6 +122,7 @@ export function createUnderstandingActivities(deps: {
           schema: contract?.outputSchema ?? { required: ['claims'] },
         },
         { workspaceId: args.workspaceId },
+        { telemetry: deps.runtimeTelemetry },
       );
       const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
       // Stub gateway returns { claims: null }; synthesize a deterministic sample
@@ -143,6 +146,7 @@ export function createUnderstandingActivities(deps: {
           schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
         },
         { workspaceId: args.workspaceId },
+        { telemetry: deps.runtimeTelemetry },
       );
       const out = result.data as { industry?: string; summary?: string };
       if (!out?.industry && !out?.summary) return; // stub/空输出不回填
@@ -172,6 +176,7 @@ export function createUnderstandingActivities(deps: {
           schema: contract?.outputSchema ?? { required: ['offerings'] },
         },
         { workspaceId: args.workspaceId },
+        { telemetry: deps.runtimeTelemetry },
       );
       const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
       return { offerings: Array.isArray(fromModel) ? fromModel : [] };

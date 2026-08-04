@@ -157,6 +157,7 @@ export interface RepairBinding {
 
 export interface ModelExecutionPlan<Input, Output> {
   executionId: string;
+  fallbackIndex?: number;
   workspaceId: string;
   buildRunId: string;
   contract: TaskModelContract<Input, Output>;
@@ -213,6 +214,8 @@ export interface RuntimeTelemetryEvent {
   requestedAlias: string;
   resolvedAlias: string;
   protocol: ModelProtocol;
+  reasoning: ReasoningLevel;
+  fallbackIndex: number;
   detail?: Readonly<Record<string, string | number | boolean>>;
 }
 
