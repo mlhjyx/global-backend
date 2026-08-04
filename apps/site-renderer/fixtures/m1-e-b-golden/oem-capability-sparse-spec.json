@@ -344,8 +344,8 @@
       "detail.oem-capability-hero.subhead": "Further information is available on request.",
       "detail.oem-capability-inquiry.sub": "Further information is available on request.",
       "detail.oem-capability-inquiry.title": "Practical solutions",
-      "detail.oem-capability-materials.ctaprimarylabel": "Further information is…",
-      "detail.oem-capability-materials.ctasecondarylabel": "Further information is…",
+      "detail.oem-capability-materials.ctaprimarylabel": "Get in touch",
+      "detail.oem-capability-materials.ctasecondarylabel": "Get in touch",
       "detail.oem-capability-materials.eyebrow": "Further information is available on req…",
       "detail.oem-capability-materials.intro": "Further information is available on request.",
       "detail.oem-capability-materials.items.0.name": "Further information is available on request.",
@@ -435,7 +435,7 @@
           "id": "snapshot-c36150ea2c18d6f5",
           "digest": "efafa48830ce4e38e1abebbb4a94c8bba4bd58570d564305f7553721d5ac1e22"
         },
-        "inputHash": "397f88ef6cdc4441315058c807abfaf915ec853064b183a510dc6e9978749083",
+        "inputHash": "a83b822e16bb8408356e988c7ad19acf6565d3853d48664c44a1430f2d888651",
         "slots": {
           "detail.oem-capability-features.eyebrow": {
             "type": "plain_text",
@@ -521,7 +521,7 @@
             "claimRefs": []
           },
           "detail.oem-capability-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -556,17 +556,17 @@
             "claimRefs": []
           },
           "detail.oem-capability-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.oem-capability-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.oem-capability-materials.eyebrow": {
@@ -755,7 +755,7 @@
             "claimRefs": []
           },
           "home.oem-home-process-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -811,7 +811,7 @@
             "claimRefs": []
           },
           "home.oem-home-process-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -846,7 +846,7 @@
             "claimRefs": []
           },
           "home.oem-home-process-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1198,7 +1198,7 @@
             "claimRefs": []
           }
         },
-        "digest": "3c7bfe6ece0dcfa608497c20f05b9d5a7d445566480d7bc8cc25cde83c87f45c"
+        "digest": "2a11f8d176f4fd14e9e8eafdaf31995aa4f7cefc9549331dc049fd066d6c2d32"
       }
     }
   }

@@ -6,7 +6,9 @@ import {
   CopyBundleGenerationError,
   CopyBundleService,
   copyGenerationContextDigest,
+  copySlotContentMode,
   neutralCopySlotContent,
+  validateCopySlotGeneratorOutput,
   type CopySlotGenerator,
 } from "./copy-bundle.service";
 
@@ -70,8 +72,8 @@ function generator(failLocale?: string): CopySlotGenerator {
       return {
         content:
           input.locale === "de-DE"
-            ? `${input.slot.key} deutsch`
-            : `${input.slot.key} english`,
+            ? "Klare Technik für sichere Entscheidungen"
+            : "Clear engineering for confident decisions",
         claimRefs: [],
       };
     }),
@@ -111,6 +113,63 @@ describe("CopyBundleService", () => {
       expect(neutralCopySlotContent(key, "de-DE")).toBe("Kontakt aufnehmen");
     }
   });
+
+  it.each([
+    "home.hero.primarycta.label",
+    "home.hero.ctalabel",
+    "products.grid.cta1",
+  ])("classifies semantic component CTA slot %s before validation", (key) => {
+    expect(
+      copySlotContentMode({
+        key,
+        type: "plain_text",
+        maxGraphemes: 24,
+        factual: true,
+      }),
+    ).toBe("cta_allowlist");
+  });
+
+  it.each([
+    {
+      key: "home.hero.primarycta.label",
+      type: "plain_text" as const,
+      expected: "COPY_CTA_POLICY_VIOLATION",
+    },
+    {
+      key: "nav.home",
+      type: "plain_text" as const,
+      expected: "COPY_DETERMINISTIC_SLOT_VIOLATION",
+    },
+    {
+      key: "inquiry.field.name",
+      type: "form_label" as const,
+      expected: "COPY_DETERMINISTIC_SLOT_VIOLATION",
+    },
+    {
+      key: "faq.q1",
+      type: "plain_text" as const,
+      expected: "COPY_DETERMINISTIC_SLOT_VIOLATION",
+    },
+  ])(
+    "does not let a cited Claim bypass the $key slot gate",
+    ({ key, type, expected }) => {
+      const context = generationContexts.en.context;
+      expect(() =>
+        validateCopySlotGeneratorOutput({
+          locale: "en",
+          slot: { key, type, maxGraphemes: 80, factual: false },
+          output: {
+            content: "Industrial pumps up to 400 bar",
+            claimRefs: ["claim-1"],
+          },
+          claims: new Map([
+            ["claim-1", { statement: "Industrial pumps up to 400 bar" }],
+          ]),
+          context,
+        }),
+      ).toThrow(expected);
+    },
+  );
 
   it("generates every locale and slot from the frozen Claim snapshot only", async () => {
     const model = generator();

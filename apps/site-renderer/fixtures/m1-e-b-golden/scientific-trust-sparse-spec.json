@@ -346,7 +346,7 @@
           "id": "snapshot-58a847e928da7407",
           "digest": "e11716d0836b71b78c79999b06c07e9682209d1ebdde3ea3547287028d0430d4"
         },
-        "inputHash": "e4dad6a782f8478d3d2e66644385ab51291d01ba978c9a65d1bc1100534cdf82",
+        "inputHash": "d0ef846416259d637e37058a113fe94b558e2daf2e4809ddfcadb5394e2c74c9",
         "slots": {
           "detail.scientific-solution-faq.items.0.a": {
             "type": "plain_text",
@@ -467,7 +467,7 @@
             "claimRefs": []
           },
           "detail.scientific-solution-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -604,7 +604,7 @@
             "claimRefs": []
           },
           "home.scientific-home-system-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -963,7 +963,7 @@
             "claimRefs": []
           }
         },
-        "digest": "2f12323e8ceac8cbedb2e5e43249f3a06fd530dc2017ccd7bd1c71f36952cd59"
+        "digest": "19f8d98345b0f0968555b2054abf1e8b62dcd0134aed78f43b4fcc29a55d5f70"
       }
     }
   }

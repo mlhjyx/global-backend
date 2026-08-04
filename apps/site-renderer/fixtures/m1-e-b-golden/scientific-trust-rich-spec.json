@@ -376,7 +376,7 @@
       "home.scientific-home-evidence-inquiry.title": "Practical solutions",
       "home.scientific-home-evidence-products.capacitylabel": "Further information is available on request.",
       "home.scientific-home-evidence-products.chapter": "Further information is available on req…",
-      "home.scientific-home-evidence-products.configurecta.label": "Further information is…",
+      "home.scientific-home-evidence-products.configurecta.label": "Get in touch",
       "home.scientific-home-evidence-products.cycleslabel": "Further information is available on request.",
       "home.scientific-home-evidence-products.f1": "Further information is…",
       "home.scientific-home-evidence-products.f2": "Further information is…",
@@ -457,7 +457,7 @@
           "id": "snapshot-39fbbb8bd1dbc2ee",
           "digest": "0ef54e1b5c3b71af07d944d8e90f5818f0a8b314483211dfc5698b5854fbfb63"
         },
-        "inputHash": "7b3d3b1fd1b886cec55786242789eb509c4dfa8fb699923a461e02cc989d2c42",
+        "inputHash": "8e3f9b9de110e3d4d05068bce57be987c77e80eae6c24c2e3d972858b89b7962",
         "slots": {
           "detail.scientific-solution-faq.items.0.a": {
             "type": "plain_text",
@@ -578,7 +578,7 @@
             "claimRefs": []
           },
           "detail.scientific-solution-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -798,14 +798,14 @@
             "claimRefs": []
           },
           "detail.scientific-validation-cta.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "detail.scientific-validation-cta.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -833,7 +833,7 @@
             "claimRefs": []
           },
           "detail.scientific-validation-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1034,7 +1034,7 @@
             "claimRefs": []
           },
           "home.scientific-home-evidence-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1048,7 +1048,7 @@
             "claimRefs": []
           },
           "home.scientific-home-evidence-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1090,10 +1090,10 @@
             "claimRefs": []
           },
           "home.scientific-home-evidence-products.configurecta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.scientific-home-evidence-products.cycleslabel": {
@@ -1277,7 +1277,7 @@
             "claimRefs": []
           },
           "home.scientific-home-system-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1636,7 +1636,7 @@
             "claimRefs": []
           }
         },
-        "digest": "755dae3654faba52a286d20984341097c14608122ded07825419f9264a8d9c21"
+        "digest": "8199fbb00d094065890c4cc156408087e1cc109396cbcc34d43bc5059a61ebdb"
       }
     }
   }

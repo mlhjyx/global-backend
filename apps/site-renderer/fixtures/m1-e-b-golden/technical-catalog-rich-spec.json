@@ -293,7 +293,7 @@
       "detail.catalog-application-features.titleline2": "Further information is avail…",
       "detail.catalog-application-hero.capacitylabel": "Further information is available on request.",
       "detail.catalog-application-hero.chapter": "Further information is available on req…",
-      "detail.catalog-application-hero.configurecta.label": "Further information is…",
+      "detail.catalog-application-hero.configurecta.label": "Get in touch",
       "detail.catalog-application-hero.cycleslabel": "Further information is available on request.",
       "detail.catalog-application-hero.f1": "Further information is…",
       "detail.catalog-application-hero.f2": "Further information is…",
@@ -355,7 +355,7 @@
       "home.catalog-materials-cta.headline": "Practical solutions",
       "home.catalog-materials-hero.capacitylabel": "Further information is available on request.",
       "home.catalog-materials-hero.chapter": "Further information is available on req…",
-      "home.catalog-materials-hero.configurecta.label": "Further information is…",
+      "home.catalog-materials-hero.configurecta.label": "Get in touch",
       "home.catalog-materials-hero.cycleslabel": "Further information is available on request.",
       "home.catalog-materials-hero.f1": "Further information is…",
       "home.catalog-materials-hero.f2": "Further information is…",
@@ -370,8 +370,8 @@
       "home.catalog-materials-hero.title": "Practical solutions",
       "home.catalog-materials-hero.titleaccent": "Further information is avail…",
       "home.catalog-materials-hero.weightlabel": "Further information is available on request.",
-      "home.catalog-materials-library.ctaprimarylabel": "Further information is…",
-      "home.catalog-materials-library.ctasecondarylabel": "Further information is…",
+      "home.catalog-materials-library.ctaprimarylabel": "Get in touch",
+      "home.catalog-materials-library.ctasecondarylabel": "Get in touch",
       "home.catalog-materials-library.eyebrow": "Further information is available on req…",
       "home.catalog-materials-library.intro": "Further information is available on request.",
       "home.catalog-materials-library.items.0.name": "Further information is available on request.",
@@ -419,7 +419,7 @@
           "id": "snapshot-0d05ab79c4205e20",
           "digest": "498d368afbf2ef75975911b3e579b0ec6b9f92ed9730baf17913e9b14fcd0a9b"
         },
-        "inputHash": "c4bc4551b424b2e4d5dd4f3d7b5357573f4c518b036792504359ffb5f7bcc558",
+        "inputHash": "450e4abd3c18d37f9a37980dbef66ef7ebfc41ddb4f466cce0d24b34fa8a5856",
         "slots": {
           "detail.catalog-application-features.eyebrow": {
             "type": "plain_text",
@@ -519,10 +519,10 @@
             "claimRefs": []
           },
           "detail.catalog-application-hero.configurecta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.catalog-application-hero.cycleslabel": {
@@ -651,7 +651,7 @@
             "claimRefs": []
           },
           "detail.catalog-application-page-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -707,7 +707,7 @@
             "claimRefs": []
           },
           "detail.catalog-detail-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -784,7 +784,7 @@
             "claimRefs": []
           },
           "home.catalog-home-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -881,7 +881,7 @@
             "claimRefs": []
           },
           "home.catalog-home-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -951,7 +951,7 @@
             "claimRefs": []
           },
           "home.catalog-materials-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -979,10 +979,10 @@
             "claimRefs": []
           },
           "home.catalog-materials-hero.configurecta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.catalog-materials-hero.cycleslabel": {
@@ -1097,17 +1097,17 @@
             "claimRefs": []
           },
           "home.catalog-materials-library.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.catalog-materials-library.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.catalog-materials-library.eyebrow": {
@@ -1194,7 +1194,7 @@
             "claimRefs": []
           },
           "home.catalog-materials-page-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -1341,7 +1341,7 @@
             "claimRefs": []
           }
         },
-        "digest": "88786c466aacbab573cbe0671b59a8bc1b1a36346dd970540d4b0af0f9e9fa06"
+        "digest": "86766ea8a1a6c17f8775b6bbc5dfdcc473b85f2536c5e92f6b7cccdbfe8f20ca"
       }
     }
   }

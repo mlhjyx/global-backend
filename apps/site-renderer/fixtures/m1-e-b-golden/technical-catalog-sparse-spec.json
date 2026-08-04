@@ -265,7 +265,7 @@
           "id": "snapshot-9a13f60a58b9b98c",
           "digest": "befc89ec1acff9e415310aae801917349d0da27efba9aeb5236bf60a154b713e"
         },
-        "inputHash": "6db9b3d80bdfd79097422f4f4ebab686521bca1482300a9a8ed97b00141c1812",
+        "inputHash": "98878d871f087935436315b535375f6ef63e5838a6974fcb749368638c78072b",
         "slots": {
           "detail.catalog-detail-faq.items.0.a": {
             "type": "plain_text",
@@ -303,7 +303,7 @@
             "claimRefs": []
           },
           "detail.catalog-detail-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -380,7 +380,7 @@
             "claimRefs": []
           },
           "home.catalog-home-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -477,7 +477,7 @@
             "claimRefs": []
           },
           "home.catalog-home-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -624,7 +624,7 @@
             "claimRefs": []
           }
         },
-        "digest": "43c24ba2d71dcbb2a538492a12081873bb1deec115c4b0ff8e557dd791fe3d99"
+        "digest": "1fdf8aa03b4c862b9f26c0224e354197f359e6fa5a298aed0a4ae1f4d58bd54d"
       }
     }
   }

@@ -318,8 +318,8 @@
       "detail.natural-catalog-hero.cta.label": "Get in touch",
       "detail.natural-catalog-hero.headline": "Practical solutions",
       "detail.natural-catalog-hero.subhead": "Further information is available on request.",
-      "detail.natural-catalog-materials.ctaprimarylabel": "Further information is…",
-      "detail.natural-catalog-materials.ctasecondarylabel": "Further information is…",
+      "detail.natural-catalog-materials.ctaprimarylabel": "Get in touch",
+      "detail.natural-catalog-materials.ctasecondarylabel": "Get in touch",
       "detail.natural-catalog-materials.eyebrow": "Further information is available on req…",
       "detail.natural-catalog-materials.intro": "Further information is available on request.",
       "detail.natural-catalog-materials.items.0.name": "Further information is available on request.",
@@ -351,8 +351,8 @@
       "home.natural-home-origin-hero.primarycta.label": "Get in touch",
       "home.natural-home-origin-hero.scroll": "Further information is available on request.",
       "home.natural-home-origin-hero.secondarycta.label": "Get in touch",
-      "home.natural-home-origin-materials.ctaprimarylabel": "Further information is…",
-      "home.natural-home-origin-materials.ctasecondarylabel": "Further information is…",
+      "home.natural-home-origin-materials.ctaprimarylabel": "Get in touch",
+      "home.natural-home-origin-materials.ctasecondarylabel": "Get in touch",
       "home.natural-home-origin-materials.eyebrow": "Further information is available on req…",
       "home.natural-home-origin-materials.intro": "Further information is available on request.",
       "home.natural-home-origin-materials.items.0.name": "Further information is available on request.",
@@ -398,7 +398,7 @@
           "id": "snapshot-74b3d8688f33a503",
           "digest": "34eaff70dfad824261883ff7fe990ecc37d8906e6f08b6fd870f9683374f965c"
         },
-        "inputHash": "dc2b3384b6abfc88e36e1c43c642616bae67b3ecb67bac9e1f6405226a057150",
+        "inputHash": "de8410fd74e8a122362eec9c9d05096591745fcf7895dc533948a849e2ff95db",
         "slots": {
           "detail.natural-catalog-cta.eyebrow": {
             "type": "plain_text",
@@ -408,14 +408,14 @@
             "claimRefs": []
           },
           "detail.natural-catalog-cta.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "detail.natural-catalog-cta.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -478,7 +478,7 @@
             "claimRefs": []
           },
           "detail.natural-catalog-hero.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -499,17 +499,17 @@
             "claimRefs": []
           },
           "detail.natural-catalog-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.natural-catalog-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "detail.natural-catalog-materials.eyebrow": {
@@ -687,7 +687,7 @@
             "claimRefs": []
           },
           "home.natural-home-origin-cta.cta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -722,7 +722,7 @@
             "claimRefs": []
           },
           "home.natural-home-origin-hero.primarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
@@ -736,24 +736,24 @@
             "claimRefs": []
           },
           "home.natural-home-origin-hero.secondarycta.label": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
             "content": "Get in touch",
             "claimRefs": []
           },
           "home.natural-home-origin-materials.ctaprimarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.natural-home-origin-materials.ctasecondarylabel": {
-            "type": "plain_text",
+            "type": "cta_label",
             "maxGraphemes": 24,
             "factual": false,
-            "content": "Further information is…",
+            "content": "Get in touch",
             "claimRefs": []
           },
           "home.natural-home-origin-materials.eyebrow": {
@@ -1025,7 +1025,7 @@
             "claimRefs": []
           }
         },
-        "digest": "9ebf46b36b24af2ac6a6c5a3dc71742dab21dcb035ac9f7ccb3fd62bd2a31532"
+        "digest": "ee008dedc67d3de6d413f871419f85f6c0b3b3669dceca7cedc87e165714508c"
       }
     }
   }
