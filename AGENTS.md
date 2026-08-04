@@ -6,13 +6,15 @@
 
 ## 1. 这是什么 + 边界（关键）
 
-出海企业 **AI 全球客户开发与增长执行平台**的后端仓库，现包含两个产品面：已于 2026-08-02 提前解除新增开发冻结、可先行审计/规划且在 M1 收口后恢复施工的**买家智能与机会资格后端**，以及当前正在收口的 **Site Builder 独立站建设子系统**。
+出海企业 **AI 全球客户开发与增长执行平台**的后端仓库，现包含两个产品面：已于 2026-08-02 解除新增开发冻结、可在重新审计后恢复施工的**买家智能与机会资格后端**，以及已于 2026-08-04 完成 M1 阶段收口的 **Site Builder 独立站建设子系统**。
 
 - **获客侧边界不变**：止于 `LeadQualifiedPackage`；Campaign、触达、Conversation、Opportunity/QGO/SAO、归因归 SaaS。Site Builder 在本仓负责建站与发布能力，SaaS 负责身份、控制面和产品 UI。
 - 本后端**不做身份系统**：只校验 SaaS 平台签发的 token（JWKS 验签）→ 解出 `workspace_id` / `user` / `roles`。不签发、不刷新、不管用户表。
 - 不为前端并行造 mock、不等前端。接口 code-first OpenAPI，后期交付。
 
 ## 2. 技术栈 / 架构
+
+- **2026-08-04 M1-g 收口覆盖真值**：六个剩余文本 task 的 campaign `7c2e1b2d-2d91-4a6e-9c9c-34a006920804` 完成 206 executions / 262 wire calls，产物见 [`m1-g-text-evaluation-real-evidence-v1.json`](docs/evidence/site-builder/m1-g-text-evaluation-real-evidence-v1.json)。复审确认它未由 canonical fixed-HEAD/cost-safe executor 产生，也未内嵌 resolved upstream/channel 与逐 wire settlement attestation，因此已明确降级为 `diagnostic_only`、`promotionEligible=false`：62 accepted、99 validator rejected、45 transport failed，不能据此排序、晋级或切路由。M1-g 收口的是 12 视觉集、确定性发布门以及“本轮不晋级、保留现役路由”的决策；一次性 runner 已删除，仓库不再为这次运行计算价格。通用 suite/validator 与诊断产物保留；这不代表 MODEL-2、30+ 成熟系统集、生产部署或 M2-PUBLISH。
 
 - **2026-08-03 source/manifest split 当前真值（覆盖下方旧 harness truth-sync）**：当前源码合同为 `site-builder-model-evaluation-harness/2026-08-01-v18` 与 `design_spec` suite/source bundle v15，#266 已合并。12 fixtures、3 候选、2 次重复、一次 GPT-5.5 probe、24 个确定性 comparator case 及 73 executions / 146 wire calls 规划矩阵不变；admission、repair 和最终评分全部绑定模块加载时捕获的 validator。每个物理调用独立受 20¢ 上限约束，两次合法 repair 的聚合结算与 capability attestation 均按完整 40¢ execution reservation 核验。当前 v2 create-only manifest 固定 `origin/main@295038d323b4bd09ed16ab73ea981d24e1f010df`；当前仍无真实调用、费用、evidence、promotion 或路由变化。
 - **2026-08-03 `design_spec` v2 manifest（覆盖上一条作为当前合同的表述）**：`site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2` 生成新的 73/146 清单、24 个零调用 comparator case、source bundle、compiled contracts 与停止条件。2026-08-01 v1 与其 `e493ba1d09fe37feea927f70d12f17aadadc5c6a` fixed source 保留为历史审计产物，不能作为新原生双币执行的授权输入。v2 不读取 `.env`、OpenOx 价格、余额或凭据，不含 wire client，dispatch 仍为 `NOT_AUTHORIZED`，调用和费用均为零。
@@ -87,9 +89,9 @@ data_provider 源（gleif/directory/trade_fair/wikidata/…）在 **API/relay �
 
 ## 6. 当前施工与恢复后的获客 backlog
 
-> 🟢 **2026-08-02 用户明确提前解除获客侧开发冻结**。M1 收口前可做只读审计、研究、规划与排期准备；M1 收口后才恢复获客实现施工。该决定不表示旧 backlog、旧 owner、旧 Claude/worktree 或默认 `DISABLED` provider 自动恢复。Site Builder M1-g 仍是当前唯一在途产品施工；获客恢复后的首个任务必须基于最新 `origin/main`、活文档、代码、服务与合规状态重新审计，并由用户单独确认优先级和实施范围。2026-07-13 至 2026-08-02 的冻结作为历史 provenance 保留。
+> 🟢 **2026-08-04 M1 已收口**。获客侧可恢复实现施工，但这不表示旧 backlog、旧 owner、旧 Claude/worktree 或默认 `DISABLED` provider 自动恢复。首个恢复任务必须基于最新 `origin/main`、活文档、代码、服务与合规状态重新审计并明确 owner/验收；2026-07-13 至 2026-08-02 的冻结作为历史 provenance 保留。
 >
-> **DOC-12 状态**：#119/#120 已把主要设计内容分发入活文档；2026-07-16 truth-sync（#125）已收口项目级状态、00–14 漂移与接入说明，R0 contract（#126）、R1-safety ①+②、**R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2/B-min、M1-d、R1-min、DI-0（#164）、M1-e-A/B 与 M1-f** 均已闭环，不把 DOC-12 重新描述为一项代码能力。M1-e-A 的 55 型全部 `m1_e_a_qualified`，保留 385 份七件套证据与 165 张三断点 SHA-256 快照。M1-e-B 已交付六个 `1.0.0/approved` Family、DesignBrief、封闭 adapter/copy-slot/四层 validator、SiteSpec 1.1、tenant/catalog asset overlay、ReleaseManifest v2、局部 v2-base 与 Temporal patch；12 个 sparse/rich Golden 对应 36 张整站三断点证据。M1-f 已接入确定性 QA/SEO/a11y/genericness、三断点截图、closed-shape DesignEvaluation v2、最多三次闭合 optionId 修复、ReleaseManifest v3 与 replay-safe quality patch；旧 history 与 Demo v0/SiteSpec 1.0/Release v1 继续兼容。Gemini 原生图像接口及 Terra/Responses、Sol/Responses、Sonnet/Messages 均已连通；复核发现现有确定性 Golden 不是独立审美 Gold，旧四模型结果只能作诊断、不得晋级。**下一施工顺序**：M1-g 阶段收口；`template-distillation` 未采纳。R4-A2 继续提供 Claim/Evidence truth bridge；R4-B-min 继续提供 BuildRun hard cap、task fencing、model/tool spend ledger 与 kill switch。上述开发验证均不代表生产部署；M1-c 仍没有公开 process/select API。
+> **DOC-12 状态**：#119/#120 已把主要设计内容分发入活文档；2026-07-16 truth-sync（#125）已收口项目级状态、00–14 漂移与接入说明，R0 contract（#126）、R1-safety ①+②、**R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2/B-min、M1-d、R1-min、DI-0（#164）、M1-e-A/B、M1-f 与 M1-g** 均已闭环，不把 DOC-12 重新描述为一项代码能力。M1-e-A 的 55 型全部 `m1_e_a_qualified`，保留 385 份七件套证据与 165 张三断点 SHA-256 快照。M1-e-B 已交付六个 `1.0.0/approved` Family、DesignBrief、封闭 adapter/copy-slot/四层 validator、SiteSpec 1.1、tenant/catalog asset overlay、ReleaseManifest v2、局部 v2-base 与 Temporal patch；12 个 sparse/rich Golden 对应 36 张整站三断点证据。M1-f 已接入确定性 QA/SEO/a11y/genericness、三断点截图、closed-shape DesignEvaluation v2、最多三次闭合 optionId 修复、ReleaseManifest v3 与 replay-safe quality patch；M1-g 的真实候选结果没有自动改变路由。**下一施工顺序**：重新审计并选择获客侧首个恢复任务；`template-distillation` 未采纳。上述开发验证均不代表生产部署、MODEL-2、30+ 成熟系统集或 M2-PUBLISH。
 >
 > **2026-07-30 M1-g QA/SEO consumer fast-follow**：`qa_summarize` / `seo_review` 已在当前交付分支接到 P4 确定性 finding，保存私有 create-only `QualityNarrativeSetV1`；输出只可引用既有 finding/group/explanation ID，不能改变 severity、pass、repair、ReleaseManifest 或公开 API。空 finding、付费拒绝、模型失败/无效输出和 unknown settlement 均按冻结规则降级或停止；既有未结算 spend 在传入 executor 前 fail-closed，私有 sidecar 存储/校验失败只省略非权威叙事而不推翻确定性结果，取消仍直接终止。该 PR 模型调用为 0、费用 $0.00，未改 active route/new-api/数据库；下一步仍须先独立审查和合并，再从合并提交准备 `design_spec` canonical suite。
 >
