@@ -58,6 +58,12 @@ describe("Copy Evaluation v2 admission plan", () => {
       requiredVersion: "site-builder-task-contract/site_builder.copy/v2",
       status: "READY",
       missingContext: [],
+      currentContext: [
+        "audience",
+        "brand_voice",
+        "prohibited_assertions",
+        "cta_policy",
+      ],
     });
     expect(COPY_EVALUATION_V2_PLAN.creativeOutputAdmission).toEqual({
       currentPolicy: "validated_non_factual_copy_is_preserved",
@@ -86,6 +92,18 @@ describe("Copy Evaluation v2 admission plan", () => {
       repeats: 2,
       status: "READY",
     });
+    expect(COPY_EVALUATION_V2_PLAN.evaluatorAdmission).toEqual({
+      evaluatorVersion: "site-builder-copy-assembly-evaluator/2026-08-04-v2",
+      currentScoredDimensions: [],
+      requiredScoredDimensions: [
+        "language_quality",
+        "brand_voice",
+        "cta_quality",
+        "cross_locale_quality",
+        "stability",
+      ],
+      status: "BLOCKED_ON_SCORED_EVALUATOR",
+    });
     expect(COPY_EVALUATION_V2_PLAN.requiredContext).toEqual([
       "claim_snapshot",
       "slot_contract",
@@ -107,7 +125,12 @@ describe("Copy Evaluation v2 admission plan", () => {
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,
       maximumWireCalls: 72,
-      status: "BLOCKED_BEFORE_PILOT_RESULT",
+      status: "BLOCKED_ON_SCORED_EVALUATOR",
+    });
+    expect(COPY_EVALUATION_V2_PLAN.cachePolicy).toEqual({
+      exactResultCache: "disabled_for_evaluation",
+      repeatIdentity: "distinct_execution_and_cache_identity_per_repeat",
+      durableReplay: "same_physical_execution_only",
     });
     expect(COPY_EVALUATION_V2_PLAN.decisionBoundaries).toEqual([
       "capability_pilot_dispatch_requires_separate_user_authorization",
@@ -181,4 +204,44 @@ describe("Copy Evaluation v2 admission plan", () => {
       ).toThrow("COPY_EVALUATION_V2_PLAN_DRIFT");
     },
   );
+
+  it.each([
+    [
+      "undefined field",
+      () => ({ ...COPY_EVALUATION_V2_PLAN, hidden: undefined }),
+    ],
+    [
+      "function field",
+      () => ({ ...COPY_EVALUATION_V2_PLAN, hidden: () => "omitted" }),
+    ],
+    [
+      "symbol-keyed field",
+      () => {
+        const candidate = { ...COPY_EVALUATION_V2_PLAN } as Record<
+          PropertyKey,
+          unknown
+        >;
+        candidate[Symbol("hidden")] = "omitted";
+        return candidate;
+      },
+    ],
+    [
+      "array property",
+      () => {
+        const candidates = [...COPY_EVALUATION_V2_PLAN.candidates] as Array<
+          (typeof COPY_EVALUATION_V2_PLAN.candidates)[number]
+        > & { hidden?: string };
+        candidates.hidden = "omitted";
+        return { ...COPY_EVALUATION_V2_PLAN, candidates };
+      },
+    ],
+    [
+      "non-JSON object",
+      () => ({ ...COPY_EVALUATION_V2_PLAN, hidden: new Date(0) }),
+    ],
+  ])("rejects %s before canonical JSON comparison", (_name, build) => {
+    expect(() => validateCopyEvaluationV2Plan(build())).toThrow(
+      "COPY_EVALUATION_V2_PLAN_NON_JSON",
+    );
+  });
 });

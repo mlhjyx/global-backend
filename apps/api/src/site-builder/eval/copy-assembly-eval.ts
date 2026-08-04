@@ -45,6 +45,7 @@ export const COPY_ASSEMBLY_EVALUATOR_RUBRIC = Object.freeze({
   factualClaimTextMustBeExact: true,
   validatedNonFactualCopyIsPreserved: true,
   creativeQualityIsScoredNotExactMatched: true,
+  scoredDimensions: Object.freeze([] as string[]),
   freeFormFactsAllowed: false,
   prohibitedBehavior: Object.freeze([
     "invent_claim_reference",
