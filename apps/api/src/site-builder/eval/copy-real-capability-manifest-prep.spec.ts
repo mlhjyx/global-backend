@@ -22,6 +22,8 @@ const PREPARATION_HEAD = "f".repeat(40);
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../..");
 const HISTORICAL_MANIFEST_V1_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v1.json";
+const HISTORICAL_MANIFEST_V2_PATH =
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v2.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -31,23 +33,23 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("freezes the operational-proof merge as manifest v2 without dispatch", () => {
+  it("freezes the dispatch-preflight merge as manifest v3 without dispatch", () => {
     const artifact = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: PREPARATION_HEAD,
       sourceFiles: sourceFiles(),
     });
 
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "c167cde19e0d7d415303bc5353e2733480df13da",
+      "03d701ee15d28254419fa4f04fb865ba4fd44932",
     );
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v2.json",
+      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v3.json",
     );
     expect(artifact).toMatchObject({
       schemaVersion:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
       artifactId:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2",
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3",
       classification: "FIXED_SOURCE_CREATE_ONLY",
       fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD,
@@ -60,7 +62,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       manifest: {
         schemaVersion:
           "site-builder-copy-real-capability-manifest/2026-08-05-v1",
-        manifestId: "site-builder-copy-real-capability/2026-08-05-v2",
+        manifestId: "site-builder-copy-real-capability/2026-08-05-v3",
         fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
         planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
         dispatchAuthorization: "NOT_AUTHORIZED",
@@ -106,6 +108,9 @@ describe("Copy real capability create-only manifest preparation", () => {
     });
     expect(artifact.requiredFollowup).toContain(
       "SEPARATE_DISPATCH_AUTHORIZATION",
+    );
+    expect(artifact.requiredFollowup).toContain(
+      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
     );
     expect(artifact.artifactDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(() =>
@@ -169,6 +174,30 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(specs.map(({ path }) => path)).not.toContain(
       "apps/api/src/model-runtime/capability-registry.spec.ts",
     );
+    expect(specs).toEqual(
+      expect.arrayContaining([
+        {
+          role: "gateway_settlement",
+          path: "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+        },
+        {
+          role: "real_dispatch_ledger_identity",
+          path: "apps/api/src/site-builder/eval/copy-pilot-ledger-identity.ts",
+        },
+        {
+          role: "real_dispatch_source_verifier",
+          path: "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts",
+        },
+        {
+          role: "real_dispatch_gateway",
+          path: "apps/api/src/site-builder/eval/copy-pilot-trusted-gateway.ts",
+        },
+        {
+          role: "real_dispatch_runner",
+          path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+        },
+      ]),
+    );
     expect(specs.map(({ path }) => path)).toEqual(
       [...specs.map(({ path }) => path)].sort(),
     );
@@ -185,10 +214,47 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("keeps repository v2 as self-consistent history after runtime v5 drift", () => {
+  it("keeps the generated repository v3 bound to the merged dispatch source", () => {
     const artifact = JSON.parse(
       readFileSync(
         resolve(REPOSITORY_ROOT, COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH),
+        "utf8",
+      ),
+    );
+
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "fb1607d00cc29e3802fe265930bc5e9259899c76",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-05-v3",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(67);
+    expect(artifact.sourceBundle.digest).toBe(
+      "e3bcbb3c5705dd036b1db0f362f5d4f7352333488819fb28e6bc783466a5c63b",
+    );
+    expect(artifact.requiredFollowup).toContain(
+      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
+    );
+  });
+
+  it("keeps repository v2 as self-consistent history after runtime v5 drift", () => {
+    const artifact = JSON.parse(
+      readFileSync(
+        resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V2_PATH),
         "utf8",
       ),
     );
@@ -199,7 +265,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2",
-      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      fixedSourceCommit: "c167cde19e0d7d415303bc5353e2733480df13da",
       preparationHeadCommit: "42b6bc209560c30840ecd5b305325a5e3e93abc7",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,

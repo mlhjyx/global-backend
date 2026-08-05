@@ -16,9 +16,9 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
-  "c167cde19e0d7d415303bc5353e2733480df13da" as const;
+  "03d701ee15d28254419fa4f04fb865ba4fd44932" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v2.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v3.json" as const;
 
 export interface CopyRealCapabilitySourceFileSpec {
   role: string;
@@ -33,6 +33,10 @@ const SOURCE_FILE_SPECS = [
   {
     role: "api_manifest",
     path: "apps/api/package.json",
+  },
+  {
+    role: "gateway_settlement",
+    path: "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
   },
   {
     role: "runtime_adapter",
@@ -123,8 +127,24 @@ const SOURCE_FILE_SPECS = [
     path: "apps/api/src/site-builder/eval/copy-quality-rubric.ts",
   },
   {
+    role: "real_dispatch_ledger_identity",
+    path: "apps/api/src/site-builder/eval/copy-pilot-ledger-identity.ts",
+  },
+  {
+    role: "real_dispatch_source_verifier",
+    path: "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts",
+  },
+  {
+    role: "real_dispatch_gateway",
+    path: "apps/api/src/site-builder/eval/copy-pilot-trusted-gateway.ts",
+  },
+  {
     role: "admission_contract",
     path: "apps/api/src/site-builder/eval/copy-real-capability-admission.ts",
+  },
+  {
+    role: "real_dispatch_runner",
+    path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
   },
   {
     role: "claim_contract",
@@ -224,7 +244,7 @@ export interface CopyRealCapabilityContractSnapshot {
 
 export interface CopyRealCapabilityManifestArtifact {
   schemaVersion: "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1";
-  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2";
+  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3";
   classification: "FIXED_SOURCE_CREATE_ONLY";
   fixedSourceCommit: typeof COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT;
   preparationHeadCommit: string;
@@ -247,6 +267,7 @@ export interface CopyRealCapabilityManifestArtifact {
   requiredFollowup: readonly [
     "PURPOSE_SPECIFIC_FINITE_CREDENTIAL_ATTESTATION",
     "TRUSTED_SETTLEMENT_OBSERVER_AND_LEDGER_BINDING",
+    "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
     "SEPARATE_DISPATCH_AUTHORIZATION",
     "TRUSTED_OPERATIONAL_PROOF_FACTORIES_AND_BRANDED_RECEIPT",
     "REAL_GATEWAY_POST_WIRE_FREEZE",
@@ -347,7 +368,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-real-capability-manifest/2026-08-05-v1" as const,
-    manifestId: "site-builder-copy-real-capability/2026-08-05-v2",
+    manifestId: "site-builder-copy-real-capability/2026-08-05-v3",
     fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
     sourceBundleDigest: sourceBundle.digest,
     planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
@@ -362,7 +383,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     schemaVersion:
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1" as const,
     artifactId:
-      "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2" as const,
+      "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
     fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
     preparationHeadCommit: input.preparationHeadCommit,
@@ -385,6 +406,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     requiredFollowup: Object.freeze([
       "PURPOSE_SPECIFIC_FINITE_CREDENTIAL_ATTESTATION",
       "TRUSTED_SETTLEMENT_OBSERVER_AND_LEDGER_BINDING",
+      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
       "SEPARATE_DISPATCH_AUTHORIZATION",
       "TRUSTED_OPERATIONAL_PROOF_FACTORIES_AND_BRANDED_RECEIPT",
       "REAL_GATEWAY_POST_WIRE_FREEZE",
