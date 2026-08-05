@@ -52,14 +52,37 @@ import {
   loadCopyPilotLedgerIdentity,
   markCopyPilotLedgerIdentityClaimed,
 } from "./copy-pilot-ledger-identity";
+import {
+  assertCopyOperatorEvidenceAuthorizationCurrent,
+  getCopyOperatorEvidenceAuthorizationAttestation,
+  type VerifiedCopyOperatorEvidenceAuthorization,
+} from "./copy-operator-evidence-authorization";
+import {
+  COPY_OPERATOR_EVIDENCE_KEY_ID,
+  COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256,
+} from "./copy-operator-evidence-key";
 
-export const COPY_REAL_CAPABILITY_ARTIFACT_PATHS = Object.freeze(
+const FREEZE_OBJECT = Object.freeze.bind(Object);
+const OBJECT_IS_FROZEN = Object.isFrozen.bind(Object);
+const CANONICAL_DIGEST = canonicalDigest;
+const freezeProbe = { value: "unchanged" };
+FREEZE_OBJECT(freezeProbe);
+if (
+  !OBJECT_IS_FROZEN(freezeProbe) ||
+  Reflect.set(freezeProbe, "value", "mutated")
+) {
+  throw new Error("COPY_OPERATOR_EVIDENCE_OBJECT_PRIMITIVE_DRIFT");
+}
+
+export const COPY_REAL_CAPABILITY_ARTIFACT_PATHS = FREEZE_OBJECT(
   [
     ...COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS,
     "apps/api/dist/model-gateway/new-api-request-bound-settlement.js",
     "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
     "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
     "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+    "apps/api/dist/site-builder/eval/copy-operator-evidence-key.js",
+    "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
     "apps/api/dist/site-builder/eval/copy-real-capability-admission.js",
     "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
   ].filter((path, index, paths) => paths.indexOf(path) === index),
@@ -76,10 +99,22 @@ const GET_DURABLE_ATTESTATION = getDurableModelExecutionAttestation;
 const GET_TRUSTED_METADATA = getTrustedModelExecutionMetadata;
 const FREEZE_REAL_EXECUTION =
   RealModelExecutionLedger.prototype.freezeExecution;
+const TRUSTED_OPERATOR_EVIDENCE_KEY_ID =
+  "copy-evidence-operator-2026-08-v1" as const;
+const TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256 =
+  "90a80a686b217df4a524a709d940ca9cc133348722e8d611aa4cb2549b21dca7" as const;
+if (
+  COPY_OPERATOR_EVIDENCE_KEY_ID !== TRUSTED_OPERATOR_EVIDENCE_KEY_ID ||
+  COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256 !==
+    TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256
+) {
+  throw new Error("COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_DRIFT");
+}
 
 export interface CopyRealCapabilityReceipt {
   classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY";
   evidenceClass: "copy_gateway_settlement_candidate";
+  evidenceKind: "capability_pilot";
   campaignId: string;
   executionId: string;
   alias: string;
@@ -87,11 +122,18 @@ export interface CopyRealCapabilityReceipt {
   reasoning: ReasoningLevel;
   wireCount: 1 | 2;
   repaired: boolean;
+  fixtureId: string;
+  repeatIndex: null;
+  planDigest: string;
+  inputDigest: string;
+  contextDigest: string;
+  promptDigest: string;
   ledgerDigest: string;
   outputDigest: string;
   fixedSourceCommit: string;
   sourceBundleDigest: string;
   manifestDigest: string;
+  admissionDigest: string;
   credentialAttestationDigest: string;
   settlementObserverDigest: string;
   authorizationId: string;
@@ -100,14 +142,63 @@ export interface CopyRealCapabilityReceipt {
   compiledBindingDigest: string;
 }
 
+export interface CopyOperatorEvidenceChallenge {
+  schemaVersion: "site-builder-copy-operator-evidence-challenge/2026-08-05-v1";
+  candidateReceiptDigest: string;
+  receipt: CopyRealCapabilityReceipt;
+}
+
+export interface CopyOperatorAuthorizedExecution {
+  readonly classification: "OPAQUE_COPY_OPERATOR_AUTHORIZED_EXECUTION";
+}
+
+export interface CopyOperatorAuthorizedExecutionAttestation {
+  classification: "OPERATOR_AUTHENTICATED_REAL_EVIDENCE";
+  evidenceClass: "real_gateway_settled";
+  evidenceKind: "capability_pilot";
+  candidateReceiptDigest: string;
+  candidateLedgerDigest: string;
+  evidenceLedgerDigest: string;
+  authorizationId: string;
+  operatorPayloadDigest: string;
+  operatorSignatureDigest: string;
+  operatorPublicKeySha256: string;
+  executionId: string;
+  outputDigest: string;
+}
+
 export interface CopyRealCapabilityRunner {
   execute(executionKey: string): Promise<ModelExecutionResult<CopyTaskOutput>>;
+  authorizeOperatorEvidence(input: {
+    challenge: CopyOperatorEvidenceChallenge;
+    authorization: VerifiedCopyOperatorEvidenceAuthorization;
+  }): Promise<CopyOperatorAuthorizedExecution>;
   summary(): Promise<RealModelExecutionLedgerSummary>;
 }
 
 const REAL_CAPABILITY_RECEIPTS = new WeakMap<
   object,
   CopyRealCapabilityReceipt
+>();
+interface CopyRealCapabilityRuntimeDetail {
+  receipt?: CopyRealCapabilityReceipt;
+  ledger: RealModelExecutionLedger;
+  ledgerIdentity: Awaited<ReturnType<typeof loadCopyPilotLedgerIdentity>>;
+  compiledGuard: Awaited<ReturnType<typeof createCompiledRuntimeGuard>>;
+  verifiedSource: CopyPilotVerifiedSource;
+  trustedGateway: CopyPilotTrustedGateway;
+  admission: CopyRealCapabilityAdmissionInput;
+  source: ReturnType<typeof requireCopyPilotVerifiedSourceBinding>;
+  campaignId: string;
+}
+
+const REAL_CAPABILITY_DETAILS = new WeakMap<
+  object,
+  CopyRealCapabilityRuntimeDetail & { receipt: CopyRealCapabilityReceipt }
+>();
+const OPERATOR_AUTHORIZED_EXECUTIONS = new WeakMap<
+  object,
+  CopyOperatorAuthorizedExecutionAttestation
 >();
 
 function fail(code: string): never {
@@ -150,7 +241,7 @@ export function copyPilotReservationDigest(
     "reservationDigest"
   >,
 ): string {
-  return canonicalDigest({
+  return CANONICAL_DIGEST({
     schemaVersion: "copy-pilot-reservation-binding/2026-08-05-v1",
     authorizationId: authorization.authorizationId,
     reservationId: authorization.reservationId,
@@ -169,17 +260,42 @@ function runtimeBinding(input: {
   admission: CopyRealCapabilityAdmissionInput;
   source: ReturnType<typeof requireCopyPilotVerifiedSourceBinding>;
 }): Readonly<Record<string, unknown>> {
-  return Object.freeze({
+  return FREEZE_OBJECT({
     schemaVersion: "copy-real-capability-runtime-binding/2026-08-05-v1",
     taskId: COPY_CAPABILITY_PILOT_PLAN.taskId,
-    planDigest: canonicalDigest(COPY_CAPABILITY_PILOT_PLAN),
+    planDigest: CANONICAL_DIGEST(COPY_CAPABILITY_PILOT_PLAN),
     fixedSourceCommit: input.source.fixedSourceCommit,
     sourceBundleDigest: input.source.sourceBundleDigest,
-    manifestDigest: canonicalDigest(input.admission.manifest),
-    credentialAttestationDigest: canonicalDigest(input.admission.credential),
-    settlementObserverDigest: canonicalDigest(input.admission.settlement),
-    authorizationDigest: canonicalDigest(input.admission.authorization),
-    artifactPathsDigest: canonicalDigest(COPY_REAL_CAPABILITY_ARTIFACT_PATHS),
+    manifestDigest: CANONICAL_DIGEST(input.admission.manifest),
+    credentialAttestationDigest: CANONICAL_DIGEST(input.admission.credential),
+    settlementObserverDigest: CANONICAL_DIGEST(input.admission.settlement),
+    authorizationDigest: CANONICAL_DIGEST(input.admission.authorization),
+    operatorEvidencePublicKeySha256:
+      TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256,
+    artifactPathsDigest: CANONICAL_DIGEST(COPY_REAL_CAPABILITY_ARTIFACT_PATHS),
+  });
+}
+
+function executionPlanDigest(
+  plan: ReturnType<typeof createCopyCapabilityExecutionPlan>,
+): string {
+  return CANONICAL_DIGEST({
+    executionId: plan.executionId,
+    workspaceId: plan.workspaceId,
+    buildRunId: plan.buildRunId,
+    taskId: plan.contract.taskId,
+    taskVersion: plan.contract.version,
+    inputDigest: plan.inputDigest,
+    contextDigest: plan.contextDigest,
+    promptVersion: plan.promptVersion,
+    schemaDigest: plan.schemaDigest,
+    requestedAlias: plan.requestedAlias,
+    resolvedAlias: plan.resolvedAlias,
+    protocol: plan.protocol,
+    reasoning: plan.reasoning,
+    sampling: plan.sampling,
+    locale: plan.locale,
+    promptDigest: CANONICAL_DIGEST(plan.prompt),
   });
 }
 
@@ -221,6 +337,160 @@ export function getCopyRealCapabilityReceipt(
   return REAL_CAPABILITY_RECEIPTS.get(result);
 }
 
+export function createCopyOperatorEvidenceChallenge(
+  result: ModelExecutionResult<unknown>,
+): CopyOperatorEvidenceChallenge {
+  const detail = REAL_CAPABILITY_DETAILS.get(result);
+  if (!detail) fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_REQUIRED");
+  return FREEZE_OBJECT({
+    schemaVersion:
+      "site-builder-copy-operator-evidence-challenge/2026-08-05-v1" as const,
+    candidateReceiptDigest: CANONICAL_DIGEST(detail.receipt),
+    receipt: detail.receipt,
+  });
+}
+
+export function getCopyOperatorAuthorizedExecutionAttestation(
+  execution: CopyOperatorAuthorizedExecution,
+): CopyOperatorAuthorizedExecutionAttestation | undefined {
+  return OPERATOR_AUTHORIZED_EXECUTIONS.get(execution);
+}
+
+async function authorizeCopyOperatorChallenge(input: {
+  detail: CopyRealCapabilityRuntimeDetail;
+  challenge: CopyOperatorEvidenceChallenge;
+  authorization: VerifiedCopyOperatorEvidenceAuthorization;
+}): Promise<CopyOperatorAuthorizedExecution> {
+  const operator = getCopyOperatorEvidenceAuthorizationAttestation(
+    input.authorization,
+  );
+  if (!operator) fail("COPY_OPERATOR_EVIDENCE_AUTHORIZATION_REQUIRED");
+  const receipt = input.challenge?.receipt;
+  let candidateReceiptDigest: string;
+  try {
+    candidateReceiptDigest = CANONICAL_DIGEST(receipt);
+  } catch {
+    return fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  if (
+    input.challenge?.schemaVersion !==
+      "site-builder-copy-operator-evidence-challenge/2026-08-05-v1" ||
+    input.challenge.candidateReceiptDigest !== candidateReceiptDigest ||
+    operator.candidateReceiptDigest !== candidateReceiptDigest
+  ) {
+    fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  const execution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+    (candidate) => candidate.executionKey === receipt.executionId,
+  );
+  if (!execution) fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+  const plan = createCopyCapabilityExecutionPlan({
+    executionKey: execution.executionKey,
+    campaignId: input.detail.campaignId,
+    workspaceId: "copy-capability-real-gateway",
+  });
+  await assertCopyPilotTrustedGatewayCurrent(input.detail.trustedGateway);
+  await assertCopyPilotVerifiedSourceCurrent(input.detail.verifiedSource);
+  await assertCopyPilotLedgerIdentityCurrent(
+    input.detail.ledgerIdentity.handle,
+  );
+  await ASSERT_COMPILED_CURRENT(input.detail.compiledGuard);
+  const compiled = GET_COMPILED_ATTESTATION(input.detail.compiledGuard);
+  if (
+    receipt.classification !== "DISPATCH_PREFLIGHT_RECEIPT_ONLY" ||
+    receipt.evidenceClass !== "copy_gateway_settlement_candidate" ||
+    receipt.evidenceKind !== "capability_pilot" ||
+    receipt.campaignId !== input.detail.campaignId ||
+    receipt.alias !== execution.alias ||
+    receipt.protocol !== execution.protocol ||
+    receipt.reasoning !== execution.reasoning ||
+    (receipt.wireCount !== 1 && receipt.wireCount !== 2) ||
+    receipt.repaired !== (receipt.wireCount === 2) ||
+    receipt.fixtureId !== COPY_CAPABILITY_PILOT_PLAN.source.fixtureId ||
+    receipt.repeatIndex !== null ||
+    receipt.planDigest !== executionPlanDigest(plan) ||
+    receipt.inputDigest !== plan.inputDigest ||
+    receipt.contextDigest !== plan.contextDigest ||
+    receipt.promptDigest !== CANONICAL_DIGEST(plan.prompt) ||
+    receipt.fixedSourceCommit !== input.detail.source.fixedSourceCommit ||
+    receipt.sourceBundleDigest !== input.detail.source.sourceBundleDigest ||
+    receipt.manifestDigest !== input.detail.source.manifestDigest ||
+    receipt.admissionDigest !== CANONICAL_DIGEST(input.detail.admission) ||
+    receipt.credentialAttestationDigest !==
+      CANONICAL_DIGEST(input.detail.admission.credential) ||
+    receipt.settlementObserverDigest !==
+      CANONICAL_DIGEST(input.detail.admission.settlement) ||
+    receipt.authorizationId !==
+      input.detail.admission.authorization.authorizationId ||
+    receipt.reservationId !==
+      input.detail.admission.authorization.reservationId ||
+    compiled == null ||
+    receipt.compiledRuntimeDigest !== compiled.artifactTreeDigest ||
+    receipt.compiledBindingDigest !== compiled.bindingDigest
+  ) {
+    fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  const ledgerAuthorization = {
+    authorizationId: operator.authorizationId,
+    keyId: TRUSTED_OPERATOR_EVIDENCE_KEY_ID,
+    payloadDigest: operator.payloadDigest,
+    signatureDigest: operator.signatureDigest,
+    candidateReceiptDigest,
+    executionId: receipt.executionId,
+    outputDigest: receipt.outputDigest,
+    candidateLedgerDigest: receipt.ledgerDigest,
+  } as const;
+  const existingAuthorization =
+    await input.detail.ledger.operatorEvidenceAuthorizationDigest(
+      ledgerAuthorization,
+    );
+  if (existingAuthorization == null) {
+    const before = await input.detail.ledger.summary();
+    if (before.frozen || before.unknownWireSettlements !== 0) {
+      fail("COPY_OPERATOR_EVIDENCE_LEDGER_MISMATCH");
+    }
+    assertCopyOperatorEvidenceAuthorizationCurrent(input.authorization);
+  }
+  const evidenceLedgerDigest =
+    await input.detail.ledger.consumeOperatorEvidenceAuthorization(
+      ledgerAuthorization,
+    );
+  const authorized = FREEZE_OBJECT({
+    classification: "OPAQUE_COPY_OPERATOR_AUTHORIZED_EXECUTION" as const,
+  });
+  OPERATOR_AUTHORIZED_EXECUTIONS.set(
+    authorized,
+    FREEZE_OBJECT({
+      classification: "OPERATOR_AUTHENTICATED_REAL_EVIDENCE" as const,
+      evidenceClass: "real_gateway_settled" as const,
+      evidenceKind: "capability_pilot" as const,
+      candidateReceiptDigest,
+      candidateLedgerDigest: receipt.ledgerDigest,
+      evidenceLedgerDigest,
+      authorizationId: operator.authorizationId,
+      operatorPayloadDigest: operator.payloadDigest,
+      operatorSignatureDigest: operator.signatureDigest,
+      operatorPublicKeySha256: TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256,
+      executionId: receipt.executionId,
+      outputDigest: receipt.outputDigest,
+    }),
+  );
+  return authorized;
+}
+
+export async function authorizeCopyGatewaySettlementCandidate(input: {
+  result: ModelExecutionResult<unknown>;
+  authorization: VerifiedCopyOperatorEvidenceAuthorization;
+}): Promise<CopyOperatorAuthorizedExecution> {
+  const detail = REAL_CAPABILITY_DETAILS.get(input.result);
+  if (!detail) fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_REQUIRED");
+  return authorizeCopyOperatorChallenge({
+    detail,
+    challenge: createCopyOperatorEvidenceChallenge(input.result),
+    authorization: input.authorization,
+  });
+}
+
 export async function createCopyRealCapabilityRunner(input: {
   ledgerPath: string;
   authorizationClaimPath: string;
@@ -240,13 +510,13 @@ export async function createCopyRealCapabilityRunner(input: {
     source.repositoryRoot !== realpathSync(LOADED_REPOSITORY_ROOT) ||
     source.fixedSourceCommit !== input.admission.manifest.fixedSourceCommit ||
     source.sourceBundleDigest !== input.admission.manifest.sourceBundleDigest ||
-    source.manifestDigest !== canonicalDigest(input.admission.manifest) ||
+    source.manifestDigest !== CANONICAL_DIGEST(input.admission.manifest) ||
     gatewayBinding == null ||
     gatewayBinding.manifestDigest !== source.manifestDigest ||
     gatewayBinding.credentialAttestationDigest !==
-      canonicalDigest(input.admission.credential) ||
+      CANONICAL_DIGEST(input.admission.credential) ||
     gatewayBinding.settlementObserverDigest !==
-      canonicalDigest(input.admission.settlement) ||
+      CANONICAL_DIGEST(input.admission.settlement) ||
     gatewayBinding.authorizationId !==
       input.admission.authorization.authorizationId ||
     gatewayBinding.reservationId !== input.admission.authorization.reservationId
@@ -282,19 +552,19 @@ export async function createCopyRealCapabilityRunner(input: {
     campaign: {
       campaignId: input.campaignId,
       taskId: COPY_CAPABILITY_PILOT_PLAN.taskId,
-      planDigest: canonicalDigest(COPY_CAPABILITY_PILOT_PLAN),
+      planDigest: CANONICAL_DIGEST(COPY_CAPABILITY_PILOT_PLAN),
       maximumExecutions: 3,
       maximumWireCalls: 6,
     },
     authorization: input.admission.authorization,
   });
   await markCopyPilotLedgerIdentityClaimed(ledgerIdentity.handle, {
-    authorizationDigest: canonicalDigest(input.admission.authorization),
+    authorizationDigest: CANONICAL_DIGEST(input.admission.authorization),
   });
   await assertCopyPilotLedgerIdentityCurrent(ledgerIdentity.handle);
   const gateway = createCopyPilotTrustedGatewayBindings(input.trustedGateway);
 
-  return Object.freeze({
+  const runner = FREEZE_OBJECT({
     execute: async (executionKey: string) => {
       validateCopyRealCapabilityAdmissionEnvelope(input.admission);
       await assertCopyPilotTrustedGatewayCurrent(input.trustedGateway);
@@ -368,14 +638,14 @@ export async function createCopyRealCapabilityRunner(input: {
             settlementProof.bearerTokenSha256 ===
               input.admission.credential.bearerTokenSha256 &&
             settlementProof.credentialAttestationDigest ===
-              canonicalDigest(input.admission.credential) &&
+              CANONICAL_DIGEST(input.admission.credential) &&
             settlementProof.authorizationDigest ===
-              canonicalDigest(input.admission.authorization) &&
+              CANONICAL_DIGEST(input.admission.authorization) &&
             usageComplete &&
             native.reportedModel === execution.alias &&
             (!(native instanceof NativeModelOutputError) ||
               native.rawOutputText != null);
-          const observation: ModelObservation<CopyTaskOutput> = Object.freeze({
+          const observation: ModelObservation<CopyTaskOutput> = FREEZE_OBJECT({
             output:
               native instanceof NativeModelOutputError
                 ? invalidOutput(native)
@@ -398,7 +668,7 @@ export async function createCopyRealCapabilityRunner(input: {
             ...(requestId == null ? {} : { requestId }),
             settlement: settled ? "known" : "unknown",
             ...(settled ? { settlementProof: settlement } : {}),
-            warnings: Object.freeze(
+            warnings: FREEZE_OBJECT(
               native instanceof NativeModelOutputError
                 ? []
                 : native.warnings.map(({ type, feature, details }) =>
@@ -447,7 +717,7 @@ export async function createCopyRealCapabilityRunner(input: {
             compiled.artifactCount !==
               COPY_REAL_CAPABILITY_ARTIFACT_PATHS.length ||
             compiled.bindingDigest !==
-              canonicalDigest(
+              CANONICAL_DIGEST(
                 runtimeBinding({ admission: input.admission, source }),
               )
           ) {
@@ -472,35 +742,52 @@ export async function createCopyRealCapabilityRunner(input: {
         ) {
           fail("COPY_REAL_CAPABILITY_RECEIPT_INCOMPLETE");
         }
-        REAL_CAPABILITY_RECEIPTS.set(
-          result,
-          Object.freeze({
-            classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY" as const,
-            evidenceClass: "copy_gateway_settlement_candidate" as const,
-            campaignId: durable.campaignId,
-            executionId: durable.executionId,
-            alias: metadata.resolvedAlias,
-            protocol: metadata.protocol,
-            reasoning: metadata.reasoning,
-            wireCount: durable.wireCount,
-            repaired: durable.wireCount === 2,
-            ledgerDigest: durable.ledgerDigest,
-            outputDigest: durable.outputDigest,
-            fixedSourceCommit: source.fixedSourceCommit,
-            sourceBundleDigest: source.sourceBundleDigest,
-            manifestDigest: source.manifestDigest,
-            credentialAttestationDigest: canonicalDigest(
-              input.admission.credential,
-            ),
-            settlementObserverDigest: canonicalDigest(
-              input.admission.settlement,
-            ),
-            authorizationId: input.admission.authorization.authorizationId,
-            reservationId: input.admission.authorization.reservationId,
-            compiledRuntimeDigest: compiled.artifactTreeDigest,
-            compiledBindingDigest: compiled.bindingDigest,
-          }),
-        );
+        const receipt = FREEZE_OBJECT({
+          classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY" as const,
+          evidenceClass: "copy_gateway_settlement_candidate" as const,
+          evidenceKind: "capability_pilot" as const,
+          campaignId: durable.campaignId,
+          executionId: durable.executionId,
+          alias: metadata.resolvedAlias,
+          protocol: metadata.protocol,
+          reasoning: metadata.reasoning,
+          wireCount: durable.wireCount,
+          repaired: durable.wireCount === 2,
+          fixtureId: COPY_CAPABILITY_PILOT_PLAN.source.fixtureId,
+          repeatIndex: null,
+          planDigest: executionPlanDigest(plan),
+          inputDigest: plan.inputDigest,
+          contextDigest: plan.contextDigest,
+          promptDigest: CANONICAL_DIGEST(plan.prompt),
+          ledgerDigest: durable.ledgerDigest,
+          outputDigest: durable.outputDigest,
+          fixedSourceCommit: source.fixedSourceCommit,
+          sourceBundleDigest: source.sourceBundleDigest,
+          manifestDigest: source.manifestDigest,
+          admissionDigest: CANONICAL_DIGEST(input.admission),
+          credentialAttestationDigest: CANONICAL_DIGEST(
+            input.admission.credential,
+          ),
+          settlementObserverDigest: CANONICAL_DIGEST(
+            input.admission.settlement,
+          ),
+          authorizationId: input.admission.authorization.authorizationId,
+          reservationId: input.admission.authorization.reservationId,
+          compiledRuntimeDigest: compiled.artifactTreeDigest,
+          compiledBindingDigest: compiled.bindingDigest,
+        });
+        REAL_CAPABILITY_RECEIPTS.set(result, receipt);
+        REAL_CAPABILITY_DETAILS.set(result, {
+          receipt,
+          ledger,
+          ledgerIdentity,
+          compiledGuard,
+          verifiedSource: input.verifiedSource,
+          trustedGateway: input.trustedGateway,
+          admission: input.admission,
+          source,
+          campaignId: input.campaignId,
+        });
       } catch (error) {
         await FREEZE_REAL_EXECUTION.call(
           ledger,
@@ -511,6 +798,25 @@ export async function createCopyRealCapabilityRunner(input: {
       }
       return result;
     },
+    authorizeOperatorEvidence: (authorizationInput: {
+      challenge: CopyOperatorEvidenceChallenge;
+      authorization: VerifiedCopyOperatorEvidenceAuthorization;
+    }) =>
+      authorizeCopyOperatorChallenge({
+        detail: {
+          ledger,
+          ledgerIdentity,
+          compiledGuard,
+          verifiedSource: input.verifiedSource,
+          trustedGateway: input.trustedGateway,
+          admission: input.admission,
+          source,
+          campaignId: input.campaignId,
+        },
+        challenge: authorizationInput.challenge,
+        authorization: authorizationInput.authorization,
+      }),
     summary: () => ledger.summary(),
   });
+  return runner;
 }

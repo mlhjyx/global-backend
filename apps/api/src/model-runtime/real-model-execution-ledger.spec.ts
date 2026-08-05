@@ -286,6 +286,104 @@ describe("RealModelExecutionLedger", () => {
     ).rejects.toThrow("REAL_MODEL_EXECUTION_REPAIR_CAP_EXHAUSTED");
   });
 
+  it("consumes one operator evidence authorization in the candidate ledger chain", async () => {
+    const target = await paths();
+    const ledger = await openLedger(target);
+    await ledger.claimExecution({
+      executionId: "copy-terra",
+      planDigest: campaign.planDigest,
+    });
+    await claimAndSettle(ledger, {
+      executionId: "copy-terra",
+      wireNumber: 1,
+    });
+    await ledger.completeExecution({
+      executionId: "copy-terra",
+      outputDigest: digest("9"),
+    });
+    const candidate = await ledger.summary();
+    const authorizationInput = {
+      authorizationId: "copy-evidence-auth-001",
+      keyId: "copy-evidence-operator-2026-08-v1",
+      payloadDigest: digest("d"),
+      signatureDigest: digest("e"),
+      candidateReceiptDigest: digest("f"),
+      executionId: "copy-terra",
+      outputDigest: digest("9"),
+      candidateLedgerDigest: candidate.ledgerDigest,
+    } as const;
+
+    const evidenceLedgerDigest =
+      await ledger.consumeOperatorEvidenceAuthorization(authorizationInput);
+
+    expect(evidenceLedgerDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(evidenceLedgerDigest).not.toBe(candidate.ledgerDigest);
+    expect(await ledger.summary()).toMatchObject({
+      operatorEvidenceAuthorizations: 1,
+      ledgerDigest: evidenceLedgerDigest,
+      frozen: false,
+    });
+    await expect(
+      ledger.consumeOperatorEvidenceAuthorization(authorizationInput),
+    ).resolves.toBe(evidenceLedgerDigest);
+    expect(await ledger.summary()).toMatchObject({
+      operatorEvidenceAuthorizations: 1,
+      ledgerDigest: evidenceLedgerDigest,
+    });
+    const resumed = await openLedger(target);
+    await expect(
+      resumed.consumeOperatorEvidenceAuthorization(authorizationInput),
+    ).resolves.toBe(evidenceLedgerDigest);
+    expect(await resumed.summary()).toMatchObject({
+      operatorEvidenceAuthorizations: 1,
+      ledgerDigest: evidenceLedgerDigest,
+    });
+    await resumed.freezeExecution("copy-sonnet", "later_execution_failed");
+    await expect(
+      resumed.consumeOperatorEvidenceAuthorization(authorizationInput),
+    ).resolves.toBe(evidenceLedgerDigest);
+    await expect(
+      ledger.consumeOperatorEvidenceAuthorization({
+        ...authorizationInput,
+        signatureDigest: digest("0"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_OPERATOR_AUTHORIZATION_ALREADY_CONSUMED");
+  });
+
+  it("rejects operator evidence authorization drift before appending", async () => {
+    const ledger = await openLedger(await paths());
+    await ledger.claimExecution({
+      executionId: "copy-terra",
+      planDigest: campaign.planDigest,
+    });
+    await claimAndSettle(ledger, {
+      executionId: "copy-terra",
+      wireNumber: 1,
+    });
+    await ledger.completeExecution({
+      executionId: "copy-terra",
+      outputDigest: digest("9"),
+    });
+    const candidate = await ledger.summary();
+
+    await expect(
+      ledger.consumeOperatorEvidenceAuthorization({
+        authorizationId: "copy-evidence-auth-002",
+        keyId: "copy-evidence-operator-2026-08-v1",
+        payloadDigest: digest("d"),
+        signatureDigest: digest("e"),
+        candidateReceiptDigest: digest("f"),
+        executionId: "copy-terra",
+        outputDigest: digest("a"),
+        candidateLedgerDigest: candidate.ledgerDigest,
+      }),
+    ).rejects.toThrow("REAL_MODEL_OPERATOR_AUTHORIZATION_BINDING_MISMATCH");
+    expect(await ledger.summary()).toMatchObject({
+      operatorEvidenceAuthorizations: 0,
+      ledgerDigest: candidate.ledgerDigest,
+    });
+  });
+
   it("durably freezes unknown settlement across a process restart", async () => {
     const target = await paths();
     const ledger = await openLedger(target);
