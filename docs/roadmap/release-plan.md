@@ -8,6 +8,8 @@
 
 > **2026-08-04 Model Runtime 实施覆盖**：当前施工顺序改为 Runtime/Context/缓存与两生成式消费者收口 → 可选 Langfuse 旁路 → Copy Evaluation v2。旧 design_spec/remaining-text manifest、价格卡与 runner 只供审计，不再推进真实执行；assemble/fix/QA/SEO 已移出模型矩阵。Copy v2 只允许 Terra、Sol、Sonnet 的独立小型 capability pilot，真实调用、promotion、production adoption 与 Gemini native 仍分别授权、分别 PR。
 
+> **2026-08-05 Copy fixed-source gate**：#313 的真实准入源码已合并；独立 create-only manifest 已固定 `origin/main@5287e5c4d95cd1eb78a61e71ba84c1dfa56b632a`、59 个 source blob 与 Terra/Sol/Sonnet 的 3-execution/6-wire pilot。该产物仍是 `NOT_AUTHORIZED`、零网络/模型调用、零实际费用，且不能替代 compiled runtime、有限凭据、known settlement/ledger、post-wire freeze、repair binding 或单独 dispatch authorization。Copy 的真实 capability pilot、quality evidence、promotion 与 production adoption 继续分别决策、分别 PR。
+
 > **2026-08-04 M1-g diagnostic closeout**：campaign 完成 206 executions / 262 wires，但复审确认其 provenance、resolved upstream/channel 与逐 wire settlement 不满足 promotion evidence 合同，故机器产物明确标为 `diagnostic_only`、`promotionEligible=false`。62 accepted、99 validator rejected、45 transport failed 分开记录，传输失败不作模型质量结论；所有候选均不可排序或晋级，运行路由不变。一次性执行器从主线删除，通用 suite/validator 和诊断产物保留。该决定闭合 M1 的 12 视觉集、确定性发布门与“不晋级”收口，不冒充 MODEL-2、30+ 成熟系统集、生产部署或 M2-PUBLISH。
 
 ## 0. Site Builder 当前路线
