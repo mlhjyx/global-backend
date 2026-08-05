@@ -20,6 +20,8 @@ import {
 
 const PREPARATION_HEAD = "f".repeat(40);
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../..");
+const HISTORICAL_MANIFEST_V1_PATH =
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v1.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -29,20 +31,23 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("freezes the merged source and exact three-execution pilot without dispatch", () => {
+  it("freezes the operational-proof merge as manifest v2 without dispatch", () => {
     const artifact = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: PREPARATION_HEAD,
       sourceFiles: sourceFiles(),
     });
 
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "5287e5c4d95cd1eb78a61e71ba84c1dfa56b632a",
+      "c167cde19e0d7d415303bc5353e2733480df13da",
+    );
+    expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
+      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v2.json",
     );
     expect(artifact).toMatchObject({
       schemaVersion:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
       artifactId:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2",
       classification: "FIXED_SOURCE_CREATE_ONLY",
       fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD,
@@ -55,7 +60,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       manifest: {
         schemaVersion:
           "site-builder-copy-real-capability-manifest/2026-08-05-v1",
-        manifestId: "site-builder-copy-real-capability/2026-08-05-v1",
+        manifestId: "site-builder-copy-real-capability/2026-08-05-v2",
         fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
         planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
         dispatchAuthorization: "NOT_AUTHORIZED",
@@ -183,15 +188,14 @@ describe("Copy real capability create-only manifest preparation", () => {
   it("keeps the historical artifact self-consistent after current-source drift", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
-      COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
+      HISTORICAL_MANIFEST_V1_PATH,
     );
     const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
 
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
     expect(artifact).toMatchObject({
-      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
+      fixedSourceCommit: "5287e5c4d95cd1eb78a61e71ba84c1dfa56b632a",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedNetworkCalls: 0,
@@ -216,6 +220,14 @@ describe("Copy real capability create-only manifest preparation", () => {
         reasoning: "medium",
       },
     ]);
+    const { artifactDigest, ...artifactWithoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(artifactWithoutDigest));
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.manifest.sourceBundleDigest).toBe(
+      artifact.sourceBundle.digest,
+    );
 
     const currentTransitivePaths = execFileSync(
       "git",
