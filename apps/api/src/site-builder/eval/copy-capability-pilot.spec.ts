@@ -8,10 +8,9 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v2",
-      planId: "site-builder-copy-capability-pilot/2026-08-05-v2",
-      executionStatus:
-        "FAKE_GATEWAY_DURABLE_RUNNER_READY_REAL_DISPATCH_BLOCKED",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v3",
+      planId: "site-builder-copy-capability-pilot/2026-08-05-v3",
+      executionStatus: "REAL_ADMISSION_SOURCE_READY_MANIFEST_REQUIRED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
@@ -33,11 +32,20 @@ describe("Copy capability pilot preparation contract", () => {
         "structured_output_failure_cannot_be_business_validated",
         "loopback_only_native_adapter_factory",
       ],
+      completedPreparationGates: [
+        "exact_real_candidate_scope_contract",
+        "fixed_source_commit_and_bundle_verification_contract",
+        "finite_credential_attestation_contract",
+        "authorization_binding_and_global_caps_contract",
+        "bounded_request_bound_settlement_contract",
+        "closed_non_dispatch_admission_envelope_validator",
+      ],
       blockingGates: [
-        "real_gateway_fixed_commit_manifest",
-        "real_gateway_credential_attestation",
-        "real_gateway_authorization_reservation",
-        "real_gateway_settlement_observer",
+        "post_merge_create_only_fixed_commit_manifest",
+        "installed_real_gateway_credential_attestation",
+        "durable_real_gateway_authorization_reservation",
+        "trusted_settlement_observer_and_ledger_binding",
+        "trusted_operational_proof_factories_and_branded_receipt",
         "real_gateway_post_wire_freeze",
         "real_gateway_repair_payload_binding",
       ],
