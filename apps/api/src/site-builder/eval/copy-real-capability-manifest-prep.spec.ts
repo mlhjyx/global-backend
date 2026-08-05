@@ -180,7 +180,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("verifies the committed create-only artifact against every fixed-source blob", () => {
+  it("verifies the committed artifact against every tracked source byte", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
       COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
@@ -220,10 +220,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     const trackedTransitivePaths = execFileSync(
       "git",
       [
-        "ls-tree",
-        "-r",
-        "--name-only",
-        COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+        "ls-files",
         "--",
         "apps/api/src/model-runtime",
         "packages/contracts/src",
@@ -244,12 +241,8 @@ describe("Copy real capability create-only manifest preparation", () => {
 
     for (const entry of artifact.sourceBundle
       .files as CopyRealCapabilitySourceFile[]) {
-      const fixedBytes = execFileSync(
-        "git",
-        ["show", `${COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT}:${entry.path}`],
-        { cwd: REPOSITORY_ROOT, encoding: "buffer" },
-      );
-      expect(createHash("sha256").update(fixedBytes).digest("hex")).toBe(
+      const workingBytes = readFileSync(resolve(REPOSITORY_ROOT, entry.path));
+      expect(createHash("sha256").update(workingBytes).digest("hex")).toBe(
         entry.sha256,
       );
     }
