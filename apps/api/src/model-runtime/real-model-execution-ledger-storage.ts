@@ -35,6 +35,17 @@ export interface RealWireSettlementProof {
   quota: number;
 }
 
+export interface OperatorEvidenceAuthorizationInput {
+  authorizationId: string;
+  keyId: string;
+  payloadDigest: string;
+  signatureDigest: string;
+  candidateReceiptDigest: string;
+  executionId: string;
+  outputDigest: string;
+  candidateLedgerDigest: string;
+}
+
 export type RealLedgerEvent =
   | {
       kind: "campaign_opened";
@@ -83,6 +94,9 @@ export type RealLedgerEvent =
       findingsDigest: string;
     }
   | { kind: "execution_completed"; executionId: string; outputDigest: string }
+  | ({
+      kind: "operator_evidence_authorization_consumed";
+    } & OperatorEvidenceAuthorizationInput)
   | { kind: "campaign_frozen"; executionId: string; reason: string };
 
 export interface RealLedgerEnvelope {
@@ -112,6 +126,7 @@ export interface RealModelExecutionLedgerSummary extends ModelExecutionLedgerSum
   evidenceClass: "gateway_settlement_claim_only";
   authorizationDigest: string;
   repairPlans: number;
+  operatorEvidenceAuthorizations: number;
 }
 
 export function fail(code: string): never {

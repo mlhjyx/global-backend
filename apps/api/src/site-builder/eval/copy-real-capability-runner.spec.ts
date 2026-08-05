@@ -18,9 +18,11 @@ import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
+  createCopyOperatorEvidenceChallenge,
   copyPilotLedgerIdentityDigest,
   copyPilotReservationDigest,
   createCopyRealCapabilityRunner as createSourceRunner,
+  getCopyOperatorAuthorizedExecutionAttestation,
 } from "./copy-real-capability-runner";
 import { prepareCopyPilotLedgerIdentity } from "./copy-pilot-ledger-identity";
 
@@ -30,6 +32,10 @@ const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const COMPILED_RUNNER_PATH = join(
   REPOSITORY_ROOT,
   "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+);
+const COMPILED_OPERATOR_KEY_PATH = join(
+  REPOSITORY_ROOT,
+  "apps/api/dist/site-builder/eval/copy-operator-evidence-key.js",
 );
 const TEST_GATEWAY_AUTHORIZATION = createHash("sha256")
   .update(import.meta.url)
@@ -389,6 +395,19 @@ function admission() {
 }
 
 describe("Copy real capability runner admission", () => {
+  it("rejects forged candidate and authorized-execution objects", () => {
+    expect(() =>
+      createCopyOperatorEvidenceChallenge(Object.freeze({}) as never),
+    ).toThrow("COPY_OPERATOR_EVIDENCE_CANDIDATE_REQUIRED");
+    expect(
+      getCopyOperatorAuthorizedExecutionAttestation(
+        Object.freeze({
+          classification: "OPAQUE_COPY_OPERATOR_AUTHORIZED_EXECUTION",
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
   it("binds the authorization to exact ledger paths and reservation fields", async () => {
     const directory = await mkdtemp(join(tmpdir(), "copy-runner-binding-"));
     directories.push(directory);
@@ -454,6 +473,213 @@ describe("Copy real capability runner admission", () => {
     `;
     const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
     expect(JSON.parse(stdout) as string[]).toEqual([]);
+  });
+
+  it("rejects a preloaded CommonJS mutation of the operator trust key", async () => {
+    const script = `
+      const key = require(${JSON.stringify(COMPILED_OPERATOR_KEY_PATH)});
+      key.COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256 = "b".repeat(64);
+      try {
+        require(${JSON.stringify(COMPILED_RUNNER_PATH)});
+        process.stdout.write("LOADED");
+      } catch (error) {
+        process.stdout.write(String(error && error.message));
+      }
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_DRIFT");
+  });
+
+  it("rejects a preloaded crypto verifier that accepts tampered signatures", async () => {
+    const authorizationPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
+    );
+    const script = `
+      require("node:crypto").verify = () => true;
+      try {
+        require(${JSON.stringify(authorizationPath)});
+        process.stdout.write("LOADED");
+      } catch (error) {
+        process.stdout.write(String(error && error.message));
+      }
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_CRYPTO_PRIMITIVE_DRIFT");
+  });
+
+  it("freezes the CommonJS authorization exports before the runner consumes them", async () => {
+    const authorizationPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
+    );
+    const script = `
+      const authorization = require(${JSON.stringify(authorizationPath)});
+      const originalGet = authorization.getCopyOperatorEvidenceAuthorizationAttestation;
+      const originalAssert = authorization.assertCopyOperatorEvidenceAuthorizationCurrent;
+      const getReplaced = Reflect.set(
+        authorization,
+        "getCopyOperatorEvidenceAuthorizationAttestation",
+        () => ({ authorizationId: "forged" }),
+      );
+      const assertReplaced = Reflect.set(
+        authorization,
+        "assertCopyOperatorEvidenceAuthorizationCurrent",
+        () => undefined,
+      );
+      require(${JSON.stringify(COMPILED_RUNNER_PATH)});
+      process.stdout.write(JSON.stringify({
+        frozen: Object.isFrozen(authorization),
+        getReplaced,
+        assertReplaced,
+        getUnchanged:
+          authorization.getCopyOperatorEvidenceAuthorizationAttestation === originalGet,
+        assertUnchanged:
+          authorization.assertCopyOperatorEvidenceAuthorizationCurrent === originalAssert,
+      }));
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(JSON.parse(stdout)).toEqual({
+      frozen: true,
+      getReplaced: false,
+      assertReplaced: false,
+      getUnchanged: true,
+      assertUnchanged: true,
+    });
+  });
+
+  it("rejects a preloaded Object.freeze implementation that cannot seal exports", async () => {
+    const authorizationPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
+    );
+    const script = `
+      Object.freeze = (value) => value;
+      try {
+        require(${JSON.stringify(authorizationPath)});
+        process.stdout.write("LOADED");
+      } catch (error) {
+        process.stdout.write(String(error && error.message));
+      }
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_OBJECT_PRIMITIVE_DRIFT");
+  });
+
+  it("keeps verified authorization state frozen after ambient Object.freeze drift", async () => {
+    const authorizationPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
+    );
+    const script = `
+      const authorization = require(${JSON.stringify(authorizationPath)});
+      const signedAuthorization = {
+        payload: {
+          schemaVersion: "site-builder-copy-operator-evidence-authorization/2026-08-05-v1",
+          purpose: "site_builder_copy_gateway_settlement_evidence",
+          keyId: "copy-evidence-operator-2026-08-v1",
+          algorithm: "Ed25519",
+          authorizationId: "copy-evidence-auth-test-001",
+          issuedAt: "2026-08-05T10:00:00.000Z",
+          expiresAt: "2026-08-05T10:15:00.000Z",
+          candidateReceiptDigest: "a".repeat(64),
+        },
+        signatureBase64Url: "-7Xw6OOH0IYy35npgA8vHKguMy5r41kBTzbwu2WfdDMZlYKQiz8dkLqc7BExkpzmebl6R2EFP1umbTi6VtPNBg",
+      };
+      Object.freeze = (value) => value;
+      const handle = authorization.verifyCopyOperatorEvidenceAuthorization({
+        signedAuthorization,
+        expectedPayload: signedAuthorization.payload,
+      });
+      const attestation = authorization.getCopyOperatorEvidenceAuthorizationAttestation(handle);
+      const retargeted = Reflect.set(attestation, "candidateReceiptDigest", "b".repeat(64));
+      process.stdout.write(JSON.stringify({
+        handleFrozen: Object.isFrozen(handle),
+        attestationFrozen: Object.isFrozen(attestation),
+        retargeted,
+        candidateReceiptDigest: attestation.candidateReceiptDigest,
+      }));
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(JSON.parse(stdout)).toEqual({
+      handleFrozen: true,
+      attestationFrozen: true,
+      retargeted: false,
+      candidateReceiptDigest: "a".repeat(64),
+    });
+  });
+
+  it("does not retarget a signature after ambient Buffer.from drift", async () => {
+    const authorizationPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
+    );
+    const script = `
+      const authorization = require(${JSON.stringify(authorizationPath)});
+      const payloadA = {
+        schemaVersion: "site-builder-copy-operator-evidence-authorization/2026-08-05-v1",
+        purpose: "site_builder_copy_gateway_settlement_evidence",
+        keyId: "copy-evidence-operator-2026-08-v1",
+        algorithm: "Ed25519",
+        authorizationId: "copy-evidence-auth-test-001",
+        issuedAt: "2026-08-05T10:00:00.000Z",
+        expiresAt: "2026-08-05T10:15:00.000Z",
+        candidateReceiptDigest: "a".repeat(64),
+      };
+      const payloadB = { ...payloadA, candidateReceiptDigest: "b".repeat(64) };
+      const signedBytesA = Buffer.from(
+        authorization.canonicalCopyOperatorEvidenceSigningBytes(payloadA),
+      );
+      const originalBufferFrom = Buffer.from;
+      Buffer.from = (value, encoding) =>
+        typeof value === "string" && value.includes('"candidateReceiptDigest":"' + "b".repeat(64) + '"')
+          ? originalBufferFrom(signedBytesA)
+          : originalBufferFrom(value, encoding);
+      try {
+        authorization.verifyCopyOperatorEvidenceAuthorization({
+          signedAuthorization: {
+            payload: payloadB,
+            signatureBase64Url: "-7Xw6OOH0IYy35npgA8vHKguMy5r41kBTzbwu2WfdDMZlYKQiz8dkLqc7BExkpzmebl6R2EFP1umbTi6VtPNBg",
+          },
+          expectedPayload: payloadB,
+        });
+        process.stdout.write("ACCEPTED_RETARGETED_SIGNATURE");
+      } catch (error) {
+        process.stdout.write(String(error && error.message));
+      }
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_SIGNATURE_INVALID");
+  });
+
+  it("captures the receipt digest function before CommonJS export drift", async () => {
+    const contextPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/model-runtime/context-engine.js",
+    );
+    const script = `
+      const runner = require(${JSON.stringify(COMPILED_RUNNER_PATH)});
+      const context = require(${JSON.stringify(contextPath)});
+      const reservation = {
+        authorizationId: "copy-digest-capture-auth",
+        reservationId: "copy-digest-capture-reservation",
+        manifestDigest: "a".repeat(64),
+        credentialAttestationDigest: "b".repeat(64),
+        settlementObserverDigest: "c".repeat(64),
+        ledgerIdentityDigest: "d".repeat(64),
+        maximumExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      };
+      const before = runner.copyPilotReservationDigest(reservation);
+      context.canonicalDigest = () => "e".repeat(64);
+      const after = runner.copyPilotReservationDigest(reservation);
+      process.stdout.write(JSON.stringify({ before, after }));
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    const result = JSON.parse(stdout) as { before: string; after: string };
+    expect(result.after).toBe(result.before);
+    expect(result.after).not.toBe("e".repeat(64));
   });
 
   it("runs settled success and one closed repair, then freezes unknown settlement", async () => {
@@ -599,7 +825,9 @@ describe("Copy real capability runner admission", () => {
         }
         process.stdout.write(JSON.stringify({
           terra: runnerModule.getCopyRealCapabilityReceipt(terra),
+          terraChallenge: runnerModule.createCopyOperatorEvidenceChallenge(terra),
           sol: runnerModule.getCopyRealCapabilityReceipt(sol),
+          solChallenge: runnerModule.createCopyOperatorEvidenceChallenge(sol),
           sonnetError,
           summary: await runner.summary(),
         }));
@@ -617,12 +845,24 @@ describe("Copy real capability runner admission", () => {
         evidenceClass: string;
         wireCount: number;
         repaired: boolean;
+        fixtureId: string;
+        repeatIndex: null;
+        planDigest: string;
+        inputDigest: string;
+        contextDigest: string;
+        promptDigest: string;
+      };
+      terraChallenge: {
+        candidateReceiptDigest: string;
       };
       sol: {
         classification: string;
         evidenceClass: string;
         wireCount: number;
         repaired: boolean;
+      };
+      solChallenge: {
+        candidateReceiptDigest: string;
       };
       sonnetError: string;
       summary: {
@@ -637,13 +877,35 @@ describe("Copy real capability runner admission", () => {
       evidenceClass: "copy_gateway_settlement_candidate",
       wireCount: 1,
       repaired: false,
+      fixtureId: "copy-factual-claims",
+      repeatIndex: null,
     });
+    expect(result.terraChallenge.candidateReceiptDigest).toMatch(
+      /^[0-9a-f]{64}$/u,
+    );
+    expect([
+      result.terra.planDigest,
+      result.terra.inputDigest,
+      result.terra.contextDigest,
+      result.terra.promptDigest,
+    ]).toEqual([
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+    ]);
     expect(result.sol).toMatchObject({
       classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY",
       evidenceClass: "copy_gateway_settlement_candidate",
       wireCount: 2,
       repaired: true,
     });
+    expect(result.solChallenge.candidateReceiptDigest).toMatch(
+      /^[0-9a-f]{64}$/u,
+    );
+    expect(result.solChallenge.candidateReceiptDigest).not.toBe(
+      result.terraChallenge.candidateReceiptDigest,
+    );
     expect(result.sonnetError).toMatch(/settlement is unknown/u);
     expect(result.summary).toMatchObject({
       completedExecutions: 2,

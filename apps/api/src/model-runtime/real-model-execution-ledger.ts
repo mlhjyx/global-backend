@@ -26,6 +26,7 @@ import {
   type RealLedgerEvent,
   type RealModelExecutionAuthorization,
   type RealModelExecutionLedgerSummary,
+  type OperatorEvidenceAuthorizationInput,
 } from "./real-model-execution-ledger-storage";
 import type { ModelProtocol } from "./types";
 
@@ -222,7 +223,7 @@ export class RealModelExecutionLedger {
     buildEvents: (
       events: readonly RealLedgerEnvelope[],
     ) => readonly RealLedgerEvent[],
-  ): Promise<void> {
+  ): Promise<string | null> {
     let lock;
     try {
       lock = await open(this.lockPath, "wx", 0o600);
@@ -260,7 +261,7 @@ export class RealModelExecutionLedger {
         fail("REAL_MODEL_AUTHORIZATION_CLAIM_MISMATCH");
       }
       const additions = buildEnvelopes(existing, buildEvents(existing));
-      if (additions.length === 0) return;
+      if (additions.length === 0) return null;
 
       let ledgerHandle;
       try {
@@ -287,6 +288,9 @@ export class RealModelExecutionLedger {
       } finally {
         await ledgerHandle.close();
       }
+      return (
+        additions.at(-1)?.digest ?? fail("REAL_MODEL_EXECUTION_LEDGER_INVALID")
+      );
     } finally {
       await lock.close();
       await unlink(this.lockPath).catch(() => undefined);
@@ -584,6 +588,106 @@ export class RealModelExecutionLedger {
     });
   }
 
+  private validateOperatorEvidenceAuthorization(
+    input: OperatorEvidenceAuthorizationInput,
+  ): void {
+    validateIdentifier(
+      input.authorizationId,
+      "REAL_MODEL_OPERATOR_AUTHORIZATION_INVALID",
+    );
+    validateIdentifier(
+      input.keyId,
+      "REAL_MODEL_OPERATOR_AUTHORIZATION_INVALID",
+    );
+    validateIdentifier(
+      input.executionId,
+      "REAL_MODEL_OPERATOR_AUTHORIZATION_INVALID",
+    );
+    for (const value of [
+      input.payloadDigest,
+      input.signatureDigest,
+      input.candidateReceiptDigest,
+      input.outputDigest,
+      input.candidateLedgerDigest,
+    ]) {
+      validateDigest(value, "REAL_MODEL_OPERATOR_AUTHORIZATION_INVALID");
+    }
+  }
+
+  async operatorEvidenceAuthorizationDigest(
+    input: OperatorEvidenceAuthorizationInput,
+  ): Promise<string | undefined> {
+    this.validateOperatorEvidenceAuthorization(input);
+    const ledgerIdentity = await readSecure(this.ledgerPath);
+    if (
+      ledgerIdentity.device !== this.ledgerDevice ||
+      ledgerIdentity.inode !== this.ledgerInode
+    ) {
+      fail("REAL_MODEL_EXECUTION_LEDGER_REPLACED");
+    }
+    return parseLedger(ledgerIdentity.raw).find(
+      ({ event }) =>
+        event.kind === "operator_evidence_authorization_consumed" &&
+        canonicalDigest(event) ===
+          canonicalDigest({
+            kind: "operator_evidence_authorization_consumed",
+            ...input,
+          }),
+    )?.digest;
+  }
+
+  async consumeOperatorEvidenceAuthorization(
+    input: OperatorEvidenceAuthorizationInput,
+  ): Promise<string> {
+    this.validateOperatorEvidenceAuthorization(input);
+    const evidenceLedgerDigest = await this.mutate((events) => {
+      const operatorEvent = {
+        kind: "operator_evidence_authorization_consumed" as const,
+        ...input,
+      };
+      const existingAuthorization = events.find(
+        ({ event }) =>
+          event.kind === "operator_evidence_authorization_consumed" &&
+          (event.authorizationId === input.authorizationId ||
+            event.executionId === input.executionId),
+      );
+      if (existingAuthorization != null) {
+        if (
+          canonicalDigest(existingAuthorization.event) !==
+          canonicalDigest(operatorEvent)
+        ) {
+          fail("REAL_MODEL_OPERATOR_AUTHORIZATION_ALREADY_CONSUMED");
+        }
+        return [];
+      }
+      if (frozen(events)) fail("REAL_MODEL_EXECUTION_CAMPAIGN_FROZEN");
+      const completed = events.find(
+        ({ event }) =>
+          event.kind === "execution_completed" &&
+          event.executionId === input.executionId,
+      )?.event;
+      if (
+        events.at(-1)?.digest !== input.candidateLedgerDigest ||
+        completed?.kind !== "execution_completed" ||
+        completed.outputDigest !== input.outputDigest ||
+        events.some(
+          ({ event }) =>
+            event.kind === "wire_observed" &&
+            event.executionId === input.executionId &&
+            event.settlement === "unknown",
+        )
+      ) {
+        fail("REAL_MODEL_OPERATOR_AUTHORIZATION_BINDING_MISMATCH");
+      }
+      return [operatorEvent];
+    });
+    if (evidenceLedgerDigest != null) return evidenceLedgerDigest;
+    const existing = await this.operatorEvidenceAuthorizationDigest(input);
+    return (
+      existing ?? fail("REAL_MODEL_OPERATOR_AUTHORIZATION_BINDING_MISMATCH")
+    );
+  }
+
   async freezeExecution(executionId: string, reason: string): Promise<void> {
     validateIdentifier(executionId, "REAL_MODEL_EXECUTION_ID_INVALID");
     const normalized = reason.trim().slice(0, 160);
@@ -648,6 +752,10 @@ export class RealModelExecutionLedger {
           event.kind === "wire_observed" && event.settlement === "unknown",
       ).length,
       repairPlans: eventCount(events, "repair_planned"),
+      operatorEvidenceAuthorizations: eventCount(
+        events,
+        "operator_evidence_authorization_consumed",
+      ),
       completedExecutions: eventCount(events, "execution_completed"),
       frozen: frozen(events),
     });
