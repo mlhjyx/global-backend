@@ -217,10 +217,13 @@ describe("Copy real capability create-only manifest preparation", () => {
       },
     ]);
 
-    const trackedTransitivePaths = execFileSync(
+    const fixedTransitivePaths = execFileSync(
       "git",
       [
-        "ls-files",
+        "ls-tree",
+        "-r",
+        "--name-only",
+        COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
         "--",
         "apps/api/src/model-runtime",
         "packages/contracts/src",
@@ -234,7 +237,7 @@ describe("Copy real capability create-only manifest preparation", () => {
         ({ path }) => path,
       ),
     ).toEqual(
-      buildCopyRealCapabilitySourceFileSpecs(trackedTransitivePaths).map(
+      buildCopyRealCapabilitySourceFileSpecs(fixedTransitivePaths).map(
         ({ path }) => path,
       ),
     );
