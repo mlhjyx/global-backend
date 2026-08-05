@@ -15,6 +15,7 @@ import {
   COPY_EVALUATION_V2_CANDIDATES,
   type CopyEvaluationV2Candidate,
 } from "./copy-evaluation-v2-candidates";
+import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
   COPY_QUALITY_GATE,
   COPY_QUALITY_REVIEW_SCHEMA_VERSION,
@@ -311,6 +312,9 @@ const PLAN = {
   },
   requiredContext: REQUIRED_CONTEXT,
   capabilityPilot: {
+    contractId: COPY_CAPABILITY_PILOT_PLAN.planId,
+    contractSchemaVersion: COPY_CAPABILITY_PILOT_PLAN.schemaVersion,
+    evidenceClassification: COPY_CAPABILITY_PILOT_PLAN.evidenceClassification,
     purpose: "protocol_schema_reasoning_usage_and_identity_only",
     aliases: REQUIRED_ALIASES,
     plannedExecutions: PILOT_EXECUTIONS,
@@ -318,7 +322,7 @@ const PLAN = {
     maximumWireCalls: PILOT_EXECUTIONS * 2,
     status:
       CANDIDATE_ADMISSION_STATUS === "READY"
-        ? "NOT_AUTHORIZED"
+        ? COPY_CAPABILITY_PILOT_PLAN.executionStatus
         : CANDIDATE_ADMISSION_STATUS,
   },
   taskMatrix: {

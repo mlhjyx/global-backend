@@ -25,6 +25,8 @@ export interface CapabilityRequirements {
   reportsUsage?: boolean;
   reportsModel?: boolean;
   reportsRequestId?: boolean;
+  exactReportedModel?: boolean;
+  forbidWarnings?: boolean;
   settlementRequired?: boolean;
 }
 
@@ -185,8 +187,10 @@ export interface ModelObservation<Output> {
   reportedModel?: string;
   protocol: ModelProtocol;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number };
+  usageComplete?: boolean;
   requestId?: string;
   settlement: 'known' | 'unknown';
+  warnings?: readonly string[];
 }
 
 export interface ModelTransport<Input = unknown, Output = unknown> {

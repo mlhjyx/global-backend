@@ -5,7 +5,13 @@ import {
   TransportDispatchError,
 } from './model-execution-runtime';
 import { canonicalDigest, ContextEngine } from './context-engine';
-import type { ModelExecutionPlan, ModelObservation, RuntimeTelemetry, TaskModelContract } from './types';
+import type {
+  ExactResultCache,
+  ModelExecutionPlan,
+  ModelObservation,
+  RuntimeTelemetry,
+  TaskModelContract,
+} from './types';
 
 interface Input { name: string }
 interface Output { headline: string }
@@ -74,24 +80,31 @@ const observed = (output: Output): ModelObservation<Output> => ({
   settlement: 'known',
 });
 
+function mockCache(cached?: { output: Output; settlement: 'known'; validated: true }): ExactResultCache {
+  return {
+    get: vi.fn().mockResolvedValue(cached),
+    put: vi.fn().mockResolvedValue(undefined),
+    putRepair: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe('ModelExecutionRuntime', () => {
-  it('separates transport retry from one content repair and records the state lifecycle', async () => {
+  it('records transport retry separately and brands a valid completion', async () => {
     const sleep = vi.fn(async () => undefined);
     const dispatch = vi.fn()
       .mockRejectedValueOnce(new TransportDispatchError('429', { retryable: true, retryAfterMs: 250 }))
-      .mockResolvedValueOnce(observed({ headline: '' }))
       .mockResolvedValueOnce(observed({ headline: 'Precision pumps' }));
     const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch }, sleep });
 
     const result = await runtime.execute(plan);
 
     expect(result.output).toEqual({ headline: 'Precision pumps' });
-    expect(result.transportAttempts).toBe(3);
-    expect(result.repairAttempts).toBe(1);
+    expect(result.transportAttempts).toBe(2);
+    expect(result.repairAttempts).toBe(0);
     expect(sleep).toHaveBeenCalledWith(250);
     expect(result.states).toEqual([
-      'planned', 'admitted', 'dispatched', 'dispatched', 'observed', 'repaired',
-      'dispatched', 'observed', 'validated', 'settled', 'completed',
+      'planned', 'admitted', 'dispatched', 'dispatched', 'observed',
+      'validated', 'settled', 'completed',
     ]);
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.states)).toBe(true);
@@ -113,7 +126,29 @@ describe('ModelExecutionRuntime', () => {
       ...result,
       states: [...result.states],
     })).toBeUndefined();
-    expect(dispatch.mock.calls[2]?.[0].repair).toMatchObject({ priorOutputDigest: expect.any(String), findingsDigest: expect.any(String) });
+  });
+
+  it('uses the bounded default sleep when a retry has no injected scheduler', async () => {
+    const dispatch = vi.fn()
+      .mockRejectedValueOnce(new TransportDispatchError('busy', { retryable: true, retryAfterMs: 1 }))
+      .mockResolvedValueOnce(observed({ headline: 'Recovered' }));
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
+
+    await expect(runtime.execute(plan)).resolves.toMatchObject({
+      output: { headline: 'Recovered' },
+      transportAttempts: 2,
+    });
+  });
+
+  it('freezes a settled invalid output without dispatching an unbound repair', async () => {
+    const dispatch = vi.fn().mockResolvedValue(observed({ headline: '' }));
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
+
+    await expect(runtime.execute(plan)).rejects.toMatchObject({
+      message: 'model output validation failed; Runtime content repair is not admitted',
+      states: ['planned', 'admitted', 'dispatched', 'observed', 'frozen'],
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it('freezes unknown settlement and never repairs or completes it', async () => {
@@ -131,6 +166,65 @@ describe('ModelExecutionRuntime', () => {
     await expect(runtime.execute(plan)).rejects.toThrow(/identity/);
   });
 
+  it.each([
+    ['request ID', { reportsRequestId: true }, { requestId: undefined }, /request ID/],
+    ['usage', { reportsUsage: true }, { usageComplete: false }, /usage/],
+    ['reported model', { reportsModel: true }, { reportedModel: undefined }, /reported model/],
+    ['exact model', { exactReportedModel: true }, { reportedModel: 'different' }, /not exact/],
+    ['warnings', { forbidWarnings: true }, { warnings: ['reasoning_removed'] }, /warnings/],
+  ])('enforces the admitted %s observation requirement', async (
+    _name,
+    requirements,
+    observationDrift,
+    expected,
+  ) => {
+    const strictPlan = {
+      ...plan,
+      contract: { ...contract, capabilityRequirements: requirements },
+    };
+    const runtime = new ModelExecutionRuntime<Input, Output>({
+      transport: {
+        dispatch: vi.fn().mockResolvedValue({
+          ...observed({ headline: 'A' }),
+          ...observationDrift,
+        }),
+      },
+    });
+
+    await expect(runtime.execute(strictPlan)).rejects.toThrow(expected);
+  });
+
+  it('completes when every strict observation requirement is satisfied', async () => {
+    const strictPlan = {
+      ...plan,
+      contract: {
+        ...contract,
+        capabilityRequirements: {
+          reportsUsage: true,
+          reportsModel: true,
+          reportsRequestId: true,
+          exactReportedModel: true,
+          forbidWarnings: true,
+        },
+      },
+    };
+    const runtime = new ModelExecutionRuntime<Input, Output>({
+      transport: {
+        dispatch: vi.fn().mockResolvedValue({
+          ...observed({ headline: 'A' }),
+          reportedModel: 'gpt-terra',
+          usageComplete: true,
+          warnings: [],
+        }),
+      },
+    });
+
+    await expect(runtime.execute(strictPlan)).resolves.toMatchObject({
+      output: { headline: 'A' },
+      states: ['planned', 'admitted', 'dispatched', 'observed', 'validated', 'settled', 'completed'],
+    });
+  });
+
   it('treats telemetry as a fail-open side channel', async () => {
     const emit = vi.fn(() => { throw new Error('offline'); });
     const telemetry: RuntimeTelemetry = { emit };
@@ -146,6 +240,48 @@ describe('ModelExecutionRuntime', () => {
     }));
   });
 
+  it('replays a validated exact cache hit without dispatch', async () => {
+    const dispatch = vi.fn();
+    const cache = mockCache({ output: { headline: 'Cached' }, settlement: 'known', validated: true });
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch }, cache });
+
+    await expect(runtime.execute(plan)).resolves.toMatchObject({
+      output: { headline: 'Cached' },
+      cacheHit: true,
+      transportAttempts: 0,
+      states: ['planned', 'admitted', 'validated', 'completed'],
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('freezes an invalid exact cache hit instead of dispatching', async () => {
+    const dispatch = vi.fn();
+    const cache = mockCache({ output: { headline: '' }, settlement: 'known', validated: true });
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch }, cache });
+
+    await expect(runtime.execute(plan)).rejects.toThrow(/cached model output validation failed/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('stores only a validated known-settlement result in the exact cache', async () => {
+    const cache = mockCache();
+    const runtime = new ModelExecutionRuntime<Input, Output>({
+      transport: { dispatch: vi.fn().mockResolvedValue(observed({ headline: 'Stored' })) },
+      cache,
+    });
+
+    await runtime.execute(plan);
+
+    expect(cache.put).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'site_builder.copy',
+      resolvedAlias: 'gpt-terra',
+    }), {
+      output: { headline: 'Stored' },
+      settlement: 'known',
+      validated: true,
+    });
+  });
+
   it('never dispatches a deterministic task through the model transport', async () => {
     const dispatch = vi.fn();
     const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
@@ -158,11 +294,53 @@ describe('ModelExecutionRuntime', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it('freezes a deterministic task without an admitted local executor', async () => {
+    const dispatch = vi.fn();
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
+
+    await expect(runtime.execute({
+      ...plan,
+      contract: { ...contract, executionMode: 'deterministic' },
+    })).rejects.toThrow(/missing its local executor/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('freezes a deterministic result that fails its task validator', async () => {
+    const dispatch = vi.fn();
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
+
+    await expect(runtime.execute({
+      ...plan,
+      contract: { ...contract, executionMode: 'deterministic' },
+      deterministicExecutor: () => ({ headline: '' }),
+    })).rejects.toThrow(/deterministic output validation failed/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('freezes caller-supplied provenance drift before cache lookup or dispatch', async () => {
     const dispatch = vi.fn();
     const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
 
     await expect(runtime.execute({ ...plan, inputDigest: '0'.repeat(64) })).rejects.toThrow(/provenance/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('freezes a digest-valid context containing an undeclared source', async () => {
+    const dispatch = vi.fn();
+    const segments = [{ ...context.segments[0], sourceRef: 'undeclared:v1' }];
+    const { digest: _digest, ...contextMaterial } = context;
+    const unauthorizedContext = {
+      ...contextMaterial,
+      segments,
+      digest: canonicalDigest({ ...contextMaterial, segments }),
+    };
+    const runtime = new ModelExecutionRuntime<Input, Output>({ transport: { dispatch } });
+
+    await expect(runtime.execute({
+      ...plan,
+      context: unauthorizedContext,
+      contextDigest: unauthorizedContext.digest,
+    })).rejects.toThrow(/provenance/);
     expect(dispatch).not.toHaveBeenCalled();
   });
 });
