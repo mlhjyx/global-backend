@@ -1,4 +1,4 @@
-import { canonicalDigest } from "../../model-runtime";
+import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_TASK } from "../agents/copy";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import { COPY_EVALUATION_V2_CANDIDATES } from "./copy-evaluation-v2-candidates";

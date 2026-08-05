@@ -7,9 +7,12 @@ import {
 import { ModelExecutionRuntime } from "./model-execution-runtime";
 import type {
   ExactResultCache,
+  ModelCompletionGuard,
+  ModelContentRepairCompiler,
   ModelExecutionPlan,
   ModelExecutionResult,
   ModelObservation,
+  ModelPostWireGuard,
   ModelTransport,
   RuntimeTelemetry,
 } from "./types";
@@ -21,6 +24,9 @@ interface DurableRuntimeDependencies<Input, Output> {
   telemetry?: RuntimeTelemetry;
   sleep?: (milliseconds: number) => Promise<void>;
   random?: () => number;
+  postWireGuard?: ModelPostWireGuard<Input, Output>;
+  completionGuard?: ModelCompletionGuard<Input, Output>;
+  repairCompiler?: ModelContentRepairCompiler<Input, Output>;
 }
 
 export interface DurableModelExecutionAttestation {
@@ -116,6 +122,9 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
   private readonly telemetry?: RuntimeTelemetry;
   private readonly sleep?: (milliseconds: number) => Promise<void>;
   private readonly random?: () => number;
+  private readonly postWireGuard?: ModelPostWireGuard<Input, Output>;
+  private readonly completionGuard?: ModelCompletionGuard<Input, Output>;
+  private readonly repairCompiler?: ModelContentRepairCompiler<Input, Output>;
 
   constructor(dependencies: DurableRuntimeDependencies<Input, Output>) {
     if (!isTrustedModelExecutionLedger(dependencies.ledger)) {
@@ -127,6 +136,9 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
     this.telemetry = dependencies.telemetry;
     this.sleep = dependencies.sleep;
     this.random = dependencies.random;
+    this.postWireGuard = dependencies.postWireGuard;
+    this.completionGuard = dependencies.completionGuard;
+    this.repairCompiler = dependencies.repairCompiler;
   }
 
   async execute(
@@ -161,6 +173,16 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
             requestId: null,
             reason: "transport_failed_after_dispatch",
           });
+          try {
+            await this.postWireGuard?.({
+              plan: currentPlan,
+              dispatchError: error,
+            });
+          } catch (guardError) {
+            throw new Error("model execution post-wire guard failed", {
+              cause: guardError,
+            });
+          }
           throw error;
         }
         if (!completeObservation(observation)) {
@@ -171,6 +193,13 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
             requestId: observation.requestId ?? null,
             reason: "observation_or_settlement_incomplete",
           });
+          try {
+            await this.postWireGuard?.({ plan: currentPlan, observation });
+          } catch (guardError) {
+            throw new Error("model execution post-wire guard failed", {
+              cause: guardError,
+            });
+          }
           return observation;
         }
         await OBSERVE_WIRE.call(this.ledger, {
@@ -188,6 +217,13 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
           },
           outputDigest: canonicalDigest(observation.output),
         });
+        try {
+          await this.postWireGuard?.({ plan: currentPlan, observation });
+        } catch (guardError) {
+          throw new Error("model execution post-wire guard failed", {
+            cause: guardError,
+          });
+        }
         return observation;
       },
     };
@@ -197,6 +233,9 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
       ...(this.telemetry == null ? {} : { telemetry: this.telemetry }),
       ...(this.sleep == null ? {} : { sleep: this.sleep }),
       ...(this.random == null ? {} : { random: this.random }),
+      ...(this.repairCompiler == null
+        ? {}
+        : { repairCompiler: this.repairCompiler }),
     });
     let result: ModelExecutionResult<Output>;
     try {
@@ -210,6 +249,23 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
       throw error;
     }
     const outputDigest = canonicalDigest(result.output);
+    try {
+      await this.completionGuard?.({
+        plan,
+        result,
+        wireCount,
+        outputDigest,
+      });
+    } catch (error) {
+      await FREEZE_EXECUTION.call(
+        this.ledger,
+        plan.executionId,
+        "completion_guard_failed",
+      );
+      throw new Error("model execution completion guard failed", {
+        cause: error,
+      });
+    }
     try {
       await COMPLETE_EXECUTION.call(this.ledger, {
         executionId: plan.executionId,
