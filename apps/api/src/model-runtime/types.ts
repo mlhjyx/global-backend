@@ -1,11 +1,11 @@
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
 export type ModelProtocol =
-  | 'openai_responses'
-  | 'openai_chat_completions'
-  | 'anthropic_messages'
-  | 'google_native';
-export type ReasoningLevel = 'none' | 'low' | 'medium' | 'high' | 'max';
+  | "openai_responses"
+  | "openai_chat_completions"
+  | "anthropic_messages"
+  | "google_native";
+export type ReasoningLevel = "none" | "low" | "medium" | "high" | "max";
 
 export interface ContextPolicy {
   version: string;
@@ -37,7 +37,7 @@ export interface ReasoningPolicy {
 }
 
 export interface CachePolicy {
-  mode: 'disabled' | 'exact' | 'build-run-replay';
+  mode: "disabled" | "exact" | "build-run-replay";
 }
 
 export interface RetryPolicy {
@@ -53,7 +53,7 @@ export interface RetryPolicy {
 export interface TaskModelContract<Input, Output> {
   taskId: string;
   version: string;
-  executionMode: 'deterministic' | 'generative';
+  executionMode: "deterministic" | "generative";
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   contextPolicy: ContextPolicy;
@@ -65,20 +65,14 @@ export interface TaskModelContract<Input, Output> {
 }
 
 export type ContextSegmentKind =
-  | 'policy'
-  | 'schema'
-  | 'facts'
-  | 'brand'
-  | 'examples'
-  | 'request'
-  | 'repair';
+  "policy" | "schema" | "facts" | "brand" | "examples" | "request" | "repair";
 
 export interface ContextSegment {
   kind: ContextSegmentKind;
   sourceRef: string;
   sourceDigest: string;
-  sensitivity: 'public' | 'workspace' | 'restricted';
-  cacheClass: 'stable-prefix' | 'request-local' | 'never-cache';
+  sensitivity: "public" | "workspace" | "restricted";
+  cacheClass: "stable-prefix" | "request-local" | "never-cache";
   estimatedTokens: number;
   relevance?: number;
   content: unknown;
@@ -111,8 +105,12 @@ export interface ModelCapabilityProfile {
   reportsUsage: boolean;
   reportsModel: boolean;
   reportsRequestId: boolean;
-  settlementObservation: 'none' | 'response' | 'gateway_log';
-  probe: { version: string; observedAt: string; result: 'passed' | 'failed' | 'unknown' };
+  settlementObservation: "none" | "response" | "gateway_log";
+  probe: {
+    version: string;
+    observedAt: string;
+    result: "passed" | "failed" | "unknown";
+  };
 }
 
 export interface ExactResultCacheIdentity {
@@ -136,13 +134,18 @@ export interface ExactResultCacheIdentity {
 
 export interface ExactResultCacheEntry<Output = unknown> {
   output: Output;
-  settlement: 'known' | 'unknown';
+  settlement: "known" | "unknown";
   validated: boolean;
 }
 
 export interface ExactResultCache {
-  get<Output>(identity: ExactResultCacheIdentity): Promise<ExactResultCacheEntry<Output> | undefined>;
-  put<Output>(identity: ExactResultCacheIdentity, entry: ExactResultCacheEntry<Output>): Promise<void>;
+  get<Output>(
+    identity: ExactResultCacheIdentity,
+  ): Promise<ExactResultCacheEntry<Output> | undefined>;
+  put<Output>(
+    identity: ExactResultCacheIdentity,
+    entry: ExactResultCacheEntry<Output>,
+  ): Promise<void>;
   putRepair<Output>(
     originalIdentity: ExactResultCacheIdentity,
     repairIdentity: ExactResultCacheIdentity,
@@ -155,6 +158,31 @@ export interface RepairBinding {
   findingsDigest: string;
   originalInputDigest: string;
   originalContextDigest: string;
+}
+
+export interface ModelValidationFinding {
+  code: string;
+  path: string;
+}
+
+export interface ModelContentRepairCompilerInput<Input, Output> {
+  originalPlan: ModelExecutionPlan<Input, Output>;
+  currentPlan: ModelExecutionPlan<Input, Output>;
+  priorOutput: Output;
+  findings: readonly ModelValidationFinding[];
+  binding: RepairBinding;
+  repairAttempt: number;
+}
+
+/**
+ * Task-specific compiler for a closed content repair. The Runtime validates
+ * every returned identity and digest before a second physical dispatch.
+ */
+export interface ModelContentRepairCompiler<Input, Output> {
+  findings(error: unknown): readonly ModelValidationFinding[];
+  compile(
+    input: ModelContentRepairCompilerInput<Input, Output>,
+  ): ModelExecutionPlan<Input, Output>;
 }
 
 export interface ModelExecutionPlan<Input, Output> {
@@ -186,27 +214,44 @@ export interface ModelObservation<Output> {
   resolvedAlias: string;
   reportedModel?: string;
   protocol: ModelProtocol;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  };
   usageComplete?: boolean;
   requestId?: string;
-  settlement: 'known' | 'unknown';
+  settlement: "known" | "unknown";
   warnings?: readonly string[];
 }
 
 export interface ModelTransport<Input = unknown, Output = unknown> {
-  dispatch(plan: ModelExecutionPlan<Input, Output>): Promise<ModelObservation<Output>>;
+  dispatch(
+    plan: ModelExecutionPlan<Input, Output>,
+  ): Promise<ModelObservation<Output>>;
 }
 
+export interface ModelPostWireGuardInput<Input, Output> {
+  plan: ModelExecutionPlan<Input, Output>;
+  observation?: ModelObservation<Output>;
+  dispatchError?: unknown;
+}
+
+export type ModelPostWireGuard<Input, Output> = (
+  input: ModelPostWireGuardInput<Input, Output>,
+) => void | Promise<void>;
+
 export type ModelExecutionState =
-  | 'planned'
-  | 'admitted'
-  | 'dispatched'
-  | 'observed'
-  | 'validated'
-  | 'repaired'
-  | 'settled'
-  | 'completed'
-  | 'frozen';
+  | "planned"
+  | "admitted"
+  | "dispatched"
+  | "observed"
+  | "validated"
+  | "repaired"
+  | "settled"
+  | "completed"
+  | "frozen";
 
 export interface RuntimeTelemetryEvent {
   executionId: string;

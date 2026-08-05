@@ -8,7 +8,10 @@ import {
   getDurableModelExecutionAttestation,
 } from "./durable-model-execution-runtime";
 import { AppendOnlyModelExecutionLedger } from "./model-execution-ledger";
-import { ModelExecutionRuntime } from "./model-execution-runtime";
+import {
+  ModelExecutionRuntime,
+  unwrapModelExecutionError,
+} from "./model-execution-runtime";
 import type {
   ModelExecutionPlan,
   ModelObservation,
@@ -267,5 +270,36 @@ describe("DurableModelExecutionRuntime", () => {
     await expect(
       runtime.execute(executionPlan("copy-after-unknown")),
     ).rejects.toThrow("MODEL_EXECUTION_CAMPAIGN_FROZEN");
+  });
+
+  it("records known settlement before a failing post-wire guard freezes the campaign", async () => {
+    const durableLedger = await ledger();
+    const guard = vi
+      .fn()
+      .mockRejectedValue(new Error("compiled runtime drift"));
+    const runtime = new DurableModelExecutionRuntime<Input, Output>({
+      ledger: durableLedger,
+      transport: {
+        dispatch: vi
+          .fn()
+          .mockResolvedValue(observation({ headline: "Observed" })),
+      },
+      postWireGuard: guard,
+    });
+
+    const failure = await runtime.execute(executionPlan("copy-drift")).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(unwrapModelExecutionError(failure)).toMatchObject({
+      message: "model execution post-wire guard failed",
+    });
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(await durableLedger.summary()).toMatchObject({
+      wireClaims: 1,
+      knownWireSettlements: 1,
+      completedExecutions: 0,
+      frozen: true,
+    });
   });
 });
