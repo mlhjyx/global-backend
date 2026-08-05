@@ -24,6 +24,8 @@ const HISTORICAL_MANIFEST_V1_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v1.json";
 const HISTORICAL_MANIFEST_V2_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v2.json";
+const HISTORICAL_MANIFEST_V3_PATH =
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v3.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -33,23 +35,23 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("freezes the dispatch-preflight merge as manifest v3 without dispatch", () => {
+  it("freezes the operator evidence gate merge as manifest v4 without dispatch", () => {
     const artifact = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: PREPARATION_HEAD,
       sourceFiles: sourceFiles(),
     });
 
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "03d701ee15d28254419fa4f04fb865ba4fd44932",
+      "00d39b384a03c2144fc04029ec90a3e840550140",
     );
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v3.json",
+      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v4.json",
     );
     expect(artifact).toMatchObject({
       schemaVersion:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
       artifactId:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3",
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v4",
       classification: "FIXED_SOURCE_CREATE_ONLY",
       fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD,
@@ -62,7 +64,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       manifest: {
         schemaVersion:
           "site-builder-copy-real-capability-manifest/2026-08-05-v1",
-        manifestId: "site-builder-copy-real-capability/2026-08-05-v3",
+        manifestId: "site-builder-copy-real-capability/2026-08-05-v4",
         fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
         planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
         dispatchAuthorization: "NOT_AUTHORIZED",
@@ -156,6 +158,10 @@ describe("Copy real capability create-only manifest preparation", () => {
     const specs = buildCopyRealCapabilitySourceFileSpecs([
       "apps/api/src/model-runtime/capability-registry.ts",
       "apps/api/src/model-runtime/capability-registry.spec.ts",
+      "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
+      "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+      "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
+      "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
       "packages/contracts/src/site-builder/locales.ts",
     ]);
 
@@ -196,6 +202,22 @@ describe("Copy real capability create-only manifest preparation", () => {
           role: "real_dispatch_runner",
           path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
         },
+        {
+          role: "operator_evidence_key",
+          path: "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
+        },
+        {
+          role: "operator_evidence_authorization",
+          path: "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
+        },
+        {
+          role: "runtime_transitive_source",
+          path: "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
+        },
+        {
+          role: "runtime_transitive_source",
+          path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+        },
       ]),
     );
     expect(specs.map(({ path }) => path)).toEqual(
@@ -214,21 +236,18 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("keeps the generated repository v3 bound to the merged dispatch source", () => {
-    const artifact = JSON.parse(
-      readFileSync(
-        resolve(REPOSITORY_ROOT, COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH),
-        "utf8",
-      ),
-    );
+  it("keeps repository v3 as self-consistent history after the operator gate", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V3_PATH);
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "953101004cd8c93c42ec2416bf9fe3c5e8aefbd04ff939869eedfb78380359e0",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3",
-      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      fixedSourceCommit: "03d701ee15d28254419fa4f04fb865ba4fd44932",
       preparationHeadCommit: "fb1607d00cc29e3802fe265930bc5e9259899c76",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
@@ -249,6 +268,35 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifact.requiredFollowup).toContain(
       "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
     );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.manifest.sourceBundleDigest).toBe(
+      artifact.sourceBundle.digest,
+    );
+    expect(
+      artifact.sourceBundle.files.map(
+        ({ path }: CopyRealCapabilitySourceFile) => path,
+      ),
+    ).not.toEqual(
+      expect.arrayContaining([
+        "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
+        "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
+      ]),
+    );
+    for (const entry of artifact.sourceBundle
+      .files as CopyRealCapabilitySourceFile[]) {
+      const fixedBytes = execFileSync(
+        "git",
+        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
+        { cwd: REPOSITORY_ROOT, encoding: "buffer" },
+      );
+      expect(createHash("sha256").update(fixedBytes).digest("hex")).toBe(
+        entry.sha256,
+      );
+    }
   });
 
   it("keeps repository v2 as self-consistent history after runtime v5 drift", () => {
