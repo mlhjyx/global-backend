@@ -197,8 +197,8 @@ describe("ModelExecutionRuntime", () => {
   it("admits exactly one digest-bound content repair after a known-settlement validation failure", async () => {
     const repairPolicy = {
       findings: () => [{ code: "HEADLINE_MISSING", path: "$.headline" }],
-      compile: ({ originalPlan, findings, binding }) => {
-        const repairMaterial = { binding, findings };
+      compile: ({ originalPlan, findings, binding, priorOutput }) => {
+        const repairMaterial = { binding, findings, priorOutput };
         const repairContext = new ContextEngine().assemble({
           workspaceId: originalPlan.workspaceId,
           policy: originalPlan.contract.contextPolicy,
@@ -279,6 +279,10 @@ describe("ModelExecutionRuntime", () => {
       ]),
       originalInputDigest: plan.inputDigest,
       originalContextDigest: plan.contextDigest,
+    });
+    expect(secondPlan.prompt.repair).toMatchObject({
+      priorOutput: { headline: "" },
+      findings: [{ code: "HEADLINE_MISSING", path: "$.headline" }],
     });
     expect(secondPlan.requestedAlias).toBe(plan.requestedAlias);
     expect(secondPlan.protocol).toBe(plan.protocol);

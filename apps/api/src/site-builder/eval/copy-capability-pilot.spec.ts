@@ -8,9 +8,9 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v3",
-      planId: "site-builder-copy-capability-pilot/2026-08-05-v3",
-      executionStatus: "REAL_ADMISSION_SOURCE_READY_MANIFEST_REQUIRED",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v5",
+      planId: "site-builder-copy-capability-pilot/2026-08-05-v5",
+      executionStatus: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
@@ -31,6 +31,12 @@ describe("Copy capability pilot preparation contract", () => {
         "post_wire_failure_durably_freezes_campaign",
         "structured_output_failure_cannot_be_business_validated",
         "loopback_only_native_adapter_factory",
+        "one_shot_real_authorization_and_reservation_ledger",
+        "request_bound_real_settlement_ledger",
+        "gateway_settlement_claim_requires_proof",
+        "known_settlement_invalid_output_closed_repair",
+        "real_gateway_post_wire_freeze",
+        "real_gateway_repair_payload_binding",
       ],
       completedPreparationGates: [
         "exact_real_candidate_scope_contract",
@@ -39,15 +45,16 @@ describe("Copy capability pilot preparation contract", () => {
         "authorization_binding_and_global_caps_contract",
         "bounded_request_bound_settlement_contract",
         "closed_non_dispatch_admission_envelope_validator",
+        "purpose_specific_live_finite_credential_factory",
+        "fixed_source_runtime_reverification_factory",
+        "trusted_dispatch_runner_and_candidate_receipt_factory",
       ],
       blockingGates: [
         "post_merge_create_only_fixed_commit_manifest",
         "installed_real_gateway_credential_attestation",
         "durable_real_gateway_authorization_reservation",
-        "trusted_settlement_observer_and_ledger_binding",
-        "trusted_operational_proof_factories_and_branded_receipt",
-        "real_gateway_post_wire_freeze",
-        "real_gateway_repair_payload_binding",
+        "separate_exact_scope_dispatch_authorization",
+        "operator_authenticated_evidence_authorization",
       ],
     });
     expect(COPY_CAPABILITY_PILOT_PLAN.executions).toEqual([

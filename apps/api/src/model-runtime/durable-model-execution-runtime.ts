@@ -4,6 +4,10 @@ import {
   isTrustedModelExecutionLedger,
   type ModelExecutionEvidenceClass,
 } from "./model-execution-ledger";
+import {
+  isTrustedRealModelExecutionLedger,
+  RealModelExecutionLedger,
+} from "./real-model-execution-ledger";
 import { ModelExecutionRuntime } from "./model-execution-runtime";
 import type {
   ExactResultCache,
@@ -13,12 +17,14 @@ import type {
   ModelExecutionResult,
   ModelObservation,
   ModelPostWireGuard,
+  ModelRepairPlannedGuard,
   ModelTransport,
   RuntimeTelemetry,
 } from "./types";
 
 interface DurableRuntimeDependencies<Input, Output> {
-  ledger: AppendOnlyModelExecutionLedger;
+  ledger: AppendOnlyModelExecutionLedger | RealModelExecutionLedger;
+  expectedEvidenceClass?: ModelExecutionEvidenceClass;
   transport: ModelTransport<Input, Output>;
   cache?: ExactResultCache;
   telemetry?: RuntimeTelemetry;
@@ -27,6 +33,10 @@ interface DurableRuntimeDependencies<Input, Output> {
   postWireGuard?: ModelPostWireGuard<Input, Output>;
   completionGuard?: ModelCompletionGuard<Input, Output>;
   repairCompiler?: ModelContentRepairCompiler<Input, Output>;
+  repairPlannedGuard?: ModelRepairPlannedGuard<Input, Output>;
+  preWireGuard?: (
+    plan: ModelExecutionPlan<Input, Output>,
+  ) => void | Promise<void>;
 }
 
 export interface DurableModelExecutionAttestation {
@@ -50,6 +60,15 @@ const COMPLETE_EXECUTION =
 const FREEZE_EXECUTION =
   AppendOnlyModelExecutionLedger.prototype.freezeExecution;
 const LEDGER_SUMMARY = AppendOnlyModelExecutionLedger.prototype.summary;
+const REAL_CLAIM_EXECUTION = RealModelExecutionLedger.prototype.claimExecution;
+const REAL_CLAIM_WIRE = RealModelExecutionLedger.prototype.claimWire;
+const REAL_OBSERVE_WIRE = RealModelExecutionLedger.prototype.observeWire;
+const REAL_PLAN_REPAIR = RealModelExecutionLedger.prototype.planRepair;
+const REAL_COMPLETE_EXECUTION =
+  RealModelExecutionLedger.prototype.completeExecution;
+const REAL_FREEZE_EXECUTION =
+  RealModelExecutionLedger.prototype.freezeExecution;
+const REAL_LEDGER_SUMMARY = RealModelExecutionLedger.prototype.summary;
 
 export function getDurableModelExecutionAttestation(
   result: ModelExecutionResult<unknown>,
@@ -115,8 +134,47 @@ function completeObservation<Output>(
   );
 }
 
+interface GatewaySettlementClaim {
+  requestId: string;
+  alias: string;
+  protocol: string;
+  channelId: number;
+  quota: number;
+  inputTokens: number;
+  outputTokens: number;
+  receiptDigest: string;
+  resolverId: string;
+}
+
+function gatewaySettlementClaim(
+  value: unknown,
+): GatewaySettlementClaim | undefined {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const claim = value as Partial<GatewaySettlementClaim>;
+  return typeof claim.requestId === "string" &&
+    typeof claim.alias === "string" &&
+    typeof claim.protocol === "string" &&
+    Number.isSafeInteger(claim.channelId) &&
+    Number(claim.channelId) > 0 &&
+    Number.isSafeInteger(claim.quota) &&
+    Number(claim.quota) >= 0 &&
+    Number.isSafeInteger(claim.inputTokens) &&
+    Number(claim.inputTokens) >= 0 &&
+    Number.isSafeInteger(claim.outputTokens) &&
+    Number(claim.outputTokens) >= 0 &&
+    typeof claim.receiptDigest === "string" &&
+    /^[0-9a-f]{64}$/u.test(claim.receiptDigest) &&
+    typeof claim.resolverId === "string"
+    ? (claim as GatewaySettlementClaim)
+    : undefined;
+}
+
 export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
-  private readonly ledger: AppendOnlyModelExecutionLedger;
+  private readonly ledger:
+    AppendOnlyModelExecutionLedger | RealModelExecutionLedger;
+  private readonly expectedEvidenceClass: ModelExecutionEvidenceClass;
   private readonly transport: ModelTransport<Input, Output>;
   private readonly cache?: ExactResultCache;
   private readonly telemetry?: RuntimeTelemetry;
@@ -125,12 +183,24 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
   private readonly postWireGuard?: ModelPostWireGuard<Input, Output>;
   private readonly completionGuard?: ModelCompletionGuard<Input, Output>;
   private readonly repairCompiler?: ModelContentRepairCompiler<Input, Output>;
+  private readonly repairPlannedGuard?: ModelRepairPlannedGuard<Input, Output>;
+  private readonly preWireGuard?: (
+    plan: ModelExecutionPlan<Input, Output>,
+  ) => void | Promise<void>;
 
   constructor(dependencies: DurableRuntimeDependencies<Input, Output>) {
-    if (!isTrustedModelExecutionLedger(dependencies.ledger)) {
+    if (
+      !isTrustedModelExecutionLedger(dependencies.ledger) &&
+      !isTrustedRealModelExecutionLedger(dependencies.ledger)
+    ) {
       throw new Error("MODEL_EXECUTION_LEDGER_UNTRUSTED");
     }
     this.ledger = dependencies.ledger;
+    this.expectedEvidenceClass =
+      dependencies.expectedEvidenceClass ?? "fake_gateway_contract_only";
+    if (this.ledger.evidenceClass !== this.expectedEvidenceClass) {
+      throw new Error("MODEL_EXECUTION_EVIDENCE_CLASS_MISMATCH");
+    }
     this.transport = dependencies.transport;
     this.cache = dependencies.cache;
     this.telemetry = dependencies.telemetry;
@@ -139,6 +209,122 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
     this.postWireGuard = dependencies.postWireGuard;
     this.completionGuard = dependencies.completionGuard;
     this.repairCompiler = dependencies.repairCompiler;
+    this.repairPlannedGuard = dependencies.repairPlannedGuard;
+    this.preWireGuard = dependencies.preWireGuard;
+  }
+
+  private realLedger(): RealModelExecutionLedger | undefined {
+    return isTrustedRealModelExecutionLedger(this.ledger)
+      ? this.ledger
+      : undefined;
+  }
+
+  private claimExecution(input: {
+    executionId: string;
+    planDigest: string;
+  }): Promise<void> {
+    const realLedger = this.realLedger();
+    return realLedger != null
+      ? REAL_CLAIM_EXECUTION.call(realLedger, input)
+      : CLAIM_EXECUTION.call(this.ledger, input);
+  }
+
+  private claimWire(input: {
+    executionId: string;
+    wireId: string;
+    requestDigest: string;
+  }): Promise<void> {
+    const realLedger = this.realLedger();
+    return realLedger != null
+      ? REAL_CLAIM_WIRE.call(realLedger, input)
+      : CLAIM_WIRE.call(this.ledger, input);
+  }
+
+  private observeUnknown(input: {
+    executionId: string;
+    wireId: string;
+    settlement: "unknown";
+    requestId: string | null;
+    reason: string;
+  }): Promise<void> {
+    const realLedger = this.realLedger();
+    return realLedger != null
+      ? REAL_OBSERVE_WIRE.call(realLedger, input)
+      : OBSERVE_WIRE.call(this.ledger, input);
+  }
+
+  private observeKnown<ObservedOutput>(input: {
+    executionId: string;
+    wireId: string;
+    observation: ModelObservation<ObservedOutput> & {
+      requestId: string;
+      reportedModel: string;
+      usageComplete: true;
+      settlement: "known";
+    };
+  }): Promise<void> {
+    const observation = input.observation;
+    const common = {
+      executionId: input.executionId,
+      wireId: input.wireId,
+      settlement: "known" as const,
+      requestId: observation.requestId,
+      requestedAlias: observation.requestedAlias,
+      resolvedAlias: observation.resolvedAlias,
+      reportedModel: observation.reportedModel,
+      protocol: observation.protocol,
+      usage: {
+        inputTokens: observation.usage.inputTokens,
+        outputTokens: observation.usage.outputTokens,
+      },
+      outputDigest: canonicalDigest(observation.output),
+    };
+    const realLedger = this.realLedger();
+    if (realLedger != null) {
+      const proof = gatewaySettlementClaim(observation.settlementProof);
+      if (
+        proof == null ||
+        proof.requestId !== observation.requestId ||
+        proof.alias !== observation.resolvedAlias ||
+        proof.protocol !== observation.protocol ||
+        proof.inputTokens !== observation.usage.inputTokens ||
+        proof.outputTokens !== observation.usage.outputTokens
+      ) {
+        throw new Error("MODEL_EXECUTION_REAL_SETTLEMENT_PROOF_MISSING");
+      }
+      return REAL_OBSERVE_WIRE.call(realLedger, {
+        ...common,
+        receiptDigest: proof.receiptDigest,
+        quota: proof.quota,
+        resolverId: proof.resolverId,
+        channelId: proof.channelId,
+      });
+    }
+    return OBSERVE_WIRE.call(this.ledger, common);
+  }
+
+  private completeExecution(input: {
+    executionId: string;
+    outputDigest: string;
+  }): Promise<void> {
+    const realLedger = this.realLedger();
+    return realLedger != null
+      ? REAL_COMPLETE_EXECUTION.call(realLedger, input)
+      : COMPLETE_EXECUTION.call(this.ledger, input);
+  }
+
+  private freezeExecution(executionId: string, reason: string): Promise<void> {
+    const realLedger = this.realLedger();
+    return realLedger != null
+      ? REAL_FREEZE_EXECUTION.call(realLedger, executionId, reason)
+      : FREEZE_EXECUTION.call(this.ledger, executionId, reason);
+  }
+
+  private summary() {
+    const realLedger = this.realLedger();
+    return realLedger != null
+      ? REAL_LEDGER_SUMMARY.call(realLedger)
+      : LEDGER_SUMMARY.call(this.ledger);
   }
 
   async execute(
@@ -148,16 +334,19 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
       throw new Error("MODEL_EXECUTION_TASK_MISMATCH");
     }
     const executionPlanDigest = planDigest(plan);
-    await CLAIM_EXECUTION.call(this.ledger, {
+    await this.claimExecution({
       executionId: plan.executionId,
       planDigest: executionPlanDigest,
     });
     let wireCount = 0;
+    let lastWireId: string | undefined;
     const durableTransport: ModelTransport<Input, Output> = {
       dispatch: async (currentPlan) => {
+        await this.preWireGuard?.(currentPlan);
         wireCount += 1;
         const wireId = `${plan.executionId}:wire:${wireCount}`;
-        await CLAIM_WIRE.call(this.ledger, {
+        lastWireId = wireId;
+        await this.claimWire({
           executionId: plan.executionId,
           wireId,
           requestDigest: requestDigest(currentPlan, wireCount),
@@ -166,7 +355,7 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
         try {
           observation = await this.transport.dispatch(currentPlan);
         } catch (error) {
-          await OBSERVE_WIRE.call(this.ledger, {
+          await this.observeUnknown({
             executionId: plan.executionId,
             wireId,
             settlement: "unknown",
@@ -186,7 +375,7 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
           throw error;
         }
         if (!completeObservation(observation)) {
-          await OBSERVE_WIRE.call(this.ledger, {
+          await this.observeUnknown({
             executionId: plan.executionId,
             wireId,
             settlement: "unknown",
@@ -202,20 +391,10 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
           }
           return observation;
         }
-        await OBSERVE_WIRE.call(this.ledger, {
+        await this.observeKnown({
           executionId: plan.executionId,
           wireId,
-          settlement: "known",
-          requestId: observation.requestId,
-          requestedAlias: observation.requestedAlias,
-          resolvedAlias: observation.resolvedAlias,
-          reportedModel: observation.reportedModel,
-          protocol: observation.protocol,
-          usage: {
-            inputTokens: observation.usage.inputTokens,
-            outputTokens: observation.usage.outputTokens,
-          },
-          outputDigest: canonicalDigest(observation.output),
+          observation,
         });
         try {
           await this.postWireGuard?.({ plan: currentPlan, observation });
@@ -236,13 +415,28 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
       ...(this.repairCompiler == null
         ? {}
         : { repairCompiler: this.repairCompiler }),
+      repairPlannedGuard: async (repair) => {
+        const realLedger = this.realLedger();
+        if (realLedger != null) {
+          if (lastWireId == null) {
+            throw new Error("MODEL_EXECUTION_REPAIR_WIRE_MISSING");
+          }
+          await REAL_PLAN_REPAIR.call(realLedger, {
+            executionId: plan.executionId,
+            wireId: `${plan.executionId}:wire:${wireCount + 1}`,
+            bindingDigest: canonicalDigest(repair.binding),
+            priorOutputDigest: repair.binding.priorOutputDigest,
+            findingsDigest: repair.binding.findingsDigest,
+          });
+        }
+        await this.repairPlannedGuard?.(repair);
+      },
     });
     let result: ModelExecutionResult<Output>;
     try {
       result = await runtime.execute(plan);
     } catch (error) {
-      await FREEZE_EXECUTION.call(
-        this.ledger,
+      await this.freezeExecution(
         plan.executionId,
         "runtime_rejected_after_execution_claim",
       );
@@ -257,34 +451,25 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
         outputDigest,
       });
     } catch (error) {
-      await FREEZE_EXECUTION.call(
-        this.ledger,
-        plan.executionId,
-        "completion_guard_failed",
-      );
+      await this.freezeExecution(plan.executionId, "completion_guard_failed");
       throw new Error("model execution completion guard failed", {
         cause: error,
       });
     }
     try {
-      await COMPLETE_EXECUTION.call(this.ledger, {
+      await this.completeExecution({
         executionId: plan.executionId,
         outputDigest,
       });
     } catch (error) {
-      await FREEZE_EXECUTION.call(
-        this.ledger,
-        plan.executionId,
-        "durable_completion_failed",
-      );
+      await this.freezeExecution(plan.executionId, "durable_completion_failed");
       throw error;
     }
-    const summary = await LEDGER_SUMMARY.call(this.ledger);
-    if (summary.evidenceClass !== "fake_gateway_contract_only") {
-      await FREEZE_EXECUTION.call(
-        this.ledger,
+    const summary = await this.summary();
+    if (summary.evidenceClass !== this.expectedEvidenceClass) {
+      await this.freezeExecution(
         plan.executionId,
-        "test_only_evidence_class_mismatch",
+        "execution_evidence_class_mismatch",
       );
       throw new Error("MODEL_EXECUTION_EVIDENCE_CLASS_MISMATCH");
     }

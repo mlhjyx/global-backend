@@ -8,6 +8,7 @@ import {
   getDurableModelExecutionAttestation,
 } from "./durable-model-execution-runtime";
 import { AppendOnlyModelExecutionLedger } from "./model-execution-ledger";
+import { RealModelExecutionLedger } from "./real-model-execution-ledger";
 import {
   ModelExecutionRuntime,
   unwrapModelExecutionError,
@@ -46,6 +47,34 @@ async function ledger() {
       planDigest: "a".repeat(64),
       maximumExecutions: 3,
       maximumWireCalls: 6,
+    },
+  });
+}
+
+async function realLedger() {
+  const directory = await mkdtemp(join(tmpdir(), "durable-real-runtime-"));
+  temporaryDirectories.push(directory);
+  return RealModelExecutionLedger.open({
+    ledgerPath: join(directory, "ledger.jsonl"),
+    authorizationClaimPath: join(directory, "authorization.claim.json"),
+    campaign: {
+      campaignId: "copy-runtime-test",
+      taskId: "site_builder.copy",
+      planDigest: "a".repeat(64),
+      maximumExecutions: 3,
+      maximumWireCalls: 6,
+    },
+    authorization: {
+      authorizationId: "copy-runtime-real-authorization",
+      reservationId: "copy-runtime-real-reservation",
+      manifestDigest: "b".repeat(64),
+      credentialAttestationDigest: "c".repeat(64),
+      settlementObserverDigest: "d".repeat(64),
+      ledgerIdentityDigest: "e".repeat(64),
+      reservationDigest: "f".repeat(64),
+      maximumExecutions: 3,
+      maximumWireCalls: 6,
+      maximumRepairCallsPerExecution: 1,
     },
   });
 }
@@ -131,6 +160,18 @@ function observation(output: Output): ModelObservation<Output> {
   };
 }
 
+function realObservation(output: Output): ModelObservation<Output> {
+  return {
+    ...observation(output),
+    settlementProof: {
+      resolverId: "copy-runtime-request-bound-resolver",
+      receiptDigest: "1".repeat(64),
+      channelId: 21,
+      quota: 400,
+    },
+  };
+}
+
 describe("DurableModelExecutionRuntime", () => {
   it("rejects an object that only forges the ledger prototype", () => {
     const forged = Object.create(AppendOnlyModelExecutionLedger.prototype);
@@ -150,7 +191,7 @@ describe("DurableModelExecutionRuntime", () => {
       .spyOn(AppendOnlyModelExecutionLedger.prototype, "summary")
       .mockResolvedValue({
         ...originalSummary,
-        evidenceClass: "real_gateway_settled",
+        evidenceClass: "gateway_settlement_claim_only",
       });
     try {
       const runtime = new DurableModelExecutionRuntime<Input, Output>({
@@ -194,6 +235,61 @@ describe("DurableModelExecutionRuntime", () => {
     expect(getDurableModelExecutionAttestation(result)?.ledgerDigest).toMatch(
       /^[0-9a-f]{64}$/u,
     );
+  });
+
+  it("rejects a structurally forged settlement proof from minting real evidence", async () => {
+    const durableLedger = await realLedger();
+    const runtime = new DurableModelExecutionRuntime<Input, Output>({
+      ledger: durableLedger,
+      expectedEvidenceClass: "gateway_settlement_claim_only",
+      transport: {
+        dispatch: vi
+          .fn()
+          .mockResolvedValue(realObservation({ headline: "Settled" })),
+      },
+    });
+
+    const failure = await runtime
+      .execute(executionPlan("copy-real-forged"))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(unwrapModelExecutionError(failure)).toMatchObject({
+      message: "MODEL_EXECUTION_REAL_SETTLEMENT_PROOF_MISSING",
+    });
+    expect(getDurableModelExecutionAttestation({} as never)).toBeUndefined();
+    expect(await durableLedger.summary()).toMatchObject({
+      completedExecutions: 0,
+      frozen: true,
+    });
+  });
+
+  it("freezes a real ledger before completion when settlement proof is missing", async () => {
+    const durableLedger = await realLedger();
+    const runtime = new DurableModelExecutionRuntime<Input, Output>({
+      ledger: durableLedger,
+      expectedEvidenceClass: "gateway_settlement_claim_only",
+      transport: {
+        dispatch: vi
+          .fn()
+          .mockResolvedValue(observation({ headline: "Unproven" })),
+      },
+    });
+
+    const failure = await runtime
+      .execute(executionPlan("copy-real-unproven"))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(unwrapModelExecutionError(failure)).toMatchObject({
+      message: "MODEL_EXECUTION_REAL_SETTLEMENT_PROOF_MISSING",
+    });
+    expect(await durableLedger.summary()).toMatchObject({
+      completedExecutions: 0,
+      frozen: true,
+    });
   });
 
   it("does not trust an ordinary injectable Runtime transport result", async () => {

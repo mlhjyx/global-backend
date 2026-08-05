@@ -1,5 +1,5 @@
-import { canonicalDigest } from "../../model-runtime";
-import type { ModelProtocol, ReasoningLevel } from "../../model-runtime";
+import { canonicalDigest } from "../../model-runtime/context-engine";
+import type { ModelProtocol, ReasoningLevel } from "../../model-runtime/types";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -30,7 +30,7 @@ const EXECUTIONS = COPY_CAPABILITY_PILOT_PLAN.executions.map(
 
 export const COPY_REAL_CAPABILITY_ADMISSION_SOURCE = deepFreeze({
   schemaVersion:
-    "site-builder-copy-real-capability-admission-source/2026-08-05-v1" as const,
+    "site-builder-copy-real-capability-admission-source/2026-08-05-v3" as const,
   taskId: "site_builder.copy" as const,
   planId: COPY_CAPABILITY_PILOT_PLAN.planId,
   planDigest: canonicalDigest(COPY_CAPABILITY_PILOT_PLAN),
@@ -67,7 +67,7 @@ export interface CopyRealCapabilitySourceVerification {
 }
 
 export interface CopyPilotCredentialAttestation {
-  schemaVersion: "site-builder-copy-pilot-credential-attestation/2026-08-05-v1";
+  schemaVersion: "site-builder-copy-pilot-credential-attestation/2026-08-05-v3";
   attestationId: string;
   capturedAt: string;
   expiresAt: string;
@@ -77,8 +77,16 @@ export interface CopyPilotCredentialAttestation {
   quotaMode: "limited";
   quotaCapPoints: number;
   remainingQuotaPoints: number;
+  maximumQuotaPointsPerWire: number;
+  reservedQuotaPoints: number;
   scopeExact: true;
+  repairPayloadPolicy: "bounded_structured_prior_output_64k";
   executions: readonly CopyRealCapabilityExecutionScope[];
+  channels: readonly {
+    alias: string;
+    protocol: ModelProtocol;
+    channelId: number;
+  }[];
   resolverId: string;
 }
 
@@ -276,27 +284,51 @@ function validateCredential(
       "quotaMode",
       "quotaCapPoints",
       "remainingQuotaPoints",
+      "maximumQuotaPointsPerWire",
+      "reservedQuotaPoints",
       "scopeExact",
+      "repairPayloadPolicy",
       "executions",
+      "channels",
       "resolverId",
     ]) ||
     credential.schemaVersion !==
-      "site-builder-copy-pilot-credential-attestation/2026-08-05-v1" ||
+      "site-builder-copy-pilot-credential-attestation/2026-08-05-v3" ||
     !IDENTIFIER.test(credential.attestationId) ||
     !IDENTIFIER.test(credential.resolverId) ||
     !SHA256.test(credential.bearerTokenSha256) ||
     credential.purpose !== "site_builder_copy_capability_pilot" ||
     credential.quotaMode !== "limited" ||
     credential.scopeExact !== true ||
+    credential.repairPayloadPolicy !== "bounded_structured_prior_output_64k" ||
     !safePositiveInteger(credential.quotaCapPoints) ||
     !safePositiveInteger(credential.remainingQuotaPoints) ||
-    credential.remainingQuotaPoints > credential.quotaCapPoints
+    !safePositiveInteger(credential.maximumQuotaPointsPerWire) ||
+    !safePositiveInteger(credential.reservedQuotaPoints) ||
+    credential.reservedQuotaPoints !==
+      credential.maximumQuotaPointsPerWire *
+        COPY_CAPABILITY_PILOT_PLAN.maximumWireCalls ||
+    !Number.isSafeInteger(credential.reservedQuotaPoints) ||
+    credential.remainingQuotaPoints > credential.quotaCapPoints ||
+    credential.remainingQuotaPoints < credential.reservedQuotaPoints ||
+    credential.quotaCapPoints < credential.reservedQuotaPoints
   ) {
     fail("COPY_REAL_CAPABILITY_CREDENTIAL_INVALID");
   }
   validateGatewayOrigin(credential.gatewayOrigin);
   validateLifetime(credential.capturedAt, credential.expiresAt, now);
   if (!exactExecutionScope(credential.executions)) {
+    fail("COPY_REAL_CAPABILITY_SCOPE_MISMATCH");
+  }
+  if (
+    credential.channels.length !== EXECUTIONS.length ||
+    credential.channels.some(
+      (channel, index) =>
+        channel.alias !== EXECUTIONS[index]?.alias ||
+        channel.protocol !== EXECUTIONS[index]?.protocol ||
+        !safePositiveInteger(channel.channelId),
+    )
+  ) {
     fail("COPY_REAL_CAPABILITY_SCOPE_MISMATCH");
   }
 }

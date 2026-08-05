@@ -185,7 +185,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("validates the repository v2 artifact against the current preparation contract", () => {
+  it("keeps repository v2 as self-consistent history after runtime v5 drift", () => {
     const artifact = JSON.parse(
       readFileSync(
         resolve(REPOSITORY_ROOT, COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH),
@@ -193,9 +193,9 @@ describe("Copy real capability create-only manifest preparation", () => {
       ),
     );
 
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(() => validateCopyRealCapabilityManifestArtifact(artifact)).toThrow(
+      "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2",
@@ -211,13 +211,18 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifact.sourceBundle.digest).toBe(
       "c9ae0a641fc5401ad8dca84e267b550129e67af8426aebf407a5c48b76cf0901",
     );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.manifest.planDigest).not.toBe(
+      COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
+    );
   });
 
   it("keeps the historical artifact self-consistent after current-source drift", () => {
-    const artifactPath = resolve(
-      REPOSITORY_ROOT,
-      HISTORICAL_MANIFEST_V1_PATH,
-    );
+    const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V1_PATH);
     const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
 
     expect(artifact).toMatchObject({

@@ -176,13 +176,13 @@ describe("Copy Evaluation v2 admission plan", () => {
 
   it("separates the three-call pilot from the later task-shaped matrix", () => {
     expect(COPY_EVALUATION_V2_PLAN.capabilityPilot).toMatchObject({
-      contractId: "site-builder-copy-capability-pilot/2026-08-05-v3",
+      contractId: "site-builder-copy-capability-pilot/2026-08-05-v5",
       contractSchemaVersion:
-        "site-builder-copy-capability-pilot-plan/2026-08-05-v3",
+        "site-builder-copy-capability-pilot-plan/2026-08-05-v5",
       evidenceClassification: "CAPABILITY_ONLY_NOT_QUALITY_EVIDENCE",
       plannedExecutions: 3,
       maximumWireCalls: 6,
-      status: "REAL_ADMISSION_SOURCE_READY_MANIFEST_REQUIRED",
+      status: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
     });
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,

@@ -19,9 +19,7 @@ import {
   AppendOnlyModelExecutionLedger,
   type ModelExecutionLedgerSummary,
 } from "../../model-runtime/model-execution-ledger";
-import {
-  getTrustedModelExecutionMetadata,
-} from "../../model-runtime/model-execution-runtime";
+import { getTrustedModelExecutionMetadata } from "../../model-runtime/model-execution-runtime";
 import type {
   ModelContentRepairCompiler,
   ModelExecutionPlan,
@@ -65,6 +63,7 @@ const FIXTURE = (() => {
 })();
 
 export const COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS = Object.freeze([
+  "apps/api/dist/model-gateway/new-api-request-bound-settlement.js",
   "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
   "apps/api/dist/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.js",
   "apps/api/dist/model-runtime/adapters/ai-sdk-native-adapter.contract.js",
@@ -75,6 +74,8 @@ export const COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS = Object.freeze([
   "apps/api/dist/model-runtime/immutable.js",
   "apps/api/dist/model-runtime/model-execution-ledger.js",
   "apps/api/dist/model-runtime/model-execution-runtime.js",
+  "apps/api/dist/model-runtime/real-model-execution-ledger-storage.js",
+  "apps/api/dist/model-runtime/real-model-execution-ledger.js",
   "apps/api/dist/model-runtime/types.js",
   "apps/api/dist/site-builder/agents/copy.js",
   "apps/api/dist/site-builder/copy-bundle.service.js",
@@ -194,7 +195,7 @@ function completeUsage(usage: {
   );
 }
 
-function contract(input: {
+export function createCopyCapabilityTaskContract(input: {
   protocol: ModelProtocol;
   reasoning: ReasoningLevel;
 }): TaskModelContract<CopyTaskInput, CopyTaskOutput> {
@@ -248,6 +249,7 @@ function contract(input: {
 
 function contextFor(
   taskContract: TaskModelContract<CopyTaskInput, CopyTaskOutput>,
+  workspaceId: string,
 ) {
   const sources = [
     {
@@ -301,7 +303,7 @@ function contextFor(
     },
   ];
   return new ContextEngine().assemble({
-    workspaceId: "copy-capability-fake-gateway",
+    workspaceId,
     policy: taskContract.contextPolicy,
     segments: sources.map((source) => ({
       ...source,
@@ -365,7 +367,7 @@ export function getCopyCapabilityOperationalProofReceipt(
   return OPERATIONAL_PROOF_RECEIPTS.get(result);
 }
 
-function copyRepairCompiler(): ModelContentRepairCompiler<
+export function createCopyCapabilityRepairCompiler(): ModelContentRepairCompiler<
   CopyTaskInput,
   CopyTaskOutput
 > {
@@ -377,8 +379,15 @@ function copyRepairCompiler(): ModelContentRepairCompiler<
           path: "$",
         }),
       ]),
-    compile: ({ originalPlan, findings, binding }) => {
-      const repairMaterial = Object.freeze({ binding, findings });
+    compile: ({ originalPlan, findings, binding, priorOutput }) => {
+      if (Buffer.byteLength(JSON.stringify(priorOutput), "utf8") > 64 * 1024) {
+        throw new Error("COPY_CAPABILITY_PRIOR_OUTPUT_TOO_LARGE");
+      }
+      const repairMaterial = Object.freeze({
+        binding,
+        findings,
+        priorOutput,
+      });
       const repairContext = new ContextEngine().assemble({
         workspaceId: originalPlan.workspaceId,
         policy: originalPlan.contract.contextPolicy,
@@ -420,6 +429,47 @@ interface RunnerInput {
   campaignId: string;
   gateway: AiSdkNativeAdapterSettings;
   compiledRuntimeGuard?: CompiledRuntimeGuard;
+}
+
+export function createCopyCapabilityExecutionPlan(input: {
+  executionKey: string;
+  campaignId: string;
+  workspaceId: string;
+}): ModelExecutionPlan<CopyTaskInput, CopyTaskOutput> {
+  const execution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+    (candidate) => candidate.executionKey === input.executionKey,
+  );
+  if (!execution) throw new Error("COPY_CAPABILITY_EXECUTION_NOT_IN_PLAN");
+  const taskContract = createCopyCapabilityTaskContract({
+    protocol: execution.protocol,
+    reasoning: execution.reasoning,
+  });
+  const context = contextFor(taskContract, input.workspaceId);
+  return Object.freeze({
+    executionId: execution.executionKey,
+    workspaceId: input.workspaceId,
+    buildRunId: input.campaignId,
+    contract: taskContract,
+    input: FIXTURE.input,
+    inputDigest: canonicalDigest(FIXTURE.input),
+    context,
+    contextDigest: context.digest,
+    promptVersion: COPY_CAPABILITY_PILOT_PLAN.planId,
+    schemaDigest: canonicalDigest(taskContract.outputSchema),
+    requestedAlias: execution.alias,
+    resolvedAlias: execution.alias,
+    protocol: execution.protocol,
+    reasoning: execution.reasoning,
+    sampling: Object.freeze({
+      maximumOutputTokens: execution.maximumOutputTokens,
+      timeoutMs: execution.timeoutMs,
+    }),
+    locale: FIXTURE.input.locale,
+    prompt: Object.freeze({
+      system: COPY_TASK.system,
+      user: COPY_TASK.buildPrompt(FIXTURE.input),
+    }),
+  });
 }
 
 function copyOperationalRuntimeBinding(): Readonly<Record<string, unknown>> {
@@ -471,38 +521,11 @@ async function createRunner(
       if (compiledRuntimeGuard != null) {
         await ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard);
       }
-      const taskContract = contract({
-        protocol: execution.protocol,
-        reasoning: execution.reasoning,
+      const plan = createCopyCapabilityExecutionPlan({
+        executionKey,
+        campaignId: input.campaignId,
+        workspaceId: "copy-capability-fake-gateway",
       });
-      const context = contextFor(taskContract);
-      const prompt = Object.freeze({
-        system: COPY_TASK.system,
-        user: COPY_TASK.buildPrompt(FIXTURE.input),
-      });
-      const plan: ModelExecutionPlan<CopyTaskInput, CopyTaskOutput> =
-        Object.freeze({
-          executionId: execution.executionKey,
-          workspaceId: "copy-capability-fake-gateway",
-          buildRunId: input.campaignId,
-          contract: taskContract,
-          input: FIXTURE.input,
-          inputDigest: canonicalDigest(FIXTURE.input),
-          context,
-          contextDigest: context.digest,
-          promptVersion: COPY_CAPABILITY_PILOT_PLAN.planId,
-          schemaDigest: canonicalDigest(taskContract.outputSchema),
-          requestedAlias: execution.alias,
-          resolvedAlias: execution.alias,
-          protocol: execution.protocol,
-          reasoning: execution.reasoning,
-          sampling: Object.freeze({
-            maximumOutputTokens: execution.maximumOutputTokens,
-            timeoutMs: execution.timeoutMs,
-          }),
-          locale: FIXTURE.input.locale,
-          prompt,
-        });
       const adapter = adapters[execution.protocol];
       const transport: ModelTransport<CopyTaskInput, CopyTaskOutput> = {
         dispatch: async (
@@ -576,7 +599,7 @@ async function createRunner(
       >({
         ledger,
         transport,
-        repairCompiler: copyRepairCompiler(),
+        repairCompiler: createCopyCapabilityRepairCompiler(),
         ...(compiledRuntimeGuard == null
           ? {}
           : {
@@ -589,9 +612,8 @@ async function createRunner(
               }) => {
                 await ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard);
                 const metadata = GET_TRUSTED_METADATA(completedResult);
-                const compiled = GET_COMPILED_RUNTIME_ATTESTATION(
-                  compiledRuntimeGuard,
-                );
+                const compiled =
+                  GET_COMPILED_RUNTIME_ATTESTATION(compiledRuntimeGuard);
                 if (
                   completedResult.repairAttempts !== 1 ||
                   completedResult.transportAttempts !== 2 ||
@@ -634,8 +656,7 @@ async function createRunner(
             metadata.protocol !== execution.protocol ||
             metadata.reasoning !== execution.reasoning ||
             durable.outputDigest !== metadata.outputDigest ||
-            compiled.schemaVersion !==
-              "compiled-runtime-guard/2026-08-05-v1" ||
+            compiled.schemaVersion !== "compiled-runtime-guard/2026-08-05-v1" ||
             compiled.artifactCount !==
               COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS.length ||
             compiled.bindingDigest !==
