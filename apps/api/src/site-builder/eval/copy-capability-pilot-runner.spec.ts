@@ -1,21 +1,23 @@
+import { execFile } from "node:child_process";
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { promisify } from "node:util";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDurableModelExecutionAttestation } from "../../model-runtime";
 import type { CopyTaskOutput } from "../agents/copy";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
   createCopyCapabilityPilotFakeGatewayRunner,
-  createCopyCapabilityPilotOperationalProofRunner,
+  createCopyCapabilityPilotOperationalProofRunner as createSourceOperationalProofRunner,
   COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS,
-  getCopyCapabilityOperationalProofReceipt,
 } from "./copy-capability-pilot-runner";
 
 interface ObservedRequest {
@@ -29,17 +31,30 @@ const REJECTED_API_KEY = ["not", "a", "fixture", "key"].join("-");
 const servers: Array<ReturnType<typeof createServer>> = [];
 const directories: string[] = [];
 
-async function writeOperationalArtifactTree(root: string): Promise<void> {
-  await Promise.all(
-    COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS.map(async (path) => {
-      const artifact = join(root, path);
-      await mkdir(dirname(artifact), { recursive: true });
-      await writeFile(
-        artifact,
-        `export const artifact = ${JSON.stringify(path)};\n`,
-      );
-    }),
+const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
+const COMPILED_RUNNER_PATH = join(
+  REPOSITORY_ROOT,
+  "apps/api/dist/site-builder/eval/copy-capability-pilot-runner.js",
+);
+const REQUIRE = createRequire(import.meta.url);
+const EXEC_FILE = promisify(execFile);
+
+function createCompiledOperationalProofRunner(input: {
+  ledgerPath: string;
+  campaignId: string;
+  gateway: {
+    baseUrl: string;
+    canonicalGatewayBaseUrl: string;
+    apiKey: string;
+  };
+}) {
+  return compiledRunnerModule().createCopyCapabilityPilotOperationalProofRunner(
+    input,
   );
+}
+
+function compiledRunnerModule() {
+  return REQUIRE(COMPILED_RUNNER_PATH) as typeof import("./copy-capability-pilot-runner");
 }
 
 afterEach(async () => {
@@ -227,8 +242,7 @@ describe("Copy capability pilot fake-gateway runner", () => {
     const gateway = await fakeGateway([invalidOutput, expectedOutput]);
     const directory = await mkdtemp(join(tmpdir(), "copy-operational-proof-"));
     directories.push(directory);
-    await writeOperationalArtifactTree(directory);
-    const runner = await createCopyCapabilityPilotOperationalProofRunner({
+    const runner = await createCompiledOperationalProofRunner({
       ledgerPath: join(directory, "ledger.jsonl"),
       campaignId: "copy-capability-operational-proof",
       gateway: {
@@ -236,7 +250,6 @@ describe("Copy capability pilot fake-gateway runner", () => {
         canonicalGatewayBaseUrl: gateway.baseUrl,
         apiKey: FIXTURE_API_KEY,
       },
-      compiledRuntimeRoot: directory,
     });
 
     const result = await runner.execute("copy-capability-1-gpt-5.6-terra");
@@ -244,7 +257,9 @@ describe("Copy capability pilot fake-gateway runner", () => {
     expect(gateway.observed).toHaveLength(2);
     expect(result).toMatchObject({ repairAttempts: 1, transportAttempts: 2 });
     expect(result.states).toContain("repaired");
-    expect(getCopyCapabilityOperationalProofReceipt(result)).toMatchObject({
+    expect(
+      compiledRunnerModule().getCopyCapabilityOperationalProofReceipt(result),
+    ).toMatchObject({
       classification: "OPERATIONAL_PROOF_ONLY",
       evidenceClass: "fake_gateway_contract_only",
       wireCount: 2,
@@ -256,7 +271,7 @@ describe("Copy capability pilot fake-gateway runner", () => {
       untrustedInstruction,
     );
     expect(
-      getCopyCapabilityOperationalProofReceipt({
+      compiledRunnerModule().getCopyCapabilityOperationalProofReceipt({
         ...result,
         states: [...result.states],
       }),
@@ -267,6 +282,202 @@ describe("Copy capability pilot fake-gateway runner", () => {
       completedExecutions: 1,
       frozen: false,
     });
+  });
+
+  it("refuses a one-wire happy path as operational repair proof", async () => {
+    const gateway = await fakeGateway();
+    const directory = await mkdtemp(join(tmpdir(), "copy-operational-proof-"));
+    directories.push(directory);
+    const runner = await createCompiledOperationalProofRunner({
+      ledgerPath: join(directory, "ledger.jsonl"),
+      campaignId: "copy-capability-repair-required",
+      gateway: {
+        baseUrl: gateway.baseUrl,
+        canonicalGatewayBaseUrl: gateway.baseUrl,
+        apiKey: FIXTURE_API_KEY,
+      },
+    });
+
+    await expect(
+      runner.execute("copy-capability-1-gpt-5.6-terra"),
+    ).rejects.toThrow("model execution completion guard failed");
+    expect(gateway.observed).toHaveLength(1);
+    expect(await runner.summary()).toMatchObject({
+      wireClaims: 1,
+      knownWireSettlements: 1,
+      completedExecutions: 0,
+      frozen: true,
+    });
+  });
+
+  it("freezes if receipt branding cannot verify the completed durable result", async () => {
+    const expectedOutput = COPY_ASSEMBLY_EVAL_FIXTURES.find(
+      ({ fixtureId }) => fixtureId === "copy-factual-claims",
+    )!.expectedOutput;
+    const invalidOutput = structuredClone(expectedOutput);
+    invalidOutput.slots["home.hero.headline"] = {
+      content: "Invented pressure performance",
+      claimRefs: ["claim-pressure"],
+    };
+    const gateway = await fakeGateway([invalidOutput, expectedOutput]);
+    const directory = await mkdtemp(join(tmpdir(), "copy-receipt-failure-"));
+    directories.push(directory);
+    const compiledDurablePath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
+    );
+    const compiledDurable = REQUIRE(compiledDurablePath) as typeof import("../../model-runtime/durable-model-execution-runtime");
+    const originalExecute =
+      compiledDurable.DurableModelExecutionRuntime.prototype.execute;
+    const executePatch = vi
+      .spyOn(
+        compiledDurable.DurableModelExecutionRuntime.prototype,
+        "execute",
+      )
+      .mockImplementation(async function (plan) {
+        const result = await originalExecute.call(this, plan);
+        return { ...result, states: [...result.states] };
+      });
+
+    try {
+      const runner = await createCompiledOperationalProofRunner({
+        ledgerPath: join(directory, "ledger.jsonl"),
+        campaignId: "copy-capability-receipt-failure",
+        gateway: {
+          baseUrl: gateway.baseUrl,
+          canonicalGatewayBaseUrl: gateway.baseUrl,
+          apiKey: FIXTURE_API_KEY,
+        },
+      });
+      await expect(
+        runner.execute("copy-capability-1-gpt-5.6-terra"),
+      ).rejects.toThrow("COPY_CAPABILITY_OPERATIONAL_PROOF_INCOMPLETE");
+      expect(await runner.summary()).toMatchObject({
+        wireClaims: 2,
+        knownWireSettlements: 2,
+        completedExecutions: 1,
+        frozen: true,
+      });
+    } finally {
+      executePatch.mockRestore();
+    }
+  });
+
+  it("freezes receipt-time compiled drift after durable completion", async () => {
+    const expectedOutput = COPY_ASSEMBLY_EVAL_FIXTURES.find(
+      ({ fixtureId }) => fixtureId === "copy-factual-claims",
+    )!.expectedOutput;
+    const invalidOutput = structuredClone(expectedOutput);
+    invalidOutput.slots["home.hero.headline"] = {
+      content: "Invented pressure performance",
+      claimRefs: ["claim-pressure"],
+    };
+    const gateway = await fakeGateway([invalidOutput, expectedOutput]);
+    const directory = await mkdtemp(join(tmpdir(), "copy-receipt-drift-"));
+    directories.push(directory);
+    const runtimePath = join(
+      REPOSITORY_ROOT,
+      COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS[0]!,
+    );
+    const originalRuntime = await readFile(runtimePath);
+    const compiledLedgerPath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/model-runtime/model-execution-ledger.js",
+    );
+    const compiledDurablePath = join(
+      REPOSITORY_ROOT,
+      "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
+    );
+    const compiledLedger = REQUIRE(compiledLedgerPath) as typeof import("../../model-runtime/model-execution-ledger");
+    const originalComplete =
+      compiledLedger.AppendOnlyModelExecutionLedger.prototype.completeExecution;
+    const completePatch = vi
+      .spyOn(
+        compiledLedger.AppendOnlyModelExecutionLedger.prototype,
+        "completeExecution",
+      )
+      .mockImplementation(async function (input) {
+        await originalComplete.call(this, input);
+        await writeFile(runtimePath, "export const receiptDrift = true;\n");
+      });
+    delete REQUIRE.cache[REQUIRE.resolve(COMPILED_RUNNER_PATH)];
+    delete REQUIRE.cache[REQUIRE.resolve(compiledDurablePath)];
+
+    try {
+      const runner = await createCompiledOperationalProofRunner({
+        ledgerPath: join(directory, "ledger.jsonl"),
+        campaignId: "copy-capability-receipt-drift",
+        gateway: {
+          baseUrl: gateway.baseUrl,
+          canonicalGatewayBaseUrl: gateway.baseUrl,
+          apiKey: FIXTURE_API_KEY,
+        },
+      });
+      await expect(
+        runner.execute("copy-capability-1-gpt-5.6-terra"),
+      ).rejects.toThrow("COMPILED_RUNTIME_DRIFT");
+      expect(await runner.summary()).toMatchObject({
+        wireClaims: 2,
+        knownWireSettlements: 2,
+        completedExecutions: 1,
+        frozen: true,
+      });
+    } finally {
+      completePatch.mockRestore();
+      await writeFile(runtimePath, originalRuntime);
+      delete REQUIRE.cache[REQUIRE.resolve(COMPILED_RUNNER_PATH)];
+      delete REQUIRE.cache[REQUIRE.resolve(compiledDurablePath)];
+    }
+  });
+
+  it("guards the Copy proof transitive compiled closure", () => {
+    expect(COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS).toEqual(
+      expect.arrayContaining([
+        "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
+        "apps/api/dist/model-runtime/immutable.js",
+        "apps/api/dist/site-builder/copy-bundle.service.js",
+        "apps/api/dist/site-builder/eval/copy-evaluation-v2-candidates.js",
+        "apps/api/dist/site-builder/eval/copy-quality-rubric.js",
+        "packages/contracts/dist/site-builder/site-spec.js",
+      ]),
+    );
+  });
+
+  it("covers every repository-local module loaded by the compiled runner", async () => {
+    const script = `
+      const { relative, resolve } = require("node:path");
+      const root = ${JSON.stringify(REPOSITORY_ROOT)};
+      const entrypoint = ${JSON.stringify(COMPILED_RUNNER_PATH)};
+      const loaded = require(entrypoint);
+      const guarded = new Set(loaded.COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS);
+      const missing = Object.keys(require.cache)
+        .filter((path) => path.startsWith(root + "/") && !path.includes("/node_modules/"))
+        .map((path) => relative(root, resolve(path)).replaceAll("\\\\", "/"))
+        .filter((path) => path.endsWith(".js") && !guarded.has(path))
+        .sort();
+      process.stdout.write(JSON.stringify(missing));
+    `;
+    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
+    expect(JSON.parse(stdout) as string[]).toEqual([]);
+  });
+
+  it("rejects operational proof when loaded from TypeScript source", async () => {
+    const gateway = await fakeGateway();
+    const directory = await mkdtemp(join(tmpdir(), "copy-source-proof-"));
+    directories.push(directory);
+
+    await expect(
+      createSourceOperationalProofRunner({
+        ledgerPath: join(directory, "ledger.jsonl"),
+        campaignId: "copy-source-proof-rejected",
+        gateway: {
+          baseUrl: gateway.baseUrl,
+          canonicalGatewayBaseUrl: gateway.baseUrl,
+          apiKey: FIXTURE_API_KEY,
+        },
+      }),
+    ).rejects.toThrow("COPY_CAPABILITY_COMPILED_ENTRYPOINT_REQUIRED");
+    expect(gateway.observed).toHaveLength(0);
   });
 
   it("never repairs an unknown settlement and never dispatches a third wire", async () => {
@@ -336,15 +547,15 @@ describe("Copy capability pilot fake-gateway runner", () => {
   it("keeps a known wire settlement then freezes post-wire compiled drift", async () => {
     const directory = await mkdtemp(join(tmpdir(), "copy-operational-proof-"));
     directories.push(directory);
-    await writeOperationalArtifactTree(directory);
     const runtimePath = join(
-      directory,
+      REPOSITORY_ROOT,
       COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS[0]!,
     );
+    const originalRuntime = await readFile(runtimePath);
     const gateway = await fakeGateway(undefined, "present", async () => {
       await writeFile(runtimePath, "export const runtime = 2;\n");
     });
-    const runner = await createCopyCapabilityPilotOperationalProofRunner({
+    const runner = await createCompiledOperationalProofRunner({
       ledgerPath: join(directory, "ledger.jsonl"),
       campaignId: "copy-capability-post-wire-drift",
       gateway: {
@@ -352,18 +563,21 @@ describe("Copy capability pilot fake-gateway runner", () => {
         canonicalGatewayBaseUrl: gateway.baseUrl,
         apiKey: FIXTURE_API_KEY,
       },
-      compiledRuntimeRoot: directory,
     });
 
-    await expect(
-      runner.execute("copy-capability-1-gpt-5.6-terra"),
-    ).rejects.toThrow();
-    expect(gateway.observed).toHaveLength(1);
-    expect(await runner.summary()).toMatchObject({
-      knownWireSettlements: 1,
-      completedExecutions: 0,
-      frozen: true,
-    });
+    try {
+      await expect(
+        runner.execute("copy-capability-1-gpt-5.6-terra"),
+      ).rejects.toThrow();
+      expect(gateway.observed).toHaveLength(1);
+      expect(await runner.summary()).toMatchObject({
+        knownWireSettlements: 1,
+        completedExecutions: 0,
+        frozen: true,
+      });
+    } finally {
+      await writeFile(runtimePath, originalRuntime);
+    }
   });
 
   it("rejects non-loopback origins and unknown execution keys before opening a wire", async () => {

@@ -242,6 +242,17 @@ export type ModelPostWireGuard<Input, Output> = (
   input: ModelPostWireGuardInput<Input, Output>,
 ) => void | Promise<void>;
 
+export interface ModelCompletionGuardInput<Input, Output> {
+  plan: ModelExecutionPlan<Input, Output>;
+  result: ModelExecutionResult<Output>;
+  wireCount: number;
+  outputDigest: string;
+}
+
+export type ModelCompletionGuard<Input, Output> = (
+  input: ModelCompletionGuardInput<Input, Output>,
+) => void | Promise<void>;
+
 export type ModelExecutionState =
   | "planned"
   | "admitted"

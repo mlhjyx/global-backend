@@ -1,31 +1,45 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+
+import {
+  assertCompiledRuntimeGuardCurrent,
+  type CompiledRuntimeGuard,
+  createCompiledRuntimeGuard,
+  getCompiledRuntimeGuardAttestation,
+} from "../../model-runtime/compiled-runtime-guard";
+import {
+  canonicalDigest,
+  ContextEngine,
+} from "../../model-runtime/context-engine";
+import {
+  DurableModelExecutionRuntime,
+  getDurableModelExecutionAttestation,
+} from "../../model-runtime/durable-model-execution-runtime";
 import {
   AppendOnlyModelExecutionLedger,
-  assertCompiledRuntimeGuardCurrent,
-  canonicalDigest,
-  type CompiledRuntimeGuard,
-  ContextEngine,
-  createCompiledRuntimeGuard,
-  DurableModelExecutionRuntime,
-  getCompiledRuntimeGuardAttestation,
-  getDurableModelExecutionAttestation,
-  getTrustedModelExecutionMetadata,
-  type ModelContentRepairCompiler,
   type ModelExecutionLedgerSummary,
-  type ModelExecutionPlan,
-  type ModelExecutionResult,
-  type ModelObservation,
-  type ModelProtocol,
-  type ModelTransport,
-  type ReasoningLevel,
-  type TaskModelContract,
-} from "../../model-runtime";
+} from "../../model-runtime/model-execution-ledger";
 import {
-  AiSdkAnthropicMessagesAdapter,
-  AiSdkOpenAiResponsesAdapter,
-  type AiSdkNativeAdapterSettings,
-  type NativeModelAdapter,
-  type NativeReasoningEffort,
-} from "../../model-runtime/adapters";
+  getTrustedModelExecutionMetadata,
+} from "../../model-runtime/model-execution-runtime";
+import type {
+  ModelContentRepairCompiler,
+  ModelExecutionPlan,
+  ModelExecutionResult,
+  ModelObservation,
+  ModelProtocol,
+  ModelTransport,
+  ReasoningLevel,
+  TaskModelContract,
+} from "../../model-runtime/types";
+// Direct adapter imports keep the compiled proof closure explicit and narrow.
+import { AiSdkAnthropicMessagesAdapter } from "../../model-runtime/adapters/ai-sdk-anthropic-messages.adapter";
+import type {
+  AiSdkNativeAdapterSettings,
+  NativeModelAdapter,
+  NativeReasoningEffort,
+} from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
+import { AiSdkOpenAiResponsesAdapter } from "../../model-runtime/adapters/ai-sdk-openai-responses.adapter";
 import {
   COPY_TASK,
   type CopyTaskInput,
@@ -58,16 +72,59 @@ export const COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS = Object.freeze([
   "apps/api/dist/model-runtime/compiled-runtime-guard.js",
   "apps/api/dist/model-runtime/context-engine.js",
   "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
+  "apps/api/dist/model-runtime/immutable.js",
   "apps/api/dist/model-runtime/model-execution-ledger.js",
   "apps/api/dist/model-runtime/model-execution-runtime.js",
   "apps/api/dist/model-runtime/types.js",
   "apps/api/dist/site-builder/agents/copy.js",
+  "apps/api/dist/site-builder/copy-bundle.service.js",
   "apps/api/dist/site-builder/eval/copy-assembly-eval.js",
   "apps/api/dist/site-builder/eval/copy-capability-pilot-runner.js",
   "apps/api/dist/site-builder/eval/copy-capability-pilot.js",
+  "apps/api/dist/site-builder/eval/copy-evaluation-v2-candidates.js",
+  "apps/api/dist/site-builder/eval/copy-quality-rubric.js",
   "packages/contracts/dist/index.js",
+  "packages/contracts/dist/site-builder/component-content-budget.js",
+  "packages/contracts/dist/site-builder/component-qualification.js",
+  "packages/contracts/dist/site-builder/component-schema.js",
   "packages/contracts/dist/site-builder/copy-bundle.js",
+  "packages/contracts/dist/site-builder/design-brief.js",
+  "packages/contracts/dist/site-builder/design-catalog-v2.js",
+  "packages/contracts/dist/site-builder/design-catalog.js",
+  "packages/contracts/dist/site-builder/design-dna.js",
+  "packages/contracts/dist/site-builder/design-evaluation.js",
+  "packages/contracts/dist/site-builder/design-integrity.js",
+  "packages/contracts/dist/site-builder/design-observation.js",
+  "packages/contracts/dist/site-builder/design-source.js",
+  "packages/contracts/dist/site-builder/evidence.js",
+  "packages/contracts/dist/site-builder/inquiry.js",
+  "packages/contracts/dist/site-builder/locales.js",
+  "packages/contracts/dist/site-builder/media-foundation.js",
+  "packages/contracts/dist/site-builder/model-policy.js",
+  "packages/contracts/dist/site-builder/site-spec-validation.js",
+  "packages/contracts/dist/site-builder/site-spec.js",
+  "packages/contracts/dist/site-builder/template-family.js",
 ] as const);
+
+const LOADED_REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
+const COMPILED_OPERATIONAL_ENTRYPOINT = resolve(
+  LOADED_REPOSITORY_ROOT,
+  "apps/api/dist/site-builder/eval/copy-capability-pilot-runner.js",
+);
+
+function assertCompiledOperationalEntrypoint(): void {
+  let loadedEntrypoint: string;
+  let compiledEntrypoint: string;
+  try {
+    loadedEntrypoint = realpathSync(__filename);
+    compiledEntrypoint = realpathSync(COMPILED_OPERATIONAL_ENTRYPOINT);
+  } catch {
+    throw new Error("COPY_CAPABILITY_COMPILED_ENTRYPOINT_REQUIRED");
+  }
+  if (loadedEntrypoint !== compiledEntrypoint) {
+    throw new Error("COPY_CAPABILITY_COMPILED_ENTRYPOINT_REQUIRED");
+  }
+}
 
 const COPY_CONTRACT_VERSION = (() => {
   if (!COPY_TASK.contractVersion) {
@@ -299,6 +356,8 @@ const CREATE_COMPILED_RUNTIME_GUARD = createCompiledRuntimeGuard;
 const GET_COMPILED_RUNTIME_ATTESTATION = getCompiledRuntimeGuardAttestation;
 const GET_DURABLE_ATTESTATION = getDurableModelExecutionAttestation;
 const GET_TRUSTED_METADATA = getTrustedModelExecutionMetadata;
+const FREEZE_EXECUTION =
+  AppendOnlyModelExecutionLedger.prototype.freezeExecution;
 
 export function getCopyCapabilityOperationalProofReceipt(
   result: ModelExecutionResult<unknown>,
@@ -360,7 +419,7 @@ interface RunnerInput {
   ledgerPath: string;
   campaignId: string;
   gateway: AiSdkNativeAdapterSettings;
-  compiledRuntimeRoot?: string;
+  compiledRuntimeGuard?: CompiledRuntimeGuard;
 }
 
 function copyOperationalRuntimeBinding(): Readonly<Record<string, unknown>> {
@@ -381,14 +440,7 @@ function copyOperationalRuntimeBinding(): Readonly<Record<string, unknown>> {
 async function createRunner(
   input: RunnerInput,
 ): Promise<CopyCapabilityPilotFakeGatewayRunner> {
-  const compiledRuntimeGuard: CompiledRuntimeGuard | undefined =
-    input.compiledRuntimeRoot == null
-      ? undefined
-      : await CREATE_COMPILED_RUNTIME_GUARD({
-          repositoryRoot: input.compiledRuntimeRoot,
-          artifactPaths: COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS,
-          binding: copyOperationalRuntimeBinding(),
-        });
+  const compiledRuntimeGuard = input.compiledRuntimeGuard;
   if (compiledRuntimeGuard != null) {
     await ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard);
   }
@@ -510,7 +562,18 @@ async function createRunner(
           });
         },
       };
-      const result = await new DurableModelExecutionRuntime({
+      let completedProof:
+        | {
+            compiled: NonNullable<
+              ReturnType<typeof GET_COMPILED_RUNTIME_ATTESTATION>
+            >;
+            metadata: NonNullable<ReturnType<typeof GET_TRUSTED_METADATA>>;
+          }
+        | undefined;
+      const result = await new DurableModelExecutionRuntime<
+        CopyTaskInput,
+        CopyTaskOutput
+      >({
         ledger,
         transport,
         repairCompiler: copyRepairCompiler(),
@@ -519,49 +582,94 @@ async function createRunner(
           : {
               postWireGuard: () =>
                 ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard),
+              completionGuard: async ({
+                result: completedResult,
+                wireCount,
+                outputDigest,
+              }) => {
+                await ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard);
+                const metadata = GET_TRUSTED_METADATA(completedResult);
+                const compiled = GET_COMPILED_RUNTIME_ATTESTATION(
+                  compiledRuntimeGuard,
+                );
+                if (
+                  completedResult.repairAttempts !== 1 ||
+                  completedResult.transportAttempts !== 2 ||
+                  wireCount !== 2 ||
+                  !completedResult.states.includes("repaired") ||
+                  metadata == null ||
+                  compiled == null ||
+                  metadata.executionId !== execution.executionKey ||
+                  metadata.resolvedAlias !== execution.alias ||
+                  metadata.protocol !== execution.protocol ||
+                  metadata.reasoning !== execution.reasoning ||
+                  metadata.outputDigest !== outputDigest ||
+                  compiled.schemaVersion !==
+                    "compiled-runtime-guard/2026-08-05-v1" ||
+                  compiled.artifactCount !==
+                    COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS.length ||
+                  compiled.bindingDigest !==
+                    canonicalDigest(copyOperationalRuntimeBinding())
+                ) {
+                  throw new Error(
+                    "COPY_CAPABILITY_OPERATIONAL_PROOF_INCOMPLETE",
+                  );
+                }
+                completedProof = { compiled, metadata };
+              },
             }),
       }).execute(plan);
       if (compiledRuntimeGuard != null) {
-        await ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard);
-        const durable = GET_DURABLE_ATTESTATION(result);
-        const metadata = GET_TRUSTED_METADATA(result);
-        const compiled = GET_COMPILED_RUNTIME_ATTESTATION(compiledRuntimeGuard);
-        if (
-          durable?.evidenceClass !== "fake_gateway_contract_only" ||
-          metadata == null ||
-          compiled == null ||
-          metadata.executionId !== execution.executionKey ||
-          metadata.resolvedAlias !== execution.alias ||
-          metadata.protocol !== execution.protocol ||
-          metadata.reasoning !== execution.reasoning ||
-          durable.outputDigest !== metadata.outputDigest ||
-          compiled.schemaVersion !== "compiled-runtime-guard/2026-08-05-v1" ||
-          compiled.artifactCount !==
-            COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS.length ||
-          compiled.bindingDigest !==
-            canonicalDigest(copyOperationalRuntimeBinding())
-        ) {
-          throw new Error("COPY_CAPABILITY_OPERATIONAL_PROOF_INCOMPLETE");
+        try {
+          await ASSERT_COMPILED_RUNTIME_CURRENT(compiledRuntimeGuard);
+          const durable = GET_DURABLE_ATTESTATION(result);
+          const metadata = completedProof?.metadata;
+          const compiled = completedProof?.compiled;
+          if (
+            durable?.evidenceClass !== "fake_gateway_contract_only" ||
+            metadata == null ||
+            compiled == null ||
+            metadata.executionId !== execution.executionKey ||
+            metadata.resolvedAlias !== execution.alias ||
+            metadata.protocol !== execution.protocol ||
+            metadata.reasoning !== execution.reasoning ||
+            durable.outputDigest !== metadata.outputDigest ||
+            compiled.schemaVersion !==
+              "compiled-runtime-guard/2026-08-05-v1" ||
+            compiled.artifactCount !==
+              COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS.length ||
+            compiled.bindingDigest !==
+              canonicalDigest(copyOperationalRuntimeBinding())
+          ) {
+            throw new Error("COPY_CAPABILITY_OPERATIONAL_PROOF_INCOMPLETE");
+          }
+          OPERATIONAL_PROOF_RECEIPTS.set(
+            result,
+            Object.freeze({
+              classification: "OPERATIONAL_PROOF_ONLY" as const,
+              evidenceClass: "fake_gateway_contract_only" as const,
+              campaignId: durable.campaignId,
+              executionId: durable.executionId,
+              alias: metadata.resolvedAlias,
+              protocol: metadata.protocol,
+              reasoning: metadata.reasoning,
+              wireCount: durable.wireCount,
+              ledgerDigest: durable.ledgerDigest,
+              outputDigest: durable.outputDigest,
+              compiledRuntimeDigest: compiled.artifactTreeDigest,
+              compiledBindingDigest: compiled.bindingDigest,
+              compiledRuntimeSchemaVersion: compiled.schemaVersion,
+              compiledArtifactCount: compiled.artifactCount,
+            }),
+          );
+        } catch (error) {
+          await FREEZE_EXECUTION.call(
+            ledger,
+            plan.executionId,
+            "operational_receipt_failed",
+          );
+          throw error;
         }
-        OPERATIONAL_PROOF_RECEIPTS.set(
-          result,
-          Object.freeze({
-            classification: "OPERATIONAL_PROOF_ONLY" as const,
-            evidenceClass: "fake_gateway_contract_only" as const,
-            campaignId: durable.campaignId,
-            executionId: durable.executionId,
-            alias: metadata.resolvedAlias,
-            protocol: metadata.protocol,
-            reasoning: metadata.reasoning,
-            wireCount: durable.wireCount,
-            ledgerDigest: durable.ledgerDigest,
-            outputDigest: durable.outputDigest,
-            compiledRuntimeDigest: compiled.artifactTreeDigest,
-            compiledBindingDigest: compiled.bindingDigest,
-            compiledRuntimeSchemaVersion: compiled.schemaVersion,
-            compiledArtifactCount: compiled.artifactCount,
-          }),
-        );
       }
       return result;
     },
@@ -574,14 +682,23 @@ export async function createCopyCapabilityPilotFakeGatewayRunner(input: {
   campaignId: string;
   gateway: AiSdkNativeAdapterSettings;
 }): Promise<CopyCapabilityPilotFakeGatewayRunner> {
-  return createRunner(input);
+  return createRunner({
+    ledgerPath: input.ledgerPath,
+    campaignId: input.campaignId,
+    gateway: input.gateway,
+  });
 }
 
 export async function createCopyCapabilityPilotOperationalProofRunner(input: {
   ledgerPath: string;
   campaignId: string;
   gateway: AiSdkNativeAdapterSettings;
-  compiledRuntimeRoot: string;
 }): Promise<CopyCapabilityPilotFakeGatewayRunner> {
-  return createRunner(input);
+  assertCompiledOperationalEntrypoint();
+  const compiledRuntimeGuard = await CREATE_COMPILED_RUNTIME_GUARD({
+    repositoryRoot: LOADED_REPOSITORY_ROOT,
+    artifactPaths: COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS,
+    binding: copyOperationalRuntimeBinding(),
+  });
+  return createRunner({ ...input, compiledRuntimeGuard });
 }

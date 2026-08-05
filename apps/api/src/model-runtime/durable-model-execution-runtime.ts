@@ -7,6 +7,7 @@ import {
 import { ModelExecutionRuntime } from "./model-execution-runtime";
 import type {
   ExactResultCache,
+  ModelCompletionGuard,
   ModelContentRepairCompiler,
   ModelExecutionPlan,
   ModelExecutionResult,
@@ -24,6 +25,7 @@ interface DurableRuntimeDependencies<Input, Output> {
   sleep?: (milliseconds: number) => Promise<void>;
   random?: () => number;
   postWireGuard?: ModelPostWireGuard<Input, Output>;
+  completionGuard?: ModelCompletionGuard<Input, Output>;
   repairCompiler?: ModelContentRepairCompiler<Input, Output>;
 }
 
@@ -121,6 +123,7 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
   private readonly sleep?: (milliseconds: number) => Promise<void>;
   private readonly random?: () => number;
   private readonly postWireGuard?: ModelPostWireGuard<Input, Output>;
+  private readonly completionGuard?: ModelCompletionGuard<Input, Output>;
   private readonly repairCompiler?: ModelContentRepairCompiler<Input, Output>;
 
   constructor(dependencies: DurableRuntimeDependencies<Input, Output>) {
@@ -134,6 +137,7 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
     this.sleep = dependencies.sleep;
     this.random = dependencies.random;
     this.postWireGuard = dependencies.postWireGuard;
+    this.completionGuard = dependencies.completionGuard;
     this.repairCompiler = dependencies.repairCompiler;
   }
 
@@ -245,6 +249,23 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
       throw error;
     }
     const outputDigest = canonicalDigest(result.output);
+    try {
+      await this.completionGuard?.({
+        plan,
+        result,
+        wireCount,
+        outputDigest,
+      });
+    } catch (error) {
+      await FREEZE_EXECUTION.call(
+        this.ledger,
+        plan.executionId,
+        "completion_guard_failed",
+      );
+      throw new Error("model execution completion guard failed", {
+        cause: error,
+      });
+    }
     try {
       await COMPLETE_EXECUTION.call(this.ledger, {
         executionId: plan.executionId,

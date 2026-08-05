@@ -302,4 +302,36 @@ describe("DurableModelExecutionRuntime", () => {
       frozen: true,
     });
   });
+
+  it("freezes before completion when the completion guard rejects the result", async () => {
+    const durableLedger = await ledger();
+    const completionGuard = vi
+      .fn()
+      .mockRejectedValue(new Error("operational proof incomplete"));
+    const runtime = new DurableModelExecutionRuntime<Input, Output>({
+      ledger: durableLedger,
+      transport: {
+        dispatch: vi
+          .fn()
+          .mockResolvedValue(observation({ headline: "Observed" })),
+      },
+      completionGuard,
+    });
+
+    await expect(
+      runtime.execute(executionPlan("copy-completion-guard")),
+    ).rejects.toThrow("model execution completion guard failed");
+    expect(completionGuard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wireCount: 1,
+        outputDigest: canonicalDigest({ headline: "Observed" }),
+      }),
+    );
+    expect(await durableLedger.summary()).toMatchObject({
+      wireClaims: 1,
+      knownWireSettlements: 1,
+      completedExecutions: 0,
+      frozen: true,
+    });
+  });
 });
