@@ -185,6 +185,34 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
+  it("validates the repository v2 artifact against the current preparation contract", () => {
+    const artifact = JSON.parse(
+      readFileSync(
+        resolve(REPOSITORY_ROOT, COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH),
+        "utf8",
+      ),
+    );
+
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v2",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "42b6bc209560c30840ecd5b305325a5e3e93abc7",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(60);
+    expect(artifact.sourceBundle.digest).toBe(
+      "c9ae0a641fc5401ad8dca84e267b550129e67af8426aebf407a5c48b76cf0901",
+    );
+  });
+
   it("keeps the historical artifact self-consistent after current-source drift", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
