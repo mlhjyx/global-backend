@@ -1,14 +1,20 @@
-import { jsonSchema, NoObjectGeneratedError, type LanguageModelUsage } from 'ai';
-import Ajv from 'ajv';
-import addFormats from 'ajv-formats';
+import { createHash } from "node:crypto";
+import {
+  jsonSchema,
+  NoObjectGeneratedError,
+  type LanguageModelUsage,
+} from "ai";
+import Ajv from "ajv";
+import addFormats from "ajv-formats";
 import type {
   NativeAdapterUsage,
   NativeAdapterWarning,
   NativeModelProtocol,
-} from './ai-sdk-native-adapter.contract';
-import { NativeModelOutputError } from './ai-sdk-native-adapter.contract';
+} from "./ai-sdk-native-adapter.contract";
+import { NativeModelOutputError } from "./ai-sdk-native-adapter.contract";
 
 const schemaValidator = addFormats(new Ajv({ allErrors: true, strict: true }));
+const MAX_INVALID_OUTPUT_BYTES = 64 * 1024;
 
 export function createValidatedAiSdkSchema<OutputValue>(
   schema: Readonly<Record<string, unknown>>,
@@ -33,15 +39,15 @@ export function normalizeAiSdkWarnings(
   return Object.freeze(
     (warnings ?? []).map((warning) => {
       const value =
-        warning != null && typeof warning === 'object'
+        warning != null && typeof warning === "object"
           ? (warning as Readonly<Record<string, unknown>>)
           : {};
       return Object.freeze({
-        type: typeof value.type === 'string' ? value.type : 'provider-warning',
-        ...(typeof value.feature === 'string'
+        type: typeof value.type === "string" ? value.type : "provider-warning",
+        ...(typeof value.feature === "string"
           ? { feature: value.feature }
           : {}),
-        ...(typeof value.details === 'string'
+        ...(typeof value.details === "string"
           ? { details: value.details }
           : {}),
       });
@@ -76,15 +82,15 @@ export function readOneApiRequestId(
 ): string | undefined {
   if (headers == null) return undefined;
   return Object.entries(headers).find(
-    ([name]) => name.toLowerCase() === 'x-oneapi-request-id',
+    ([name]) => name.toLowerCase() === "x-oneapi-request-id",
   )?.[1];
 }
 
 const PROTECTED_HEADERS = new Set([
-  'authorization',
-  'x-api-key',
-  'anthropic-version',
-  'content-type',
+  "authorization",
+  "x-api-key",
+  "anthropic-version",
+  "content-type",
 ]);
 
 export function assertSafeRequestHeaders(
@@ -106,6 +112,12 @@ export function throwNormalizedOutputError(input: {
   requestedModel: string;
 }): never {
   if (!NoObjectGeneratedError.isInstance(input.error)) throw input.error;
+  const rawOutputText =
+    typeof input.error.text === "string" ? input.error.text : undefined;
+  const rawOutputBytes =
+    rawOutputText == null
+      ? undefined
+      : Buffer.byteLength(rawOutputText, "utf8");
   throw new NativeModelOutputError({
     protocol: input.protocol,
     requestedModel: input.requestedModel,
@@ -115,5 +127,15 @@ export function throwNormalizedOutputError(input: {
       input.error.usage == null
         ? undefined
         : normalizeAiSdkUsage(input.error.usage),
+    ...(rawOutputText == null
+      ? {}
+      : {
+          rawOutputDigest: createHash("sha256")
+            .update(rawOutputText)
+            .digest("hex"),
+        }),
+    ...(rawOutputBytes != null && rawOutputBytes <= MAX_INVALID_OUTPUT_BYTES
+      ? { rawOutputText }
+      : {}),
   });
 }

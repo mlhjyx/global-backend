@@ -1,14 +1,7 @@
-export type NativeModelProtocol =
-  | 'openai-responses'
-  | 'anthropic-messages';
+export type NativeModelProtocol = "openai-responses" | "anthropic-messages";
 
 export type NativeReasoningEffort =
-  | 'none'
-  | 'minimal'
-  | 'low'
-  | 'medium'
-  | 'high'
-  | 'xhigh';
+  "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface NativeAdapterReasoning {
   effort: NativeReasoningEffort;
@@ -59,6 +52,8 @@ export class NativeModelOutputError extends Error {
   readonly reportedModel?: string;
   readonly requestId?: string;
   readonly usage?: NativeAdapterUsage;
+  readonly rawOutputText?: string;
+  readonly rawOutputDigest?: string;
 
   constructor(input: {
     protocol: NativeModelProtocol;
@@ -66,14 +61,18 @@ export class NativeModelOutputError extends Error {
     reportedModel?: string;
     requestId?: string;
     usage?: NativeAdapterUsage;
+    rawOutputText?: string;
+    rawOutputDigest?: string;
   }) {
-    super('Model output failed structured-output validation');
-    this.name = 'NativeModelOutputError';
+    super("Model output failed structured-output validation");
+    this.name = "NativeModelOutputError";
     this.protocol = input.protocol;
     this.requestedModel = input.requestedModel;
     this.reportedModel = input.reportedModel;
     this.requestId = input.requestId;
     this.usage = input.usage;
+    this.rawOutputText = input.rawOutputText;
+    this.rawOutputDigest = input.rawOutputDigest;
   }
 }
 
@@ -92,28 +91,46 @@ export interface AiSdkNativeAdapterSettings {
 }
 
 const OFFICIAL_PROVIDER_HOSTS = new Set([
-  'api.openai.com',
-  'api.anthropic.com',
-  'generativelanguage.googleapis.com',
+  "api.openai.com",
+  "api.anthropic.com",
+  "generativelanguage.googleapis.com",
 ]);
 
 function canonicalBaseUrl(value: string): string {
   const parsed = new URL(value);
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error('new-api gateway URL cannot contain credentials, query, or fragment');
+    throw new Error(
+      "new-api gateway URL cannot contain credentials, query, or fragment",
+    );
   }
   if (OFFICIAL_PROVIDER_HOSTS.has(parsed.hostname.toLowerCase())) {
-    throw new Error('direct provider origins are forbidden; new-api is the sole model egress');
+    throw new Error(
+      "direct provider origins are forbidden; new-api is the sole model egress",
+    );
   }
-  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname.toLowerCase());
-  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback)) {
-    throw new Error('new-api gateway URL must use HTTPS except for loopback development');
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(
+    parsed.hostname.toLowerCase(),
+  );
+  if (
+    parsed.protocol !== "https:" &&
+    !(parsed.protocol === "http:" && loopback)
+  ) {
+    throw new Error(
+      "new-api gateway URL must use HTTPS except for loopback development",
+    );
   }
-  return parsed.toString().replace(/\/$/, '');
+  return parsed.toString().replace(/\/$/, "");
 }
 
-export function assertNewApiGatewayBinding(settings: AiSdkNativeAdapterSettings): void {
-  if (canonicalBaseUrl(settings.baseUrl) !== canonicalBaseUrl(settings.canonicalGatewayBaseUrl)) {
-    throw new Error('model adapter base URL does not match the canonical new-api gateway');
+export function assertNewApiGatewayBinding(
+  settings: AiSdkNativeAdapterSettings,
+): void {
+  if (
+    canonicalBaseUrl(settings.baseUrl) !==
+    canonicalBaseUrl(settings.canonicalGatewayBaseUrl)
+  ) {
+    throw new Error(
+      "model adapter base URL does not match the canonical new-api gateway",
+    );
   }
 }

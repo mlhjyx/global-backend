@@ -223,6 +223,7 @@ export interface ModelObservation<Output> {
   usageComplete?: boolean;
   requestId?: string;
   settlement: "known" | "unknown";
+  settlementProof?: unknown;
   warnings?: readonly string[];
 }
 
@@ -240,6 +241,17 @@ export interface ModelPostWireGuardInput<Input, Output> {
 
 export type ModelPostWireGuard<Input, Output> = (
   input: ModelPostWireGuardInput<Input, Output>,
+) => void | Promise<void>;
+
+export interface ModelRepairPlannedGuardInput<Input, Output> {
+  originalPlan: ModelExecutionPlan<Input, Output>;
+  repairPlan: ModelExecutionPlan<Input, Output>;
+  binding: RepairBinding;
+  findings: readonly ModelValidationFinding[];
+}
+
+export type ModelRepairPlannedGuard<Input, Output> = (
+  input: ModelRepairPlannedGuardInput<Input, Output>,
 ) => void | Promise<void>;
 
 export interface ModelCompletionGuardInput<Input, Output> {

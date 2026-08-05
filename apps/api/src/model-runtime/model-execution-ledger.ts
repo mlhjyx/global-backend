@@ -8,7 +8,10 @@ export const MODEL_EXECUTION_LEDGER_SCHEMA_VERSION =
   "model-execution-ledger/2026-08-05-v1" as const;
 
 export type ModelExecutionEvidenceClass =
-  "fake_gateway_contract_only" | "real_gateway_settled";
+  | "fake_gateway_contract_only"
+  | "gateway_settlement_claim_only"
+  | "copy_gateway_settlement_candidate"
+  | "real_gateway_settled";
 
 export interface ModelExecutionCampaignContract {
   campaignId: string;

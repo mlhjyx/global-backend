@@ -32,7 +32,7 @@ function validInput(): CopyRealCapabilityAdmissionInput {
   };
   const credential = {
     schemaVersion:
-      "site-builder-copy-pilot-credential-attestation/2026-08-05-v1" as const,
+      "site-builder-copy-pilot-credential-attestation/2026-08-05-v3" as const,
     attestationId: "copy-pilot-credential-attestation-20260805",
     capturedAt: "2026-08-05T05:55:00.000Z",
     expiresAt: "2026-08-05T07:00:00.000Z",
@@ -42,8 +42,18 @@ function validInput(): CopyRealCapabilityAdmissionInput {
     quotaMode: "limited" as const,
     quotaCapPoints: 10_000,
     remainingQuotaPoints: 10_000,
+    maximumQuotaPointsPerWire: 1_000,
+    reservedQuotaPoints: 6_000,
     scopeExact: true as const,
+    repairPayloadPolicy: "bounded_structured_prior_output_64k" as const,
     executions: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions,
+    channels: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions.map(
+      ({ alias, protocol }, index) => ({
+        alias,
+        protocol,
+        channelId: index + 10,
+      }),
+    ),
     resolverId: "copy-pilot-new-api-log-resolver-v1",
   };
   const settlement = {
@@ -94,7 +104,7 @@ describe("Copy real capability pilot admission", () => {
   it("publishes a zero-call exact-scope source contract", () => {
     expect(COPY_REAL_CAPABILITY_ADMISSION_SOURCE).toMatchObject({
       schemaVersion:
-        "site-builder-copy-real-capability-admission-source/2026-08-05-v1",
+        "site-builder-copy-real-capability-admission-source/2026-08-05-v3",
       taskId: "site_builder.copy",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
@@ -202,6 +212,16 @@ describe("Copy real capability pilot admission", () => {
       (input: CopyRealCapabilityAdmissionInput) => ({
         ...input,
         credential: { ...input.credential, quotaMode: "unlimited" as never },
+      }),
+    ],
+    [
+      "COPY_REAL_CAPABILITY_CREDENTIAL_INVALID",
+      (input: CopyRealCapabilityAdmissionInput) => ({
+        ...input,
+        credential: {
+          ...input.credential,
+          reservedQuotaPoints: 1,
+        },
       }),
     ],
     [

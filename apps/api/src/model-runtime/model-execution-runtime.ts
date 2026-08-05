@@ -12,6 +12,7 @@ import type {
   RetryPolicy,
   RuntimeTelemetry,
   ModelValidationFinding,
+  ModelRepairPlannedGuard,
 } from "./types";
 
 export class TransportDispatchError extends Error {
@@ -70,6 +71,7 @@ interface RuntimeDependencies<Input, Output> {
   sleep?: (milliseconds: number) => Promise<void>;
   random?: () => number;
   repairCompiler?: ModelContentRepairCompiler<Input, Output>;
+  repairPlannedGuard?: ModelRepairPlannedGuard<Input, Output>;
 }
 
 export interface TrustedModelExecutionMetadata {
@@ -261,7 +263,7 @@ function validateRepairPlan<Input, Output>(input: {
   const preservedSegments = repairPlan.context.segments.filter(
     ({ kind }) => kind !== "repair",
   );
-  const repairMaterial = { binding, findings };
+  const repairMaterial = { binding, findings, priorOutput };
   const { repair: repairPromptMaterial, ...preservedPrompt } =
     repairPlan.prompt;
   if (
@@ -643,6 +645,12 @@ export class ModelExecutionRuntime<Input = unknown, Output = unknown> {
             findings,
             priorOutput,
             binding,
+          });
+          await this.dependencies.repairPlannedGuard?.({
+            originalPlan: plan,
+            repairPlan,
+            binding,
+            findings,
           });
           currentPlan = repairPlan;
           repairAttempts += 1;

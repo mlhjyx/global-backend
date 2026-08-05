@@ -54,7 +54,9 @@ function createCompiledOperationalProofRunner(input: {
 }
 
 function compiledRunnerModule() {
-  return REQUIRE(COMPILED_RUNNER_PATH) as typeof import("./copy-capability-pilot-runner");
+  return REQUIRE(
+    COMPILED_RUNNER_PATH,
+  ) as typeof import("./copy-capability-pilot-runner");
 }
 
 afterEach(async () => {
@@ -267,7 +269,7 @@ describe("Copy capability pilot fake-gateway runner", () => {
       compiledArtifactCount: COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS.length,
       compiledBindingDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
-    expect(JSON.stringify(gateway.observed[1]?.body)).not.toContain(
+    expect(JSON.stringify(gateway.observed[1]?.body)).toContain(
       untrustedInstruction,
     );
     expect(
@@ -326,14 +328,13 @@ describe("Copy capability pilot fake-gateway runner", () => {
       REPOSITORY_ROOT,
       "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
     );
-    const compiledDurable = REQUIRE(compiledDurablePath) as typeof import("../../model-runtime/durable-model-execution-runtime");
+    const compiledDurable = REQUIRE(
+      compiledDurablePath,
+    ) as typeof import("../../model-runtime/durable-model-execution-runtime");
     const originalExecute =
       compiledDurable.DurableModelExecutionRuntime.prototype.execute;
     const executePatch = vi
-      .spyOn(
-        compiledDurable.DurableModelExecutionRuntime.prototype,
-        "execute",
-      )
+      .spyOn(compiledDurable.DurableModelExecutionRuntime.prototype, "execute")
       .mockImplementation(async function (plan) {
         const result = await originalExecute.call(this, plan);
         return { ...result, states: [...result.states] };
@@ -388,7 +389,9 @@ describe("Copy capability pilot fake-gateway runner", () => {
       REPOSITORY_ROOT,
       "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
     );
-    const compiledLedger = REQUIRE(compiledLedgerPath) as typeof import("../../model-runtime/model-execution-ledger");
+    const compiledLedger = REQUIRE(
+      compiledLedgerPath,
+    ) as typeof import("../../model-runtime/model-execution-ledger");
     const originalComplete =
       compiledLedger.AppendOnlyModelExecutionLedger.prototype.completeExecution;
     const completePatch = vi
@@ -435,6 +438,7 @@ describe("Copy capability pilot fake-gateway runner", () => {
       expect.arrayContaining([
         "apps/api/dist/model-runtime/durable-model-execution-runtime.js",
         "apps/api/dist/model-runtime/immutable.js",
+        "apps/api/dist/model-runtime/real-model-execution-ledger-storage.js",
         "apps/api/dist/site-builder/copy-bundle.service.js",
         "apps/api/dist/site-builder/eval/copy-evaluation-v2-candidates.js",
         "apps/api/dist/site-builder/eval/copy-quality-rubric.js",
