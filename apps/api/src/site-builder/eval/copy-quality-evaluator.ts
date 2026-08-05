@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import {
+  getDurableModelExecutionAttestation,
   getTrustedModelExecutionMetadata,
+  type ModelExecutionEvidenceClass,
   type ModelExecutionResult,
 } from "../../model-runtime";
 import type { CopyTaskOutput } from "../agents/copy";
@@ -52,6 +54,8 @@ export interface CopyQualityExecutionReceipt {
   repeatIndex: 0 | 1;
   executionId: string;
   outputDigest: string;
+  evidenceClass: ModelExecutionEvidenceClass;
+  ledgerDigest: string;
 }
 
 export interface CopyQualityDimensionOutcome {
@@ -67,6 +71,8 @@ export interface CopyQualityReviewOutcome {
   executionId: string;
   candidateAlias: string;
   outputDigest: string;
+  evidenceClass: ModelExecutionEvidenceClass;
+  ledgerDigest: string;
   reviewDigest: string;
   dimensions: Record<CopyQualityReviewedDimension, CopyQualityDimensionOutcome>;
 }
@@ -77,6 +83,8 @@ export interface CopyRepeatStabilityOutcome {
   repeatPair: "0/1";
   executionIds: readonly [string, string];
   outputDigests: readonly [string, string];
+  evidenceClass: ModelExecutionEvidenceClass;
+  ledgerDigests: readonly [string, string];
   applicable: boolean;
   score: number | null;
   slotScores: Readonly<Record<string, number>>;
@@ -207,7 +215,9 @@ export function observeCopyQualityExecution(input: {
   repeatIndex: 0 | 1;
 }): CopyQualityExecutionReceipt {
   const metadata = getTrustedModelExecutionMetadata(input.result);
+  const durable = getDurableModelExecutionAttestation(input.result);
   if (!metadata) reviewError("RUNTIME_RESULT_UNTRUSTED");
+  if (!durable) reviewError("DURABLE_EXECUTION_UNTRUSTED");
   const candidate = COPY_EVALUATION_V2_CANDIDATES.find(
     (entry) =>
       entry.alias === metadata.resolvedAlias &&
@@ -223,6 +233,9 @@ export function observeCopyQualityExecution(input: {
     metadata.cacheMode !== "disabled" ||
     metadata.settlement !== "known" ||
     metadata.cacheHit ||
+    durable.executionId !== metadata.executionId ||
+    durable.outputDigest !== metadata.outputDigest ||
+    durable.wireCount !== input.result.transportAttempts ||
     !input.result.states.includes("settled") ||
     input.result.states.at(-1) !== "completed" ||
     copyQualityOutputDigest(input.result.output) !== metadata.outputDigest
@@ -239,6 +252,8 @@ export function observeCopyQualityExecution(input: {
     repeatIndex: input.repeatIndex,
     executionId: sha256(metadata.executionId),
     outputDigest: copyQualityOutputDigest(output),
+    evidenceClass: durable.evidenceClass,
+    ledgerDigest: durable.ledgerDigest,
   });
   TRUSTED_EXECUTION_RECEIPTS.add(receipt);
   EXECUTION_RECEIPT_DETAILS.set(receipt, {
@@ -429,6 +444,8 @@ export function evaluateCopyQualityReview(
     repeatIndex: receipt.repeatIndex,
     executionId: receipt.executionId,
     outputDigest: receipt.outputDigest,
+    evidenceClass: receipt.evidenceClass,
+    ledgerDigest: receipt.ledgerDigest,
     reviewDigest: sha256(canonicalJson(review)),
     dimensions,
   } as const;
@@ -485,7 +502,8 @@ export function evaluateCopyRepeatStability(
     first.fixtureId !== second.fixtureId ||
     first.repeatIndex !== 0 ||
     second.repeatIndex !== 1 ||
-    first.executionId === second.executionId
+    first.executionId === second.executionId ||
+    first.evidenceClass !== second.evidenceClass
   ) {
     reviewError("STABILITY_IDENTITY_INVALID");
   }
@@ -513,6 +531,8 @@ export function evaluateCopyRepeatStability(
     repeatPair: "0/1" as const,
     executionIds: [first.executionId, second.executionId] as const,
     outputDigests: [first.outputDigest, second.outputDigest] as const,
+    evidenceClass: first.evidenceClass,
+    ledgerDigests: [first.ledgerDigest, second.ledgerDigest] as const,
     applicable: scores.length > 0,
     score:
       scores.length === 0
@@ -687,7 +707,19 @@ export function aggregateCopyCandidateQuality(input: {
       return [dimension, { observations: scores.length, mean }];
     }),
   );
+  const scoredQualityGatePassed = blockers.size === 0;
+  if (
+    input.reviews.some(
+      (review) => review.evidenceClass !== "real_gateway_settled",
+    ) ||
+    input.stability.some(
+      (stability) => stability.evidenceClass !== "real_gateway_settled",
+    )
+  ) {
+    blockers.add("TEST_ONLY_EXECUTION_EVIDENCE");
+  }
   return deepFreeze({
+    scoredQualityGatePassed,
     qualityGatePassed: blockers.size === 0,
     blockers: [...blockers].sort(),
     dimensions,

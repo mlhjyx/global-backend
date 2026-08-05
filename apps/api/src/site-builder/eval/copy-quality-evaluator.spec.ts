@@ -1,8 +1,13 @@
 import { runInNewContext } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import {
+  AppendOnlyModelExecutionLedger,
   canonicalDigest,
   ContextEngine,
+  DurableModelExecutionRuntime,
   ModelExecutionRuntime,
   type ModelExecutionPlan,
   type TaskModelContract,
@@ -65,12 +70,22 @@ function reviewFor(
 
 const OPENAI_ALIAS = "gpt-5.6-terra" as const;
 let executionCounter = 0;
+const temporaryDirectories: string[] = [];
+
+afterAll(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
 
 async function execution(
   prepared: ReturnType<typeof prepareCopyAssemblyEvalFixture>,
   output: CopyTaskOutput,
   repeatIndex: 0 | 1,
   candidateAlias = OPENAI_ALIAS,
+  durable = true,
 ) {
   executionCounter += 1;
   const candidate = COPY_EVALUATION_V2_CANDIDATES.find(
@@ -86,7 +101,14 @@ async function execution(
       version: "copy-quality-test/v1",
       allowedSourceRefs: ["copy-quality:test"],
     },
-    capabilityRequirements: { protocols: [candidate.protocol] },
+    capabilityRequirements: {
+      protocols: [candidate.protocol],
+      reportsRequestId: true,
+      reportsUsage: true,
+      reportsModel: true,
+      exactReportedModel: true,
+      forbidWarnings: true,
+    },
     reasoningPolicy: {
       allowed: [candidate.reasoning],
       default: candidate.reasoning,
@@ -132,20 +154,43 @@ async function execution(
     locale: prepared.input.locale,
     prompt: { fixtureId: prepared.fixture.fixtureId, repeatIndex },
   };
-  const runtime = new ModelExecutionRuntime<CopyTaskInput, CopyTaskOutput>({
-    transport: {
-      dispatch: async () => ({
-        output,
-        requestedAlias: candidate.alias,
-        resolvedAlias: candidate.alias,
-        reportedModel: candidate.alias,
-        protocol: candidate.protocol,
-        usage: { inputTokens: 1, outputTokens: 1 },
-        requestId: `request-${executionCounter}`,
-        settlement: "known",
-      }),
-    },
-  });
+  const transport = {
+    dispatch: async () => ({
+      output,
+      requestedAlias: candidate.alias,
+      resolvedAlias: candidate.alias,
+      reportedModel: candidate.alias,
+      protocol: candidate.protocol,
+      usage: { inputTokens: 1, outputTokens: 1 },
+      usageComplete: true as const,
+      requestId: `request-${executionCounter}`,
+      settlement: "known" as const,
+      warnings: [] as const,
+    }),
+  };
+  let runtime:
+    | ModelExecutionRuntime<CopyTaskInput, CopyTaskOutput>
+    | DurableModelExecutionRuntime<CopyTaskInput, CopyTaskOutput>;
+  if (durable) {
+    const directory = await mkdtemp(join(tmpdir(), "copy-quality-ledger-"));
+    temporaryDirectories.push(directory);
+    const ledger = await AppendOnlyModelExecutionLedger.openTestOnly({
+      ledgerPath: join(directory, "ledger.jsonl"),
+      campaign: {
+        campaignId: `copy-quality-${executionCounter}`,
+        taskId: "site_builder.copy",
+        planDigest: canonicalDigest({
+          fixtureId: prepared.fixture.fixtureId,
+          repeatIndex,
+        }),
+        maximumExecutions: 1,
+        maximumWireCalls: 2,
+      },
+    });
+    runtime = new DurableModelExecutionRuntime({ ledger, transport });
+  } else {
+    runtime = new ModelExecutionRuntime({ transport });
+  }
   const result = await runtime.execute(plan);
   return observeCopyQualityExecution({
     prepared,
@@ -204,6 +249,19 @@ describe("Copy quality scored evaluator", () => {
       "cross_locale_quality",
       "stability",
     ]);
+  });
+
+  it("rejects a Runtime-branded result without a durable ledger attestation", async () => {
+    const prepared = fixture("copy-brand-voice-en");
+    await expect(
+      execution(
+        prepared,
+        structuredClone(prepared.fixture.expectedOutput),
+        0,
+        OPENAI_ALIAS,
+        false,
+      ),
+    ).rejects.toThrow("COPY_QUALITY_REVIEW_DURABLE_EXECUTION_UNTRUSTED");
   });
 
   it("scores a blind closed review without exact-matching creative copy", async () => {
@@ -411,7 +469,9 @@ describe("Copy quality scored evaluator", () => {
       hardGateFailures: 0,
     });
 
-    expect(outcome.qualityGatePassed).toBe(true);
+    expect(outcome.scoredQualityGatePassed).toBe(true);
+    expect(outcome.qualityGatePassed).toBe(false);
+    expect(outcome.blockers).toContain("TEST_ONLY_EXECUTION_EVIDENCE");
     expect(outcome.routeAdoptionAuthorized).toBe(false);
     expect(outcome.promotionDecision).toBe("SEPARATE_PR_REQUIRED");
   });
@@ -451,6 +511,8 @@ describe("Copy quality scored evaluator", () => {
             repeatIndex: 0,
             executionId: "c".repeat(64),
             outputDigest: "a".repeat(64),
+            evidenceClass: "fake_gateway_contract_only",
+            ledgerDigest: "d".repeat(64),
             reviewDigest: "b".repeat(64),
             dimensions: {
               language_quality: {

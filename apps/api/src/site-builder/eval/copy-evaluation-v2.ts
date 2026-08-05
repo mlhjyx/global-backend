@@ -24,7 +24,7 @@ import {
 } from "./copy-quality-rubric";
 
 export const COPY_EVALUATION_V2_SCHEMA_VERSION =
-  "site-builder-copy-evaluation-plan/2026-08-04-v3" as const;
+  "site-builder-copy-evaluation-plan/2026-08-05-v4" as const;
 
 const COPY_PROFILE = "copy.premium" as const;
 const CURRENT_TASK_CONTRACT_VERSION =
