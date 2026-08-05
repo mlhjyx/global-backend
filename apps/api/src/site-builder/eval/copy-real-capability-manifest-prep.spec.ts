@@ -214,6 +214,43 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
+  it("keeps the generated repository v3 bound to the merged dispatch source", () => {
+    const artifact = JSON.parse(
+      readFileSync(
+        resolve(REPOSITORY_ROOT, COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH),
+        "utf8",
+      ),
+    );
+
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v3",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "fb1607d00cc29e3802fe265930bc5e9259899c76",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-05-v3",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(67);
+    expect(artifact.sourceBundle.digest).toBe(
+      "e3bcbb3c5705dd036b1db0f362f5d4f7352333488819fb28e6bc783466a5c63b",
+    );
+    expect(artifact.requiredFollowup).toContain(
+      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
+    );
+  });
+
   it("keeps repository v2 as self-consistent history after runtime v5 drift", () => {
     const artifact = JSON.parse(
       readFileSync(
