@@ -8,9 +8,10 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v1",
-      planId: "site-builder-copy-capability-pilot/2026-08-05-v1",
-      executionStatus: "BLOCKED_ON_DURABLE_ADMISSION_AND_BRANDED_RUNNER",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v2",
+      planId: "site-builder-copy-capability-pilot/2026-08-05-v2",
+      executionStatus:
+        "FAKE_GATEWAY_DURABLE_RUNNER_READY_REAL_DISPATCH_BLOCKED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
@@ -23,15 +24,22 @@ describe("Copy capability pilot preparation contract", () => {
       settlementPolicy: "known_per_physical_call_required",
       fixedCommitPolicy: "separate_create_only_manifest_required",
       credentialPolicy: "finite_exact_alias_protocol_allowlist_required",
-      blockingGates: [
-        "durable_authorization_reserve_and_unique_wire_claim",
-        "all_post_wire_paths_settled_or_durably_frozen",
-        "trusted_gateway_bound_adapter_factory",
-        "runtime_branded_receipt_bound_to_ledger",
+      completedTestOnlyGates: [
+        "append_only_hash_chained_execution_ledger",
+        "unique_execution_and_wire_claim",
+        "runtime_receipt_bound_to_completed_ledger",
         "global_execution_and_wire_caps",
+        "post_wire_failure_durably_freezes_campaign",
         "structured_output_failure_cannot_be_business_validated",
-        "repair_payload_digest_matches_sent_payload",
-        "bounded_settlement_observation",
+        "loopback_only_native_adapter_factory",
+      ],
+      blockingGates: [
+        "real_gateway_fixed_commit_manifest",
+        "real_gateway_credential_attestation",
+        "real_gateway_authorization_reservation",
+        "real_gateway_settlement_observer",
+        "real_gateway_post_wire_freeze",
+        "real_gateway_repair_payload_binding",
       ],
     });
     expect(COPY_CAPABILITY_PILOT_PLAN.executions).toEqual([
