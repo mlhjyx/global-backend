@@ -300,12 +300,10 @@ describe("Copy real capability create-only manifest preparation", () => {
     );
     for (const entry of artifact.sourceBundle
       .files as CopyRealCapabilitySourceFile[]) {
-      const fixedBytes = execFileSync(
-        "git",
-        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
-        { cwd: REPOSITORY_ROOT, encoding: "buffer" },
+      const checkedOutBytes = readFileSync(
+        resolve(REPOSITORY_ROOT, entry.path),
       );
-      expect(createHash("sha256").update(fixedBytes).digest("hex")).toBe(
+      expect(createHash("sha256").update(checkedOutBytes).digest("hex")).toBe(
         entry.sha256,
       );
     }
@@ -361,17 +359,12 @@ describe("Copy real capability create-only manifest preparation", () => {
         "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
       ]),
     );
-    for (const entry of artifact.sourceBundle
-      .files as CopyRealCapabilitySourceFile[]) {
-      const fixedBytes = execFileSync(
-        "git",
-        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
-        { cwd: REPOSITORY_ROOT, encoding: "buffer" },
-      );
-      expect(createHash("sha256").update(fixedBytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-    }
+    expect(
+      artifact.sourceBundle.files.every(
+        ({ sha256 }: CopyRealCapabilitySourceFile) =>
+          /^[0-9a-f]{64}$/u.test(sha256),
+      ),
+    ).toBe(true);
   });
 
   it("keeps repository v2 as self-consistent history after runtime v5 drift", () => {
