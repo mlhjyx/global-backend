@@ -236,6 +236,81 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
+  it("keeps repository v4 bound to the merged operator evidence source", () => {
+    const artifactPath = resolve(
+      REPOSITORY_ROOT,
+      COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
+    );
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "5601ef8ead8fd69ce96d72e2ceecdf3dcd42d1a17930fcd8ef0699e25c8deeaa",
+    );
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v4",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "9d6adb80facdb4fa7eb064cffd5ef6d1d4c6212d",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-05-v4",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.sourceBundle.digest).toBe(
+      "8eee87290b1a462d405f9b6d891f1f1db646c17ea1409292d16d962d24b3ccaf",
+    );
+    expect(artifact.artifactDigest).toBe(
+      "fa098048b1d3bba6ddcad70a1adc9cd4df6ccdbfd213c49f51d1c66fbf4766d5",
+    );
+    expect(artifact.sourceBundle.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "runtime_transitive_source",
+          path: "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
+        }),
+        expect.objectContaining({
+          role: "runtime_transitive_source",
+          path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+        }),
+        expect.objectContaining({
+          role: "operator_evidence_key",
+          path: "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
+        }),
+        expect.objectContaining({
+          role: "operator_evidence_authorization",
+          path: "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
+        }),
+        expect.objectContaining({
+          role: "real_dispatch_runner",
+          path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+        }),
+      ]),
+    );
+    for (const entry of artifact.sourceBundle
+      .files as CopyRealCapabilitySourceFile[]) {
+      const fixedBytes = execFileSync(
+        "git",
+        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
+        { cwd: REPOSITORY_ROOT, encoding: "buffer" },
+      );
+      expect(createHash("sha256").update(fixedBytes).digest("hex")).toBe(
+        entry.sha256,
+      );
+    }
+  });
+
   it("keeps repository v3 as self-consistent history after the operator gate", () => {
     const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V3_PATH);
     const artifactBytes = readFileSync(artifactPath);
