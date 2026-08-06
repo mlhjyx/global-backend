@@ -242,6 +242,51 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
+  it("keeps repository v7 byte-exact, create-only, and internally consistent", () => {
+    const artifactPath = resolve(
+      REPOSITORY_ROOT,
+      COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
+    );
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "0dcced98628249a0d7db96fedba6a23570178ffdbe5af97d9b9f2845896f424e",
+    );
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-06-v7",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "6d86e393b842663f679dcd3d7d19ce953e73a605",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-06-v7",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      "7c23b6bd48209f586c657dd269d784c8c5aa6ef489a161d26559be3a7db8d598",
+    );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifactDigest).toBe(
+      "2b66605a89b0ac412b1f61c23216b4c7cdfc9815e809386dba3fb4c0027961e9",
+    );
+  });
+
   it("keeps repository v6 as immutable superseded history", () => {
     const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V6_PATH);
     const artifactBytes = readFileSync(artifactPath);
