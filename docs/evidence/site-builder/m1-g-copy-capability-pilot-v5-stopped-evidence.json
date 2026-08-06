@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "site-builder-copy-capability-pilot-stopped-evidence/2026-08-06-v1",
+  "artifactDigest": "508f4e87180531e942c4993291a3149505ff750beac46ff42605a52a6201c9eb",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "taskId": "site_builder.copy",
+  "campaignId": "copy-capability-pilot-v5-2026-08-06T094341331Z",
+  "executionHead": "b36e535cb2151d4ec4eaf47cd9a6b082c00f3e0f",
+  "fixedSourceCommit": "ecdd45b7947b1fec061286d4a68199ab7ad6a49c",
+  "manifestArtifactDigest": "b93a0b0b5cf01fd61a92407634b2aec47c142502aec0a40251de5d5cc4bc0118",
+  "authorizationScope": {
+    "plannedExecutions": 3,
+    "maximumWireCalls": 6,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumQuotaPointsPerWire": 500000,
+    "totalQuotaCapPoints": 3000000,
+    "excluded": [
+      "copy_quality_matrix_36_executions_72_wires",
+      "model_promotion",
+      "production_route_adoption"
+    ]
+  },
+  "startedAt": "2026-08-06T09:43:41.331Z",
+  "stoppedAt": "2026-08-06T09:43:46.814Z",
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopReason": "transport_failed_after_dispatch",
+  "attemptedCandidate": {
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_responses",
+    "reasoning": "medium",
+    "wireClaims": 1,
+    "requestId": null,
+    "settlement": "unknown",
+    "completed": false
+  },
+  "unattemptedCandidates": [
+    {
+      "alias": "gpt-5.6-sol",
+      "protocol": "openai_responses",
+      "reason": "campaign_frozen_after_unknown_settlement"
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic_messages",
+      "reason": "campaign_frozen_after_unknown_settlement"
+    }
+  ],
+  "ledger": {
+    "ledgerDigest": "fd97dabbb4c2b29397a2ac9ebadc768f685847e64c37d4b5e6b400833669ac01",
+    "authorizationDigest": "3fabbacdd6aeb082609342043a197bb66e235d18a76363316759d7bf75a2cd27",
+    "eventCount": 5,
+    "executionClaims": 1,
+    "wireClaims": 1,
+    "knownWireSettlements": 0,
+    "unknownWireSettlements": 1,
+    "completedExecutions": 0,
+    "frozen": true
+  },
+  "gatewayObservation": {
+    "liveFiniteExactScopePreflight": "PASS",
+    "tokenScopedModelCatalogPreflight": "PASS",
+    "matchingConsumeLogRows": 0,
+    "quotaPointsBefore": 3000000,
+    "quotaPointsAfter": 3000000,
+    "observedQuotaPointsConsumed": 0,
+    "providerCostSettlement": "unknown"
+  },
+  "qualityConclusion": "inconclusive",
+  "candidateRanking": null,
+  "promotionDecision": "NOT_ELIGIBLE",
+  "routeChange": false,
+  "requiredRecovery": [
+    "preserve bounded AI SDK API failure metadata without response bodies or request bodies",
+    "merge the runtime fix and create a new fixed-source manifest",
+    "obtain a new manifest-bound dispatch authorization before any retry"
+  ]
+}
