@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "site-builder-copy-capability-pilot-stopped-evidence/2026-08-06-v2",
+  "artifactDigest": "b71dfac015a8d4b266481be641ba30abc6be2c18fda16068e889b59c2b7f8f8d",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "taskId": "site_builder.copy",
+  "campaignId": "copy-capability-pilot-v6-2026-08-06T110911100Z",
+  "executionHead": "1b0324a30e4fa5df3c0012e249b6efd9b6a4e2d6",
+  "fixedSourceCommit": "55f10fa325916be6dde488ab148d1462175cda12",
+  "manifestArtifactDigest": "c9a4391e20523e980197745f66a0796e8438b6e5186f8bc3bf4e1823b0341d21",
+  "authorizationScope": {
+    "plannedExecutions": 3,
+    "maximumWireCalls": 6,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumQuotaPointsPerWire": 500000,
+    "totalQuotaCapPoints": 3000000,
+    "excluded": [
+      "copy_quality_matrix_36_executions_72_wires",
+      "model_promotion",
+      "production_route_adoption"
+    ]
+  },
+  "startedAt": "2026-08-06T11:09:11.100Z",
+  "stoppedAt": "2026-08-06T11:09:32.665Z",
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopReason": "openox_http_502_after_dispatch",
+  "attemptedCandidate": {
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_responses",
+    "reasoning": "medium",
+    "wireClaims": 1,
+    "requestId": "202608061109123091744508268d9d6KxnsEz9a",
+    "httpStatus": 502,
+    "retryableTransport": true,
+    "boundedResponseDigest": "72be74edd68a112fd319fb92c57f61da203dcc606d065c6970283c7a9998f02e",
+    "boundedResponseBytes": 115,
+    "settlement": "unknown",
+    "completed": false
+  },
+  "unattemptedCandidates": [
+    {
+      "alias": "gpt-5.6-sol",
+      "protocol": "openai_responses",
+      "reason": "campaign_frozen_after_unknown_settlement"
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic_messages",
+      "reason": "campaign_frozen_after_unknown_settlement"
+    }
+  ],
+  "ledger": {
+    "ledgerDigest": "0c6342f260f3c6ee44185aa9ff46499ec3e95d7090fbcbc105bc283494559ae1",
+    "authorizationDigest": "6724ab9f5e74a858b33364d53ccdb38a42243402be1fc2d6462b43d81997de93",
+    "eventCount": 5,
+    "executionClaims": 1,
+    "wireClaims": 1,
+    "knownWireSettlements": 0,
+    "unknownWireSettlements": 1,
+    "repairPlans": 0,
+    "operatorEvidenceAuthorizations": 0,
+    "completedExecutions": 0,
+    "frozen": true
+  },
+  "gatewayObservation": {
+    "liveFiniteExactScopePreflight": "PASS",
+    "tokenScopedModelCatalogPreflight": "PASS",
+    "gatewayEndpoint": "/v1/responses",
+    "gatewayChannelId": 17,
+    "upstreamHost": "openox.tech",
+    "upstreamDiagnostic": "openox_http_502",
+    "matchingConsumeLogRows": 0,
+    "quotaPointsBefore": 3000000,
+    "quotaPointsAfter": 3000000,
+    "observedQuotaPointsConsumed": 0,
+    "newApiQuotaUnchangedAfterFailedDispatch": true,
+    "providerCostSettlement": "unknown",
+    "responseBodiesPersistedInEvidence": false
+  },
+  "qualityConclusion": "inconclusive",
+  "candidateRanking": null,
+  "promotionDecision": "NOT_ELIGIBLE",
+  "routeChange": false,
+  "requiredRecovery": [
+    "preserve this v6 campaign as frozen and do not retry it",
+    "confirm OpenOx Responses health before any separately authorized campaign",
+    "obtain a new campaign-bound dispatch authorization before any further model wire",
+    "keep capability evidence, quality matrix, promotion, and route adoption separate"
+  ]
+}
