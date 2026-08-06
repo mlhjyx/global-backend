@@ -246,6 +246,9 @@ describe("Copy real capability create-only manifest preparation", () => {
     const artifactBytes = readFileSync(artifactPath);
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "df5f8c1b42135eacf6ed1d5d92ca5fe4d960c6af4c31b426392292df69f1a428",
+    );
     expect(() =>
       validateCopyRealCapabilityManifestArtifact(artifact),
     ).not.toThrow();
@@ -253,6 +256,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-06-v5",
       fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "c7f7acd3dd652829353c25c963c38dc79830081c",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedNetworkCalls: 0,
@@ -269,8 +273,14 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifact.sourceBundle.digest).toBe(
       canonicalDigest(artifact.sourceBundle.files),
     );
+    expect(artifact.sourceBundle.digest).toBe(
+      "6bb9626e0d41aa0fabee4473b9cc90fc98e2e0feca7e20609daa546dcce02aae",
+    );
     const { artifactDigest, ...withoutDigest } = artifact;
     expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifactDigest).toBe(
+      "b93a0b0b5cf01fd61a92407634b2aec47c142502aec0a40251de5d5cc4bc0118",
+    );
     expect(artifact.sourceBundle.files).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
