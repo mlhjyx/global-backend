@@ -46,6 +46,36 @@ export interface NativeModelAdapterResult<Output> {
   warnings: readonly NativeAdapterWarning[];
 }
 
+export class NativeModelApiError extends Error {
+  readonly protocol: NativeModelProtocol;
+  readonly requestedModel: string;
+  readonly requestId?: string;
+  readonly statusCode?: number;
+  readonly retryable: boolean;
+  readonly responseBodyDigest?: string;
+  readonly responseBodyBytes?: number;
+
+  constructor(input: {
+    protocol: NativeModelProtocol;
+    requestedModel: string;
+    requestId?: string;
+    statusCode?: number;
+    retryable: boolean;
+    responseBodyDigest?: string;
+    responseBodyBytes?: number;
+  }) {
+    super("Model provider API call failed");
+    this.name = "NativeModelApiError";
+    this.protocol = input.protocol;
+    this.requestedModel = input.requestedModel;
+    this.requestId = input.requestId;
+    this.statusCode = input.statusCode;
+    this.retryable = input.retryable;
+    this.responseBodyDigest = input.responseBodyDigest;
+    this.responseBodyBytes = input.responseBodyBytes;
+  }
+}
+
 export class NativeModelOutputError extends Error {
   readonly protocol: NativeModelProtocol;
   readonly requestedModel: string;

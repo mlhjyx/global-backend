@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { AiSdkAnthropicMessagesAdapter } from "./ai-sdk-anthropic-messages.adapter";
 import {
+  NativeModelApiError,
   NativeModelOutputError,
   type NativeModelAdapterRequest,
 } from "./ai-sdk-native-adapter.contract";
@@ -273,6 +274,52 @@ describe("AI SDK 7 native provider adapters", () => {
     ).rejects.toThrow();
     expect(gateway.observed).toHaveLength(1);
   });
+
+  it.each([
+    ["openai", AiSdkOpenAiResponsesAdapter, "gpt-5.6-terra"],
+    ["anthropic", AiSdkAnthropicMessagesAdapter, "claude-sonnet-5"],
+  ] as const)(
+    "preserves bounded settlement diagnostics for %s API failures",
+    async (_name, Adapter, alias) => {
+      const requestId = `${_name}-failed-request`;
+      const gateway = await startFakeGateway((_request, response) => {
+        sendJson(
+          response,
+          400,
+          { error: { message: "unsupported request shape" } },
+          { "x-oneapi-request-id": requestId },
+        );
+      });
+      const adapter = new Adapter(adapterSettings(gateway.baseUrl));
+
+      const error = await adapter
+        .execute({
+          alias,
+          prompt: "hello",
+          maxOutputTokens: 32,
+          abortSignal: AbortSignal.timeout(5_000),
+        })
+        .then(
+          () => undefined,
+          (failure: unknown) => failure,
+        );
+
+      expect(error).toBeInstanceOf(NativeModelApiError);
+      expect(error).toMatchObject({
+        protocol:
+          _name === "openai" ? "openai-responses" : "anthropic-messages",
+        requestedModel: alias,
+        requestId,
+        statusCode: 400,
+        retryable: false,
+        responseBodyDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        responseBodyBytes: expect.any(Number),
+      });
+      expect(error).not.toHaveProperty("responseBody");
+      expect(error).not.toHaveProperty("requestBodyValues");
+      expect(gateway.observed).toHaveLength(1);
+    },
+  );
 
   it("rejects unsupported Anthropic reasoning before dispatch", async () => {
     const gateway = await startFakeGateway((_request, response) => {

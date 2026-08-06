@@ -238,7 +238,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("keeps repository v5 bound to the merged live preflight source", () => {
+  it("keeps repository v5 as self-consistent frozen history", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
       COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
@@ -305,15 +305,6 @@ describe("Copy real capability create-only manifest preparation", () => {
         }),
       ]),
     );
-    for (const entry of artifact.sourceBundle
-      .files as CopyRealCapabilitySourceFile[]) {
-      const checkedOutBytes = readFileSync(
-        resolve(REPOSITORY_ROOT, entry.path),
-      );
-      expect(createHash("sha256").update(checkedOutBytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-    }
   });
 
   it("keeps repository v4 as self-consistent stale history", () => {

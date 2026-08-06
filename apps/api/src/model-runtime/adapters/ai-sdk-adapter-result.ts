@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  APICallError,
   jsonSchema,
   NoObjectGeneratedError,
   type LanguageModelUsage,
@@ -11,7 +12,10 @@ import type {
   NativeAdapterWarning,
   NativeModelProtocol,
 } from "./ai-sdk-native-adapter.contract";
-import { NativeModelOutputError } from "./ai-sdk-native-adapter.contract";
+import {
+  NativeModelApiError,
+  NativeModelOutputError,
+} from "./ai-sdk-native-adapter.contract";
 
 const schemaValidator = addFormats(new Ajv({ allErrors: true, strict: true }));
 const MAX_INVALID_OUTPUT_BYTES = 64 * 1024;
@@ -111,6 +115,24 @@ export function throwNormalizedOutputError(input: {
   protocol: NativeModelProtocol;
   requestedModel: string;
 }): never {
+  if (APICallError.isInstance(input.error)) {
+    const responseBody = input.error.responseBody;
+    throw new NativeModelApiError({
+      protocol: input.protocol,
+      requestedModel: input.requestedModel,
+      requestId: readOneApiRequestId(input.error.responseHeaders),
+      statusCode: input.error.statusCode,
+      retryable: input.error.isRetryable,
+      ...(responseBody == null
+        ? {}
+        : {
+            responseBodyDigest: createHash("sha256")
+              .update(responseBody)
+              .digest("hex"),
+            responseBodyBytes: Buffer.byteLength(responseBody, "utf8"),
+          }),
+    });
+  }
   if (!NoObjectGeneratedError.isInstance(input.error)) throw input.error;
   const rawOutputText =
     typeof input.error.text === "string" ? input.error.text : undefined;
