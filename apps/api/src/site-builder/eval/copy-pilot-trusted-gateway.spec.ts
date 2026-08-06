@@ -47,6 +47,7 @@ async function gateway(input?: {
   unlimited?: boolean;
   allowlist?: readonly string[];
   modelLimit?: unknown;
+  catalog?: readonly string[];
   totalAvailable?: number;
 }) {
   const observed: string[] = [];
@@ -65,7 +66,7 @@ async function gateway(input?: {
           unlimited_quota: input?.unlimited ?? false,
           model_limits_enabled: true,
           model_limits: Object.fromEntries(
-            aliases.map((alias) => [alias, input?.modelLimit ?? 1]),
+            aliases.map((alias) => [alias, input?.modelLimit ?? true]),
           ),
           total_granted: 10_000,
           total_available: input?.totalAvailable ?? 9_900,
@@ -89,9 +90,11 @@ async function gateway(input?: {
       });
       return;
     }
-    const match = request.url?.match(/^\/v1\/models\/(.+)$/u);
-    if (match) {
-      sendJson(response, { id: decodeURIComponent(match[1]!) });
+    if (request.url === "/v1/models") {
+      sendJson(response, {
+        object: "list",
+        data: (input?.catalog ?? aliases).map((id) => ({ id })),
+      });
       return;
     }
     response.writeHead(404).end();
@@ -200,9 +203,7 @@ describe("Copy pilot trusted gateway", () => {
 
     expect(live.observed).toEqual([
       "/api/usage/token",
-      "/v1/models/claude-sonnet-5",
-      "/v1/models/gpt-5.6-sol",
-      "/v1/models/gpt-5.6-terra",
+      "/v1/models",
     ]);
     expect(Object.keys(handle)).toEqual([]);
     expect(JSON.stringify(handle)).toBe("{}");
@@ -308,8 +309,24 @@ describe("Copy pilot trusted gateway", () => {
       },
       "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH",
     ],
+    [{ modelLimit: 1 }, "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH"],
     [{ modelLimit: 0 }, "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH"],
     [{ modelLimit: "1" }, "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH"],
+    [
+      { catalog: ["gpt-5.6-terra", "gpt-5.6-sol"] },
+      "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH",
+    ],
+    [
+      {
+        catalog: [
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "claude-sonnet-5",
+          "unexpected-model",
+        ],
+      },
+      "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH",
+    ],
   ] as const)(
     "fails closed for broadened or unlimited live credentials",
     async (settings, code) => {

@@ -110,9 +110,9 @@ async function realRunnerGateway() {
           unlimited_quota: false,
           model_limits_enabled: true,
           model_limits: {
-            "gpt-5.6-terra": 1,
-            "gpt-5.6-sol": 1,
-            "claude-sonnet-5": 1,
+            "gpt-5.6-terra": true,
+            "gpt-5.6-sol": true,
+            "claude-sonnet-5": true,
           },
           total_granted: 10_000,
           total_available: 9_900,
@@ -120,9 +120,15 @@ async function realRunnerGateway() {
       });
       return;
     }
-    const modelLookup = request.url?.match(/^\/v1\/models\/(.+)$/u);
-    if (modelLookup) {
-      sendJson(response, { id: decodeURIComponent(modelLookup[1]!) });
+    if (request.url === "/v1/models") {
+      sendJson(response, {
+        object: "list",
+        data: [
+          { id: "gpt-5.6-terra" },
+          { id: "gpt-5.6-sol" },
+          { id: "claude-sonnet-5" },
+        ],
+      });
       return;
     }
     if (request.url === "/api/log/token") {

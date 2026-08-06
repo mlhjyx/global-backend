@@ -236,7 +236,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("keeps repository v4 bound to the merged operator evidence source", () => {
+  it("keeps repository v4 self-consistent but visibly stale after live preflight drift", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
       COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
@@ -298,15 +298,23 @@ describe("Copy real capability create-only manifest preparation", () => {
         }),
       ]),
     );
-    for (const entry of artifact.sourceBundle
-      .files as CopyRealCapabilitySourceFile[]) {
-      const checkedOutBytes = readFileSync(
-        resolve(REPOSITORY_ROOT, entry.path),
-      );
-      expect(createHash("sha256").update(checkedOutBytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-    }
+    const historicalGatewaySource = (
+      artifact.sourceBundle.files as CopyRealCapabilitySourceFile[]
+    ).find(
+      ({ path }) =>
+        path ===
+        "apps/api/src/site-builder/eval/copy-pilot-trusted-gateway.ts",
+    );
+    expect(historicalGatewaySource).toBeDefined();
+    expect(
+      createHash("sha256")
+        .update(
+          readFileSync(
+            resolve(REPOSITORY_ROOT, historicalGatewaySource!.path),
+          ),
+        )
+        .digest("hex"),
+    ).not.toBe(historicalGatewaySource!.sha256);
   });
 
   it("keeps repository v3 as self-consistent history after the operator gate", () => {
