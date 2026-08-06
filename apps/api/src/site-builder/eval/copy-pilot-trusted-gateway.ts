@@ -202,9 +202,7 @@ async function verifyLiveScopeAndQuota(
     usage.unlimited_quota !== false ||
     usage.model_limits_enabled !== true ||
     JSON.stringify(liveAliases) !== JSON.stringify(expectedAliases) ||
-    expectedAliases.some(
-      (alias) => !safeInteger(liveModelLimits?.[alias], 1),
-    ) ||
+    expectedAliases.some((alias) => liveModelLimits?.[alias] !== true) ||
     usage.total_granted !== state.admission.credential.quotaCapPoints ||
     !safeInteger(usage.total_available, 1) ||
     (initial &&
@@ -219,16 +217,28 @@ async function verifyLiveScopeAndQuota(
     fail("COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH");
   }
 
-  for (const alias of expectedAliases) {
-    const model = (await getJson(
-      origin,
-      `/v1/models/${encodeURIComponent(alias)}`,
-      state.bearerToken,
-      signal,
-    )) as { id?: unknown };
-    if (model.id !== alias) {
-      fail("COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH");
-    }
+  const modelCatalog = (await getJson(
+    origin,
+    "/v1/models",
+    state.bearerToken,
+    signal,
+  )) as { data?: unknown };
+  const modelEntries = Array.isArray(modelCatalog.data)
+    ? modelCatalog.data
+    : [];
+  const modelIds = modelEntries
+    .map((entry) =>
+      entry && typeof entry === "object" && !Array.isArray(entry)
+        ? (entry as { id?: unknown }).id
+        : undefined,
+    )
+    .filter((id): id is string => typeof id === "string")
+    .sort();
+  if (
+    modelIds.length !== modelEntries.length ||
+    JSON.stringify(modelIds) !== JSON.stringify(expectedAliases)
+  ) {
+    fail("COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH");
   }
   if (
     signal.aborted ||
