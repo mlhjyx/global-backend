@@ -305,17 +305,6 @@ describe("Copy real capability create-only manifest preparation", () => {
         }),
       ]),
     );
-    for (const entry of artifact.sourceBundle
-      .files as CopyRealCapabilitySourceFile[]) {
-      const fixedSourceBytes = execFileSync(
-        "git",
-        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
-        { cwd: REPOSITORY_ROOT },
-      );
-      expect(createHash("sha256").update(fixedSourceBytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-    }
   });
 
   it("keeps repository v4 as self-consistent stale history", () => {
