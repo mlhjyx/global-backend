@@ -16,9 +16,9 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
-  "55f10fa325916be6dde488ab148d1462175cda12" as const;
+  "a0dde9014a4ca22a87191e778303354a96bd7296" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v6.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v7.json" as const;
 
 export interface CopyRealCapabilitySourceFileSpec {
   role: string;
@@ -252,7 +252,7 @@ export interface CopyRealCapabilityContractSnapshot {
 
 export interface CopyRealCapabilityManifestArtifact {
   schemaVersion: "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1";
-  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-06-v6";
+  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-06-v7";
   classification: "FIXED_SOURCE_CREATE_ONLY";
   fixedSourceCommit: typeof COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT;
   preparationHeadCommit: string;
@@ -376,7 +376,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-real-capability-manifest/2026-08-05-v1" as const,
-    manifestId: "site-builder-copy-real-capability/2026-08-06-v6",
+    manifestId: "site-builder-copy-real-capability/2026-08-06-v7",
     fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
     sourceBundleDigest: sourceBundle.digest,
     planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
@@ -391,7 +391,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     schemaVersion:
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1" as const,
     artifactId:
-      "site-builder-copy-real-capability-manifest-prep/2026-08-06-v6" as const,
+      "site-builder-copy-real-capability-manifest-prep/2026-08-06-v7" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
     fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
     preparationHeadCommit: input.preparationHeadCommit,
