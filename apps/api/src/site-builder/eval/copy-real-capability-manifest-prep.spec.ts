@@ -240,6 +240,60 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
+  it("keeps repository v6 bound to the API diagnostic fixed source", () => {
+    const artifactPath = resolve(
+      REPOSITORY_ROOT,
+      COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
+    );
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "948ac50be094c4b7398ed0644b98c55fdfa41b319f958ee295bb0b5503510f39",
+    );
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-06-v6",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "abb8d3ff74f2998614ad7cac4c3686000db7cb6f",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-06-v6",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      "6e74f4f533f56a3def20d4f18d09ac17cc589f3e517915f099472b877eb3704a",
+    );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifactDigest).toBe(
+      "c9a4391e20523e980197745f66a0796e8438b6e5186f8bc3bf4e1823b0341d21",
+    );
+    for (const entry of artifact.sourceBundle
+      .files as CopyRealCapabilitySourceFile[]) {
+      const checkedOutBytes = readFileSync(
+        resolve(REPOSITORY_ROOT, entry.path),
+      );
+      expect(createHash("sha256").update(checkedOutBytes).digest("hex")).toBe(
+        entry.sha256,
+      );
+    }
+  });
+
   it("keeps repository v5 as self-consistent frozen history", () => {
     const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V5_PATH);
     const artifactBytes = readFileSync(artifactPath);
