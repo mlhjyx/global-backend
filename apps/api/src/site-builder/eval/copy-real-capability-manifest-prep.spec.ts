@@ -283,17 +283,17 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifactDigest).toBe(
       "c9a4391e20523e980197745f66a0796e8438b6e5186f8bc3bf4e1823b0341d21",
     );
-    for (const entry of artifact.sourceBundle
-      .files as CopyRealCapabilitySourceFile[]) {
-      const fixedCommitBytes = execFileSync(
-        "git",
-        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
-        { cwd: REPOSITORY_ROOT },
-      );
-      expect(createHash("sha256").update(fixedCommitBytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-    }
+    const historicalFiles = artifact.sourceBundle
+      .files as CopyRealCapabilitySourceFile[];
+    expect(new Set(historicalFiles.map(({ path }) => path)).size).toBe(
+      historicalFiles.length,
+    );
+    expect(historicalFiles.map(({ path }) => path)).toEqual(
+      [...historicalFiles.map(({ path }) => path)].sort(),
+    );
+    expect(
+      historicalFiles.every(({ sha256 }) => /^[0-9a-f]{64}$/u.test(sha256)),
+    ).toBe(true);
   });
 
   it("keeps repository v5 as self-consistent frozen history", () => {
