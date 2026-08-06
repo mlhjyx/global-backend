@@ -31,8 +31,8 @@ const EXECUTIONS = COPY_EVALUATION_V2_CANDIDATES.map((candidate, index) =>
     reasoning: candidate.reasoning,
     maximumWireCalls: 2 as const,
     maximumRepairCalls: 1 as const,
-    maximumOutputTokens: 4_000 as const,
-    timeoutMs: 120_000 as const,
+    maximumOutputTokens: 1_200 as const,
+    timeoutMs: 240_000 as const,
     requirements: deepFreeze({
       structuredOutput: true,
       reportsUsage: true,
@@ -61,8 +61,8 @@ const CHILD_CAMPAIGNS = EXECUTIONS.map((execution, index) =>
 );
 
 const PLAN = {
-  schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v6",
-  planId: "site-builder-copy-capability-pilot/2026-08-06-v6",
+  schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v8",
+  planId: "site-builder-copy-capability-pilot/2026-08-06-v8",
   executionStatus: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
   dispatchAuthorization: "NOT_AUTHORIZED",
   observedModelWireCalls: 0,

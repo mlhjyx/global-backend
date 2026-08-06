@@ -201,13 +201,16 @@ describe("Copy capability pilot fake-gateway runner", () => {
     expect(gateway.observed[0]!.body).toMatchObject({
       model: "gpt-5.6-terra",
       reasoning: { effort: "medium" },
+      max_output_tokens: 1200,
     });
     expect(gateway.observed[1]!.body).toMatchObject({
       model: "gpt-5.6-sol",
       reasoning: { effort: "high" },
+      max_output_tokens: 1200,
     });
     expect(gateway.observed[2]!.body).toMatchObject({
       model: "claude-sonnet-5",
+      max_tokens: 1200,
       thinking: { type: "adaptive" },
       output_config: { effort: "medium" },
     });
