@@ -6,6 +6,8 @@
 > 2026-07-10 v2（获客合流定稿）；**2026-07-27 模型候选重基线更新**。历史实施日志见 [changelog.md](changelog.md)。
 > 六项获客工程收口已完成。获客 R1–R3 与所有新 provider 在 2026-07-13 至 2026-08-02 暂停新增开发；用户已解除冻结。**Site Builder M1 于 2026-08-04 完成阶段收口**；下一步是重新审计并选择获客侧首个恢复任务。旧 Word、v3.1/v3.2、研究稿、旧 owner 与旧 worktree 不具有排期权威。
 
+> **2026-08-06 Copy capability 候选隔离 fast-follow（当前交付分支，zero-call）**：保留全局 3/6 与 3,000,000 quota points 上界，同时将 Terra、Sol、Sonnet 拆成三个独立 1/2 子 campaign，各自绑定 authorization、reservation 与 durable ledger。候选 unknown settlement 只冻结对应子 campaign，其他候选仍可执行；共享 source/manifest/compiled runtime/credential/aggregate authorization 漂移则冻结全部。旧 v6 固定提交不包含该语义，只能作为历史；合并顺序固定为隔离实现 → post-merge create-only v7 manifest → 用户另行授权真实 capability pilot。36/72、promotion 与 production adoption 仍不在本批次。
+
 > **2026-08-04 Model Runtime 实施覆盖**：当前施工顺序改为 Runtime/Context/缓存与两生成式消费者收口 → 可选 Langfuse 旁路 → Copy Evaluation v2。旧 design_spec/remaining-text manifest、价格卡与 runner 只供审计，不再推进真实执行；assemble/fix/QA/SEO 已移出模型矩阵。Copy v2 只允许 Terra、Sol、Sonnet 的独立小型 capability pilot，真实调用、promotion、production adoption 与 Gemini native 仍分别授权、分别 PR。
 
 > **2026-08-06 Copy v5 real pilot stopped**：固定 v5 获得独立 3/6 授权后只发起 Terra/Responses 第一条 wire；因 transport failure 且无 request ID/consume-log settlement，campaign 按约立即冻结，Sol/Sonnet 未调用。new-api quota 仍为 3,000,000、匹配 consume log 为 0，但 provider cost settlement 仍按 `unknown`；该结果只进入 [`diagnostic_only` stopped evidence](../evidence/site-builder/m1-g-copy-capability-pilot-v5-stopped-evidence.json)，不能判断候选质量或晋级。当前先修 native adapter 对 AI SDK API-call error 的 bounded status/request-id/body-digest 保真，再生成新 fixed-source manifest 并重新授权；冻结 v5 不得重试，36/72、promotion、route adoption 不变。

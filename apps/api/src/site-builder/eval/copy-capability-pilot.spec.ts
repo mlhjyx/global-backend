@@ -8,8 +8,8 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v5",
-      planId: "site-builder-copy-capability-pilot/2026-08-05-v5",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v6",
+      planId: "site-builder-copy-capability-pilot/2026-08-06-v6",
       executionStatus: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
@@ -19,6 +19,8 @@ describe("Copy capability pilot preparation contract", () => {
       plannedExecutions: 3,
       maximumWireCalls: 6,
       maximumRepairCallsPerExecution: 1,
+      unknownSettlementPolicy: "freeze_selected_child_campaign",
+      sharedDriftPolicy: "freeze_all_child_campaigns",
       cachePolicy: "disabled",
       settlementPolicy: "known_per_physical_call_required",
       fixedCommitPolicy: "separate_create_only_manifest_required",
@@ -74,6 +76,44 @@ describe("Copy capability pilot preparation contract", () => {
         reasoning: "medium",
       }),
     ]);
+    expect(COPY_CAPABILITY_PILOT_PLAN.childCampaigns).toEqual([
+      {
+        childSlotId: "copy-capability-child-1-gpt-5.6-terra",
+        executionKey: "copy-capability-1-gpt-5.6-terra",
+        alias: "gpt-5.6-terra",
+        protocol: "openai_responses",
+        reasoning: "medium",
+        maximumExecutions: 1,
+        maximumWireCalls: 2,
+        maximumRepairCallsPerExecution: 1,
+        unknownSettlementPolicy: "freeze_selected_child_campaign",
+        sharedDriftPolicy: "freeze_all_child_campaigns",
+      },
+      {
+        childSlotId: "copy-capability-child-2-gpt-5.6-sol",
+        executionKey: "copy-capability-2-gpt-5.6-sol",
+        alias: "gpt-5.6-sol",
+        protocol: "openai_responses",
+        reasoning: "high",
+        maximumExecutions: 1,
+        maximumWireCalls: 2,
+        maximumRepairCallsPerExecution: 1,
+        unknownSettlementPolicy: "freeze_selected_child_campaign",
+        sharedDriftPolicy: "freeze_all_child_campaigns",
+      },
+      {
+        childSlotId: "copy-capability-child-3-claude-sonnet-5",
+        executionKey: "copy-capability-3-claude-sonnet-5",
+        alias: "claude-sonnet-5",
+        protocol: "anthropic_messages",
+        reasoning: "medium",
+        maximumExecutions: 1,
+        maximumWireCalls: 2,
+        maximumRepairCallsPerExecution: 1,
+        unknownSettlementPolicy: "freeze_selected_child_campaign",
+        sharedDriftPolicy: "freeze_all_child_campaigns",
+      },
+    ]);
     for (const execution of COPY_CAPABILITY_PILOT_PLAN.executions) {
       expect(execution).toMatchObject({
         kind: "capability_probe",
@@ -107,6 +147,12 @@ describe("Copy capability pilot preparation contract", () => {
     ).not.toThrow();
     expect(Object.isFrozen(COPY_CAPABILITY_PILOT_PLAN)).toBe(true);
     expect(Object.isFrozen(COPY_CAPABILITY_PILOT_PLAN.executions)).toBe(true);
+    expect(Object.isFrozen(COPY_CAPABILITY_PILOT_PLAN.childCampaigns)).toBe(
+      true,
+    );
+    for (const child of COPY_CAPABILITY_PILOT_PLAN.childCampaigns) {
+      expect(Object.isFrozen(child)).toBe(true);
+    }
   });
 
   it.each([
@@ -115,6 +161,10 @@ describe("Copy capability pilot preparation contract", () => {
     [
       "candidate",
       { executions: COPY_CAPABILITY_PILOT_PLAN.executions.slice(1) },
+    ],
+    [
+      "child slot",
+      { childCampaigns: COPY_CAPABILITY_PILOT_PLAN.childCampaigns.slice(1) },
     ],
   ])("rejects %s drift before a future dispatcher", (_name, mutation) => {
     expect(() =>

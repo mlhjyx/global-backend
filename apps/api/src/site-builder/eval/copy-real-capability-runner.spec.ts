@@ -15,7 +15,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
-import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
+import {
+  COPY_REAL_CAPABILITY_ADMISSION_SOURCE,
+  copyPilotChildReservationDigest,
+  type CopyRealCapabilityAdmissionInput,
+} from "./copy-real-capability-admission";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
   createCopyOperatorEvidenceChallenge,
@@ -91,6 +95,7 @@ async function realRunnerGateway() {
   const callsByAlias = new Map<string, number>();
   const logs: Record<string, unknown>[] = [];
   const observedModelBodies: Record<string, unknown>[] = [];
+  const control = { sharedDrift: false };
   const channelByAlias = new Map([
     ["gpt-5.6-terra", 20],
     ["gpt-5.6-sol", 21],
@@ -115,9 +120,14 @@ async function realRunnerGateway() {
             "claude-sonnet-5": true,
           },
           total_granted: 10_000,
-          total_available: 9_900,
+          total_available: control.sharedDrift ? 3_000 : 9_900,
         },
       });
+      return;
+    }
+    if (request.url === "/test/fail-shared") {
+      control.sharedDrift = true;
+      sendJson(response, { ok: true });
       return;
     }
     if (request.url === "/v1/models") {
@@ -152,7 +162,7 @@ async function realRunnerGateway() {
     const requestId = `request-real-${alias.replaceAll(".", "-")}-${ordinal}`;
     const output =
       alias === "gpt-5.6-sol" && ordinal === 1 ? invalid : expected;
-    if (alias !== "claude-sonnet-5") {
+    if (alias !== "gpt-5.6-terra") {
       logs.push({
         request_id: requestId,
         type: 2,
@@ -308,7 +318,7 @@ async function compiledExecutionRepository() {
   return { root, manifestPath, manifest };
 }
 
-function admission() {
+function admission(selectedIndex = 0): CopyRealCapabilityAdmissionInput {
   const now = Date.now();
   const issuedAt = new Date(now - 60_000).toISOString();
   const expiresAt = new Date(now + 60 * 60_000).toISOString();
@@ -354,30 +364,63 @@ function admission() {
   };
   const settlement = {
     schemaVersion:
-      "site-builder-copy-pilot-settlement-observer/2026-08-05-v1" as const,
+      "site-builder-copy-pilot-settlement-observer/2026-08-06-v2" as const,
     resolverId: credential.resolverId,
     status: "READY" as const,
     observation: "request_bound_new_api_consume_log" as const,
     requestIdentityHeader: "x-oneapi-request-id" as const,
     requiredObservationPerPhysicalCall: true as const,
     maximumPollDurationMs: 2_000,
-    unknownSettlementPolicy: "freeze_campaign" as const,
+    unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
   };
-  const authorizationWithoutReservation = {
+  const children = COPY_CAPABILITY_PILOT_PLAN.childCampaigns.map(
+    (child, index) => ({
+      ...child,
+      campaignId: `copy-runner-child-campaign-${index + 1}`,
+      authorizationId: `copy-runner-child-authorization-${index + 1}`,
+      reservationId: `copy-runner-child-reservation-${index + 1}`,
+      ledgerIdentityDigest: String(index + 1).repeat(64),
+      reservedQuotaPoints: 2_000,
+    }),
+  );
+  const authorization = {
     schemaVersion:
-      "site-builder-copy-pilot-dispatch-authorization/2026-08-05-v1" as const,
-    authorizationId: "copy-runner-authorization-test-v3",
+      "site-builder-copy-pilot-global-dispatch-authorization/2026-08-06-v2" as const,
+    authorizationId: "copy-runner-global-authorization-test-v4",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
     manifestDigest: canonicalDigest(manifest),
     credentialAttestationDigest: canonicalDigest(credential),
     settlementObserverDigest: canonicalDigest(settlement),
-    ledgerIdentityDigest: "d".repeat(64),
-    reservationId: "copy-runner-reservation-test-v3",
     reservationStatus: "RESERVED" as const,
     maximumExecutions: 3 as const,
     maximumWireCalls: 6 as const,
+    maximumRepairCallsPerExecution: 1 as const,
+    unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
+    sharedDriftPolicy: "freeze_all_child_campaigns" as const,
+    children,
+  };
+  const selected = children[selectedIndex]!;
+  const childWithoutDigest = {
+    schemaVersion:
+      "site-builder-copy-pilot-child-dispatch-authorization/2026-08-06-v1" as const,
+    globalAuthorizationDigest: canonicalDigest(authorization),
+    childSlotId: selected.childSlotId,
+    executionKey: selected.executionKey,
+    campaignId: selected.campaignId,
+    authorizationId: selected.authorizationId,
+    status: "AUTHORIZED" as const,
+    issuedAt,
+    expiresAt,
+    manifestDigest: authorization.manifestDigest,
+    credentialAttestationDigest: authorization.credentialAttestationDigest,
+    settlementObserverDigest: authorization.settlementObserverDigest,
+    ledgerIdentityDigest: selected.ledgerIdentityDigest,
+    reservationId: selected.reservationId,
+    reservationStatus: "RESERVED" as const,
+    maximumExecutions: 1 as const,
+    maximumWireCalls: 2 as const,
     maximumRepairCallsPerExecution: 1 as const,
   };
   return {
@@ -391,12 +434,12 @@ function admission() {
     },
     credential,
     settlement,
-    authorization: {
-      ...authorizationWithoutReservation,
-      reservationDigest: copyPilotReservationDigest(
-        authorizationWithoutReservation,
-      ),
+    authorization,
+    childAuthorization: {
+      ...childWithoutDigest,
+      reservationDigest: copyPilotChildReservationDigest(childWithoutDigest),
     },
+    selectedExecutionKey: selected.executionKey,
   };
 }
 
@@ -436,13 +479,13 @@ describe("Copy real capability runner admission", () => {
         ledgerPath: join(directory, "other-ledger.jsonl"),
       }),
     ).rejects.toThrow("COPY_PILOT_LEDGER_IDENTITY_MISMATCH");
-    const authorization = admission().authorization;
+    const authorization = admission().childAuthorization;
     const { reservationDigest, ...withoutDigest } = authorization;
     expect(copyPilotReservationDigest(withoutDigest)).toBe(reservationDigest);
     expect(
       copyPilotReservationDigest({
         ...withoutDigest,
-        maximumWireCalls: 7 as never,
+        maximumWireCalls: 3 as never,
       }),
     ).not.toBe(reservationDigest);
   });
@@ -667,14 +710,23 @@ describe("Copy real capability runner admission", () => {
       const runner = require(${JSON.stringify(COMPILED_RUNNER_PATH)});
       const context = require(${JSON.stringify(contextPath)});
       const reservation = {
+        schemaVersion: "site-builder-copy-pilot-child-dispatch-authorization/2026-08-06-v1",
+        globalAuthorizationDigest: "0".repeat(64),
+        childSlotId: "copy-child-slot-1",
+        executionKey: "copy-capability-1-gpt-5.6-terra",
+        campaignId: "copy-digest-capture-campaign",
         authorizationId: "copy-digest-capture-auth",
+        status: "AUTHORIZED",
+        issuedAt: "2026-08-06T00:00:00.000Z",
+        expiresAt: "2026-08-06T01:00:00.000Z",
         reservationId: "copy-digest-capture-reservation",
         manifestDigest: "a".repeat(64),
         credentialAttestationDigest: "b".repeat(64),
         settlementObserverDigest: "c".repeat(64),
         ledgerIdentityDigest: "d".repeat(64),
-        maximumExecutions: 3,
-        maximumWireCalls: 6,
+        reservationStatus: "RESERVED",
+        maximumExecutions: 1,
+        maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
       };
       const before = runner.copyPilotReservationDigest(reservation);
@@ -688,7 +740,7 @@ describe("Copy real capability runner admission", () => {
     expect(result.after).not.toBe("e".repeat(64));
   });
 
-  it("runs settled success and one closed repair, then freezes unknown settlement", async () => {
+  it("isolates unknown settlement to one child while sibling campaigns complete", async () => {
     const [repository, gateway] = await Promise.all([
       compiledExecutionRepository(),
       realRunnerGateway(),
@@ -728,16 +780,26 @@ describe("Copy real capability runner admission", () => {
         const now = Date.now();
         const issuedAt = new Date(now - 60_000).toISOString();
         const expiresAt = new Date(now + 60 * 60_000).toISOString();
-        const ledgerPath = ${JSON.stringify(join(evidenceDirectory, "ledger.jsonl"))};
-        const authorizationClaimPath = ${JSON.stringify(join(evidenceDirectory, "authorization.claim.json"))};
-        const ledgerMarkerPath = ${JSON.stringify(join(evidenceDirectory, "ledger.marker.jsonl"))};
-        const campaignId = "copy-real-integration-v3";
-        const prepared = await markerModule.prepareCopyPilotLedgerIdentity({
-          ledgerPath,
-          authorizationClaimPath,
-          markerPath: ledgerMarkerPath,
-          campaignId,
-        });
+        const childPlans = require(${JSON.stringify(
+          join(
+            repository.root,
+            "apps/api/dist/site-builder/eval/copy-capability-pilot.js",
+          ),
+        )}).COPY_CAPABILITY_PILOT_PLAN.childCampaigns;
+        const paths = childPlans.map((child, index) => ({
+          ledgerPath: ${JSON.stringify(evidenceDirectory)} + "/ledger-" + (index + 1) + ".jsonl",
+          authorizationClaimPath: ${JSON.stringify(evidenceDirectory)} + "/authorization-" + (index + 1) + ".claim.json",
+          ledgerMarkerPath: ${JSON.stringify(evidenceDirectory)} + "/ledger-" + (index + 1) + ".marker.jsonl",
+          campaignId: "copy-real-child-campaign-" + (index + 1),
+        }));
+        const prepared = await Promise.all(paths.map((entry) =>
+          markerModule.prepareCopyPilotLedgerIdentity({
+            ledgerPath: entry.ledgerPath,
+            authorizationClaimPath: entry.authorizationClaimPath,
+            markerPath: entry.ledgerMarkerPath,
+            campaignId: entry.campaignId,
+          })
+        ));
         const credential = {
           schemaVersion: "site-builder-copy-pilot-credential-attestation/2026-08-05-v3",
           attestationId: "copy-real-integration-credential-v2",
@@ -762,80 +824,163 @@ describe("Copy real capability runner admission", () => {
           resolverId: "copy-real-integration-resolver-v2",
         };
         const settlement = {
-          schemaVersion: "site-builder-copy-pilot-settlement-observer/2026-08-05-v1",
+          schemaVersion: "site-builder-copy-pilot-settlement-observer/2026-08-06-v2",
           resolverId: credential.resolverId,
           status: "READY",
           observation: "request_bound_new_api_consume_log",
           requestIdentityHeader: "x-oneapi-request-id",
           requiredObservationPerPhysicalCall: true,
           maximumPollDurationMs: 1000,
-          unknownSettlementPolicy: "freeze_campaign",
+          unknownSettlementPolicy: "freeze_selected_child_campaign",
         };
-        const authorizationWithoutReservation = {
-          schemaVersion: "site-builder-copy-pilot-dispatch-authorization/2026-08-05-v1",
-          authorizationId: "copy-real-integration-authorization-v3",
+        const children = childPlans.map((child, index) => ({
+          ...child,
+          campaignId: paths[index].campaignId,
+          authorizationId: "copy-real-child-authorization-" + (index + 1),
+          reservationId: "copy-real-child-reservation-" + (index + 1),
+          ledgerIdentityDigest: prepared[index].ledgerIdentityDigest,
+          reservedQuotaPoints: 2000,
+        }));
+        const authorization = {
+          schemaVersion: "site-builder-copy-pilot-global-dispatch-authorization/2026-08-06-v2",
+          authorizationId: "copy-real-global-authorization-v4",
           status: "AUTHORIZED",
           issuedAt,
           expiresAt,
           manifestDigest: canonicalDigest(artifact.manifest),
           credentialAttestationDigest: canonicalDigest(credential),
           settlementObserverDigest: canonicalDigest(settlement),
-          ledgerIdentityDigest: prepared.ledgerIdentityDigest,
-          reservationId: "copy-real-integration-reservation-v3",
           reservationStatus: "RESERVED",
           maximumExecutions: 3,
           maximumWireCalls: 6,
           maximumRepairCallsPerExecution: 1,
+          unknownSettlementPolicy: "freeze_selected_child_campaign",
+          sharedDriftPolicy: "freeze_all_child_campaigns",
+          children,
         };
-        const authorization = {
-          ...authorizationWithoutReservation,
-          reservationDigest: runnerModule.copyPilotReservationDigest(authorizationWithoutReservation),
-        };
-        const admission = {
-          manifest: artifact.manifest,
-          sourceVerification: {
-            fixedSourceCommit: artifact.manifest.fixedSourceCommit,
-            sourceBundleDigest: artifact.manifest.sourceBundleDigest,
-            fixedCommitReachableFromExecutionHead: true,
-            trackedSourceBytesMatch: true,
-            compiledContractsMatch: true,
-          },
-          credential,
-          settlement,
-          authorization,
-        };
+        const admissions = children.map((selected) => {
+          const childWithoutDigest = {
+            schemaVersion: "site-builder-copy-pilot-child-dispatch-authorization/2026-08-06-v1",
+            globalAuthorizationDigest: canonicalDigest(authorization),
+            childSlotId: selected.childSlotId,
+            executionKey: selected.executionKey,
+            campaignId: selected.campaignId,
+            authorizationId: selected.authorizationId,
+            status: "AUTHORIZED",
+            issuedAt,
+            expiresAt,
+            manifestDigest: authorization.manifestDigest,
+            credentialAttestationDigest: authorization.credentialAttestationDigest,
+            settlementObserverDigest: authorization.settlementObserverDigest,
+            ledgerIdentityDigest: selected.ledgerIdentityDigest,
+            reservationId: selected.reservationId,
+            reservationStatus: "RESERVED",
+            maximumExecutions: 1,
+            maximumWireCalls: 2,
+            maximumRepairCallsPerExecution: 1,
+          };
+          return {
+            manifest: artifact.manifest,
+            sourceVerification: {
+              fixedSourceCommit: artifact.manifest.fixedSourceCommit,
+              sourceBundleDigest: artifact.manifest.sourceBundleDigest,
+              fixedCommitReachableFromExecutionHead: true,
+              trackedSourceBytesMatch: true,
+              compiledContractsMatch: true,
+            },
+            credential,
+            settlement,
+            authorization,
+            childAuthorization: {
+              ...childWithoutDigest,
+              reservationDigest: runnerModule.copyPilotReservationDigest(childWithoutDigest),
+            },
+            selectedExecutionKey: selected.executionKey,
+          };
+        });
         const verifiedSource = await sourceModule.createCopyPilotVerifiedSource({
           repositoryRoot: ${JSON.stringify(repository.root)},
           manifestArtifactPath: ${JSON.stringify(repository.manifestPath)},
         });
-        const trustedGateway = await gatewayModule.createCopyPilotTrustedGateway({
-          admission,
-          bearerToken: ${JSON.stringify(gateway.authorizationValue)},
-        });
-        const runner = await runnerModule.createCopyRealCapabilityRunner({
-          ledgerPath,
-          authorizationClaimPath,
-          ledgerMarkerPath,
-          campaignId,
-          admission,
-          verifiedSource,
-          trustedGateway,
-        });
-        const terra = await runner.execute("copy-capability-1-gpt-5.6-terra");
-        const sol = await runner.execute("copy-capability-2-gpt-5.6-sol");
-        let sonnetError;
+        const trustedGateways = await Promise.all(admissions.map((admission) =>
+          gatewayModule.createCopyPilotTrustedGateway({
+            admission,
+            bearerToken: ${JSON.stringify(gateway.authorizationValue)},
+          })
+        ));
+        const runners = await Promise.all(admissions.map((admission, index) =>
+          runnerModule.createCopyRealCapabilityRunner({
+            ...paths[index],
+            admission,
+            verifiedSource,
+            trustedGateway: trustedGateways[index],
+          })
+        ));
+        let unboundChildError;
         try {
-          await runner.execute("copy-capability-3-claude-sonnet-5");
+          await runners[0].execute("copy-capability-1-gpt-5.6-terra");
         } catch (error) {
-          sonnetError = String(error && error.message);
+          unboundChildError = String(error && error.message);
+        }
+        const originalWeakMapGet = WeakMap.prototype.get;
+        let ambientWeakMapBypassError;
+        WeakMap.prototype.get = () => "copy-capability-1-gpt-5.6-terra";
+        try {
+          await runners[0].execute("copy-capability-1-gpt-5.6-terra");
+        } catch (error) {
+          ambientWeakMapBypassError = String(error && error.message);
+        } finally {
+          WeakMap.prototype.get = originalWeakMapGet;
+        }
+        let duplicateBatchError;
+        try {
+          runnerModule.createCopyRealCapabilityCampaignRunner({
+            runners: [runners[0], runners[0], runners[2]],
+          });
+        } catch (error) {
+          duplicateBatchError = String(error && error.message);
+        }
+        const campaignRunner = runnerModule.createCopyRealCapabilityCampaignRunner({
+          runners,
+        });
+        let wrongChildError;
+        try {
+          await runners[0].execute("copy-capability-2-gpt-5.6-sol");
+        } catch (error) {
+          wrongChildError = String(error && error.message);
+        }
+        runners[1] = runners[0];
+        let terraError;
+        try {
+          await campaignRunner.execute("copy-capability-1-gpt-5.6-terra");
+        } catch (error) {
+          terraError = String(error && error.message);
+        }
+        const sol = await campaignRunner.execute("copy-capability-2-gpt-5.6-sol");
+        const sonnet = await campaignRunner.execute("copy-capability-3-claude-sonnet-5");
+        const summariesBeforeSharedDrift = await campaignRunner.summaries();
+        await fetch(${JSON.stringify(gateway.origin)} + "/test/fail-shared", {
+          headers: { authorization: "Bearer " + ${JSON.stringify(gateway.authorizationValue)} },
+        });
+        let sharedDriftError;
+        try {
+          await campaignRunner.execute("copy-capability-3-claude-sonnet-5");
+        } catch (error) {
+          sharedDriftError = String(error && error.message);
         }
         process.stdout.write(JSON.stringify({
-          terra: runnerModule.getCopyRealCapabilityReceipt(terra),
-          terraChallenge: runnerModule.createCopyOperatorEvidenceChallenge(terra),
+          unboundChildError,
+          ambientWeakMapBypassError,
+          duplicateBatchError,
+          wrongChildError,
+          terraError,
+          sharedDriftError,
           sol: runnerModule.getCopyRealCapabilityReceipt(sol),
           solChallenge: runnerModule.createCopyOperatorEvidenceChallenge(sol),
-          sonnetError,
-          summary: await runner.summary(),
+          sonnet: runnerModule.getCopyRealCapabilityReceipt(sonnet),
+          sonnetChallenge: runnerModule.createCopyOperatorEvidenceChallenge(sonnet),
+          summariesBeforeSharedDrift,
+          summariesAfterSharedDrift: await campaignRunner.summaries(),
         }));
       })().catch((error) => {
         process.stderr.write(error && error.stack ? error.stack : String(error));
@@ -846,7 +991,25 @@ describe("Copy real capability runner admission", () => {
       maxBuffer: 4 * 1024 * 1024,
     });
     const result = JSON.parse(stdout) as {
-      terra: {
+      unboundChildError: string;
+      ambientWeakMapBypassError: string;
+      duplicateBatchError: string;
+      wrongChildError: string;
+      terraError: string;
+      sharedDriftError: string;
+      sol: {
+        classification: string;
+        evidenceClass: string;
+        wireCount: number;
+        repaired: boolean;
+        childSlotId: string;
+        globalAuthorizationDigest: string;
+        childAuthorizationDigest: string;
+      };
+      solChallenge: {
+        candidateReceiptDigest: string;
+      };
+      sonnet: {
         classification: string;
         evidenceClass: string;
         wireCount: number;
@@ -857,44 +1020,64 @@ describe("Copy real capability runner admission", () => {
         inputDigest: string;
         contextDigest: string;
         promptDigest: string;
+        childSlotId: string;
+        globalAuthorizationDigest: string;
+        childAuthorizationDigest: string;
       };
-      terraChallenge: {
+      sonnetChallenge: {
         candidateReceiptDigest: string;
       };
-      sol: {
-        classification: string;
-        evidenceClass: string;
-        wireCount: number;
-        repaired: boolean;
-      };
-      solChallenge: {
-        candidateReceiptDigest: string;
-      };
-      sonnetError: string;
-      summary: {
+      summariesBeforeSharedDrift: Array<{
         completedExecutions: number;
         knownWireSettlements: number;
         unknownWireSettlements: number;
         frozen: boolean;
-      };
+      }>;
+      summariesAfterSharedDrift: Array<{
+        completedExecutions: number;
+        knownWireSettlements: number;
+        unknownWireSettlements: number;
+        frozen: boolean;
+      }>;
     };
-    expect(result.terra).toMatchObject({
+    expect(result.unboundChildError).toBe(
+      "COPY_REAL_CAPABILITY_BATCH_RUNNER_REQUIRED",
+    );
+    expect(result.ambientWeakMapBypassError).toBe(
+      "COPY_REAL_CAPABILITY_BATCH_RUNNER_REQUIRED",
+    );
+    expect(result.duplicateBatchError).toBe(
+      "COPY_REAL_CAPABILITY_CHILD_BATCH_MISMATCH",
+    );
+    expect(result.wrongChildError).toBe(
+      "COPY_REAL_CAPABILITY_BATCH_RUNNER_REQUIRED",
+    );
+    expect(result.terraError).toMatch(/settlement is unknown/u);
+    expect(result.sharedDriftError).toBe(
+      "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH",
+    );
+    expect(result.sonnet).toMatchObject({
       classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY",
       evidenceClass: "copy_gateway_settlement_candidate",
       wireCount: 1,
       repaired: false,
       fixtureId: "copy-factual-claims",
       repeatIndex: null,
+      childSlotId: "copy-capability-child-3-claude-sonnet-5",
     });
-    expect(result.terraChallenge.candidateReceiptDigest).toMatch(
+    expect(result.sonnetChallenge.candidateReceiptDigest).toMatch(
       /^[0-9a-f]{64}$/u,
     );
     expect([
-      result.terra.planDigest,
-      result.terra.inputDigest,
-      result.terra.contextDigest,
-      result.terra.promptDigest,
+      result.sonnet.planDigest,
+      result.sonnet.inputDigest,
+      result.sonnet.contextDigest,
+      result.sonnet.promptDigest,
+      result.sonnet.globalAuthorizationDigest,
+      result.sonnet.childAuthorizationDigest,
     ]).toEqual([
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
       expect.stringMatching(/^[0-9a-f]{64}$/u),
       expect.stringMatching(/^[0-9a-f]{64}$/u),
       expect.stringMatching(/^[0-9a-f]{64}$/u),
@@ -905,20 +1088,37 @@ describe("Copy real capability runner admission", () => {
       evidenceClass: "copy_gateway_settlement_candidate",
       wireCount: 2,
       repaired: true,
+      childSlotId: "copy-capability-child-2-gpt-5.6-sol",
     });
     expect(result.solChallenge.candidateReceiptDigest).toMatch(
       /^[0-9a-f]{64}$/u,
     );
     expect(result.solChallenge.candidateReceiptDigest).not.toBe(
-      result.terraChallenge.candidateReceiptDigest,
+      result.sonnetChallenge.candidateReceiptDigest,
     );
-    expect(result.sonnetError).toMatch(/settlement is unknown/u);
-    expect(result.summary).toMatchObject({
-      completedExecutions: 2,
-      knownWireSettlements: 3,
+    expect(result.summariesBeforeSharedDrift).toHaveLength(3);
+    expect(result.summariesBeforeSharedDrift[0]).toMatchObject({
+      completedExecutions: 0,
+      knownWireSettlements: 0,
       unknownWireSettlements: 1,
       frozen: true,
     });
+    expect(result.summariesBeforeSharedDrift[1]).toMatchObject({
+      completedExecutions: 1,
+      knownWireSettlements: 2,
+      unknownWireSettlements: 0,
+      frozen: false,
+    });
+    expect(result.summariesBeforeSharedDrift[2]).toMatchObject({
+      completedExecutions: 1,
+      knownWireSettlements: 1,
+      unknownWireSettlements: 0,
+      frozen: false,
+    });
+    expect(result.summariesAfterSharedDrift).toHaveLength(3);
+    expect(result.summariesAfterSharedDrift.every(({ frozen }) => frozen)).toBe(
+      true,
+    );
     expect(gateway.observedModelBodies).toHaveLength(4);
     expect(JSON.stringify(result)).not.toContain("real_gateway_settled");
     expect(JSON.stringify(gateway.observedModelBodies[2])).toContain(

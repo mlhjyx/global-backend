@@ -58,15 +58,21 @@ export interface CopyPilotTrustedSettlementProof {
   gatewayOrigin: string;
   bearerTokenSha256: string;
   credentialAttestationDigest: string;
-  authorizationDigest: string;
+  globalAuthorizationDigest: string;
+  childAuthorizationDigest: string;
+  executionKey: string;
 }
 
 export interface CopyPilotTrustedAdmissionBinding {
   manifestDigest: string;
   credentialAttestationDigest: string;
   settlementObserverDigest: string;
-  authorizationId: string;
-  reservationId: string;
+  globalAuthorizationDigest: string;
+  childAuthorizationDigest: string;
+  executionKey: string;
+  childCampaignId: string;
+  childAuthorizationId: string;
+  childReservationId: string;
   gatewayOrigin: string;
 }
 
@@ -287,8 +293,14 @@ export function getCopyPilotTrustedAdmissionBinding(
     manifestDigest: canonicalDigest(state.admission.manifest),
     credentialAttestationDigest: canonicalDigest(state.admission.credential),
     settlementObserverDigest: canonicalDigest(state.admission.settlement),
-    authorizationId: state.admission.authorization.authorizationId,
-    reservationId: state.admission.authorization.reservationId,
+    globalAuthorizationDigest: canonicalDigest(state.admission.authorization),
+    childAuthorizationDigest: canonicalDigest(
+      state.admission.childAuthorization,
+    ),
+    executionKey: state.admission.selectedExecutionKey,
+    childCampaignId: state.admission.childAuthorization.campaignId,
+    childAuthorizationId: state.admission.childAuthorization.authorizationId,
+    childReservationId: state.admission.childAuthorization.reservationId,
     gatewayOrigin: state.admission.credential.gatewayOrigin,
   });
 }
@@ -332,11 +344,20 @@ export function createCopyPilotTrustedGatewayBindings(
     resolverId: state.admission.settlement.resolverId,
     maximumPollDurationMs: state.admission.settlement.maximumPollDurationMs,
   });
+  const selected = state.admission.authorization.children.find(
+    ({ executionKey }) => executionKey === state.admission.selectedExecutionKey,
+  );
+  if (!selected) fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
   return Object.freeze({
     execute: <Output>(
       protocol: "openai_responses" | "anthropic_messages",
       request: NativeModelAdapterRequest,
-    ) => adapters[protocol].execute<Output>(request),
+    ) => {
+      if (protocol !== selected.protocol || request.alias !== selected.alias) {
+        return fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+      }
+      return adapters[protocol].execute<Output>(request);
+    },
     resolve: async (input: NewApiRequestBoundSettlementInput) => {
       const settlement = await resolver.resolve(input);
       if (settlement.status === "settled") {
@@ -357,7 +378,13 @@ export function createCopyPilotTrustedGatewayBindings(
             credentialAttestationDigest: canonicalDigest(
               state.admission.credential,
             ),
-            authorizationDigest: canonicalDigest(state.admission.authorization),
+            globalAuthorizationDigest: canonicalDigest(
+              state.admission.authorization,
+            ),
+            childAuthorizationDigest: canonicalDigest(
+              state.admission.childAuthorization,
+            ),
+            executionKey: state.admission.selectedExecutionKey,
           }),
         );
       }
@@ -368,6 +395,9 @@ export function createCopyPilotTrustedGatewayBindings(
         ? state.settlements.get(value)
         : undefined,
     channelIdFor: (alias: string, protocol: ModelProtocol) => {
+      if (alias !== selected.alias || protocol !== selected.protocol) {
+        fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+      }
       const channelId = channels.get(`${alias}:${protocol}`);
       if (channelId == null) fail("COPY_PILOT_CHANNEL_BINDING_MISSING");
       return channelId;

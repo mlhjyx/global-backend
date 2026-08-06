@@ -6,6 +6,8 @@
 > 2026-07-10 立；**2026-08-02 获客开发冻结解除**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
 > 下方「真实具备/缺口/偏差/待拍板」四节仍是**获客侧 2026-07-13 冻结时点的历史快照**，解除冻结不自动把旧验证升级为当前验收。测试数量随提交变化，不在活状态文档固化；是否通过以最新分支实际命令、服务证据和 CI 结果为准。
 
+- **2026-08-06 Copy capability 候选隔离执行（当前交付分支，zero-call）**：v6 的单一 3/6 campaign 暴露了首候选 unknown settlement 会阻断后续候选的问题；当前离线改造保留全局 3 executions / 6 wires / 3,000,000 quota points 上界，但把 Terra、Sol、Sonnet 分别绑定为独立的 1 execution / 2 wires / 最多一次 repair 子 campaign，并为每个候选使用独立 campaign、authorization、reservation 与 durable ledger。候选 transport/settlement 失败只冻结自身；fixed source、manifest、compiled runtime、共享 exact-scope credential 或全局授权漂移会冻结全部子 campaign。三个 trusted gateway/runner 必须全部通过 admission 才能形成 batch runner，错误候选在 client 前拒绝。旧 v6 manifest 与 stopped evidence 仅保留历史审计，不能适配新执行语义；本改造合并后必须另开 create-only v7 manifest PR，再另行决定新的真实调用授权。本分支未调用模型、未改 new-api、未产新 evidence、未晋级或切换路由。
+
 ## 🟢 Site Builder M1 已收口；获客侧待选择首个恢复任务
 
 - **2026-08-06 Copy capability pilot v6 stopped evidence（真实调用，未晋级）**：固定 v6 获得与 v5 相同的独立 3 executions / 6 wires 授权后，零调用 preflight 先通过 fixed source、69-file bundle、compiled runtime、finite exact token scope、3,000,000 quota points 与空账本。随后 Terra/Responses 的首条 wire 到达 new-api/OpenOx 通道并返回 HTTP 502；#323 新增诊断成功保留 request ID、status、retryable 和有界响应摘要。token quota 前后仍为 3,000,000、used=0、consume log 为 0；provider settlement 仍按 `unknown`，campaign 以 1 execution claim、1 wire claim、0 known、1 unknown、0 completed 持久冻结，Sol/Sonnet 未调用。机器证据见 [`m1-g-copy-capability-pilot-v6-stopped-evidence.json`](../evidence/site-builder/m1-g-copy-capability-pilot-v6-stopped-evidence.json)，固定为 `diagnostic_only`、`promotionEligible=false`、质量结论 `inconclusive`；这证明当前阻塞在 OpenOx 上游可用性而不是 Copy 质量，不能 rank、promotion 或切 route。

@@ -240,7 +240,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("keeps repository v6 bound to the API diagnostic fixed source", () => {
+  it("keeps repository v6 as immutable superseded history", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
       COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
@@ -251,9 +251,9 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "948ac50be094c4b7398ed0644b98c55fdfa41b319f958ee295bb0b5503510f39",
     );
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(() => validateCopyRealCapabilityManifestArtifact(artifact)).toThrow(
+      "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-06-v6",
@@ -285,10 +285,12 @@ describe("Copy real capability create-only manifest preparation", () => {
     );
     for (const entry of artifact.sourceBundle
       .files as CopyRealCapabilitySourceFile[]) {
-      const checkedOutBytes = readFileSync(
-        resolve(REPOSITORY_ROOT, entry.path),
+      const fixedCommitBytes = execFileSync(
+        "git",
+        ["show", `${artifact.fixedSourceCommit}:${entry.path}`],
+        { cwd: REPOSITORY_ROOT },
       );
-      expect(createHash("sha256").update(checkedOutBytes).digest("hex")).toBe(
+      expect(createHash("sha256").update(fixedCommitBytes).digest("hex")).toBe(
         entry.sha256,
       );
     }
