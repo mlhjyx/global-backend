@@ -45,9 +45,24 @@ const EXECUTIONS = COPY_EVALUATION_V2_CANDIDATES.map((candidate, index) =>
   }),
 );
 
+const CHILD_CAMPAIGNS = EXECUTIONS.map((execution, index) =>
+  deepFreeze({
+    childSlotId: `copy-capability-child-${index + 1}-${execution.alias}`,
+    executionKey: execution.executionKey,
+    alias: execution.alias,
+    protocol: execution.protocol,
+    reasoning: execution.reasoning,
+    maximumExecutions: 1 as const,
+    maximumWireCalls: 2 as const,
+    maximumRepairCallsPerExecution: 1 as const,
+    unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
+    sharedDriftPolicy: "freeze_all_child_campaigns" as const,
+  }),
+);
+
 const PLAN = {
-  schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-05-v5",
-  planId: "site-builder-copy-capability-pilot/2026-08-05-v5",
+  schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v6",
+  planId: "site-builder-copy-capability-pilot/2026-08-06-v6",
   executionStatus: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
   dispatchAuthorization: "NOT_AUTHORIZED",
   observedModelWireCalls: 0,
@@ -57,6 +72,8 @@ const PLAN = {
   plannedExecutions: 3,
   maximumWireCalls: 6,
   maximumRepairCallsPerExecution: 1,
+  unknownSettlementPolicy: "freeze_selected_child_campaign",
+  sharedDriftPolicy: "freeze_all_child_campaigns",
   cachePolicy: "disabled",
   settlementPolicy: "known_per_physical_call_required",
   fixedCommitPolicy: "separate_create_only_manifest_required",
@@ -105,6 +122,7 @@ const PLAN = {
     }),
   },
   executions: EXECUTIONS,
+  childCampaigns: CHILD_CAMPAIGNS,
 } as const;
 
 export const COPY_CAPABILITY_PILOT_PLAN = deepFreeze(PLAN);

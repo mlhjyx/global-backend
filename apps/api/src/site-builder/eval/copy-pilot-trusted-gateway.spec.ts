@@ -7,6 +7,7 @@ import { canonicalDigest } from "../../model-runtime";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
   COPY_REAL_CAPABILITY_ADMISSION_SOURCE,
+  copyPilotChildReservationDigest,
   type CopyRealCapabilityAdmissionInput,
 } from "./copy-real-capability-admission";
 import {
@@ -151,14 +152,64 @@ function admission(origin: string): CopyRealCapabilityAdmissionInput {
   };
   const settlement = {
     schemaVersion:
-      "site-builder-copy-pilot-settlement-observer/2026-08-05-v1" as const,
+      "site-builder-copy-pilot-settlement-observer/2026-08-06-v2" as const,
     resolverId: credential.resolverId,
     status: "READY" as const,
     observation: "request_bound_new_api_consume_log" as const,
     requestIdentityHeader: "x-oneapi-request-id" as const,
     requiredObservationPerPhysicalCall: true as const,
     maximumPollDurationMs: 2_000,
-    unknownSettlementPolicy: "freeze_campaign" as const,
+    unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
+  };
+  const children = COPY_CAPABILITY_PILOT_PLAN.childCampaigns.map(
+    (child, index) => ({
+      ...child,
+      campaignId: `copy-gateway-child-campaign-${index + 1}`,
+      authorizationId: `copy-gateway-child-authorization-${index + 1}`,
+      reservationId: `copy-gateway-child-reservation-${index + 1}`,
+      ledgerIdentityDigest: String(index + 1).repeat(64),
+      reservedQuotaPoints: 2_000,
+    }),
+  );
+  const authorization = {
+    schemaVersion:
+      "site-builder-copy-pilot-global-dispatch-authorization/2026-08-06-v2" as const,
+    authorizationId: "copy-pilot-global-authorization-test-v4",
+    status: "AUTHORIZED" as const,
+    issuedAt: capturedAt,
+    expiresAt,
+    manifestDigest: canonicalDigest(manifest),
+    credentialAttestationDigest: canonicalDigest(credential),
+    settlementObserverDigest: canonicalDigest(settlement),
+    reservationStatus: "RESERVED" as const,
+    maximumExecutions: 3 as const,
+    maximumWireCalls: 6 as const,
+    maximumRepairCallsPerExecution: 1 as const,
+    unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
+    sharedDriftPolicy: "freeze_all_child_campaigns" as const,
+    children,
+  };
+  const selected = children[0]!;
+  const childWithoutDigest = {
+    schemaVersion:
+      "site-builder-copy-pilot-child-dispatch-authorization/2026-08-06-v1" as const,
+    globalAuthorizationDigest: canonicalDigest(authorization),
+    childSlotId: selected.childSlotId,
+    executionKey: selected.executionKey,
+    campaignId: selected.campaignId,
+    authorizationId: selected.authorizationId,
+    status: "AUTHORIZED" as const,
+    issuedAt: capturedAt,
+    expiresAt,
+    manifestDigest: authorization.manifestDigest,
+    credentialAttestationDigest: authorization.credentialAttestationDigest,
+    settlementObserverDigest: authorization.settlementObserverDigest,
+    ledgerIdentityDigest: selected.ledgerIdentityDigest,
+    reservationId: selected.reservationId,
+    reservationStatus: "RESERVED" as const,
+    maximumExecutions: 1 as const,
+    maximumWireCalls: 2 as const,
+    maximumRepairCallsPerExecution: 1 as const,
   };
   return {
     manifest,
@@ -171,24 +222,12 @@ function admission(origin: string): CopyRealCapabilityAdmissionInput {
     },
     credential,
     settlement,
-    authorization: {
-      schemaVersion:
-        "site-builder-copy-pilot-dispatch-authorization/2026-08-05-v1",
-      authorizationId: "copy-pilot-authorization-test-v3",
-      status: "AUTHORIZED",
-      issuedAt: capturedAt,
-      expiresAt,
-      manifestDigest: canonicalDigest(manifest),
-      credentialAttestationDigest: canonicalDigest(credential),
-      settlementObserverDigest: canonicalDigest(settlement),
-      ledgerIdentityDigest: "c".repeat(64),
-      reservationId: "copy-pilot-reservation-test-v3",
-      reservationDigest: "d".repeat(64),
-      reservationStatus: "RESERVED",
-      maximumExecutions: 3,
-      maximumWireCalls: 6,
-      maximumRepairCallsPerExecution: 1,
+    authorization,
+    childAuthorization: {
+      ...childWithoutDigest,
+      reservationDigest: copyPilotChildReservationDigest(childWithoutDigest),
     },
+    selectedExecutionKey: selected.executionKey,
   };
 }
 
@@ -201,17 +240,17 @@ describe("Copy pilot trusted gateway", () => {
       bearerToken: AUTHORIZATION_VALUE,
     });
 
-    expect(live.observed).toEqual([
-      "/api/usage/token",
-      "/v1/models",
-    ]);
+    expect(live.observed).toEqual(["/api/usage/token", "/v1/models"]);
     expect(Object.keys(handle)).toEqual([]);
     expect(JSON.stringify(handle)).toBe("{}");
     expect(getCopyPilotTrustedCredentialAttestation(handle)).toEqual(
       envelope.credential,
     );
     const bindings = createCopyPilotTrustedGatewayBindings(handle);
-    expect(bindings.channelIdFor("gpt-5.6-sol", "openai_responses")).toBe(21);
+    expect(bindings.channelIdFor("gpt-5.6-terra", "openai_responses")).toBe(20);
+    expect(() =>
+      bindings.channelIdFor("gpt-5.6-sol", "openai_responses"),
+    ).toThrow("COPY_PILOT_CHILD_SCOPE_MISMATCH");
     expect(bindings.execute).toBeTypeOf("function");
     expect(bindings.resolve).toBeTypeOf("function");
     expect(JSON.stringify(bindings)).toBe("{}");
@@ -248,7 +287,9 @@ describe("Copy pilot trusted gateway", () => {
     expect(settlement.status).toBe("settled");
     expect(bindings.trustedSettlementProof(settlement)).toMatchObject({
       alias: "gpt-5.6-terra",
-      authorizationDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      globalAuthorizationDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      childAuthorizationDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      executionKey: "copy-capability-1-gpt-5.6-terra",
       credentialAttestationDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
     expect(

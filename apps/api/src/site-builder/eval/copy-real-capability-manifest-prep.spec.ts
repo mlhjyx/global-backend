@@ -240,7 +240,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("keeps repository v6 bound to the API diagnostic fixed source", () => {
+  it("keeps repository v6 as immutable superseded history", () => {
     const artifactPath = resolve(
       REPOSITORY_ROOT,
       COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
@@ -251,9 +251,9 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "948ac50be094c4b7398ed0644b98c55fdfa41b319f958ee295bb0b5503510f39",
     );
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(() => validateCopyRealCapabilityManifestArtifact(artifact)).toThrow(
+      "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-06-v6",
@@ -283,15 +283,17 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifactDigest).toBe(
       "c9a4391e20523e980197745f66a0796e8438b6e5186f8bc3bf4e1823b0341d21",
     );
-    for (const entry of artifact.sourceBundle
-      .files as CopyRealCapabilitySourceFile[]) {
-      const checkedOutBytes = readFileSync(
-        resolve(REPOSITORY_ROOT, entry.path),
-      );
-      expect(createHash("sha256").update(checkedOutBytes).digest("hex")).toBe(
-        entry.sha256,
-      );
-    }
+    const historicalFiles = artifact.sourceBundle
+      .files as CopyRealCapabilitySourceFile[];
+    expect(new Set(historicalFiles.map(({ path }) => path)).size).toBe(
+      historicalFiles.length,
+    );
+    expect(historicalFiles.map(({ path }) => path)).toEqual(
+      [...historicalFiles.map(({ path }) => path)].sort(),
+    );
+    expect(
+      historicalFiles.every(({ sha256 }) => /^[0-9a-f]{64}$/u.test(sha256)),
+    ).toBe(true);
   });
 
   it("keeps repository v5 as self-consistent frozen history", () => {

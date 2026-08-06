@@ -7,11 +7,22 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const MAX_PROOF_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const MAX_SETTLEMENT_POLL_MS = 30_000;
+const CANONICAL_DIGEST = canonicalDigest;
 
 export interface CopyRealCapabilityExecutionScope {
   alias: string;
   protocol: ModelProtocol;
   reasoning: ReasoningLevel;
+}
+
+export interface CopyPilotChildCampaignScope extends CopyRealCapabilityExecutionScope {
+  childSlotId: string;
+  executionKey: string;
+  maximumExecutions: 1;
+  maximumWireCalls: 2;
+  maximumRepairCallsPerExecution: 1;
+  unknownSettlementPolicy: "freeze_selected_child_campaign";
+  sharedDriftPolicy: "freeze_all_child_campaigns";
 }
 
 function deepFreeze<T>(value: T): T {
@@ -27,10 +38,13 @@ function deepFreeze<T>(value: T): T {
 const EXECUTIONS = COPY_CAPABILITY_PILOT_PLAN.executions.map(
   ({ alias, protocol, reasoning }) => ({ alias, protocol, reasoning }),
 );
+const CHILD_CAMPAIGNS = COPY_CAPABILITY_PILOT_PLAN.childCampaigns.map(
+  (child) => ({ ...child }),
+);
 
 export const COPY_REAL_CAPABILITY_ADMISSION_SOURCE = deepFreeze({
   schemaVersion:
-    "site-builder-copy-real-capability-admission-source/2026-08-05-v3" as const,
+    "site-builder-copy-real-capability-admission-source/2026-08-06-v4" as const,
   taskId: "site_builder.copy" as const,
   planId: COPY_CAPABILITY_PILOT_PLAN.planId,
   planDigest: canonicalDigest(COPY_CAPABILITY_PILOT_PLAN),
@@ -40,8 +54,11 @@ export const COPY_REAL_CAPABILITY_ADMISSION_SOURCE = deepFreeze({
   plannedExecutions: 3 as const,
   maximumWireCalls: 6 as const,
   maximumRepairCallsPerExecution: 1 as const,
+  unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
+  sharedDriftPolicy: "freeze_all_child_campaigns" as const,
   requiredFollowup: "POST_MERGE_CREATE_ONLY_MANIFEST" as const,
   executions: EXECUTIONS,
+  childCampaigns: CHILD_CAMPAIGNS,
 });
 
 export interface CopyRealCapabilityManifest {
@@ -91,18 +108,48 @@ export interface CopyPilotCredentialAttestation {
 }
 
 export interface CopyPilotSettlementObserver {
-  schemaVersion: "site-builder-copy-pilot-settlement-observer/2026-08-05-v1";
+  schemaVersion: "site-builder-copy-pilot-settlement-observer/2026-08-06-v2";
   resolverId: string;
   status: "READY";
   observation: "request_bound_new_api_consume_log";
   requestIdentityHeader: "x-oneapi-request-id";
   requiredObservationPerPhysicalCall: true;
   maximumPollDurationMs: number;
-  unknownSettlementPolicy: "freeze_campaign";
+  unknownSettlementPolicy: "freeze_selected_child_campaign";
+}
+
+export interface CopyPilotAuthorizedChildSlot extends CopyPilotChildCampaignScope {
+  campaignId: string;
+  authorizationId: string;
+  reservationId: string;
+  ledgerIdentityDigest: string;
+  reservedQuotaPoints: number;
 }
 
 export interface CopyPilotDispatchAuthorization {
-  schemaVersion: "site-builder-copy-pilot-dispatch-authorization/2026-08-05-v1";
+  schemaVersion: "site-builder-copy-pilot-global-dispatch-authorization/2026-08-06-v2";
+  authorizationId: string;
+  status: "AUTHORIZED";
+  issuedAt: string;
+  expiresAt: string;
+  manifestDigest: string;
+  credentialAttestationDigest: string;
+  settlementObserverDigest: string;
+  reservationStatus: "RESERVED";
+  maximumExecutions: 3;
+  maximumWireCalls: 6;
+  maximumRepairCallsPerExecution: 1;
+  unknownSettlementPolicy: "freeze_selected_child_campaign";
+  sharedDriftPolicy: "freeze_all_child_campaigns";
+  children: readonly CopyPilotAuthorizedChildSlot[];
+}
+
+export interface CopyPilotChildDispatchAuthorization {
+  schemaVersion: "site-builder-copy-pilot-child-dispatch-authorization/2026-08-06-v1";
+  globalAuthorizationDigest: string;
+  childSlotId: string;
+  executionKey: string;
+  campaignId: string;
   authorizationId: string;
   status: "AUTHORIZED";
   issuedAt: string;
@@ -114,8 +161,8 @@ export interface CopyPilotDispatchAuthorization {
   reservationId: string;
   reservationDigest: string;
   reservationStatus: "RESERVED";
-  maximumExecutions: 3;
-  maximumWireCalls: 6;
+  maximumExecutions: 1;
+  maximumWireCalls: 2;
   maximumRepairCallsPerExecution: 1;
 }
 
@@ -125,10 +172,12 @@ export interface CopyRealCapabilityAdmissionInput {
   credential: CopyPilotCredentialAttestation;
   settlement: CopyPilotSettlementObserver;
   authorization: CopyPilotDispatchAuthorization;
+  childAuthorization: CopyPilotChildDispatchAuthorization;
+  selectedExecutionKey: string;
 }
 
 export interface CopyRealCapabilityAdmissionValidation {
-  schemaVersion: "site-builder-copy-real-capability-admission-validation/2026-08-05-v1";
+  schemaVersion: "site-builder-copy-real-capability-admission-validation/2026-08-06-v2";
   classification: "SOURCE_CONTRACT_VALIDATION_ONLY";
   dispatchCapable: false;
   taskId: "site_builder.copy";
@@ -136,12 +185,20 @@ export interface CopyRealCapabilityAdmissionValidation {
   fixedSourceCommit: string;
   credentialAttestationDigest: string;
   settlementObserverDigest: string;
+  globalAuthorizationDigest: string;
+  childAuthorizationDigest: string;
+  selectedExecutionKey: string;
+  childCampaignId: string;
   authorizationId: string;
   ledgerIdentityDigest: string;
   reservationId: string;
   reservationDigest: string;
-  maximumExecutions: 3;
-  maximumWireCalls: 6;
+  maximumExecutions: 1;
+  maximumWireCalls: 2;
+  globalMaximumExecutions: 3;
+  globalMaximumWireCalls: 6;
+  unknownSettlementPolicy: "freeze_selected_child_campaign";
+  sharedDriftPolicy: "freeze_all_child_campaigns";
 }
 
 function fail(code: string): never {
@@ -349,7 +406,7 @@ function validateSettlement(
       "unknownSettlementPolicy",
     ]) ||
     settlement.schemaVersion !==
-      "site-builder-copy-pilot-settlement-observer/2026-08-05-v1" ||
+      "site-builder-copy-pilot-settlement-observer/2026-08-06-v2" ||
     settlement.resolverId !== credential.resolverId ||
     settlement.status !== "READY" ||
     settlement.observation !== "request_bound_new_api_consume_log" ||
@@ -357,10 +414,51 @@ function validateSettlement(
     settlement.requiredObservationPerPhysicalCall !== true ||
     !safePositiveInteger(settlement.maximumPollDurationMs) ||
     settlement.maximumPollDurationMs > MAX_SETTLEMENT_POLL_MS ||
-    settlement.unknownSettlementPolicy !== "freeze_campaign"
+    settlement.unknownSettlementPolicy !== "freeze_selected_child_campaign"
   ) {
     fail("COPY_REAL_CAPABILITY_SETTLEMENT_UNAVAILABLE");
   }
+}
+
+function validChildShape(
+  child: CopyPilotAuthorizedChildSlot,
+  expected: CopyPilotChildCampaignScope,
+  expectedReservation: number,
+): boolean {
+  return (
+    exactKeys(child, [
+      "childSlotId",
+      "executionKey",
+      "alias",
+      "protocol",
+      "reasoning",
+      "maximumExecutions",
+      "maximumWireCalls",
+      "maximumRepairCallsPerExecution",
+      "unknownSettlementPolicy",
+      "sharedDriftPolicy",
+      "campaignId",
+      "authorizationId",
+      "reservationId",
+      "ledgerIdentityDigest",
+      "reservedQuotaPoints",
+    ]) &&
+    child.childSlotId === expected.childSlotId &&
+    child.executionKey === expected.executionKey &&
+    child.alias === expected.alias &&
+    child.protocol === expected.protocol &&
+    child.reasoning === expected.reasoning &&
+    child.maximumExecutions === 1 &&
+    child.maximumWireCalls === 2 &&
+    child.maximumRepairCallsPerExecution === 1 &&
+    child.unknownSettlementPolicy === "freeze_selected_child_campaign" &&
+    child.sharedDriftPolicy === "freeze_all_child_campaigns" &&
+    IDENTIFIER.test(child.campaignId) &&
+    IDENTIFIER.test(child.authorizationId) &&
+    IDENTIFIER.test(child.reservationId) &&
+    SHA256.test(child.ledgerIdentityDigest) &&
+    child.reservedQuotaPoints === expectedReservation
+  );
 }
 
 function validateAuthorization(
@@ -378,25 +476,25 @@ function validateAuthorization(
       "manifestDigest",
       "credentialAttestationDigest",
       "settlementObserverDigest",
-      "ledgerIdentityDigest",
-      "reservationId",
-      "reservationDigest",
       "reservationStatus",
       "maximumExecutions",
       "maximumWireCalls",
       "maximumRepairCallsPerExecution",
+      "unknownSettlementPolicy",
+      "sharedDriftPolicy",
+      "children",
     ]) ||
     authorization.schemaVersion !==
-      "site-builder-copy-pilot-dispatch-authorization/2026-08-05-v1" ||
+      "site-builder-copy-pilot-global-dispatch-authorization/2026-08-06-v2" ||
     !IDENTIFIER.test(authorization.authorizationId) ||
-    !IDENTIFIER.test(authorization.reservationId) ||
     authorization.status !== "AUTHORIZED" ||
-    !SHA256.test(authorization.ledgerIdentityDigest) ||
-    !SHA256.test(authorization.reservationDigest) ||
     authorization.reservationStatus !== "RESERVED" ||
     authorization.maximumExecutions !== 3 ||
     authorization.maximumWireCalls !== 6 ||
     authorization.maximumRepairCallsPerExecution !== 1 ||
+    authorization.unknownSettlementPolicy !==
+      "freeze_selected_child_campaign" ||
+    authorization.sharedDriftPolicy !== "freeze_all_child_campaigns" ||
     authorization.manifestDigest !== canonicalDigest(input.manifest) ||
     authorization.credentialAttestationDigest !==
       canonicalDigest(input.credential) ||
@@ -408,12 +506,113 @@ function validateAuthorization(
   if (instant(authorization.expiresAt) > instant(input.credential.expiresAt)) {
     fail("COPY_REAL_CAPABILITY_AUTHORIZATION_MISMATCH");
   }
+  const expectedReservation = input.credential.maximumQuotaPointsPerWire * 2;
+  const unique = <T>(values: readonly T[]) =>
+    new Set(values).size === values.length;
+  if (
+    authorization.children.length !== CHILD_CAMPAIGNS.length ||
+    authorization.children.some(
+      (child, index) =>
+        !validChildShape(child, CHILD_CAMPAIGNS[index]!, expectedReservation),
+    ) ||
+    !unique(authorization.children.map(({ childSlotId }) => childSlotId)) ||
+    !unique(authorization.children.map(({ executionKey }) => executionKey)) ||
+    !unique(authorization.children.map(({ campaignId }) => campaignId)) ||
+    !unique(
+      authorization.children.map(({ authorizationId }) => authorizationId),
+    ) ||
+    !unique(authorization.children.map(({ reservationId }) => reservationId)) ||
+    !unique(
+      authorization.children.map(
+        ({ ledgerIdentityDigest }) => ledgerIdentityDigest,
+      ),
+    ) ||
+    authorization.children.reduce(
+      (total, child) => total + child.reservedQuotaPoints,
+      0,
+    ) !== input.credential.reservedQuotaPoints
+  ) {
+    fail("COPY_REAL_CAPABILITY_GLOBAL_CHILDREN_MISMATCH");
+  }
 }
 
-/**
- * Pure admission boundary for a future real runner. It never reads credentials,
- * opens a ledger, creates a model client, or dispatches a request.
- */
+export function copyPilotChildReservationDigest(
+  authorization: Omit<CopyPilotChildDispatchAuthorization, "reservationDigest">,
+): string {
+  return CANONICAL_DIGEST({
+    bindingSchemaVersion: "copy-pilot-child-reservation-binding/2026-08-06-v1",
+    authorization,
+  });
+}
+
+function validateChildAuthorization(
+  input: CopyRealCapabilityAdmissionInput,
+  now: Date,
+): void {
+  const child = input.childAuthorization;
+  const globalDigest = canonicalDigest(input.authorization);
+  const slot = input.authorization.children.find(
+    ({ executionKey }) => executionKey === input.selectedExecutionKey,
+  );
+  if (
+    !slot ||
+    !exactKeys(child, [
+      "schemaVersion",
+      "globalAuthorizationDigest",
+      "childSlotId",
+      "executionKey",
+      "campaignId",
+      "authorizationId",
+      "status",
+      "issuedAt",
+      "expiresAt",
+      "manifestDigest",
+      "credentialAttestationDigest",
+      "settlementObserverDigest",
+      "ledgerIdentityDigest",
+      "reservationId",
+      "reservationDigest",
+      "reservationStatus",
+      "maximumExecutions",
+      "maximumWireCalls",
+      "maximumRepairCallsPerExecution",
+    ]) ||
+    child.schemaVersion !==
+      "site-builder-copy-pilot-child-dispatch-authorization/2026-08-06-v1" ||
+    child.globalAuthorizationDigest !== globalDigest ||
+    child.childSlotId !== slot.childSlotId ||
+    child.executionKey !== slot.executionKey ||
+    child.campaignId !== slot.campaignId ||
+    child.authorizationId !== slot.authorizationId ||
+    child.status !== "AUTHORIZED" ||
+    child.issuedAt !== input.authorization.issuedAt ||
+    child.expiresAt !== input.authorization.expiresAt ||
+    child.manifestDigest !== input.authorization.manifestDigest ||
+    child.credentialAttestationDigest !==
+      input.authorization.credentialAttestationDigest ||
+    child.settlementObserverDigest !==
+      input.authorization.settlementObserverDigest ||
+    child.ledgerIdentityDigest !== slot.ledgerIdentityDigest ||
+    child.reservationId !== slot.reservationId ||
+    child.reservationStatus !== "RESERVED" ||
+    child.maximumExecutions !== 1 ||
+    child.maximumWireCalls !== 2 ||
+    child.maximumRepairCallsPerExecution !== 1
+  ) {
+    fail("COPY_REAL_CAPABILITY_CHILD_AUTHORIZATION_MISMATCH");
+  }
+  const { reservationDigest, ...withoutReservationDigest } = child;
+  if (
+    !SHA256.test(reservationDigest) ||
+    reservationDigest !==
+      copyPilotChildReservationDigest(withoutReservationDigest)
+  ) {
+    fail("COPY_REAL_CAPABILITY_CHILD_AUTHORIZATION_MISMATCH");
+  }
+  validateLifetime(child.issuedAt, child.expiresAt, now);
+}
+
+/** Pure admission boundary. It never reads secrets or dispatches a request. */
 export function validateCopyRealCapabilityAdmissionEnvelope(
   input: CopyRealCapabilityAdmissionInput,
   now: Date = new Date(),
@@ -422,10 +621,11 @@ export function validateCopyRealCapabilityAdmissionEnvelope(
   validateCredential(input.credential, now);
   validateSettlement(input.settlement, input.credential);
   validateAuthorization(input.authorization, input, now);
+  validateChildAuthorization(input, now);
 
   return Object.freeze({
     schemaVersion:
-      "site-builder-copy-real-capability-admission-validation/2026-08-05-v1" as const,
+      "site-builder-copy-real-capability-admission-validation/2026-08-06-v2" as const,
     classification: "SOURCE_CONTRACT_VALIDATION_ONLY" as const,
     dispatchCapable: false as const,
     taskId: "site_builder.copy" as const,
@@ -433,11 +633,19 @@ export function validateCopyRealCapabilityAdmissionEnvelope(
     fixedSourceCommit: input.manifest.fixedSourceCommit,
     credentialAttestationDigest: canonicalDigest(input.credential),
     settlementObserverDigest: canonicalDigest(input.settlement),
-    authorizationId: input.authorization.authorizationId,
-    ledgerIdentityDigest: input.authorization.ledgerIdentityDigest,
-    reservationId: input.authorization.reservationId,
-    reservationDigest: input.authorization.reservationDigest,
-    maximumExecutions: 3 as const,
-    maximumWireCalls: 6 as const,
+    globalAuthorizationDigest: canonicalDigest(input.authorization),
+    childAuthorizationDigest: canonicalDigest(input.childAuthorization),
+    selectedExecutionKey: input.selectedExecutionKey,
+    childCampaignId: input.childAuthorization.campaignId,
+    authorizationId: input.childAuthorization.authorizationId,
+    ledgerIdentityDigest: input.childAuthorization.ledgerIdentityDigest,
+    reservationId: input.childAuthorization.reservationId,
+    reservationDigest: input.childAuthorization.reservationDigest,
+    maximumExecutions: 1 as const,
+    maximumWireCalls: 2 as const,
+    globalMaximumExecutions: 3 as const,
+    globalMaximumWireCalls: 6 as const,
+    unknownSettlementPolicy: "freeze_selected_child_campaign" as const,
+    sharedDriftPolicy: "freeze_all_child_campaigns" as const,
   });
 }
