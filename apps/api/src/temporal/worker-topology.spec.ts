@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ACQUISITION_TASK_QUEUE,
   LEGACY_TASK_QUEUE,
   MAINTENANCE_TASK_QUEUE,
   SITE_BUILDER_TASK_QUEUE,
   WORKER_DOMAINS,
+  parseBoundedIntervalMs,
   parseWorkerConcurrency,
+  runWorkerFleet,
   taskQueueForWorkflow,
 } from "./worker-topology";
 
@@ -64,4 +66,39 @@ describe("worker topology", () => {
       ).toThrow("INVALID_WORKER_CONCURRENCY");
     },
   );
+
+  it("bounds heartbeat and schedule observation intervals without accepting whitespace coercion", () => {
+    expect(
+      parseBoundedIntervalMs(undefined, "HEARTBEAT", 15_000, 5_000, 60_000),
+    ).toBe(15_000);
+    expect(
+      parseBoundedIntervalMs("300000", "SCHEDULE", 60_000, 60_000, 3_600_000),
+    ).toBe(300_000);
+    expect(() =>
+      parseBoundedIntervalMs(" 15000 ", "HEARTBEAT", 15_000, 5_000, 60_000),
+    ).toThrow("INVALID_WORKER_INTERVAL:HEARTBEAT");
+    expect(() =>
+      parseBoundedIntervalMs("0", "HEARTBEAT", 15_000, 5_000, 60_000),
+    ).toThrow("INVALID_WORKER_INTERVAL:HEARTBEAT");
+  });
+
+  it("shuts down the rest of the fleet when one worker exits fatally", async () => {
+    let rejectFatal!: (error: Error) => void;
+    let resolvePeer!: () => void;
+    const fatalRun = new Promise<void>((_resolve, reject) => {
+      rejectFatal = reject;
+    });
+    const peerRun = new Promise<void>((resolve) => {
+      resolvePeer = resolve;
+    });
+    const fatal = { run: () => fatalRun, shutdown: vi.fn() };
+    const peer = { run: () => peerRun, shutdown: vi.fn(resolvePeer) };
+    const running = runWorkerFleet([fatal, peer]);
+
+    rejectFatal(new Error("fatal poller error"));
+
+    await expect(running).rejects.toThrow("fatal poller error");
+    expect(fatal.shutdown).toHaveBeenCalledTimes(1);
+    expect(peer.shutdown).toHaveBeenCalledTimes(1);
+  });
 });

@@ -196,7 +196,11 @@ describe("schedule governance", () => {
 
     expect(fake.creates).toHaveLength(0);
     expect(fake.updates).toHaveLength(1);
-    const next = fake.updates[0]!.next as Record<string, any>;
+    const next = fake.updates[0]!.next as {
+      spec: unknown;
+      state: unknown;
+      action: { workflowType: string; taskQueue: string; args: unknown[] };
+    };
     expect(next.spec).toBe(current.spec);
     expect(next.state).toBe(current.state);
     expect(next.state).toEqual({
@@ -267,5 +271,74 @@ describe("schedule governance", () => {
         errorCode: "SCHEDULE_RECONCILE_FAILED",
       }),
     );
+  });
+
+  it("records bounded runtime observations while excluding the operator note and cadence", async () => {
+    const target = PLATFORM_SCHEDULES.find(
+      (item) => item.id === "external-intent-sweep",
+    )!;
+    const desired = desiredScheduleOptions(target, {});
+    const current = existingSchedule({
+      action: desired.action,
+      info: {
+        ...existingSchedule().info,
+        nextActionTimes: [new Date("2026-08-07T12:05:00.000Z")],
+        numActionsMissedCatchupWindow: 2,
+        numActionsSkippedOverlap: 3,
+      },
+    });
+    const fake = fakeClient(new Map([[target.id, current]]));
+    const append = vi.fn().mockResolvedValue(undefined);
+
+    await reconcilePlatformSchedules({
+      client: fake.client as never,
+      contracts: [target],
+      receipts: { append },
+      env: {},
+    });
+
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paused: true,
+        nextActionAt: new Date("2026-08-07T12:05:00.000Z"),
+        missedCatchupCount: 2,
+        skippedOverlapCount: 3,
+      }),
+    );
+    expect(JSON.stringify(append.mock.calls)).not.toMatch(/ops incident|42m/i);
+  });
+
+  it("persists a FAILED receipt when the first schedule description fails unexpectedly", async () => {
+    const target = PLATFORM_SCHEDULES[0]!;
+    const failure = Object.assign(new Error("transport details"), {
+      name: "ConnectionError",
+    });
+    const append = vi.fn().mockResolvedValue(undefined);
+    const client = {
+      schedule: {
+        getHandle: vi.fn(() => ({
+          describe: vi.fn().mockRejectedValue(failure),
+          update: vi.fn(),
+        })),
+        create: vi.fn(),
+      },
+    };
+
+    await expect(
+      reconcilePlatformSchedules({
+        client: client as never,
+        contracts: [target],
+        receipts: { append },
+        env: {},
+      }),
+    ).rejects.toBe(failure);
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        disposition: "FAILED",
+        changedFields: ["describe"],
+        errorCode: "SCHEDULE_DESCRIBE_FAILED",
+      }),
+    );
+    expect(JSON.stringify(append.mock.calls)).not.toContain("transport details");
   });
 });

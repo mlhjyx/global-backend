@@ -169,6 +169,39 @@ describe("RuntimeOpsWriter", () => {
       }),
     });
   });
+
+  it("appends bounded schedule runtime observations without operator notes or cadence payloads", async () => {
+    const db = fakeDb();
+    const writer = new RuntimeOpsWriter(db as never, { buildSha: BUILD_SHA });
+    const nextActionAt = new Date("2026-08-07T12:05:00.000Z");
+
+    await writer.appendScheduleDriftReceipt({
+      scheduleId: "external-intent-sweep",
+      disposition: "IN_SYNC",
+      desiredHash: "b".repeat(64),
+      observedHash: "b".repeat(64),
+      changedFields: [],
+      errorCode: null,
+      paused: true,
+      nextActionAt,
+      missedCatchupCount: 2,
+      skippedOverlapCount: 1,
+    });
+
+    expect(db.scheduleDriftReceipt.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        scheduleId: "external-intent-sweep",
+        paused: true,
+        nextActionAt,
+        missedCatchupCount: 2,
+        skippedOverlapCount: 1,
+        workerBuildSha: BUILD_SHA,
+      }),
+    });
+    expect(JSON.stringify(db.scheduleDriftReceipt.create.mock.calls)).not.toMatch(
+      /note|cadence|ops incident/i,
+    );
+  });
 });
 
 describe("buildWorkerIdentity", () => {

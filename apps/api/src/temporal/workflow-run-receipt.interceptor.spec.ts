@@ -83,7 +83,10 @@ describe("workflow run receipt interceptor replay contract", () => {
       1,
       expect.objectContaining({
         workspaceId: "11111111-1111-4111-8111-111111111111",
-        ...INFO,
+        workflowId: INFO.workflowId,
+        runId: INFO.runId,
+        workflowType: INFO.workflowType,
+        taskQueue: INFO.taskQueue,
         phase: "STARTED",
         stage: "started",
         stats: {},
@@ -102,6 +105,31 @@ describe("workflow run receipt interceptor replay contract", () => {
     );
     expect(JSON.stringify(temporal.record.mock.calls)).not.toMatch(
       /input@example|output@example|must-not-leak/,
+    );
+  });
+
+  it("records a successful workflow's explicit budget truncation flag without retaining its result", async () => {
+    temporal.patched.mockReturnValue(true);
+    const result = {
+      status: "PARTIAL",
+      budgetTruncated: true,
+      customerEmail: "output@example.com",
+    };
+    const next = vi.fn().mockResolvedValue(result);
+
+    await expect(
+      executeInterceptor()({ args: [{}], headers: {} }, next),
+    ).resolves.toBe(result);
+
+    expect(temporal.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        phase: "COMPLETED",
+        budgetTruncated: true,
+        stats: {},
+      }),
+    );
+    expect(JSON.stringify(temporal.record.mock.calls)).not.toContain(
+      "output@example.com",
     );
   });
 
