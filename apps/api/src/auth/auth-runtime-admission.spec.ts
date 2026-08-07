@@ -103,16 +103,33 @@ describe('resolveAuthRuntimeAdmission', () => {
     );
   });
 
-  it('treats NODE_ENV=production as the production floor when DEPLOYMENT_STAGE is omitted', () => {
-    const admission = resolveAuthRuntimeAdmission({
-      NODE_ENV: 'production',
-      API_BIND_HOST: '127.0.0.1',
-      AUTH_ROLE_SCOPE_MAP: ROLE_SCOPE_MAP,
-      ...JWKS,
-    });
+  it.each([
+    ['serving', []],
+    ['OpenAPI export', ['node', 'main.js', '--export-openapi']],
+  ] as const)('%s rejects a missing explicit DEPLOYMENT_STAGE', (_name, argv) => {
+    expect(() =>
+      resolveAuthRuntimeAdmission(
+        {
+          NODE_ENV: 'production',
+          API_BIND_HOST: '127.0.0.1',
+          AUTH_ROLE_SCOPE_MAP: ROLE_SCOPE_MAP,
+          ...JWKS,
+        },
+        argv,
+      ),
+    ).toThrow('DEPLOYMENT_STAGE is required');
+  });
 
-    expect(admission.stage).toBe('production');
-    expect(admission.verifierKind).toBe('jwks');
+  it.each(['prodction', 'developmnt', ' production ', 'staging'])('rejects an invalid NODE_ENV %j', (nodeEnv) => {
+    expect(() =>
+      resolveAuthRuntimeAdmission({
+        DEPLOYMENT_STAGE: 'development',
+        NODE_ENV: nodeEnv,
+        API_BIND_HOST: '127.0.0.1',
+        AUTH_ALLOW_DEV_TOKENS: 'true',
+        AUTH_ROLE_SCOPE_MAP: ROLE_SCOPE_MAP,
+      }),
+    ).toThrow('NODE_ENV');
   });
 
   it('development admits dev tokens only with the explicit flag, explicit mapping, and loopback bind', () => {
@@ -164,7 +181,10 @@ describe('resolveAuthRuntimeAdmission', () => {
   });
 
   it('OpenAPI export uses a rejecting verifier and does not create a serving admission bypass', () => {
-    const admission = resolveAuthRuntimeAdmission({}, ['node', 'main.js', '--export-openapi']);
+    const admission = resolveAuthRuntimeAdmission(
+      { DEPLOYMENT_STAGE: 'development', NODE_ENV: 'test' },
+      ['node', 'main.js', '--export-openapi'],
+    );
 
     expect(admission).toMatchObject({
       stage: 'development',

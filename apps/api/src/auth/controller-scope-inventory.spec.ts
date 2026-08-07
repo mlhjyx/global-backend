@@ -2,7 +2,9 @@ import 'reflect-metadata';
 import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { ModulesContainer, NestFactory } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
+import { AppModule } from '../app.module';
 import { ClaimController } from '../claim/claim.controller';
 import { CompanyController } from '../company/company.controller';
 import { DeletionController } from '../compliance/deletion.controller';
@@ -26,6 +28,24 @@ const CONTROLLERS = {
   IcpController,
   LeadController,
 } as const;
+
+const REGISTERED_PRODUCTION_CONTROLLERS = Object.freeze([
+  'AssetsController',
+  'BuildsController',
+  'ClaimController',
+  'CompanyController',
+  'DeletionController',
+  'DiscoveryController',
+  'EventsController',
+  'HealthController',
+  'IcpController',
+  'IntakeController',
+  'KbController',
+  'LeadController',
+  'SitePreviewController',
+  'SitesController',
+  'WhoamiController',
+]);
 
 function routeMethods(controller: abstract new (...args: never[]) => unknown): string[] {
   return Object.getOwnPropertyNames(controller.prototype)
@@ -67,6 +87,53 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
   it('forces every non-Site-Builder controller file to be inventoried or explicitly exempted', () => {
     const inventoried = Object.values(ACQUISITION_CONTROLLER_SCOPE_INVENTORY).map(({ file }) => file);
     expect(controllerFiles()).toEqual([...inventoried, ...NON_ACQUISITION_CONTROLLER_EXEMPTIONS].sort());
+  });
+
+  it('matches the actual Nest production module graph bidirectionally', async () => {
+    const originalEnvironment = process.env;
+    process.env = {
+      ...process.env,
+      NODE_ENV: 'test',
+      DEPLOYMENT_STAGE: 'development',
+      API_BIND_HOST: '127.0.0.1',
+      AUTH_ALLOW_DEV_TOKENS: 'true',
+      AUTH_ROLE_SCOPE_MAP: JSON.stringify({ 'inventory.reader': ['acquisition:read'] }),
+    };
+    const app = await NestFactory.create(AppModule, { logger: false });
+    try {
+      const modules = app.get(ModulesContainer);
+      const registered = [...modules.values()]
+        .flatMap((module) => [...module.controllers.values()])
+        .map((wrapper) => wrapper.metatype?.name)
+        .filter((name): name is string => Boolean(name))
+        .sort();
+
+      expect(registered).toEqual([...REGISTERED_PRODUCTION_CONTROLLERS].sort());
+    } finally {
+      await app.close();
+      process.env = originalEnvironment;
+    }
+  });
+
+  it('requires personal-data and compliance authority for sensitive acquisition operations', () => {
+    expect(ACQUISITION_CONTROLLER_SCOPE_INVENTORY.DiscoveryController.operations.verify).toEqual([
+      'acquisition:write',
+      'personal-data:read',
+      'compliance:manage',
+    ]);
+    expect(ACQUISITION_CONTROLLER_SCOPE_INVENTORY.DiscoveryController.operations.guessEmails).toEqual([
+      'acquisition:write',
+      'personal-data:read',
+      'compliance:manage',
+    ]);
+    expect(ACQUISITION_CONTROLLER_SCOPE_INVENTORY.LeadController.operations.accept).toEqual([
+      'acquisition:review',
+      'personal-data:read',
+    ]);
+    expect(ACQUISITION_CONTROLLER_SCOPE_INVENTORY.EventsController.operations.list).toEqual([
+      'acquisition:read',
+      'personal-data:read',
+    ]);
   });
 
   it('keeps quality-label write and identity-review scopes unbound until their separate endpoints exist', () => {

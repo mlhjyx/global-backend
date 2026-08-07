@@ -1,6 +1,17 @@
-import { UnauthorizedException } from '@nestjs/common';
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWTPayload } from 'jose';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  customFetch,
+  exportJWK,
+  generateKeyPair,
+  SignJWT,
+  type CryptoKey,
+  type FetchImplementation,
+  type JWTVerifyGetKey,
+  type JWTPayload,
+} from 'jose';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { JwksRuntimeConfig } from './auth-runtime-admission';
 import { JwksTokenVerifier } from './jwks-token-verifier';
 
@@ -62,13 +73,18 @@ async function signedToken(
   return new SignJWT(payload).setProtectedHeader(protectedHeader).sign(options.privateKey ?? privateKey1);
 }
 
-async function expectGenericRejection(token: string): Promise<void> {
-  const error = await verifier.verify(token).catch((caught) => caught);
+async function expectGenericRejection(token: string, target: JwksTokenVerifier = verifier): Promise<void> {
+  const error = await target.verify(token).catch((caught) => caught);
   expect(error).toBeInstanceOf(UnauthorizedException);
   expect((error as UnauthorizedException).getResponse()).toEqual({
     error: { code: 'TOKEN_INVALID', message: 'token verification failed' },
   });
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('JwksTokenVerifier offline contract', () => {
   it('accepts valid iss/aud/exp/nbf/sub/workspace_id/roles/kid claims', async () => {
@@ -117,6 +133,83 @@ describe('JwksTokenVerifier offline contract', () => {
   });
 
   it('does not disclose jose/provider verification details for malformed compact JWS', async () => {
-    await expectGenericRejection('not-a-compact-jwt');
+    const malformedInput = 'not-a-compact-jwt-sensitive-material';
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await expectGenericRejection(malformedInput);
+
+    expect(warning).toHaveBeenCalledWith('token verification rejected: malformed_token');
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(malformedInput);
+  });
+
+  it('rejects non-RS256 signatures before consulting the JWKS resolver', async () => {
+    const pair = await generateKeyPair('PS256');
+    const resolver = vi.fn(async () => pair.publicKey);
+    const target = new JwksTokenVerifier(CONFIG, resolver as JWTVerifyGetKey);
+    const token = await new SignJWT(validClaims())
+      .setProtectedHeader({ alg: 'PS256', kid: 'ps-key' })
+      .sign(pair.privateKey);
+
+    await expectGenericRejection(token, target);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('uses real remote-JWKS refresh, cooldown, cache, and fail-closed outage behavior offline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-07T00:00:00.000Z'));
+
+    const pair1 = await generateKeyPair('RS256');
+    const pair2 = await generateKeyPair('RS256');
+    const jwk1 = Object.freeze({ ...(await exportJWK(pair1.publicKey)), alg: 'RS256', use: 'sig', kid: 'remote-1' });
+    const jwk2 = Object.freeze({ ...(await exportJWK(pair2.publicKey)), alg: 'RS256', use: 'sig', kid: 'remote-2' });
+    let published = Object.freeze({ keys: Object.freeze([jwk1]) });
+    let outage = false;
+    const fetchJwks = vi.fn<FetchImplementation>(async (url, options) => {
+      expect(url).toBe(CONFIG.uri);
+      expect(options.method).toBe('GET');
+      expect(options.redirect).toBe('manual');
+      if (outage) {
+        return new Response('temporarily unavailable', { status: 503 });
+      }
+      return new Response(JSON.stringify(published), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const remote = createRemoteJWKSet(new URL(CONFIG.uri), {
+      cooldownDuration: 1_000,
+      cacheMaxAge: 2_000,
+      timeoutDuration: 500,
+      [customFetch]: fetchJwks,
+    });
+    const target = new JwksTokenVerifier(CONFIG, remote);
+    const token1 = await signedToken({}, { kid: 'remote-1', privateKey: pair1.privateKey });
+    const token2 = await signedToken({}, { kid: 'remote-2', privateKey: pair2.privateKey });
+
+    await expect(target.verify(token1)).resolves.toMatchObject({ userId: 'user-123' });
+    expect(fetchJwks).toHaveBeenCalledTimes(1);
+    expect(remote.fresh).toBe(true);
+
+    outage = true;
+    await expect(target.verify(token1)).resolves.toMatchObject({ userId: 'user-123' });
+    expect(fetchJwks).toHaveBeenCalledTimes(1);
+
+    outage = false;
+    published = Object.freeze({ keys: Object.freeze([jwk1, jwk2]) });
+    await expectGenericRejection(token2, target);
+    expect(remote.coolingDown).toBe(true);
+    expect(fetchJwks).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1_001);
+    await expect(target.verify(token2)).resolves.toMatchObject({ userId: 'user-123' });
+    expect(fetchJwks).toHaveBeenCalledTimes(2);
+
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    outage = true;
+    vi.advanceTimersByTime(2_001);
+    await expectGenericRejection(token1, target);
+    expect(fetchJwks).toHaveBeenCalledTimes(3);
+    expect(warning).toHaveBeenLastCalledWith('token verification rejected: jwks_unavailable');
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('temporarily unavailable');
   });
 });
