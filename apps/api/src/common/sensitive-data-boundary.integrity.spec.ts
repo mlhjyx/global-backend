@@ -89,4 +89,39 @@ describe("sensitive data boundary integration", () => {
     expect(filter).toMatch(/scrubSensitiveData\(\{\s*error:/s);
     expect(filter).toMatch(/diagnosticErrorSummary\(exception\)/);
   });
+
+  it("never persists pre-stringified runtime exceptions in acquisition ledgers or deletion state", () => {
+    const signalIngest = source("signals/signal-ingest.service.ts");
+    const acquisition = source("acquisition/acquisition.service.ts");
+    const deletionWorkflow = source("temporal/deletion.workflow.ts");
+    const deletionActivities = source("temporal/deletion.activities.ts");
+    const toolBroker = source("tools/tool-broker.ts");
+
+    for (const runtimeSource of [signalIngest, acquisition, toolBroker]) {
+      expect(runtimeSource).toMatch(/diagnosticErrorToken\(/);
+    }
+    expect(signalIngest).not.toMatch(/const msg = String\(err\)/);
+    expect(acquisition).not.toMatch(/error:\s*String\(err\)/);
+    expect(toolBroker).not.toMatch(
+      /this\.trace\([^;]+String\(err\)\.slice/s,
+    );
+    expect(deletionWorkflow).toContain('error: "DELETION_WORKFLOW_FAILED"');
+    expect(deletionWorkflow).not.toContain("error: String(err)");
+    expect(deletionActivities).toMatch(
+      /error:\s*diagnosticErrorToken\(args\.error\)/,
+    );
+  });
+
+  it("does not pre-stringify exceptions in the controlled pilot runtime logs", () => {
+    const discovery = source("discovery/discovery.service.ts");
+    const taxonomy = source("discovery/taxonomy-resolver.ts");
+    const worker = source("temporal/worker.ts");
+
+    for (const runtimeSource of [discovery, taxonomy, worker]) {
+      expect(runtimeSource).toMatch(/diagnosticErrorToken\(/);
+    }
+    expect(discovery).not.toMatch(/String\(err\)\.slice/);
+    expect(taxonomy).not.toMatch(/String\(e\)\.slice/);
+    expect(worker).not.toMatch(/\$\{String\(err\)\}/);
+  });
 });
