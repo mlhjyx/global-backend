@@ -18,6 +18,13 @@ import {
   PostgresOutboxSingleWriterRepository,
   type OutboxSingleWriterPort,
 } from './outbox-single-writer.repository';
+import {
+  createRelayDiagnostic,
+  RELAY_DIAGNOSTIC_CODE,
+  serializeRelayDiagnostic,
+  type RelayDiagnostic,
+  type RelayDiagnosticCode,
+} from './relay-diagnostic';
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -46,8 +53,6 @@ export const WEBHOOK_TIMEOUT_MS = 10_000;
 export const OUTBOX_TICK_DEADLINE_MS = 240_000;
 /** 单 tick 处理上限（路由与派送各自适用），防单轮吃满。 */
 const BATCH_SIZE = 20;
-/** lastError 截断长度：错误体可能是整页 HTML，不让它撑爆行。 */
-const MAX_ERROR_LEN = 500;
 
 class NonRetryableOutboxCommandError extends Error {
   constructor(message: string) {
@@ -172,18 +177,29 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       new PostgresOutboxSingleWriterRepository(this.db as never);
   }
 
+  private logRelayFailure(context: string, code: RelayDiagnosticCode, error: unknown): void {
+    const diagnostic = createRelayDiagnostic(code, error);
+    this.logger.error(`${context}: ${serializeRelayDiagnostic(diagnostic)}`);
+  }
+
   async onModuleInit(): Promise<void> {
     await this.db.$connect();
     // 平台配置播种（data_provider 无 RLS，owner 连接写入）。失败要**大声**：seed 静默失败意味着
     // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
     await new DiscoveryProviderRegistry().seed(this.db).catch((err) => {
-      this.logger.error(
-        `provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`,
+      this.logRelayFailure(
+        'provider seed FAILED — providers may be invisible to routing (no-op pipeline)',
+        RELAY_DIAGNOSTIC_CODE.providerSeedFailed,
+        err,
       );
     });
     // 制裁名单源 + source_policy seed（第五门，DISABLED；API-only 部署也需登记 source_policy 供 broker 门）。
     await seedSanctions(this.db).catch((err) => {
-      this.logger.error(`sanctions seed FAILED — refresh/screening may be misconfigured: ${String(err)}`);
+      this.logRelayFailure(
+        'sanctions seed FAILED — refresh/screening may be misconfigured',
+        RELAY_DIAGNOSTIC_CODE.sanctionsSeedFailed,
+        err,
+      );
     });
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。
@@ -211,7 +227,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       // webhook sends, preserving pull-delivery creation order across replicas.
       await this.singleWriter.runExclusive(() => this.runTickBody());
     } catch (err) {
-      this.logger.error(`relay tick failed: ${String(err)}`);
+      this.logRelayFailure('relay tick failed', RELAY_DIAGNOSTIC_CODE.relayTickFailed, err);
     } finally {
       this.running = false;
     }
@@ -264,10 +280,18 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
             where: { id: ev.id },
             data: { parkedAt: new Date() },
           });
-          this.logger.error(`invalid internal command ${ev.eventId} parked: ${err.message}`);
+          this.logRelayFailure(
+            `invalid internal command ${ev.eventId} parked`,
+            RELAY_DIAGNOSTIC_CODE.invalidInternalCommand,
+            err,
+          );
           return;
         }
-        this.logger.error(`dispatch failed for event ${ev.eventId}: ${String(err)}`);
+        this.logRelayFailure(
+          `dispatch failed for event ${ev.eventId}`,
+          RELAY_DIAGNOSTIC_CODE.internalDispatchFailed,
+          err,
+        );
       }
       return;
     }
@@ -289,7 +313,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           });
         });
       } catch (err) {
-        this.logger.error(`delivery routing failed for event ${ev.eventId}: ${String(err)}`);
+        this.logRelayFailure(
+          `delivery routing failed for event ${ev.eventId}`,
+          RELAY_DIAGNOSTIC_CODE.deliveryRoutingFailed,
+          err,
+        );
       }
       return;
     }
@@ -300,11 +328,14 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         data: { parkedAt: new Date() },
       });
     } catch (err) {
-      this.logger.error(`failed to park event ${ev.eventId}: ${String(err)}`);
+      this.logRelayFailure(`failed to park event ${ev.eventId}`, RELAY_DIAGNOSTIC_CODE.eventParkFailed, err);
       return;
     }
     this.logger.error(
-      `UNREGISTERED event type '${ev.eventType}' (event ${ev.eventId}) — parked. ` +
+      `UNREGISTERED event type (event ${ev.eventId}) — parked: ` +
+        `${serializeRelayDiagnostic(
+          createRelayDiagnostic(RELAY_DIAGNOSTIC_CODE.unregisteredEventType, ev.eventType),
+        )}. ` +
         `新增事件类型必须登记 relay/event-registry.ts（internal 或 integration），否则会静默丢失。`,
     );
   }
@@ -371,31 +402,39 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           });
           continue;
         }
-        await this.recordWebhookFailure(d, `HTTP ${res.status}`, now);
+        await this.recordWebhookFailure(
+          d,
+          createRelayDiagnostic(RELAY_DIAGNOSTIC_CODE.webhookHttpError, `HTTP ${res.status}`, {
+            httpStatus: res.status,
+          }),
+          now,
+        );
       } catch (err) {
-        await this.recordWebhookFailure(d, String(err), now);
+        await this.recordWebhookFailure(d, createRelayDiagnostic(RELAY_DIAGNOSTIC_CODE.webhookNetworkError, err), now);
       }
     }
   }
 
   /**
-   * 失败记账：attempts+1、lastError 截断、指数退避（2^attempts × 30s 封顶 1h）；达阈值 → DEAD。
+   * 失败记账：attempts+1、lastError 仅存闭合 code + SHA256 token（HTTP status 可选）、
+   * 指数退避（2^attempts × 30s 封顶 1h）；达阈值 → DEAD。
    * CAS：where 带读时 attempts 做乐观锁 + 仅 PENDING——与 ACK API/双实例竞态时 count=0 →
    * 本轮静默跳过（不 log.error，不把 ACKED 覆写成 DEAD、不丢 attempts 更新）。
    */
   private async recordWebhookFailure(
     d: { id: bigint; eventId: string; attempts: number },
-    error: string,
+    diagnostic: RelayDiagnostic,
     now: Date,
   ): Promise<void> {
     const attempts = d.attempts + 1;
     const isDead = attempts >= MAX_WEBHOOK_ATTEMPTS;
     const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** attempts, BACKOFF_CAP_MS);
+    const lastError = serializeRelayDiagnostic(diagnostic);
     const r = await this.db.outboxDelivery.updateMany({
       where: { id: d.id, status: 'PENDING', attempts: d.attempts },
       data: {
         attempts,
-        lastError: error.slice(0, MAX_ERROR_LEN),
+        lastError,
         nextAttemptAt: new Date(now.getTime() + backoffMs),
         ...(isDead ? { status: 'DEAD' } : {}),
       },
@@ -403,7 +442,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (r.count === 0) return; // 乐观锁失手：行已被他方推进（ACK/另一实例记账）
     if (isDead) {
       this.logger.error(
-        `webhook delivery for event ${d.eventId} DEAD after ${attempts} attempts (DLQ, 人工介入): ${error.slice(0, 200)}`,
+        `webhook delivery for event ${d.eventId} DEAD after ${attempts} attempts (DLQ, 人工介入): ${lastError}`,
       );
     }
   }
@@ -463,7 +502,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         if (changed) expiredCount += 1;
       } catch (err) {
         // 单条失败不阻断本批其余 claim；未翻状态的下轮扫描仍会重试。
-        this.logger.error(`claim expiry failed for ${c.id} (下轮重试): ${String(err)}`);
+        this.logRelayFailure(
+          `claim expiry failed for ${c.id} (下轮重试)`,
+          RELAY_DIAGNOSTIC_CODE.claimExpiryFailed,
+          err,
+        );
       }
     }
     if (expiredCount) {
