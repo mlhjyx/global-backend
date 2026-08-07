@@ -1,9 +1,11 @@
+import { renameSync } from 'node:fs';
 import {
   chmod,
   mkdir,
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,8 +21,22 @@ import { resolveRuntimeAdmission } from './runtime-admission';
 const BUILD_INPUT = Object.freeze({
   buildSha: 'a'.repeat(40),
   buildTime: '2026-08-07T12:34:56.000Z',
-  migrationRevision: '202608070001_runtime_identity',
 });
+
+const MIGRATION_ENTRIES = Object.freeze([
+  Object.freeze({
+    name: '20260801000000_first',
+    checksum:
+      'b4e0497804e46e0a0b0b8c31975b062152d551bac49c3c2e80932567b4085dcd',
+  }),
+  Object.freeze({
+    name: '20260802000000_second',
+    checksum:
+      'a41109d24069b4822ddc5f367b25d484dc7e839bff338ce7a3e5da641caacda0',
+  }),
+]);
+const MIGRATION_MANIFEST_DIGEST =
+  'sha256:d677da9c98a371cce495417fa42d6b2a33412f7cf2864a7f0818a8ed75bcc84e';
 
 const roots: string[] = [];
 
@@ -48,20 +64,58 @@ async function artifactRoot(
   return root;
 }
 
+async function migrationRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'global-api-migrations-'));
+  roots.push(root);
+  await mkdir(join(root, MIGRATION_ENTRIES[1].name), { recursive: true });
+  await writeFile(
+    join(root, MIGRATION_ENTRIES[1].name, 'migration.sql'),
+    'SELECT 2;\n',
+  );
+  await mkdir(join(root, MIGRATION_ENTRIES[0].name), { recursive: true });
+  await writeFile(
+    join(root, MIGRATION_ENTRIES[0].name, 'migration.sql'),
+    'SELECT 1;\n',
+  );
+  return root;
+}
+
 describe('runtime build receipt', () => {
   it('hashes sorted relative paths and bytes deterministically, excluding the receipt itself', async () => {
     const first = await artifactRoot('forward');
     const second = await artifactRoot('reverse');
     expect(computeArtifactDigest(first)).toBe(computeArtifactDigest(second));
+    expect(computeArtifactDigest(first)).toBe(
+      'sha256:0f893da69d25efb9e0b97fbbf95400be6ec91f364e220079b7d41de889932dee',
+    );
 
-    await generateRuntimeBuildReceipt({ artifactRoot: first, ...BUILD_INPUT });
+    await generateRuntimeBuildReceipt({
+      artifactRoot: first,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
     expect(computeArtifactDigest(first)).toBe(computeArtifactDigest(second));
+  });
+
+  it('sorts the complete relative-path set globally rather than using directory DFS order', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'global-api-global-sort-'));
+    roots.push(root);
+    await mkdir(join(root, 'a'));
+    await writeFile(join(root, 'a', 'z.txt'), 'nested\n');
+    await writeFile(join(root, 'a.txt'), 'root\n');
+    await writeFile(join(root, 'z.txt'), 'last\n');
+
+    expect(computeArtifactDigest(root)).toBe(
+      'sha256:9d33c7eb6e15efa459331347b8ef7de216b779c8500e14886750f84e90be8443',
+    );
   });
 
   it('writes a read-only receipt beside the artifact and loads only a byte-consistent identity', async () => {
     const root = await artifactRoot();
+    const migrations = await migrationRoot();
     const receipt = await generateRuntimeBuildReceipt({
       artifactRoot: root,
+      migrationRoot: migrations,
       ...BUILD_INPUT,
     });
     const receiptPath = join(root, 'runtime-build-receipt.json');
@@ -77,14 +131,40 @@ describe('runtime build receipt', () => {
       status: 'VERIFIED',
       buildSha: BUILD_INPUT.buildSha,
       buildTime: BUILD_INPUT.buildTime,
-      migrationRevision: BUILD_INPUT.migrationRevision,
+      migrationRevision: MIGRATION_ENTRIES.at(-1)?.name,
+      migrationManifestDigest: MIGRATION_MANIFEST_DIGEST,
+      migrationManifest: {
+        schemaVersion: 'global-api-migration-manifest/v1',
+        digest: MIGRATION_MANIFEST_DIGEST,
+        entries: MIGRATION_ENTRIES,
+      },
       artifactDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
     });
   });
 
+  it('derives the ordered migration name and raw-byte checksum manifest from source migrations', async () => {
+    const root = await artifactRoot();
+    const receipt = await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
+
+    expect(receipt.migrationManifest).toEqual({
+      schemaVersion: 'global-api-migration-manifest/v1',
+      digest: MIGRATION_MANIFEST_DIGEST,
+      entries: MIGRATION_ENTRIES,
+    });
+    expect(receipt.migrationRevision).toBeUndefined();
+  });
+
   it('fails closed if any receipt-excluded artifact byte changes', async () => {
     const root = await artifactRoot();
-    await generateRuntimeBuildReceipt({ artifactRoot: root, ...BUILD_INPUT });
+    await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
     await writeFile(join(root, 'main.js'), 'console.log("tampered");\n');
 
     expect(() =>
@@ -96,13 +176,14 @@ describe('runtime build receipt', () => {
     const root = await artifactRoot();
     const receipt = await generateRuntimeBuildReceipt({
       artifactRoot: root,
+      migrationRoot: await migrationRoot(),
       ...BUILD_INPUT,
     });
     const exactEnv = {
       BUILD_SHA: receipt.buildSha,
       BUILD_TIME: receipt.buildTime,
       ARTIFACT_DIGEST: receipt.artifactDigest,
-      MIGRATION_REVISION: receipt.migrationRevision,
+      MIGRATION_MANIFEST_DIGEST: receipt.migrationManifest.digest,
     };
 
     expect(
@@ -130,29 +211,47 @@ describe('runtime build receipt', () => {
 
   it('admits pilot only from a verified receipt and exposes the receipt identity', async () => {
     const root = await artifactRoot();
-    await generateRuntimeBuildReceipt({ artifactRoot: root, ...BUILD_INPUT });
+    await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
     const admission = await resolveRuntimeAdmission(
       {
         DEPLOYMENT_STAGE: 'pilot',
+        NODE_ENV: 'production',
         API_BIND_HOST: '127.0.0.1',
         CORS_ORIGINS: 'https://app.example.test',
+        AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
+        AUTH_ISSUER: 'https://identity.example.test',
+        MODEL_GATEWAY_URL: 'https://models.example.test/v1',
+        MODEL_GATEWAY_KEY: 'test-key',
+        S3_ACCESS_KEY: 'test-access',
+        S3_SECRET_KEY: 'test-secret',
+        DATA_PROCESSOR_JURISDICTION: 'EU',
+        SITE_RENDERER_BUILD_ID: 'site-renderer@1.0.0+sha.abc123',
       },
       { artifactRoot: root },
     );
 
-    expect(admission).toMatchObject({
+    expect(admission.admission).toMatchObject({
       deploymentStage: 'pilot',
       apiBindHost: '127.0.0.1',
       buildIdentity: {
         status: 'VERIFIED',
-        migrationRevision: BUILD_INPUT.migrationRevision,
+        migrationRevision: MIGRATION_ENTRIES.at(-1)?.name,
+        migrationManifestDigest: MIGRATION_MANIFEST_DIGEST,
       },
     });
   });
 
   it('rejects a writable or symlinked receipt', async () => {
     const root = await artifactRoot();
-    await generateRuntimeBuildReceipt({ artifactRoot: root, ...BUILD_INPUT });
+    await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
     const receiptPath = join(root, 'runtime-build-receipt.json');
     await chmod(receiptPath, 0o644);
     expect(() =>
@@ -168,7 +267,11 @@ describe('runtime build receipt', () => {
 
   it('rejects malformed receipt identity field types before identity parsing', async () => {
     const root = await artifactRoot();
-    await generateRuntimeBuildReceipt({ artifactRoot: root, ...BUILD_INPUT });
+    await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
     const receiptPath = join(root, 'runtime-build-receipt.json');
     await chmod(receiptPath, 0o644);
     const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as Record<
@@ -186,6 +289,39 @@ describe('runtime build receipt', () => {
     ).toThrow(/identity fields must be strings/i);
   });
 
+  it('rejects a symlinked artifact root and path replacement races', async () => {
+    const root = await artifactRoot();
+    const linkedRoot = `${root}-link`;
+    roots.push(linkedRoot);
+    await symlink(root, linkedRoot, 'dir');
+    expect(() => computeArtifactDigest(linkedRoot)).toThrow(/root.*symlink/i);
+
+    const receipt = await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
+    const receiptPath = join(root, 'runtime-build-receipt.json');
+    const replacementRoot = await mkdtemp(
+      join(tmpdir(), 'global-api-receipt-replacement-'),
+    );
+    roots.push(replacementRoot);
+    const replacement = join(replacementRoot, 'replacement.json');
+    await writeFile(replacement, `${JSON.stringify(receipt)}\n`);
+    await chmod(replacement, 0o444);
+
+    expect(() =>
+      loadRuntimeBuildIdentity({
+        artifactRoot: root,
+        env: {},
+        required: true,
+        beforeReceiptOpenForTest: () => {
+          renameSync(replacement, receiptPath);
+        },
+      }),
+    ).toThrow(/receipt.*changed|identity.*changed/i);
+  });
+
   it('keeps the generator free of runtime Git derivation', async () => {
     const script = await readFile(
       resolve(process.cwd(), 'scripts/generate-runtime-build-receipt.mts'),
@@ -195,5 +331,7 @@ describe('runtime build receipt', () => {
       /child_process|execSync|spawnSync|git\s+rev-parse/u,
     );
     expect(script).toContain('--source-sha');
+    expect(script).toContain('--migration-root');
+    expect(script).not.toContain('--migration-revision');
   });
 });

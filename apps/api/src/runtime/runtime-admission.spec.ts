@@ -12,7 +12,21 @@ const COMPLETE_IDENTITY = Object.freeze({
   BUILD_SHA: 'a'.repeat(40),
   BUILD_TIME: '2026-08-07T12:34:56.000Z',
   ARTIFACT_DIGEST: `sha256:${'b'.repeat(64)}`,
-  MIGRATION_REVISION: '202608070001_runtime_identity',
+  MIGRATION_MANIFEST_DIGEST: `sha256:${'c'.repeat(64)}`,
+});
+const SAFE_PILOT_ENV = Object.freeze({
+  DEPLOYMENT_STAGE: 'pilot',
+  NODE_ENV: 'production',
+  API_BIND_HOST: '127.0.0.1',
+  CORS_ORIGINS: 'https://app.example.test',
+  AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
+  AUTH_ISSUER: 'https://identity.example.test',
+  MODEL_GATEWAY_URL: 'https://models.example.test/v1',
+  MODEL_GATEWAY_KEY: 'test-key',
+  S3_ACCESS_KEY: 'test-access',
+  S3_SECRET_KEY: 'test-secret',
+  DATA_PROCESSOR_JURISDICTION: 'EU',
+  SITE_RENDERER_BUILD_ID: 'site-renderer@1.0.0+sha.abc123',
 });
 
 const originalBuildSha = process.env.BUILD_SHA;
@@ -23,22 +37,19 @@ afterEach(() => {
 });
 
 describe('runtime deployment-stage admission', () => {
-  it('defaults non-production processes to development', () => {
-    expect(resolveDeploymentStage({})).toBe('development');
-    expect(resolveDeploymentStage({ NODE_ENV: 'test' })).toBe('development');
-  });
-
-  it('derives production from NODE_ENV for compatibility', () => {
-    expect(resolveDeploymentStage({ NODE_ENV: 'production' })).toBe(
-      'production',
+  it('requires an explicit deployment stage in every process', () => {
+    expect(() => resolveDeploymentStage({})).toThrow(
+      /DEPLOYMENT_STAGE.*required/i,
+    );
+    expect(() => resolveDeploymentStage({ NODE_ENV: 'test' })).toThrow(
+      /DEPLOYMENT_STAGE.*required/i,
+    );
+    expect(() => resolveDeploymentStage({ NODE_ENV: 'production' })).toThrow(
+      /DEPLOYMENT_STAGE.*required/i,
     );
   });
 
   it('accepts an explicit pilot or production stage', () => {
-    expect(resolveDeploymentStage({ DEPLOYMENT_STAGE: 'pilot' })).toBe('pilot');
-    expect(resolveDeploymentStage({ DEPLOYMENT_STAGE: 'production' })).toBe(
-      'production',
-    );
     expect(
       resolveDeploymentStage({
         NODE_ENV: 'production',
@@ -46,6 +57,31 @@ describe('runtime deployment-stage admission', () => {
       }),
     ).toBe('pilot');
   });
+
+  it.each(['pilot', 'production'] as const)(
+    'rejects %s when NODE_ENV is absent or not exactly production',
+    (stage) => {
+      expect(() => resolveDeploymentStage({ DEPLOYMENT_STAGE: stage })).toThrow(
+        /NODE_ENV.*production/i,
+      );
+      expect(() =>
+        resolveDeploymentStage({
+          DEPLOYMENT_STAGE: stage,
+          NODE_ENV: 'prodution',
+        }),
+      ).toThrow(/NODE_ENV/i);
+    },
+  );
+
+  it.each(['prodution', 'dev', 'staging', 'Production'])
+    ('rejects misspelled NODE_ENV=%j', (nodeEnv) => {
+      expect(() =>
+        resolveDeploymentStage({
+          DEPLOYMENT_STAGE: 'development',
+          NODE_ENV: nodeEnv,
+        }),
+      ).toThrow(/NODE_ENV/);
+    });
 
   it('refuses an explicit development stage from downgrading NODE_ENV=production', () => {
     expect(() =>
@@ -160,12 +196,12 @@ describe('injected build identity', () => {
       buildSha: null,
       buildTime: null,
       artifactDigest: null,
-      migrationRevision: null,
+      migrationManifestDigest: null,
       missingFields: [
         'BUILD_SHA',
         'BUILD_TIME',
         'ARTIFACT_DIGEST',
-        'MIGRATION_REVISION',
+        'MIGRATION_MANIFEST_DIGEST',
       ],
     });
   });
@@ -176,7 +212,7 @@ describe('injected build identity', () => {
       buildSha: COMPLETE_IDENTITY.BUILD_SHA,
       buildTime: COMPLETE_IDENTITY.BUILD_TIME,
       artifactDigest: COMPLETE_IDENTITY.ARTIFACT_DIGEST,
-      migrationRevision: COMPLETE_IDENTITY.MIGRATION_REVISION,
+      migrationManifestDigest: COMPLETE_IDENTITY.MIGRATION_MANIFEST_DIGEST,
       missingFields: [],
     });
   });
@@ -185,7 +221,7 @@ describe('injected build identity', () => {
     ['BUILD_SHA', 'abc'],
     ['BUILD_TIME', 'yesterday'],
     ['ARTIFACT_DIGEST', 'b'.repeat(64)],
-    ['MIGRATION_REVISION', '../latest'],
+    ['MIGRATION_MANIFEST_DIGEST', '../latest'],
   ] as const)(
     'rejects malformed injected %s in every stage',
     (field, value) => {
@@ -199,7 +235,7 @@ describe('injected build identity', () => {
     'BUILD_SHA',
     'BUILD_TIME',
     'ARTIFACT_DIGEST',
-    'MIGRATION_REVISION',
+    'MIGRATION_MANIFEST_DIGEST',
   ] as const)(
     'rejects blank injected %s rather than treating it as absent',
     (field) => {
@@ -214,9 +250,8 @@ describe('injected build identity', () => {
     (stage) => {
       expect(() =>
         resolveRuntimeAdmission({
+          ...SAFE_PILOT_ENV,
           DEPLOYMENT_STAGE: stage,
-          API_BIND_HOST: '127.0.0.1',
-          CORS_ORIGINS: 'https://app.example.test',
           ...COMPLETE_IDENTITY,
           BUILD_TIME: undefined,
         }),
@@ -227,9 +262,7 @@ describe('injected build identity', () => {
   it('never admits pilot from runtime identity env without a verified receipt', () => {
     expect(() =>
       resolveRuntimeAdmission({
-        DEPLOYMENT_STAGE: 'pilot',
-        API_BIND_HOST: '127.0.0.1',
-        CORS_ORIGINS: 'https://app.example.test',
+        ...SAFE_PILOT_ENV,
         ...COMPLETE_IDENTITY,
       }),
     ).toThrow(/build receipt/i);
@@ -238,9 +271,10 @@ describe('injected build identity', () => {
   it('returns one immutable development runtime snapshot', () => {
     const admission = resolveRuntimeAdmission({
       DEPLOYMENT_STAGE: 'development',
+      NODE_ENV: 'development',
     });
 
-    expect(admission).toMatchObject({
+    expect(admission.admission).toMatchObject({
       deploymentStage: 'development',
       apiBindHost: '127.0.0.1',
       port: 3000,
@@ -248,7 +282,8 @@ describe('injected build identity', () => {
       buildIdentity: { status: 'UNVERIFIED' },
     });
     expect(Object.isFrozen(admission)).toBe(true);
-    expect(Object.isFrozen(admission.corsOrigins)).toBe(true);
-    expect(Object.isFrozen(admission.buildIdentity)).toBe(true);
+    expect(Object.isFrozen(admission.admission)).toBe(true);
+    expect(Object.isFrozen(admission.admission.corsOrigins)).toBe(true);
+    expect(Object.isFrozen(admission.admission.buildIdentity)).toBe(true);
   });
 });

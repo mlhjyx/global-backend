@@ -13,6 +13,17 @@ import {
   UnavailableProofReadinessProbe,
 } from './readiness.probes';
 
+const MIGRATION_ENTRIES = Object.freeze([
+  Object.freeze({
+    name: '20260801000000_first',
+    checksum: '1'.repeat(64),
+  }),
+  Object.freeze({
+    name: '20260802000000_second',
+    checksum: '2'.repeat(64),
+  }),
+]);
+const MIGRATION_MANIFEST_DIGEST = `sha256:${'c'.repeat(64)}`;
 const COMPLETE_SNAPSHOT = Object.freeze({
   deploymentStage: 'pilot' as const,
   apiBindHost: '127.0.0.1' as const,
@@ -23,15 +34,60 @@ const COMPLETE_SNAPSHOT = Object.freeze({
     buildSha: 'a'.repeat(40),
     buildTime: '2026-08-07T12:34:56.000Z',
     artifactDigest: `sha256:${'b'.repeat(64)}`,
-    migrationRevision: '202608070001_runtime_identity',
+    migrationRevision: MIGRATION_ENTRIES.at(-1)!.name,
+    migrationManifestDigest: MIGRATION_MANIFEST_DIGEST,
+    migrationManifest: Object.freeze({
+      schemaVersion: 'global-api-migration-manifest/v1' as const,
+      digest: MIGRATION_MANIFEST_DIGEST,
+      entries: MIGRATION_ENTRIES,
+    }),
     missingFields: [] as const,
   }),
 });
+
+type MigrationRow = Readonly<{
+  migrationName: string;
+  checksum: string;
+  finishedAt: Date | null;
+  rolledBackAt: Date | null;
+  appliedStepsCount: number;
+}>;
 
 function runtime(
   snapshot: RuntimeAdmission = COMPLETE_SNAPSHOT,
 ): RuntimeIdentityService {
   return { getSnapshot: () => snapshot } as RuntimeIdentityService;
+}
+
+function appliedRows(): MigrationRow[] {
+  return MIGRATION_ENTRIES.map((entry) => ({
+    migrationName: entry.name,
+    checksum: entry.checksum,
+    finishedAt: new Date('2026-08-07T12:00:00.000Z'),
+    rolledBackAt: null,
+    appliedStepsCount: 1,
+  }));
+}
+
+function prismaForRows(rows: readonly MigrationRow[]): {
+  prisma: PrismaService;
+  queryRaw: ReturnType<typeof vi.fn>;
+  transaction: ReturnType<typeof vi.fn>;
+} {
+  const queryRaw = vi
+    .fn()
+    .mockResolvedValueOnce([{ statementTimeout: '750ms' }])
+    .mockResolvedValueOnce(rows);
+  const transaction = vi.fn(
+    async (
+      callback: (tx: { $queryRaw: typeof queryRaw }) => Promise<unknown>,
+    ) => callback({ $queryRaw: queryRaw }),
+  );
+  return {
+    prisma: { $transaction: transaction } as unknown as PrismaService,
+    queryRaw,
+    transaction,
+  };
 }
 
 describe('concrete readiness probes', () => {
@@ -50,53 +106,88 @@ describe('concrete readiness probes', () => {
     });
   });
 
-  it('queries the database without returning query or connection details', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        migrationName: COMPLETE_SNAPSHOT.buildIdentity.migrationRevision,
-        finishedAt: new Date('2026-08-07T12:00:00.000Z'),
-      },
-    ]);
-    const probe = new DatabaseReadinessProbe(
-      { $queryRaw: queryRaw } as unknown as PrismaService,
-      runtime(),
-    );
+  it('sets a transaction-local DB timeout and verifies the entire name/checksum manifest', async () => {
+    const { prisma, queryRaw, transaction } = prismaForRows(appliedRows());
+    const probe = new DatabaseReadinessProbe(prisma, runtime());
 
     await expect(probe.check()).resolves.toEqual({
       status: 'PASS',
       code: 'DATABASE_REACHABLE_AND_MIGRATED',
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(String(queryRaw.mock.calls[0]?.[0])).toContain('set_config');
+    expect(String(queryRaw.mock.calls[0]?.[0])).toContain('statement_timeout');
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 250,
+      timeout: 900,
+    });
   });
 
   it.each([
     [
-      'dirty migration',
-      [{ migrationName: '202608070001_runtime_identity', finishedAt: null }],
+      'unfinished migration',
+      () => [{ ...appliedRows()[0]!, finishedAt: null }],
       'DATABASE_MIGRATION_DIRTY',
     ],
     [
-      'revision mismatch',
-      [{ migrationName: '202608060001_previous', finishedAt: new Date() }],
-      'MIGRATION_REVISION_MISMATCH',
+      'missing migration',
+      () => appliedRows().slice(0, 1),
+      'MIGRATION_MANIFEST_MISMATCH',
+    ],
+    [
+      'extra migration',
+      () => [
+        ...appliedRows(),
+        {
+          ...appliedRows()[0]!,
+          migrationName: '20260803000000_extra',
+        },
+      ],
+      'MIGRATION_MANIFEST_MISMATCH',
+    ],
+    [
+      'duplicate migration',
+      () => [...appliedRows(), appliedRows()[0]!],
+      'MIGRATION_MANIFEST_MISMATCH',
+    ],
+    [
+      'checksum drift',
+      () => [{ ...appliedRows()[0]!, checksum: 'f'.repeat(64) }, appliedRows()[1]!],
+      'MIGRATION_CHECKSUM_MISMATCH',
     ],
   ] as const)(
-    'fails closed for %s without returning migration names',
+    'fails closed for %s without returning migration identities',
     async (_name, rows, code) => {
-      const probe = new DatabaseReadinessProbe(
-        {
-          $queryRaw: vi.fn().mockResolvedValue(rows),
-        } as unknown as PrismaService,
+      const { prisma } = prismaForRows(rows());
+      const result = await new DatabaseReadinessProbe(
+        prisma,
         runtime(),
-      );
-      const result = await probe.check();
+      ).check();
       expect(result).toEqual({ status: 'FAIL', code });
       expect(JSON.stringify(result)).not.toContain('202608');
+      expect(JSON.stringify(result)).not.toContain('ffff');
     },
   );
 
+  it('ignores rolled-back history only when the active applied set is exact', async () => {
+    const { prisma } = prismaForRows([
+      {
+        ...appliedRows()[0]!,
+        checksum: 'f'.repeat(64),
+        rolledBackAt: new Date('2026-08-06T00:00:00.000Z'),
+      },
+      ...appliedRows(),
+    ]);
+    await expect(
+      new DatabaseReadinessProbe(prisma, runtime()).check(),
+    ).resolves.toEqual({
+      status: 'PASS',
+      code: 'DATABASE_REACHABLE_AND_MIGRATED',
+    });
+  });
+
   it('still verifies DB connectivity while reporting a missing development migration receipt', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([]);
+    const { prisma, queryRaw } = prismaForRows([]);
     const incompleteRuntime = runtime({
       deploymentStage: 'development',
       apiBindHost: '127.0.0.1',
@@ -108,24 +199,23 @@ describe('concrete readiness probes', () => {
         buildTime: null,
         artifactDigest: null,
         migrationRevision: null,
+        migrationManifestDigest: null,
+        migrationManifest: null,
         missingFields: [
           'BUILD_SHA',
           'BUILD_TIME',
           'ARTIFACT_DIGEST',
-          'MIGRATION_REVISION',
+          'MIGRATION_MANIFEST_DIGEST',
         ],
       },
     });
-    const probe = new DatabaseReadinessProbe(
-      { $queryRaw: queryRaw } as unknown as PrismaService,
-      incompleteRuntime,
-    );
+    const probe = new DatabaseReadinessProbe(prisma, incompleteRuntime);
 
     await expect(probe.check()).resolves.toEqual({
       status: 'UNVERIFIED',
       code: 'DATABASE_REACHABLE_MIGRATION_UNVERIFIED',
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it('uses the bounded Temporal system-info seam', async () => {

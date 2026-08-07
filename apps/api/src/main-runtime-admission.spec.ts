@@ -8,15 +8,20 @@ describe('API bootstrap runtime admission wiring', () => {
     const admissionIndex = source.indexOf(
       'resolveRuntimeAdmission(process.env)',
     );
-    const createIndex = source.indexOf('NestFactory.create(AppModule)');
+    const createIndex = source.indexOf(
+      'NestFactory.create(AppModule.register(runtime))',
+    );
 
     expect(admissionIndex).toBeGreaterThan(-1);
+    expect(source.match(/resolveRuntimeAdmission\(process\.env\)/gu)).toHaveLength(
+      1,
+    );
     expect(createIndex).toBeGreaterThan(admissionIndex);
     expect(source).toMatch(
-      /app\.listen\(runtime\.port,\s*runtime\.apiBindHost\)/u,
+      /app\.listen\(runtime\.admission\.port,\s*runtime\.admission\.apiBindHost\)/u,
     );
     expect(source).not.toMatch(/app\.listen\(port\)/u);
-    expect(source).toContain('runtime.corsOrigins');
+    expect(source).toContain('runtime.admission.corsOrigins');
     expect(source).not.toContain(
       "process.env.NODE_ENV === 'production' ? false : true",
     );
