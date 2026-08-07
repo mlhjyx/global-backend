@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "site-builder-copy-capability-pilot-stopped-evidence/2026-08-07-v4",
+  "artifactDigest": "f91542a28332f6c05d3d774dfbc85b1b7fd512edcbda874b3aef7363db97408e",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "taskId": "site_builder.copy",
+  "campaignId": "copy-capability-v9-user-auth-20260807T121905Z",
+  "executionHead": "1daceec319e1f157d36402f5bc3b399a0a189fd4",
+  "fixedSourceCommit": "5775945c6e056e99ba9357d8d8794b01fad0c66b",
+  "manifestArtifactDigest": "f4eaa8e481cbe7403fce778c65b2c1ec2bbf005f6f913c787917b7045a6cd9ce",
+  "manifestDigest": "dee840e92f1e983e0eae1bb77fdcd64be929794ef7aff8d4d88f7ed856444cf1",
+  "authorizationScope": {
+    "plannedExecutions": 3,
+    "maximumWireCalls": 6,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumQuotaPointsPerWire": 500000,
+    "totalQuotaCapPoints": 3000000,
+    "purposeSpecificTokenOperationsAuthorized": true,
+    "excluded": [
+      "copy_quality_matrix_36_executions_72_wires",
+      "model_promotion",
+      "production_route_adoption"
+    ]
+  },
+  "controlPlanePreparation": {
+    "initialAttempt": "PREFLIGHT_REJECTED_BEFORE_MODEL_CLIENT",
+    "initialAttemptModelWireCalls": 0,
+    "initialAttemptObservedFailure": "COPY_PILOT_LIVE_PREFLIGHT_UNAVAILABLE",
+    "operatorDiagnosis": "new_api_process_cache_not_refreshed_after_direct_local_sqlite_insert",
+    "initialAttemptTokenDisabledAndRejected": true,
+    "recoveryAction": "scoped_local_new_api_restart_then_fresh_purpose_specific_token"
+  },
+  "startedAt": "2026-08-07T12:20:44.142Z",
+  "stoppedAt": "2026-08-07T12:22:52.100Z",
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopReason": "openox_cloudflare_524_with_unknown_request_bound_settlement",
+  "attemptedCandidate": {
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_responses",
+    "reasoning": "medium",
+    "maximumOutputTokens": 1200,
+    "timeoutMs": 240000,
+    "wireClaims": 1,
+    "repairPlans": 0,
+    "requestIdInRunner": null,
+    "requestIdInGatewayLog": "202608071220461508340848268d9d6SDsmnxZO",
+    "gatewayHttpStatus": 524,
+    "gatewayDurationMs": 125927,
+    "settlement": "unknown",
+    "completed": false,
+    "candidateReceiptProduced": false
+  },
+  "unattemptedCandidates": [
+    {
+      "alias": "gpt-5.6-sol",
+      "protocol": "openai_responses",
+      "reason": "authorization_stop_after_unknown_settlement"
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic_messages",
+      "reason": "authorization_stop_after_unknown_settlement"
+    }
+  ],
+  "ledgers": {
+    "terra": {
+      "eventCount": 5,
+      "executionClaims": 1,
+      "wireClaims": 1,
+      "knownWireSettlements": 0,
+      "unknownWireSettlements": 1,
+      "repairPlans": 0,
+      "gitEvidenceAcceptances": 0,
+      "completedExecutions": 0,
+      "frozen": true,
+      "freezeReason": "transport_failed_after_dispatch"
+    },
+    "sol": {
+      "executionClaims": 0,
+      "wireClaims": 0,
+      "completedExecutions": 0,
+      "frozen": false
+    },
+    "sonnet": {
+      "executionClaims": 0,
+      "wireClaims": 0,
+      "completedExecutions": 0,
+      "frozen": false
+    }
+  },
+  "gatewayObservation": {
+    "provenanceClass": "operator_observed_local_docker_json_log",
+    "observationDigest": "9079c62698b364c0a435043cf7d71068e30adc9f56dfec7424306458f7aa4e5b",
+    "observationLedgerPath": "copy-capability-v9-20260807T121905Z/gateway-log-observation.json",
+    "settlementAuthority": false,
+    "liveFiniteExactScopePreflight": "PASS",
+    "tokenScopedModelCatalogPreflight": "PASS",
+    "gatewayEndpoint": "/v1/responses",
+    "gatewayChannelId": 17,
+    "upstreamHost": "openox.tech",
+    "upstreamDiagnostic": "cloudflare_524_timeout",
+    "gatewayPrechargeCurrency": "CNY",
+    "gatewayPrechargeAmount": 0.040092,
+    "quotaPerUnit": 500000,
+    "derivedTransientPrechargeQuotaPoints": 20046,
+    "matchingConsumeLogRows": 0,
+    "quotaPointsBefore": 3000000,
+    "finalQuotaPointsAfterGatewayRefund": 3000000,
+    "finalUsedQuotaPoints": 0,
+    "newApiPrechargeRefundObserved": true,
+    "providerCostSettlement": "unknown",
+    "responseBodiesPersistedInEvidence": false
+  },
+  "tokenLifecycle": {
+    "purpose": "site_builder_copy_capability_pilot",
+    "provisioningMethod": "direct_local_new_api_sqlite_insert",
+    "cacheRefreshMethod": "scoped_global_new_api_container_restart",
+    "finiteExactScope": true,
+    "disabledInDatabase": true,
+    "rejectedByGatewayAfterDisable": true,
+    "rawBearerPersistedInEvidence": false
+  },
+  "qualityConclusion": "inconclusive",
+  "candidateRanking": null,
+  "promotionDecision": "NOT_ELIGIBLE",
+  "routeChange": false,
+  "requiredRecovery": [
+    "preserve this v9 campaign and authorization as frozen and do not retry them",
+    "do not treat a longer runner timeout as recovery because the 240 second runner remained bounded by an upstream Cloudflare timeout near 126 seconds",
+    "repair the OpenOx Responses transport path so it returns or streams before the Cloudflare timeout boundary",
+    "prove request-bound error settlement for non-2xx Responses failures before another real campaign",
+    "create a new fixed-source manifest after the transport and settlement changes",
+    "obtain a new campaign-bound dispatch and token authorization before any further model wire",
+    "keep capability evidence, quality matrix, promotion, and route adoption separate"
+  ]
+}
