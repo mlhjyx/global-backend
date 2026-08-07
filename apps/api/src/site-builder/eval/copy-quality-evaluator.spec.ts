@@ -23,6 +23,7 @@ import {
   aggregateCopyCandidateQuality,
   evaluateCopyQualityReview,
   evaluateCopyRepeatStability,
+  observeCopyQualityAcceptedExecution,
   observeCopyQualityExecution,
   type CopyQualityExecutionReceipt,
 } from "./copy-quality-evaluator";
@@ -241,6 +242,16 @@ async function completeCandidateOutcomes(input?: {
 }
 
 describe("Copy quality scored evaluator", () => {
+  it("exposes the Git-reviewed accepted-output replay observer", () => {
+    expect(observeCopyQualityAcceptedExecution).toBeTypeOf("function");
+  });
+
+  it("rejects a caller-forged accepted-output replay handle", () => {
+    expect(() =>
+      observeCopyQualityAcceptedExecution(Object.freeze({}) as never),
+    ).toThrow("COPY_QUALITY_REVIEW_ACCEPTED_EXECUTION_UNTRUSTED");
+  });
+
   it("exposes exactly the five admitted dimensions", () => {
     expect(COPY_QUALITY_SCORED_DIMENSIONS).toEqual([
       "language_quality",

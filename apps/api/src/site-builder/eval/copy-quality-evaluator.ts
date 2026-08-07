@@ -5,6 +5,7 @@ import {
   type ModelExecutionEvidenceClass,
   type ModelExecutionResult,
 } from "../../model-runtime";
+import { canonicalDigest } from "../../model-runtime/context-engine";
 import type { CopyTaskOutput } from "../agents/copy";
 import { copySlotContentMode } from "../copy-bundle.service";
 import {
@@ -13,6 +14,10 @@ import {
   type PreparedCopyAssemblyEvalFixture,
 } from "./copy-assembly-eval";
 import { COPY_EVALUATION_V2_CANDIDATES } from "./copy-evaluation-v2-candidates";
+import {
+  materializeCopyQualityAcceptedExecution,
+  type CopyQualityAcceptedExecution,
+} from "./copy-quality-accepted-replay";
 import {
   COPY_QUALITY_FINDING_PENALTIES,
   COPY_QUALITY_GATE,
@@ -46,6 +51,8 @@ interface CopyQualityReview {
 }
 
 type CopyQualityProviderFamily = "openai" | "anthropic";
+type CopyQualityExecutionEvidenceClass =
+  ModelExecutionEvidenceClass | "git_reviewed_gateway_settlement_accepted";
 
 export interface CopyQualityExecutionReceipt {
   candidateAlias: string;
@@ -54,7 +61,7 @@ export interface CopyQualityExecutionReceipt {
   repeatIndex: 0 | 1;
   executionId: string;
   outputDigest: string;
-  evidenceClass: ModelExecutionEvidenceClass;
+  evidenceClass: CopyQualityExecutionEvidenceClass;
   ledgerDigest: string;
 }
 
@@ -71,7 +78,7 @@ export interface CopyQualityReviewOutcome {
   executionId: string;
   candidateAlias: string;
   outputDigest: string;
-  evidenceClass: ModelExecutionEvidenceClass;
+  evidenceClass: CopyQualityExecutionEvidenceClass;
   ledgerDigest: string;
   reviewDigest: string;
   dimensions: Record<CopyQualityReviewedDimension, CopyQualityDimensionOutcome>;
@@ -83,7 +90,7 @@ export interface CopyRepeatStabilityOutcome {
   repeatPair: "0/1";
   executionIds: readonly [string, string];
   outputDigests: readonly [string, string];
-  evidenceClass: ModelExecutionEvidenceClass;
+  evidenceClass: CopyQualityExecutionEvidenceClass;
   ledgerDigests: readonly [string, string];
   applicable: boolean;
   score: number | null;
@@ -93,6 +100,25 @@ export interface CopyRepeatStabilityOutcome {
 const TRUSTED_REVIEW_OUTCOMES = new WeakSet<object>();
 const TRUSTED_STABILITY_OUTCOMES = new WeakSet<object>();
 const TRUSTED_EXECUTION_RECEIPTS = new WeakSet<object>();
+const REPLAY_BACKED_EXECUTION_RECEIPTS = new WeakSet<object>();
+const REPLAY_BACKED_REVIEW_OUTCOMES = new WeakSet<object>();
+const REPLAY_BACKED_STABILITY_OUTCOMES = new WeakSet<object>();
+const CANONICAL_DIGEST = canonicalDigest;
+const MATERIALIZE_ACCEPTED_EXECUTION = materializeCopyQualityAcceptedExecution;
+const ADD_REPLAY_BACKED_EXECUTION_RECEIPT =
+  REPLAY_BACKED_EXECUTION_RECEIPTS.add.bind(REPLAY_BACKED_EXECUTION_RECEIPTS);
+const HAS_REPLAY_BACKED_EXECUTION_RECEIPT =
+  REPLAY_BACKED_EXECUTION_RECEIPTS.has.bind(REPLAY_BACKED_EXECUTION_RECEIPTS);
+const ADD_REPLAY_BACKED_REVIEW_OUTCOME = REPLAY_BACKED_REVIEW_OUTCOMES.add.bind(
+  REPLAY_BACKED_REVIEW_OUTCOMES,
+);
+const HAS_REPLAY_BACKED_REVIEW_OUTCOME = REPLAY_BACKED_REVIEW_OUTCOMES.has.bind(
+  REPLAY_BACKED_REVIEW_OUTCOMES,
+);
+const ADD_REPLAY_BACKED_STABILITY_OUTCOME =
+  REPLAY_BACKED_STABILITY_OUTCOMES.add.bind(REPLAY_BACKED_STABILITY_OUTCOMES);
+const HAS_REPLAY_BACKED_STABILITY_OUTCOME =
+  REPLAY_BACKED_STABILITY_OUTCOMES.has.bind(REPLAY_BACKED_STABILITY_OUTCOMES);
 const EXECUTION_RECEIPT_DETAILS = new WeakMap<
   object,
   {
@@ -104,19 +130,6 @@ export const COPY_QUALITY_EXPECTED_REVIEWS_PER_CANDIDATE =
   COPY_ASSEMBLY_EVAL_FIXTURES.length * 2;
 export const COPY_QUALITY_EXPECTED_STABILITY_PAIRS_PER_CANDIDATE =
   COPY_ASSEMBLY_EVAL_FIXTURES.length;
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  }
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
-    .join(",")}}`;
-}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -206,7 +219,38 @@ function deepFreeze<T>(value: T): T {
 }
 
 export function copyQualityOutputDigest(output: CopyTaskOutput): string {
-  return sha256(canonicalJson(output));
+  return CANONICAL_DIGEST(output);
+}
+
+function registerCopyQualityExecution(input: {
+  candidateAlias: string;
+  providerFamily: CopyQualityProviderFamily;
+  prepared: PreparedCopyAssemblyEvalFixture;
+  output: CopyTaskOutput;
+  repeatIndex: 0 | 1;
+  executionId: string;
+  evidenceClass: CopyQualityExecutionEvidenceClass;
+  ledgerDigest: string;
+  replayBacked: boolean;
+}): CopyQualityExecutionReceipt {
+  const output = deepFreeze(structuredClone(input.output));
+  const receipt = Object.freeze({
+    candidateAlias: input.candidateAlias,
+    providerFamily: input.providerFamily,
+    fixtureId: input.prepared.fixture.fixtureId,
+    repeatIndex: input.repeatIndex,
+    executionId: sha256(input.executionId),
+    outputDigest: copyQualityOutputDigest(output),
+    evidenceClass: input.evidenceClass,
+    ledgerDigest: input.ledgerDigest,
+  });
+  TRUSTED_EXECUTION_RECEIPTS.add(receipt);
+  if (input.replayBacked) ADD_REPLAY_BACKED_EXECUTION_RECEIPT(receipt);
+  EXECUTION_RECEIPT_DETAILS.set(receipt, {
+    prepared: input.prepared,
+    output,
+  });
+  return receipt;
 }
 
 export function observeCopyQualityExecution(input: {
@@ -245,22 +289,34 @@ export function observeCopyQualityExecution(input: {
   if (![0, 1].includes(input.repeatIndex)) reviewError("REPEAT_INVALID");
   const output = structuredClone(input.result.output);
   evaluateCopyAssemblyOutput(input.prepared, output);
-  const receipt = Object.freeze({
+  return registerCopyQualityExecution({
     candidateAlias: candidate.alias,
     providerFamily: candidate.providerFamily,
-    fixtureId: input.prepared.fixture.fixtureId,
+    prepared: input.prepared,
+    output,
     repeatIndex: input.repeatIndex,
-    executionId: sha256(metadata.executionId),
-    outputDigest: copyQualityOutputDigest(output),
+    executionId: metadata.executionId,
     evidenceClass: durable.evidenceClass,
     ledgerDigest: durable.ledgerDigest,
+    replayBacked: false,
   });
-  TRUSTED_EXECUTION_RECEIPTS.add(receipt);
-  EXECUTION_RECEIPT_DETAILS.set(receipt, {
-    prepared: input.prepared,
-    output: deepFreeze(output),
+}
+
+export function observeCopyQualityAcceptedExecution(
+  execution: CopyQualityAcceptedExecution,
+): CopyQualityExecutionReceipt {
+  const accepted = MATERIALIZE_ACCEPTED_EXECUTION(execution);
+  return registerCopyQualityExecution({
+    candidateAlias: accepted.candidateAlias,
+    providerFamily: accepted.providerFamily,
+    prepared: accepted.prepared,
+    output: accepted.output,
+    repeatIndex: accepted.repeatIndex,
+    executionId: accepted.executionId,
+    evidenceClass: accepted.evidenceClass,
+    ledgerDigest: accepted.ledgerDigest,
+    replayBacked: true,
   });
-  return receipt;
 }
 
 function applicableSlots(
@@ -446,11 +502,14 @@ export function evaluateCopyQualityReview(
     outputDigest: receipt.outputDigest,
     evidenceClass: receipt.evidenceClass,
     ledgerDigest: receipt.ledgerDigest,
-    reviewDigest: sha256(canonicalJson(review)),
+    reviewDigest: CANONICAL_DIGEST(review),
     dimensions,
   } as const;
   const frozenOutcome = deepFreeze(outcome);
   TRUSTED_REVIEW_OUTCOMES.add(frozenOutcome);
+  if (HAS_REPLAY_BACKED_EXECUTION_RECEIPT(receipt)) {
+    ADD_REPLAY_BACKED_REVIEW_OUTCOME(frozenOutcome);
+  }
   return frozenOutcome;
 }
 
@@ -545,6 +604,12 @@ export function evaluateCopyRepeatStability(
   };
   const frozenOutcome = deepFreeze(outcome);
   TRUSTED_STABILITY_OUTCOMES.add(frozenOutcome);
+  if (
+    HAS_REPLAY_BACKED_EXECUTION_RECEIPT(first) &&
+    HAS_REPLAY_BACKED_EXECUTION_RECEIPT(second)
+  ) {
+    ADD_REPLAY_BACKED_STABILITY_OUTCOME(frozenOutcome);
+  }
   return frozenOutcome;
 }
 
@@ -708,10 +773,14 @@ export function aggregateCopyCandidateQuality(input: {
     }),
   );
   const scoredQualityGatePassed = blockers.size === 0;
-  // Current outcomes are process-local scoring artifacts. Promotion remains
-  // blocked until a restart-safe adapter reopens the accepted ledger, consumes
-  // the Git acceptance once, and verifies persisted output bytes by digest.
-  blockers.add("DURABLE_ACCEPTED_ARTIFACT_REPLAY_REQUIRED");
+  if (
+    input.reviews.some((review) => !HAS_REPLAY_BACKED_REVIEW_OUTCOME(review)) ||
+    input.stability.some(
+      (stability) => !HAS_REPLAY_BACKED_STABILITY_OUTCOME(stability),
+    )
+  ) {
+    blockers.add("DURABLE_ACCEPTED_ARTIFACT_REPLAY_REQUIRED");
+  }
   return deepFreeze({
     scoredQualityGatePassed,
     qualityGatePassed: blockers.size === 0,

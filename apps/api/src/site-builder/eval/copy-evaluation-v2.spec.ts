@@ -7,7 +7,7 @@ import {
 describe("Copy Evaluation v2 admission plan", () => {
   it("versions the Git-reviewed runtime settlement evidence contract", () => {
     expect(COPY_EVALUATION_V2_PLAN.schemaVersion).toBe(
-      "site-builder-copy-evaluation-plan/2026-08-07-v5",
+      "site-builder-copy-evaluation-plan/2026-08-07-v6",
     );
   });
 
@@ -154,10 +154,11 @@ describe("Copy Evaluation v2 admission plan", () => {
       reviewerPolicy:
         "human_blind_or_independent_model_with_provider_separation",
       candidateIdentityVisibleToReviewer: false,
-      executionReceiptPolicy:
-        "blocked_pending_restart_safe_git_reviewed_quality_replay",
+      executionReceiptPolicy: "restart_safe_git_reviewed_quality_output_replay",
       evidenceAcceptance: {
-        status: "NOT_IMPLEMENTED_FOR_QUALITY_MATRIX",
+        replayContractVersion:
+          "site-builder-copy-quality-accepted-output-replay/2026-08-07-v1",
+        status: "IMPLEMENTED_RESTART_SAFE",
         requiredClass: "git_reviewed_gateway_settlement_accepted",
         requiredKind: "quality_matrix",
         gitReviewPolicy: "immutable_artifact_on_merged_commit_required",
@@ -166,6 +167,10 @@ describe("Copy Evaluation v2 admission plan", () => {
           "reopen_accepted_ledger_consume_once_and_verify_persisted_output_bytes",
         identityBindingPolicy:
           "candidate_fixture_repeat_input_prompt_plan_output_and_settlement",
+        outputBytesPolicy:
+          "canonical_utf8_json_exact_digest_and_length_max_65536",
+        ledgerConsumptionPolicy:
+          "one_shot_shared_git_acceptance_identity_namespace",
       },
       repeatBindingPolicy: "candidate_fixture_repeat_execution_output_digest",
       stabilityPolicy: "deterministic_two_repeat_normalized_token_dice",
@@ -178,7 +183,7 @@ describe("Copy Evaluation v2 admission plan", () => {
         promotionDecision: "SEPARATE_PR_REQUIRED",
         routeAdoptionAuthorized: false,
       },
-      status: "BLOCKED_ON_DURABLE_ACCEPTED_ARTIFACT_REPLAY",
+      status: "READY",
     });
     expect(COPY_EVALUATION_V2_PLAN.requiredContext).toEqual([
       "claim_snapshot",
@@ -205,12 +210,13 @@ describe("Copy Evaluation v2 admission plan", () => {
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,
       maximumWireCalls: 72,
-      status: "BLOCKED_ON_DURABLE_ACCEPTED_ARTIFACT_REPLAY",
+      status: "BLOCKED_BEFORE_CAPABILITY_PILOT_RESULT",
     });
     expect(COPY_EVALUATION_V2_PLAN.cachePolicy).toEqual({
       exactResultCache: "disabled_for_evaluation",
       repeatIdentity: "distinct_execution_and_cache_identity_per_repeat",
-      durableReplay: "same_physical_execution_only",
+      durableReplay:
+        "git_reviewed_exact_output_bytes_same_physical_execution_only",
     });
     expect(COPY_EVALUATION_V2_PLAN.decisionBoundaries).toEqual([
       "capability_pilot_dispatch_requires_separate_user_authorization",

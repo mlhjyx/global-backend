@@ -95,13 +95,13 @@ describe("Copy quality matrix create-only manifest preparation", () => {
     });
 
     expect(COPY_QUALITY_MATRIX_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v1.json",
+      "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v2.json",
     );
     expect(artifact).toMatchObject({
       schemaVersion:
-        "site-builder-copy-quality-matrix-manifest-prep/2026-08-06-v1",
+        "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2",
       artifactId:
-        "site-builder-copy-quality-matrix-manifest-prep/2026-08-06-v1",
+        "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2",
       classification: "FIXED_SOURCE_CREATE_ONLY",
       fixedSourceCommit: FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD_COMMIT,
@@ -112,8 +112,8 @@ describe("Copy quality matrix create-only manifest preparation", () => {
       observedModelWireCalls: 0,
       manifest: {
         schemaVersion:
-          "site-builder-copy-quality-matrix-manifest/2026-08-06-v1",
-        manifestId: "site-builder-copy-quality-matrix/2026-08-06-v1",
+          "site-builder-copy-quality-matrix-manifest/2026-08-07-v2",
+        manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2",
         purpose: "site_builder_copy_quality_matrix",
         fixedSourceCommit: FIXED_SOURCE_COMMIT,
         dispatchAuthorization: "NOT_AUTHORIZED",
@@ -121,6 +121,10 @@ describe("Copy quality matrix create-only manifest preparation", () => {
         plannedExecutions: 36,
         maximumWireCalls: 72,
         maximumRepairCallsPerExecution: 1,
+        ledgerTopology: "shared_campaign_ledger",
+        acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+        evidenceKind: "quality_matrix",
+        outputReplayPolicy: "git_reviewed_canonical_output_bytes_consume_once",
       },
       preparationVerification: {
         fixedCommitEqualsPreparationHead: false,
@@ -170,6 +174,7 @@ describe("Copy quality matrix create-only manifest preparation", () => {
     for (const [role, digestKey] of [
       ["quality_matrix_runner", "runner"],
       ["quality_evaluator", "evaluator"],
+      ["quality_replay", "evaluator"],
       ["quality_fixture", "fixtures"],
       ["runtime_execution", "runtime"],
     ] as const) {
@@ -205,6 +210,14 @@ describe("Copy quality matrix create-only manifest preparation", () => {
         {
           role: "quality_evaluator",
           path: "apps/api/src/site-builder/eval/copy-quality-evaluator.ts",
+        },
+        {
+          role: "quality_replay",
+          path: "apps/api/src/site-builder/eval/copy-quality-accepted-replay.ts",
+        },
+        {
+          role: "quality_replay",
+          path: "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts",
         },
         {
           role: "quality_fixture",

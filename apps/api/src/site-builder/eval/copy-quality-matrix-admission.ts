@@ -10,6 +10,12 @@ const MAX_PROOF_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const MAX_SETTLEMENT_POLL_MS = 30_000;
 const MATRIX_PURPOSE = "site_builder_copy_quality_matrix" as const;
 const UNKNOWN_SETTLEMENT_POLICY = "freeze_matrix_and_stop_dispatch" as const;
+const LEDGER_TOPOLOGY = "shared_campaign_ledger" as const;
+const ACCEPTED_EVIDENCE_CLASS =
+  "git_reviewed_gateway_settlement_accepted" as const;
+const EVIDENCE_KIND = "quality_matrix" as const;
+const OUTPUT_REPLAY_POLICY =
+  "git_reviewed_canonical_output_bytes_consume_once" as const;
 const MAXIMUM_EXECUTIONS = 36 as const;
 const MAXIMUM_WIRE_CALLS = 72 as const;
 const MAXIMUM_REPAIRS = 1 as const;
@@ -115,7 +121,7 @@ assertCanonicalMatrixPlan();
 
 export const COPY_QUALITY_MATRIX_ADMISSION_SOURCE = deepFreeze({
   schemaVersion:
-    "site-builder-copy-quality-matrix-admission-source/2026-08-06-v1" as const,
+    "site-builder-copy-quality-matrix-admission-source/2026-08-07-v2" as const,
   taskId: "site_builder.copy" as const,
   purpose: MATRIX_PURPOSE,
   planId: COPY_QUALITY_MATRIX_PLAN.planId,
@@ -127,6 +133,10 @@ export const COPY_QUALITY_MATRIX_ADMISSION_SOURCE = deepFreeze({
   maximumWireCalls: MAXIMUM_WIRE_CALLS,
   maximumRepairCallsPerExecution: MAXIMUM_REPAIRS,
   unknownSettlementPolicy: UNKNOWN_SETTLEMENT_POLICY,
+  ledgerTopology: LEDGER_TOPOLOGY,
+  acceptedEvidenceClass: ACCEPTED_EVIDENCE_CLASS,
+  evidenceKind: EVIDENCE_KIND,
+  outputReplayPolicy: OUTPUT_REPLAY_POLICY,
   requiredFollowup: Object.freeze([
     "SUCCESSFUL_CAPABILITY_PILOT_EVIDENCE",
     "SEPARATE_MATRIX_DISPATCH_AUTHORIZATION",
@@ -136,7 +146,7 @@ export const COPY_QUALITY_MATRIX_ADMISSION_SOURCE = deepFreeze({
 });
 
 export interface CopyQualityMatrixManifest {
-  schemaVersion: "site-builder-copy-quality-matrix-manifest/2026-08-06-v1";
+  schemaVersion: "site-builder-copy-quality-matrix-manifest/2026-08-07-v2";
   manifestId: string;
   fixedSourceCommit: string;
   sourceBundleDigest: string;
@@ -147,6 +157,10 @@ export interface CopyQualityMatrixManifest {
   plannedExecutions: 36;
   maximumWireCalls: 72;
   maximumRepairCallsPerExecution: 1;
+  ledgerTopology: typeof LEDGER_TOPOLOGY;
+  acceptedEvidenceClass: typeof ACCEPTED_EVIDENCE_CLASS;
+  evidenceKind: typeof EVIDENCE_KIND;
+  outputReplayPolicy: typeof OUTPUT_REPLAY_POLICY;
   executions: readonly CopyQualityMatrixExecutionScope[];
 }
 
@@ -237,7 +251,7 @@ export interface CopyQualityMatrixAdmissionInput {
 }
 
 export interface CopyQualityMatrixAdmissionValidation {
-  schemaVersion: "site-builder-copy-quality-matrix-admission-validation/2026-08-06-v1";
+  schemaVersion: "site-builder-copy-quality-matrix-admission-validation/2026-08-07-v2";
   classification: "SOURCE_CONTRACT_VALIDATION_ONLY";
   dispatchCapable: false;
   taskId: "site_builder.copy";
@@ -258,6 +272,10 @@ export interface CopyQualityMatrixAdmissionValidation {
   maximumWireCalls: 72;
   maximumRepairCallsPerExecution: 1;
   unknownSettlementPolicy: "freeze_matrix_and_stop_dispatch";
+  ledgerTopology: typeof LEDGER_TOPOLOGY;
+  acceptedEvidenceClass: typeof ACCEPTED_EVIDENCE_CLASS;
+  evidenceKind: typeof EVIDENCE_KIND;
+  outputReplayPolicy: typeof OUTPUT_REPLAY_POLICY;
 }
 
 function fail(code: string): never {
@@ -348,10 +366,14 @@ function validateManifest(
       "plannedExecutions",
       "maximumWireCalls",
       "maximumRepairCallsPerExecution",
+      "ledgerTopology",
+      "acceptedEvidenceClass",
+      "evidenceKind",
+      "outputReplayPolicy",
       "executions",
     ]) ||
     manifest.schemaVersion !==
-      "site-builder-copy-quality-matrix-manifest/2026-08-06-v1" ||
+      "site-builder-copy-quality-matrix-manifest/2026-08-07-v2" ||
     !IDENTIFIER.test(manifest.manifestId) ||
     !GIT_COMMIT.test(manifest.fixedSourceCommit) ||
     !SHA256.test(manifest.sourceBundleDigest) ||
@@ -362,6 +384,10 @@ function validateManifest(
     manifest.plannedExecutions !== MAXIMUM_EXECUTIONS ||
     manifest.maximumWireCalls !== MAXIMUM_WIRE_CALLS ||
     manifest.maximumRepairCallsPerExecution !== MAXIMUM_REPAIRS ||
+    manifest.ledgerTopology !== LEDGER_TOPOLOGY ||
+    manifest.acceptedEvidenceClass !== ACCEPTED_EVIDENCE_CLASS ||
+    manifest.evidenceKind !== EVIDENCE_KIND ||
+    manifest.outputReplayPolicy !== OUTPUT_REPLAY_POLICY ||
     !sameDigest(manifest.executions, EXECUTIONS)
   ) {
     fail("COPY_QUALITY_MATRIX_MANIFEST_INVALID");
@@ -642,7 +668,7 @@ export function validateCopyQualityMatrixAdmissionEnvelope(
 
   return Object.freeze({
     schemaVersion:
-      "site-builder-copy-quality-matrix-admission-validation/2026-08-06-v1" as const,
+      "site-builder-copy-quality-matrix-admission-validation/2026-08-07-v2" as const,
     classification: "SOURCE_CONTRACT_VALIDATION_ONLY" as const,
     dispatchCapable: false as const,
     taskId: "site_builder.copy" as const,
@@ -663,5 +689,9 @@ export function validateCopyQualityMatrixAdmissionEnvelope(
     maximumWireCalls: MAXIMUM_WIRE_CALLS,
     maximumRepairCallsPerExecution: MAXIMUM_REPAIRS,
     unknownSettlementPolicy: UNKNOWN_SETTLEMENT_POLICY,
+    ledgerTopology: LEDGER_TOPOLOGY,
+    acceptedEvidenceClass: ACCEPTED_EVIDENCE_CLASS,
+    evidenceKind: EVIDENCE_KIND,
+    outputReplayPolicy: OUTPUT_REPLAY_POLICY,
   });
 }

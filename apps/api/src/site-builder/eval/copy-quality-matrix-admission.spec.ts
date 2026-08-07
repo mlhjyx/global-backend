@@ -22,8 +22,8 @@ const PILOT_LEDGER_DIGEST = "f".repeat(64);
 function validInput(): CopyQualityMatrixAdmissionInput {
   const manifest = {
     schemaVersion:
-      "site-builder-copy-quality-matrix-manifest/2026-08-06-v1" as const,
-    manifestId: "site-builder-copy-quality-matrix/2026-08-06-v1-test",
+      "site-builder-copy-quality-matrix-manifest/2026-08-07-v2" as const,
+    manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2-test",
     fixedSourceCommit: SOURCE_COMMIT,
     sourceBundleDigest: SOURCE_BUNDLE_DIGEST,
     planDigest: canonicalDigest(COPY_QUALITY_MATRIX_PLAN),
@@ -33,6 +33,11 @@ function validInput(): CopyQualityMatrixAdmissionInput {
     plannedExecutions: 36 as const,
     maximumWireCalls: 72 as const,
     maximumRepairCallsPerExecution: 1 as const,
+    ledgerTopology: "shared_campaign_ledger" as const,
+    acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted" as const,
+    evidenceKind: "quality_matrix" as const,
+    outputReplayPolicy:
+      "git_reviewed_canonical_output_bytes_consume_once" as const,
     executions: COPY_QUALITY_MATRIX_ADMISSION_SOURCE.executions,
   };
   const credential = {
@@ -133,13 +138,17 @@ describe("Copy quality matrix admission", () => {
   it("publishes one immutable matrix-only 36/72 contract", () => {
     expect(COPY_QUALITY_MATRIX_ADMISSION_SOURCE).toMatchObject({
       schemaVersion:
-        "site-builder-copy-quality-matrix-admission-source/2026-08-06-v1",
+        "site-builder-copy-quality-matrix-admission-source/2026-08-07-v2",
       taskId: "site_builder.copy",
       purpose: "site_builder_copy_quality_matrix",
       dispatchAuthorization: "NOT_AUTHORIZED",
       plannedExecutions: 36,
       maximumWireCalls: 72,
       maximumRepairCallsPerExecution: 1,
+      ledgerTopology: "shared_campaign_ledger",
+      acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+      evidenceKind: "quality_matrix",
+      outputReplayPolicy: "git_reviewed_canonical_output_bytes_consume_once",
       unknownSettlementPolicy: "freeze_matrix_and_stop_dispatch",
     });
     expect(COPY_QUALITY_MATRIX_ADMISSION_SOURCE.executions).toHaveLength(36);
@@ -162,7 +171,7 @@ describe("Copy quality matrix admission", () => {
 
     expect(validation).toMatchObject({
       schemaVersion:
-        "site-builder-copy-quality-matrix-admission-validation/2026-08-06-v1",
+        "site-builder-copy-quality-matrix-admission-validation/2026-08-07-v2",
       classification: "SOURCE_CONTRACT_VALIDATION_ONLY",
       dispatchCapable: false,
       taskId: "site_builder.copy",
@@ -170,6 +179,10 @@ describe("Copy quality matrix admission", () => {
       maximumExecutions: 36,
       maximumWireCalls: 72,
       maximumRepairCallsPerExecution: 1,
+      ledgerTopology: "shared_campaign_ledger",
+      acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+      evidenceKind: "quality_matrix",
+      outputReplayPolicy: "git_reviewed_canonical_output_bytes_consume_once",
       unknownSettlementPolicy: "freeze_matrix_and_stop_dispatch",
       authorizationId: input.authorization.authorizationId,
       reservationId: input.authorization.reservationId,
