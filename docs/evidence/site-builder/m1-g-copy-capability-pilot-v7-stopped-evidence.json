@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "site-builder-copy-capability-pilot-stopped-evidence/2026-08-06-v3",
+  "artifactDigest": "62f414bb4261901d1796aa0e18c591050833f1810f72f801cc5e99e61e8bb189",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "taskId": "site_builder.copy",
+  "campaignId": "copy-capability-v7-user-auth-20260806T152952Z",
+  "executionHead": "152a2fc4cd53a0785f79b5beb3ec1bb9b477fb63",
+  "fixedSourceCommit": "a0dde9014a4ca22a87191e778303354a96bd7296",
+  "manifestArtifactDigest": "2b66605a89b0ac412b1f61c23216b4c7cdfc9815e809386dba3fb4c0027961e9",
+  "manifestDigest": "e196518778a5a934182da971973760611cc1d10d69dafc86ebae0857bd6b1000",
+  "authorizationScope": {
+    "plannedExecutions": 3,
+    "maximumWireCalls": 6,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumQuotaPointsPerWire": 500000,
+    "totalQuotaCapPoints": 3000000,
+    "excluded": [
+      "copy_quality_matrix_36_executions_72_wires",
+      "model_promotion",
+      "production_route_adoption"
+    ]
+  },
+  "startedAt": "2026-08-06T15:34:43.102Z",
+  "stoppedAt": "2026-08-06T15:36:45.118Z",
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopReason": "openox_cloudflare_524_after_runner_timeout",
+  "attemptedCandidate": {
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_responses",
+    "reasoning": "medium",
+    "maximumOutputTokens": 4000,
+    "timeoutMs": 120000,
+    "wireClaims": 1,
+    "requestIdInRunner": null,
+    "requestIdInGatewayLog": "202608061534451369674438268d9d6uznhwQin",
+    "gatewayHttpStatus": 524,
+    "gatewayDurationMs": 127554,
+    "settlement": "unknown",
+    "completed": false
+  },
+  "unattemptedCandidates": [
+    {
+      "alias": "gpt-5.6-sol",
+      "protocol": "openai_responses",
+      "reason": "authorization_stop_after_unknown_settlement"
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic_messages",
+      "reason": "authorization_stop_after_unknown_settlement"
+    }
+  ],
+  "ledgers": {
+    "terra": {
+      "eventCount": 5,
+      "executionClaims": 1,
+      "wireClaims": 1,
+      "knownWireSettlements": 0,
+      "unknownWireSettlements": 1,
+      "repairPlans": 0,
+      "completedExecutions": 0,
+      "frozen": true
+    },
+    "sol": {
+      "executionClaims": 0,
+      "wireClaims": 0,
+      "completedExecutions": 0,
+      "frozen": false
+    },
+    "sonnet": {
+      "executionClaims": 0,
+      "wireClaims": 0,
+      "completedExecutions": 0,
+      "frozen": false
+    }
+  },
+  "gatewayObservation": {
+    "liveFiniteExactScopePreflight": "PASS",
+    "tokenScopedModelCatalogPreflight": "PASS",
+    "gatewayEndpoint": "/v1/responses",
+    "gatewayChannelId": 17,
+    "upstreamHost": "openox.tech",
+    "upstreamDiagnostic": "cloudflare_524_timeout",
+    "matchingConsumeLogRows": 0,
+    "quotaPointsBefore": 3000000,
+    "transientQuotaPointsAfterRunner": 2993754,
+    "transientPrechargePoints": 6246,
+    "finalQuotaPointsAfterGatewayRefund": 3000000,
+    "finalUsedQuotaPoints": 0,
+    "newApiPrechargeRefundObserved": true,
+    "providerCostSettlement": "unknown",
+    "responseBodiesPersistedInEvidence": false
+  },
+  "qualityConclusion": "inconclusive",
+  "candidateRanking": null,
+  "promotionDecision": "NOT_ELIGIBLE",
+  "routeChange": false,
+  "requiredRecovery": [
+    "preserve this v7 campaign as frozen and do not retry it",
+    "reduce the bounded Copy output envelope from 4000 to 1200 tokens",
+    "extend the bounded transport observation window beyond the observed 127.554 second gateway timeout",
+    "create a new fixed-source manifest before any later campaign",
+    "obtain a new campaign-bound dispatch authorization before any further model wire",
+    "keep capability evidence, quality matrix, promotion, and route adoption separate"
+  ]
+}

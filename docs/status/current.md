@@ -6,6 +6,8 @@
 > 2026-07-10 立；**2026-08-02 获客开发冻结解除**。这是当前状态权威；历史见 [../roadmap/changelog.md](../roadmap/changelog.md)。
 > 下方「真实具备/缺口/偏差/待拍板」四节仍是**获客侧 2026-07-13 冻结时点的历史快照**，解除冻结不自动把旧验证升级为当前验收。测试数量随提交变化，不在活状态文档固化；是否通过以最新分支实际命令、服务证据和 CI 结果为准。
 
+- **2026-08-06 Copy capability v7 实际结果与 v8 retry 准备（覆盖下方“v7 尚未执行”旧描述）**：用户授权的固定 v7 只发出 Terra/Responses 首 wire；runner 在 120 秒有界超时后以 unknown settlement 冻结 Terra 子账本，Sol/Sonnet 未调用、无 repair、无候选 receipt。new-api 随后记录 OpenOx channel #17 的 Cloudflare 524（127.554 秒）并退回 6,246 quota points 的临时预扣，token 最终 remain=3,000,000、used=0、consume log=0；这仍不能把 provider settlement 升级为 known。脱敏机器记录见 [`m1-g-copy-capability-pilot-v7-stopped-evidence.json`](../evidence/site-builder/m1-g-copy-capability-pilot-v7-stopped-evidence.json)，仅为 `diagnostic_only`。当前 v8 零调用修复把单 wire 输出上限从 4,000 收紧到 1,200，并把仍然有界的 transport 观察窗从 120 秒延至 240 秒；3 executions / 6 wires / 每次最多一次 repair 与 3,000,000 quota points 边界不变。v7 授权不可复用；v8 必须在源码合并后另建 fixed-source create-only manifest，再取得新的 campaign-bound 授权。
+
 - **2026-08-06 Copy capability 候选隔离执行（当前交付分支，zero-call）**：v6 的单一 3/6 campaign 暴露了首候选 unknown settlement 会阻断后续候选的问题；当前离线改造保留全局 3 executions / 6 wires / 3,000,000 quota points 上界，但把 Terra、Sol、Sonnet 分别绑定为独立的 1 execution / 2 wires / 最多一次 repair 子 campaign，并为每个候选使用独立 campaign、authorization、reservation 与 durable ledger。候选 transport/settlement 失败只冻结自身；fixed source、manifest、compiled runtime、共享 exact-scope credential 或全局授权漂移会冻结全部子 campaign。三个 trusted gateway/runner 必须全部通过 admission 才能形成 batch runner，错误候选在 client 前拒绝。旧 v6 manifest 与 stopped evidence 仅保留历史审计，不能适配新执行语义；本改造合并后必须另开 create-only v7 manifest PR，再另行决定新的真实调用授权。本分支未调用模型、未改 new-api、未产新 evidence、未晋级或切换路由。
 
 ## 🟢 Site Builder M1 已收口；获客侧待选择首个恢复任务

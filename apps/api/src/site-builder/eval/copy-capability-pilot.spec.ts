@@ -8,8 +8,8 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v6",
-      planId: "site-builder-copy-capability-pilot/2026-08-06-v6",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v8",
+      planId: "site-builder-copy-capability-pilot/2026-08-06-v8",
       executionStatus: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
@@ -120,8 +120,8 @@ describe("Copy capability pilot preparation contract", () => {
         fixtureId: "copy-factual-claims",
         maximumWireCalls: 2,
         maximumRepairCalls: 1,
-        maximumOutputTokens: 4000,
-        timeoutMs: 120_000,
+        maximumOutputTokens: 1200,
+        timeoutMs: 240_000,
         requirements: {
           structuredOutput: true,
           reportsUsage: true,
