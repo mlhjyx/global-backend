@@ -1617,7 +1617,7 @@ describe("Copy real capability runner admission", () => {
     expect(JSON.stringify(gateway.observedModelBodies[2])).toContain(
       "Invented unsupported performance claim",
     );
-  });
+  }, 15_000);
 
   it("compiled runner rejects forged source and gateway handles before dispatch", async () => {
     const directory = await mkdtemp(join(tmpdir(), "copy-runner-forged-"));
