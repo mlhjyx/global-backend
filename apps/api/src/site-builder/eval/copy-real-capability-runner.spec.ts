@@ -22,11 +22,11 @@ import {
 } from "./copy-real-capability-admission";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
-  createCopyOperatorEvidenceChallenge,
+  createCopyGitEvidenceAcceptanceChallenge,
   copyPilotLedgerIdentityDigest,
   copyPilotReservationDigest,
   createCopyRealCapabilityRunner as createSourceRunner,
-  getCopyOperatorAuthorizedExecutionAttestation,
+  getCopyGitAcceptedExecutionAttestation,
 } from "./copy-real-capability-runner";
 import { prepareCopyPilotLedgerIdentity } from "./copy-pilot-ledger-identity";
 
@@ -37,9 +37,9 @@ const COMPILED_RUNNER_PATH = join(
   REPOSITORY_ROOT,
   "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
 );
-const COMPILED_OPERATOR_KEY_PATH = join(
+const COMPILED_GIT_ACCEPTANCE_PATH = join(
   REPOSITORY_ROOT,
-  "apps/api/dist/site-builder/eval/copy-operator-evidence-key.js",
+  "apps/api/dist/model-runtime/git-reviewed-evidence-acceptance.js",
 );
 const TEST_GATEWAY_AUTHORIZATION = createHash("sha256")
   .update(import.meta.url)
@@ -444,14 +444,14 @@ function admission(selectedIndex = 0): CopyRealCapabilityAdmissionInput {
 }
 
 describe("Copy real capability runner admission", () => {
-  it("rejects forged candidate and authorized-execution objects", () => {
+  it("rejects forged candidate and Git-accepted execution objects", () => {
     expect(() =>
-      createCopyOperatorEvidenceChallenge(Object.freeze({}) as never),
-    ).toThrow("COPY_OPERATOR_EVIDENCE_CANDIDATE_REQUIRED");
+      createCopyGitEvidenceAcceptanceChallenge(Object.freeze({}) as never),
+    ).toThrow("COPY_GIT_EVIDENCE_CANDIDATE_REQUIRED");
     expect(
-      getCopyOperatorAuthorizedExecutionAttestation(
+      getCopyGitAcceptedExecutionAttestation(
         Object.freeze({
-          classification: "OPAQUE_COPY_OPERATOR_AUTHORIZED_EXECUTION",
+          classification: "OPAQUE_COPY_GIT_ACCEPTED_EXECUTION",
         }),
       ),
     ).toBeUndefined();
@@ -524,181 +524,43 @@ describe("Copy real capability runner admission", () => {
     expect(JSON.parse(stdout) as string[]).toEqual([]);
   });
 
-  it("rejects a preloaded CommonJS mutation of the operator trust key", async () => {
+  it("retires Ed25519 from the compiled runner dependency and guard surface", async () => {
     const script = `
-      const key = require(${JSON.stringify(COMPILED_OPERATOR_KEY_PATH)});
-      key.COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256 = "b".repeat(64);
-      try {
-        require(${JSON.stringify(COMPILED_RUNNER_PATH)});
-        process.stdout.write("LOADED");
-      } catch (error) {
-        process.stdout.write(String(error && error.message));
-      }
-    `;
-    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
-    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_DRIFT");
-  });
-
-  it("rejects a preloaded crypto verifier that accepts tampered signatures", async () => {
-    const authorizationPath = join(
-      REPOSITORY_ROOT,
-      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
-    );
-    const script = `
-      require("node:crypto").verify = () => true;
-      try {
-        require(${JSON.stringify(authorizationPath)});
-        process.stdout.write("LOADED");
-      } catch (error) {
-        process.stdout.write(String(error && error.message));
-      }
-    `;
-    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
-    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_CRYPTO_PRIMITIVE_DRIFT");
-  });
-
-  it("freezes the CommonJS authorization exports before the runner consumes them", async () => {
-    const authorizationPath = join(
-      REPOSITORY_ROOT,
-      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
-    );
-    const script = `
-      const authorization = require(${JSON.stringify(authorizationPath)});
-      const originalGet = authorization.getCopyOperatorEvidenceAuthorizationAttestation;
-      const originalAssert = authorization.assertCopyOperatorEvidenceAuthorizationCurrent;
-      const getReplaced = Reflect.set(
-        authorization,
-        "getCopyOperatorEvidenceAuthorizationAttestation",
-        () => ({ authorizationId: "forged" }),
-      );
-      const assertReplaced = Reflect.set(
-        authorization,
-        "assertCopyOperatorEvidenceAuthorizationCurrent",
-        () => undefined,
-      );
-      require(${JSON.stringify(COMPILED_RUNNER_PATH)});
+      const runner = require(${JSON.stringify(COMPILED_RUNNER_PATH)});
+      const loaded = Object.keys(require.cache);
       process.stdout.write(JSON.stringify({
-        frozen: Object.isFrozen(authorization),
-        getReplaced,
-        assertReplaced,
-        getUnchanged:
-          authorization.getCopyOperatorEvidenceAuthorizationAttestation === originalGet,
-        assertUnchanged:
-          authorization.assertCopyOperatorEvidenceAuthorizationCurrent === originalAssert,
+        guarded: runner.COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
+        loaded,
       }));
     `;
     const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
-    expect(JSON.parse(stdout)).toEqual({
-      frozen: true,
-      getReplaced: false,
-      assertReplaced: false,
-      getUnchanged: true,
-      assertUnchanged: true,
-    });
+    const result = JSON.parse(stdout) as {
+      guarded: string[];
+      loaded: string[];
+    };
+    expect(result.guarded).toContain(
+      "apps/api/dist/model-runtime/git-reviewed-evidence-acceptance.js",
+    );
+    expect(result.guarded.join("\n")).not.toContain("copy-operator-evidence");
+    expect(result.loaded.join("\n")).not.toContain("copy-operator-evidence");
   });
 
-  it("rejects a preloaded Object.freeze implementation that cannot seal exports", async () => {
-    const authorizationPath = join(
-      REPOSITORY_ROOT,
-      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
-    );
-    const script = `
-      Object.freeze = (value) => value;
-      try {
-        require(${JSON.stringify(authorizationPath)});
-        process.stdout.write("LOADED");
-      } catch (error) {
-        process.stdout.write(String(error && error.message));
-      }
-    `;
-    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
-    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_OBJECT_PRIMITIVE_DRIFT");
-  });
+  it("freezes the compiled Git acceptance exports against CommonJS replacement", () => {
+    const acceptance = REQUIRE(COMPILED_GIT_ACCEPTANCE_PATH) as Record<
+      string,
+      unknown
+    >;
+    const getter = acceptance.getGitReviewedEvidenceAcceptanceAttestation;
 
-  it("keeps verified authorization state frozen after ambient Object.freeze drift", async () => {
-    const authorizationPath = join(
-      REPOSITORY_ROOT,
-      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
-    );
-    const script = `
-      const authorization = require(${JSON.stringify(authorizationPath)});
-      const signedAuthorization = {
-        payload: {
-          schemaVersion: "site-builder-copy-operator-evidence-authorization/2026-08-05-v1",
-          purpose: "site_builder_copy_gateway_settlement_evidence",
-          keyId: "copy-evidence-operator-2026-08-v1",
-          algorithm: "Ed25519",
-          authorizationId: "copy-evidence-auth-test-001",
-          issuedAt: "2026-08-05T10:00:00.000Z",
-          expiresAt: "2026-08-05T10:15:00.000Z",
-          candidateReceiptDigest: "a".repeat(64),
-        },
-        signatureBase64Url: "-7Xw6OOH0IYy35npgA8vHKguMy5r41kBTzbwu2WfdDMZlYKQiz8dkLqc7BExkpzmebl6R2EFP1umbTi6VtPNBg",
-      };
-      Object.freeze = (value) => value;
-      const handle = authorization.verifyCopyOperatorEvidenceAuthorization({
-        signedAuthorization,
-        expectedPayload: signedAuthorization.payload,
-      });
-      const attestation = authorization.getCopyOperatorEvidenceAuthorizationAttestation(handle);
-      const retargeted = Reflect.set(attestation, "candidateReceiptDigest", "b".repeat(64));
-      process.stdout.write(JSON.stringify({
-        handleFrozen: Object.isFrozen(handle),
-        attestationFrozen: Object.isFrozen(attestation),
-        retargeted,
-        candidateReceiptDigest: attestation.candidateReceiptDigest,
-      }));
-    `;
-    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
-    expect(JSON.parse(stdout)).toEqual({
-      handleFrozen: true,
-      attestationFrozen: true,
-      retargeted: false,
-      candidateReceiptDigest: "a".repeat(64),
-    });
-  });
-
-  it("does not retarget a signature after ambient Buffer.from drift", async () => {
-    const authorizationPath = join(
-      REPOSITORY_ROOT,
-      "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
-    );
-    const script = `
-      const authorization = require(${JSON.stringify(authorizationPath)});
-      const payloadA = {
-        schemaVersion: "site-builder-copy-operator-evidence-authorization/2026-08-05-v1",
-        purpose: "site_builder_copy_gateway_settlement_evidence",
-        keyId: "copy-evidence-operator-2026-08-v1",
-        algorithm: "Ed25519",
-        authorizationId: "copy-evidence-auth-test-001",
-        issuedAt: "2026-08-05T10:00:00.000Z",
-        expiresAt: "2026-08-05T10:15:00.000Z",
-        candidateReceiptDigest: "a".repeat(64),
-      };
-      const payloadB = { ...payloadA, candidateReceiptDigest: "b".repeat(64) };
-      const signedBytesA = Buffer.from(
-        authorization.canonicalCopyOperatorEvidenceSigningBytes(payloadA),
-      );
-      const originalBufferFrom = Buffer.from;
-      Buffer.from = (value, encoding) =>
-        typeof value === "string" && value.includes('"candidateReceiptDigest":"' + "b".repeat(64) + '"')
-          ? originalBufferFrom(signedBytesA)
-          : originalBufferFrom(value, encoding);
-      try {
-        authorization.verifyCopyOperatorEvidenceAuthorization({
-          signedAuthorization: {
-            payload: payloadB,
-            signatureBase64Url: "-7Xw6OOH0IYy35npgA8vHKguMy5r41kBTzbwu2WfdDMZlYKQiz8dkLqc7BExkpzmebl6R2EFP1umbTi6VtPNBg",
-          },
-          expectedPayload: payloadB,
-        });
-        process.stdout.write("ACCEPTED_RETARGETED_SIGNATURE");
-      } catch (error) {
-        process.stdout.write(String(error && error.message));
-      }
-    `;
-    const { stdout } = await EXEC_FILE(process.execPath, ["-e", script]);
-    expect(stdout).toBe("COPY_OPERATOR_EVIDENCE_SIGNATURE_INVALID");
+    expect(Object.isFrozen(acceptance)).toBe(true);
+    expect(
+      Reflect.set(
+        acceptance,
+        "getGitReviewedEvidenceAcceptanceAttestation",
+        () => ({ artifactId: "forged" }),
+      ),
+    ).toBe(false);
+    expect(acceptance.getGitReviewedEvidenceAcceptanceAttestation).toBe(getter);
   });
 
   it("captures the receipt digest function before CommonJS export drift", async () => {
@@ -765,18 +627,218 @@ describe("Copy real capability runner admission", () => {
       repository.root,
       "apps/api/dist/model-runtime/context-engine.js",
     );
+    const acceptancePath = join(
+      repository.root,
+      "apps/api/dist/model-runtime/git-reviewed-evidence-acceptance.js",
+    );
+    const pilotPath = join(
+      repository.root,
+      "apps/api/dist/site-builder/eval/copy-capability-pilot.js",
+    );
     const evidenceDirectory = join(repository.root, "evidence");
     await mkdir(evidenceDirectory);
+    const acceptanceStatePath = join(
+      evidenceDirectory,
+      "persisted-acceptance-state.json",
+    );
+    const freshAcceptanceScript = `
+      const { readFileSync } = require("node:fs");
+      const pilotModule = require(${JSON.stringify(pilotPath)});
+      const originalPlan = pilotModule.COPY_CAPABILITY_PILOT_PLAN;
+      pilotModule.COPY_CAPABILITY_PILOT_PLAN = Object.freeze({
+        ...originalPlan,
+        planId: "post-dispatch-current-plan-drift",
+      });
+      const runnerModule = require(${JSON.stringify(runnerPath)});
+      const acceptanceModule = require(${JSON.stringify(acceptancePath)});
+      const { canonicalDigest } = require(${JSON.stringify(digestPath)});
+      const rawState = readFileSync(${JSON.stringify(acceptanceStatePath)}, "utf8");
+      const state = JSON.parse(rawState);
+      const persistedArtifact = JSON.parse(readFileSync(state.acceptanceArtifactPath, "utf8"));
+      let fetchCalls = 0;
+      global.fetch = () => {
+        fetchCalls += 1;
+        throw new Error("COPY_EVIDENCE_ONLY_NETWORK_FORBIDDEN");
+      };
+      (async () => {
+        const gitAcceptance = await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+          repositoryRoot: state.repositoryRoot,
+          artifactPath: state.acceptanceArtifactPath,
+        });
+        const forgedGitAcceptance =
+          await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+            repositoryRoot: state.repositoryRoot,
+            artifactPath: state.forgedAcceptanceArtifactPath,
+          });
+        const forgedCompiledAcceptance =
+          await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+            repositoryRoot: state.repositoryRoot,
+            artifactPath: state.forgedCompiledArtifactPath,
+          });
+        const forgedNestedAcceptance =
+          await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+            repositoryRoot: state.repositoryRoot,
+            artifactPath: state.forgedNestedArtifactPath,
+          });
+        const forgedPlanFieldAcceptances = {};
+        for (const [key, artifactPath] of Object.entries(
+          state.forgedPlanFieldArtifactPaths,
+        )) {
+          forgedPlanFieldAcceptances[key] =
+            await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+              repositoryRoot: state.repositoryRoot,
+              artifactPath,
+            });
+        }
+        const sonnetRunner = await runnerModule.reopenCopyGitEvidenceAcceptanceRunner({
+          ...state.paths[2],
+        });
+        const solRunner = await runnerModule.reopenCopyGitEvidenceAcceptanceRunner({
+          ...state.paths[1],
+        });
+        let forgedAcceptanceError;
+        try {
+          await sonnetRunner.acceptGitReviewedEvidence({ acceptance: Object.freeze({}) });
+        } catch (error) {
+          forgedAcceptanceError = String(error && error.message);
+        }
+        let forgedSettlementChainError;
+        try {
+          await sonnetRunner.acceptGitReviewedEvidence({
+            acceptance: forgedGitAcceptance,
+          });
+        } catch (error) {
+          forgedSettlementChainError = String(error && error.message);
+        }
+        let forgedCompiledRuntimeError;
+        try {
+          await sonnetRunner.acceptGitReviewedEvidence({
+            acceptance: forgedCompiledAcceptance,
+          });
+        } catch (error) {
+          forgedCompiledRuntimeError = String(error && error.message);
+        }
+        let forgedNestedSecretError;
+        try {
+          await sonnetRunner.acceptGitReviewedEvidence({
+            acceptance: forgedNestedAcceptance,
+          });
+        } catch (error) {
+          forgedNestedSecretError = String(error && error.message);
+        }
+        const forgedPlanFieldErrors = {};
+        for (const [key, acceptance] of Object.entries(
+          forgedPlanFieldAcceptances,
+        )) {
+          try {
+            await sonnetRunner.acceptGitReviewedEvidence({ acceptance });
+          } catch (error) {
+            forgedPlanFieldErrors[key] = String(error && error.message);
+          }
+        }
+        let crossCandidateAcceptanceError;
+        try {
+          await solRunner.acceptGitReviewedEvidence({ acceptance: gitAcceptance });
+        } catch (error) {
+          crossCandidateAcceptanceError = String(error && error.message);
+        }
+        let legacyAdmissionInputError;
+        try {
+          await runnerModule.reopenCopyGitEvidenceAcceptanceRunner({
+            ...state.paths[2],
+            admission: { forbidden: "evidence-only-reopen-does-not-take-admission" },
+          });
+        } catch (error) {
+          legacyAdmissionInputError = String(error && error.message);
+        }
+        let bearerInputError;
+        try {
+          await runnerModule.reopenCopyGitEvidenceAcceptanceRunner({
+            ...state.paths[2],
+            bearerToken: "forbidden-on-evidence-only-reopen",
+          });
+        } catch (error) {
+          bearerInputError = String(error && error.message);
+        }
+        let acceptanceBearerInputError;
+        try {
+          await sonnetRunner.acceptGitReviewedEvidence({
+            acceptance: gitAcceptance,
+            bearerToken: "forbidden-on-evidence-only-acceptance",
+          });
+        } catch (error) {
+          acceptanceBearerInputError = String(error && error.message);
+        }
+        const accepted = await sonnetRunner.acceptGitReviewedEvidence({
+          acceptance: gitAcceptance,
+        });
+        const acceptedRetry = await sonnetRunner.acceptGitReviewedEvidence({
+          acceptance: gitAcceptance,
+        });
+        const acceptedAttestation =
+          runnerModule.getCopyGitAcceptedExecutionAttestation(accepted);
+        const acceptedRetryAttestation =
+          runnerModule.getCopyGitAcceptedExecutionAttestation(acceptedRetry);
+        const originalWeakMapGet = WeakMap.prototype.get;
+        WeakMap.prototype.get = () => ({ classification: "FORGED" });
+        const ambientAcceptedAttestation =
+          runnerModule.getCopyGitAcceptedExecutionAttestation(accepted);
+        WeakMap.prototype.get = originalWeakMapGet;
+        process.stdout.write(JSON.stringify({
+          acceptedAttestation,
+          acceptedRetryAttestation,
+          ambientAcceptedAttestation,
+          forgedAcceptanceError,
+          forgedSettlementChainError,
+          forgedCompiledRuntimeError,
+          forgedNestedSecretError,
+          forgedPlanFieldErrors,
+          crossCandidateAcceptanceError,
+          legacyAdmissionInputError,
+          bearerInputError,
+          acceptanceBearerInputError,
+          proofExpiredBeforeAcceptance:
+            Date.parse(state.authorizationExpiresAt) <= Date.now(),
+          currentPlanDrifted: pilotModule.COPY_CAPABILITY_PILOT_PLAN.planId !== originalPlan.planId,
+          currentPlanDigestDrifted:
+            canonicalDigest(pilotModule.COPY_CAPABILITY_PILOT_PLAN) !==
+            persistedArtifact.candidateReceipt.ledgerCampaign.planDigest,
+          fetchCalls,
+          runnerKeys: Object.keys(sonnetRunner).sort(),
+          summary: await sonnetRunner.summary(),
+          persistedStateContainsBearer:
+            rawState.includes("forbidden-on-evidence-only-reopen") ||
+            rawState.includes('"bearerToken":') ||
+            rawState.includes('"apiKey":'),
+        }));
+      })().catch((error) => {
+        process.stderr.write(error && error.stack ? error.stack : String(error));
+        process.exitCode = 1;
+      });
+    `;
     const script = `
       const { createHash } = require("node:crypto");
-      const { readFileSync } = require("node:fs");
+      const { execFileSync } = require("node:child_process");
+      const { readFileSync, writeFileSync } = require("node:fs");
       const runnerModule = require(${JSON.stringify(runnerPath)});
       const sourceModule = require(${JSON.stringify(sourcePath)});
       const gatewayModule = require(${JSON.stringify(gatewayPath)});
       const markerModule = require(${JSON.stringify(markerPath)});
+      const acceptanceModule = require(${JSON.stringify(acceptancePath)});
       const { canonicalDigest } = require(${JSON.stringify(digestPath)});
       (async () => {
         const artifact = JSON.parse(readFileSync(${JSON.stringify(repository.manifestPath)}, "utf8"));
+        const RealDate = Date;
+        const dispatchNow = RealDate.now() - 2 * 60 * 60_000;
+        class DispatchDate extends RealDate {
+          constructor(...args) {
+            super(...(args.length === 0 ? [dispatchNow] : args));
+          }
+          static now() {
+            return dispatchNow;
+          }
+        }
+        global.Date = DispatchDate;
         const now = Date.now();
         const issuedAt = new Date(now - 60_000).toISOString();
         const expiresAt = new Date(now + 60 * 60_000).toISOString();
@@ -943,6 +1005,7 @@ describe("Copy real capability runner admission", () => {
         const campaignRunner = runnerModule.createCopyRealCapabilityCampaignRunner({
           runners,
         });
+        const solRunner = runners[1];
         let wrongChildError;
         try {
           await runners[0].execute("copy-capability-2-gpt-5.6-sol");
@@ -958,27 +1021,245 @@ describe("Copy real capability runner admission", () => {
         }
         const sol = await campaignRunner.execute("copy-capability-2-gpt-5.6-sol");
         const sonnet = await campaignRunner.execute("copy-capability-3-claude-sonnet-5");
-        const summariesBeforeSharedDrift = await campaignRunner.summaries();
+        global.Date = RealDate;
+        const sonnetChallenge = runnerModule.createCopyGitEvidenceAcceptanceChallenge(sonnet);
+        const acceptanceArtifact = runnerModule.createCopyGitEvidenceAcceptanceArtifact({
+          artifactId: "copy-capability-sonnet-acceptance-401",
+          challenge: sonnetChallenge,
+        });
+        const acceptanceArtifactPath = ${JSON.stringify(repository.root)} + "/docs/evidence/copy-sonnet-acceptance.json";
+        await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+          artifactPath: acceptanceArtifactPath,
+          artifact: acceptanceArtifact,
+        });
+        const forgedReceipt = structuredClone(sonnetChallenge.receipt);
+        forgedReceipt.settlementChain.wires[0].observation.quota += 1;
+        const forgedChallenge = {
+          schemaVersion: sonnetChallenge.schemaVersion,
+          candidateReceiptDigest: canonicalDigest(forgedReceipt),
+          receipt: forgedReceipt,
+        };
+        let forgedChallengeError;
+        try {
+          runnerModule.createCopyGitEvidenceAcceptanceArtifact({
+            artifactId: "copy-capability-sonnet-forged-challenge",
+            challenge: forgedChallenge,
+          });
+        } catch (error) {
+          forgedChallengeError = String(error && error.message);
+        }
+        const forgedAcceptanceArtifact =
+          acceptanceModule.createGitReviewedEvidenceAcceptanceArtifact({
+            artifactId: "copy-capability-sonnet-forged-acceptance-402",
+            acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+            taskId: "site_builder.copy",
+            evidenceKind: "capability_pilot",
+            candidateReceipt: forgedReceipt,
+            subject: acceptanceArtifact.subject,
+          });
+        const forgedAcceptanceArtifactPath = ${JSON.stringify(repository.root)} + "/docs/evidence/copy-sonnet-forged-acceptance.json";
+        await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+          artifactPath: forgedAcceptanceArtifactPath,
+          artifact: forgedAcceptanceArtifact,
+        });
+        const forgedCompiledReceipt = structuredClone(sonnetChallenge.receipt);
+        forgedCompiledReceipt.compiledRuntimeDigest = "f".repeat(64);
+        const forgedCompiledAcceptanceArtifact =
+          acceptanceModule.createGitReviewedEvidenceAcceptanceArtifact({
+            artifactId: "copy-capability-sonnet-forged-compiled-403",
+            acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+            taskId: "site_builder.copy",
+            evidenceKind: "capability_pilot",
+            candidateReceipt: forgedCompiledReceipt,
+            subject: {
+              ...acceptanceArtifact.subject,
+              compiledRuntimeDigest: forgedCompiledReceipt.compiledRuntimeDigest,
+            },
+          });
+        const forgedCompiledArtifactPath = ${JSON.stringify(repository.root)} + "/docs/evidence/copy-sonnet-forged-compiled.json";
+        await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+          artifactPath: forgedCompiledArtifactPath,
+          artifact: forgedCompiledAcceptanceArtifact,
+        });
+        const forgedNestedReceipt = structuredClone(sonnetChallenge.receipt);
+        forgedNestedReceipt.settlementChain.wires[0].observation.requestId =
+          "raw-request-id-must-not-enter-evidence";
+        const forgedNestedAcceptanceArtifact =
+          acceptanceModule.createGitReviewedEvidenceAcceptanceArtifact({
+            artifactId: "copy-capability-sonnet-forged-nested-404",
+            acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+            taskId: "site_builder.copy",
+            evidenceKind: "capability_pilot",
+            candidateReceipt: forgedNestedReceipt,
+            subject: acceptanceArtifact.subject,
+          });
+        const forgedNestedArtifactPath = ${JSON.stringify(repository.root)} + "/docs/evidence/copy-sonnet-forged-nested.json";
+        await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+          artifactPath: forgedNestedArtifactPath,
+          artifact: forgedNestedAcceptanceArtifact,
+        });
+        const forbiddenChallengeErrors = {};
+        for (const [key, mutate] of Object.entries({
+          bearerToken: (receipt) => { receipt.bearerToken = "forbidden"; },
+          [["api", "Key"].join("")]: (receipt) => {
+            Reflect.set(receipt, ["api", "Key"].join(""), "forbidden");
+          },
+          requestId: (receipt) => { receipt.settlementChain.wires[0].observation.requestId = "forbidden"; },
+          prompt: (receipt) => { receipt.prompt = "forbidden"; },
+          output: (receipt) => { receipt.settlementChain.wires[0].observation.output = "forbidden"; },
+          rawOutput: (receipt) => { receipt.settlementChain.rawOutput = "forbidden"; },
+          unknownNested: (receipt) => { receipt.settlementChain.wires[0].unknownNested = true; },
+        })) {
+          const candidate = structuredClone(sonnetChallenge.receipt);
+          mutate(candidate);
+          try {
+            runnerModule.createCopyGitEvidenceAcceptanceArtifact({
+              artifactId: "copy-capability-forbidden-" + key,
+              challenge: {
+                schemaVersion: sonnetChallenge.schemaVersion,
+                candidateReceiptDigest: canonicalDigest(candidate),
+                receipt: candidate,
+              },
+            });
+          } catch (error) {
+            forbiddenChallengeErrors[key] = String(error && error.message);
+          }
+        }
+        const forgedPlanFieldArtifactPaths = {};
+        const forgedPlanFieldRelativePaths = [];
+        for (const [key, mutate] of Object.entries({
+          inputDigest: (receipt) => { receipt.inputDigest = "a".repeat(64); },
+          contextDigest: (receipt) => { receipt.contextDigest = "b".repeat(64); },
+          promptDigest: (receipt) => { receipt.promptDigest = "c".repeat(64); },
+          fixtureId: (receipt) => { receipt.fixtureId = "copy-forged-fixture"; },
+          childSlotId: (receipt) => { receipt.childSlotId = "copy-forged-child-slot"; },
+          reasoning: (receipt) => { receipt.reasoning = "high"; },
+          unknownNested: (receipt) => {
+            receipt.settlementChain.wires[0].unknownNested = true;
+          },
+        })) {
+          const candidate = structuredClone(sonnetChallenge.receipt);
+          mutate(candidate);
+          const artifactForField =
+            acceptanceModule.createGitReviewedEvidenceAcceptanceArtifact({
+              artifactId: "copy-capability-sonnet-forged-field-" + key,
+              acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+              taskId: "site_builder.copy",
+              evidenceKind: "capability_pilot",
+              candidateReceipt: candidate,
+              subject: {
+                ...acceptanceArtifact.subject,
+                ...(key === "reasoning" ? { reasoning: candidate.reasoning } : {}),
+              },
+            });
+          const relativePath = "docs/evidence/copy-sonnet-forged-field-" + key + ".json";
+          const artifactPath = ${JSON.stringify(repository.root)} + "/" + relativePath;
+          await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+            artifactPath,
+            artifact: artifactForField,
+          });
+          forgedPlanFieldArtifactPaths[key] = artifactPath;
+          forgedPlanFieldRelativePaths.push(relativePath);
+        }
+        const git = (...args) => execFileSync("git", args, {
+          cwd: ${JSON.stringify(repository.root)},
+          encoding: "utf8",
+        }).trim();
+        const mainBranch = git("rev-parse", "--abbrev-ref", "HEAD");
+        git("checkout", "-qb", "acceptance/copy-sonnet");
+        git("add", "docs/evidence/copy-sonnet-acceptance.json");
+        git("commit", "-qm", "test: accept Copy Sonnet evidence");
+        git("checkout", "-q", mainBranch);
+        git(
+          "merge",
+          "--no-ff",
+          "acceptance/copy-sonnet",
+          "-m",
+          "Merge pull request #401 from test/acceptance-copy-sonnet",
+        );
+        git("update-ref", "refs/remotes/origin/main", "HEAD");
+        git("checkout", "-qb", "acceptance/copy-sonnet-forged");
+        git(
+          "add",
+          "docs/evidence/copy-sonnet-forged-acceptance.json",
+          "docs/evidence/copy-sonnet-forged-compiled.json",
+          "docs/evidence/copy-sonnet-forged-nested.json",
+          ...forgedPlanFieldRelativePaths,
+        );
+        git("commit", "-qm", "test: add forged Copy settlement artifact");
+        git("checkout", "-q", mainBranch);
+        git(
+          "merge",
+          "--no-ff",
+          "acceptance/copy-sonnet-forged",
+          "-m",
+          "Merge pull request #402 from test/acceptance-copy-sonnet-forged",
+        );
+        git("update-ref", "refs/remotes/origin/main", "HEAD");
+        let liveReopenExpiredError;
+        try {
+          await runnerModule.createCopyRealCapabilityRunner({
+            ...paths[2],
+            admission: admissions[2],
+            verifiedSource,
+            trustedGateway: trustedGateways[2],
+          });
+        } catch (error) {
+          liveReopenExpiredError = String(error && error.message);
+        }
         await fetch(${JSON.stringify(gateway.origin)} + "/test/fail-shared", {
           headers: { authorization: "Bearer " + ${JSON.stringify(gateway.authorizationValue)} },
         });
+        writeFileSync(
+          ${JSON.stringify(acceptanceStatePath)},
+          JSON.stringify({
+            repositoryRoot: ${JSON.stringify(repository.root)},
+            acceptanceArtifactPath,
+            forgedAcceptanceArtifactPath,
+            forgedCompiledArtifactPath,
+            forgedNestedArtifactPath,
+            forgedPlanFieldArtifactPaths,
+            paths,
+            authorizationExpiresAt: expiresAt,
+          }),
+          { mode: 0o600 },
+        );
+        const freshAcceptance = JSON.parse(execFileSync(
+          process.execPath,
+          ["-e", ${JSON.stringify(freshAcceptanceScript)}],
+          { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
+        ));
+        const summariesBeforeSharedDrift = await campaignRunner.summaries();
+        global.Date = DispatchDate;
         let sharedDriftError;
         try {
           await campaignRunner.execute("copy-capability-3-claude-sonnet-5");
         } catch (error) {
           sharedDriftError = String(error && error.message);
+        } finally {
+          global.Date = RealDate;
         }
+        const acceptanceArtifactText = readFileSync(acceptanceArtifactPath, "utf8");
         process.stdout.write(JSON.stringify({
           unboundChildError,
           ambientWeakMapBypassError,
           duplicateBatchError,
           wrongChildError,
           terraError,
+          liveReopenExpiredError,
+          forgedChallengeError,
+          forbiddenChallengeErrors,
+          ...freshAcceptance,
+          acceptanceArtifactContainsBearer: acceptanceArtifactText.includes(${JSON.stringify(gateway.authorizationValue)}),
+          acceptanceArtifactContainsSecretField:
+            /"(?:bearerToken|apiKey|requestId|prompt|output|rawOutput)"\\s*:/u.test(
+              acceptanceArtifactText,
+            ),
           sharedDriftError,
           sol: runnerModule.getCopyRealCapabilityReceipt(sol),
-          solChallenge: runnerModule.createCopyOperatorEvidenceChallenge(sol),
+          solChallenge: runnerModule.createCopyGitEvidenceAcceptanceChallenge(sol),
           sonnet: runnerModule.getCopyRealCapabilityReceipt(sonnet),
-          sonnetChallenge: runnerModule.createCopyOperatorEvidenceChallenge(sonnet),
+          sonnetChallenge,
           summariesBeforeSharedDrift,
           summariesAfterSharedDrift: await campaignRunner.summaries(),
         }));
@@ -996,7 +1277,66 @@ describe("Copy real capability runner admission", () => {
       duplicateBatchError: string;
       wrongChildError: string;
       terraError: string;
+      forgedAcceptanceError: string;
+      forgedSettlementChainError: string;
+      forgedCompiledRuntimeError: string;
+      forgedNestedSecretError: string;
+      forgedPlanFieldErrors: Record<string, string>;
+      crossCandidateAcceptanceError: string;
+      legacyAdmissionInputError: string;
+      liveReopenExpiredError: string;
+      forgedChallengeError: string;
+      forbiddenChallengeErrors: Record<string, string>;
+      bearerInputError: string;
+      acceptanceBearerInputError: string;
+      proofExpiredBeforeAcceptance: boolean;
+      currentPlanDrifted: boolean;
+      currentPlanDigestDrifted: boolean;
+      fetchCalls: number;
+      runnerKeys: string[];
+      persistedStateContainsBearer: boolean;
+      summary: {
+        completedExecutions: number;
+        knownWireSettlements: number;
+        unknownWireSettlements: number;
+        gitEvidenceAcceptances: number;
+        frozen: boolean;
+      };
+      acceptanceArtifactContainsBearer: boolean;
+      acceptanceArtifactContainsSecretField: boolean;
       sharedDriftError: string;
+      acceptedAttestation: {
+        classification: string;
+        evidenceClass: string;
+        evidenceKind: string;
+        acceptanceId: string;
+        artifactDigest: string;
+        artifactCommit: string;
+        mergeCommit: string;
+        pullRequestNumber: number;
+        candidateReceiptDigest: string;
+        candidateLedgerDigest: string;
+        evidenceLedgerDigest: string;
+        executionId: string;
+        outputDigest: string;
+        alias: string;
+        protocol: string;
+        reasoning: string;
+        fixedSourceCommit: string;
+        sourceBundleDigest: string;
+        manifestDigest: string;
+        compiledRuntimeDigest: string;
+        compiledBindingDigest: string;
+        settlementObserverDigest: string;
+        knownSettlementDigest: string;
+      };
+      acceptedRetryAttestation: {
+        evidenceLedgerDigest: string;
+      };
+      ambientAcceptedAttestation: {
+        classification: string;
+        artifactDigest: string;
+      };
       sol: {
         classification: string;
         evidenceClass: string;
@@ -1020,6 +1360,26 @@ describe("Copy real capability runner admission", () => {
         inputDigest: string;
         contextDigest: string;
         promptDigest: string;
+        knownSettlementDigest: string;
+        settlementChain: {
+          schemaVersion: string;
+          executionClaim: { planDigest: string };
+          wires: Array<{
+            wireIndex: number;
+            claim: { wireId: string; requestDigest: string };
+            observation: {
+              settlement: string;
+              requestIdDigest: string;
+              resolvedAlias: string;
+              protocol: string;
+              outputDigest: string;
+              receiptDigest: string;
+              quota: number;
+            };
+          }>;
+          completion: { outputDigest: string };
+          digest: string;
+        };
         childSlotId: string;
         globalAuthorizationDigest: string;
         childAuthorizationDigest: string;
@@ -1031,12 +1391,14 @@ describe("Copy real capability runner admission", () => {
         completedExecutions: number;
         knownWireSettlements: number;
         unknownWireSettlements: number;
+        gitEvidenceAcceptances: number;
         frozen: boolean;
       }>;
       summariesAfterSharedDrift: Array<{
         completedExecutions: number;
         knownWireSettlements: number;
         unknownWireSettlements: number;
+        gitEvidenceAcceptances: number;
         frozen: boolean;
       }>;
     };
@@ -1053,6 +1415,110 @@ describe("Copy real capability runner admission", () => {
       "COPY_REAL_CAPABILITY_BATCH_RUNNER_REQUIRED",
     );
     expect(result.terraError).toMatch(/settlement is unknown/u);
+    expect(result.forgedAcceptanceError).toBe(
+      "COPY_GIT_EVIDENCE_ACCEPTANCE_REQUIRED",
+    );
+    expect(result.forgedSettlementChainError).toBe(
+      "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    );
+    expect(result.forgedCompiledRuntimeError).toBe(
+      "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    );
+    expect(result.forgedNestedSecretError).toBe(
+      "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    );
+    expect(result.forgedPlanFieldErrors).toEqual({
+      inputDigest: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      contextDigest: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      promptDigest: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      fixtureId: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      childSlotId: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      reasoning: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      unknownNested: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    });
+    expect(result.crossCandidateAcceptanceError).toBe(
+      "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    );
+    expect(result.legacyAdmissionInputError).toBe(
+      "COPY_GIT_EVIDENCE_REOPEN_INPUT_INVALID",
+    );
+    expect(result.liveReopenExpiredError).toBe(
+      "COPY_REAL_CAPABILITY_PROOF_EXPIRED",
+    );
+    expect(result.forgedChallengeError).toBe(
+      "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    );
+    expect(result.forbiddenChallengeErrors).toEqual({
+      bearerToken: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      [["api", "Key"].join("")]: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      requestId: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      prompt: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      output: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      rawOutput: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+      unknownNested: "COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH",
+    });
+    expect(result.bearerInputError).toBe(
+      "COPY_GIT_EVIDENCE_REOPEN_INPUT_INVALID",
+    );
+    expect(result.acceptanceBearerInputError).toBe(
+      "COPY_GIT_EVIDENCE_ACCEPTANCE_INPUT_INVALID",
+    );
+    expect(result.proofExpiredBeforeAcceptance).toBe(true);
+    expect(result.currentPlanDrifted).toBe(true);
+    expect(result.currentPlanDigestDrifted).toBe(true);
+    expect(result.fetchCalls).toBe(0);
+    expect(result.runnerKeys).toEqual(["acceptGitReviewedEvidence", "summary"]);
+    expect(result.persistedStateContainsBearer).toBe(false);
+    expect(result.summary).toMatchObject({
+      completedExecutions: 1,
+      knownWireSettlements: 1,
+      unknownWireSettlements: 0,
+      gitEvidenceAcceptances: 1,
+      frozen: false,
+    });
+    expect(result.acceptanceArtifactContainsBearer).toBe(false);
+    expect(result.acceptanceArtifactContainsSecretField).toBe(false);
+    expect(result.acceptedAttestation).toMatchObject({
+      classification: "GIT_REVIEWED_REAL_EVIDENCE",
+      evidenceClass: "git_reviewed_gateway_settlement_accepted",
+      evidenceKind: "capability_pilot",
+      acceptanceId: "copy-capability-sonnet-acceptance-401",
+      pullRequestNumber: 401,
+      executionId: "copy-capability-3-claude-sonnet-5",
+      alias: "claude-sonnet-5",
+      protocol: "anthropic_messages",
+      reasoning: "medium",
+    });
+    expect([
+      result.acceptedAttestation.artifactDigest,
+      result.acceptedAttestation.candidateReceiptDigest,
+      result.acceptedAttestation.candidateLedgerDigest,
+      result.acceptedAttestation.evidenceLedgerDigest,
+      result.acceptedAttestation.outputDigest,
+      result.acceptedAttestation.sourceBundleDigest,
+      result.acceptedAttestation.manifestDigest,
+      result.acceptedAttestation.compiledRuntimeDigest,
+      result.acceptedAttestation.compiledBindingDigest,
+      result.acceptedAttestation.settlementObserverDigest,
+      result.acceptedAttestation.knownSettlementDigest,
+    ]).toEqual(
+      Array.from({ length: 11 }, () =>
+        expect.stringMatching(/^[0-9a-f]{64}$/u),
+      ),
+    );
+    expect([
+      result.acceptedAttestation.artifactCommit,
+      result.acceptedAttestation.mergeCommit,
+      result.acceptedAttestation.fixedSourceCommit,
+    ]).toEqual(
+      Array.from({ length: 3 }, () => expect.stringMatching(/^[0-9a-f]{40}$/u)),
+    );
+    expect(result.acceptedRetryAttestation.evidenceLedgerDigest).toBe(
+      result.acceptedAttestation.evidenceLedgerDigest,
+    );
+    expect(result.ambientAcceptedAttestation).toEqual(
+      result.acceptedAttestation,
+    );
     expect(result.sharedDriftError).toBe(
       "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH",
     );
@@ -1063,11 +1529,34 @@ describe("Copy real capability runner admission", () => {
       repaired: false,
       fixtureId: "copy-factual-claims",
       repeatIndex: null,
+      taskId: "site_builder.copy",
       childSlotId: "copy-capability-child-3-claude-sonnet-5",
     });
     expect(result.sonnetChallenge.candidateReceiptDigest).toMatch(
       /^[0-9a-f]{64}$/u,
     );
+    expect(result.sonnet.settlementChain).toMatchObject({
+      schemaVersion: "real-model-known-settlement-evidence/2026-08-07-v1",
+      executionClaim: { planDigest: result.sonnet.planDigest },
+      completion: { outputDigest: result.acceptedAttestation.outputDigest },
+      digest: result.sonnet.knownSettlementDigest,
+      wires: [
+        {
+          wireIndex: 1,
+          observation: {
+            settlement: "known",
+            resolvedAlias: "claude-sonnet-5",
+            protocol: "anthropic_messages",
+          },
+        },
+      ],
+    });
+    expect(result.sonnet.settlementChain.wires[0]?.observation).toMatchObject({
+      requestIdDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      outputDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      receiptDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      quota: expect.any(Number),
+    });
     expect([
       result.sonnet.planDigest,
       result.sonnet.inputDigest,
@@ -1075,7 +1564,9 @@ describe("Copy real capability runner admission", () => {
       result.sonnet.promptDigest,
       result.sonnet.globalAuthorizationDigest,
       result.sonnet.childAuthorizationDigest,
+      result.sonnet.knownSettlementDigest,
     ]).toEqual([
+      expect.stringMatching(/^[0-9a-f]{64}$/u),
       expect.stringMatching(/^[0-9a-f]{64}$/u),
       expect.stringMatching(/^[0-9a-f]{64}$/u),
       expect.stringMatching(/^[0-9a-f]{64}$/u),
@@ -1107,12 +1598,14 @@ describe("Copy real capability runner admission", () => {
       completedExecutions: 1,
       knownWireSettlements: 2,
       unknownWireSettlements: 0,
+      gitEvidenceAcceptances: 0,
       frozen: false,
     });
     expect(result.summariesBeforeSharedDrift[2]).toMatchObject({
       completedExecutions: 1,
       knownWireSettlements: 1,
       unknownWireSettlements: 0,
+      gitEvidenceAcceptances: 1,
       frozen: false,
     });
     expect(result.summariesAfterSharedDrift).toHaveLength(3);

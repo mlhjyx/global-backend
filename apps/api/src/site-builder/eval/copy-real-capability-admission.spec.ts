@@ -147,7 +147,7 @@ describe("Copy real capability candidate-isolated admission", () => {
   it("publishes one immutable 1/2 child slot per candidate under the 3/6 envelope", () => {
     expect(COPY_REAL_CAPABILITY_ADMISSION_SOURCE).toMatchObject({
       schemaVersion:
-        "site-builder-copy-real-capability-admission-source/2026-08-06-v4",
+        "site-builder-copy-real-capability-admission-source/2026-08-07-v5",
       taskId: "site_builder.copy",
       dispatchAuthorization: "NOT_AUTHORIZED",
       plannedExecutions: 3,

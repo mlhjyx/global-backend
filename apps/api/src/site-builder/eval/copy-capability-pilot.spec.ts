@@ -8,9 +8,9 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-06-v8",
-      planId: "site-builder-copy-capability-pilot/2026-08-06-v8",
-      executionStatus: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-07-v9",
+      planId: "site-builder-copy-capability-pilot/2026-08-07-v9",
+      executionStatus: "REAL_RUNTIME_READY_POST_MERGE_V9_MANIFEST_REQUIRED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
@@ -56,7 +56,7 @@ describe("Copy capability pilot preparation contract", () => {
         "installed_real_gateway_credential_attestation",
         "durable_real_gateway_authorization_reservation",
         "separate_exact_scope_dispatch_authorization",
-        "operator_authenticated_evidence_authorization",
+        "git_reviewed_runtime_settlement_evidence",
       ],
     });
     expect(COPY_CAPABILITY_PILOT_PLAN.executions).toEqual([

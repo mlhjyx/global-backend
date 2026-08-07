@@ -13,9 +13,21 @@ import {
 } from "../../model-runtime/durable-model-execution-runtime";
 import { getTrustedModelExecutionMetadata } from "../../model-runtime/model-execution-runtime";
 import {
+  assertGitReviewedEvidenceAcceptanceCurrent,
+  createGitReviewedEvidenceAcceptanceArtifact,
+  getGitReviewedEvidenceAcceptanceAttestation,
+  GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION,
+  type GitReviewedEvidenceAcceptanceArtifact,
+  type GitReviewedEvidenceAcceptanceSubject,
+  type VerifiedGitReviewedEvidenceAcceptance,
+} from "../../model-runtime/git-reviewed-evidence-acceptance";
+import {
   RealModelExecutionLedger,
+  type RealModelExecutionAuthorization,
+  type RealKnownSettlementEvidence,
   type RealModelExecutionLedgerSummary,
 } from "../../model-runtime/real-model-execution-ledger";
+import type { ModelExecutionCampaignContract } from "../../model-runtime/model-execution-ledger";
 import { NativeModelOutputError } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type { NativeModelAdapterResult } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type {
@@ -54,18 +66,31 @@ import {
   loadCopyPilotLedgerIdentity,
   markCopyPilotLedgerIdentityClaimed,
 } from "./copy-pilot-ledger-identity";
-import {
-  assertCopyOperatorEvidenceAuthorizationCurrent,
-  getCopyOperatorEvidenceAuthorizationAttestation,
-  type VerifiedCopyOperatorEvidenceAuthorization,
-} from "./copy-operator-evidence-authorization";
-import {
-  COPY_OPERATOR_EVIDENCE_KEY_ID,
-  COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256,
-} from "./copy-operator-evidence-key";
 
 const FREEZE_OBJECT = Object.freeze.bind(Object);
 const OBJECT_IS_FROZEN = Object.isFrozen.bind(Object);
+const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf.bind(Object);
+const REFLECT_OWN_KEYS = Reflect.ownKeys.bind(Reflect);
+const ARRAY_IS_ARRAY = Array.isArray.bind(Array);
+const SAFE_WEAK_SET = WeakSet;
+const WEAK_SET_HAS = Function.prototype.call.bind(WeakSet.prototype.has) as (
+  set: WeakSet<object>,
+  value: object,
+) => boolean;
+const WEAK_SET_ADD = Function.prototype.call.bind(WeakSet.prototype.add) as (
+  set: WeakSet<object>,
+  value: object,
+) => WeakSet<object>;
+const STRING_REPLACE = Function.prototype.call.bind(
+  String.prototype.replace,
+) as (
+  value: string,
+  searchValue: string | RegExp,
+  replaceValue: string,
+) => string;
+const STRING_TO_LOWER_CASE = Function.prototype.call.bind(
+  String.prototype.toLowerCase,
+) as (value: string) => string;
 const CANONICAL_DIGEST = canonicalDigest;
 const freezeProbe = { value: "unchanged" };
 FREEZE_OBJECT(freezeProbe);
@@ -73,18 +98,17 @@ if (
   !OBJECT_IS_FROZEN(freezeProbe) ||
   Reflect.set(freezeProbe, "value", "mutated")
 ) {
-  throw new Error("COPY_OPERATOR_EVIDENCE_OBJECT_PRIMITIVE_DRIFT");
+  throw new Error("COPY_GIT_EVIDENCE_OBJECT_PRIMITIVE_DRIFT");
 }
 
 export const COPY_REAL_CAPABILITY_ARTIFACT_PATHS = FREEZE_OBJECT(
   [
     ...COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS,
     "apps/api/dist/model-gateway/new-api-request-bound-settlement.js",
+    "apps/api/dist/model-runtime/git-reviewed-evidence-acceptance.js",
     "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
     "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
     "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
-    "apps/api/dist/site-builder/eval/copy-operator-evidence-key.js",
-    "apps/api/dist/site-builder/eval/copy-operator-evidence-authorization.js",
     "apps/api/dist/site-builder/eval/copy-real-capability-admission.js",
     "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
   ].filter((path, index, paths) => paths.indexOf(path) === index),
@@ -101,22 +125,12 @@ const GET_DURABLE_ATTESTATION = getDurableModelExecutionAttestation;
 const GET_TRUSTED_METADATA = getTrustedModelExecutionMetadata;
 const FREEZE_REAL_EXECUTION =
   RealModelExecutionLedger.prototype.freezeExecution;
-const TRUSTED_OPERATOR_EVIDENCE_KEY_ID =
-  "copy-evidence-operator-2026-08-v1" as const;
-const TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256 =
-  "90a80a686b217df4a524a709d940ca9cc133348722e8d611aa4cb2549b21dca7" as const;
-if (
-  COPY_OPERATOR_EVIDENCE_KEY_ID !== TRUSTED_OPERATOR_EVIDENCE_KEY_ID ||
-  COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256 !==
-    TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256
-) {
-  throw new Error("COPY_OPERATOR_EVIDENCE_PUBLIC_KEY_DRIFT");
-}
 
 export interface CopyRealCapabilityReceipt {
   classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY";
   evidenceClass: "copy_gateway_settlement_candidate";
   evidenceKind: "capability_pilot";
+  taskId: "site_builder.copy";
   campaignId: string;
   executionId: string;
   alias: string;
@@ -138,46 +152,85 @@ export interface CopyRealCapabilityReceipt {
   admissionDigest: string;
   credentialAttestationDigest: string;
   settlementObserverDigest: string;
+  knownSettlementDigest: string;
+  settlementChain: RealKnownSettlementEvidence;
   authorizationId: string;
   reservationId: string;
   globalAuthorizationDigest: string;
   childAuthorizationDigest: string;
   childSlotId: string;
+  ledgerCampaign: ModelExecutionCampaignContract;
+  ledgerAuthorization: RealModelExecutionAuthorization;
+  runtimeBinding: CopyRealCapabilityRuntimeBinding;
   compiledRuntimeDigest: string;
   compiledBindingDigest: string;
 }
 
-export interface CopyOperatorEvidenceChallenge {
-  schemaVersion: "site-builder-copy-operator-evidence-challenge/2026-08-05-v1";
+export interface CopyRealCapabilityRuntimeBinding {
+  schemaVersion: "copy-real-capability-runtime-binding/2026-08-07-v3";
+  taskId: "site_builder.copy";
+  planDigest: string;
+  fixedSourceCommit: string;
+  sourceBundleDigest: string;
+  manifestDigest: string;
+  credentialAttestationDigest: string;
+  settlementObserverDigest: string;
+  globalAuthorizationDigest: string;
+  childAuthorizationDigest: string;
+  selectedExecutionKey: string;
+  childCampaignId: string;
+  gitReviewedEvidenceAcceptanceSchemaVersion: typeof GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION;
+  artifactPathsDigest: string;
+}
+
+export interface CopyGitEvidenceAcceptanceChallenge {
+  schemaVersion: "site-builder-copy-git-evidence-acceptance-challenge/2026-08-07-v1";
   candidateReceiptDigest: string;
   receipt: CopyRealCapabilityReceipt;
 }
 
-export interface CopyOperatorAuthorizedExecution {
-  readonly classification: "OPAQUE_COPY_OPERATOR_AUTHORIZED_EXECUTION";
+export interface CopyGitAcceptedExecution {
+  readonly classification: "OPAQUE_COPY_GIT_ACCEPTED_EXECUTION";
 }
 
-export interface CopyOperatorAuthorizedExecutionAttestation {
-  classification: "OPERATOR_AUTHENTICATED_REAL_EVIDENCE";
-  evidenceClass: "real_gateway_settled";
+export interface CopyGitAcceptedExecutionAttestation {
+  classification: "GIT_REVIEWED_REAL_EVIDENCE";
+  evidenceClass: "git_reviewed_gateway_settlement_accepted";
   evidenceKind: "capability_pilot";
+  acceptanceId: string;
+  artifactDigest: string;
+  artifactCommit: string;
+  mergeCommit: string;
+  pullRequestNumber: number;
   candidateReceiptDigest: string;
   candidateLedgerDigest: string;
   evidenceLedgerDigest: string;
-  authorizationId: string;
-  operatorPayloadDigest: string;
-  operatorSignatureDigest: string;
-  operatorPublicKeySha256: string;
   executionId: string;
   outputDigest: string;
+  alias: string;
+  protocol: ModelProtocol;
+  reasoning: ReasoningLevel;
+  fixedSourceCommit: string;
+  sourceBundleDigest: string;
+  manifestDigest: string;
+  compiledRuntimeDigest: string;
+  compiledBindingDigest: string;
+  settlementObserverDigest: string;
+  knownSettlementDigest: string;
 }
 
 export interface CopyRealCapabilityRunner {
   execute(executionKey: string): Promise<ModelExecutionResult<CopyTaskOutput>>;
-  authorizeOperatorEvidence(input: {
-    challenge: CopyOperatorEvidenceChallenge;
-    authorization: VerifiedCopyOperatorEvidenceAuthorization;
-  }): Promise<CopyOperatorAuthorizedExecution>;
+  acceptGitReviewedEvidence(input: {
+    acceptance: VerifiedGitReviewedEvidenceAcceptance;
+  }): Promise<CopyGitAcceptedExecution>;
+  summary(): Promise<RealModelExecutionLedgerSummary>;
+}
+
+export interface CopyGitEvidenceAcceptanceRunner {
+  acceptGitReviewedEvidence(input: {
+    acceptance: VerifiedGitReviewedEvidenceAcceptance;
+  }): Promise<CopyGitAcceptedExecution>;
   summary(): Promise<RealModelExecutionLedgerSummary>;
 }
 
@@ -190,27 +243,45 @@ const REAL_CAPABILITY_RECEIPTS = new WeakMap<
   object,
   CopyRealCapabilityReceipt
 >();
-interface CopyRealCapabilityRuntimeDetail {
-  receipt?: CopyRealCapabilityReceipt;
+const GET_REAL_CAPABILITY_RECEIPT = REAL_CAPABILITY_RECEIPTS.get.bind(
+  REAL_CAPABILITY_RECEIPTS,
+);
+const SET_REAL_CAPABILITY_RECEIPT = REAL_CAPABILITY_RECEIPTS.set.bind(
+  REAL_CAPABILITY_RECEIPTS,
+);
+interface CopyGitEvidenceAcceptanceDetail {
   ledger: RealModelExecutionLedger;
   ledgerIdentity: Awaited<ReturnType<typeof loadCopyPilotLedgerIdentity>>;
+  campaignId: string;
+}
+
+interface CopyRealCapabilityRuntimeDetail extends CopyGitEvidenceAcceptanceDetail {
+  admission: CopyRealCapabilityAdmissionInput;
+  receipt?: CopyRealCapabilityReceipt;
   compiledGuard: Awaited<ReturnType<typeof createCompiledRuntimeGuard>>;
   verifiedSource: CopyPilotVerifiedSource;
   trustedGateway: CopyPilotTrustedGateway;
-  admission: CopyRealCapabilityAdmissionInput;
   source: ReturnType<typeof requireCopyPilotVerifiedSourceBinding>;
-  campaignId: string;
 }
 
 const REAL_CAPABILITY_DETAILS = new WeakMap<
   object,
   CopyRealCapabilityRuntimeDetail & { receipt: CopyRealCapabilityReceipt }
 >();
+const GET_REAL_CAPABILITY_DETAIL = REAL_CAPABILITY_DETAILS.get.bind(
+  REAL_CAPABILITY_DETAILS,
+);
+const SET_REAL_CAPABILITY_DETAIL = REAL_CAPABILITY_DETAILS.set.bind(
+  REAL_CAPABILITY_DETAILS,
+);
 const REAL_CAPABILITY_RUNNERS = new WeakMap<
   object,
   CopyRealCapabilityRuntimeDetail
 >();
 const GET_REAL_CAPABILITY_RUNNER = REAL_CAPABILITY_RUNNERS.get.bind(
+  REAL_CAPABILITY_RUNNERS,
+);
+const SET_REAL_CAPABILITY_RUNNER = REAL_CAPABILITY_RUNNERS.set.bind(
   REAL_CAPABILITY_RUNNERS,
 );
 const BATCH_DISPATCH_AUTHORIZATIONS = new WeakMap<object, string>();
@@ -223,6 +294,122 @@ const SET_BATCH_DISPATCH_AUTHORIZATION = BATCH_DISPATCH_AUTHORIZATIONS.set.bind(
 const DELETE_BATCH_DISPATCH_AUTHORIZATION =
   BATCH_DISPATCH_AUTHORIZATIONS.delete.bind(BATCH_DISPATCH_AUTHORIZATIONS);
 const PROMISE_ALL_SETTLED = Promise.allSettled.bind(Promise);
+const EVIDENCE_REOPEN_INPUT_KEYS = FREEZE_OBJECT([
+  "ledgerPath",
+  "authorizationClaimPath",
+  "ledgerMarkerPath",
+  "campaignId",
+] as const);
+const EVIDENCE_ACCEPT_INPUT_KEYS = FREEZE_OBJECT(["acceptance"] as const);
+const COPY_RECEIPT_KEYS = FREEZE_OBJECT([
+  "classification",
+  "evidenceClass",
+  "evidenceKind",
+  "taskId",
+  "campaignId",
+  "executionId",
+  "alias",
+  "protocol",
+  "reasoning",
+  "wireCount",
+  "repaired",
+  "fixtureId",
+  "repeatIndex",
+  "planDigest",
+  "inputDigest",
+  "contextDigest",
+  "promptDigest",
+  "ledgerDigest",
+  "outputDigest",
+  "fixedSourceCommit",
+  "sourceBundleDigest",
+  "manifestDigest",
+  "admissionDigest",
+  "credentialAttestationDigest",
+  "settlementObserverDigest",
+  "knownSettlementDigest",
+  "settlementChain",
+  "authorizationId",
+  "reservationId",
+  "globalAuthorizationDigest",
+  "childAuthorizationDigest",
+  "childSlotId",
+  "ledgerCampaign",
+  "ledgerAuthorization",
+  "runtimeBinding",
+  "compiledRuntimeDigest",
+  "compiledBindingDigest",
+] as const);
+const RUNTIME_BINDING_KEYS = FREEZE_OBJECT([
+  "schemaVersion",
+  "taskId",
+  "planDigest",
+  "fixedSourceCommit",
+  "sourceBundleDigest",
+  "manifestDigest",
+  "credentialAttestationDigest",
+  "settlementObserverDigest",
+  "globalAuthorizationDigest",
+  "childAuthorizationDigest",
+  "selectedExecutionKey",
+  "childCampaignId",
+  "gitReviewedEvidenceAcceptanceSchemaVersion",
+  "artifactPathsDigest",
+] as const);
+const LEDGER_CAMPAIGN_KEYS = FREEZE_OBJECT([
+  "campaignId",
+  "taskId",
+  "planDigest",
+  "maximumExecutions",
+  "maximumWireCalls",
+] as const);
+const LEDGER_AUTHORIZATION_KEYS = FREEZE_OBJECT([
+  "authorizationId",
+  "reservationId",
+  "manifestDigest",
+  "credentialAttestationDigest",
+  "settlementObserverDigest",
+  "ledgerIdentityDigest",
+  "reservationDigest",
+  "maximumExecutions",
+  "maximumWireCalls",
+  "maximumRepairCallsPerExecution",
+  "evidenceBinding",
+] as const);
+const EVIDENCE_BINDING_KEYS = FREEZE_OBJECT([
+  "schemaVersion",
+  "executionId",
+  "childSlotId",
+  "alias",
+  "protocol",
+  "reasoning",
+  "fixtureId",
+  "executionPlanDigest",
+  "inputDigest",
+  "contextDigest",
+  "promptDigest",
+  "fixedSourceCommit",
+  "sourceBundleDigest",
+  "manifestDigest",
+  "admissionDigest",
+  "globalAuthorizationDigest",
+  "childAuthorizationDigest",
+  "compiledRuntimeDigest",
+  "compiledBindingDigest",
+] as const);
+const FORBIDDEN_EVIDENCE_KEYS = FREEZE_OBJECT([
+  "apikey",
+  "bearertoken",
+  "output",
+  "password",
+  "prompt",
+  "rawoutput",
+  "rawprompt",
+  "rawrequestid",
+  "requestid",
+  "secret",
+  "token",
+] as const);
 const batchDispatchProbe = FREEZE_OBJECT({});
 SET_BATCH_DISPATCH_AUTHORIZATION(batchDispatchProbe, "probe");
 if (
@@ -232,13 +419,198 @@ if (
 ) {
   throw new Error("COPY_REAL_CAPABILITY_WEAK_MAP_PRIMITIVE_DRIFT");
 }
-const OPERATOR_AUTHORIZED_EXECUTIONS = new WeakMap<
+const GIT_ACCEPTED_EXECUTIONS = new WeakMap<
   object,
-  CopyOperatorAuthorizedExecutionAttestation
+  CopyGitAcceptedExecutionAttestation
 >();
+const GET_GIT_ACCEPTED_EXECUTION = GIT_ACCEPTED_EXECUTIONS.get.bind(
+  GIT_ACCEPTED_EXECUTIONS,
+);
+const SET_GIT_ACCEPTED_EXECUTION = GIT_ACCEPTED_EXECUTIONS.set.bind(
+  GIT_ACCEPTED_EXECUTIONS,
+);
+const EVIDENCE_REOPEN_LEDGERS = new WeakMap<object, RealModelExecutionLedger>();
+const GET_EVIDENCE_REOPEN_LEDGER = EVIDENCE_REOPEN_LEDGERS.get.bind(
+  EVIDENCE_REOPEN_LEDGERS,
+);
+const SET_EVIDENCE_REOPEN_LEDGER = EVIDENCE_REOPEN_LEDGERS.set.bind(
+  EVIDENCE_REOPEN_LEDGERS,
+);
 
 function fail(code: string): never {
   throw new Error(code);
+}
+
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  if (value == null || typeof value !== "object" || ARRAY_IS_ARRAY(value)) {
+    return false;
+  }
+  const prototype = OBJECT_GET_PROTOTYPE_OF(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function exactObjectKeys(
+  value: unknown,
+  expected: readonly string[],
+): value is Record<string, unknown> {
+  if (!objectRecord(value)) return false;
+  const keys = REFLECT_OWN_KEYS(value);
+  if (keys.length !== expected.length) return false;
+  for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
+    const key = keys[keyIndex];
+    if (typeof key !== "string") return false;
+    let found = false;
+    for (
+      let candidateIndex = 0;
+      candidateIndex < expected.length;
+      candidateIndex += 1
+    ) {
+      const candidate = expected[candidateIndex];
+      if (key === candidate) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+function containsForbiddenEvidenceKey(value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false;
+  const pending: object[] = [value];
+  const seen = new SAFE_WEAK_SET<object>();
+  for (let index = 0; index < pending.length; index += 1) {
+    const current = pending[index]!;
+    if (WEAK_SET_HAS(seen, current)) return true;
+    WEAK_SET_ADD(seen, current);
+    if (ARRAY_IS_ARRAY(current)) {
+      for (let itemIndex = 0; itemIndex < current.length; itemIndex += 1) {
+        const nested = current[itemIndex];
+        if (nested != null && typeof nested === "object") {
+          pending[pending.length] = nested;
+        }
+      }
+      continue;
+    }
+    const keys = REFLECT_OWN_KEYS(current);
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
+      const key = keys[keyIndex];
+      if (typeof key !== "string") return true;
+      const normalized = STRING_TO_LOWER_CASE(
+        STRING_REPLACE(key, /[^a-z0-9]/giu, ""),
+      );
+      for (
+        let forbiddenIndex = 0;
+        forbiddenIndex < FORBIDDEN_EVIDENCE_KEYS.length;
+        forbiddenIndex += 1
+      ) {
+        const forbidden = FORBIDDEN_EVIDENCE_KEYS[forbiddenIndex];
+        if (normalized === forbidden) return true;
+      }
+      const nested = (current as Record<string, unknown>)[key];
+      if (nested != null && typeof nested === "object") {
+        pending[pending.length] = nested;
+      }
+    }
+  }
+  return false;
+}
+
+function exactSettlementChain(
+  value: unknown,
+): value is RealKnownSettlementEvidence {
+  if (
+    !exactObjectKeys(value, [
+      "schemaVersion",
+      "executionId",
+      "executionClaim",
+      "wires",
+      "completion",
+      "digest",
+    ]) ||
+    !exactObjectKeys(value.executionClaim, ["planDigest"]) ||
+    !ARRAY_IS_ARRAY(value.wires) ||
+    !exactObjectKeys(value.completion, ["outputDigest"])
+  ) {
+    return false;
+  }
+  for (let index = 0; index < value.wires.length; index += 1) {
+    const wire = value.wires[index];
+    if (
+      !exactObjectKeys(
+        wire,
+        index === 0
+          ? ["wireIndex", "claim", "observation"]
+          : ["wireIndex", "claim", "repairPlan", "observation"],
+      ) ||
+      !exactObjectKeys(wire.claim, ["wireId", "requestDigest"]) ||
+      (index > 0 &&
+        !exactObjectKeys(wire.repairPlan, [
+          "wireId",
+          "bindingDigest",
+          "priorOutputDigest",
+          "findingsDigest",
+        ])) ||
+      !exactObjectKeys(wire.observation, [
+        "settlement",
+        "requestIdDigest",
+        "requestedAlias",
+        "resolvedAlias",
+        "reportedModel",
+        "protocol",
+        "usage",
+        "outputDigest",
+        "receiptDigest",
+        "quota",
+        "resolverId",
+        "channelId",
+      ]) ||
+      !exactObjectKeys(wire.observation.usage, ["inputTokens", "outputTokens"])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function exactCopyReceipt(value: unknown): value is CopyRealCapabilityReceipt {
+  if (
+    containsForbiddenEvidenceKey(value) ||
+    !exactObjectKeys(value, COPY_RECEIPT_KEYS) ||
+    !exactObjectKeys(value.runtimeBinding, RUNTIME_BINDING_KEYS) ||
+    !exactObjectKeys(value.ledgerCampaign, LEDGER_CAMPAIGN_KEYS) ||
+    !exactObjectKeys(value.ledgerAuthorization, LEDGER_AUTHORIZATION_KEYS) ||
+    !exactObjectKeys(
+      value.ledgerAuthorization.evidenceBinding,
+      EVIDENCE_BINDING_KEYS,
+    ) ||
+    !exactSettlementChain(value.settlementChain)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function settlementWiresMatchReceipt(
+  receipt: CopyRealCapabilityReceipt,
+): boolean {
+  for (
+    let index = 0;
+    index < receipt.settlementChain.wires.length;
+    index += 1
+  ) {
+    const observation = receipt.settlementChain.wires[index]?.observation;
+    if (
+      observation?.settlement !== "known" ||
+      observation.resolvedAlias !== receipt.alias ||
+      observation.reportedModel !== receipt.alias ||
+      observation.protocol !== receipt.protocol
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function assertCompiledEntrypoint(): void {
@@ -277,7 +649,12 @@ export function copyPilotReservationDigest(
   return copyPilotChildReservationDigest(authorization);
 }
 
-function childLedgerAuthorization(child: CopyPilotChildDispatchAuthorization) {
+function childLedgerAuthorization(
+  child: CopyPilotChildDispatchAuthorization,
+  evidenceBinding?: NonNullable<
+    RealModelExecutionAuthorization["evidenceBinding"]
+  >,
+): RealModelExecutionAuthorization {
   return FREEZE_OBJECT({
     authorizationId: child.authorizationId,
     reservationId: child.reservationId,
@@ -289,17 +666,31 @@ function childLedgerAuthorization(child: CopyPilotChildDispatchAuthorization) {
     maximumExecutions: child.maximumExecutions,
     maximumWireCalls: child.maximumWireCalls,
     maximumRepairCallsPerExecution: child.maximumRepairCallsPerExecution,
+    ...(evidenceBinding == null ? {} : { evidenceBinding }),
+  });
+}
+
+function childLedgerCampaign(input: {
+  campaignId: string;
+  manifest: CopyRealCapabilityAdmissionInput["manifest"];
+}): ModelExecutionCampaignContract {
+  return FREEZE_OBJECT({
+    campaignId: input.campaignId,
+    taskId: input.manifest.taskId,
+    planDigest: input.manifest.planDigest,
+    maximumExecutions: 1,
+    maximumWireCalls: 2,
   });
 }
 
 function runtimeBinding(input: {
   admission: CopyRealCapabilityAdmissionInput;
-  source: ReturnType<typeof requireCopyPilotVerifiedSourceBinding>;
-}): Readonly<Record<string, unknown>> {
+  source: { fixedSourceCommit: string; sourceBundleDigest: string };
+}): CopyRealCapabilityRuntimeBinding {
   return FREEZE_OBJECT({
-    schemaVersion: "copy-real-capability-runtime-binding/2026-08-06-v2",
-    taskId: COPY_CAPABILITY_PILOT_PLAN.taskId,
-    planDigest: CANONICAL_DIGEST(COPY_CAPABILITY_PILOT_PLAN),
+    schemaVersion: "copy-real-capability-runtime-binding/2026-08-07-v3",
+    taskId: input.admission.manifest.taskId,
+    planDigest: input.admission.manifest.planDigest,
     fixedSourceCommit: input.source.fixedSourceCommit,
     sourceBundleDigest: input.source.sourceBundleDigest,
     manifestDigest: CANONICAL_DIGEST(input.admission.manifest),
@@ -311,8 +702,8 @@ function runtimeBinding(input: {
     ),
     selectedExecutionKey: input.admission.selectedExecutionKey,
     childCampaignId: input.admission.childAuthorization.campaignId,
-    operatorEvidencePublicKeySha256:
-      TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256,
+    gitReviewedEvidenceAcceptanceSchemaVersion:
+      GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION,
     artifactPathsDigest: CANONICAL_DIGEST(COPY_REAL_CAPABILITY_ARTIFACT_PATHS),
   });
 }
@@ -375,167 +766,526 @@ function invalidOutput(error: NativeModelOutputError): CopyTaskOutput {
 export function getCopyRealCapabilityReceipt(
   result: ModelExecutionResult<unknown>,
 ): CopyRealCapabilityReceipt | undefined {
-  return REAL_CAPABILITY_RECEIPTS.get(result);
+  return GET_REAL_CAPABILITY_RECEIPT(result);
 }
 
-export function createCopyOperatorEvidenceChallenge(
+export function createCopyGitEvidenceAcceptanceChallenge(
   result: ModelExecutionResult<unknown>,
-): CopyOperatorEvidenceChallenge {
-  const detail = REAL_CAPABILITY_DETAILS.get(result);
-  if (!detail) fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_REQUIRED");
+): CopyGitEvidenceAcceptanceChallenge {
+  const detail = GET_REAL_CAPABILITY_DETAIL(result);
+  if (!detail) fail("COPY_GIT_EVIDENCE_CANDIDATE_REQUIRED");
   return FREEZE_OBJECT({
     schemaVersion:
-      "site-builder-copy-operator-evidence-challenge/2026-08-05-v1" as const,
+      "site-builder-copy-git-evidence-acceptance-challenge/2026-08-07-v1" as const,
     candidateReceiptDigest: CANONICAL_DIGEST(detail.receipt),
     receipt: detail.receipt,
   });
 }
 
-export function getCopyOperatorAuthorizedExecutionAttestation(
-  execution: CopyOperatorAuthorizedExecution,
-): CopyOperatorAuthorizedExecutionAttestation | undefined {
-  return OPERATOR_AUTHORIZED_EXECUTIONS.get(execution);
+function copyAcceptanceSubject(
+  receipt: CopyRealCapabilityReceipt,
+): GitReviewedEvidenceAcceptanceSubject {
+  return FREEZE_OBJECT({
+    executionId: receipt.executionId,
+    outputDigest: receipt.outputDigest,
+    candidateLedgerDigest: receipt.ledgerDigest,
+    fixedSourceCommit: receipt.fixedSourceCommit,
+    sourceBundleDigest: receipt.sourceBundleDigest,
+    manifestDigest: receipt.manifestDigest,
+    compiledRuntimeDigest: receipt.compiledRuntimeDigest,
+    compiledBindingDigest: receipt.compiledBindingDigest,
+    settlementObserverDigest: receipt.settlementObserverDigest,
+    knownSettlementDigest: receipt.knownSettlementDigest,
+    alias: receipt.alias,
+    protocol: receipt.protocol,
+    reasoning: receipt.reasoning,
+  });
 }
 
-async function authorizeCopyOperatorChallenge(input: {
-  detail: CopyRealCapabilityRuntimeDetail;
-  challenge: CopyOperatorEvidenceChallenge;
-  authorization: VerifiedCopyOperatorEvidenceAuthorization;
-}): Promise<CopyOperatorAuthorizedExecution> {
-  const operator = getCopyOperatorEvidenceAuthorizationAttestation(
-    input.authorization,
-  );
-  if (!operator) fail("COPY_OPERATOR_EVIDENCE_AUTHORIZATION_REQUIRED");
-  const receipt = input.challenge?.receipt;
+interface ReviewedCopyReceipt {
+  accepted: NonNullable<
+    ReturnType<typeof getGitReviewedEvidenceAcceptanceAttestation>
+  >;
+  receipt: CopyRealCapabilityReceipt;
+  candidateReceiptDigest: string;
+}
+
+function reviewedCopyReceipt(
+  acceptance: VerifiedGitReviewedEvidenceAcceptance,
+): ReviewedCopyReceipt {
+  const accepted = getGitReviewedEvidenceAcceptanceAttestation(acceptance);
+  if (!accepted) fail("COPY_GIT_EVIDENCE_ACCEPTANCE_REQUIRED");
+  const candidateReceipt = accepted.candidateReceipt as unknown;
+  if (!exactCopyReceipt(candidateReceipt)) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  const receipt = candidateReceipt;
   let candidateReceiptDigest: string;
   try {
     candidateReceiptDigest = CANONICAL_DIGEST(receipt);
   } catch {
-    return fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+    return fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
   }
   if (
-    input.challenge?.schemaVersion !==
-      "site-builder-copy-operator-evidence-challenge/2026-08-05-v1" ||
-    input.challenge.candidateReceiptDigest !== candidateReceiptDigest ||
-    operator.candidateReceiptDigest !== candidateReceiptDigest
+    accepted.schemaVersion !==
+      GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION ||
+    accepted.acceptedEvidenceClass !==
+      "git_reviewed_gateway_settlement_accepted" ||
+    accepted.taskId !== "site_builder.copy" ||
+    accepted.evidenceKind !== "capability_pilot" ||
+    accepted.candidateReceiptDigest !== candidateReceiptDigest ||
+    CANONICAL_DIGEST(accepted.subject) !==
+      CANONICAL_DIGEST(copyAcceptanceSubject(receipt))
   ) {
-    fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
   }
-  const execution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
-    (candidate) => candidate.executionKey === receipt.executionId,
+  return { accepted, receipt, candidateReceiptDigest };
+}
+
+function historicalReceiptBindingIsExact(
+  receipt: CopyRealCapabilityReceipt,
+): boolean {
+  let expectedCampaignDigest: string;
+  let expectedAuthorizationDigest: string;
+  let runtimeBindingDigest: string;
+  try {
+    expectedCampaignDigest = CANONICAL_DIGEST({
+      campaignId: receipt.campaignId,
+      taskId: receipt.taskId,
+      planDigest: receipt.runtimeBinding.planDigest,
+      maximumExecutions: 1,
+      maximumWireCalls: 2,
+    });
+    expectedAuthorizationDigest = CANONICAL_DIGEST({
+      authorizationId: receipt.authorizationId,
+      reservationId: receipt.reservationId,
+      manifestDigest: receipt.manifestDigest,
+      credentialAttestationDigest: receipt.credentialAttestationDigest,
+      settlementObserverDigest: receipt.settlementObserverDigest,
+      ledgerIdentityDigest: receipt.ledgerAuthorization.ledgerIdentityDigest,
+      reservationDigest: receipt.ledgerAuthorization.reservationDigest,
+      maximumExecutions: 1,
+      maximumWireCalls: 2,
+      maximumRepairCallsPerExecution: 1,
+      evidenceBinding: receipt.ledgerAuthorization.evidenceBinding,
+    });
+    runtimeBindingDigest = CANONICAL_DIGEST(receipt.runtimeBinding);
+  } catch {
+    return false;
+  }
+  return (
+    receipt.classification === "DISPATCH_PREFLIGHT_RECEIPT_ONLY" &&
+    receipt.evidenceClass === "copy_gateway_settlement_candidate" &&
+    receipt.evidenceKind === "capability_pilot" &&
+    receipt.taskId === "site_builder.copy" &&
+    (receipt.wireCount === 1 || receipt.wireCount === 2) &&
+    receipt.repaired === (receipt.wireCount === 2) &&
+    receipt.repeatIndex === null &&
+    receipt.runtimeBinding.schemaVersion ===
+      "copy-real-capability-runtime-binding/2026-08-07-v3" &&
+    receipt.runtimeBinding.taskId === receipt.taskId &&
+    receipt.runtimeBinding.fixedSourceCommit === receipt.fixedSourceCommit &&
+    receipt.runtimeBinding.sourceBundleDigest === receipt.sourceBundleDigest &&
+    receipt.runtimeBinding.manifestDigest === receipt.manifestDigest &&
+    receipt.runtimeBinding.credentialAttestationDigest ===
+      receipt.credentialAttestationDigest &&
+    receipt.runtimeBinding.settlementObserverDigest ===
+      receipt.settlementObserverDigest &&
+    receipt.runtimeBinding.globalAuthorizationDigest ===
+      receipt.globalAuthorizationDigest &&
+    receipt.runtimeBinding.childAuthorizationDigest ===
+      receipt.childAuthorizationDigest &&
+    receipt.runtimeBinding.selectedExecutionKey === receipt.executionId &&
+    receipt.runtimeBinding.childCampaignId === receipt.campaignId &&
+    receipt.runtimeBinding.gitReviewedEvidenceAcceptanceSchemaVersion ===
+      GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION &&
+    receipt.compiledBindingDigest === runtimeBindingDigest &&
+    receipt.ledgerAuthorization.evidenceBinding?.schemaVersion ===
+      "real-model-execution-evidence-binding/2026-08-07-v1" &&
+    receipt.ledgerAuthorization.evidenceBinding.executionId ===
+      receipt.executionId &&
+    receipt.ledgerAuthorization.evidenceBinding.childSlotId ===
+      receipt.childSlotId &&
+    receipt.ledgerAuthorization.evidenceBinding.alias === receipt.alias &&
+    receipt.ledgerAuthorization.evidenceBinding.protocol === receipt.protocol &&
+    receipt.ledgerAuthorization.evidenceBinding.reasoning ===
+      receipt.reasoning &&
+    receipt.ledgerAuthorization.evidenceBinding.fixtureId ===
+      receipt.fixtureId &&
+    receipt.ledgerAuthorization.evidenceBinding.executionPlanDigest ===
+      receipt.planDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.inputDigest ===
+      receipt.inputDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.contextDigest ===
+      receipt.contextDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.promptDigest ===
+      receipt.promptDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.fixedSourceCommit ===
+      receipt.fixedSourceCommit &&
+    receipt.ledgerAuthorization.evidenceBinding.sourceBundleDigest ===
+      receipt.sourceBundleDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.manifestDigest ===
+      receipt.manifestDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.admissionDigest ===
+      receipt.admissionDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.globalAuthorizationDigest ===
+      receipt.globalAuthorizationDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.childAuthorizationDigest ===
+      receipt.childAuthorizationDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.compiledRuntimeDigest ===
+      receipt.compiledRuntimeDigest &&
+    receipt.ledgerAuthorization.evidenceBinding.compiledBindingDigest ===
+      receipt.compiledBindingDigest &&
+    CANONICAL_DIGEST(receipt.ledgerCampaign) === expectedCampaignDigest &&
+    CANONICAL_DIGEST(receipt.ledgerAuthorization) ===
+      expectedAuthorizationDigest &&
+    receipt.settlementChain.executionId === receipt.executionId &&
+    receipt.settlementChain.executionClaim.planDigest === receipt.planDigest &&
+    receipt.settlementChain.wires.length === receipt.wireCount &&
+    receipt.settlementChain.completion.outputDigest === receipt.outputDigest &&
+    settlementWiresMatchReceipt(receipt)
   );
-  if (!execution) fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
-  const plan = createCopyCapabilityExecutionPlan({
-    executionKey: execution.executionKey,
-    campaignId: input.detail.campaignId,
-    workspaceId: "copy-capability-real-gateway",
+}
+
+function challengeReceipt(
+  challenge: CopyGitEvidenceAcceptanceChallenge,
+): CopyRealCapabilityReceipt {
+  if (
+    !exactObjectKeys(challenge, [
+      "schemaVersion",
+      "candidateReceiptDigest",
+      "receipt",
+    ])
+  ) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  const receipt = challenge?.receipt as unknown;
+  if (!exactCopyReceipt(receipt)) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  let candidateReceiptDigest: string;
+  let settlementChainDigest: string;
+  try {
+    candidateReceiptDigest = CANONICAL_DIGEST(receipt);
+    const { digest: _digest, ...settlementChain } = receipt.settlementChain;
+    settlementChainDigest = CANONICAL_DIGEST(settlementChain);
+  } catch {
+    return fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  if (
+    challenge?.schemaVersion !==
+      "site-builder-copy-git-evidence-acceptance-challenge/2026-08-07-v1" ||
+    challenge.candidateReceiptDigest !== candidateReceiptDigest ||
+    receipt.knownSettlementDigest !== receipt.settlementChain.digest ||
+    receipt.settlementChain.digest !== settlementChainDigest
+  ) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  return receipt;
+}
+
+export function createCopyGitEvidenceAcceptanceArtifact(input: {
+  artifactId: string;
+  challenge: CopyGitEvidenceAcceptanceChallenge;
+}): GitReviewedEvidenceAcceptanceArtifact {
+  const receipt = challengeReceipt(input.challenge);
+  return createGitReviewedEvidenceAcceptanceArtifact({
+    artifactId: input.artifactId,
+    acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+    taskId: "site_builder.copy",
+    evidenceKind: "capability_pilot",
+    candidateReceipt: receipt as unknown as Readonly<Record<string, unknown>>,
+    subject: copyAcceptanceSubject(receipt),
   });
-  await assertCopyPilotTrustedGatewayCurrent(input.detail.trustedGateway);
-  await assertCopyPilotVerifiedSourceCurrent(input.detail.verifiedSource);
+}
+
+export function getCopyGitAcceptedExecutionAttestation(
+  execution: CopyGitAcceptedExecution,
+): CopyGitAcceptedExecutionAttestation | undefined {
+  return GET_GIT_ACCEPTED_EXECUTION(execution);
+}
+
+async function acceptCopyGitReviewedEvidence(input: {
+  detail: CopyGitEvidenceAcceptanceDetail;
+  acceptance: VerifiedGitReviewedEvidenceAcceptance;
+  liveDetail?: CopyRealCapabilityRuntimeDetail;
+  reviewed?: ReviewedCopyReceipt;
+}): Promise<CopyGitAcceptedExecution> {
+  const { accepted, receipt, candidateReceiptDigest } =
+    input.reviewed ?? reviewedCopyReceipt(input.acceptance);
+  let execution:
+    (typeof COPY_CAPABILITY_PILOT_PLAN.executions)[number] | undefined;
+  let plan: ReturnType<typeof createCopyCapabilityExecutionPlan> | undefined;
+  if (input.liveDetail != null) {
+    execution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+      (candidate) => candidate.executionKey === receipt.executionId,
+    );
+    if (!execution) fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+    plan = createCopyCapabilityExecutionPlan({
+      executionKey: execution.executionKey,
+      campaignId: input.detail.campaignId,
+      workspaceId: "copy-capability-real-gateway",
+    });
+    validateCopyRealCapabilityAdmissionEnvelope(input.liveDetail.admission);
+    await assertCopyPilotTrustedGatewayCurrent(input.liveDetail.trustedGateway);
+    await assertCopyPilotVerifiedSourceCurrent(input.liveDetail.verifiedSource);
+    await ASSERT_COMPILED_CURRENT(input.liveDetail.compiledGuard);
+    const compiled = GET_COMPILED_ATTESTATION(input.liveDetail.compiledGuard);
+    if (
+      compiled == null ||
+      receipt.fixedSourceCommit !== input.liveDetail.source.fixedSourceCommit ||
+      receipt.sourceBundleDigest !==
+        input.liveDetail.source.sourceBundleDigest ||
+      receipt.manifestDigest !== input.liveDetail.source.manifestDigest ||
+      receipt.compiledRuntimeDigest !== compiled.artifactTreeDigest ||
+      receipt.compiledBindingDigest !== compiled.bindingDigest
+    ) {
+      fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+    }
+  } else if (!historicalReceiptBindingIsExact(receipt)) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
   await assertCopyPilotLedgerIdentityCurrent(
     input.detail.ledgerIdentity.handle,
   );
-  await ASSERT_COMPILED_CURRENT(input.detail.compiledGuard);
-  const compiled = GET_COMPILED_ATTESTATION(input.detail.compiledGuard);
   if (
     receipt.classification !== "DISPATCH_PREFLIGHT_RECEIPT_ONLY" ||
     receipt.evidenceClass !== "copy_gateway_settlement_candidate" ||
     receipt.evidenceKind !== "capability_pilot" ||
+    receipt.taskId !== "site_builder.copy" ||
     receipt.campaignId !== input.detail.campaignId ||
-    receipt.alias !== execution.alias ||
-    receipt.protocol !== execution.protocol ||
-    receipt.reasoning !== execution.reasoning ||
     (receipt.wireCount !== 1 && receipt.wireCount !== 2) ||
     receipt.repaired !== (receipt.wireCount === 2) ||
-    receipt.fixtureId !== COPY_CAPABILITY_PILOT_PLAN.source.fixtureId ||
     receipt.repeatIndex !== null ||
-    receipt.planDigest !== executionPlanDigest(plan) ||
-    receipt.inputDigest !== plan.inputDigest ||
-    receipt.contextDigest !== plan.contextDigest ||
-    receipt.promptDigest !== CANONICAL_DIGEST(plan.prompt) ||
-    receipt.fixedSourceCommit !== input.detail.source.fixedSourceCommit ||
-    receipt.sourceBundleDigest !== input.detail.source.sourceBundleDigest ||
-    receipt.manifestDigest !== input.detail.source.manifestDigest ||
-    receipt.admissionDigest !== CANONICAL_DIGEST(input.detail.admission) ||
-    receipt.credentialAttestationDigest !==
-      CANONICAL_DIGEST(input.detail.admission.credential) ||
-    receipt.settlementObserverDigest !==
-      CANONICAL_DIGEST(input.detail.admission.settlement) ||
-    receipt.authorizationId !==
-      input.detail.admission.childAuthorization.authorizationId ||
-    receipt.reservationId !==
-      input.detail.admission.childAuthorization.reservationId ||
-    receipt.globalAuthorizationDigest !==
-      CANONICAL_DIGEST(input.detail.admission.authorization) ||
-    receipt.childAuthorizationDigest !==
-      CANONICAL_DIGEST(input.detail.admission.childAuthorization) ||
-    receipt.childSlotId !==
-      input.detail.admission.childAuthorization.childSlotId ||
-    compiled == null ||
-    receipt.compiledRuntimeDigest !== compiled.artifactTreeDigest ||
-    receipt.compiledBindingDigest !== compiled.bindingDigest
+    receipt.ledgerCampaign.campaignId !== input.detail.campaignId
   ) {
-    fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_MISMATCH");
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
   }
-  const ledgerAuthorization = {
-    authorizationId: operator.authorizationId,
-    keyId: TRUSTED_OPERATOR_EVIDENCE_KEY_ID,
-    payloadDigest: operator.payloadDigest,
-    signatureDigest: operator.signatureDigest,
+  if (
+    input.liveDetail != null &&
+    execution != null &&
+    plan != null &&
+    (receipt.alias !== execution.alias ||
+      receipt.protocol !== execution.protocol ||
+      receipt.reasoning !== execution.reasoning ||
+      receipt.fixtureId !== COPY_CAPABILITY_PILOT_PLAN.source.fixtureId ||
+      receipt.planDigest !== executionPlanDigest(plan) ||
+      receipt.inputDigest !== plan.inputDigest ||
+      receipt.contextDigest !== plan.contextDigest ||
+      receipt.promptDigest !== CANONICAL_DIGEST(plan.prompt) ||
+      receipt.fixedSourceCommit !==
+        input.liveDetail.admission.manifest.fixedSourceCommit ||
+      receipt.sourceBundleDigest !==
+        input.liveDetail.admission.manifest.sourceBundleDigest ||
+      receipt.manifestDigest !==
+        CANONICAL_DIGEST(input.liveDetail.admission.manifest) ||
+      receipt.admissionDigest !==
+        CANONICAL_DIGEST(input.liveDetail.admission) ||
+      receipt.credentialAttestationDigest !==
+        CANONICAL_DIGEST(input.liveDetail.admission.credential) ||
+      receipt.settlementObserverDigest !==
+        CANONICAL_DIGEST(input.liveDetail.admission.settlement) ||
+      receipt.authorizationId !==
+        input.liveDetail.admission.childAuthorization.authorizationId ||
+      receipt.reservationId !==
+        input.liveDetail.admission.childAuthorization.reservationId ||
+      receipt.globalAuthorizationDigest !==
+        CANONICAL_DIGEST(input.liveDetail.admission.authorization) ||
+      receipt.childAuthorizationDigest !==
+        CANONICAL_DIGEST(input.liveDetail.admission.childAuthorization) ||
+      receipt.childSlotId !==
+        input.liveDetail.admission.childAuthorization.childSlotId ||
+      receipt.compiledBindingDigest !==
+        CANONICAL_DIGEST(
+          runtimeBinding({
+            admission: input.liveDetail.admission,
+            source: input.liveDetail.admission.manifest,
+          }),
+        ))
+  ) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  let settlementChain: RealKnownSettlementEvidence;
+  try {
+    settlementChain =
+      await input.detail.ledger.executionKnownSettlementEvidence(
+        receipt.executionId,
+        receipt.planDigest,
+      );
+  } catch {
+    return fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  if (
+    receipt.knownSettlementDigest !== settlementChain.digest ||
+    CANONICAL_DIGEST(receipt.settlementChain) !==
+      CANONICAL_DIGEST(settlementChain)
+  ) {
+    fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+  }
+  const ledgerAcceptance = {
+    acceptanceId: accepted.artifactId,
+    artifactDigest: accepted.artifactDigest,
+    artifactCommit: accepted.artifactCommit,
+    mergeCommit: accepted.mergeCommit,
+    pullRequestNumber: accepted.pullRequestNumber,
+    acceptedEvidenceClass: accepted.acceptedEvidenceClass,
+    evidenceKind: accepted.evidenceKind,
     candidateReceiptDigest,
     executionId: receipt.executionId,
+    planDigest: receipt.planDigest,
     outputDigest: receipt.outputDigest,
     candidateLedgerDigest: receipt.ledgerDigest,
+    fixedSourceCommit: receipt.fixedSourceCommit,
+    sourceBundleDigest: receipt.sourceBundleDigest,
+    manifestDigest: receipt.manifestDigest,
+    compiledRuntimeDigest: receipt.compiledRuntimeDigest,
+    compiledBindingDigest: receipt.compiledBindingDigest,
+    settlementObserverDigest: receipt.settlementObserverDigest,
+    knownSettlementDigest: receipt.knownSettlementDigest,
+    alias: receipt.alias,
+    protocol: receipt.protocol,
+    reasoning: receipt.reasoning,
   } as const;
-  const existingAuthorization =
-    await input.detail.ledger.operatorEvidenceAuthorizationDigest(
-      ledgerAuthorization,
-    );
-  if (existingAuthorization == null) {
+  const existingAcceptance =
+    await input.detail.ledger.gitEvidenceAcceptanceDigest(ledgerAcceptance);
+  if (existingAcceptance == null) {
     const before = await input.detail.ledger.summary();
-    if (before.frozen || before.unknownWireSettlements !== 0) {
-      fail("COPY_OPERATOR_EVIDENCE_LEDGER_MISMATCH");
+    if (
+      before.frozen ||
+      before.completedExecutions !== 1 ||
+      before.executionClaims !== 1 ||
+      before.wireClaims !== receipt.wireCount ||
+      before.knownWireSettlements !== receipt.wireCount ||
+      before.unknownWireSettlements !== 0 ||
+      before.gitEvidenceAcceptances !== 0
+    ) {
+      fail("COPY_GIT_EVIDENCE_LEDGER_MISMATCH");
     }
-    assertCopyOperatorEvidenceAuthorizationCurrent(input.authorization);
   }
+  await assertGitReviewedEvidenceAcceptanceCurrent(input.acceptance);
+  await assertCopyPilotLedgerIdentityCurrent(
+    input.detail.ledgerIdentity.handle,
+  );
   const evidenceLedgerDigest =
-    await input.detail.ledger.consumeOperatorEvidenceAuthorization(
-      ledgerAuthorization,
-    );
+    await input.detail.ledger.consumeGitEvidenceAcceptance(ledgerAcceptance);
   const authorized = FREEZE_OBJECT({
-    classification: "OPAQUE_COPY_OPERATOR_AUTHORIZED_EXECUTION" as const,
+    classification: "OPAQUE_COPY_GIT_ACCEPTED_EXECUTION" as const,
   });
-  OPERATOR_AUTHORIZED_EXECUTIONS.set(
+  SET_GIT_ACCEPTED_EXECUTION(
     authorized,
     FREEZE_OBJECT({
-      classification: "OPERATOR_AUTHENTICATED_REAL_EVIDENCE" as const,
-      evidenceClass: "real_gateway_settled" as const,
+      classification: "GIT_REVIEWED_REAL_EVIDENCE" as const,
+      evidenceClass: "git_reviewed_gateway_settlement_accepted" as const,
       evidenceKind: "capability_pilot" as const,
+      acceptanceId: accepted.artifactId,
+      artifactDigest: accepted.artifactDigest,
+      artifactCommit: accepted.artifactCommit,
+      mergeCommit: accepted.mergeCommit,
+      pullRequestNumber: accepted.pullRequestNumber,
       candidateReceiptDigest,
       candidateLedgerDigest: receipt.ledgerDigest,
       evidenceLedgerDigest,
-      authorizationId: operator.authorizationId,
-      operatorPayloadDigest: operator.payloadDigest,
-      operatorSignatureDigest: operator.signatureDigest,
-      operatorPublicKeySha256: TRUSTED_OPERATOR_EVIDENCE_PUBLIC_KEY_SHA256,
       executionId: receipt.executionId,
       outputDigest: receipt.outputDigest,
+      alias: receipt.alias,
+      protocol: receipt.protocol,
+      reasoning: receipt.reasoning,
+      fixedSourceCommit: receipt.fixedSourceCommit,
+      sourceBundleDigest: receipt.sourceBundleDigest,
+      manifestDigest: receipt.manifestDigest,
+      compiledRuntimeDigest: receipt.compiledRuntimeDigest,
+      compiledBindingDigest: receipt.compiledBindingDigest,
+      settlementObserverDigest: receipt.settlementObserverDigest,
+      knownSettlementDigest: receipt.knownSettlementDigest,
     }),
   );
   return authorized;
 }
 
-export async function authorizeCopyGatewaySettlementCandidate(input: {
-  result: ModelExecutionResult<unknown>;
-  authorization: VerifiedCopyOperatorEvidenceAuthorization;
-}): Promise<CopyOperatorAuthorizedExecution> {
-  const detail = REAL_CAPABILITY_DETAILS.get(input.result);
-  if (!detail) fail("COPY_OPERATOR_EVIDENCE_CANDIDATE_REQUIRED");
-  return authorizeCopyOperatorChallenge({
+export async function acceptCopyGatewaySettlementCandidate(input: {
+  runner: CopyRealCapabilityRunner;
+  acceptance: VerifiedGitReviewedEvidenceAcceptance;
+}): Promise<CopyGitAcceptedExecution> {
+  const detail = GET_REAL_CAPABILITY_RUNNER(input.runner);
+  if (!detail) fail("COPY_REAL_CAPABILITY_TRUSTED_CHILD_RUNNER_REQUIRED");
+  return acceptCopyGitReviewedEvidence({
     detail,
-    challenge: createCopyOperatorEvidenceChallenge(input.result),
-    authorization: input.authorization,
+    acceptance: input.acceptance,
+    liveDetail: detail,
   });
+}
+
+export async function reopenCopyGitEvidenceAcceptanceRunner(input: {
+  ledgerPath: string;
+  authorizationClaimPath: string;
+  ledgerMarkerPath: string;
+  campaignId: string;
+}): Promise<CopyGitEvidenceAcceptanceRunner> {
+  assertCompiledEntrypoint();
+  if (!exactObjectKeys(input, EVIDENCE_REOPEN_INPUT_KEYS)) {
+    fail("COPY_GIT_EVIDENCE_REOPEN_INPUT_INVALID");
+  }
+  const runner = FREEZE_OBJECT({
+    acceptGitReviewedEvidence: async (acceptanceInput: {
+      acceptance: VerifiedGitReviewedEvidenceAcceptance;
+    }) => {
+      if (!exactObjectKeys(acceptanceInput, EVIDENCE_ACCEPT_INPUT_KEYS)) {
+        fail("COPY_GIT_EVIDENCE_ACCEPTANCE_INPUT_INVALID");
+      }
+      const reviewed = reviewedCopyReceipt(acceptanceInput.acceptance);
+      const { receipt } = reviewed;
+      if (
+        receipt.campaignId !== input.campaignId ||
+        !historicalReceiptBindingIsExact(receipt)
+      ) {
+        fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+      }
+      let ledgerIdentity: Awaited<
+        ReturnType<typeof loadCopyPilotLedgerIdentity>
+      >;
+      let ledger: RealModelExecutionLedger;
+      try {
+        ledgerIdentity = await loadCopyPilotLedgerIdentity({
+          ledgerPath: input.ledgerPath,
+          authorizationClaimPath: input.authorizationClaimPath,
+          markerPath: input.ledgerMarkerPath,
+          campaignId: input.campaignId,
+        });
+        if (
+          receipt.ledgerAuthorization.ledgerIdentityDigest !==
+          ledgerIdentity.ledgerIdentityDigest
+        ) {
+          fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+        }
+        await assertCopyPilotLedgerIdentityCurrent(ledgerIdentity.handle);
+        ledger = await RealModelExecutionLedger.reopen({
+          ledgerPath: input.ledgerPath,
+          authorizationClaimPath: input.authorizationClaimPath,
+          campaign: receipt.ledgerCampaign,
+          authorization: receipt.ledgerAuthorization,
+        });
+      } catch {
+        return fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+      }
+      const accepted = await acceptCopyGitReviewedEvidence({
+        detail: {
+          ledger,
+          ledgerIdentity,
+          campaignId: input.campaignId,
+        },
+        acceptance: acceptanceInput.acceptance,
+        reviewed,
+      });
+      SET_EVIDENCE_REOPEN_LEDGER(runner, ledger);
+      return accepted;
+    },
+    summary: () => {
+      const ledger = GET_EVIDENCE_REOPEN_LEDGER(runner);
+      if (!ledger) fail("COPY_GIT_EVIDENCE_ACCEPTANCE_REQUIRED");
+      return ledger.summary();
+    },
+  });
+  return runner;
 }
 
 export async function createCopyRealCapabilityRunner(input: {
@@ -596,28 +1346,78 @@ export async function createCopyRealCapabilityRunner(input: {
     fail("COPY_REAL_CAPABILITY_RESERVATION_BINDING_MISMATCH");
   }
 
+  const selectedExecution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+    ({ executionKey }) => executionKey === input.admission.selectedExecutionKey,
+  );
+  const selectedChild = input.admission.authorization.children.find(
+    ({ childSlotId }) =>
+      childSlotId === input.admission.childAuthorization.childSlotId,
+  );
+  if (
+    selectedExecution == null ||
+    selectedChild == null ||
+    selectedChild.executionKey !== selectedExecution.executionKey ||
+    selectedChild.alias !== selectedExecution.alias ||
+    selectedChild.protocol !== selectedExecution.protocol ||
+    selectedChild.reasoning !== selectedExecution.reasoning
+  ) {
+    fail("COPY_REAL_CAPABILITY_ADMISSION_BINDING_MISMATCH");
+  }
+  const selectedExecutionPlan = createCopyCapabilityExecutionPlan({
+    executionKey: selectedExecution.executionKey,
+    campaignId: input.campaignId,
+    workspaceId: "copy-capability-real-gateway",
+  });
+
   const compiledGuard = await createCompiledRuntimeGuard({
     repositoryRoot: LOADED_REPOSITORY_ROOT,
     artifactPaths: COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
     binding: runtimeBinding({ admission: input.admission, source }),
   });
   await ASSERT_COMPILED_CURRENT(compiledGuard);
+  const compiledAtOpen = GET_COMPILED_ATTESTATION(compiledGuard);
+  if (compiledAtOpen == null) {
+    fail("COPY_REAL_CAPABILITY_COMPILED_ATTESTATION_REQUIRED");
+  }
+  const ledgerEvidenceBinding = FREEZE_OBJECT({
+    schemaVersion:
+      "real-model-execution-evidence-binding/2026-08-07-v1" as const,
+    executionId: input.admission.selectedExecutionKey,
+    childSlotId: selectedChild.childSlotId,
+    alias: selectedExecution.alias,
+    protocol: selectedExecution.protocol,
+    reasoning: selectedExecution.reasoning,
+    fixtureId: selectedExecution.fixtureId,
+    executionPlanDigest: executionPlanDigest(selectedExecutionPlan),
+    inputDigest: selectedExecutionPlan.inputDigest,
+    contextDigest: selectedExecutionPlan.contextDigest,
+    promptDigest: CANONICAL_DIGEST(selectedExecutionPlan.prompt),
+    fixedSourceCommit: source.fixedSourceCommit,
+    sourceBundleDigest: source.sourceBundleDigest,
+    manifestDigest: source.manifestDigest,
+    admissionDigest: CANONICAL_DIGEST(input.admission),
+    globalAuthorizationDigest: CANONICAL_DIGEST(input.admission.authorization),
+    childAuthorizationDigest: CANONICAL_DIGEST(
+      input.admission.childAuthorization,
+    ),
+    compiledRuntimeDigest: compiledAtOpen.artifactTreeDigest,
+    compiledBindingDigest: compiledAtOpen.bindingDigest,
+  });
+  const ledgerAuthorization = childLedgerAuthorization(
+    input.admission.childAuthorization,
+    ledgerEvidenceBinding,
+  );
   const ledger = await RealModelExecutionLedger.open({
     ledgerPath: input.ledgerPath,
     authorizationClaimPath: input.authorizationClaimPath,
-    campaign: {
+    campaign: childLedgerCampaign({
       campaignId: input.campaignId,
-      taskId: COPY_CAPABILITY_PILOT_PLAN.taskId,
-      planDigest: CANONICAL_DIGEST(COPY_CAPABILITY_PILOT_PLAN),
-      maximumExecutions: 1,
-      maximumWireCalls: 2,
-    },
-    authorization: childLedgerAuthorization(input.admission.childAuthorization),
+      manifest: input.admission.manifest,
+    }),
+    authorization: ledgerAuthorization,
   });
   await markCopyPilotLedgerIdentityClaimed(ledgerIdentity.handle, {
-    authorizationDigest: CANONICAL_DIGEST(
-      childLedgerAuthorization(input.admission.childAuthorization),
-    ),
+    authorizationDigest: CANONICAL_DIGEST(ledgerAuthorization),
   });
   await assertCopyPilotLedgerIdentityCurrent(ledgerIdentity.handle);
   const gateway = createCopyPilotTrustedGatewayBindings(input.trustedGateway);
@@ -632,18 +1432,11 @@ export async function createCopyRealCapabilityRunner(input: {
       await assertCopyPilotTrustedGatewayCurrent(input.trustedGateway);
       await assertCopyPilotVerifiedSourceCurrent(input.verifiedSource);
       await ASSERT_COMPILED_CURRENT(compiledGuard);
-      const execution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
-        (candidate) => candidate.executionKey === executionKey,
-      );
-      if (!execution) fail("COPY_CAPABILITY_EXECUTION_NOT_IN_PLAN");
       if (executionKey !== input.admission.selectedExecutionKey) {
         fail("COPY_REAL_CAPABILITY_CHILD_EXECUTION_MISMATCH");
       }
-      const plan = createCopyCapabilityExecutionPlan({
-        executionKey,
-        campaignId: input.campaignId,
-        workspaceId: "copy-capability-real-gateway",
-      });
+      const execution = selectedExecution;
+      const plan = selectedExecutionPlan;
       const transport: ModelTransport<CopyTaskInput, CopyTaskOutput> = {
         dispatch: async (currentPlan) => {
           const prompt =
@@ -811,10 +1604,15 @@ export async function createCopyRealCapabilityRunner(input: {
         ) {
           fail("COPY_REAL_CAPABILITY_RECEIPT_INCOMPLETE");
         }
+        const settlementChain = await ledger.executionKnownSettlementEvidence(
+          durable.executionId,
+          executionPlanDigest(plan),
+        );
         const receipt = FREEZE_OBJECT({
           classification: "DISPATCH_PREFLIGHT_RECEIPT_ONLY" as const,
           evidenceClass: "copy_gateway_settlement_candidate" as const,
           evidenceKind: "capability_pilot" as const,
+          taskId: "site_builder.copy" as const,
           campaignId: durable.campaignId,
           executionId: durable.executionId,
           alias: metadata.resolvedAlias,
@@ -840,6 +1638,8 @@ export async function createCopyRealCapabilityRunner(input: {
           settlementObserverDigest: CANONICAL_DIGEST(
             input.admission.settlement,
           ),
+          knownSettlementDigest: settlementChain.digest,
+          settlementChain,
           authorizationId: input.admission.childAuthorization.authorizationId,
           reservationId: input.admission.childAuthorization.reservationId,
           globalAuthorizationDigest: CANONICAL_DIGEST(
@@ -849,11 +1649,20 @@ export async function createCopyRealCapabilityRunner(input: {
             input.admission.childAuthorization,
           ),
           childSlotId: input.admission.childAuthorization.childSlotId,
+          ledgerCampaign: childLedgerCampaign({
+            campaignId: input.campaignId,
+            manifest: input.admission.manifest,
+          }),
+          ledgerAuthorization,
+          runtimeBinding: runtimeBinding({
+            admission: input.admission,
+            source,
+          }),
           compiledRuntimeDigest: compiled.artifactTreeDigest,
           compiledBindingDigest: compiled.bindingDigest,
         });
-        REAL_CAPABILITY_RECEIPTS.set(result, receipt);
-        REAL_CAPABILITY_DETAILS.set(result, {
+        SET_REAL_CAPABILITY_RECEIPT(result, receipt);
+        SET_REAL_CAPABILITY_DETAIL(result, {
           receipt,
           ledger,
           ledgerIdentity,
@@ -874,12 +1683,17 @@ export async function createCopyRealCapabilityRunner(input: {
       }
       return result;
     },
-    authorizeOperatorEvidence: (authorizationInput: {
-      challenge: CopyOperatorEvidenceChallenge;
-      authorization: VerifiedCopyOperatorEvidenceAuthorization;
+    acceptGitReviewedEvidence: (acceptanceInput: {
+      acceptance: VerifiedGitReviewedEvidenceAcceptance;
     }) =>
-      authorizeCopyOperatorChallenge({
+      acceptCopyGitReviewedEvidence({
         detail: {
+          ledger,
+          ledgerIdentity,
+          campaignId: input.campaignId,
+        },
+        acceptance: acceptanceInput.acceptance,
+        liveDetail: {
           ledger,
           ledgerIdentity,
           compiledGuard,
@@ -889,12 +1703,10 @@ export async function createCopyRealCapabilityRunner(input: {
           source,
           campaignId: input.campaignId,
         },
-        challenge: authorizationInput.challenge,
-        authorization: authorizationInput.authorization,
       }),
     summary: () => ledger.summary(),
   });
-  REAL_CAPABILITY_RUNNERS.set(runner, {
+  SET_REAL_CAPABILITY_RUNNER(runner, {
     ledger,
     ledgerIdentity,
     compiledGuard,

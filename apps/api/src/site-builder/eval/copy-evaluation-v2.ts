@@ -24,7 +24,7 @@ import {
 } from "./copy-quality-rubric";
 
 export const COPY_EVALUATION_V2_SCHEMA_VERSION =
-  "site-builder-copy-evaluation-plan/2026-08-05-v4" as const;
+  "site-builder-copy-evaluation-plan/2026-08-07-v5" as const;
 
 const COPY_PROFILE = "copy.premium" as const;
 const CURRENT_TASK_CONTRACT_VERSION =
@@ -146,7 +146,7 @@ const EVALUATOR_ADMISSION_STATUS = exactList(
   CURRENT_SCORED_DIMENSIONS,
   SCORED_DIMENSIONS,
 )
-  ? "READY"
+  ? "BLOCKED_ON_DURABLE_ACCEPTED_ARTIFACT_REPLAY"
   : "BLOCKED_ON_SCORED_EVALUATOR";
 const CANDIDATE_ADMISSION_STATUS = exactList(CURRENT_ALIASES, REQUIRED_ALIASES)
   ? exactList(
@@ -304,7 +304,19 @@ const PLAN = {
     findingVocabulary: "closed_code_only",
     reviewerPolicy: "human_blind_or_independent_model_with_provider_separation",
     candidateIdentityVisibleToReviewer: false,
-    executionReceiptPolicy: "model_runtime_branded_known_settlement_no_cache",
+    executionReceiptPolicy:
+      "blocked_pending_restart_safe_git_reviewed_quality_replay",
+    evidenceAcceptance: {
+      status: "NOT_IMPLEMENTED_FOR_QUALITY_MATRIX",
+      requiredClass: "git_reviewed_gateway_settlement_accepted",
+      requiredKind: "quality_matrix",
+      gitReviewPolicy: "immutable_artifact_on_merged_commit_required",
+      rawEvidencePolicy: "reject_candidate_test_and_unknown_settlement",
+      replayPolicy:
+        "reopen_accepted_ledger_consume_once_and_verify_persisted_output_bytes",
+      identityBindingPolicy:
+        "candidate_fixture_repeat_input_prompt_plan_output_and_settlement",
+    },
     repeatBindingPolicy: "candidate_fixture_repeat_execution_output_digest",
     stabilityPolicy: "deterministic_two_repeat_normalized_token_dice",
     qualityGate: COPY_QUALITY_GATE,
@@ -336,9 +348,7 @@ const PLAN = {
     status:
       CANDIDATE_ADMISSION_STATUS !== "READY"
         ? CANDIDATE_ADMISSION_STATUS
-        : EVALUATOR_ADMISSION_STATUS === "READY"
-          ? "BLOCKED_BEFORE_PILOT_RESULT"
-          : EVALUATOR_ADMISSION_STATUS,
+        : EVALUATOR_ADMISSION_STATUS,
   },
   hardGates: HARD_GATES,
   scoredDimensions: SCORED_DIMENSIONS,

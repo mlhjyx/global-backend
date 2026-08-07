@@ -15,10 +15,10 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
-export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
-  "719aacc2ec328870316b71cb0666d22828b89e74" as const;
+/** Set only in the post-merge manifest PR, never to an unmerged source SHA. */
+export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT: string | null = null;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v8.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json" as const;
 
 export interface CopyRealCapabilitySourceFileSpec {
   role: string;
@@ -65,6 +65,10 @@ const SOURCE_FILE_SPECS = [
   {
     role: "runtime_execution",
     path: "apps/api/src/model-runtime/durable-model-execution-runtime.ts",
+  },
+  {
+    role: "git_reviewed_evidence_acceptance",
+    path: "apps/api/src/model-runtime/git-reviewed-evidence-acceptance.ts",
   },
   {
     role: "runtime_immutable",
@@ -121,14 +125,6 @@ const SOURCE_FILE_SPECS = [
   {
     role: "candidate_scope",
     path: "apps/api/src/site-builder/eval/copy-evaluation-v2-candidates.ts",
-  },
-  {
-    role: "operator_evidence_authorization",
-    path: "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
-  },
-  {
-    role: "operator_evidence_key",
-    path: "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
   },
   {
     role: "quality_contract",
@@ -252,9 +248,9 @@ export interface CopyRealCapabilityContractSnapshot {
 
 export interface CopyRealCapabilityManifestArtifact {
   schemaVersion: "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1";
-  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-06-v8";
+  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-07-v9";
   classification: "FIXED_SOURCE_CREATE_ONLY";
-  fixedSourceCommit: typeof COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT;
+  fixedSourceCommit: string;
   preparationHeadCommit: string;
   createOnly: true;
   dispatchAuthorization: "NOT_AUTHORIZED";
@@ -275,7 +271,7 @@ export interface CopyRealCapabilityManifestArtifact {
   requiredFollowup: readonly [
     "PURPOSE_SPECIFIC_FINITE_CREDENTIAL_ATTESTATION",
     "TRUSTED_SETTLEMENT_OBSERVER_AND_LEDGER_BINDING",
-    "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
+    "GIT_REVIEWED_RUNTIME_SETTLEMENT_EVIDENCE",
     "SEPARATE_DISPATCH_AUTHORIZATION",
     "TRUSTED_OPERATIONAL_PROOF_FACTORIES_AND_BRANDED_RECEIPT",
     "REAL_GATEWAY_POST_WIRE_FREEZE",
@@ -286,6 +282,16 @@ export interface CopyRealCapabilityManifestArtifact {
 
 function fail(code: string): never {
   throw new Error(code);
+}
+
+function fixedSourceCommit(): string {
+  if (
+    COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT == null ||
+    !GIT_COMMIT.test(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT)
+  ) {
+    fail("COPY_REAL_CAPABILITY_V9_FIXED_SOURCE_REQUIRED");
+  }
+  return COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -360,6 +366,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
   preparationHeadCommit: string;
   sourceFiles: readonly CopyRealCapabilitySourceFile[];
 }): CopyRealCapabilityManifestArtifact {
+  const sourceCommit = fixedSourceCommit();
   if (!GIT_COMMIT.test(input.preparationHeadCommit)) {
     fail("COPY_REAL_CAPABILITY_PREPARATION_HEAD_INVALID");
   }
@@ -376,8 +383,8 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-real-capability-manifest/2026-08-05-v1" as const,
-    manifestId: "site-builder-copy-real-capability/2026-08-06-v8",
-    fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+    manifestId: "site-builder-copy-real-capability/2026-08-07-v9",
+    fixedSourceCommit: sourceCommit,
     sourceBundleDigest: sourceBundle.digest,
     planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
     dispatchAuthorization: "NOT_AUTHORIZED" as const,
@@ -391,9 +398,9 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     schemaVersion:
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1" as const,
     artifactId:
-      "site-builder-copy-real-capability-manifest-prep/2026-08-06-v8" as const,
+      "site-builder-copy-real-capability-manifest-prep/2026-08-07-v9" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
-    fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+    fixedSourceCommit: sourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,
     createOnly: true as const,
     dispatchAuthorization: "NOT_AUTHORIZED" as const,
@@ -414,7 +421,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     requiredFollowup: Object.freeze([
       "PURPOSE_SPECIFIC_FINITE_CREDENTIAL_ATTESTATION",
       "TRUSTED_SETTLEMENT_OBSERVER_AND_LEDGER_BINDING",
-      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
+      "GIT_REVIEWED_RUNTIME_SETTLEMENT_EVIDENCE",
       "SEPARATE_DISPATCH_AUTHORIZATION",
       "TRUSTED_OPERATIONAL_PROOF_FACTORIES_AND_BRANDED_RECEIPT",
       "REAL_GATEWAY_POST_WIRE_FREEZE",
@@ -479,6 +486,7 @@ function gitAncestor(
 export function prepareCopyRealCapabilityManifestFromRepository(
   repositoryRoot: string,
 ): CopyRealCapabilityManifestArtifact {
+  const sourceCommit = fixedSourceCommit();
   const root = realpathSync(repositoryRoot);
   if (
     gitText(root, ["status", "--porcelain", "--untracked-files=all"]) !== ""
@@ -488,12 +496,8 @@ export function prepareCopyRealCapabilityManifestFromRepository(
   const preparationHeadCommit = gitText(root, ["rev-parse", "HEAD"]);
   if (
     !GIT_COMMIT.test(preparationHeadCommit) ||
-    !gitAncestor(
-      root,
-      COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
-      preparationHeadCommit,
-    ) ||
-    !gitAncestor(root, COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT, "origin/main")
+    !gitAncestor(root, sourceCommit, preparationHeadCommit) ||
+    !gitAncestor(root, sourceCommit, "origin/main")
   ) {
     fail("COPY_REAL_CAPABILITY_FIXED_SOURCE_UNREACHABLE");
   }
@@ -502,7 +506,7 @@ export function prepareCopyRealCapabilityManifestFromRepository(
     "ls-tree",
     "-r",
     "--name-only",
-    COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+    sourceCommit,
     "--",
     "apps/api/src/model-runtime",
     "packages/contracts/src",
@@ -515,10 +519,7 @@ export function prepareCopyRealCapabilityManifestFromRepository(
     if (metadata.isSymbolicLink() || !metadata.isFile()) {
       fail("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
     }
-    const fixedBytes = gitOutput(root, [
-      "show",
-      `${COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT}:${path}`,
-    ]);
+    const fixedBytes = gitOutput(root, ["show", `${sourceCommit}:${path}`]);
     const workingBytes = readFileSync(resolve(root, path));
     if (!fixedBytes.equals(workingBytes)) {
       fail("COPY_REAL_CAPABILITY_SOURCE_BYTES_MISMATCH");

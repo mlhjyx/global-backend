@@ -13,6 +13,7 @@ import {
   COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES,
   buildCopyRealCapabilityManifestArtifact,
   buildCopyRealCapabilitySourceFileSpecs,
+  prepareCopyRealCapabilityManifestFromRepository,
   validateCopyRealCapabilityManifestArtifact,
   writeCopyRealCapabilityManifestCreateOnly,
   type CopyRealCapabilitySourceFile,
@@ -34,7 +35,7 @@ const HISTORICAL_MANIFEST_V6_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v6.json";
 const HISTORICAL_MANIFEST_V7_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v7.json";
-const CURRENT_MANIFEST_V8_PATH =
+const HISTORICAL_MANIFEST_V8_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v8.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
@@ -45,121 +46,30 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("prepares the bounded retry source as manifest v8 without dispatch", () => {
-    const artifact = buildCopyRealCapabilityManifestArtifact({
-      preparationHeadCommit: PREPARATION_HEAD,
-      sourceFiles: sourceFiles(),
-    });
-
-    expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "719aacc2ec328870316b71cb0666d22828b89e74",
-    );
+  it("stays fail-closed until a post-merge v9 fixed source exists", () => {
+    expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBeNull();
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v8.json",
+      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json",
     );
-    expect(artifact).toMatchObject({
-      schemaVersion:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
-      artifactId:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-06-v8",
-      classification: "FIXED_SOURCE_CREATE_ONLY",
-      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
-      preparationHeadCommit: PREPARATION_HEAD,
-      createOnly: true,
-      dispatchAuthorization: "NOT_AUTHORIZED",
-      dispatchCapable: false,
-      observedNetworkCalls: 0,
-      observedModelWireCalls: 0,
-      observedModelCost: { CNY: 0, USD: 0 },
-      manifest: {
-        schemaVersion:
-          "site-builder-copy-real-capability-manifest/2026-08-05-v1",
-        manifestId: "site-builder-copy-real-capability/2026-08-06-v8",
-        fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
-        planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
-        dispatchAuthorization: "NOT_AUTHORIZED",
-        taskId: "site_builder.copy",
-        plannedExecutions: 3,
-        maximumWireCalls: 6,
-        maximumRepairCallsPerExecution: 1,
-        executions: [
-          {
-            alias: "gpt-5.6-terra",
-            protocol: "openai_responses",
-            reasoning: "medium",
-          },
-          {
-            alias: "gpt-5.6-sol",
-            protocol: "openai_responses",
-            reasoning: "high",
-          },
-          {
-            alias: "claude-sonnet-5",
-            protocol: "anthropic_messages",
-            reasoning: "medium",
-          },
-        ],
-      },
-      preparationVerification: {
-        fixedCommitReachableFromPreparationHead: true,
-        fixedCommitReachableFromOriginMain: true,
-        trackedSourceBytesMatch: true,
-        futureExecutionMustReverify: true,
-      },
-      compiledRuntimeAttestation: "REQUIRED_BEFORE_DISPATCH",
-    });
-    expect(artifact.manifest.sourceBundleDigest).toBe(
-      artifact.sourceBundle.digest,
-    );
-    expect(artifact.contractSnapshot).toMatchObject({
-      taskId: "site_builder.copy",
-      planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
-      executionScopeDigest: canonicalDigest(
-        COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions,
-      ),
-    });
-    expect(artifact.requiredFollowup).toContain(
-      "SEPARATE_DISPATCH_AUTHORIZATION",
-    );
-    expect(artifact.requiredFollowup).toContain(
-      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
-    );
-    expect(artifact.artifactDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+      buildCopyRealCapabilityManifestArtifact({
+        preparationHeadCommit: PREPARATION_HEAD,
+        sourceFiles: sourceFiles(),
+      }),
+    ).toThrow("COPY_REAL_CAPABILITY_V9_FIXED_SOURCE_REQUIRED");
+    expect(() =>
+      prepareCopyRealCapabilityManifestFromRepository(REPOSITORY_ROOT),
+    ).toThrow("COPY_REAL_CAPABILITY_V9_FIXED_SOURCE_REQUIRED");
   });
 
-  it("rejects source bundle order, duplicate paths, and digest drift", () => {
-    const reversed = sourceFiles().reverse();
+  it("rejects all synthetic v9 artifacts while the fixed source is unset", () => {
     expect(() =>
       buildCopyRealCapabilityManifestArtifact({
         preparationHeadCommit: PREPARATION_HEAD,
-        sourceFiles: reversed,
+        sourceFiles: sourceFiles().reverse(),
       }),
-    ).toThrow("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
-
-    const duplicated = sourceFiles();
-    duplicated[1] = { ...duplicated[0]! };
-    expect(() =>
-      buildCopyRealCapabilityManifestArtifact({
-        preparationHeadCommit: PREPARATION_HEAD,
-        sourceFiles: duplicated,
-      }),
-    ).toThrow("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
-
-    const artifact = buildCopyRealCapabilityManifestArtifact({
-      preparationHeadCommit: PREPARATION_HEAD,
-      sourceFiles: sourceFiles(),
-    });
-    const drifted = {
-      ...artifact,
-      manifest: {
-        ...artifact.manifest,
-        maximumWireCalls: 7 as never,
-      },
-    };
-    expect(() => validateCopyRealCapabilityManifestArtifact(drifted)).toThrow(
+    ).toThrow("COPY_REAL_CAPABILITY_V9_FIXED_SOURCE_REQUIRED");
+    expect(() => validateCopyRealCapabilityManifestArtifact({})).toThrow(
       "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
     );
   });
@@ -170,6 +80,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       "apps/api/src/model-runtime/capability-registry.spec.ts",
       "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
       "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+      "apps/api/src/model-runtime/git-reviewed-evidence-acceptance.ts",
       "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
       "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
       "packages/contracts/src/site-builder/locales.ts",
@@ -213,12 +124,8 @@ describe("Copy real capability create-only manifest preparation", () => {
           path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
         },
         {
-          role: "operator_evidence_key",
-          path: "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
-        },
-        {
-          role: "operator_evidence_authorization",
-          path: "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
+          role: "git_reviewed_evidence_acceptance",
+          path: "apps/api/src/model-runtime/git-reviewed-evidence-acceptance.ts",
         },
         {
           role: "runtime_transitive_source",
@@ -233,30 +140,31 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(specs.map(({ path }) => path)).toEqual(
       [...specs.map(({ path }) => path)].sort(),
     );
+    expect(specs.map(({ path }) => path)).not.toEqual(
+      expect.arrayContaining([
+        "apps/api/src/site-builder/eval/copy-operator-evidence-key.ts",
+        "apps/api/src/site-builder/eval/copy-operator-evidence-authorization.ts",
+      ]),
+    );
   });
 
   it("refuses to persist an artifact without repository verification", async () => {
-    const artifact = buildCopyRealCapabilityManifestArtifact({
-      preparationHeadCommit: PREPARATION_HEAD,
-      sourceFiles: sourceFiles(),
-    });
-
     await expect(
-      writeCopyRealCapabilityManifestCreateOnly("/tmp", artifact),
+      writeCopyRealCapabilityManifestCreateOnly("/tmp", {} as never),
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("freezes repository v8 as the current fixed-source create-only manifest", () => {
-    const artifactPath = resolve(REPOSITORY_ROOT, CURRENT_MANIFEST_V8_PATH);
+  it("keeps repository v8 as immutable superseded history", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V8_PATH);
     const artifactBytes = readFileSync(artifactPath);
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "c634d384ed32fd79ae5b53b870c303f6f9995b41562e8396bea9873f182eb14f",
     );
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(() => validateCopyRealCapabilityManifestArtifact(artifact)).toThrow(
+      "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-06-v8",
@@ -275,6 +183,9 @@ describe("Copy real capability create-only manifest preparation", () => {
       },
     });
     expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.requiredFollowup).toContain(
+      "OPERATOR_AUTHENTICATED_EVIDENCE_AUTHORIZATION",
+    );
     expect(artifact.sourceBundle.digest).toBe(
       canonicalDigest(artifact.sourceBundle.files),
     );

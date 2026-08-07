@@ -5,7 +5,7 @@ import type {
   ModelExecutionCampaignContract,
   ModelExecutionLedgerSummary,
 } from "./model-execution-ledger";
-import type { ModelProtocol } from "./types";
+import type { ModelProtocol, ReasoningLevel } from "./types";
 
 export const REAL_MODEL_EXECUTION_LEDGER_SCHEMA_VERSION =
   "real-model-execution-ledger/2026-08-05-v1" as const;
@@ -26,6 +26,27 @@ export interface RealModelExecutionAuthorization {
   maximumExecutions: number;
   maximumWireCalls: number;
   maximumRepairCallsPerExecution: number;
+  evidenceBinding?: {
+    schemaVersion: "real-model-execution-evidence-binding/2026-08-07-v1";
+    executionId: string;
+    childSlotId: string;
+    alias: string;
+    protocol: ModelProtocol;
+    reasoning: ReasoningLevel;
+    fixtureId: string;
+    executionPlanDigest: string;
+    inputDigest: string;
+    contextDigest: string;
+    promptDigest: string;
+    fixedSourceCommit: string;
+    sourceBundleDigest: string;
+    manifestDigest: string;
+    admissionDigest: string;
+    globalAuthorizationDigest: string;
+    childAuthorizationDigest: string;
+    compiledRuntimeDigest: string;
+    compiledBindingDigest: string;
+  };
 }
 
 export interface RealWireSettlementProof {
@@ -33,6 +54,38 @@ export interface RealWireSettlementProof {
   receiptDigest: string;
   channelId: number;
   quota: number;
+}
+
+export interface RealKnownSettlementEvidence {
+  schemaVersion: "real-model-known-settlement-evidence/2026-08-07-v1";
+  executionId: string;
+  executionClaim: { planDigest: string };
+  wires: readonly {
+    wireIndex: number;
+    claim: { wireId: string; requestDigest: string };
+    repairPlan?: {
+      wireId: string;
+      bindingDigest: string;
+      priorOutputDigest: string;
+      findingsDigest: string;
+    };
+    observation: {
+      settlement: "known";
+      requestIdDigest: string;
+      requestedAlias: string;
+      resolvedAlias: string;
+      reportedModel: string;
+      protocol: ModelProtocol;
+      usage: { inputTokens: number; outputTokens: number };
+      outputDigest: string;
+      receiptDigest: string;
+      quota: number;
+      resolverId?: string;
+      channelId?: number;
+    };
+  }[];
+  completion: { outputDigest: string };
+  digest: string;
 }
 
 export interface OperatorEvidenceAuthorizationInput {
@@ -44,6 +97,31 @@ export interface OperatorEvidenceAuthorizationInput {
   executionId: string;
   outputDigest: string;
   candidateLedgerDigest: string;
+}
+
+export interface GitEvidenceAcceptanceInput {
+  acceptanceId: string;
+  artifactDigest: string;
+  artifactCommit: string;
+  mergeCommit: string;
+  pullRequestNumber: number;
+  acceptedEvidenceClass: string;
+  evidenceKind: string;
+  candidateReceiptDigest: string;
+  executionId: string;
+  planDigest: string;
+  outputDigest: string;
+  candidateLedgerDigest: string;
+  fixedSourceCommit: string;
+  sourceBundleDigest: string;
+  manifestDigest: string;
+  compiledRuntimeDigest: string;
+  compiledBindingDigest: string;
+  settlementObserverDigest: string;
+  knownSettlementDigest: string;
+  alias: string;
+  protocol: ModelProtocol;
+  reasoning: ReasoningLevel;
 }
 
 export type RealLedgerEvent =
@@ -97,6 +175,7 @@ export type RealLedgerEvent =
   | ({
       kind: "operator_evidence_authorization_consumed";
     } & OperatorEvidenceAuthorizationInput)
+  | ({ kind: "git_evidence_acceptance_consumed" } & GitEvidenceAcceptanceInput)
   | { kind: "campaign_frozen"; executionId: string; reason: string };
 
 export interface RealLedgerEnvelope {
@@ -127,6 +206,7 @@ export interface RealModelExecutionLedgerSummary extends ModelExecutionLedgerSum
   authorizationDigest: string;
   repairPlans: number;
   operatorEvidenceAuthorizations: number;
+  gitEvidenceAcceptances: number;
 }
 
 export function fail(code: string): never {
@@ -178,6 +258,50 @@ export function validateAuthorization(
     value.maximumRepairCallsPerExecution !== 1
   ) {
     fail("REAL_MODEL_AUTHORIZATION_MISMATCH");
+  }
+  if (value.evidenceBinding != null) {
+    validateIdentifier(
+      value.evidenceBinding.executionId,
+      "REAL_MODEL_AUTHORIZATION_INVALID",
+    );
+    for (const identifier of [
+      value.evidenceBinding.childSlotId,
+      value.evidenceBinding.alias,
+      value.evidenceBinding.fixtureId,
+    ]) {
+      validateIdentifier(identifier, "REAL_MODEL_AUTHORIZATION_INVALID");
+    }
+    if (
+      value.evidenceBinding.schemaVersion !==
+        "real-model-execution-evidence-binding/2026-08-07-v1" ||
+      !/^[0-9a-f]{40}$/u.test(value.evidenceBinding.fixedSourceCommit) ||
+      ![
+        "openai_chat_completions",
+        "openai_responses",
+        "anthropic_messages",
+        "google_native",
+      ].includes(value.evidenceBinding.protocol) ||
+      !["none", "low", "medium", "high", "max"].includes(
+        value.evidenceBinding.reasoning,
+      )
+    ) {
+      fail("REAL_MODEL_AUTHORIZATION_INVALID");
+    }
+    for (const digest of [
+      value.evidenceBinding.sourceBundleDigest,
+      value.evidenceBinding.executionPlanDigest,
+      value.evidenceBinding.inputDigest,
+      value.evidenceBinding.contextDigest,
+      value.evidenceBinding.promptDigest,
+      value.evidenceBinding.manifestDigest,
+      value.evidenceBinding.admissionDigest,
+      value.evidenceBinding.globalAuthorizationDigest,
+      value.evidenceBinding.childAuthorizationDigest,
+      value.evidenceBinding.compiledRuntimeDigest,
+      value.evidenceBinding.compiledBindingDigest,
+    ]) {
+      validateDigest(digest, "REAL_MODEL_AUTHORIZATION_INVALID");
+    }
   }
 }
 

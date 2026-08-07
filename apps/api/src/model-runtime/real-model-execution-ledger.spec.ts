@@ -162,6 +162,88 @@ describe("RealModelExecutionLedger", () => {
     ).rejects.toThrow("REAL_MODEL_EXECUTION_ALREADY_COMPLETED");
   });
 
+  it("reopens only an existing ledger and never creates evidence state", async () => {
+    const target = await paths();
+    await expect(
+      RealModelExecutionLedger.reopen({
+        ledgerPath: target.ledgerPath,
+        authorizationClaimPath: target.authorizationClaimPath,
+        campaign,
+        authorization,
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_LEDGER_REOPEN_REQUIRED");
+    await expect(readFile(target.ledgerPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    const opened = await openLedger(target);
+    const beforeLedger = await readFile(target.ledgerPath);
+    const beforeClaim = await readFile(target.authorizationClaimPath);
+    const reopened = await RealModelExecutionLedger.reopen({
+      ledgerPath: target.ledgerPath,
+      authorizationClaimPath: target.authorizationClaimPath,
+      campaign,
+      authorization,
+    });
+
+    expect(await reopened.summary()).toEqual(await opened.summary());
+    expect(await readFile(target.ledgerPath)).toEqual(beforeLedger);
+    expect(await readFile(target.authorizationClaimPath)).toEqual(beforeClaim);
+  });
+
+  it("binds the claimed execution to the persisted evidence projection", async () => {
+    const target = await paths();
+    const executionPlanDigest = digest("7");
+    const ledger = await RealModelExecutionLedger.open({
+      ledgerPath: target.ledgerPath,
+      authorizationClaimPath: target.authorizationClaimPath,
+      campaign,
+      authorization: {
+        ...authorization,
+        evidenceBinding: {
+          schemaVersion: "real-model-execution-evidence-binding/2026-08-07-v1",
+          executionId: "copy-terra-bound",
+          childSlotId: "copy-child-terra-bound",
+          alias: "gpt-5.6-terra",
+          protocol: "openai_responses",
+          reasoning: "medium",
+          fixtureId: "copy-factual-claims",
+          executionPlanDigest,
+          inputDigest: digest("8"),
+          contextDigest: digest("9"),
+          promptDigest: digest("a"),
+          fixedSourceCommit: "b".repeat(40),
+          sourceBundleDigest: digest("c"),
+          manifestDigest: authorization.manifestDigest,
+          admissionDigest: digest("d"),
+          globalAuthorizationDigest: digest("e"),
+          childAuthorizationDigest: digest("f"),
+          compiledRuntimeDigest: digest("0"),
+          compiledBindingDigest: digest("a"),
+        },
+      },
+    });
+
+    await expect(
+      ledger.claimExecution({
+        executionId: "copy-terra-forged",
+        planDigest: executionPlanDigest,
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_EVIDENCE_BINDING_MISMATCH");
+    await expect(
+      ledger.claimExecution({
+        executionId: "copy-terra-bound",
+        planDigest: digest("6"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_EVIDENCE_BINDING_MISMATCH");
+    await expect(
+      ledger.claimExecution({
+        executionId: "copy-terra-bound",
+        planDigest: executionPlanDigest,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("rejects reuse of the claimed authorization or reservation for another ledger", async () => {
     const target = await paths();
     await openLedger(target);
@@ -381,6 +463,233 @@ describe("RealModelExecutionLedger", () => {
     expect(await ledger.summary()).toMatchObject({
       operatorEvidenceAuthorizations: 0,
       ledgerDigest: candidate.ledgerDigest,
+    });
+  });
+
+  it("consumes one Git-reviewed evidence acceptance with the exact known-settlement chain", async () => {
+    const target = await paths();
+    const ledger = await openLedger(target);
+    await ledger.claimExecution({
+      executionId: "copy-terra",
+      planDigest: campaign.planDigest,
+    });
+    await claimAndSettle(ledger, {
+      executionId: "copy-terra",
+      wireNumber: 1,
+    });
+    await ledger.completeExecution({
+      executionId: "copy-terra",
+      outputDigest: digest("9"),
+    });
+    const candidate = await ledger.summary();
+    const knownSettlementDigest =
+      await ledger.executionKnownSettlementDigest("copy-terra");
+    const acceptanceInput = {
+      acceptanceId: "copy-git-acceptance-001",
+      artifactDigest: digest("d"),
+      artifactCommit: "1".repeat(40),
+      mergeCommit: "2".repeat(40),
+      pullRequestNumber: 401,
+      acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+      evidenceKind: "capability_pilot",
+      candidateReceiptDigest: digest("e"),
+      executionId: "copy-terra",
+      planDigest: campaign.planDigest,
+      outputDigest: digest("9"),
+      candidateLedgerDigest: candidate.ledgerDigest,
+      fixedSourceCommit: "3".repeat(40),
+      sourceBundleDigest: digest("4"),
+      manifestDigest: digest("5"),
+      compiledRuntimeDigest: digest("6"),
+      compiledBindingDigest: digest("7"),
+      settlementObserverDigest: digest("8"),
+      knownSettlementDigest,
+      alias: "gpt-5.6-terra",
+      protocol: "openai_responses",
+      reasoning: "medium",
+    } as const;
+
+    const evidenceLedgerDigest =
+      await ledger.consumeGitEvidenceAcceptance(acceptanceInput);
+
+    expect(evidenceLedgerDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(evidenceLedgerDigest).not.toBe(candidate.ledgerDigest);
+    expect(await ledger.summary()).toMatchObject({
+      gitEvidenceAcceptances: 1,
+      operatorEvidenceAuthorizations: 0,
+      ledgerDigest: evidenceLedgerDigest,
+      frozen: false,
+    });
+    await expect(
+      ledger.consumeGitEvidenceAcceptance(acceptanceInput),
+    ).resolves.toBe(evidenceLedgerDigest);
+
+    const resumed = await openLedger(target);
+    await expect(
+      resumed.consumeGitEvidenceAcceptance(acceptanceInput),
+    ).resolves.toBe(evidenceLedgerDigest);
+    expect(await resumed.summary()).toMatchObject({
+      gitEvidenceAcceptances: 1,
+      ledgerDigest: evidenceLedgerDigest,
+    });
+  });
+
+  it("binds sanitized known-settlement evidence to the plan, wire chain, and completion", async () => {
+    const settle = async (input: {
+      requestDigest: string;
+      receiptDigest: string;
+    }): Promise<string> => {
+      const ledger = await openLedger(await paths());
+      await ledger.claimExecution({
+        executionId: "copy-terra",
+        planDigest: campaign.planDigest,
+      });
+      await ledger.claimWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        requestDigest: input.requestDigest,
+      });
+      await ledger.observeWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        settlement: "known",
+        requestId: "req-copy-terra-1",
+        requestedAlias: "gpt-5.6-terra",
+        resolvedAlias: "gpt-5.6-terra",
+        reportedModel: "gpt-5.6-terra",
+        protocol: "openai_responses",
+        usage: { inputTokens: 120, outputTokens: 30 },
+        outputDigest: digest("9"),
+        receiptDigest: input.receiptDigest,
+        quota: 1_250,
+      });
+      await ledger.completeExecution({
+        executionId: "copy-terra",
+        outputDigest: digest("9"),
+      });
+      return ledger.executionKnownSettlementDigest("copy-terra");
+    };
+
+    const baseline = await settle({
+      requestDigest: digest("7"),
+      receiptDigest: digest("b"),
+    });
+    const [requestDrift, receiptDrift] = await Promise.all([
+      settle({ requestDigest: digest("8"), receiptDigest: digest("b") }),
+      settle({ requestDigest: digest("7"), receiptDigest: digest("c") }),
+    ]);
+    expect(requestDrift).not.toBe(baseline);
+    expect(receiptDrift).not.toBe(baseline);
+
+    const ledger = await openLedger(await paths());
+    await ledger.claimExecution({
+      executionId: "copy-auditable",
+      planDigest: campaign.planDigest,
+    });
+    await claimAndSettle(ledger, {
+      executionId: "copy-auditable",
+      wireNumber: 1,
+    });
+    await ledger.completeExecution({
+      executionId: "copy-auditable",
+      outputDigest: digest("9"),
+    });
+    const evidence = await ledger.executionKnownSettlementEvidence(
+      "copy-auditable",
+      campaign.planDigest,
+    );
+    expect(evidence).toMatchObject({
+      schemaVersion: "real-model-known-settlement-evidence/2026-08-07-v1",
+      executionClaim: { planDigest: campaign.planDigest },
+      wires: [
+        {
+          wireIndex: 1,
+          claim: { requestDigest: digest("7") },
+          observation: {
+            settlement: "known",
+            requestIdDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+            resolvedAlias: "gpt-5.6-terra",
+            outputDigest: digest("9"),
+          },
+        },
+      ],
+      completion: { outputDigest: digest("9") },
+      digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(JSON.stringify(evidence)).not.toContain("req-copy-auditable-1");
+    await expect(
+      ledger.executionKnownSettlementEvidence("copy-auditable", digest("0")),
+    ).rejects.toThrow("REAL_MODEL_GIT_ACCEPTANCE_BINDING_MISMATCH");
+  });
+
+  it("rejects Git acceptance replay, cross-candidate reuse, and settlement drift", async () => {
+    const ledger = await openLedger(await paths());
+    await ledger.claimExecution({
+      executionId: "copy-sonnet",
+      planDigest: campaign.planDigest,
+    });
+    await claimAndSettle(ledger, {
+      executionId: "copy-sonnet",
+      wireNumber: 1,
+      alias: "claude-sonnet-5",
+    });
+    await ledger.completeExecution({
+      executionId: "copy-sonnet",
+      outputDigest: digest("9"),
+    });
+    const candidate = await ledger.summary();
+    const acceptance = {
+      acceptanceId: "copy-git-acceptance-002",
+      artifactDigest: digest("d"),
+      artifactCommit: "1".repeat(40),
+      mergeCommit: "2".repeat(40),
+      pullRequestNumber: 402,
+      acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted",
+      evidenceKind: "capability_pilot",
+      candidateReceiptDigest: digest("e"),
+      executionId: "copy-sonnet",
+      planDigest: campaign.planDigest,
+      outputDigest: digest("9"),
+      candidateLedgerDigest: candidate.ledgerDigest,
+      fixedSourceCommit: "3".repeat(40),
+      sourceBundleDigest: digest("4"),
+      manifestDigest: digest("5"),
+      compiledRuntimeDigest: digest("6"),
+      compiledBindingDigest: digest("7"),
+      settlementObserverDigest: digest("8"),
+      knownSettlementDigest:
+        await ledger.executionKnownSettlementDigest("copy-sonnet"),
+      alias: "claude-sonnet-5",
+      protocol: "anthropic_messages",
+      reasoning: "medium",
+    } as const;
+
+    await expect(
+      ledger.consumeGitEvidenceAcceptance({
+        ...acceptance,
+        knownSettlementDigest: digest("0"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_GIT_ACCEPTANCE_BINDING_MISMATCH");
+    expect(await ledger.summary()).toMatchObject({ gitEvidenceAcceptances: 0 });
+
+    const acceptedDigest =
+      await ledger.consumeGitEvidenceAcceptance(acceptance);
+    await expect(
+      ledger.consumeGitEvidenceAcceptance({
+        ...acceptance,
+        artifactDigest: digest("f"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_GIT_ACCEPTANCE_ALREADY_CONSUMED");
+    await expect(
+      ledger.consumeGitEvidenceAcceptance({
+        ...acceptance,
+        acceptanceId: "copy-git-acceptance-cross-candidate",
+        candidateReceiptDigest: digest("f"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_GIT_ACCEPTANCE_ALREADY_CONSUMED");
+    expect(await ledger.summary()).toMatchObject({
+      gitEvidenceAcceptances: 1,
+      ledgerDigest: acceptedDigest,
     });
   });
 

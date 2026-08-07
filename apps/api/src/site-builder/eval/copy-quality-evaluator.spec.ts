@@ -471,7 +471,9 @@ describe("Copy quality scored evaluator", () => {
 
     expect(outcome.scoredQualityGatePassed).toBe(true);
     expect(outcome.qualityGatePassed).toBe(false);
-    expect(outcome.blockers).toContain("TEST_ONLY_EXECUTION_EVIDENCE");
+    expect(outcome.blockers).toContain(
+      "DURABLE_ACCEPTED_ARTIFACT_REPLAY_REQUIRED",
+    );
     expect(outcome.routeAdoptionAuthorized).toBe(false);
     expect(outcome.promotionDecision).toBe("SEPARATE_PR_REQUIRED");
   });
