@@ -5,6 +5,12 @@ import {
 } from "./copy-evaluation-v2";
 
 describe("Copy Evaluation v2 admission plan", () => {
+  it("versions the Git-reviewed runtime settlement evidence contract", () => {
+    expect(COPY_EVALUATION_V2_PLAN.schemaVersion).toBe(
+      "site-builder-copy-evaluation-plan/2026-08-07-v5",
+    );
+  });
+
   it("keeps dispatch blocked and records zero observed paid activity", () => {
     expect(COPY_EVALUATION_V2_PLAN.executionStatus).toBe(
       "BLOCKED_BEFORE_CAPABILITY_PILOT",
@@ -148,7 +154,19 @@ describe("Copy Evaluation v2 admission plan", () => {
       reviewerPolicy:
         "human_blind_or_independent_model_with_provider_separation",
       candidateIdentityVisibleToReviewer: false,
-      executionReceiptPolicy: "model_runtime_branded_known_settlement_no_cache",
+      executionReceiptPolicy:
+        "blocked_pending_restart_safe_git_reviewed_quality_replay",
+      evidenceAcceptance: {
+        status: "NOT_IMPLEMENTED_FOR_QUALITY_MATRIX",
+        requiredClass: "git_reviewed_gateway_settlement_accepted",
+        requiredKind: "quality_matrix",
+        gitReviewPolicy: "immutable_artifact_on_merged_commit_required",
+        rawEvidencePolicy: "reject_candidate_test_and_unknown_settlement",
+        replayPolicy:
+          "reopen_accepted_ledger_consume_once_and_verify_persisted_output_bytes",
+        identityBindingPolicy:
+          "candidate_fixture_repeat_input_prompt_plan_output_and_settlement",
+      },
       repeatBindingPolicy: "candidate_fixture_repeat_execution_output_digest",
       stabilityPolicy: "deterministic_two_repeat_normalized_token_dice",
       qualityGate: {
@@ -160,7 +178,7 @@ describe("Copy Evaluation v2 admission plan", () => {
         promotionDecision: "SEPARATE_PR_REQUIRED",
         routeAdoptionAuthorized: false,
       },
-      status: "READY",
+      status: "BLOCKED_ON_DURABLE_ACCEPTED_ARTIFACT_REPLAY",
     });
     expect(COPY_EVALUATION_V2_PLAN.requiredContext).toEqual([
       "claim_snapshot",
@@ -176,18 +194,18 @@ describe("Copy Evaluation v2 admission plan", () => {
 
   it("separates the three-call pilot from the later task-shaped matrix", () => {
     expect(COPY_EVALUATION_V2_PLAN.capabilityPilot).toMatchObject({
-      contractId: "site-builder-copy-capability-pilot/2026-08-06-v8",
+      contractId: "site-builder-copy-capability-pilot/2026-08-07-v9",
       contractSchemaVersion:
-        "site-builder-copy-capability-pilot-plan/2026-08-06-v8",
+        "site-builder-copy-capability-pilot-plan/2026-08-07-v9",
       evidenceClassification: "CAPABILITY_ONLY_NOT_QUALITY_EVIDENCE",
       plannedExecutions: 3,
       maximumWireCalls: 6,
-      status: "REAL_RUNTIME_READY_CURRENT_SOURCE_MANIFEST_REQUIRED",
+      status: "REAL_RUNTIME_READY_POST_MERGE_V9_MANIFEST_REQUIRED",
     });
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,
       maximumWireCalls: 72,
-      status: "BLOCKED_BEFORE_PILOT_RESULT",
+      status: "BLOCKED_ON_DURABLE_ACCEPTED_ARTIFACT_REPLAY",
     });
     expect(COPY_EVALUATION_V2_PLAN.cachePolicy).toEqual({
       exactResultCache: "disabled_for_evaluation",

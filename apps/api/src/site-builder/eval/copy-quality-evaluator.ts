@@ -708,16 +708,10 @@ export function aggregateCopyCandidateQuality(input: {
     }),
   );
   const scoredQualityGatePassed = blockers.size === 0;
-  if (
-    input.reviews.some(
-      (review) => review.evidenceClass !== "real_gateway_settled",
-    ) ||
-    input.stability.some(
-      (stability) => stability.evidenceClass !== "real_gateway_settled",
-    )
-  ) {
-    blockers.add("TEST_ONLY_EXECUTION_EVIDENCE");
-  }
+  // Current outcomes are process-local scoring artifacts. Promotion remains
+  // blocked until a restart-safe adapter reopens the accepted ledger, consumes
+  // the Git acceptance once, and verifies persisted output bytes by digest.
+  blockers.add("DURABLE_ACCEPTED_ARTIFACT_REPLAY_REQUIRED");
   return deepFreeze({
     scoredQualityGatePassed,
     qualityGatePassed: blockers.size === 0,

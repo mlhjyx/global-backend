@@ -44,7 +44,7 @@ const CHILD_CAMPAIGNS = COPY_CAPABILITY_PILOT_PLAN.childCampaigns.map(
 
 export const COPY_REAL_CAPABILITY_ADMISSION_SOURCE = deepFreeze({
   schemaVersion:
-    "site-builder-copy-real-capability-admission-source/2026-08-06-v4" as const,
+    "site-builder-copy-real-capability-admission-source/2026-08-07-v5" as const,
   taskId: "site_builder.copy" as const,
   planId: COPY_CAPABILITY_PILOT_PLAN.planId,
   planDigest: canonicalDigest(COPY_CAPABILITY_PILOT_PLAN),

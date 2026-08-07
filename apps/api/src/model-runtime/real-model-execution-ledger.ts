@@ -22,6 +22,8 @@ import {
   validateDigest,
   validateIdentifier,
   writeExclusive,
+  type GitEvidenceAcceptanceInput,
+  type RealKnownSettlementEvidence,
   type RealLedgerEnvelope,
   type RealLedgerEvent,
   type RealModelExecutionAuthorization,
@@ -32,6 +34,8 @@ import type { ModelProtocol } from "./types";
 
 export {
   REAL_MODEL_EXECUTION_LEDGER_SCHEMA_VERSION,
+  type GitEvidenceAcceptanceInput,
+  type RealKnownSettlementEvidence,
   type RealModelExecutionAuthorization,
   type RealModelExecutionLedgerSummary,
   type RealWireSettlementProof,
@@ -47,6 +51,13 @@ export function isTrustedRealModelExecutionLedger(
     value !== null &&
     TRUSTED_REAL_MODEL_EXECUTION_LEDGERS.has(value)
   );
+}
+
+interface RealModelExecutionLedgerOpenInput {
+  ledgerPath: string;
+  authorizationClaimPath: string;
+  campaign: ModelExecutionCampaignContract;
+  authorization: RealModelExecutionAuthorization;
 }
 
 export class RealModelExecutionLedger {
@@ -66,12 +77,22 @@ export class RealModelExecutionLedger {
     this.lockPath = `${ledgerPath}.lock`;
   }
 
-  static async open(input: {
-    ledgerPath: string;
-    authorizationClaimPath: string;
-    campaign: ModelExecutionCampaignContract;
-    authorization: RealModelExecutionAuthorization;
-  }): Promise<RealModelExecutionLedger> {
+  static async open(
+    input: RealModelExecutionLedgerOpenInput,
+  ): Promise<RealModelExecutionLedger> {
+    return this.openWithMode(input, false);
+  }
+
+  static async reopen(
+    input: RealModelExecutionLedgerOpenInput,
+  ): Promise<RealModelExecutionLedger> {
+    return this.openWithMode(input, true);
+  }
+
+  private static async openWithMode(
+    input: RealModelExecutionLedgerOpenInput,
+    existingOnly: boolean,
+  ): Promise<RealModelExecutionLedger> {
     if (
       !isAbsolute(input.ledgerPath) ||
       !isAbsolute(input.authorizationClaimPath) ||
@@ -90,6 +111,9 @@ export class RealModelExecutionLedger {
     if (ledgerExists !== claimExists) {
       fail("REAL_MODEL_LEDGER_IDENTITY_MISMATCH");
     }
+    if (existingOnly && !ledgerExists) {
+      fail("REAL_MODEL_EXECUTION_LEDGER_REOPEN_REQUIRED");
+    }
 
     const lockPath = `${input.ledgerPath}.lock`;
     let lock;
@@ -107,6 +131,7 @@ export class RealModelExecutionLedger {
         ledgerIdentity = await readSecure(input.ledgerPath);
         events = parseLedger(ledgerIdentity.raw);
       } catch (error) {
+        if (existingOnly) throw error;
         if ((error as Error).message !== "REAL_MODEL_EXECUTION_LEDGER_UNSAFE") {
           throw error;
         }
@@ -157,6 +182,9 @@ export class RealModelExecutionLedger {
         }
       }
       if (claimIdentity == null) {
+        if (existingOnly) {
+          fail("REAL_MODEL_EXECUTION_LEDGER_REOPEN_REQUIRED");
+        }
         const material = {
           schemaVersion: AUTHORIZATION_CLAIM_SCHEMA_VERSION,
           authorizationId: input.authorization.authorizationId,
@@ -306,6 +334,14 @@ export class RealModelExecutionLedger {
       input.planDigest,
       "REAL_MODEL_EXECUTION_PLAN_DIGEST_INVALID",
     );
+    if (
+      this.authorization.evidenceBinding != null &&
+      (input.executionId !== this.authorization.evidenceBinding.executionId ||
+        input.planDigest !==
+          this.authorization.evidenceBinding.executionPlanDigest)
+    ) {
+      fail("REAL_MODEL_EXECUTION_EVIDENCE_BINDING_MISMATCH");
+    }
     await this.mutate((events) => {
       if (frozen(events)) fail("REAL_MODEL_EXECUTION_CAMPAIGN_FROZEN");
       if (
@@ -588,6 +624,293 @@ export class RealModelExecutionLedger {
     });
   }
 
+  private knownSettlementEvidenceFromEvents(
+    events: readonly RealLedgerEnvelope[],
+    executionId: string,
+    expectedPlanDigest?: string,
+  ): RealKnownSettlementEvidence {
+    const executionClaims = events.flatMap(({ event }) =>
+      event.kind === "execution_claimed" && event.executionId === executionId
+        ? [event]
+        : [],
+    );
+    const claims = events.flatMap(({ event }) =>
+      event.kind === "wire_claimed" && event.executionId === executionId
+        ? [event]
+        : [],
+    );
+    const observations = events.flatMap(({ event }) =>
+      event.kind === "wire_observed" && event.executionId === executionId
+        ? [event]
+        : [],
+    );
+    const knownObservations = observations.flatMap((observation) =>
+      observation.settlement === "known" ? [observation] : [],
+    );
+    const repairPlans = events.flatMap(({ event }) =>
+      event.kind === "repair_planned" && event.executionId === executionId
+        ? [event]
+        : [],
+    );
+    const completed = events.flatMap(({ event }) =>
+      event.kind === "execution_completed" && event.executionId === executionId
+        ? [event]
+        : [],
+    )[0];
+    const claimedWireIds = claims.map(({ wireId }) => wireId);
+    const observedWireIds = knownObservations.map(({ wireId }) => wireId);
+    const lastObservation = knownObservations.at(-1);
+    if (
+      executionClaims.length !== 1 ||
+      (expectedPlanDigest != null &&
+        executionClaims[0]?.planDigest !== expectedPlanDigest) ||
+      claims.length === 0 ||
+      claims.length !== observations.length ||
+      observations.length !== knownObservations.length ||
+      completed == null ||
+      repairPlans.length !== claims.length - 1 ||
+      repairPlans.some(
+        (repair, index) => repair.wireId !== claims[index + 1]?.wireId,
+      ) ||
+      new Set(claimedWireIds).size !== claimedWireIds.length ||
+      new Set(observedWireIds).size !== observedWireIds.length ||
+      claimedWireIds.some(
+        (wireId, index) => wireId !== observedWireIds[index],
+      ) ||
+      lastObservation?.settlement !== "known" ||
+      lastObservation.outputDigest !== completed.outputDigest
+    ) {
+      fail("REAL_MODEL_GIT_ACCEPTANCE_BINDING_MISMATCH");
+    }
+    const material = Object.freeze({
+      schemaVersion:
+        "real-model-known-settlement-evidence/2026-08-07-v1" as const,
+      executionId,
+      executionClaim: Object.freeze({
+        planDigest: executionClaims[0]!.planDigest,
+      }),
+      wires: Object.freeze(
+        claims.map((claim, index) => {
+          const observation = knownObservations[index]!;
+          const repairPlan = index === 0 ? undefined : repairPlans[index - 1];
+          return Object.freeze({
+            wireIndex: index + 1,
+            claim: Object.freeze({
+              wireId: claim.wireId,
+              requestDigest: claim.requestDigest,
+            }),
+            ...(repairPlan == null
+              ? {}
+              : {
+                  repairPlan: Object.freeze({
+                    wireId: repairPlan.wireId,
+                    bindingDigest: repairPlan.bindingDigest,
+                    priorOutputDigest: repairPlan.priorOutputDigest,
+                    findingsDigest: repairPlan.findingsDigest,
+                  }),
+                }),
+            observation: Object.freeze({
+              settlement: "known" as const,
+              requestIdDigest: canonicalDigest(observation.requestId),
+              requestedAlias: observation.requestedAlias,
+              resolvedAlias: observation.resolvedAlias,
+              reportedModel: observation.reportedModel,
+              protocol: observation.protocol,
+              usage: Object.freeze({ ...observation.usage }),
+              outputDigest: observation.outputDigest,
+              receiptDigest: observation.receiptDigest,
+              quota: observation.quota,
+              ...(observation.resolverId == null
+                ? {}
+                : { resolverId: observation.resolverId }),
+              ...(observation.channelId == null
+                ? {}
+                : { channelId: observation.channelId }),
+            }),
+          });
+        }),
+      ),
+      completion: Object.freeze({ outputDigest: completed.outputDigest }),
+    });
+    return Object.freeze({ ...material, digest: canonicalDigest(material) });
+  }
+
+  private knownSettlementDigestFromEvents(
+    events: readonly RealLedgerEnvelope[],
+    executionId: string,
+    expectedPlanDigest?: string,
+  ): string {
+    return this.knownSettlementEvidenceFromEvents(
+      events,
+      executionId,
+      expectedPlanDigest,
+    ).digest;
+  }
+
+  async executionKnownSettlementEvidence(
+    executionId: string,
+    expectedPlanDigest?: string,
+  ): Promise<RealKnownSettlementEvidence> {
+    validateIdentifier(executionId, "REAL_MODEL_EXECUTION_ID_INVALID");
+    if (expectedPlanDigest != null) {
+      validateDigest(
+        expectedPlanDigest,
+        "REAL_MODEL_EXECUTION_PLAN_DIGEST_INVALID",
+      );
+    }
+    const ledgerIdentity = await readSecure(this.ledgerPath);
+    if (
+      ledgerIdentity.device !== this.ledgerDevice ||
+      ledgerIdentity.inode !== this.ledgerInode
+    ) {
+      fail("REAL_MODEL_EXECUTION_LEDGER_REPLACED");
+    }
+    return this.knownSettlementEvidenceFromEvents(
+      parseLedger(ledgerIdentity.raw),
+      executionId,
+      expectedPlanDigest,
+    );
+  }
+
+  async executionKnownSettlementDigest(
+    executionId: string,
+    expectedPlanDigest?: string,
+  ): Promise<string> {
+    return (
+      await this.executionKnownSettlementEvidence(
+        executionId,
+        expectedPlanDigest,
+      )
+    ).digest;
+  }
+
+  private validateGitEvidenceAcceptance(
+    input: GitEvidenceAcceptanceInput,
+  ): void {
+    for (const value of [
+      input.acceptanceId,
+      input.acceptedEvidenceClass,
+      input.evidenceKind,
+      input.executionId,
+      input.alias,
+      input.protocol,
+      input.reasoning,
+    ]) {
+      validateIdentifier(value, "REAL_MODEL_GIT_ACCEPTANCE_INVALID");
+    }
+    for (const value of [
+      input.artifactDigest,
+      input.candidateReceiptDigest,
+      input.planDigest,
+      input.outputDigest,
+      input.candidateLedgerDigest,
+      input.sourceBundleDigest,
+      input.manifestDigest,
+      input.compiledRuntimeDigest,
+      input.compiledBindingDigest,
+      input.settlementObserverDigest,
+      input.knownSettlementDigest,
+    ]) {
+      validateDigest(value, "REAL_MODEL_GIT_ACCEPTANCE_INVALID");
+    }
+    if (
+      !/^[0-9a-f]{40}$/u.test(input.artifactCommit) ||
+      !/^[0-9a-f]{40}$/u.test(input.mergeCommit) ||
+      !/^[0-9a-f]{40}$/u.test(input.fixedSourceCommit) ||
+      !safeInteger(input.pullRequestNumber, 1)
+    ) {
+      fail("REAL_MODEL_GIT_ACCEPTANCE_INVALID");
+    }
+  }
+
+  async gitEvidenceAcceptanceDigest(
+    input: GitEvidenceAcceptanceInput,
+  ): Promise<string | undefined> {
+    this.validateGitEvidenceAcceptance(input);
+    const ledgerIdentity = await readSecure(this.ledgerPath);
+    if (
+      ledgerIdentity.device !== this.ledgerDevice ||
+      ledgerIdentity.inode !== this.ledgerInode
+    ) {
+      fail("REAL_MODEL_EXECUTION_LEDGER_REPLACED");
+    }
+    return parseLedger(ledgerIdentity.raw).find(
+      ({ event }) =>
+        event.kind === "git_evidence_acceptance_consumed" &&
+        canonicalDigest(event) ===
+          canonicalDigest({
+            kind: "git_evidence_acceptance_consumed",
+            ...input,
+          }),
+    )?.digest;
+  }
+
+  async consumeGitEvidenceAcceptance(
+    input: GitEvidenceAcceptanceInput,
+  ): Promise<string> {
+    this.validateGitEvidenceAcceptance(input);
+    const evidenceLedgerDigest = await this.mutate((events) => {
+      const acceptanceEvent = {
+        kind: "git_evidence_acceptance_consumed" as const,
+        ...input,
+      };
+      const existingAcceptance = events.find(
+        ({ event }) =>
+          event.kind === "git_evidence_acceptance_consumed" &&
+          (event.acceptanceId === input.acceptanceId ||
+            event.executionId === input.executionId ||
+            event.artifactDigest === input.artifactDigest),
+      );
+      if (existingAcceptance != null) {
+        if (
+          canonicalDigest(existingAcceptance.event) !==
+          canonicalDigest(acceptanceEvent)
+        ) {
+          fail("REAL_MODEL_GIT_ACCEPTANCE_ALREADY_CONSUMED");
+        }
+        return [];
+      }
+      if (frozen(events)) fail("REAL_MODEL_EXECUTION_CAMPAIGN_FROZEN");
+      const completed = events.find(
+        ({ event }) =>
+          event.kind === "execution_completed" &&
+          event.executionId === input.executionId,
+      )?.event;
+      const observations = events.flatMap(({ event }) =>
+        event.kind === "wire_observed" &&
+        event.executionId === input.executionId
+          ? [event]
+          : [],
+      );
+      const knownObservations = observations.filter(
+        (observation) => observation.settlement === "known",
+      );
+      if (
+        events.at(-1)?.digest !== input.candidateLedgerDigest ||
+        completed?.kind !== "execution_completed" ||
+        completed.outputDigest !== input.outputDigest ||
+        observations.length === 0 ||
+        observations.length !== knownObservations.length ||
+        knownObservations.some(
+          (observation) =>
+            observation.resolvedAlias !== input.alias ||
+            observation.protocol !== input.protocol,
+        ) ||
+        this.knownSettlementDigestFromEvents(
+          events,
+          input.executionId,
+          input.planDigest,
+        ) !== input.knownSettlementDigest
+      ) {
+        fail("REAL_MODEL_GIT_ACCEPTANCE_BINDING_MISMATCH");
+      }
+      return [acceptanceEvent];
+    });
+    if (evidenceLedgerDigest != null) return evidenceLedgerDigest;
+    const existing = await this.gitEvidenceAcceptanceDigest(input);
+    return existing ?? fail("REAL_MODEL_GIT_ACCEPTANCE_BINDING_MISMATCH");
+  }
+
   private validateOperatorEvidenceAuthorization(
     input: OperatorEvidenceAuthorizationInput,
   ): void {
@@ -755,6 +1078,10 @@ export class RealModelExecutionLedger {
       operatorEvidenceAuthorizations: eventCount(
         events,
         "operator_evidence_authorization_consumed",
+      ),
+      gitEvidenceAcceptances: eventCount(
+        events,
+        "git_evidence_acceptance_consumed",
       ),
       completedExecutions: eventCount(events, "execution_completed"),
       frozen: frozen(events),
