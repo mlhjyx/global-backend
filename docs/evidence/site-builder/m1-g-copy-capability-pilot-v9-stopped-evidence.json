@@ -1,6 +1,6 @@
 {
   "schemaVersion": "site-builder-copy-capability-pilot-stopped-evidence/2026-08-07-v4",
-  "artifactDigest": "f91542a28332f6c05d3d774dfbc85b1b7fd512edcbda874b3aef7363db97408e",
+  "artifactDigest": "a4a3430f5d0964505b81480081cee01f1d7ecf7bf7d9c00bd884811930121a79",
   "classification": "diagnostic_only",
   "promotionEligible": false,
   "taskId": "site_builder.copy",
