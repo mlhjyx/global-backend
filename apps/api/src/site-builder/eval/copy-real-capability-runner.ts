@@ -28,7 +28,10 @@ import {
   type RealModelExecutionLedgerSummary,
 } from "../../model-runtime/real-model-execution-ledger";
 import type { ModelExecutionCampaignContract } from "../../model-runtime/model-execution-ledger";
-import { NativeModelOutputError } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
+import {
+  NativeModelApiError,
+  NativeModelOutputError,
+} from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type { NativeModelAdapterResult } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type {
   ModelExecutionResult,
@@ -763,6 +766,37 @@ function invalidOutput(error: NativeModelOutputError): CopyTaskOutput {
   }
 }
 
+function nativeApiFailureReason(
+  error: NativeModelApiError,
+  settlementReason:
+    | "request_id_missing"
+    | "log_unavailable"
+    | "log_ambiguous"
+    | "log_invalid"
+    | "model_mismatch"
+    | "channel_mismatch"
+    | "settlement_proof_invalid"
+    | "settled",
+): string {
+  const status =
+    Number.isSafeInteger(error.statusCode) &&
+    Number(error.statusCode) >= 100 &&
+    Number(error.statusCode) <= 599
+      ? `http_${error.statusCode}`
+      : "http_unknown";
+  const digest =
+    typeof error.responseBodyDigest === "string" &&
+    /^[0-9a-f]{64}$/u.test(error.responseBodyDigest)
+      ? `:body_sha256_${error.responseBodyDigest}`
+      : "";
+  const bytes =
+    Number.isSafeInteger(error.responseBodyBytes) &&
+    Number(error.responseBodyBytes) >= 0
+      ? `:bytes_${error.responseBodyBytes}`
+      : "";
+  return `native_api_failure_${status}:${settlementReason}${digest}${bytes}`;
+}
+
 export function getCopyRealCapabilityReceipt(
   result: ModelExecutionResult<unknown>,
 ): CopyRealCapabilityReceipt | undefined {
@@ -1450,7 +1484,9 @@ export async function createCopyRealCapabilityRunner(input: {
                   currentPlan.prompt.repair,
                 )}`;
           let native:
-            NativeModelAdapterResult<CopyTaskOutput> | NativeModelOutputError;
+            | NativeModelAdapterResult<CopyTaskOutput>
+            | NativeModelOutputError
+            | NativeModelApiError;
           try {
             native = await gateway.execute<CopyTaskOutput>(execution.protocol, {
               alias: execution.alias,
@@ -1468,11 +1504,16 @@ export async function createCopyRealCapabilityRunner(input: {
               abortSignal: AbortSignal.timeout(execution.timeoutMs),
             });
           } catch (error) {
-            if (!(error instanceof NativeModelOutputError)) throw error;
+            if (
+              !(error instanceof NativeModelOutputError) &&
+              !(error instanceof NativeModelApiError)
+            ) {
+              throw error;
+            }
             native = error;
           }
-          const usage = native.usage ?? {};
-          const usageComplete = completeUsage(usage);
+          const adapterUsage =
+            native instanceof NativeModelApiError ? {} : (native.usage ?? {});
           const requestId = native.requestId ?? null;
           const settlement = await gateway.resolve({
             requestId,
@@ -1482,12 +1523,27 @@ export async function createCopyRealCapabilityRunner(input: {
               execution.alias,
               execution.protocol,
             ),
-            usage,
+            usage: adapterUsage,
             maxOutputTokens: execution.maximumOutputTokens,
             maximumQuotaPoints:
               input.admission.credential.maximumQuotaPointsPerWire,
           });
           const settlementProof = gateway.trustedSettlementProof(settlement);
+          const usage =
+            native instanceof NativeModelApiError &&
+            settlement.status === "settled"
+              ? {
+                  inputTokens: settlement.inputTokens,
+                  outputTokens: settlement.outputTokens,
+                }
+              : adapterUsage;
+          const usageComplete = completeUsage(usage);
+          const reportedModel =
+            native instanceof NativeModelApiError
+              ? settlement.status === "settled"
+                ? settlement.alias
+                : undefined
+              : native.reportedModel;
           const settled =
             settlement.status === "settled" &&
             settlementProof != null &&
@@ -1504,17 +1560,27 @@ export async function createCopyRealCapabilityRunner(input: {
             settlementProof.executionKey ===
               input.admission.selectedExecutionKey &&
             usageComplete &&
-            native.reportedModel === execution.alias &&
+            reportedModel === execution.alias &&
             (!(native instanceof NativeModelOutputError) ||
               native.rawOutputText != null);
+          const settlementReason =
+            settlement.status === "unknown"
+              ? settlement.reason
+              : "settlement_proof_invalid";
+          const apiFailureReason =
+            native instanceof NativeModelApiError
+              ? nativeApiFailureReason(native, settlementReason)
+              : undefined;
           const observation: ModelObservation<CopyTaskOutput> = FREEZE_OBJECT({
             output:
               native instanceof NativeModelOutputError
                 ? invalidOutput(native)
-                : native.output,
+                : native instanceof NativeModelApiError
+                  ? ({} as CopyTaskOutput)
+                  : native.output,
             requestedAlias: native.requestedModel,
             resolvedAlias: execution.alias,
-            reportedModel: native.reportedModel,
+            ...(reportedModel == null ? {} : { reportedModel }),
             protocol: runtimeProtocol(native.protocol),
             usage: {
               inputTokens: usage.inputTokens ?? -1,
@@ -1529,13 +1595,23 @@ export async function createCopyRealCapabilityRunner(input: {
             usageComplete,
             ...(requestId == null ? {} : { requestId }),
             settlement: settled ? "known" : "unknown",
+            ...(!settled && apiFailureReason != null
+              ? { settlementUnknownReason: apiFailureReason }
+              : {}),
             ...(settled ? { settlementProof: settlement } : {}),
             warnings: FREEZE_OBJECT(
               native instanceof NativeModelOutputError
                 ? []
-                : native.warnings.map(({ type, feature, details }) =>
-                    [type, feature, details].filter(Boolean).join(":"),
-                  ),
+                : native instanceof NativeModelApiError
+                  ? [
+                      nativeApiFailureReason(
+                        native,
+                        settled ? "settled" : settlementReason,
+                      ),
+                    ]
+                  : native.warnings.map(({ type, feature, details }) =>
+                      [type, feature, details].filter(Boolean).join(":"),
+                    ),
             ),
           });
           return observation;

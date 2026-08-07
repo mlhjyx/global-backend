@@ -3,6 +3,8 @@
 > 文档 ID：`SITE-EVAL-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：资格证据、Golden 资产、[状态](../status/current.md)与候选基线 `site-builder-model-candidate-baseline/2026-08-04-v2`。
+>
+> **Copy Responses streaming 与 non-2xx settlement（2026-08-07 当前交付分支，zero-call）**：OpenAI Responses adapter 使用 AI SDK `streamText + Output.object`，请求固定 `stream=true`，只在完整终止事件后解析 strict schema 并归一化 reported model、usage、warnings 与 response headers；stream error 经 `onError` 捕获后仍按 bounded `NativeModelApiError` 处理，不输出 raw body。Copy real runner 以非 2xx header request ID 查询 purpose token 的 `/api/log/token`：无唯一 type=2 行时记录 `native_api_failure_http_<status>:<settlement reason>:body_sha256_<digest>:bytes_<n>` 并按 unknown 冻结；若存在合法计费行，则先记录 known settlement，再以 provider-failure warning 冻结。两条路径都不触发内容 repair 或 candidate receipt。fake gateway 覆盖 streamed valid/invalid structured output、524 + request ID + `log_unavailable`、Terra 子账本冻结后 Sol repair 与 Sonnet success；本分支 0 real wire。新真实执行仍须等待本分支合并后的 fixed-source manifest 和独立授权。
 > 落实 [02 §11.8](02-architecture.md)（eval harness）+ 仓库 TDD 硬规矩。两层质量体系：**运行期质量环**（每次 refurbish build 内的确定性 QA/SEO/a11y/genericness 与 capability-gated 审美评审，02 §4 P4，M1-f 已落）管"这一站好不好"；**离线评测基线**（本文件）管"整条管线有没有随改动退化"。借鉴 Mastra"evals 一等公民"思想（03 §10.5）。
 >
 > **as-built vs target**：`task-routes.ts` 已登记 7 个 AI Task；只有 BrandProfile 已完成 MODEL-1 task-shaped 晋级。M1-d 已为现役 `copy` route 接入真实 workflow 消费者、immutable snapshot/slot gate、空 snapshot 中性路径与 en/de-DE/RTL renderer 测试，但**带 approved Claim 的 de-DE 模型质量尚无独立晋级报告**。M1-e-B 已使 design/assemble 成为真实受控消费者，但其 402 后确定性降级不构成模型成功证据。M1-f 已落确定性 P4 与 closed repair；Gemini task-shaped 矩阵超时，因此审美状态只能明确为 unavailable，未晋级、不得冒充模型成功。55 型均为 `m1_e_a_qualified`，不是蒸馏产物状态。

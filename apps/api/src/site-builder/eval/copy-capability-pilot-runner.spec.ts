@@ -87,6 +87,66 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
+function sendOpenAiResponsesStream(
+  response: ServerResponse,
+  input: {
+    requestId?: string;
+    model: string;
+    output: unknown;
+    inputTokens: number;
+    outputTokens: number;
+  },
+): void {
+  const messageId = `message-${input.requestId ?? "missing-request-id"}`;
+  const events = [
+    {
+      type: "response.created",
+      response: {
+        id: `response-${input.requestId ?? "missing-request-id"}`,
+        created_at: 1_786_000_000,
+        model: input.model,
+      },
+    },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { type: "message", id: messageId },
+    },
+    {
+      type: "response.output_text.delta",
+      item_id: messageId,
+      delta: JSON.stringify(input.output),
+    },
+    {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: { type: "message", id: messageId },
+    },
+    {
+      type: "response.completed",
+      response: {
+        usage: {
+          input_tokens: input.inputTokens,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens: input.outputTokens,
+          output_tokens_details: { reasoning_tokens: 10 },
+        },
+      },
+    },
+  ];
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    ...(input.requestId == null
+      ? {}
+      : { "x-oneapi-request-id": input.requestId }),
+  });
+  for (const event of events) {
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+}
+
 async function fakeGateway(
   outputs?: readonly CopyTaskOutput[],
   requestIds: "present" | "missing" = "present",
@@ -113,38 +173,13 @@ async function fakeGateway(
         ? `request-${observed.length}-${model}`
         : undefined;
     if (request.url === "/v1/responses") {
-      sendJson(
-        response,
-        {
-          id: `response-${observed.length}`,
-          created_at: 1_786_000_000,
-          model,
-          output: [
-            {
-              type: "message",
-              id: `message-${observed.length}`,
-              role: "assistant",
-              content: [
-                {
-                  type: "output_text",
-                  text: JSON.stringify(output),
-                  annotations: [],
-                },
-              ],
-            },
-          ],
-          usage:
-            usageMode === "complete"
-              ? {
-                  input_tokens: 120,
-                  input_tokens_details: { cached_tokens: 0 },
-                  output_tokens: 40,
-                  output_tokens_details: { reasoning_tokens: 10 },
-                }
-              : { input_tokens: 120 },
-        },
+      sendOpenAiResponsesStream(response, {
         requestId,
-      );
+        model,
+        output,
+        inputTokens: 120,
+        outputTokens: usageMode === "complete" ? 40 : 0,
+      });
       return;
     }
     if (request.url === "/v1/messages") {
@@ -202,11 +237,13 @@ describe("Copy capability pilot fake-gateway runner", () => {
       model: "gpt-5.6-terra",
       reasoning: { effort: "medium" },
       max_output_tokens: 1200,
+      stream: true,
     });
     expect(gateway.observed[1]!.body).toMatchObject({
       model: "gpt-5.6-sol",
       reasoning: { effort: "high" },
       max_output_tokens: 1200,
+      stream: true,
     });
     expect(gateway.observed[2]!.body).toMatchObject({
       model: "claude-sonnet-5",

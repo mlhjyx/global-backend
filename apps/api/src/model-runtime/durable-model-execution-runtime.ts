@@ -134,6 +134,20 @@ function completeObservation<Output>(
   );
 }
 
+const NATIVE_API_UNKNOWN_SETTLEMENT_REASON =
+  /^native_api_failure_http_(?:[1-5][0-9]{2}|unknown):(?:request_id_missing|log_unavailable|log_ambiguous|log_invalid|model_mismatch|channel_mismatch|settlement_proof_invalid)(?::body_sha256_[0-9a-f]{64})?(?::bytes_(?:0|[1-9][0-9]{0,15}))?$/u;
+
+function unknownSettlementReason<Output>(
+  observation: ModelObservation<Output>,
+): string {
+  const reason = observation.settlementUnknownReason?.trim();
+  return reason != null &&
+    reason.length <= 160 &&
+    NATIVE_API_UNKNOWN_SETTLEMENT_REASON.test(reason)
+    ? reason
+    : "observation_or_settlement_incomplete";
+}
+
 interface GatewaySettlementClaim {
   requestId: string;
   alias: string;
@@ -380,7 +394,7 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
             wireId,
             settlement: "unknown",
             requestId: observation.requestId ?? null,
-            reason: "observation_or_settlement_incomplete",
+            reason: unknownSettlementReason(observation),
           });
           try {
             await this.postWireGuard?.({ plan: currentPlan, observation });

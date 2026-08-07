@@ -82,6 +82,64 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
+function sendOpenAiResponsesStream(
+  response: ServerResponse,
+  input: {
+    requestId: string;
+    alias: string;
+    output: unknown;
+    inputTokens: number;
+    outputTokens: number;
+  },
+): void {
+  const messageId = `message-${input.requestId}`;
+  const events = [
+    {
+      type: "response.created",
+      response: {
+        id: `response-${input.requestId}`,
+        created_at: 1_786_000_000,
+        model: input.alias,
+      },
+    },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { type: "message", id: messageId },
+    },
+    {
+      type: "response.output_text.delta",
+      item_id: messageId,
+      delta: JSON.stringify(input.output),
+    },
+    {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: { type: "message", id: messageId },
+    },
+    {
+      type: "response.completed",
+      response: {
+        usage: {
+          input_tokens: input.inputTokens,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens: input.outputTokens,
+          output_tokens_details: { reasoning_tokens: 10 },
+        },
+      },
+    },
+  ];
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    "x-oneapi-request-id": input.requestId,
+  });
+  for (const event of events) {
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+}
+
 async function realRunnerGateway() {
   const authorizationValue = TEST_GATEWAY_AUTHORIZATION;
   const expected = COPY_ASSEMBLY_EVAL_FIXTURES.find(
@@ -162,6 +220,14 @@ async function realRunnerGateway() {
     const requestId = `request-real-${alias.replaceAll(".", "-")}-${ordinal}`;
     const output =
       alias === "gpt-5.6-sol" && ordinal === 1 ? invalid : expected;
+    if (alias === "gpt-5.6-terra") {
+      response.writeHead(524, {
+        "content-type": "application/json",
+        "x-oneapi-request-id": requestId,
+      });
+      response.end(JSON.stringify({ error: { message: "upstream timeout" } }));
+      return;
+    }
     if (alias !== "gpt-5.6-terra") {
       logs.push({
         request_id: requestId,
@@ -174,6 +240,16 @@ async function realRunnerGateway() {
       });
     }
     if (request.url === "/v1/responses") {
+      if (body.stream === true) {
+        sendOpenAiResponsesStream(response, {
+          requestId,
+          alias,
+          output,
+          inputTokens: 120,
+          outputTokens: 40,
+        });
+        return;
+      }
       sendJson(
         response,
         {
@@ -1240,12 +1316,18 @@ describe("Copy real capability runner admission", () => {
           global.Date = RealDate;
         }
         const acceptanceArtifactText = readFileSync(acceptanceArtifactPath, "utf8");
+        const terraWireObservation = readFileSync(paths[0].ledgerPath, "utf8")
+          .trim()
+          .split("\\n")
+          .map((line) => JSON.parse(line).event)
+          .find((event) => event.kind === "wire_observed");
         process.stdout.write(JSON.stringify({
           unboundChildError,
           ambientWeakMapBypassError,
           duplicateBatchError,
           wrongChildError,
           terraError,
+          terraWireObservation,
           liveReopenExpiredError,
           forgedChallengeError,
           forbiddenChallengeErrors,
@@ -1277,6 +1359,12 @@ describe("Copy real capability runner admission", () => {
       duplicateBatchError: string;
       wrongChildError: string;
       terraError: string;
+      terraWireObservation: {
+        kind: string;
+        settlement: string;
+        requestId: string | null;
+        reason: string;
+      };
       forgedAcceptanceError: string;
       forgedSettlementChainError: string;
       forgedCompiledRuntimeError: string;
@@ -1415,6 +1503,16 @@ describe("Copy real capability runner admission", () => {
       "COPY_REAL_CAPABILITY_BATCH_RUNNER_REQUIRED",
     );
     expect(result.terraError).toMatch(/settlement is unknown/u);
+    expect(result.terraWireObservation).toMatchObject({
+      kind: "wire_observed",
+      settlement: "unknown",
+      requestId: "request-real-gpt-5-6-terra-1",
+      reason: expect.stringMatching(
+        /native_api_failure_http_524:log_unavailable/u,
+      ),
+    });
+    expect(result.terraWireObservation.reason.length).toBeLessThanOrEqual(160);
+    expect(result.terraWireObservation.reason).not.toContain("upstream timeout");
     expect(result.forgedAcceptanceError).toBe(
       "COPY_GIT_EVIDENCE_ACCEPTANCE_REQUIRED",
     );
