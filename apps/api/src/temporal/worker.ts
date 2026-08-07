@@ -66,6 +66,7 @@ import {
   buildWorkerIdentity,
   type WorkflowRunReceiptInput,
 } from "../runtime-ops/runtime-ops.service";
+import { acquisitionActivityFailureInterceptorsForDomain } from "./acquisition-activity-failure.interceptor";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -201,7 +202,7 @@ async function main(): Promise<void> {
     recordWorkflowRunReceipt: (input: WorkflowRunReceiptInput) =>
       runtimeOps.appendWorkflowReceipt(input),
   };
-  const acquisitionActivities = {
+  const acquisitionCoreActivities = {
     ...createUnderstandingActivities({
       prisma,
       gateway,
@@ -236,6 +237,9 @@ async function main(): Promise<void> {
       runtimeTelemetry: runtimeTelemetry.telemetry,
     }),
     ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
+  };
+  const acquisitionActivities = {
+    ...acquisitionCoreActivities,
     ...receiptActivities,
   };
   const maintenanceActivities = {
@@ -282,6 +286,15 @@ async function main(): Promise<void> {
     ...siteBuilderActivities,
     ...maintenanceActivities,
   };
+  const nonAcquisitionActivityTypes = new Set([
+    ...Object.keys(siteBuilderActivities),
+    ...Object.keys(maintenanceActivities),
+  ]);
+  const legacyAcquisitionActivityTypes = new Set(
+    Object.keys(acquisitionCoreActivities).filter(
+      (activityType) => !nonAcquisitionActivityTypes.has(activityType),
+    ),
+  );
   const activitiesByDomain: Record<ResolvedWorkerDomain["domain"], object> = {
     legacy: allActivities,
     acquisition: acquisitionActivities,
@@ -300,6 +313,12 @@ async function main(): Promise<void> {
         maxConcurrentActivityTaskExecutions: domain.activityConcurrency,
         maxConcurrentWorkflowTaskExecutions: domain.workflowConcurrency,
         interceptors: {
+          activity: [
+            ...acquisitionActivityFailureInterceptorsForDomain(
+              domain.domain,
+              legacyAcquisitionActivityTypes,
+            ),
+          ],
           workflowModules: [
             require.resolve("./workflow-run-receipt.interceptor"),
           ],

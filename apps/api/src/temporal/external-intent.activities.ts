@@ -12,6 +12,12 @@ import { TedIntentProjectionService, ProjectTendersResult } from '../intent/ted-
 import { OpenFdaIntentProjectionService, ProjectClearancesResult } from '../intent/openfda-intent-projection.service';
 import { SamIntentProjectionService, ProjectSourcesSoughtResult } from '../intent/sam-intent-projection.service';
 import { IntentRecomputeService, ProjectionSurface } from '../signals/intent-recompute.service';
+import {
+  appendSafeErrorCode,
+  safeErrorCodeSequence,
+  safeTemporalErrorCode,
+  type SafeTemporalErrorCode,
+} from './safe-error-code';
 
 const DEFAULT_MAX_NOTICES = 100; // 单指纹有界样本（绝不 grind 全库）
 const DEFAULT_RECOMPUTE_ROUNDS = 25; // 单 workspace 单 sweep 的复算分页轮上限（25×200=5000 家/轮，防单轮无界 grind）
@@ -48,7 +54,7 @@ export interface IngestSweepSummary {
   ledgerHits: number; // ingest-once 命中数（跨 workspace/ICP 共享）
   signalsUpserted: number;
   budgetExceeded: boolean;
-  errors: string[];
+  errors: string[]; // closed machine codes only; never provider/error text
 }
 
 export interface ExternalIntentIcpResult {
@@ -180,8 +186,8 @@ export function createExternalIntentActivities(deps: {
         );
         out.cpvCodes = cpv.cpvCodes;
         out.buyerCountries = cpv.buyerCountries;
-      } catch (err) {
-        out.error = `cpv: ${String(err).slice(0, 120)}`;
+      } catch {
+        out.error = appendSafeErrorCode(out.error, 'CPV_RESOLUTION_FAILED');
       }
       try {
         const fda = await resolveIcpToFda(
@@ -190,8 +196,8 @@ export function createExternalIntentActivities(deps: {
           { allowLlm: false, workspaceId: args.workspaceId },
         );
         out.fdaProductCodes = fda.productCodes;
-      } catch (err) {
-        out.error = `${out.error ? out.error + '; ' : ''}fda: ${String(err).slice(0, 120)}`;
+      } catch {
+        out.error = appendSafeErrorCode(out.error, 'FDA_RESOLUTION_FAILED');
       }
       try {
         const naics = await resolveIcpToNaics(
@@ -200,8 +206,8 @@ export function createExternalIntentActivities(deps: {
           { allowLlm: false, workspaceId: args.workspaceId },
         );
         out.naicsCodes = naics.naicsCodes;
-      } catch (err) {
-        out.error = `${out.error ? out.error + '; ' : ''}naics: ${String(err).slice(0, 120)}`;
+      } catch {
+        out.error = appendSafeErrorCode(out.error, 'NAICS_RESOLUTION_FAILED');
       }
       return out;
     },
@@ -249,7 +255,10 @@ export function createExternalIntentActivities(deps: {
 
       budgetLedger.open(SWEEP_BUDGET_KEY, sweepBudgetCents());
       try {
-        const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {
+        const runOne = async (
+          provider: 'ted' | 'openfda' | 'samgov',
+          fetch: () => Promise<IngestOutcome>,
+        ): Promise<boolean> => {
           try {
             const r = await fetch();
             // fetches=真实出网尝试次数（含失败——外部配额审计口径；复审 LOW）；未出网的
@@ -262,16 +271,20 @@ export function createExternalIntentActivities(deps: {
             ) {
               summary.fetches += 1;
             }
-            if (r.error) summary.errors.push(`${r.provider}: ${r.error}`);
+            if (r.error) {
+              summary.errors.push(signalIngestOutcomeCode(r.provider, r.error));
+            }
             summary.signalsUpserted += r.signalsUpserted; // ledgerHit 归 0（本轮真实落库数，不跨窗双计）
             return true;
           } catch (err) {
             if (err instanceof BudgetExceededError) {
               summary.budgetExceeded = true; // 显性截断：预算打穿即停拉（绝不静默假完成）
-              summary.errors.push('budget_exceeded');
+              summary.errors.push('BUDGET_EXCEEDED');
               return false;
             }
-            summary.errors.push(String(err).slice(0, 150));
+            summary.errors.push(
+              safeTemporalErrorCode(err, signalIngestFailureCode(provider)),
+            );
             return true; // 单指纹失败 fail-safe 不阻断其余
           }
         };
@@ -279,17 +292,17 @@ export function createExternalIntentActivities(deps: {
         for (const params of tedByFp.values()) {
           const live = await liveEnabled(); // 每指纹 live 重读：中途 ops 关停本轮即生效
           if (!live.ted) break;
-          if (!(await runOne(() => ingestSvc.ingestTed(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+          if (!(await runOne('ted', () => ingestSvc.ingestTed(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
         }
         for (const params of fdaByFp.values()) {
           const live = await liveEnabled();
           if (!live.openfda) break;
-          if (!(await runOne(() => ingestSvc.ingestFda(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+          if (!(await runOne('openfda', () => ingestSvc.ingestFda(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
         }
         if (samParams) {
           const live = await liveEnabled(); // live 重读：中途 ops 关停本轮即生效
           if (live.samgov) {
-            if (!(await runOne(() => ingestSvc.ingestSam(samParams, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+            if (!(await runOne('samgov', () => ingestSvc.ingestSam(samParams, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
           }
         }
         return summary;
@@ -379,7 +392,14 @@ export function createExternalIntentActivities(deps: {
       const out: ExternalIntentIcpResult = {
         workspaceId: args.workspaceId, icpId: args.icpId,
         cpvCodes: args.cpvCodes.length, fdaProductCodes: args.fdaProductCodes.length, naicsCodes: args.naicsCodes?.length ?? 0,
-        ...(args.error ? { error: args.error } : {}),
+        ...(args.error
+          ? {
+              error: safeErrorCodeSequence(
+                args.error,
+                'EXTERNAL_TARGET_RESOLUTION_FAILED',
+              ),
+            }
+          : {}),
       };
 
       // 投影前 **live 门控 DataProvider kill-switch**（Codex #56 P1 收口 + fast-follow 单次读优化）：
@@ -401,8 +421,8 @@ export function createExternalIntentActivities(deps: {
             cpvCodes: args.cpvCodes,
             buyerCountries: args.buyerCountries,
           });
-        } catch (err) {
-          out.error = `${out.error ? out.error + '; ' : ''}ted: ${String(err).slice(0, 120)}`;
+        } catch {
+          out.error = appendSafeErrorCode(out.error, 'TED_PROJECTION_FAILED');
         }
       }
 
@@ -411,8 +431,8 @@ export function createExternalIntentActivities(deps: {
           out.clearances = await openfdaProj.projectClearances(args.workspaceId, {
             productCodes: args.fdaProductCodes,
           });
-        } catch (err) {
-          out.error = `${out.error ? out.error + '; ' : ''}openfda: ${String(err).slice(0, 120)}`;
+        } catch {
+          out.error = appendSafeErrorCode(out.error, 'OPENFDA_PROJECTION_FAILED');
         }
       }
 
@@ -421,8 +441,8 @@ export function createExternalIntentActivities(deps: {
           out.sourcesSought = await samProj.projectSourcesSought(args.workspaceId, {
             naicsCodes: args.naicsCodes,
           });
-        } catch (err) {
-          out.error = `${out.error ? out.error + '; ' : ''}samgov: ${String(err).slice(0, 120)}`;
+        } catch {
+          out.error = appendSafeErrorCode(out.error, 'SAMGOV_PROJECTION_FAILED');
         }
       }
       return out;
@@ -431,3 +451,32 @@ export function createExternalIntentActivities(deps: {
 }
 
 export type ExternalIntentActivities = ReturnType<typeof createExternalIntentActivities>;
+
+function signalIngestFailureCode(
+  provider: 'ted' | 'openfda' | 'samgov',
+): SafeTemporalErrorCode {
+  if (provider === 'ted') return 'TED_SIGNAL_INGEST_FAILED';
+  if (provider === 'openfda') return 'OPENFDA_SIGNAL_INGEST_FAILED';
+  return 'SAMGOV_SIGNAL_INGEST_FAILED';
+}
+
+function signalIngestOutcomeCode(
+  provider: 'ted' | 'openfda' | 'samgov',
+  outcome: string,
+): SafeTemporalErrorCode {
+  const prefix = provider === 'ted' ? 'TED' : provider === 'openfda' ? 'OPENFDA' : 'SAMGOV';
+  const suffix =
+    outcome === 'broker_unavailable'
+      ? 'BROKER_UNAVAILABLE'
+      : outcome === 'empty_query'
+        ? 'EMPTY_QUERY'
+        : outcome === 'lease_busy'
+          ? 'LEASE_BUSY'
+          : outcome === 'lease_lost'
+            ? 'LEASE_LOST'
+            : outcome === 'signal_fetch_failed'
+              ? 'SIGNAL_FETCH_FAILED'
+              : null;
+  if (!suffix) return signalIngestFailureCode(provider);
+  return `${prefix}_${suffix}` as SafeTemporalErrorCode;
+}
