@@ -16,7 +16,8 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 /** Set only in the post-merge manifest PR, never to an unmerged source SHA. */
-export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT: string | null = null;
+export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
+  "5775945c6e056e99ba9357d8d8794b01fad0c66b" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json" as const;
 
