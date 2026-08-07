@@ -36,8 +36,10 @@ const HISTORICAL_MANIFEST_V7_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v7.json";
 const HISTORICAL_MANIFEST_V8_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v8.json";
-const CURRENT_MANIFEST_V9_PATH =
+const HISTORICAL_MANIFEST_V9_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json";
+const CURRENT_MANIFEST_V10_PATH =
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v10.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -47,23 +49,23 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("prepares the post-merge runtime evidence source as manifest v9 without dispatch", () => {
+  it("prepares the post-merge streaming settlement source as manifest v10 without dispatch", () => {
     const artifact = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: PREPARATION_HEAD,
       sourceFiles: sourceFiles(),
     });
 
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "5775945c6e056e99ba9357d8d8794b01fad0c66b",
+      "d819455dea736151a4c30d5ffdd0e224d74af917",
     );
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json",
+      CURRENT_MANIFEST_V10_PATH,
     );
     expect(artifact).toMatchObject({
       schemaVersion:
         "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
       artifactId:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-07-v9",
+        "site-builder-copy-real-capability-manifest-prep/2026-08-07-v10",
       classification: "FIXED_SOURCE_CREATE_ONLY",
       fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD,
@@ -76,7 +78,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       manifest: {
         schemaVersion:
           "site-builder-copy-real-capability-manifest/2026-08-05-v1",
-        manifestId: "site-builder-copy-real-capability/2026-08-07-v9",
+        manifestId: "site-builder-copy-real-capability/2026-08-07-v10",
         fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
         planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
         dispatchAuthorization: "NOT_AUTHORIZED",
@@ -249,17 +251,93 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("freezes repository v9 as the current fixed-source create-only manifest", () => {
-    const artifactPath = resolve(REPOSITORY_ROOT, CURRENT_MANIFEST_V9_PATH);
+  it("freezes repository v10 as the current fixed-source create-only manifest", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, CURRENT_MANIFEST_V10_PATH);
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "1fc5584042da0b8bce46692258fa8e049ee4fc235c9c58ac58a7980f06abfcf5",
+    );
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-07-v10",
+      fixedSourceCommit: "d819455dea736151a4c30d5ffdd0e224d74af917",
+      preparationHeadCommit: "abdc41cb656deca55eec7248b54b5ebb6c7f6868",
+      createOnly: true,
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-07-v10",
+        fixedSourceCommit: "d819455dea736151a4c30d5ffdd0e224d74af917",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+      contractSnapshot: {
+        planId: "site-builder-copy-capability-pilot/2026-08-07-v9",
+        planDigest:
+          "fd77404ce29d05e79550a103331cbac25049064630027672e96581765c364177",
+        executionScopeDigest:
+          "8660c38795b89fe213f0a9727f1a403ff2f8c3c2b5f5d7b36b32d90ef843ef48",
+        admissionSourceDigest:
+          "797e678c26801669ca10348e4c5b457ca5500e342686bef747dbc7cf7301688b",
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(68);
+    expect(artifact.sourceBundle.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "runtime_adapter",
+          path: "apps/api/src/model-runtime/adapters/ai-sdk-openai-responses.adapter.ts",
+        }),
+        expect.objectContaining({
+          role: "runtime_execution",
+          path: "apps/api/src/model-runtime/durable-model-execution-runtime.ts",
+        }),
+        expect.objectContaining({
+          role: "runtime_types",
+          path: "apps/api/src/model-runtime/types.ts",
+        }),
+        expect.objectContaining({
+          role: "real_dispatch_runner",
+          path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+        }),
+      ]),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      "01e541e1b3e238d198ec0b4d2c671b3fdab3c0e8bb292f69f16a6c6c5f5de189",
+    );
+    expect(artifact.manifest.sourceBundleDigest).toBe(
+      artifact.sourceBundle.digest,
+    );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifactDigest).toBe(
+      "ea2783ddb648f3ec6590addbf925566a87dbd7f90a0a09f065ec398d88b0abaf",
+    );
+  });
+
+  it("keeps repository v9 as immutable superseded history", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V9_PATH);
     const artifactBytes = readFileSync(artifactPath);
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "ad29a6fffd5e7dee36e7642f7b7137a855b9d6b6c7e56f240552ccb65c30565e",
     );
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(() => validateCopyRealCapabilityManifestArtifact(artifact)).toThrow(
+      "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-07-v9",
