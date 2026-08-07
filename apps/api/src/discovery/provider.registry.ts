@@ -54,6 +54,8 @@ export class DiscoveryProviderRegistry {
   constructor(deps?: {
     gateway?: ModelGateway;
     broker?: ExecutionBroker;
+    /** Dedicated fail-closed broker for providers migrated to durable budgets. */
+    acquisitionBroker?: ExecutionBroker;
     prisma?: PrismaClient;
     runtimeTelemetry?: RuntimeTelemetry;
   }) {
@@ -108,7 +110,7 @@ export class DiscoveryProviderRegistry {
     this.discovery.push(new TedDiscoveryProvider({ broker }));
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
-    this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
+    this.discovery.push(new OpenFdaDiscoveryProvider({ broker: deps?.acquisitionBroker }));
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。

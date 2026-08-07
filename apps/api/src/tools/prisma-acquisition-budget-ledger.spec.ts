@@ -25,12 +25,12 @@ const auth: AcquisitionBudgetAuthorization = {
   currency: 'USD',
   billingUnit: 'cent',
   limits: amount({ requestCount: 2n, callCount: 2n, recordCount: 100n, costMinor: 20n }),
-  expiresAt: new Date('2026-08-07T12:15:00.000Z'),
+  expiresAt: new Date('2027-08-07T12:15:00.000Z'),
 };
 
 function fakePrisma(rows: unknown[]) {
   const query = vi.fn(async (sql: Prisma.Sql) => {
-    expect(sql).toBeInstanceOf(Prisma.Sql);
+    expect(sql).toEqual(expect.objectContaining({ strings: expect.any(Array), values: expect.any(Array) }));
     return rows;
   });
   const withWorkspace = vi.fn(async (_workspaceId: string, operation: (tx: unknown) => Promise<unknown>) =>
@@ -116,6 +116,27 @@ describe('PrismaAcquisitionBudgetLedger repository contract', () => {
         }),
       ).rejects.toMatchObject({ code: `ACCOUNT_${decision}` });
     }
+  });
+
+  it('rejects incomplete reserve identity before opening a database transaction', async () => {
+    const { prisma, withWorkspace } = fakePrisma([]);
+    const ledger = new PrismaAcquisitionBudgetLedger(prisma);
+
+    await expect(
+      ledger.reserve({
+        accountId: auth.accountId,
+        workspaceId: auth.workspaceId,
+        runId: auth.runId,
+        purpose: auth.purpose,
+        targetKind: auth.targetKind,
+        targetId: '',
+        executionId: 'exec-invalid',
+        attempt: 1,
+        requestFingerprint: 'c'.repeat(64),
+        maximum: amount({ requestCount: 1n }),
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESERVATION' });
+    expect(withWorkspace).not.toHaveBeenCalled();
   });
 
   it('maps UNKNOWN settlement as a full charge and frozen account', async () => {

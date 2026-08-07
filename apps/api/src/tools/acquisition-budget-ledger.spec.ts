@@ -86,6 +86,14 @@ describe('InMemoryAcquisitionBudgetLedger — explicit finite authorization', ()
     await expect(
       ledger.openAccount(authorization({ accountId: 'budget-targetless', targetId: '' })),
     ).rejects.toMatchObject({ code: 'INVALID_AUTHORIZATION' });
+    await expect(
+      ledger.openAccount(
+        authorization({
+          accountId: 'budget-overflow',
+          limits: amount({ requestCount: 1n << 63n }),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_AUTHORIZATION' });
   });
 
   it('opens once and only replays byte-equivalent authorization', async () => {
@@ -98,6 +106,32 @@ describe('InMemoryAcquisitionBudgetLedger — explicit finite authorization', ()
         authorization({ limits: amount({ requestCount: 3n, callCount: 2n, recordCount: 100n, costMinor: 20n }) }),
       ),
     ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('canonicalizes authorization object key order before replay comparison', async () => {
+    const ledger = new InMemoryAcquisitionBudgetLedger(() => NOW);
+    const first = authorization();
+    const reordered = {
+      expiresAt: first.expiresAt,
+      limits: {
+        costMinor: first.limits.costMinor,
+        modelCallCount: first.limits.modelCallCount,
+        recordCount: first.limits.recordCount,
+        callCount: first.limits.callCount,
+        requestCount: first.limits.requestCount,
+      },
+      billingUnit: first.billingUnit,
+      currency: first.currency,
+      targetId: first.targetId,
+      targetKind: first.targetKind,
+      purpose: first.purpose,
+      runId: first.runId,
+      workspaceId: first.workspaceId,
+      accountId: first.accountId,
+    };
+
+    await expect(ledger.openAccount(first)).resolves.toEqual({ kind: 'opened' });
+    await expect(ledger.openAccount(reordered)).resolves.toEqual({ kind: 'replay' });
   });
 });
 
@@ -176,6 +210,10 @@ describe('InMemoryAcquisitionBudgetLedger — atomic reserve and settle', () => 
     await expect(
       ledger.reserve(reserveInput({ executionId: 'next-exec', attempt: 2 })),
     ).rejects.toMatchObject({ code: 'ACCOUNT_FROZEN' });
+    await expect(ledger.reserve(reserveInput())).resolves.toMatchObject({
+      kind: 'replay',
+      reservationId: reservation.reservationId,
+    });
   });
 
   it('actual usage above the reservation is treated as unknown and freezes instead of overspending', async () => {
@@ -190,5 +228,33 @@ describe('InMemoryAcquisitionBudgetLedger — atomic reserve and settle', () => 
     });
     expect(result).toMatchObject({ kind: 'unknown', charged: reservation.maximum });
     expect(await ledger.inspectAccount('budget-001')).toMatchObject({ status: 'FROZEN' });
+  });
+
+  it('rejects malformed runtime settlement values before state changes', async () => {
+    const ledger = new InMemoryAcquisitionBudgetLedger(() => NOW);
+    await ledger.openAccount(authorization());
+    const reservation = await ledger.reserve(reserveInput());
+
+    await expect(
+      ledger.settle({
+        reservation,
+        outcome: 'NOT_AN_OUTCOME' as 'SETTLED',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESERVATION' });
+    await expect(
+      ledger.settle({
+        reservation,
+        outcome: 'RELEASED',
+        actual: amount({ requestCount: 1n }),
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESERVATION' });
+    await expect(
+      ledger.reserve(
+        reserveInput({
+          executionId: 'attempt-overflow',
+          attempt: 2_147_483_648,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_RESERVATION' });
   });
 });

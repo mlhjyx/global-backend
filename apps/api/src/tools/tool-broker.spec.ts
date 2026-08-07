@@ -3,7 +3,11 @@ import { ToolRegistry } from './tool-registry';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger, BudgetExceededError } from './budget';
 import { RateLimiter } from './rate-limiter';
-import { Tool } from './tool-contract';
+import { Tool, type ToolContext } from './tool-contract';
+import {
+  InMemoryAcquisitionBudgetLedger,
+  type BudgetAmount,
+} from './acquisition-budget-ledger';
 
 function fakeTool(id: string, costCents = 5, exec?: () => Promise<unknown>): Tool {
   return {
@@ -85,6 +89,176 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     budget.open('run1', 10);
     await expect(broker.invoke('t.fail', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow('boom');
     expect(budget.remainingCents('run1')).toBe(10); // 全额退还
+  });
+});
+
+describe('ToolBroker — durable acquisition authorization', () => {
+  const workspaceId = '11111111-1111-4111-8111-111111111111';
+  const now = new Date('2026-08-07T12:00:00.000Z');
+  const maximum: BudgetAmount = {
+    requestCount: 1n,
+    callCount: 1n,
+    recordCount: 10n,
+    modelCallCount: 0n,
+    costMinor: 5n,
+  };
+
+  async function durableBroker(exec?: () => Promise<unknown>) {
+    const ledger = new InMemoryAcquisitionBudgetLedger(() => now);
+    await ledger.openAccount({
+      accountId: 'acquisition-tool-account',
+      workspaceId,
+      runId: 'run-1',
+      purpose: 'discovery',
+      targetKind: 'TOOL',
+      targetId: 'openfda.search',
+      currency: 'USD',
+      billingUnit: 'cent',
+      limits: {
+        requestCount: 2n,
+        callCount: 2n,
+        recordCount: 20n,
+        modelCallCount: 0n,
+        costMinor: 10n,
+      },
+      expiresAt: new Date('2026-08-07T12:15:00.000Z'),
+    });
+    const execution = vi.fn(exec ?? (async () => ({ establishments: [{ id: 1 }, { id: 2 }] })));
+    const { broker } = makeBroker(fakeTool('openfda.search', 5, execution), {
+      acquisitionBudget: ledger,
+      acquisitionBudgetMode: 'required',
+    });
+    return { broker, ledger, execution };
+  }
+
+  function context(over: Partial<ToolContext> = {}): ToolContext {
+    return {
+      workspaceId,
+      runId: 'run-1',
+      purpose: 'discovery',
+      acquisitionBudget: {
+        accountId: 'acquisition-tool-account',
+        purpose: 'discovery',
+        targetKind: 'TOOL',
+        targetId: 'openfda.search',
+        executionId: 'workflow-1:activity-1',
+        attempt: 1,
+        maximum,
+      },
+      ...over,
+    };
+  }
+
+  it('rejects a missing durable binding before limiter or tool execution', async () => {
+    const { broker, execution } = await durableBroker();
+
+    await expect(
+      broker.invoke('openfda.search', {}, { workspaceId, runId: 'run-1' }),
+    ).rejects.toThrow(/acquisition budget/i);
+    expect(execution).not.toHaveBeenCalled();
+  });
+
+  it('binds exact target and settles measured records/cost against the durable account', async () => {
+    const { broker, ledger, execution } = await durableBroker();
+
+    await expect(broker.invoke('openfda.search', { code: 'LLZ' }, context())).resolves.toMatchObject({
+      data: { establishments: [{ id: 1 }, { id: 2 }] },
+    });
+    expect(execution).toHaveBeenCalledTimes(1);
+    await expect(ledger.inspectAccount('acquisition-tool-account')).resolves.toEqual({
+      status: 'ACTIVE',
+      remaining: {
+        requestCount: 1n,
+        callCount: 1n,
+        recordCount: 18n,
+        modelCallCount: 0n,
+        costMinor: 5n,
+      },
+    });
+    await expect(
+      broker.invoke('openfda.search', { code: 'LLZ' }, context()),
+    ).rejects.toThrow(/replay/i);
+    expect(execution).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects target drift before execution', async () => {
+    const { broker, execution } = await durableBroker();
+
+    await expect(
+      broker.invoke(
+        'openfda.search',
+        {},
+        context({
+          acquisitionBudget: {
+            ...context().acquisitionBudget!,
+            targetId: 'ted.search',
+          },
+        }),
+      ),
+    ).rejects.toThrow(/target/i);
+    expect(execution).not.toHaveBeenCalled();
+  });
+
+  it('charges the maximum and freezes after an execution with unknown settlement', async () => {
+    const { broker, ledger, execution } = await durableBroker(async () => {
+      throw new Error('upstream disconnected');
+    });
+
+    await expect(
+      broker.invoke('openfda.search', { code: 'LLZ' }, context()),
+    ).rejects.toThrow('upstream disconnected');
+    await expect(ledger.inspectAccount('acquisition-tool-account')).resolves.toMatchObject({
+      status: 'FROZEN',
+    });
+    await expect(
+      broker.invoke(
+        'openfda.search',
+        { code: 'LLZ-2' },
+        context({
+          acquisitionBudget: {
+            ...context().acquisitionBudget!,
+            executionId: 'workflow-1:activity-2',
+            attempt: 2,
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_FROZEN' });
+    expect(execution).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a reservation when the domain delay fails before provider execution', async () => {
+    const ledger = new InMemoryAcquisitionBudgetLedger(() => now);
+    await ledger.openAccount({
+      accountId: 'acquisition-tool-account',
+      workspaceId,
+      runId: 'run-1',
+      purpose: 'discovery',
+      targetKind: 'TOOL',
+      targetId: 'openfda.search',
+      currency: 'USD',
+      billingUnit: 'cent',
+      limits: maximum,
+      expiresAt: new Date('2026-08-07T12:15:00.000Z'),
+    });
+    const execution = vi.fn(async () => ({ establishments: [{ id: 1 }] }));
+    const tool = fakeTool('openfda.search', 5, execution);
+    tool.rateLimit.perDomainCrawlDelayMs = 100;
+    const limiter = new RateLimiter();
+    vi.spyOn(limiter, 'respectDomainDelay').mockRejectedValue(new Error('delay store unavailable'));
+    const { broker } = makeBroker(tool, {
+      acquisitionBudget: ledger,
+      acquisitionBudgetMode: 'required',
+      limiter,
+    });
+
+    await expect(
+      broker.invoke('openfda.search', { domain: 'api.fda.gov' }, context()),
+    ).rejects.toThrow('delay store unavailable');
+    expect(execution).not.toHaveBeenCalled();
+    await expect(ledger.inspectAccount('acquisition-tool-account')).resolves.toEqual({
+      status: 'ACTIVE',
+      remaining: maximum,
+    });
   });
 });
 

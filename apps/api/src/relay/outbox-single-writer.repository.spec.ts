@@ -7,7 +7,7 @@ import {
 
 function repositoryWithLocks(sequence: boolean[]) {
   const query = vi.fn(async (sql: Prisma.Sql) => {
-    expect(sql).toBeInstanceOf(Prisma.Sql);
+    expect(sql).toEqual(expect.objectContaining({ strings: expect.any(Array), values: expect.any(Array) }));
     return [{ acquired: sequence.shift() ?? false }];
   });
   const transaction = vi.fn(async (operation: (tx: unknown) => Promise<unknown>) =>

@@ -720,11 +720,23 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     { id: 'c-2', workspaceId: WS, companyId: 'co-2', factKey: 'quality_certifications', type: 'certification', version: 7 },
   ];
 
+  it('a newly elected replica performs its first sweep without needing 30 local lock wins', async () => {
+    const first = makeDb([]);
+    const second = makeDb([]);
+    const firstService = makeService(first.db, makeTemporal());
+    const secondService = makeService(second.db, makeTemporal());
+
+    await firstService['expireDueClaims']();
+    await secondService['expireDueClaims']();
+
+    expect(first.db.claim.findMany).toHaveBeenCalledTimes(1);
+    expect(second.db.claim.findMany).toHaveBeenCalledTimes(1);
+  });
+
   it('每条 claim 的 CAS + 事件 create 走同一个 interactive transaction', async () => {
     const { db } = makeDb([]);
     db.claim.findMany = vi.fn(async () => CLAIMS.slice(0, 1));
     const svc = makeService(db, makeTemporal());
-    svc['expireCounter'] = 29; // 下一次调用命中 %30===0 的扫描轮
 
     await svc['expireDueClaims']();
 
@@ -763,7 +775,6 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     db.claim.findMany = vi.fn(async () => CLAIMS.slice(0, 1));
     db.claim.updateMany = vi.fn(async () => ({ count: 0 }));
     const svc = makeService(db, makeTemporal());
-    svc['expireCounter'] = 29;
 
     await svc['expireDueClaims']();
 
@@ -779,7 +790,6 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
       return { count: 1 };
     });
     const svc = makeService(db, makeTemporal());
-    svc['expireCounter'] = 29;
     const errSpy = vi.spyOn(svc['logger'], 'error');
 
     await svc['expireDueClaims']();

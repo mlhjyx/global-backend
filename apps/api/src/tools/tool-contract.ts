@@ -5,6 +5,10 @@
  */
 
 import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
+import type {
+  AcquisitionBudgetTargetKind,
+  BudgetAmount,
+} from './acquisition-budget-ledger';
 
 export type ToolCategory =
   | 'search' // 元搜索（searxng）
@@ -78,6 +82,20 @@ export interface ToolContext {
   sourcePolicySnapshot?: Record<string, unknown>;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: Omit<PaidCostContext, 'siteId'>;
+  /**
+   * Explicit acquisition authorization for one physical Broker invocation.
+   * The Broker validates target/purpose/execution/attempt and reserves these
+   * maxima before the limiter or provider can run.
+   */
+  acquisitionBudget?: {
+    accountId: string;
+    purpose: string;
+    targetKind: AcquisitionBudgetTargetKind;
+    targetId: string;
+    executionId: string;
+    attempt: number;
+    maximum: BudgetAmount;
+  };
 }
 
 export interface ToolResult<T = unknown> {

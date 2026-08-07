@@ -16,6 +16,7 @@ import {
 } from '../../adapters/openfda-api';
 import type { OpenFdaSearchInput, OpenFdaSearchOutput } from '../../tools/source-tools';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import { AcquisitionBudgetError } from '../../tools/acquisition-budget-ledger';
 import { companyIdentity } from '../identity';
 
 const PARSER_VERSION = 'openfda/v1';
@@ -51,7 +52,12 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
     // 可含具名 us_agent/contact）——SUSPENDED/未登记/用途不符/无 reader 一律 fail-closed。
     // 无 broker = 不允许直连（生产 registry 两处均注入）。
     if (!this.deps?.broker) {
-       
+      if (ctx.acquisitionBudget) {
+        throw new AcquisitionBudgetError(
+          'INVALID_RESERVATION',
+          'durable acquisition broker unavailable',
+        );
+      }
       console.warn('[openfda] broker unavailable, fail-closed (no raw egress)');
       return { records: [], costCents: 0 };
     }
@@ -72,13 +78,23 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
+        {
+          workspaceId: ctx.workspaceId,
+          runId: ctx.runId,
+          correlationId: ctx.correlationId,
+          purpose: 'discovery',
+          acquisitionBudget: ctx.acquisitionBudget,
+        },
       );
       establishments = res.data.establishments ?? [];
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
        
       console.warn(`[openfda] discover failed: ${String(err).slice(0, 150)}`);
+      // The migrated durable seam must remain visible to orchestration. Hiding
+      // its exhausted/frozen/unknown/ledger failures as a clean empty source
+      // would let the run finalize DONE even though execution was blocked.
+      if (ctx.acquisitionBudget) throw err;
       return { records: [], costCents: 0 };
     }
 

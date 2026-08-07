@@ -14,20 +14,26 @@ import { matchesAssetCleanupPayload, parseAssetCleanupCommand } from '../tempora
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { seedSanctions } from '../sanctions/sanctions-seed';
 import { INTEGRATION_EVENTS, INTERNAL_COMMANDS, PULL_SINK, WEBHOOK_SINK, toEnvelope } from './event-registry';
+import {
+  PostgresOutboxSingleWriterRepository,
+  type OutboxSingleWriterPort,
+} from './outbox-single-writer.repository';
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
- * owner (DATABASE_URL) to read unpublished events ACROSS all tenants — RLS would
- * hide them from app_user. Dispatched work (workflow activities) is tenant-scoped
- * again via withWorkspace. Dev uses simple polling; prod can move to LISTEN/NOTIFY.
+ * owner (OUTBOX_RELAY_DATABASE_URL, or explicit OWNER_DATABASE_URL fallback) to
+ * read unpublished events ACROSS all tenants — RLS would hide them from app_user.
+ * It never falls back to DATABASE_URL / APP_DATABASE_URL. Dispatched work
+ * (workflow activities) is tenant-scoped again via withWorkspace. Dev uses
+ * simple polling; prod can move to LISTEN/NOTIFY.
  *
  * 收口③：事件按注册表三分支——internal command 拉 Temporal；integration 事件原子路由进
  * outbox_delivery 交付账本（publishedAt 语义 = 「已路由进交付层」，消费真值在账本）；
  * 未注册类型 park（不假发布、不毒化轮询）。webhook sink 在同 tick 内派送（退避 + DLQ + HMAC 签名）。
  *
- * ⚠️ 部署约束（GET /events 游标正确性依赖）：交付账本行必须由**单写者**串行创建——
- * 当前单进程部署 + tick 的 running 互斥满足；若上多 API 副本，各自跑 relay 会重引入
- * 「低事件 id 晚建交付行」的乱序，tick 需先加 pg advisory lock 保证单写者再扩副本。
+ * GET /events 游标正确性依赖交付账本**单写者**串行创建。每个 tick 先持有全局
+ * PostgreSQL advisory xact lock；非持锁副本不读/路由/派送。running 只负责本进程防重入。
+ * 连接丢失与已在途外部副作用的剩余边界见 docs/backend/acquisition-ops-durability.md。
  */
 
 /** webhook 死信阈值：连续失败达此次数 → DEAD（人工介入）。 */
@@ -36,6 +42,8 @@ export const MAX_WEBHOOK_ATTEMPTS = 10;
 export const BACKOFF_BASE_MS = 30_000;
 export const BACKOFF_CAP_MS = 3_600_000;
 export const WEBHOOK_TIMEOUT_MS = 10_000;
+/** Cooperative ceiling below the repository's 300s transaction timeout. */
+export const OUTBOX_TICK_DEADLINE_MS = 240_000;
 /** 单 tick 处理上限（路由与派送各自适用），防单轮吃满。 */
 const BATCH_SIZE = 20;
 /** lastError 截断长度：错误体可能是整页 HTML，不让它撑爆行。 */
@@ -78,23 +86,90 @@ type FetchLike = (
   },
 ) => Promise<{ ok: boolean; status: number }>;
 
+const OUTBOX_DATABASE_CONFIG_ERROR =
+  'Outbox relay database configuration rejected: set OUTBOX_RELAY_DATABASE_URL or OWNER_DATABASE_URL to a dedicated PostgreSQL owner/relay role';
+
+function databaseConnectionIdentity(parsed: URL): string | null {
+  try {
+    return JSON.stringify({
+      username: decodeURIComponent(parsed.username),
+      hostname: parsed.hostname.toLowerCase(),
+      port: parsed.port || '5432',
+      database: decodeURIComponent(parsed.pathname).replace(/^\/+/, ''),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Admit only a deliberately configured platform database connection. Errors are
+ * constant strings so malformed URLs and credentials can never reach logs.
+ */
+export function resolveOutboxRelayDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const explicitUrl = env.OUTBOX_RELAY_DATABASE_URL?.trim() || env.OWNER_DATABASE_URL?.trim();
+  if (!explicitUrl) throw new Error(OUTBOX_DATABASE_CONFIG_ERROR);
+
+  let parsed: URL;
+  try {
+    parsed = new URL(explicitUrl);
+  } catch {
+    throw new Error(OUTBOX_DATABASE_CONFIG_ERROR);
+  }
+
+  const connectionIdentity = databaseConnectionIdentity(parsed);
+  const appUrl = env.APP_DATABASE_URL?.trim();
+  let aliasesAppDatabase = explicitUrl === appUrl;
+  if (appUrl && !aliasesAppDatabase) {
+    try {
+      const appIdentity = databaseConnectionIdentity(new URL(appUrl));
+      aliasesAppDatabase = appIdentity !== null && appIdentity === connectionIdentity;
+    } catch {
+      // A malformed APP_DATABASE_URL must not affect admission of an otherwise
+      // explicit owner URL, nor may its value appear in an error.
+    }
+  }
+
+  const isPostgres = parsed.protocol === 'postgres:' || parsed.protocol === 'postgresql:';
+  const username = connectionIdentity ? decodeURIComponent(parsed.username) : '';
+  const hasDatabase = connectionIdentity !== null && parsed.pathname.length > 1;
+  if (
+    !isPostgres ||
+    !parsed.hostname ||
+    !parsed.username ||
+    !hasDatabase ||
+    username === 'app_user' ||
+    aliasesAppDatabase
+  ) {
+    throw new Error(OUTBOX_DATABASE_CONFIG_ERROR);
+  }
+
+  return explicitUrl;
+}
+
 @Injectable()
 export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('OutboxRelay');
   private readonly db: PrismaClient;
   private readonly fetchFn: FetchLike;
+  private readonly singleWriter: OutboxSingleWriterPort;
   private timer?: NodeJS.Timeout;
   private running = false;
-  private expireCounter = 0;
+  private nextClaimExpirySweepAt = 0;
 
   constructor(
     private readonly temporal: TemporalClient,
-    // 可选注入（@Optional：Nest 无 provider 时注入 undefined）→ 单测传 mock db/fetch，生产走默认。
+    // 可选注入（@Optional：Nest 无 provider 时注入 undefined）→ 单测传 mock db/fetch；
+    // 生产默认客户端只接受显式 relay/owner URL，缺失或 app_user 一律启动失败。
     @Optional() db?: PrismaClient,
     @Optional() fetchFn?: FetchLike,
+    @Optional() singleWriter?: OutboxSingleWriterPort,
   ) {
-    this.db = db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+    this.db = db ?? new PrismaClient({ datasourceUrl: resolveOutboxRelayDatabaseUrl() });
     this.fetchFn = fetchFn ?? ((url, init) => fetch(url, init));
+    this.singleWriter =
+      singleWriter ??
+      new PostgresOutboxSingleWriterRepository(this.db as never);
   }
 
   async onModuleInit(): Promise<void> {
@@ -131,24 +206,41 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return; // avoid overlapping ticks
     this.running = true;
     try {
-      await this.expireDueClaims();
-      // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
-      const events = (await this.db.outboxEvent.findMany({
-        where: { publishedAt: null, parkedAt: null },
-        orderBy: { id: 'asc' },
-        take: BATCH_SIZE,
-      })) as OutboxEventRecord[];
-      for (const ev of events) {
-        await this.routeEvent(ev);
-      }
-      // webhook 派送循环：仅推模式启用时才扫账本（与 routeEvent 的 sink 判定共用同一谓词，消除漂移）。
-      if (this.webhookEnabled()) {
-        await this.pumpWebhookDeliveries(new Date());
-      }
+      // The PostgreSQL port holds pg_try_advisory_xact_lock across this entire
+      // callback. A non-holder performs no reads, routing writes, workflows, or
+      // webhook sends, preserving pull-delivery creation order across replicas.
+      await this.singleWriter.runExclusive(() => this.runTickBody());
     } catch (err) {
       this.logger.error(`relay tick failed: ${String(err)}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  private async runTickBody(): Promise<void> {
+    const deadlineAt = Date.now() + OUTBOX_TICK_DEADLINE_MS;
+    await this.expireDueClaims(deadlineAt);
+    this.assertTickDeadline(deadlineAt);
+    // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
+    const events = (await this.db.outboxEvent.findMany({
+      where: { publishedAt: null, parkedAt: null },
+      orderBy: { id: 'asc' },
+      take: BATCH_SIZE,
+    })) as OutboxEventRecord[];
+    for (const ev of events) {
+      this.assertTickDeadline(deadlineAt);
+      await this.routeEvent(ev);
+    }
+    // webhook 派送循环：仅推模式启用时才扫账本（与 routeEvent 的 sink 判定共用同一谓词，消除漂移）。
+    if (this.webhookEnabled()) {
+      this.assertTickDeadline(deadlineAt);
+      await this.pumpWebhookDeliveries(new Date(), deadlineAt);
+    }
+  }
+
+  private assertTickDeadline(deadlineAt: number): void {
+    if (Date.now() >= deadlineAt) {
+      throw new Error('outbox relay tick deadline exceeded');
     }
   }
 
@@ -239,7 +331,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    * 2xx → ACKED；失败 → 指数退避重试；连续 MAX_WEBHOOK_ATTEMPTS 次 → DEAD（DLQ，人工介入）。
    * 每请求带 HMAC 签名头（x-timestamp + x-signature，验签方式见 packages/contracts/events/WEBHOOK.md）。
    */
-  async pumpWebhookDeliveries(now: Date): Promise<void> {
+  async pumpWebhookDeliveries(now: Date, deadlineAt?: number): Promise<void> {
     if (!this.webhookEnabled()) return;
     const url = process.env.SAAS_WEBHOOK_URL as string;
     const secret = process.env.SAAS_WEBHOOK_SECRET as string;
@@ -254,6 +346,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       include: { event: true },
     });
     for (const d of due) {
+      if (deadlineAt !== undefined) this.assertTickDeadline(deadlineAt);
       try {
         const body = JSON.stringify(toEnvelope(d.event));
         const timestamp = now.toISOString();
@@ -316,9 +409,12 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** KNW-003/KNW-009：validUntil 到期的已批准事实 → EXPIRED（约每 60s 扫一次）。 */
-  private async expireDueClaims(): Promise<void> {
-    this.expireCounter = (this.expireCounter + 1) % 30;
-    if (this.expireCounter !== 0) return;
+  private async expireDueClaims(deadlineAt?: number): Promise<void> {
+    const sweepStartedAt = Date.now();
+    if (sweepStartedAt < this.nextClaimExpirySweepAt) return;
+    // Wall-clock gating avoids coupling a global job to one replica's local
+    // count of lock wins. Every newly elected replica performs an initial scan.
+    this.nextClaimExpirySweepAt = sweepStartedAt + 60_000;
     const now = new Date();
     const expired = await this.db.claim.findMany({
       where: { status: 'APPROVED', validUntil: { lt: now } },
@@ -334,6 +430,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     });
     let expiredCount = 0;
     for (const c of expired) {
+      if (deadlineAt !== undefined) this.assertTickDeadline(deadlineAt);
       try {
         // 原子成对（E）：CAS 状态翻转与 ClaimExpired 同事务。读后若人工 revoke/
         // re-approve 已推进 status/version，CAS 失手且不伪造过期事件。

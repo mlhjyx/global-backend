@@ -12,6 +12,14 @@ import {
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
+import {
+  AcquisitionBudgetError,
+  ZERO_BUDGET_AMOUNT,
+  acquisitionBudgetDigest,
+  type AcquisitionBudgetLedgerPort,
+  type AcquisitionBudgetReservation,
+  type BudgetAmount,
+} from './acquisition-budget-ledger';
 
 /**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
@@ -45,6 +53,10 @@ export interface BrokerDeps {
   now?: () => number;
   /** R4-B durable ledger. Any paidCost context fails closed when this is absent. */
   paidLedger?: SiteBuildCostLedger;
+  /** Durable acquisition ledger used by the required acquisition execution seam. */
+  acquisitionBudget?: AcquisitionBudgetLedgerPort;
+  /** required rejects missing account/execution/attempt/caps before limiter/client. */
+  acquisitionBudgetMode?: 'legacy' | 'required';
 }
 
 export interface ToolTrace {
@@ -80,6 +92,9 @@ export class ToolBroker implements ExecutionBroker {
   private readonly deps: BrokerDeps;
 
   constructor(deps: BrokerDeps) {
+    if (deps.acquisitionBudgetMode === 'required' && !deps.acquisitionBudget) {
+      throw new Error('required acquisition budget mode needs a durable acquisition ledger');
+    }
     this.deps = deps;
     this.registry = deps.registry;
     this.budget = deps.budget ?? budgetLedger;
@@ -188,6 +203,7 @@ export class ToolBroker implements ExecutionBroker {
     const runId = ctx.runId ?? ctx.workspaceId;
     let reservation: { runId: string; estCents: number } | undefined;
     let paidScope: PaidOperationReservation | undefined;
+    let acquisitionReservation: AcquisitionBudgetReservation | undefined;
     if (ctx.paidCost) {
       if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
         this.trace(
@@ -246,6 +262,20 @@ export class ToolBroker implements ExecutionBroker {
           `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? 'recorded_failure'}`,
         );
       }
+    } else if (this.deps.acquisitionBudgetMode === 'required') {
+      try {
+        acquisitionReservation = await this.reserveAcquisition(tool, input, ctx);
+      } catch (error) {
+        this.trace(
+          ctx,
+          tool,
+          'DENIED',
+          `acquisition budget denied: ${String(error).slice(0, 150)}`,
+          0,
+          now() - started,
+        );
+        throw error;
+      }
     } else {
       try {
         reservation = this.budget.reserve(
@@ -272,7 +302,13 @@ export class ToolBroker implements ExecutionBroker {
     try {
       release = await this.limiter.acquire(toolId, now());
     } catch (error) {
-      if (paidScope) {
+      if (acquisitionReservation) {
+        await this.deps.acquisitionBudget!.settle({
+          reservation: acquisitionReservation,
+          outcome: 'RELEASED',
+          actual: ZERO_BUDGET_AMOUNT,
+        });
+      } else if (paidScope) {
         await this.settlePersistentOperation({
           scope: paidScope,
           status: 'RELEASED',
@@ -285,8 +321,32 @@ export class ToolBroker implements ExecutionBroker {
       throw error;
     }
     const domain = extractDomain(input);
-    if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
-      await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+    try {
+      if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
+        await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+      }
+    } catch (error) {
+      try {
+        if (acquisitionReservation) {
+          await this.deps.acquisitionBudget!.settle({
+            reservation: acquisitionReservation,
+            outcome: 'RELEASED',
+            actual: ZERO_BUDGET_AMOUNT,
+          });
+        } else if (paidScope) {
+          await this.settlePersistentOperation({
+            scope: paidScope,
+            status: 'RELEASED',
+            measurement: this.notIncurredMeasurement(),
+            errorCode: 'NOT_EXECUTED',
+          });
+        } else if (reservation) {
+          this.budget.settle(reservation, 0);
+        }
+      } finally {
+        release?.();
+      }
+      throw error;
     }
 
     // 5) 执行 + 6) settle + 7) trace
@@ -295,7 +355,12 @@ export class ToolBroker implements ExecutionBroker {
       try {
         result = await tool.execute(input, ctx);
       } catch (err) {
-        if (paidScope) {
+        if (acquisitionReservation) {
+          await this.deps.acquisitionBudget!.settle({
+            reservation: acquisitionReservation,
+            outcome: 'UNKNOWN',
+          });
+        } else if (paidScope) {
           await this.settlePersistentOperation({
             scope: paidScope,
             status: 'FAILED',
@@ -315,7 +380,28 @@ export class ToolBroker implements ExecutionBroker {
 
       // A settlement failure is intentionally outside the execute() catch: the
       // external call has succeeded and must not be relabelled or repeated.
-      if (paidScope) {
+      if (acquisitionReservation) {
+        const actual = this.measureAcquisitionResult(result);
+        const settlement = await this.deps.acquisitionBudget!.settle({
+          reservation: acquisitionReservation,
+          outcome: actual ? 'SETTLED' : 'UNKNOWN',
+          ...(actual ? { actual } : {}),
+        });
+        if (!actual || settlement.kind === 'unknown') {
+          this.trace(
+            ctx,
+            tool,
+            'ERROR',
+            'acquisition settlement unknown; account frozen',
+            result.costCents,
+            now() - started,
+          );
+          throw new AcquisitionBudgetError(
+            'ACCOUNT_FROZEN',
+            'acquisition result could not be settled within the reserved maxima',
+          );
+        }
+      } else if (paidScope) {
         const durableReplay = tool.durableReplayResult?.(result) ?? null;
         await this.settlePersistentOperation({
           scope: paidScope,
@@ -344,6 +430,97 @@ export class ToolBroker implements ExecutionBroker {
     } finally {
       release?.();
     }
+  }
+
+  private async reserveAcquisition<I, O>(
+    tool: Tool<I, O>,
+    input: I,
+    ctx: ToolContext,
+  ): Promise<AcquisitionBudgetReservation> {
+    const binding = ctx.acquisitionBudget;
+    if (!binding || !ctx.runId) {
+      throw new AcquisitionBudgetError(
+        'INVALID_RESERVATION',
+        'acquisition budget binding and runId are required',
+      );
+    }
+    const purposes = Array.isArray(ctx.purpose)
+      ? ctx.purpose
+      : ctx.purpose
+        ? [ctx.purpose]
+        : [];
+    if (
+      binding.targetKind !== 'TOOL' ||
+      binding.targetId !== tool.id ||
+      !purposes.includes(binding.purpose)
+    ) {
+      throw new AcquisitionBudgetError(
+        'IDENTITY_MISMATCH',
+        'acquisition budget target or purpose differs from the tool invocation',
+      );
+    }
+    if (
+      binding.maximum.requestCount !== 1n ||
+      binding.maximum.callCount !== 1n ||
+      binding.maximum.modelCallCount !== 0n ||
+      !Number.isSafeInteger(tool.cost.estimatedCents) ||
+      tool.cost.estimatedCents < 0 ||
+      binding.maximum.costMinor < BigInt(tool.cost.estimatedCents)
+    ) {
+      throw new AcquisitionBudgetError(
+        'INVALID_RESERVATION',
+        'tool authorization must cap one request/call and cover estimated cost',
+      );
+    }
+    const reservation = await this.deps.acquisitionBudget!.reserve({
+      accountId: binding.accountId,
+      workspaceId: ctx.workspaceId,
+      runId: ctx.runId,
+      purpose: binding.purpose,
+      targetKind: binding.targetKind,
+      targetId: binding.targetId,
+      executionId: binding.executionId,
+      attempt: binding.attempt,
+      requestFingerprint: acquisitionBudgetDigest({
+        toolId: tool.id,
+        toolVersion: tool.version,
+        idempotencyKey: tool.idempotencyKey(input),
+        input,
+      }),
+      maximum: binding.maximum,
+    });
+    if (reservation.kind === 'replay') {
+      throw new AcquisitionBudgetError(
+        'IDEMPOTENCY_CONFLICT',
+        'acquisition reservation replay has no durable provider result; execution blocked',
+      );
+    }
+    return reservation;
+  }
+
+  private measureAcquisitionResult(result: ToolResult<unknown>): BudgetAmount | null {
+    if (!Number.isSafeInteger(result.costCents) || result.costCents < 0) {
+      return null;
+    }
+    const recordCount = this.countResultRecords(result.data);
+    if (recordCount === null) return null;
+    return {
+      requestCount: 1n,
+      callCount: 1n,
+      recordCount,
+      modelCallCount: 0n,
+      costMinor: BigInt(result.costCents),
+    };
+  }
+
+  private countResultRecords(data: unknown): bigint | null {
+    if (Array.isArray(data)) return BigInt(data.length);
+    if (data === null || data === undefined) return 0n;
+    if (typeof data !== 'object') return 0n;
+    const arrays = Object.values(data).filter(Array.isArray);
+    if (arrays.length === 0) return 0n;
+    const count = arrays.reduce((total, value) => total + value.length, 0);
+    return Number.isSafeInteger(count) ? BigInt(count) : null;
   }
 
   private notIncurredMeasurement(): PaidCostMeasurement {

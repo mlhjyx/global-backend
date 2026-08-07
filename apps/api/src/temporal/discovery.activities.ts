@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { activityInfo } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
@@ -12,6 +13,11 @@ import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import { BudgetExceededError, budgetLedger, runBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import {
+  acquisitionBudgetDigest,
+  type AcquisitionBudgetLedgerPort,
+  type BudgetAmount,
+} from '../tools/acquisition-budget-ledger';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -33,6 +39,58 @@ const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 const WATCH_REGISTER_LIMIT = 12; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
+const OPENFDA_BUDGET_TARGET = 'openfda.search';
+const OPENFDA_MAX_RECORDS = 250n;
+const ACQUISITION_AUTHORIZATION_TTL_MS = 24 * 60 * 60 * 1000;
+
+class DiscoveryProviderExecutionError extends Error {
+  constructor(
+    readonly providerKey: string,
+    readonly originalError: unknown,
+  ) {
+    super(`discovery provider ${providerKey} failed`);
+    this.name = 'DiscoveryProviderExecutionError';
+  }
+}
+
+interface ActivityExecutionIdentity {
+  attempt: number;
+  activityId: string;
+  workflowId: string;
+  workflowRunId: string;
+  firstScheduledAtMs: number;
+}
+
+function currentActivityExecution(): ActivityExecutionIdentity {
+  const info = activityInfo();
+  if (
+    !info.workflowExecution ||
+    !Number.isSafeInteger(info.attempt) ||
+    info.attempt < 1 ||
+    !Number.isFinite(info.scheduledTimestampMs)
+  ) {
+    throw new Error(
+      'durable acquisition authorization requires a Temporal workflow activity identity',
+    );
+  }
+  return {
+    attempt: info.attempt,
+    activityId: info.activityId,
+    workflowId: info.workflowExecution.workflowId,
+    workflowRunId: info.workflowExecution.runId,
+    firstScheduledAtMs: info.scheduledTimestampMs,
+  };
+}
+
+function openFdaMaximum(): BudgetAmount {
+  return {
+    requestCount: 1n,
+    callCount: 1n,
+    recordCount: OPENFDA_MAX_RECORDS,
+    modelCallCount: 0n,
+    costMinor: 0n,
+  };
+}
 
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
@@ -46,6 +104,10 @@ export function createDiscoveryActivities(deps: {
   taxonomy?: TaxonomyResolver;
   /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
   broker?: ExecutionBroker;
+  /** Durable acquisition ledger; currently required by the openFDA discovery seam. */
+  acquisitionBudget?: AcquisitionBudgetLedgerPort;
+  /** Test seam only; production uses Temporal's immutable activityInfo(). */
+  activityExecution?: () => ActivityExecutionIdentity;
   runtimeTelemetry?: RuntimeTelemetry;
 }) {
   // 收口② D「真开账」：每个活动入口幂等 open（open 取较大值，重复无害；账本进程内，
@@ -131,19 +193,83 @@ export function createDiscoveryActivities(deps: {
       if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
       if (!adapters.length) return { rawCount: 0, costCents: 0, provider: null, budgetTruncated: false };
 
+      let openFdaBinding: ExecutionContext['acquisitionBudget'];
+      if (adapters.some((adapter) => adapter.key === 'openfda') && deps.acquisitionBudget) {
+        const execution = (deps.activityExecution ?? currentActivityExecution)();
+        const queryFingerprint = acquisitionBudgetDigest(q);
+        const accountId = `aba_${acquisitionBudgetDigest({
+          workspaceId: args.workspaceId,
+          runId: args.runId,
+          purpose: 'discovery',
+          targetKind: 'TOOL',
+          targetId: OPENFDA_BUDGET_TARGET,
+          queryFingerprint,
+        })}`;
+        const maximum = openFdaMaximum();
+        await deps.acquisitionBudget.openAccount({
+          accountId,
+          workspaceId: args.workspaceId,
+          runId: args.runId,
+          purpose: 'discovery',
+          targetKind: 'TOOL',
+          targetId: OPENFDA_BUDGET_TARGET,
+          currency: 'USD',
+          billingUnit: 'cent',
+          // One provider attempt per query. A pre-execution release permits a
+          // retry; any reserved/settled/unknown prior call blocks a duplicate.
+          limits: maximum,
+          expiresAt: new Date(execution.firstScheduledAtMs + ACQUISITION_AUTHORIZATION_TTL_MS),
+        });
+        openFdaBinding = {
+          accountId,
+          purpose: 'discovery',
+          targetKind: 'TOOL',
+          targetId: OPENFDA_BUDGET_TARGET,
+          executionId: `exec_${acquisitionBudgetDigest({
+            workflowId: execution.workflowId,
+            workflowRunId: execution.workflowRunId,
+            activityId: execution.activityId,
+            queryFingerprint,
+          })}`,
+          attempt: execution.attempt,
+          maximum,
+        };
+      }
+
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
       ensureRunBudget(args.runId);
       const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: args.runId, correlationId: args.runId };
       const blockedDomains = suspended.map((s) => s.domain);
       const settled = await Promise.allSettled(
-        adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
+        adapters.map((a) => {
+          const adapterContext =
+            a.key === 'openfda' && openFdaBinding
+              ? { ...ctx, acquisitionBudget: openFdaBinding }
+              : ctx;
+          return a
+            .discoverCompanies(q, adapterContext, { blockedDomains })
+            .then((r) => ({ key: a.key, r }))
+            .catch((error: unknown) => {
+              throw new DiscoveryProviderExecutionError(a.key, error);
+            });
+        }),
       );
       // 预算耗尽绝不被吞成假成功。**不能**靠「某源 reject」判断——provider 的 fail-safe catch 会把
       // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
       // 改由 BudgetLedger 唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
       // wasExhausted=true → 显性上报截断，让 workflow 判 PARTIAL 而非假 DONE（各源 fail-safe 拿到的部分记录仍落库）。
-      const budgetTruncated = budgetLedger.wasExhausted(args.runId);
+      const durableAcquisitionBlocked = Boolean(
+        openFdaBinding &&
+          settled.some(
+            (result) =>
+              result.status === 'rejected' &&
+              result.reason instanceof DiscoveryProviderExecutionError &&
+              result.reason.providerKey === 'openfda',
+          ),
+      );
+      const budgetTruncated =
+        budgetLedger.wasExhausted(args.runId) || durableAcquisitionBlocked;
 
       // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
       // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务

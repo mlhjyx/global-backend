@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
 import { budgetLedger } from '../tools/budget';
+import {
+  AcquisitionBudgetError,
+  InMemoryAcquisitionBudgetLedger,
+  acquisitionBudgetDigest,
+} from '../tools/acquisition-budget-ledger';
 import type {
   CompanyDiscoveryAdapter,
   EnrichmentResult,
@@ -65,7 +70,15 @@ const QUERY = { source_class: 'public_intelligence', filters: {}, keywords: [], 
 
 // executeQuery/enrichRun 不 close run 预算账户（finalizeRun 才 close）→ 测试自行 force-close，清打标防单例泄漏。
 afterEach(() => {
-  for (const k of ['run-budget-x', 'run-ok-x', 'run-enrich-x', 'run-enrich-ok', 'run-signal-x', 'run-leak']) {
+  for (const k of [
+    'run-budget-x',
+    'run-ok-x',
+    'run-enrich-x',
+    'run-enrich-ok',
+    'run-signal-x',
+    'run-leak',
+    '22222222-2222-4222-8222-222222222222',
+  ]) {
     budgetLedger.close(k, { force: true });
   }
 });
@@ -113,6 +126,107 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     const r = await acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-ok-x', query: QUERY });
     expect(r.budgetTruncated).toBe(false);
     expect(r.rawCount).toBe(1);
+  });
+
+  it('openFDA production seam opens one finite account and passes exact execution/attempt/target binding', async () => {
+    const workspaceId = '11111111-1111-4111-8111-111111111111';
+    const runId = '22222222-2222-4222-8222-222222222222';
+    const ledger = new InMemoryAcquisitionBudgetLedger(
+      () => new Date('2026-08-07T12:00:00.000Z'),
+    );
+    let seen: ExecutionContext | undefined;
+    const openFda = {
+      key: 'openfda',
+      classes: ['public_intelligence'],
+      discoverCompanies: async (_q: unknown, ctx: ExecutionContext) => {
+        seen = ctx;
+        return { records: [], costCents: 0 };
+      },
+    } as CompanyDiscoveryAdapter;
+    const deps = makeDeps([openFda]);
+    deps.acquisitionBudget = ledger;
+    deps.activityExecution = () => ({
+      attempt: 2,
+      activityId: 'execute-query-7',
+      workflowId: 'discovery-workflow-1',
+      workflowRunId: 'temporal-run-1',
+      firstScheduledAtMs: Date.parse('2026-08-07T12:00:00.000Z'),
+    });
+    const acts = createDiscoveryActivities(deps);
+
+    await acts.executeQuery({
+      workspaceId,
+      runId,
+      query: {
+        ...QUERY,
+        filters: { product_code: 'LLZ', source_hint: 'openfda' },
+      },
+    });
+
+    expect(seen?.acquisitionBudget).toMatchObject({
+      purpose: 'discovery',
+      targetKind: 'TOOL',
+      targetId: 'openfda.search',
+      attempt: 2,
+      maximum: {
+        requestCount: 1n,
+        callCount: 1n,
+        recordCount: 250n,
+        modelCallCount: 0n,
+        costMinor: 0n,
+      },
+    });
+    expect(seen?.acquisitionBudget?.executionId).toMatch(/^exec_[0-9a-f]{64}$/);
+    const binding = seen?.acquisitionBudget;
+    if (!binding) throw new Error('expected acquisition binding');
+    await expect(
+      ledger.reserve({
+        accountId: binding.accountId,
+        workspaceId,
+        runId,
+        purpose: binding.purpose,
+        targetKind: binding.targetKind,
+        targetId: binding.targetId,
+        executionId: binding.executionId,
+        attempt: binding.attempt,
+        requestFingerprint: acquisitionBudgetDigest({ productCode: 'LLZ' }),
+        maximum: binding.maximum,
+      }),
+    ).resolves.toMatchObject({ kind: 'reserved' });
+  });
+
+  it('marks a durable openFDA rejection as truncated while preserving other provider records', async () => {
+    const workspaceId = '11111111-1111-4111-8111-111111111111';
+    const runId = '22222222-2222-4222-8222-222222222222';
+    const openFda = {
+      key: 'openfda',
+      classes: ['public_intelligence'],
+      discoverCompanies: async () => {
+        throw new AcquisitionBudgetError('ACCOUNT_FROZEN', 'durable settlement unknown');
+      },
+    } as CompanyDiscoveryAdapter;
+    const deps = makeDeps([openFda, okAdapter('wikidata', [REC])]);
+    deps.acquisitionBudget = new InMemoryAcquisitionBudgetLedger(
+      () => new Date('2026-08-07T12:00:00.000Z'),
+    );
+    deps.activityExecution = () => ({
+      attempt: 1,
+      activityId: 'execute-query-8',
+      workflowId: 'discovery-workflow-1',
+      workflowRunId: 'temporal-run-1',
+      firstScheduledAtMs: Date.parse('2026-08-07T12:00:00.000Z'),
+    });
+
+    const result = await createDiscoveryActivities(deps).executeQuery({
+      workspaceId,
+      runId,
+      query: {
+        ...QUERY,
+        filters: { product_code: 'LLZ' },
+      },
+    });
+
+    expect(result).toMatchObject({ rawCount: 1, budgetTruncated: true });
   });
 });
 
