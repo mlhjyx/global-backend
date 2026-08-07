@@ -75,6 +75,7 @@ import {
   type WorkflowRunReceiptInput,
 } from "../runtime-ops/runtime-ops.service";
 import { acquisitionActivityFailureInterceptorsForDomain } from "./acquisition-activity-failure.interceptor";
+import { connectNativeTemporal } from "./native-connection";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -175,9 +176,9 @@ async function main(): Promise<void> {
   );
   gateway.paidLedger = costLedger;
 
-  const connection = await NativeConnection.connect({
+  const connection = await connectNativeTemporal(NativeConnection, {
     address: runtime.safety.temporal.address,
-    connectTimeout: runtime.safety.temporal.connectTimeoutMs,
+    timeoutMs: runtime.safety.temporal.connectTimeoutMs,
   });
 
   // 收口②：全部原始出网仍经 ToolBroker 的同一政策面。openFDA discovery 先迁入
