@@ -8,6 +8,7 @@ import {
   assertComplianceCatalogFacts,
   assertIsolatedDatabaseRoleFacts,
   resolveAcquisitionComplianceVerifierEnvironment,
+  safeAcquisitionComplianceFailureCode,
   type ComplianceCatalogFacts,
   type DatabaseRoleFacts,
 } from "../../scripts/verify-acquisition-compliance-postgres.mts";
@@ -197,6 +198,23 @@ describe("acquisition compliance PostgreSQL verifier admission", () => {
     }
     expect(rendered).not.toContain(sensitiveMarker);
   });
+
+  it("renders only fixed internal failure codes and genericizes shaped provider text", () => {
+    expect(
+      safeAcquisitionComplianceFailureCode(
+        new Error(ACQUISITION_COMPLIANCE_POSTGRES_NOT_RUN),
+      ),
+    ).toBe(ACQUISITION_COMPLIANCE_POSTGRES_NOT_RUN);
+    for (const untrusted of [
+      "ACME",
+      "WANG",
+      "ACQUISITION_COMPLIANCE_UNREGISTERED_PROVIDER_TEXT",
+    ]) {
+      expect(safeAcquisitionComplianceFailureCode(new Error(untrusted))).toBe(
+        "ACQUISITION_COMPLIANCE_POSTGRES_VERIFICATION_FAILED",
+      );
+    }
+  });
 });
 
 describe("acquisition compliance PostgreSQL verifier role and catalog facts", () => {
@@ -316,9 +334,13 @@ describe("acquisition compliance PostgreSQL verifier implementation integrity", 
       "suppression_release_decision",
       "policy_decision_log",
     ]) {
-      expect(script).toContain(`\"${table}\"`);
-      expect(script).toMatch(new RegExp(`UPDATE \\"${table}\\"`, "i"));
-      expect(script).toMatch(new RegExp(`DELETE FROM \\"${table}\\"`, "i"));
+      expect(script).toContain(`"${table}"`);
+      expect(script).toMatch(
+        new RegExp(`UPDATE (?:"public"\\.)?"${table}"`, "i"),
+      );
+      expect(script).toMatch(
+        new RegExp(`DELETE FROM (?:"public"\\.)?"${table}"`, "i"),
+      );
     }
     expect(script).toContain("verifyWorkspaceIsolation");
     expect(script).toContain("otherWorkspaceId");
