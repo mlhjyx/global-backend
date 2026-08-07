@@ -106,6 +106,16 @@ function makeTx(store: Store) {
         });
         return { count };
       },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      findFirst: async ({ where }: any) =>
+        store.deliveries.find(
+          (d) => d.eventId === where.eventId && d.sink === where.sink,
+        ) ?? null,
+    },
+    outboxEvent: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      findFirst: async ({ where }: any) =>
+        store.deliveries.find((d) => d.eventId === where.eventId)?.event ?? null,
     },
   };
 }
@@ -155,7 +165,17 @@ describe('EventsService.list — 集成事件拉取（账本游标翻页）', ()
     expect(page2.data).toHaveLength(1);
     expect(page2.data[0].event_type).toBe('DiscoveryRunCompleted');
     expect(page2.hasMore).toBe(false);
-    expect(page2.nextCursor).toBeNull();
+    expect(page2.nextCursor).toBe('13');
+
+    // An empty follow-up keeps null; the preceding terminal page remains
+    // checkpointable at its last delivery-ledger id.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const empty = (await svc.list(ctx as any, { limit: 2, cursor: page2.nextCursor! })) as {
+      data: Array<Record<string, unknown>>;
+      nextCursor: string | null;
+    };
+    expect(empty.data).toEqual([]);
+    expect(empty.nextCursor).toBeNull();
   });
 
   it('A 回归：低事件 id 晚路由（重试/乱序提交）→ 账本 id 靠后，游标不漏交付', async () => {
@@ -225,7 +245,7 @@ describe('EventsService.list — 集成事件拉取（账本游标翻页）', ()
 describe('EventsService.ack — pull sink 消费真值（幂等 + sink 锁死）', () => {
   const ev = (n: bigint) => makeEvent(n, 'LeadQualified');
 
-  it('ACK PENDING → acked:n + ackedAt/deliveredAt；重复 ACK → acked:0（幂等）', async () => {
+  it('ACK PENDING reports ACKED_NOW; duplicate ACK reports ALREADY_ACKED', async () => {
     const store: Store = {
       deliveries: [makeDelivery(1n, ev(1n)), makeDelivery(2n, ev(2n))],
     };
@@ -235,12 +255,19 @@ describe('EventsService.ack — pull sink 消费真值（幂等 + sink 锁死）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const first = (await svc.ack(ctx as any, ids)) as { acked: number };
     expect(first.acked).toBe(2);
+    expect(first).toMatchObject({
+      results: ids.map((event_id) => ({ event_id, outcome: 'ACKED_NOW' })),
+    });
     expect(store.deliveries.every((d) => d.status === 'ACKED')).toBe(true);
-    expect(store.deliveries.every((d) => d.ackedAt instanceof Date && d.deliveredAt instanceof Date)).toBe(true);
+    expect(store.deliveries.every((d) => d.ackedAt instanceof Date)).toBe(true);
+    expect(store.deliveries.every((d) => d.deliveredAt === null)).toBe(true);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const second = (await svc.ack(ctx as any, ids)) as { acked: number };
     expect(second.acked).toBe(0);
+    expect(second).toMatchObject({
+      results: ids.map((event_id) => ({ event_id, outcome: 'ALREADY_ACKED' })),
+    });
   });
 
   it('ACK 只碰 PENDING：DEAD/其他 sink 的行不动', async () => {
@@ -255,8 +282,32 @@ describe('EventsService.ack — pull sink 消费真值（幂等 + sink 锁死）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = (await svc.ack(ctx as any, ['aaaaaaaa-0000-0000-0000-000000000001'])) as { acked: number };
     expect(r.acked).toBe(0);
+    expect(r).toMatchObject({
+      results: [
+        {
+          event_id: 'aaaaaaaa-0000-0000-0000-000000000001',
+          outcome: 'NOT_DELIVERED',
+        },
+      ],
+    });
     expect(store.deliveries[0].status).toBe('DEAD');
     expect(store.deliveries[1].status).toBe('PENDING'); // webhook sink 不受 saas ACK 影响
+  });
+
+  it('distinguishes an unknown event from a known event without a pull delivery', async () => {
+    const knownWithoutSaas = makeDelivery(1n, ev(1n), { sink: 'webhook' });
+    const svc = makeService({ deliveries: [knownWithoutSaas] });
+    const known = knownWithoutSaas.eventId;
+    const unknown = 'bbbbbbbb-0000-0000-0000-000000000099';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect(svc.ack(ctx as any, [known, unknown])).resolves.toEqual({
+      acked: 0,
+      results: [
+        { event_id: known, outcome: 'NOT_DELIVERED' },
+        { event_id: unknown, outcome: 'NOT_FOUND' },
+      ],
+    });
   });
 
   it('F 回归：sink 缺省恒为 saas——webhook 的 ACKED 只能由 relay 2xx 写，API 侧无从触碰', async () => {
@@ -268,7 +319,9 @@ describe('EventsService.ack — pull sink 消费真值（幂等 + sink 锁死）
           seenWheres.push(where);
           return { count: 0 };
         },
+        findFirst: async () => null,
       },
+      outboxEvent: { findFirst: async () => null },
     };
     const prisma = { withWorkspace: async (_ws: string, fn: (t: unknown) => Promise<unknown>) => fn(tx) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

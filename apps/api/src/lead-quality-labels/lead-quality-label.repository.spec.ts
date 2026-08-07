@@ -59,6 +59,7 @@ function harness(
     lockedLead?: boolean;
     createError?: unknown;
     confirmedQgoCount?: number;
+    distinctQgoHandoffs?: Array<{ leadQualifiedEventId: string }>;
   } = {},
 ) {
   let existingCalls = 0;
@@ -76,12 +77,24 @@ function harness(
     ),
     outboxEvent: {
       findFirst: vi.fn(async () =>
-        options.event === undefined ? { eventId: EVENT_ID } : options.event,
+        options.event === undefined
+          ? { eventId: EVENT_ID, occurredAt: new Date("2026-08-07T11:00:00.000Z") }
+          : options.event,
       ),
     },
     leadQualityLabel: {
       findFirst,
-      findMany: vi.fn(async () => options.accepted ?? []),
+      findMany: vi.fn(async (args: Record<string, unknown>) => {
+        if ("distinct" in args) {
+          return (
+            options.distinctQgoHandoffs ??
+            Array.from({ length: options.confirmedQgoCount ?? 0 }, (_, index) => ({
+              leadQualifiedEventId: `22222222-2222-4222-8${String(index).padStart(3, "0")}-222222222222`,
+            }))
+          );
+        }
+        return options.accepted ?? [];
+      }),
       count: vi.fn(async () => options.confirmedQgoCount ?? 0),
       create,
     },
@@ -124,7 +137,7 @@ describe("LeadQualityLabelRepository.append", () => {
         aggregateType: "Lead",
         aggregateId: LEAD_ID,
       },
-      select: { eventId: true },
+      select: { eventId: true, occurredAt: true },
     });
     expect(h.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -136,6 +149,41 @@ describe("LeadQualityLabelRepository.append", () => {
     });
     expect(h.tx).not.toHaveProperty("lead.update");
     expect(h.tx).not.toHaveProperty("opportunity");
+  });
+
+  it("aggregates prerequisites only within the exact handoff and passes causal timestamps", async () => {
+    const accepted = [
+      row({
+        label: "QGO_CREATED",
+        occurredAt: new Date("2026-08-07T11:30:00.000Z"),
+      }),
+    ];
+    const h = harness({ accepted });
+    await h.repository.append(CTX, {
+      ...REQUEST,
+      label: "SALES_ACCEPTED",
+    });
+
+    expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledWith({
+      where: {
+        workspaceId: CTX.workspaceId,
+        leadId: LEAD_ID,
+        leadQualifiedEventId: EVENT_ID,
+        disposition: "ACCEPTED",
+      },
+      select: {
+        label: true,
+        commercialResult: true,
+        reasonCode: true,
+        occurredAt: true,
+      },
+    });
+    expect(h.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        disposition: "ACCEPTED",
+        heldReason: null,
+      }),
+    });
   });
 
   it("persists an out-of-order label as HELD instead of discarding or later flipping it", async () => {
@@ -230,21 +278,47 @@ describe("LeadQualityLabelRepository.append", () => {
 });
 
 describe("LeadQualityLabelLearningConsumer", () => {
-  it("exposes accepted rows only as explicitly offline per-lead observation", async () => {
+  it("exposes accepted rows only as explicitly offline exact-handoff observation", async () => {
     const accepted = [row()];
     const h = harness({ accepted });
     const consumer = new LeadQualityLabelLearningConsumer(h.prisma);
 
-    await expect(consumer.observeForLead(CTX, LEAD_ID)).resolves.toEqual(
+    await expect(
+      consumer.observeForHandoff(CTX, LEAD_ID, EVENT_ID),
+    ).resolves.toEqual(
       accepted,
     );
     expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledWith({
       where: {
         workspaceId: CTX.workspaceId,
         leadId: LEAD_ID,
+        leadQualifiedEventId: EVENT_ID,
         disposition: "ACCEPTED",
       },
       orderBy: [{ occurredAt: "asc" }, { ingestedAt: "asc" }, { id: "asc" }],
+    });
+  });
+
+  it("counts distinct accepted handoffs rather than duplicate source facts", async () => {
+    const repeated = Array.from({ length: 50 }, () => ({
+      leadQualifiedEventId: EVENT_ID,
+    }));
+    const h = harness({ distinctQgoHandoffs: repeated.slice(0, 1), accepted: [row()] });
+    const consumer = new LeadQualityLabelLearningConsumer(h.prisma);
+
+    await expect(consumer.buildTuningBatch(CTX)).resolves.toMatchObject({
+      eligible: false,
+      confirmedQgoLabels: 1,
+      labels: [],
+    });
+    expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledWith({
+      where: {
+        workspaceId: CTX.workspaceId,
+        label: "QGO_CREATED",
+        disposition: "ACCEPTED",
+      },
+      select: { leadQualifiedEventId: true },
+      distinct: ["leadQualifiedEventId"],
     });
   });
 
@@ -259,7 +333,7 @@ describe("LeadQualityLabelLearningConsumer", () => {
       minimumRequired: 50,
       labels: [],
     });
-    expect(h.tx.leadQualityLabel.findMany).not.toHaveBeenCalled();
+    expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledTimes(1);
   });
 
   it("builds a batch from ACCEPTED rows only once the 50-QGO guard is met", async () => {
@@ -276,6 +350,28 @@ describe("LeadQualityLabelLearningConsumer", () => {
     expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledWith({
       where: { workspaceId: CTX.workspaceId, disposition: "ACCEPTED" },
       orderBy: [{ occurredAt: "asc" }, { ingestedAt: "asc" }, { id: "asc" }],
+    });
+  });
+
+  it("never admits two contradictory manual rejection facts for one handoff into learning", async () => {
+    const first = row({
+      id: "33333333-3333-4333-8333-333333333333",
+      label: "LEAD_OUTCOME_REJECTED",
+      reasonCode: "NOT_ICP",
+    });
+    const contradictory = row({
+      id: "44444444-4444-4444-8444-444444444444",
+      sourceEventId: "crm:event:contradictory",
+      label: "LEAD_OUTCOME_REJECTED",
+      reasonCode: "BAD_TIMING",
+      ingestedAt: new Date("2026-08-07T12:02:00.000Z"),
+    });
+    const h = harness({ confirmedQgoCount: 50, accepted: [first, contradictory] });
+    const consumer = new LeadQualityLabelLearningConsumer(h.prisma);
+
+    await expect(consumer.buildTuningBatch(CTX)).resolves.toMatchObject({
+      eligible: true,
+      labels: [first],
     });
   });
 });

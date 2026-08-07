@@ -44,6 +44,31 @@ describe("lead_quality_label persistence contract", () => {
     expect(sql).toMatch(
       /FOREIGN KEY \("lead_qualified_event_id", "workspace_id"\)[\s\S]+REFERENCES "outbox_event"\("event_id", "workspace_id"\)[\s\S]+ON DELETE RESTRICT/,
     );
+    expect(sql).not.toMatch(/lead_quality_label[\s\S]+ON UPDATE CASCADE/);
+    expect(schema).toMatch(
+      /LeadQualityLabelLead[\s\S]+onDelete: Restrict, onUpdate: NoAction/,
+    );
+    expect(schema).toMatch(
+      /LeadQualityLabelQualifiedEvent[\s\S]+onDelete: Restrict, onUpdate: NoAction/,
+    );
+  });
+
+  it("enforces exact LeadQualified event type/workspace/aggregate identity against direct app_user inserts", () => {
+    expect(sql).toContain("enforce_lead_quality_label_handoff_identity");
+    expect(sql).toMatch(
+      /event_id" = NEW\."lead_qualified_event_id"[\s\S]+workspace_id" = NEW\."workspace_id"[\s\S]+event_type" = 'LeadQualified'[\s\S]+aggregate_type" = 'Lead'[\s\S]+aggregate_id" = NEW\."lead_id"::text/,
+    );
+    expect(sql).toMatch(
+      /BEFORE INSERT ON "lead_quality_label"[\s\S]+EXECUTE FUNCTION "enforce_lead_quality_label_handoff_identity"/,
+    );
+    expect(sql).toContain("protect_lead_quality_label_handoff_identity");
+    expect(sql).toMatch(/BEFORE UPDATE OF "event_type", "aggregate_type", "aggregate_id"/);
+    expect(sql).toMatch(
+      /previous_workspace[\s\S]+set_config\('app\.current_workspace_id', NEW\."workspace_id"::text, true\)[\s\S]+set_config\('app\.current_workspace_id', COALESCE\(previous_workspace, ''\), true\)/,
+    );
+    expect(sql).toMatch(
+      /previous_workspace[\s\S]+set_config\('app\.current_workspace_id', OLD\."workspace_id"::text, true\)/,
+    );
   });
 
   it("closes semantic value combinations and models the table in Prisma", () => {

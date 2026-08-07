@@ -8,14 +8,30 @@ import {
 const positive = (
   label: AcceptedLeadQualityLabel["label"],
   commercialResult: AcceptedLeadQualityLabel["commercialResult"] = null,
-): AcceptedLeadQualityLabel => ({ label, commercialResult });
+  occurredAt = new Date("2026-08-07T12:00:00.000Z"),
+  reasonCode: "NOT_ICP" | "BAD_TIMING" | null = null,
+): AcceptedLeadQualityLabel =>
+  ({ label, commercialResult, occurredAt, reasonCode }) as AcceptedLeadQualityLabel;
+
+const context = {
+  handoffOccurredAt: new Date("2026-08-07T11:00:00.000Z"),
+  observedAt: new Date("2026-08-07T13:00:00.000Z"),
+};
+
+const input = (
+  label: Parameters<typeof classifyLeadQualityLabel>[0]["label"],
+  commercialResult: Parameters<typeof classifyLeadQualityLabel>[0]["commercialResult"] = null,
+  occurredAt = new Date("2026-08-07T12:00:00.000Z"),
+  reasonCode: "NOT_ICP" | "BAD_TIMING" | null = null,
+) => ({ label, commercialResult, occurredAt, reasonCode });
 
 describe("classifyLeadQualityLabel", () => {
   it("accepts QGO_CREATED when the repository has already bound a matching LeadQualified event", () => {
     expect(
       classifyLeadQualityLabel(
-        { label: "QGO_CREATED", commercialResult: null },
+        input("QGO_CREATED"),
         [],
+        context,
       ),
     ).toEqual({
       disposition: "ACCEPTED",
@@ -26,8 +42,9 @@ describe("classifyLeadQualityLabel", () => {
   it("holds SALES_ACCEPTED until an accepted QGO_CREATED fact exists", () => {
     expect(
       classifyLeadQualityLabel(
-        { label: "SALES_ACCEPTED", commercialResult: null },
+        input("SALES_ACCEPTED"),
         [],
+        context,
       ),
     ).toEqual({
       disposition: "HELD",
@@ -35,8 +52,9 @@ describe("classifyLeadQualityLabel", () => {
     });
     expect(
       classifyLeadQualityLabel(
-        { label: "SALES_ACCEPTED", commercialResult: null },
+        input("SALES_ACCEPTED"),
         [positive("QGO_CREATED")],
+        context,
       ),
     ).toEqual({ disposition: "ACCEPTED", heldReason: null });
   });
@@ -44,15 +62,17 @@ describe("classifyLeadQualityLabel", () => {
   it("holds commercial outcomes until both accepted positive prerequisites exist", () => {
     expect(
       classifyLeadQualityLabel(
-        { label: "COMMERCIAL_OUTCOME_VERIFIED", commercialResult: "WON" },
+        input("COMMERCIAL_OUTCOME_VERIFIED", "WON"),
         [positive("QGO_CREATED")],
+        context,
       ),
     ).toEqual({ disposition: "HELD", heldReason: "MISSING_PREREQUISITE" });
 
     expect(
       classifyLeadQualityLabel(
-        { label: "COMMERCIAL_OUTCOME_VERIFIED", commercialResult: "WON" },
+        input("COMMERCIAL_OUTCOME_VERIFIED", "WON"),
         [positive("QGO_CREATED"), positive("SALES_ACCEPTED")],
+        context,
       ),
     ).toEqual({ disposition: "ACCEPTED", heldReason: null });
   });
@@ -60,8 +80,9 @@ describe("classifyLeadQualityLabel", () => {
   it("holds a rejection after any accepted positive fact and holds later positives after an accepted rejection", () => {
     expect(
       classifyLeadQualityLabel(
-        { label: "LEAD_OUTCOME_REJECTED", commercialResult: null },
+        input("LEAD_OUTCOME_REJECTED"),
         [positive("QGO_CREATED")],
+        context,
       ),
     ).toEqual({
       disposition: "HELD",
@@ -70,8 +91,9 @@ describe("classifyLeadQualityLabel", () => {
 
     expect(
       classifyLeadQualityLabel(
-        { label: "QGO_CREATED", commercialResult: null },
+        input("QGO_CREATED"),
         [positive("LEAD_OUTCOME_REJECTED")],
+        context,
       ),
     ).toEqual({ disposition: "HELD", heldReason: "CONTRADICTORY_REJECTION" });
   });
@@ -79,17 +101,71 @@ describe("classifyLeadQualityLabel", () => {
   it("holds a conflicting WON/LOST fact without changing the earlier accepted fact", () => {
     expect(
       classifyLeadQualityLabel(
-        { label: "COMMERCIAL_OUTCOME_VERIFIED", commercialResult: "LOST" },
+        input("COMMERCIAL_OUTCOME_VERIFIED", "LOST"),
         [
           positive("QGO_CREATED"),
           positive("SALES_ACCEPTED"),
           positive("COMMERCIAL_OUTCOME_VERIFIED", "WON"),
         ],
+        context,
       ),
     ).toEqual({
       disposition: "HELD",
       heldReason: "CONTRADICTORY_COMMERCIAL_RESULT",
     });
+  });
+
+  it("holds a different rejection reason for the same handoff as contradictory history", () => {
+    expect(
+      classifyLeadQualityLabel(
+        input("LEAD_OUTCOME_REJECTED", null, undefined, "BAD_TIMING"),
+        [
+          positive(
+            "LEAD_OUTCOME_REJECTED",
+            null,
+            new Date("2026-08-07T11:30:00.000Z"),
+            "NOT_ICP",
+          ),
+        ],
+        context,
+      ),
+    ).toEqual({ disposition: "HELD", heldReason: "CONTRADICTORY_REJECTION" });
+  });
+
+  it("holds facts timestamped before their exact handoff or beyond the bounded future skew", () => {
+    expect(
+      classifyLeadQualityLabel(
+        input("QGO_CREATED", null, new Date("2026-08-07T10:59:59.999Z")),
+        [],
+        context,
+      ),
+    ).toEqual({ disposition: "HELD", heldReason: "OCCURRED_BEFORE_HANDOFF" });
+
+    expect(
+      classifyLeadQualityLabel(
+        input("QGO_CREATED", null, new Date("2026-08-07T13:05:00.001Z")),
+        [],
+        context,
+      ),
+    ).toEqual({ disposition: "HELD", heldReason: "OCCURRED_AT_IN_FUTURE" });
+  });
+
+  it("holds a late-arriving older fact and never uses a future prerequisite", () => {
+    expect(
+      classifyLeadQualityLabel(
+        input("QGO_CREATED", null, new Date("2026-08-07T11:30:00.000Z")),
+        [positive("SALES_ACCEPTED", null, new Date("2026-08-07T12:00:00.000Z"))],
+        context,
+      ),
+    ).toEqual({ disposition: "HELD", heldReason: "OUT_OF_ORDER_ARRIVAL" });
+
+    expect(
+      classifyLeadQualityLabel(
+        input("SALES_ACCEPTED", null, new Date("2026-08-07T11:30:00.000Z")),
+        [positive("QGO_CREATED", null, new Date("2026-08-07T12:00:00.000Z"))],
+        context,
+      ),
+    ).toEqual({ disposition: "HELD", heldReason: "OUT_OF_ORDER_ARRIVAL" });
   });
 });
 
