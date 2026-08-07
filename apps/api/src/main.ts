@@ -22,6 +22,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('ICP')
     .addTag('Discovery')
     .addTag('Leads')
+    .addTag('Lead quality labels')
     .addTag('Events')
     .addTag('System')
     .addBearerAuth()

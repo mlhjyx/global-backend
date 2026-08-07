@@ -1,28 +1,29 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
-import { describe, expect, it, vi } from 'vitest';
-import type { RequestContext } from '../auth/request-context';
-import type { PrismaService } from '../prisma/prisma.service';
+import { ConflictException, NotFoundException } from "@nestjs/common";
+import { describe, expect, it, vi } from "vitest";
+import type { RequestContext } from "../auth/request-context";
+import type { PrismaService } from "../prisma/prisma.service";
 import {
   LeadQualityLabelLearningConsumer,
   LeadQualityLabelRepository,
-} from './lead-quality-label.repository';
-import type { NormalizedLeadQualityLabelRequest } from './lead-quality-label.domain';
+  MIN_CONFIRMED_QGO_LABELS,
+} from "./lead-quality-label.repository";
+import type { NormalizedLeadQualityLabelRequest } from "./lead-quality-label.domain";
 
 const CTX: RequestContext = {
-  workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-  userId: 'user-from-token',
-  roles: ['member'],
+  workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  userId: "user-from-token",
+  roles: ["member"],
 };
-const LEAD_ID = '11111111-1111-4111-8111-111111111111';
-const EVENT_ID = '22222222-2222-4222-8222-222222222222';
+const LEAD_ID = "11111111-1111-4111-8111-111111111111";
+const EVENT_ID = "22222222-2222-4222-8222-222222222222";
 
 const REQUEST: NormalizedLeadQualityLabelRequest = {
-  sourceEventId: 'crm:event:1001',
+  sourceEventId: "crm:event:1001",
   leadId: LEAD_ID,
   leadQualifiedEventId: EVENT_ID,
-  label: 'QGO_CREATED',
-  occurredAt: new Date('2026-08-07T12:00:00.000Z'),
-  sourceSystem: 'growth-saas',
+  label: "QGO_CREATED",
+  occurredAt: new Date("2026-08-07T12:00:00.000Z"),
+  sourceSystem: "growth-saas",
   externalObjectRef: null,
   reasonCode: null,
   commercialResult: null,
@@ -30,7 +31,7 @@ const REQUEST: NormalizedLeadQualityLabelRequest = {
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
-    id: '33333333-3333-4333-8333-333333333333',
+    id: "33333333-3333-4333-8333-333333333333",
     workspaceId: CTX.workspaceId,
     sourceEventId: REQUEST.sourceEventId,
     leadId: REQUEST.leadId,
@@ -41,23 +42,25 @@ function row(overrides: Record<string, unknown> = {}) {
     externalObjectRef: null,
     reasonCode: null,
     commercialResult: null,
-    disposition: 'ACCEPTED',
+    disposition: "ACCEPTED",
     heldReason: null,
     actorId: CTX.userId,
-    ingestedAt: new Date('2026-08-07T12:01:00.000Z'),
-    createdAt: new Date('2026-08-07T12:01:00.000Z'),
+    ingestedAt: new Date("2026-08-07T12:01:00.000Z"),
     ...overrides,
   };
 }
 
-function harness(options: {
-  existing?: ReturnType<typeof row> | null;
-  existingSequence?: Array<ReturnType<typeof row> | null>;
-  accepted?: unknown[];
-  event?: unknown;
-  lockedLead?: boolean;
-  createError?: unknown;
-} = {}) {
+function harness(
+  options: {
+    existing?: ReturnType<typeof row> | null;
+    existingSequence?: Array<ReturnType<typeof row> | null>;
+    accepted?: unknown[];
+    event?: unknown;
+    lockedLead?: boolean;
+    createError?: unknown;
+    confirmedQgoCount?: number;
+  } = {},
+) {
   let existingCalls = 0;
   const findFirst = vi.fn(async () => {
     existingCalls += 1;
@@ -68,7 +71,9 @@ function harness(options: {
     return row(data);
   });
   const tx = {
-    $queryRaw: vi.fn(async () => (options.lockedLead === false ? [] : [{ id: LEAD_ID }])),
+    $queryRaw: vi.fn(async () =>
+      options.lockedLead === false ? [] : [{ id: LEAD_ID }],
+    ),
     outboxEvent: {
       findFirst: vi.fn(async () =>
         options.event === undefined ? { eventId: EVENT_ID } : options.event,
@@ -77,30 +82,46 @@ function harness(options: {
     leadQualityLabel: {
       findFirst,
       findMany: vi.fn(async () => options.accepted ?? []),
+      count: vi.fn(async () => options.confirmedQgoCount ?? 0),
       create,
     },
   };
   const prisma = {
-    withWorkspace: vi.fn(async (_workspaceId: string, work: (value: typeof tx) => unknown) => work(tx)),
+    withWorkspace: vi.fn(
+      async (_workspaceId: string, work: (value: typeof tx) => unknown) =>
+        work(tx),
+    ),
   } as unknown as PrismaService;
-  return { repository: new LeadQualityLabelRepository(prisma), prisma, tx, create, existingCalls: () => existingCalls };
+  return {
+    repository: new LeadQualityLabelRepository(prisma),
+    prisma,
+    tx,
+    create,
+    existingCalls: () => existingCalls,
+  };
 }
 
-describe('LeadQualityLabelRepository.append', () => {
-  it('serializes on the workspace lead, binds actor/workspace only from RequestContext, and never mutates Lead state', async () => {
+describe("LeadQualityLabelRepository.append", () => {
+  it("serializes on the workspace lead, binds actor/workspace only from RequestContext, and never mutates Lead state", async () => {
     const h = harness();
     const result = await h.repository.append(CTX, REQUEST);
 
     expect(result.replayed).toBe(false);
-    expect(result.record).toMatchObject({ disposition: 'ACCEPTED', heldReason: null });
-    expect(h.prisma.withWorkspace).toHaveBeenCalledWith(CTX.workspaceId, expect.any(Function));
+    expect(result.record).toMatchObject({
+      disposition: "ACCEPTED",
+      heldReason: null,
+    });
+    expect(h.prisma.withWorkspace).toHaveBeenCalledWith(
+      CTX.workspaceId,
+      expect.any(Function),
+    );
     expect(h.tx.$queryRaw).toHaveBeenCalledOnce();
     expect(h.tx.outboxEvent.findFirst).toHaveBeenCalledWith({
       where: {
         eventId: EVENT_ID,
         workspaceId: CTX.workspaceId,
-        eventType: 'LeadQualified',
-        aggregateType: 'Lead',
+        eventType: "LeadQualified",
+        aggregateType: "Lead",
         aggregateId: LEAD_ID,
       },
       select: { eventId: true },
@@ -110,87 +131,151 @@ describe('LeadQualityLabelRepository.append', () => {
         workspaceId: CTX.workspaceId,
         actorId: CTX.userId,
         leadId: LEAD_ID,
-        label: 'QGO_CREATED',
+        label: "QGO_CREATED",
       }),
     });
-    expect(h.tx).not.toHaveProperty('lead.update');
-    expect(h.tx).not.toHaveProperty('opportunity');
+    expect(h.tx).not.toHaveProperty("lead.update");
+    expect(h.tx).not.toHaveProperty("opportunity");
   });
 
-  it('persists an out-of-order label as HELD instead of discarding or later flipping it', async () => {
+  it("persists an out-of-order label as HELD instead of discarding or later flipping it", async () => {
     const h = harness();
-    const result = await h.repository.append(CTX, { ...REQUEST, label: 'SALES_ACCEPTED' });
+    const result = await h.repository.append(CTX, {
+      ...REQUEST,
+      label: "SALES_ACCEPTED",
+    });
 
     expect(result.record).toMatchObject({
-      label: 'SALES_ACCEPTED',
-      disposition: 'HELD',
-      heldReason: 'MISSING_QGO_CREATED',
+      label: "SALES_ACCEPTED",
+      disposition: "HELD",
+      heldReason: "MISSING_QGO_CREATED",
     });
     expect(h.create).toHaveBeenCalledOnce();
   });
 
-  it('returns an identical source replay and rejects a conflicting replay with 409', async () => {
+  it("returns an identical source replay and rejects a conflicting replay with 409", async () => {
     const identical = row();
     const replay = harness({ existing: identical });
-    await expect(replay.repository.append(CTX, REQUEST)).resolves.toMatchObject({
-      replayed: true,
-      record: identical,
-    });
+    await expect(replay.repository.append(CTX, REQUEST)).resolves.toMatchObject(
+      {
+        replayed: true,
+        record: identical,
+      },
+    );
     expect(replay.create).not.toHaveBeenCalled();
 
-    const conflict = harness({ existing: row({ label: 'SALES_ACCEPTED' }) });
-    await expect(conflict.repository.append(CTX, REQUEST)).rejects.toBeInstanceOf(ConflictException);
-    await expect(conflict.repository.append(CTX, REQUEST)).rejects.toMatchObject({
-      response: { error: { code: 'SOURCE_EVENT_CONFLICT' } },
+    const conflict = harness({ existing: row({ label: "SALES_ACCEPTED" }) });
+    await expect(
+      conflict.repository.append(CTX, REQUEST),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      conflict.repository.append(CTX, REQUEST),
+    ).rejects.toMatchObject({
+      response: { error: { code: "SOURCE_EVENT_CONFLICT" } },
     });
   });
 
-  it('fails closed before insert when the LeadQualified event does not match this workspace/lead', async () => {
+  it("fails closed before insert when the LeadQualified event does not match this workspace/lead", async () => {
     const h = harness({ event: null });
-    await expect(h.repository.append(CTX, REQUEST)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(h.repository.append(CTX, REQUEST)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
     expect(h.create).not.toHaveBeenCalled();
   });
 
-  it('returns NOT_FOUND when the workspace-scoped lead lock finds no row', async () => {
+  it("returns NOT_FOUND when the workspace-scoped lead lock finds no row", async () => {
     const h = harness({ lockedLead: false });
     await expect(h.repository.append(CTX, REQUEST)).rejects.toMatchObject({
-      response: { error: { code: 'LEAD_NOT_FOUND' } },
+      response: { error: { code: "LEAD_NOT_FOUND" } },
     });
     expect(h.tx.outboxEvent.findFirst).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
   });
 
-  it('recovers a concurrent P2002 race by rereading: identical payload replays, conflicting payload returns 409', async () => {
-    const uniqueRace = Object.assign(new Error('unique constraint'), { code: 'P2002' });
+  it("recovers a concurrent P2002 race by rereading: identical payload replays, conflicting payload returns 409", async () => {
+    const uniqueRace = Object.assign(new Error("unique constraint"), {
+      code: "P2002",
+      meta: { target: "lead_quality_label_source_event_key" },
+    });
     const identical = harness({
       existingSequence: [null, null, row()],
       createError: uniqueRace,
     });
-    await expect(identical.repository.append(CTX, REQUEST)).resolves.toMatchObject({
+    await expect(
+      identical.repository.append(CTX, REQUEST),
+    ).resolves.toMatchObject({
       replayed: true,
       record: { sourceEventId: REQUEST.sourceEventId, label: REQUEST.label },
     });
 
     const conflicting = harness({
-      existingSequence: [null, null, row({ label: 'SALES_ACCEPTED' })],
+      existingSequence: [null, null, row({ label: "SALES_ACCEPTED" })],
       createError: uniqueRace,
     });
-    await expect(conflicting.repository.append(CTX, REQUEST)).rejects.toMatchObject({
-      response: { error: { code: 'SOURCE_EVENT_CONFLICT' } },
+    await expect(
+      conflicting.repository.append(CTX, REQUEST),
+    ).rejects.toMatchObject({
+      response: { error: { code: "SOURCE_EVENT_CONFLICT" } },
     });
+  });
+
+  it("does not reinterpret an unrelated P2002 as source-event idempotency", async () => {
+    const unrelated = Object.assign(new Error("other unique constraint"), {
+      code: "P2002",
+      meta: { target: ["id"] },
+    });
+    const h = harness({ createError: unrelated });
+    await expect(h.repository.append(CTX, REQUEST)).rejects.toBe(unrelated);
   });
 });
 
-describe('LeadQualityLabelLearningConsumer', () => {
-  it('queries only ACCEPTED rows, so HELD facts cannot enter learning batches', async () => {
+describe("LeadQualityLabelLearningConsumer", () => {
+  it("exposes accepted rows only as explicitly offline per-lead observation", async () => {
     const accepted = [row()];
     const h = harness({ accepted });
     const consumer = new LeadQualityLabelLearningConsumer(h.prisma);
 
-    await expect(consumer.listForLead(CTX, LEAD_ID)).resolves.toEqual(accepted);
+    await expect(consumer.observeForLead(CTX, LEAD_ID)).resolves.toEqual(
+      accepted,
+    );
     expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledWith({
-      where: { workspaceId: CTX.workspaceId, leadId: LEAD_ID, disposition: 'ACCEPTED' },
-      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      where: {
+        workspaceId: CTX.workspaceId,
+        leadId: LEAD_ID,
+        disposition: "ACCEPTED",
+      },
+      orderBy: [{ occurredAt: "asc" }, { ingestedAt: "asc" }, { id: "asc" }],
+    });
+  });
+
+  it("returns no tunable batch below 50 accepted QGO labels", async () => {
+    expect(MIN_CONFIRMED_QGO_LABELS).toBe(50);
+    const h = harness({ confirmedQgoCount: 49, accepted: [row()] });
+    const consumer = new LeadQualityLabelLearningConsumer(h.prisma);
+
+    await expect(consumer.buildTuningBatch(CTX)).resolves.toEqual({
+      eligible: false,
+      confirmedQgoLabels: 49,
+      minimumRequired: 50,
+      labels: [],
+    });
+    expect(h.tx.leadQualityLabel.findMany).not.toHaveBeenCalled();
+  });
+
+  it("builds a batch from ACCEPTED rows only once the 50-QGO guard is met", async () => {
+    const accepted = [row()];
+    const h = harness({ confirmedQgoCount: 50, accepted });
+    const consumer = new LeadQualityLabelLearningConsumer(h.prisma);
+
+    await expect(consumer.buildTuningBatch(CTX)).resolves.toEqual({
+      eligible: true,
+      confirmedQgoLabels: 50,
+      minimumRequired: 50,
+      labels: accepted,
+    });
+    expect(h.tx.leadQualityLabel.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: CTX.workspaceId, disposition: "ACCEPTED" },
+      orderBy: [{ occurredAt: "asc" }, { ingestedAt: "asc" }, { id: "asc" }],
     });
   });
 });

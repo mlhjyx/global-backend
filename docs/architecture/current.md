@@ -154,6 +154,8 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 
 **投递语义（✅ 收口③已落地，PR #46）**：事件注册表三分支（`relay/event-registry.ts` 穷举）——内部 workflow command（3 种→Temporal，AlreadyStarted 幂等）/外部 integration event（8 种→`outbox_delivery` 账本单事务原子路由，`publishedAt` 语义=已路由进交付层）/未注册类型 `parkedAt` 停靠+大声报错（不假发布、不毒化轮询）。sink：`saas` 拉模式（`GET /events` 游标=**交付账本行 id**、任意重放 at-least-once、`POST /events/ack` 幂等且锁死 pull sink）+ `webhook` 推模式（URL+SECRET 且 https 才启用；HMAC-SHA256 签名、指数退避封顶 1h、10 次 DEAD=DLQ、双路径 CAS）。LeadQualified payload=快照 v1（`packages/contracts/events/payloads/lead-qualified.v1.schema.json`，ajv Consumer Test；contact_refs 只带 ref+职务元数据不嵌 PII，含具名 refs 事件分级 RESTRICTED）。**部署约束**：relay 单写者（多副本前需 advisory lock）；其余 7 种 integration 事件的专用 payload schema 待补（现走 envelope 通契约）。
 
+**质量标签回流（append-only seam）**：`POST /api/v1/lead-quality-labels` 把 SaaS/QGO 侧事实绑定到同 workspace、同 Lead 的精确 `LeadQualified.event_id`。`QGO_CREATED / SALES_ACCEPTED / COMMERCIAL_OUTCOME_VERIFIED / LEAD_OUTCOME_REJECTED` 以 source event 幂等写入；乱序或矛盾事实仍保存为 `HELD`，不静默翻转且不进入 learning。仓内 reference consumer 在已接受 QGO 少于 50 条时只允许离线观察、不得返回调权 batch。该 seam 不改 Lead 状态、不创建 Opportunity/QGO；`CONTACTED/CONVERTED` 仅保留为历史 SaaS 回写位。
+
 ## 7. API ownership
 
 - 保留：`/companies` `/icps` `/query-plans` `/discovery-runs` `/canonical-companies` `/leads` `/suppressions`（+补 `/events` 拉取、`/evidence` 查询、`/deletion-requests`）。

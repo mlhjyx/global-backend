@@ -2475,6 +2475,176 @@
         ]
       }
     },
+    "/api/v1/lead-quality-labels": {
+      "post": {
+        "operationId": "LeadQualityLabelsController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLeadQualityLabelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "source_event_id",
+                        "lead_id",
+                        "lead_qualified_event_id",
+                        "label",
+                        "occurred_at",
+                        "source_system",
+                        "external_object_ref",
+                        "reason_code",
+                        "commercial_result",
+                        "disposition",
+                        "held_reason",
+                        "ingested_at",
+                        "replayed"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "source_event_id": {
+                          "type": "string"
+                        },
+                        "lead_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "lead_qualified_event_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "label": {
+                          "type": "string",
+                          "enum": [
+                            "QGO_CREATED",
+                            "SALES_ACCEPTED",
+                            "COMMERCIAL_OUTCOME_VERIFIED",
+                            "LEAD_OUTCOME_REJECTED"
+                          ]
+                        },
+                        "occurred_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "source_system": {
+                          "type": "string"
+                        },
+                        "external_object_ref": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "reason_code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_ICP",
+                            "BAD_TIMING",
+                            "UNREACHABLE",
+                            "DUPLICATE",
+                            "INSUFFICIENT_EVIDENCE",
+                            "COMPLIANCE_BLOCKED",
+                            "OTHER"
+                          ],
+                          "nullable": true
+                        },
+                        "commercial_result": {
+                          "type": "string",
+                          "enum": [
+                            "WON",
+                            "LOST"
+                          ],
+                          "nullable": true
+                        },
+                        "disposition": {
+                          "type": "string",
+                          "enum": [
+                            "ACCEPTED",
+                            "HELD"
+                          ]
+                        },
+                        "held_reason": {
+                          "type": "string",
+                          "enum": [
+                            "MISSING_QGO_CREATED",
+                            "MISSING_PREREQUISITE",
+                            "CONTRADICTORY_POSITIVE_LABEL",
+                            "CONTRADICTORY_REJECTION",
+                            "CONTRADICTORY_COMMERCIAL_RESULT"
+                          ],
+                          "nullable": true
+                        },
+                        "ingested_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "source_system + source_event_id was replayed with different content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SOURCE_EVENT_CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Append a downstream lead quality fact without creating Opportunity/QGO state",
+        "tags": [
+          "Lead quality labels"
+        ]
+      }
+    },
     "/api/v1/events": {
       "get": {
         "operationId": "EventsController_list_v1",
@@ -6993,6 +7163,10 @@
       "description": ""
     },
     {
+      "name": "Lead quality labels",
+      "description": ""
+    },
+    {
       "name": "Events",
       "description": ""
     },
@@ -8031,6 +8205,77 @@
         },
         "required": [
           "decision"
+        ]
+      },
+      "CreateLeadQualityLabelDto": {
+        "type": "object",
+        "properties": {
+          "source_event_id": {
+            "type": "string",
+            "description": "Opaque idempotency key from source_system",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "lead_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lead_qualified_event_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact LeadQualified envelope event_id"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "QGO_CREATED",
+              "SALES_ACCEPTED",
+              "COMMERCIAL_OUTCOME_VERIFIED",
+              "LEAD_OUTCOME_REJECTED"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_system": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "external_object_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "reason_code": {
+            "type": "string",
+            "enum": [
+              "NOT_ICP",
+              "BAD_TIMING",
+              "UNREACHABLE",
+              "DUPLICATE",
+              "INSUFFICIENT_EVIDENCE",
+              "COMPLIANCE_BLOCKED",
+              "OTHER"
+            ]
+          },
+          "commercial_result": {
+            "type": "string",
+            "enum": [
+              "WON",
+              "LOST"
+            ]
+          }
+        },
+        "required": [
+          "source_event_id",
+          "lead_id",
+          "lead_qualified_event_id",
+          "label",
+          "occurred_at",
+          "source_system"
         ]
       },
       "AckEventsDto": {

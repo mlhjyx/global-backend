@@ -19,6 +19,7 @@ import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { ModelRuntimeModule } from './model-runtime';
+import { LeadQualityLabelModule } from './lead-quality-labels/lead-quality-label.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -44,6 +45,7 @@ import { ModelRuntimeModule } from './model-runtime';
     IcpModule,
     DiscoveryModule,
     LeadModule,
+    LeadQualityLabelModule,
     EventsModule,
     ComplianceModule,
     SanctionsModule,
