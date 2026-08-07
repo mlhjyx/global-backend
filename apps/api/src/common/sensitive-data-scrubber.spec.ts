@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  diagnosticErrorSummary,
+  diagnosticErrorToken,
   scrubSensitiveData,
   scrubSensitiveText,
 } from './sensitive-data-scrubber';
@@ -122,5 +124,23 @@ describe('sensitive data scrubber', () => {
     const rendered = JSON.stringify(output);
     expect(rendered).not.toContain('do-not-leak');
     expect(rendered).not.toContain('password');
+  });
+
+  it('reduces arbitrary diagnostic text to allowlisted codes or irreversible digests', () => {
+    expect(diagnosticErrorToken('PROVIDER_TIMEOUT')).toBe('PROVIDER_TIMEOUT');
+    const token = diagnosticErrorToken(
+      'Provider response mentioned Jane Doe and a private prompt fragment',
+    );
+    expect(token).toMatch(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect(token).not.toContain('Jane Doe');
+
+    const summary = diagnosticErrorSummary(
+      new Error('Contact Jane Doe failed during lawful-basis processing'),
+    );
+    const rendered = JSON.stringify(summary);
+    expect(summary).toMatchObject({ name: 'Error' });
+    expect(rendered).toMatch(/messageDigest/);
+    expect(rendered).not.toContain('Jane Doe');
+    expect(rendered).not.toContain('lawful-basis');
   });
 });
