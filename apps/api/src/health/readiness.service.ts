@@ -1,16 +1,19 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import type { DeploymentStage } from '../runtime/runtime-admission';
 
 export const READINESS_PROBES = Symbol('READINESS_PROBES');
 export const READINESS_SERVICE_OPTIONS = Symbol('READINESS_SERVICE_OPTIONS');
 
-export type ReadinessCheckName =
-  | 'configuration'
-  | 'build_identity'
-  | 'database'
-  | 'temporal'
-  | 'worker_heartbeat'
-  | 'outbox_relay'
-  | 'gateway_admission';
+export const API_READINESS_PROBE_NAMES = [
+  'configuration',
+  'build_identity',
+  'database',
+  'temporal',
+  'worker_heartbeat',
+  'outbox_relay',
+  'gateway_admission',
+] as const;
+export type ReadinessCheckName = (typeof API_READINESS_PROBE_NAMES)[number];
 
 export type ReadinessCheckStatus = 'PASS' | 'FAIL' | 'UNVERIFIED';
 
@@ -21,9 +24,13 @@ export type ReadinessCheckCode =
   | 'BUILD_IDENTITY_REQUIRED'
   | 'DATABASE_REACHABLE_AND_MIGRATED'
   | 'DATABASE_MIGRATION_DIRTY'
-  | 'MIGRATION_REVISION_MISMATCH'
+  | 'MIGRATION_MANIFEST_MISMATCH'
+  | 'MIGRATION_CHECKSUM_MISMATCH'
   | 'DATABASE_REACHABLE_MIGRATION_UNVERIFIED'
   | 'TEMPORAL_REACHABLE'
+  | 'WORKER_HEARTBEAT_VERIFIED'
+  | 'OUTBOX_RELAY_VERIFIED'
+  | 'GATEWAY_ADMISSION_VERIFIED'
   | 'PROOF_SOURCE_UNAVAILABLE'
   | 'PROBE_FAILED'
   | 'PROBE_TIMEOUT';
@@ -52,6 +59,7 @@ export interface ReadinessResponse {
 }
 
 export interface ReadinessServiceOptions {
+  readonly deploymentStage: DeploymentStage;
   readonly timeoutMs?: number;
   readonly now?: () => string;
 }
@@ -66,9 +74,13 @@ const EXPECTED_STATUS_BY_CODE: Readonly<
   BUILD_IDENTITY_REQUIRED: 'UNVERIFIED',
   DATABASE_REACHABLE_AND_MIGRATED: 'PASS',
   DATABASE_MIGRATION_DIRTY: 'FAIL',
-  MIGRATION_REVISION_MISMATCH: 'FAIL',
+  MIGRATION_MANIFEST_MISMATCH: 'FAIL',
+  MIGRATION_CHECKSUM_MISMATCH: 'FAIL',
   DATABASE_REACHABLE_MIGRATION_UNVERIFIED: 'UNVERIFIED',
   TEMPORAL_REACHABLE: 'PASS',
+  WORKER_HEARTBEAT_VERIFIED: 'PASS',
+  OUTBOX_RELAY_VERIFIED: 'PASS',
+  GATEWAY_ADMISSION_VERIFIED: 'PASS',
   PROOF_SOURCE_UNAVAILABLE: 'UNVERIFIED',
   PROBE_FAILED: 'FAIL',
   PROBE_TIMEOUT: 'FAIL',
@@ -98,11 +110,12 @@ export class ReadinessService {
 
   constructor(
     @Inject(READINESS_PROBES) probes: readonly ReadinessProbePort[],
-    @Optional()
     @Inject(READINESS_SERVICE_OPTIONS)
-    options: ReadinessServiceOptions = {},
+    options: ReadinessServiceOptions,
   ) {
-    this.probes = Object.freeze([...probes]);
+    if (!options) {
+      throw new Error('readiness service options are required');
+    }
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.now = options.now ?? (() => new Date().toISOString());
 
@@ -115,10 +128,37 @@ export class ReadinessService {
         'readiness probe timeout must be an integer between 1 and 10000ms',
       );
     }
-    const names = new Set(this.probes.map((probe) => probe.name));
-    if (names.size !== this.probes.length) {
-      throw new Error('readiness probe names must be unique');
+    const byName = new Map<ReadinessCheckName, ReadinessProbePort>();
+    for (const probe of probes) {
+      if (!(API_READINESS_PROBE_NAMES as readonly string[]).includes(probe.name)) {
+        throw new Error(`unexpected readiness probe: ${probe.name}`);
+      }
+      if (byName.has(probe.name)) {
+        throw new Error(`duplicate readiness probe: ${probe.name}`);
+      }
+      byName.set(probe.name, probe);
     }
+    const missing = API_READINESS_PROBE_NAMES.filter(
+      (name) => !byName.has(name),
+    );
+    if (missing.length > 0) {
+      throw new Error(`missing readiness probes: ${missing.join(', ')}`);
+    }
+    const expectedPolicy = expectedReadinessProbePolicy(
+      options.deploymentStage,
+    );
+    for (const name of API_READINESS_PROBE_NAMES) {
+      const probe = byName.get(name)!;
+      const expectedRequired = expectedPolicy[name];
+      if (probe.required !== expectedRequired) {
+        throw new Error(
+          `${name} must be ${expectedRequired ? 'required' : 'optional'} for ${options.deploymentStage}`,
+        );
+      }
+    }
+    this.probes = Object.freeze(
+      API_READINESS_PROBE_NAMES.map((name) => byName.get(name)!),
+    );
   }
 
   async check(): Promise<ReadinessResponse> {
@@ -167,4 +207,18 @@ export class ReadinessService {
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+export function expectedReadinessProbePolicy(
+  deploymentStage: DeploymentStage,
+): Readonly<Record<ReadinessCheckName, boolean>> {
+  return Object.freeze({
+    configuration: true,
+    build_identity: deploymentStage !== 'development',
+    database: true,
+    temporal: true,
+    worker_heartbeat: true,
+    outbox_relay: true,
+    gateway_admission: true,
+  });
 }

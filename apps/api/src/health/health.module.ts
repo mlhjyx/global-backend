@@ -11,6 +11,7 @@ import {
 } from './readiness.probes';
 import {
   READINESS_PROBES,
+  READINESS_SERVICE_OPTIONS,
   ReadinessService,
   type ReadinessProbePort,
 } from './readiness.service';
@@ -28,7 +29,14 @@ export const GATEWAY_ADMISSION_READINESS_PROBE = Symbol(
 @Module({
   imports: [PrismaModule, TemporalModule],
   providers: [
-    RuntimeIdentityService,
+    {
+      provide: READINESS_SERVICE_OPTIONS,
+      useFactory: (runtime: RuntimeIdentityService) =>
+        Object.freeze({
+          deploymentStage: runtime.getSnapshot().deploymentStage,
+        }),
+      inject: [RuntimeIdentityService],
+    },
     ConfigurationReadinessProbe,
     BuildIdentityReadinessProbe,
     DatabaseReadinessProbe,
@@ -77,6 +85,6 @@ export const GATEWAY_ADMISSION_READINESS_PROBE = Symbol(
     },
     ReadinessService,
   ],
-  exports: [RuntimeIdentityService, ReadinessService],
+  exports: [ReadinessService],
 })
 export class HealthModule {}

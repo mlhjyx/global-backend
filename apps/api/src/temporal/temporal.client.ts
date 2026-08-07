@@ -1,20 +1,59 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Client, Connection } from '@temporalio/client';
+import {
+  Inject,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
+import { Client, Connection, type ConnectionOptions } from '@temporalio/client';
+import { RuntimeIdentityService } from '../runtime/runtime-admission';
+
+export const TEMPORAL_CLIENT_DRIVER = Symbol('TEMPORAL_CLIENT_DRIVER');
+
+export interface TemporalClientDriver {
+  connect(options: ConnectionOptions): Promise<Connection>;
+  createClient(options: ConstructorParameters<typeof Client>[0]): Client;
+}
+
+const DEFAULT_TEMPORAL_CLIENT_DRIVER: TemporalClientDriver = Object.freeze({
+  connect: (options: ConnectionOptions) => Connection.connect(options),
+  createClient: (options: ConstructorParameters<typeof Client>[0]) =>
+    new Client(options),
+});
 
 /** Thin wrapper so services (e.g. the relay) can start workflows via DI. */
 @Injectable()
 export class TemporalClient implements OnModuleInit, OnModuleDestroy {
   private connection?: Connection;
   client!: Client;
+  private readonly driver: TemporalClientDriver;
+
+  constructor(
+    private readonly runtimeIdentity: RuntimeIdentityService,
+    @Optional()
+    @Inject(TEMPORAL_CLIENT_DRIVER)
+    driver?: TemporalClientDriver,
+  ) {
+    this.driver = driver ?? DEFAULT_TEMPORAL_CLIENT_DRIVER;
+  }
 
   async onModuleInit(): Promise<void> {
-    this.connection = await Connection.connect({
-      address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
+    const temporal = this.runtimeIdentity.getProcessSnapshot().safety.temporal;
+    // This is intentionally an eager hard startup dependency. A rejection
+    // aborts Nest initialization, so the API never binds a listener.
+    const connection = await this.driver.connect({
+      address: temporal.address,
+      connectTimeout: temporal.connectTimeoutMs,
     });
-    this.client = new Client({
-      connection: this.connection,
-      namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+    this.connection = connection;
+    this.client = this.driver.createClient({
+      connection,
+      namespace: temporal.namespace,
     });
+  }
+
+  isInitialized(): boolean {
+    return this.connection !== undefined && this.client !== undefined;
   }
 
   async onModuleDestroy(): Promise<void> {

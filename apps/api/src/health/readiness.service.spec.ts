@@ -105,6 +105,7 @@ describe('ReadinessService', () => {
 
   it('rejects missing, extra, duplicate, and wrong-required probe contracts', () => {
     const full = fullProbeSet();
+    expect(() => service([])).toThrow(/missing.*configuration/i);
     expect(() => service(full.slice(1))).toThrow(/missing.*configuration/i);
     expect(() =>
       service([

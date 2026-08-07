@@ -31,6 +31,7 @@ import {
   SiteReleaseService,
   type SiteReleaseMaterializationIdentity,
 } from './site-release.service';
+import { resolveRuntimeProcessSnapshot } from '../runtime/runtime-admission';
 import { writeRendererOutputManifest } from './renderer-build';
 
 interface ReleaseRow {
@@ -779,19 +780,42 @@ describe('SiteReleaseService cross-system commit protocol', () => {
 describe('Site renderer build fencing', () => {
   it('requires an explicit immutable build identity in production', () => {
     expect(() =>
-      resolveSiteRendererBuildIdentity({ NODE_ENV: 'production' }),
-    ).toThrow('SITE_RENDERER_BUILD_ID is required in production');
-    expect(
-      resolveSiteRendererBuildIdentity({
+      resolveRuntimeProcessSnapshot({
+        DEPLOYMENT_STAGE: 'production',
         NODE_ENV: 'production',
-        SITE_RENDERER_BUILD_ID: 'site-renderer@1.0.0+sha.abc123',
+        AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
+        AUTH_ISSUER: 'https://identity.example.test',
+        MODEL_GATEWAY_URL: 'https://models.example.test/v1',
+        MODEL_GATEWAY_KEY: 'test-key',
+        S3_ACCESS_KEY: 'test-access',
+        S3_SECRET_KEY: 'test-secret',
+        DATA_PROCESSOR_JURISDICTION: 'EU',
       }),
+    ).toThrow('SITE_RENDERER_BUILD_ID is required for production');
+    expect(
+      resolveSiteRendererBuildIdentity(resolveRuntimeProcessSnapshot({
+        DEPLOYMENT_STAGE: 'production',
+        NODE_ENV: 'production',
+        AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
+        AUTH_ISSUER: 'https://identity.example.test',
+        MODEL_GATEWAY_URL: 'https://models.example.test/v1',
+        MODEL_GATEWAY_KEY: 'test-key',
+        S3_ACCESS_KEY: 'test-access',
+        S3_SECRET_KEY: 'test-secret',
+        DATA_PROCESSOR_JURISDICTION: 'EU',
+        SITE_RENDERER_BUILD_ID: 'site-renderer@1.0.0+sha.abc123',
+      })),
     ).toBe('site-renderer@1.0.0+sha.abc123');
   });
 
   it('marks an unpinned development build honestly instead of calling it production', () => {
-    expect(resolveSiteRendererBuildIdentity({ NODE_ENV: 'development' })).toBe(
-      'site-renderer@dev-unpinned',
-    );
+    expect(
+      resolveSiteRendererBuildIdentity(
+        resolveRuntimeProcessSnapshot({
+          DEPLOYMENT_STAGE: 'development',
+          NODE_ENV: 'development',
+        }),
+      ),
+    ).toBe('site-renderer@dev-unpinned');
   });
 });

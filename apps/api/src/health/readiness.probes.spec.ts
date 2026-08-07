@@ -76,7 +76,7 @@ function prismaForRows(rows: readonly MigrationRow[]): {
 } {
   const queryRaw = vi
     .fn()
-    .mockResolvedValueOnce([{ statementTimeout: '750ms' }])
+    .mockResolvedValueOnce([{ statementTimeout: '600ms' }])
     .mockResolvedValueOnce(rows);
   const transaction = vi.fn(
     async (
@@ -118,8 +118,8 @@ describe('concrete readiness probes', () => {
     expect(String(queryRaw.mock.calls[0]?.[0])).toContain('set_config');
     expect(String(queryRaw.mock.calls[0]?.[0])).toContain('statement_timeout');
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      maxWait: 250,
-      timeout: 900,
+      maxWait: 100,
+      timeout: 800,
     });
   });
 

@@ -13,7 +13,9 @@ const BUILD_HEALTH = Object.freeze({
     buildSha: 'a'.repeat(40),
     buildTime: '2026-08-07T12:34:56.000Z',
     artifactDigest: `sha256:${'b'.repeat(64)}`,
+    migrationManifestDigest: `sha256:${'c'.repeat(64)}`,
     migrationRevision: '202608070001_runtime_identity',
+    migrationCount: 1,
   }),
   missingFields: [] as const,
 });

@@ -66,15 +66,41 @@ export class DatabaseReadinessProbe implements ReadinessProbePort {
   ) {}
 
   async check(): Promise<ReadinessProbeResult> {
-    const migrations = await this.prisma.$queryRaw<
-      Array<{ migrationName: string; finishedAt: Date | null }>
-    >`
-      SELECT migration_name AS "migrationName", finished_at AS "finishedAt"
-      FROM "_prisma_migrations"
-      WHERE rolled_back_at IS NULL
-      ORDER BY started_at ASC
-    `;
-    if (migrations.some((migration) => migration.finishedAt === null)) {
+    const migrations = await this.prisma.$transaction(
+      async (transaction) => {
+        await transaction.$queryRaw`
+          SELECT set_config('statement_timeout', ${'600ms'}, true) AS "statementTimeout"
+        `;
+        return transaction.$queryRaw<
+          Array<{
+            migrationName: string;
+            checksum: string;
+            finishedAt: Date | null;
+            rolledBackAt: Date | null;
+            appliedStepsCount: number;
+          }>
+        >`
+          SELECT
+            migration_name AS "migrationName",
+            checksum,
+            finished_at AS "finishedAt",
+            rolled_back_at AS "rolledBackAt",
+            applied_steps_count AS "appliedStepsCount"
+          FROM "_prisma_migrations"
+          ORDER BY started_at ASC
+        `;
+      },
+      { maxWait: 100, timeout: 800 },
+    );
+    const active = migrations.filter(
+      (migration) => migration.rolledBackAt === null,
+    );
+    if (
+      active.some(
+        (migration) =>
+          migration.finishedAt === null || migration.appliedStepsCount < 1,
+      )
+    ) {
       return { status: 'FAIL', code: 'DATABASE_MIGRATION_DIRTY' };
     }
     const identity = this.runtime.getSnapshot().buildIdentity;
@@ -84,9 +110,23 @@ export class DatabaseReadinessProbe implements ReadinessProbePort {
         code: 'DATABASE_REACHABLE_MIGRATION_UNVERIFIED',
       };
     }
-    const latest = migrations.at(-1);
-    if (!latest || latest.migrationName !== identity.migrationRevision) {
-      return { status: 'FAIL', code: 'MIGRATION_REVISION_MISMATCH' };
+    const expected = identity.migrationManifest.entries;
+    const observedNames = active.map(({ migrationName }) => migrationName);
+    if (
+      active.length !== expected.length ||
+      new Set(observedNames).size !== observedNames.length ||
+      expected.some(
+        (entry, index) => active[index]?.migrationName !== entry.name,
+      )
+    ) {
+      return { status: 'FAIL', code: 'MIGRATION_MANIFEST_MISMATCH' };
+    }
+    if (
+      expected.some(
+        (entry, index) => active[index]?.checksum !== entry.checksum,
+      )
+    ) {
+      return { status: 'FAIL', code: 'MIGRATION_CHECKSUM_MISMATCH' };
     }
     return { status: 'PASS', code: 'DATABASE_REACHABLE_AND_MIGRATED' };
   }

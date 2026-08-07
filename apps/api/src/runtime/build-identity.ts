@@ -2,17 +2,56 @@ export const RUNTIME_IDENTITY_FIELDS = [
   'BUILD_SHA',
   'BUILD_TIME',
   'ARTIFACT_DIGEST',
-  'MIGRATION_REVISION',
+  'MIGRATION_MANIFEST_DIGEST',
 ] as const;
 export type RuntimeIdentityField = (typeof RUNTIME_IDENTITY_FIELDS)[number];
 
 export type RuntimeEnvironment = Readonly<Record<string, string | undefined>>;
+
+export const MIGRATION_MANIFEST_SCHEMA =
+  'global-api-migration-manifest/v1' as const;
+
+export interface MigrationManifestEntry {
+  readonly name: string;
+  readonly checksum: string;
+}
+
+export interface MigrationManifest {
+  readonly schemaVersion: typeof MIGRATION_MANIFEST_SCHEMA;
+  readonly digest: string;
+  readonly entries: readonly MigrationManifestEntry[];
+}
+
+export interface CompleteBuildIdentityAttestation {
+  readonly status: 'VERIFIED';
+  readonly buildSha: string;
+  readonly buildTime: string;
+  readonly artifactDigest: string;
+  readonly migrationManifestDigest: string;
+  readonly missingFields: readonly [];
+}
+
+export interface IncompleteBuildIdentityAttestation {
+  readonly status: 'UNVERIFIED';
+  readonly buildSha: string | null;
+  readonly buildTime: string | null;
+  readonly artifactDigest: string | null;
+  readonly migrationManifestDigest: string | null;
+  readonly missingFields: readonly RuntimeIdentityField[];
+}
+
+export type BuildIdentityAttestation =
+  | CompleteBuildIdentityAttestation
+  | IncompleteBuildIdentityAttestation;
 
 export interface VerifiedBuildIdentity {
   readonly status: 'VERIFIED';
   readonly buildSha: string;
   readonly buildTime: string;
   readonly artifactDigest: string;
+  readonly migrationManifestDigest: string;
+  readonly migrationManifest: MigrationManifest;
+  /** Derived from the final ordered manifest entry; never supplied by a caller. */
   readonly migrationRevision: string;
   readonly missingFields: readonly [];
 }
@@ -22,7 +61,9 @@ export interface UnverifiedBuildIdentity {
   readonly buildSha: string | null;
   readonly buildTime: string | null;
   readonly artifactDigest: string | null;
-  readonly migrationRevision: string | null;
+  readonly migrationManifestDigest: string | null;
+  readonly migrationManifest: null;
+  readonly migrationRevision: null;
   readonly missingFields: readonly RuntimeIdentityField[];
 }
 
@@ -30,8 +71,7 @@ export type BuildIdentity = VerifiedBuildIdentity | UnverifiedBuildIdentity;
 
 const BUILD_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 const BUILD_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
-const ARTIFACT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
-const MIGRATION_REVISION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 
 function invalid(name: string, expectation: string): never {
   throw new Error(`${name} is invalid; ${expectation}`);
@@ -74,21 +114,14 @@ function validateBuildTime(value: string | null): string | null {
   return value;
 }
 
-function validateArtifactDigest(value: string | null): string | null {
-  if (value !== null && !ARTIFACT_DIGEST_PATTERN.test(value)) {
+function validateDigest(
+  name: 'ARTIFACT_DIGEST' | 'MIGRATION_MANIFEST_DIGEST',
+  value: string | null,
+): string | null {
+  if (value !== null && !SHA256_DIGEST_PATTERN.test(value)) {
     return invalid(
-      'ARTIFACT_DIGEST',
+      name,
       'expected sha256 followed by 64 lowercase hexadecimal bytes',
-    );
-  }
-  return value;
-}
-
-function validateMigrationRevision(value: string | null): string | null {
-  if (value !== null && !MIGRATION_REVISION_PATTERN.test(value)) {
-    return invalid(
-      'MIGRATION_REVISION',
-      'expected a 1-128 character identifier containing only letters, digits, dot, underscore, or hyphen',
     );
   }
   return value;
@@ -100,6 +133,8 @@ export function unverifiedBuildIdentity(): UnverifiedBuildIdentity {
     buildSha: null,
     buildTime: null,
     artifactDigest: null,
+    migrationManifestDigest: null,
+    migrationManifest: null,
     migrationRevision: null,
     missingFields: Object.freeze([...RUNTIME_IDENTITY_FIELDS]),
   });
@@ -108,22 +143,24 @@ export function unverifiedBuildIdentity(): UnverifiedBuildIdentity {
 /** Parses build-tool inputs. Runtime admission must load a verified receipt instead. */
 export function resolveBuildIdentityInput(
   env: RuntimeEnvironment,
-): BuildIdentity {
+): BuildIdentityAttestation {
   const buildSha = validateBuildSha(optionalCanonicalValue(env, 'BUILD_SHA'));
   const buildTime = validateBuildTime(
     optionalCanonicalValue(env, 'BUILD_TIME'),
   );
-  const artifactDigest = validateArtifactDigest(
+  const artifactDigest = validateDigest(
+    'ARTIFACT_DIGEST',
     optionalCanonicalValue(env, 'ARTIFACT_DIGEST'),
   );
-  const migrationRevision = validateMigrationRevision(
-    optionalCanonicalValue(env, 'MIGRATION_REVISION'),
+  const migrationManifestDigest = validateDigest(
+    'MIGRATION_MANIFEST_DIGEST',
+    optionalCanonicalValue(env, 'MIGRATION_MANIFEST_DIGEST'),
   );
   const values = {
     BUILD_SHA: buildSha,
     BUILD_TIME: buildTime,
     ARTIFACT_DIGEST: artifactDigest,
-    MIGRATION_REVISION: migrationRevision,
+    MIGRATION_MANIFEST_DIGEST: migrationManifestDigest,
   } as const;
   const missingFields = Object.freeze(
     RUNTIME_IDENTITY_FIELDS.filter((field) => values[field] === null),
@@ -135,7 +172,7 @@ export function resolveBuildIdentityInput(
       buildSha: buildSha as string,
       buildTime: buildTime as string,
       artifactDigest: artifactDigest as string,
-      migrationRevision: migrationRevision as string,
+      migrationManifestDigest: migrationManifestDigest as string,
       missingFields: Object.freeze([]) as readonly [],
     });
   }
@@ -145,8 +182,28 @@ export function resolveBuildIdentityInput(
     buildSha,
     buildTime,
     artifactDigest,
-    migrationRevision,
+    migrationManifestDigest,
     missingFields,
+  });
+}
+
+export function createVerifiedBuildIdentity(
+  attestation: CompleteBuildIdentityAttestation,
+  migrationManifest: MigrationManifest,
+): VerifiedBuildIdentity {
+  const migrationRevision = migrationManifest.entries.at(-1)?.name;
+  if (!migrationRevision) {
+    throw new Error('migration manifest must contain at least one migration');
+  }
+  if (migrationManifest.digest !== attestation.migrationManifestDigest) {
+    throw new Error(
+      'MIGRATION_MANIFEST_DIGEST does not match the migration manifest',
+    );
+  }
+  return Object.freeze({
+    ...attestation,
+    migrationManifest,
+    migrationRevision,
   });
 }
 

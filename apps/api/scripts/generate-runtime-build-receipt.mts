@@ -6,8 +6,9 @@ const KNOWN_OPTIONS = new Set([
   '--receipt-path',
   '--source-sha',
   '--build-time',
-  '--migration-revision',
+  '--migration-root',
   '--expected-artifact-digest',
+  '--expected-migration-manifest-digest',
 ]);
 
 function parseOptions(args: readonly string[]): ReadonlyMap<string, string> {
@@ -46,14 +47,25 @@ async function main(): Promise<void> {
     options.get('--artifact-root') ?? resolve(import.meta.dirname, '../dist'),
   );
   const receiptPath = options.get('--receipt-path');
+  const migrationRoot = resolve(
+    options.get('--migration-root') ??
+      resolve(import.meta.dirname, '../../../packages/db/prisma/migrations'),
+  );
   const receipt = await generateRuntimeBuildReceipt({
     artifactRoot,
+    migrationRoot,
     ...(receiptPath ? { receiptPath: resolve(receiptPath) } : {}),
     buildSha: required(options, '--source-sha'),
     buildTime: required(options, '--build-time'),
-    migrationRevision: required(options, '--migration-revision'),
     ...(options.has('--expected-artifact-digest')
       ? { expectedArtifactDigest: options.get('--expected-artifact-digest') }
+      : {}),
+    ...(options.has('--expected-migration-manifest-digest')
+      ? {
+          expectedMigrationManifestDigest: options.get(
+            '--expected-migration-manifest-digest',
+          ),
+        }
       : {}),
   });
   console.log(

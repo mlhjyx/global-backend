@@ -130,7 +130,9 @@
                         "buildSha",
                         "buildTime",
                         "artifactDigest",
-                        "migrationRevision"
+                        "migrationManifestDigest",
+                        "migrationRevision",
+                        "migrationCount"
                       ],
                       "additionalProperties": false,
                       "properties": {
@@ -147,9 +149,18 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "migrationManifestDigest": {
+                          "type": "string",
+                          "nullable": true
+                        },
                         "migrationRevision": {
                           "type": "string",
                           "nullable": true
+                        },
+                        "migrationCount": {
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": 1
                         }
                       }
                     },
@@ -161,7 +172,7 @@
                           "BUILD_SHA",
                           "BUILD_TIME",
                           "ARTIFACT_DIGEST",
-                          "MIGRATION_REVISION"
+                          "MIGRATION_MANIFEST_DIGEST"
                         ]
                       }
                     }
@@ -257,9 +268,13 @@
                               "BUILD_IDENTITY_REQUIRED",
                               "DATABASE_REACHABLE_AND_MIGRATED",
                               "DATABASE_MIGRATION_DIRTY",
-                              "MIGRATION_REVISION_MISMATCH",
+                              "MIGRATION_MANIFEST_MISMATCH",
+                              "MIGRATION_CHECKSUM_MISMATCH",
                               "DATABASE_REACHABLE_MIGRATION_UNVERIFIED",
                               "TEMPORAL_REACHABLE",
+                              "WORKER_HEARTBEAT_VERIFIED",
+                              "OUTBOX_RELAY_VERIFIED",
+                              "GATEWAY_ADMISSION_VERIFIED",
                               "PROOF_SOURCE_UNAVAILABLE",
                               "PROBE_FAILED",
                               "PROBE_TIMEOUT"
@@ -348,9 +363,13 @@
                               "BUILD_IDENTITY_REQUIRED",
                               "DATABASE_REACHABLE_AND_MIGRATED",
                               "DATABASE_MIGRATION_DIRTY",
-                              "MIGRATION_REVISION_MISMATCH",
+                              "MIGRATION_MANIFEST_MISMATCH",
+                              "MIGRATION_CHECKSUM_MISMATCH",
                               "DATABASE_REACHABLE_MIGRATION_UNVERIFIED",
                               "TEMPORAL_REACHABLE",
+                              "WORKER_HEARTBEAT_VERIFIED",
+                              "OUTBOX_RELAY_VERIFIED",
+                              "GATEWAY_ADMISSION_VERIFIED",
                               "PROOF_SOURCE_UNAVAILABLE",
                               "PROBE_FAILED",
                               "PROBE_TIMEOUT"

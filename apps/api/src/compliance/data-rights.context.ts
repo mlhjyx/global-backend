@@ -1,5 +1,6 @@
 import { normalizeJurisdiction } from './jurisdiction';
 import { DataRightsContext, JURISDICTIONS, Jurisdiction } from './data-rights.types';
+import type { DeploymentStage } from '../runtime/runtime-admission';
 
 /**
  * 把一条 Lead/公司映射成 STORE 动作的 DataRightsContext（收口⑥ 接线：LeadQualified 快照的
@@ -20,15 +21,15 @@ import { DataRightsContext, JURISDICTIONS, Jurisdiction } from './data-rights.ty
  * env DATA_PROCESSOR_JURISDICTION（值 ∈ JURISDICTIONS）。非法值 → 抛（fail-fast 防拼写）；
  * 🔴 **生产未设 → 抛（fail-closed，Codex P1 on PR #72）**：缺省 EU 会把在华处理误判为 ALLOW（漏
  * GDPR Ch.V/PIPL 跨境人审），故生产必须显式设真实处理地，宁可 fail-fast 不启动也不静默错判；
- * dev/test 未设 → 缺省 EU（便于本地/CI 跑）。nodeEnv 可注入便于单测。
+ * development 未设 → 缺省 EU（便于本地/CI 跑）。部署阶段必须来自统一 runtime snapshot。
  */
 export function resolveProcessorJurisdiction(
   raw?: string | null,
-  nodeEnv: string | undefined = process.env.NODE_ENV,
+  deploymentStage: DeploymentStage = 'development',
 ): Jurisdiction {
   const v = (raw ?? '').trim().toUpperCase();
   if (!v) {
-    if (nodeEnv === 'production') {
+    if (deploymentStage !== 'development') {
       throw new Error(
         'DATA_PROCESSOR_JURISDICTION 未设：生产环境必须显式设置真实数据处理地' +
           `（${JURISDICTIONS.join(' | ')}），否则 EU/UK 主体的跨境存储会被误判为 ALLOW 而非 REQUIRE_APPROVAL。`,
@@ -44,10 +45,6 @@ export function resolveProcessorJurisdiction(
   return v as Jurisdiction;
 }
 
-export const PROCESSOR_JURISDICTION: Jurisdiction = resolveProcessorJurisdiction(
-  process.env.DATA_PROCESSOR_JURISDICTION,
-);
-
 export interface StorageRightsLeadInput {
   /** 公司国别 alpha-2（数据主体法域来源）。 */
   country: string | null;
@@ -57,10 +54,10 @@ export interface StorageRightsLeadInput {
   hasNamedContacts: boolean;
 }
 
-/** Lead/公司 → STORE 动作的 DataRightsContext（processor 可注入，便于测试与多部署）。 */
+/** Lead/公司 → STORE 动作的 DataRightsContext；processor 必须由 runtime snapshot 显式注入。 */
 export function storageRightsContextForLead(
   input: StorageRightsLeadInput,
-  processorJurisdiction: Jurisdiction = PROCESSOR_JURISDICTION,
+  processorJurisdiction: Jurisdiction,
 ): DataRightsContext {
   return {
     action: 'STORE',

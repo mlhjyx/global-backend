@@ -55,19 +55,23 @@ import { ClosedRepairService } from "../site-builder/quality/closed-repair.servi
 import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
+import { resolveRuntimeProcessSnapshot } from "../runtime/runtime-admission";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
  * directly — no Nest bootstrap — so it never starts HTTP or the relay.
  */
 async function main(): Promise<void> {
+  const runtime = resolveRuntimeProcessSnapshot(process.env);
   const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
   await prisma.$connect();
   const costLedger = new SiteBuildCostLedger(prisma);
-  const siteBuilderStorage = new StorageService();
+  const siteBuilderStorage = new StorageService({
+    getProcessSnapshot: () => runtime,
+  });
   await siteBuilderStorage.onModuleInit();
-  const rendererBuildIdentity = resolveSiteRendererBuildIdentity();
+  const rendererBuildIdentity = resolveSiteRendererBuildIdentity(runtime);
   const releaseService = new SiteReleaseService(prisma, siteBuilderStorage, {
     buildIdentity: rendererBuildIdentity,
   });
@@ -140,9 +144,9 @@ async function main(): Promise<void> {
   }
 
   const registry = new ModelProviderRegistry();
-  const gatewayProvider = buildGatewayProvider();
+  const gatewayProvider = buildGatewayProvider(runtime.environment);
   if (gatewayProvider) registry.register(gatewayProvider);
-  if (stubAllowed()) registry.register(new StubModelProvider());
+  if (stubAllowed(runtime)) registry.register(new StubModelProvider());
   const gateway = new RouterModelGateway(
     new ModelRouter(registry),
     new AiTraceSink(prisma),
@@ -150,7 +154,7 @@ async function main(): Promise<void> {
   gateway.paidLedger = costLedger;
 
   const connection = await NativeConnection.connect({
-    address: process.env.TEMPORAL_ADDRESS ?? "127.0.0.1:7233",
+    address: runtime.safety.temporal.address,
   });
 
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
@@ -185,7 +189,7 @@ async function main(): Promise<void> {
 
   const worker = await Worker.create({
     connection,
-    namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+    namespace: runtime.safety.temporal.namespace,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve("./workflows"),
     activities: {

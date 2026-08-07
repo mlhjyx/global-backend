@@ -42,7 +42,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
 
 async function bootstrap(): Promise<void> {
   const runtime = resolveRuntimeAdmission(process.env);
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule.register(runtime));
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
@@ -52,7 +52,9 @@ async function bootstrap(): Promise<void> {
   app.use(helmet({ contentSecurityPolicy: false })); // API 无 HTML，关 CSP 免误伤 Swagger UI
   // CORS 白名单来自同一个已准入运行时快照；pilot/production 缺省会在建 app 前失败。
   app.enableCors({
-    origin: runtime.corsOrigins.length ? [...runtime.corsOrigins] : true,
+    origin: runtime.admission.corsOrigins.length
+      ? [...runtime.admission.corsOrigins]
+      : true,
     credentials: true,
     exposedHeaders: ['Location', 'X-Request-Id', 'ETag'],
   });
@@ -84,9 +86,9 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  await app.listen(runtime.port, runtime.apiBindHost);
+  await app.listen(runtime.admission.port, runtime.admission.apiBindHost);
 
-  console.log(`[api] listening on http://${runtime.apiBindHost}:${runtime.port}/api  (docs: /api/docs)`);
+  console.log(`[api] listening on http://${runtime.admission.apiBindHost}:${runtime.admission.port}/api  (docs: /api/docs)`);
 }
 
 void bootstrap();

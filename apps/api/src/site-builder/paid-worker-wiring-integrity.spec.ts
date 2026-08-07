@@ -38,7 +38,7 @@ describe("R1 production worker Release wiring", () => {
     );
     expect(worker).toContain("await siteBuilderStorage.onModuleInit()");
     expect(worker).toContain(
-      "const rendererBuildIdentity = resolveSiteRendererBuildIdentity()",
+      "const rendererBuildIdentity = resolveSiteRendererBuildIdentity(runtime)",
     );
     expect(worker).toMatch(
       /const releaseService = new SiteReleaseService\([\s\S]*?prisma,[\s\S]*?siteBuilderStorage,[\s\S]*?buildIdentity: rendererBuildIdentity/,

@@ -1,10 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import {
+  resolveRuntimeProcessSnapshot,
+  type RuntimeEnvironment,
+} from '../runtime/runtime-admission';
 import { StorageService } from './storage.service';
+
+const PILOT_ENV = Object.freeze({
+  DEPLOYMENT_STAGE: 'pilot',
+  NODE_ENV: 'production',
+  AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
+  AUTH_ISSUER: 'https://identity.example.test',
+  MODEL_GATEWAY_URL: 'https://models.example.test/v1',
+  MODEL_GATEWAY_KEY: 'test-key',
+  S3_ACCESS_KEY: 'test-access',
+  S3_SECRET_KEY: 'test-secret',
+  DATA_PROCESSOR_JURISDICTION: 'EU',
+  SITE_RENDERER_BUILD_ID: 'site-renderer@1.0.0+sha.abc123',
+});
+
+function storageService(
+  env: RuntimeEnvironment = {
+    DEPLOYMENT_STAGE: 'development',
+    NODE_ENV: 'test',
+  },
+): StorageService {
+  const snapshot = resolveRuntimeProcessSnapshot(env);
+  return new StorageService({ getProcessSnapshot: () => snapshot });
+}
 
 describe('StorageService variant-attempt lifecycle', () => {
   it('uses a conditional create for immutable Release objects and reconciles 412 as existing', async () => {
-    const service = new StorageService();
+    const service = storageService();
     const send = vi
       .fn()
       .mockResolvedValueOnce({})
@@ -64,7 +91,7 @@ describe('StorageService variant-attempt lifecycle', () => {
   });
 
   it('tags only producer-isolated attempt writes for automatic expiry', async () => {
-    const service = new StorageService();
+    const service = storageService();
     const send = vi.fn(async () => ({}));
     (service as unknown as { client: { send: typeof send } }).client.send = send;
 
@@ -88,7 +115,7 @@ describe('StorageService variant-attempt lifecycle', () => {
   });
 
   it('strips source lifecycle tags while copying into a canonical key', async () => {
-    const service = new StorageService();
+    const service = storageService();
     const send = vi.fn(async () => ({}));
     (service as unknown as { client: { send: typeof send } }).client.send = send;
 
@@ -102,44 +129,27 @@ describe('StorageService variant-attempt lifecycle', () => {
   });
 
   it('keeps production replicas validate-only and fails startup when the required rule is absent', async () => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    const previousManage = process.env.S3_MANAGE_VARIANT_ATTEMPT_LIFECYCLE;
-    process.env.NODE_ENV = 'production';
-    delete process.env.S3_MANAGE_VARIANT_ATTEMPT_LIFECYCLE;
-    try {
-      const service = new StorageService();
-      const send = vi.fn(async (command: { constructor: { name: string } }) => {
-        if (command.constructor.name === 'GetBucketLifecycleConfigurationCommand') return { Rules: [] };
-        throw new Error(`unexpected ${command.constructor.name}`);
-      });
-      (service as unknown as { client: { send: typeof send } }).client.send = send;
-      const ensure = service as unknown as { ensureVariantAttemptLifecycle(): Promise<void> };
+    const service = storageService(PILOT_ENV);
+    const send = vi.fn(async (command: { constructor: { name: string } }) => {
+      if (command.constructor.name === 'GetBucketLifecycleConfigurationCommand') return { Rules: [] };
+      throw new Error(`unexpected ${command.constructor.name}`);
+    });
+    (service as unknown as { client: { send: typeof send } }).client.send = send;
+    const ensure = service as unknown as { ensureVariantAttemptLifecycle(): Promise<void> };
 
-      await expect(ensure.ensureVariantAttemptLifecycle()).rejects.toThrow(/required variant-attempt lifecycle/);
-      expect(send.mock.calls.some(([command]) =>
-        (command as { constructor: { name: string } }).constructor.name ===
-          'PutBucketLifecycleConfigurationCommand')).toBe(false);
-    } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousNodeEnv;
-      if (previousManage === undefined) delete process.env.S3_MANAGE_VARIANT_ATTEMPT_LIFECYCLE;
-      else process.env.S3_MANAGE_VARIANT_ATTEMPT_LIFECYCLE = previousManage;
-    }
+    await expect(ensure.ensureVariantAttemptLifecycle()).rejects.toThrow(/required variant-attempt lifecycle/);
+    expect(send.mock.calls.some(([command]) =>
+      (command as { constructor: { name: string } }).constructor.name ===
+        'PutBucketLifecycleConfigurationCommand')).toBe(false);
   });
 
-  it('fails production startup before lifecycle validation when object storage credentials are absent', async () => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    const previousAccessKey = process.env.S3_ACCESS_KEY;
-    process.env.NODE_ENV = 'production';
-    delete process.env.S3_ACCESS_KEY;
-    try {
-      const service = new StorageService();
-      await expect(service.onModuleInit()).rejects.toThrow(/S3_ACCESS_KEY is required/);
-    } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousNodeEnv;
-      if (previousAccessKey === undefined) delete process.env.S3_ACCESS_KEY;
-      else process.env.S3_ACCESS_KEY = previousAccessKey;
-    }
+  it('fails pilot admission before service construction when object storage credentials are absent', () => {
+    expect(() =>
+      resolveRuntimeProcessSnapshot({
+        ...PILOT_ENV,
+        S3_ACCESS_KEY: undefined,
+        S3_SECRET_KEY: undefined,
+      }),
+    ).toThrow(/S3_ACCESS_KEY.*S3_SECRET_KEY/);
   });
 });

@@ -15,6 +15,13 @@ Ubuntu 服务器（见 [AGENTS.md §3](../../AGENTS.md)）上让**后端 API 与
 - 所有 `pnpm`/`docker compose` 命令均从仓库根目录 `/global/backend` 执行。
 - **已先构建**：`cd /global/backend && pnpm --filter @global/api build`（unit 跑 `dist/`，不含热重载）。
 
+`global-api.service` 把 `temporal-dev.service` 作为硬依赖。Nest 初始化会在
+`TEMPORAL_CONNECT_TIMEOUT_MS`（默认 3000 ms）的有限窗口内主动连接 Temporal；
+连接失败会让进程启动失败，API **不会绑定监听端口**，随后由
+`Restart=on-failure` 重试。API 已成功启动后若 Temporal 再失联，进程仍存活，
+但 `/api/v1/health/ready` 的 `temporal` 探针失败并返回 503。该探针只证明
+Temporal server edge 可达；worker poller 仍由独立的 required proof gate 证明。
+
 ## 安装
 
 ```bash

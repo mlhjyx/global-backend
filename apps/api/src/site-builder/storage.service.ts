@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   CopyObjectCommand,
   CreateBucketCommand,
@@ -16,6 +16,10 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import {
+  RuntimeIdentityService,
+  type RuntimeProcessSnapshot,
+} from '../runtime/runtime-admission';
 
 const PRESIGN_PUT_TTL_S = 900; // 15min 完成直传
 const PRESIGN_GET_TTL_S = 300;
@@ -32,25 +36,31 @@ export class StorageService implements OnModuleInit {
   private readonly log = new Logger(StorageService.name);
   private readonly client: S3Client;
   readonly bucket: string;
+  private readonly runtime: RuntimeProcessSnapshot;
 
-  constructor() {
-    this.bucket = process.env.S3_BUCKET ?? 'global-site-builder';
+  constructor(
+    @Inject(RuntimeIdentityService)
+    runtimeIdentity: Pick<RuntimeIdentityService, 'getProcessSnapshot'>,
+  ) {
+    this.runtime = runtimeIdentity.getProcessSnapshot();
+    const env = this.runtime.environment;
+    this.bucket = env.S3_BUCKET ?? 'global-site-builder';
     this.client = new S3Client({
-      endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
-      region: process.env.S3_REGION ?? 'us-east-1',
-      forcePathStyle: (process.env.S3_FORCE_PATH_STYLE ?? 'true') === 'true',
+      endpoint: env.S3_ENDPOINT ?? 'http://localhost:9000',
+      region: env.S3_REGION ?? 'us-east-1',
+      forcePathStyle: (env.S3_FORCE_PATH_STYLE ?? 'true') === 'true',
       credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY ?? '',
-        secretAccessKey: process.env.S3_SECRET_KEY ?? '',
+        accessKeyId: env.S3_ACCESS_KEY ?? '',
+        secretAccessKey: env.S3_SECRET_KEY ?? '',
       },
     });
   }
 
   /** dev 幂等建桶；失败只告警（真正用到时再报错，不挡无关模块启动）。 */
   async onModuleInit(): Promise<void> {
-    if (!process.env.S3_ACCESS_KEY) {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('S3_ACCESS_KEY is required in production');
+    if (!this.runtime.safety.storage.available) {
+      if (!this.runtime.safety.storage.allowUnavailable) {
+        throw new Error('S3_ACCESS_KEY and S3_SECRET_KEY are required');
       }
       this.log.warn('S3_ACCESS_KEY not set — object storage unavailable until configured');
       return;
@@ -74,9 +84,10 @@ export class StorageService implements OnModuleInit {
    * race a full-bucket lifecycle PUT. An explicit production manager must be single-owner/IaC.
    */
   private async ensureVariantAttemptLifecycle(): Promise<void> {
-    const configured = process.env.S3_MANAGE_VARIANT_ATTEMPT_LIFECYCLE;
-    const manage = configured === 'true' || (configured === undefined && process.env.NODE_ENV !== 'production');
-    const strict = process.env.NODE_ENV === 'production' || !manage;
+    const manage =
+      this.runtime.safety.storage.manageVariantAttemptLifecycle;
+    const strict =
+      this.runtime.safety.storage.strictVariantAttemptLifecycle;
     try {
       let rules: LifecycleRule[] = [];
       try {

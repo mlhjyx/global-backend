@@ -3,7 +3,7 @@ Description=Global backend API (NestJS, dist/main.js)
 Documentation=https://github.com/mlhjyx/global-backend
 After=network-online.target docker.service temporal-dev.service
 Wants=network-online.target
-Requires=docker.service
+Requires=docker.service temporal-dev.service
 # boot 时 DB/Temporal 容器可能还没就绪 → 允许无限次崩溃重试直到依赖起来
 StartLimitIntervalSec=0
 

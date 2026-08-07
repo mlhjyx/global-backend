@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
+import type { RuntimeAuthSafety } from '../runtime/runtime-admission';
 
 /**
  * 生产鉴权：校验外部 SaaS 平台签发的 JWT（PRD 12.2；评审点名的越权漏洞修复）。
@@ -28,18 +29,18 @@ export class JwksTokenVerifier extends TokenVerifier {
   private readonly wsClaim: string;
   private readonly rolesClaim: string;
 
-  constructor() {
+  constructor(config: RuntimeAuthSafety) {
     super();
-    const jwksUri = process.env.AUTH_JWKS_URI;
-    this.issuer = process.env.AUTH_ISSUER ?? '';
-    if (!jwksUri || !this.issuer) {
+    const jwksUri = config.jwksUri;
+    this.issuer = config.issuer ?? '';
+    if (config.mode !== 'jwks' || !jwksUri || !this.issuer) {
       throw new Error('JwksTokenVerifier requires AUTH_JWKS_URI and AUTH_ISSUER');
     }
     this.jwks = createRemoteJWKSet(new URL(jwksUri)); // 内部按 kid 缓存/轮换
-    this.audience = process.env.AUTH_AUDIENCE || undefined;
-    this.clockSkewS = Number(process.env.AUTH_CLOCK_SKEW_S) || 60;
-    this.wsClaim = process.env.AUTH_WORKSPACE_CLAIM ?? 'workspace_id';
-    this.rolesClaim = process.env.AUTH_ROLES_CLAIM ?? 'roles';
+    this.audience = config.audience ?? undefined;
+    this.clockSkewS = config.clockSkewSeconds;
+    this.wsClaim = config.workspaceClaim;
+    this.rolesClaim = config.rolesClaim;
   }
 
   async verify(token: string): Promise<RequestContext> {

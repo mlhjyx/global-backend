@@ -36,7 +36,7 @@ const MIGRATION_ENTRIES = Object.freeze([
   }),
 ]);
 const MIGRATION_MANIFEST_DIGEST =
-  'sha256:d677da9c98a371cce495417fa42d6b2a33412f7cf2864a7f0818a8ed75bcc84e';
+  'sha256:c660e88b31a56fb9e329705b41371e5b0d6c0a77d59c03c5a2596bc1b2713ea4';
 
 const roots: string[] = [];
 
@@ -67,6 +67,7 @@ async function artifactRoot(
 async function migrationRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'global-api-migrations-'));
   roots.push(root);
+  await writeFile(join(root, 'migration_lock.toml'), 'provider = "postgresql"\n');
   await mkdir(join(root, MIGRATION_ENTRIES[1].name), { recursive: true });
   await writeFile(
     join(root, MIGRATION_ENTRIES[1].name, 'migration.sql'),
@@ -86,7 +87,7 @@ describe('runtime build receipt', () => {
     const second = await artifactRoot('reverse');
     expect(computeArtifactDigest(first)).toBe(computeArtifactDigest(second));
     expect(computeArtifactDigest(first)).toBe(
-      'sha256:0f893da69d25efb9e0b97fbbf95400be6ec91f364e220079b7d41de889932dee',
+      'sha256:7ba6572a4fe52e8633ebb7093248d1fbda6e8cbeea4ce6e8d51b1b007f2e76d1',
     );
 
     await generateRuntimeBuildReceipt({
@@ -106,7 +107,7 @@ describe('runtime build receipt', () => {
     await writeFile(join(root, 'z.txt'), 'last\n');
 
     expect(computeArtifactDigest(root)).toBe(
-      'sha256:9d33c7eb6e15efa459331347b8ef7de216b779c8500e14886750f84e90be8443',
+      'sha256:0bae8701bd8e8130c33034f19fed9aa52f11563b41a27e74b23886c64d264368',
     );
   });
 
@@ -296,17 +297,54 @@ describe('runtime build receipt', () => {
     await symlink(root, linkedRoot, 'dir');
     expect(() => computeArtifactDigest(linkedRoot)).toThrow(/root.*symlink/i);
 
+    const artifactReplacementRoot = await artifactRoot();
+    const artifactReplacement = join(
+      await mkdtemp(join(tmpdir(), 'global-api-artifact-replacement-')),
+      'main.js',
+    );
+    roots.push(resolve(artifactReplacement, '..'));
+    await writeFile(artifactReplacement, 'console.log("api");\n');
+    expect(() =>
+      computeArtifactDigest(
+        artifactReplacementRoot,
+        undefined,
+        {
+          beforeFileOpenForTest: (relativePath) => {
+            if (relativePath === 'main.js') {
+              renameSync(
+                artifactReplacement,
+                join(artifactReplacementRoot, 'main.js'),
+              );
+            }
+          },
+        },
+      ),
+    ).toThrow(/artifact file.*identity changed/i);
+
+    const rootReplacement = await artifactRoot();
+    const replacementRoot = await artifactRoot();
+    const displacedRoot = `${rootReplacement}-displaced`;
+    roots.push(displacedRoot);
+    expect(() =>
+      computeArtifactDigest(rootReplacement, undefined, {
+        beforeRootFinalizeForTest: () => {
+          renameSync(rootReplacement, displacedRoot);
+          renameSync(replacementRoot, rootReplacement);
+        },
+      }),
+    ).toThrow(/artifact root identity changed/i);
+
     const receipt = await generateRuntimeBuildReceipt({
       artifactRoot: root,
       migrationRoot: await migrationRoot(),
       ...BUILD_INPUT,
     });
     const receiptPath = join(root, 'runtime-build-receipt.json');
-    const replacementRoot = await mkdtemp(
+    const receiptReplacementRoot = await mkdtemp(
       join(tmpdir(), 'global-api-receipt-replacement-'),
     );
-    roots.push(replacementRoot);
-    const replacement = join(replacementRoot, 'replacement.json');
+    roots.push(receiptReplacementRoot);
+    const replacement = join(receiptReplacementRoot, 'replacement.json');
     await writeFile(replacement, `${JSON.stringify(receipt)}\n`);
     await chmod(replacement, 0o444);
 
@@ -320,6 +358,34 @@ describe('runtime build receipt', () => {
         },
       }),
     ).toThrow(/receipt.*changed|identity.*changed/i);
+  });
+
+  it('rejects receipt replacement after the artifact scan but before admission returns', async () => {
+    const root = await artifactRoot();
+    const receipt = await generateRuntimeBuildReceipt({
+      artifactRoot: root,
+      migrationRoot: await migrationRoot(),
+      ...BUILD_INPUT,
+    });
+    const receiptPath = join(root, 'runtime-build-receipt.json');
+    const replacementRoot = await mkdtemp(
+      join(tmpdir(), 'global-api-late-receipt-replacement-'),
+    );
+    roots.push(replacementRoot);
+    const replacement = join(replacementRoot, 'replacement.json');
+    await writeFile(replacement, `${JSON.stringify(receipt, null, 2)}\n`);
+    await chmod(replacement, 0o444);
+
+    expect(() =>
+      loadRuntimeBuildIdentity({
+        artifactRoot: root,
+        env: {},
+        required: true,
+        beforeReceiptFinalizeForTest: () => {
+          renameSync(replacement, receiptPath);
+        },
+      }),
+    ).toThrow(/receipt.*changed/i);
   });
 
   it('keeps the generator free of runtime Git derivation', async () => {

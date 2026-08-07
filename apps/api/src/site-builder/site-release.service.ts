@@ -18,26 +18,15 @@ import {
   assertRendererOutputMatches,
   rendererOutputTreeDigest,
 } from './renderer-build';
+import type { RuntimeProcessSnapshot } from '../runtime/runtime-admission';
 
 const DEFAULT_RELEASE_LEASE_MS = 5 * 60_000;
 const QUALITY_COLLECTION_MAX_WAIT_MS = 10_000;
 const QUALITY_COLLECTION_TIMEOUT_MS = 30_000;
-const BUILD_IDENTITY = /^[A-Za-z0-9][A-Za-z0-9._+@:/-]{0,127}$/;
-
 export function resolveSiteRendererBuildIdentity(
-  env: Record<string, string | undefined> = process.env,
+  runtime: RuntimeProcessSnapshot,
 ): string {
-  const configured = env.SITE_RENDERER_BUILD_ID?.trim();
-  if (!configured) {
-    if (env.NODE_ENV === 'production') {
-      throw new Error('SITE_RENDERER_BUILD_ID is required in production');
-    }
-    return 'site-renderer@dev-unpinned';
-  }
-  if (!BUILD_IDENTITY.test(configured)) {
-    throw new Error('SITE_RENDERER_BUILD_ID is invalid');
-  }
-  return configured;
+  return runtime.safety.siteRendererBuildIdentity;
 }
 
 export interface SiteReleaseServiceOptions {

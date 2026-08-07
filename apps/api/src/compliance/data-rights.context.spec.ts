@@ -1,10 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { storageRightsContextForLead, PROCESSOR_JURISDICTION, resolveProcessorJurisdiction } from './data-rights.context';
+import {
+  storageRightsContextForLead as rawStorageRightsContextForLead,
+  resolveProcessorJurisdiction,
+  type StorageRightsLeadInput,
+} from './data-rights.context';
+import type { Jurisdiction } from './data-rights.types';
 import { evaluateDataRights } from './data-rights.engine';
 import { JURISDICTION_POLICY_SEED } from './jurisdiction-policy.seed';
 
 /** 用系统种子规则跑真引擎，得到 STORE 动作的存储权利 effect（= 快照 storage_rights_decision 的值）。 */
 const rules = JURISDICTION_POLICY_SEED;
+const storageRightsContextForLead = (
+  input: StorageRightsLeadInput,
+  processor: Jurisdiction = 'EU',
+) => rawStorageRightsContextForLead(input, processor);
 const effectFor = (input: Parameters<typeof storageRightsContextForLead>[0], processor?: 'EU' | 'UK' | 'US' | 'CN' | 'OTHER') =>
   evaluateDataRights(storageRightsContextForLead(input, processor), rules).effect;
 
@@ -28,8 +37,8 @@ describe('storageRightsContextForLead（纯映射）', () => {
     expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }).suppressed).toBe(false);
   });
 
-  it('processor 默认取 PROCESSOR_JURISDICTION，可注入覆盖', () => {
-    expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }).processorJurisdiction).toBe(PROCESSOR_JURISDICTION);
+  it('processor 必须由调用方注入，测试 helper 默认使用 EU', () => {
+    expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }).processorJurisdiction).toBe('EU');
     expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }, 'CN').processorJurisdiction).toBe('CN');
   });
 });
@@ -83,12 +92,12 @@ describe('resolveProcessorJurisdiction（fail-closed）', () => {
 
   it('dev/test 未设 → 缺省 EU（便于本地/CI）', () => {
     expect(resolveProcessorJurisdiction('', 'development')).toBe('EU');
-    expect(resolveProcessorJurisdiction(undefined, 'test')).toBe('EU');
+    expect(resolveProcessorJurisdiction(undefined, 'development')).toBe('EU');
   });
 
   it('已设合法值 → 采用（大小写无关），任何 env 下均不抛', () => {
     expect(resolveProcessorJurisdiction('CN', 'production')).toBe('CN');
-    expect(resolveProcessorJurisdiction('cn', 'production')).toBe('CN');
+    expect(resolveProcessorJurisdiction('cn', 'pilot')).toBe('CN');
     expect(resolveProcessorJurisdiction('EU', 'production')).toBe('EU');
   });
 
