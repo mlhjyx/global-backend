@@ -17,7 +17,7 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 export const COPY_QUALITY_MATRIX_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v2.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v3.json" as const;
 
 export interface CopyQualityMatrixSourceFileSpec {
   role: string;
@@ -33,6 +33,10 @@ const SOURCE_FILE_SPECS = [
   {
     role: "gateway_settlement",
     path: "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+  },
+  {
+    role: "runtime_adapter",
+    path: "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
   },
   {
     role: "runtime_capability",
@@ -206,7 +210,7 @@ export function buildCopyQualityMatrixSourceFileSpecs(
 }
 
 export interface CopyQualityMatrixSourceBundle {
-  schemaVersion: "site-builder-copy-quality-matrix-source-bundle/2026-08-07-v2";
+  schemaVersion: "site-builder-copy-quality-matrix-source-bundle/2026-08-07-v3";
   files: readonly CopyQualityMatrixSourceFile[];
   digest: string;
 }
@@ -219,8 +223,8 @@ export interface CopyQualityMatrixSourceDigests {
 }
 
 export interface CopyQualityMatrixManifest {
-  schemaVersion: "site-builder-copy-quality-matrix-manifest/2026-08-07-v2";
-  manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2";
+  schemaVersion: "site-builder-copy-quality-matrix-manifest/2026-08-07-v3";
+  manifestId: "site-builder-copy-quality-matrix/2026-08-07-v3";
   purpose: "site_builder_copy_quality_matrix";
   fixedSourceCommit: string;
   sourceBundleDigest: string;
@@ -238,8 +242,8 @@ export interface CopyQualityMatrixManifest {
 }
 
 export interface CopyQualityMatrixManifestArtifact {
-  schemaVersion: "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2";
-  artifactId: "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2";
+  schemaVersion: "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v3";
+  artifactId: "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v3";
   classification: "FIXED_SOURCE_CREATE_ONLY";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -333,6 +337,7 @@ function buildSourceDigests(
     "gateway_settlement",
     "real_dispatch_gateway",
     "real_dispatch_ledger_identity",
+    "runtime_adapter",
     "runtime_capability",
     "runtime_context",
     "runtime_execution",
@@ -403,7 +408,7 @@ export function buildCopyQualityMatrixManifestArtifact(input: {
   );
   const sourceBundle = Object.freeze({
     schemaVersion:
-      "site-builder-copy-quality-matrix-source-bundle/2026-08-07-v2" as const,
+      "site-builder-copy-quality-matrix-source-bundle/2026-08-07-v3" as const,
     files,
     digest: canonicalDigest(files),
   });
@@ -415,8 +420,8 @@ export function buildCopyQualityMatrixManifestArtifact(input: {
   );
   const manifest = Object.freeze({
     schemaVersion:
-      "site-builder-copy-quality-matrix-manifest/2026-08-07-v2" as const,
-    manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2" as const,
+      "site-builder-copy-quality-matrix-manifest/2026-08-07-v3" as const,
+    manifestId: "site-builder-copy-quality-matrix/2026-08-07-v3" as const,
     purpose: "site_builder_copy_quality_matrix" as const,
     fixedSourceCommit: input.fixedSourceCommit,
     sourceBundleDigest: sourceBundle.digest,
@@ -435,9 +440,9 @@ export function buildCopyQualityMatrixManifestArtifact(input: {
   });
   const withoutDigest = {
     schemaVersion:
-      "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2" as const,
+      "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v3" as const,
     artifactId:
-      "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2" as const,
+      "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v3" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
     fixedSourceCommit: input.fixedSourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,

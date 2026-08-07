@@ -7,7 +7,7 @@ import {
 describe("Copy Evaluation v2 admission plan", () => {
   it("versions the Git-reviewed runtime settlement evidence contract", () => {
     expect(COPY_EVALUATION_V2_PLAN.schemaVersion).toBe(
-      "site-builder-copy-evaluation-plan/2026-08-07-v6",
+      "site-builder-copy-evaluation-plan/2026-08-07-v7",
     );
   });
 
@@ -35,12 +35,12 @@ describe("Copy Evaluation v2 admission plan", () => {
     ).toEqual([
       {
         alias: "gpt-5.6-terra",
-        protocol: "openai_responses",
+        protocol: "openai_chat_completions",
         reasoning: "medium",
       },
       {
         alias: "gpt-5.6-sol",
-        protocol: "openai_responses",
+        protocol: "openai_chat_completions",
         reasoning: "high",
       },
       {
@@ -57,12 +57,12 @@ describe("Copy Evaluation v2 admission plan", () => {
       currentCandidates: [
         {
           alias: "gpt-5.6-terra",
-          expectedProtocol: "openai-responses",
+          expectedProtocol: "openai-chat-completions",
           preflight: "capability_probe",
         },
         {
           alias: "gpt-5.6-sol",
-          expectedProtocol: "openai-responses",
+          expectedProtocol: "openai-chat-completions",
           preflight: "capability_probe",
         },
         {
@@ -74,12 +74,12 @@ describe("Copy Evaluation v2 admission plan", () => {
       requiredCandidates: [
         {
           alias: "gpt-5.6-terra",
-          expectedProtocol: "openai-responses",
+          expectedProtocol: "openai-chat-completions",
           preflight: "capability_probe",
         },
         {
           alias: "gpt-5.6-sol",
-          expectedProtocol: "openai-responses",
+          expectedProtocol: "openai-chat-completions",
           preflight: "capability_probe",
         },
         {
@@ -199,13 +199,13 @@ describe("Copy Evaluation v2 admission plan", () => {
 
   it("separates the three-call pilot from the later task-shaped matrix", () => {
     expect(COPY_EVALUATION_V2_PLAN.capabilityPilot).toMatchObject({
-      contractId: "site-builder-copy-capability-pilot/2026-08-07-v9",
+      contractId: "site-builder-copy-capability-pilot/2026-08-07-v10",
       contractSchemaVersion:
-        "site-builder-copy-capability-pilot-plan/2026-08-07-v9",
+        "site-builder-copy-capability-pilot-plan/2026-08-07-v10",
       evidenceClassification: "CAPABILITY_ONLY_NOT_QUALITY_EVIDENCE",
       plannedExecutions: 3,
       maximumWireCalls: 6,
-      status: "REAL_RUNTIME_READY_POST_MERGE_V9_MANIFEST_REQUIRED",
+      status: "REAL_RUNTIME_READY_POST_MERGE_V10_MANIFEST_REQUIRED",
     });
     expect(COPY_EVALUATION_V2_PLAN.taskMatrix).toMatchObject({
       plannedExecutions: 36,

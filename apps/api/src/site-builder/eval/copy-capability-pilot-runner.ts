@@ -32,6 +32,7 @@ import type {
 } from "../../model-runtime/types";
 // Direct adapter imports keep the compiled proof closure explicit and narrow.
 import { AiSdkAnthropicMessagesAdapter } from "../../model-runtime/adapters/ai-sdk-anthropic-messages.adapter";
+import { AiSdkOpenAiChatCompletionsAdapter } from "../../model-runtime/adapters/ai-sdk-openai-chat-completions.adapter";
 import type {
   AiSdkNativeAdapterSettings,
   NativeModelAdapter,
@@ -67,6 +68,7 @@ export const COPY_CAPABILITY_OPERATIONAL_ARTIFACT_PATHS = Object.freeze([
   "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
   "apps/api/dist/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.js",
   "apps/api/dist/model-runtime/adapters/ai-sdk-native-adapter.contract.js",
+  "apps/api/dist/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.js",
   "apps/api/dist/model-runtime/adapters/ai-sdk-openai-responses.adapter.js",
   "apps/api/dist/model-runtime/compiled-runtime-guard.js",
   "apps/api/dist/model-runtime/context-engine.js",
@@ -165,6 +167,9 @@ function nativeProtocol(
   protocol: ModelProtocol,
 ): NativeModelAdapter["protocol"] {
   if (protocol === "openai_responses") return "openai-responses";
+  if (protocol === "openai_chat_completions") {
+    return "openai-chat-completions";
+  }
   if (protocol === "anthropic_messages") return "anthropic-messages";
   throw new Error("COPY_CAPABILITY_PROTOCOL_NOT_SUPPORTED");
 }
@@ -180,7 +185,11 @@ function runtimeProtocol(
   protocol: NativeModelAdapter["protocol"],
 ): ModelProtocol {
   if (protocol === "openai-responses") return "openai_responses";
-  return "anthropic_messages";
+  if (protocol === "openai-chat-completions") {
+    return "openai_chat_completions";
+  }
+  if (protocol === "anthropic-messages") return "anthropic_messages";
+  throw new Error("COPY_CAPABILITY_NATIVE_PROTOCOL_NOT_SUPPORTED");
 }
 
 function completeUsage(usage: {
@@ -509,6 +518,9 @@ async function createRunner(
   });
   const adapters = Object.freeze({
     openai_responses: new AiSdkOpenAiResponsesAdapter(input.gateway),
+    openai_chat_completions: new AiSdkOpenAiChatCompletionsAdapter(
+      input.gateway,
+    ),
     anthropic_messages: new AiSdkAnthropicMessagesAdapter(input.gateway),
   });
 

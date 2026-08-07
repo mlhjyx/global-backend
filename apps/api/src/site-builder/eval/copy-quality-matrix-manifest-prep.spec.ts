@@ -95,13 +95,13 @@ describe("Copy quality matrix create-only manifest preparation", () => {
     });
 
     expect(COPY_QUALITY_MATRIX_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v2.json",
+      "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v3.json",
     );
     expect(artifact).toMatchObject({
       schemaVersion:
-        "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2",
+        "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v3",
       artifactId:
-        "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2",
+        "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v3",
       classification: "FIXED_SOURCE_CREATE_ONLY",
       fixedSourceCommit: FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD_COMMIT,
@@ -112,8 +112,8 @@ describe("Copy quality matrix create-only manifest preparation", () => {
       observedModelWireCalls: 0,
       manifest: {
         schemaVersion:
-          "site-builder-copy-quality-matrix-manifest/2026-08-07-v2",
-        manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2",
+          "site-builder-copy-quality-matrix-manifest/2026-08-07-v3",
+        manifestId: "site-builder-copy-quality-matrix/2026-08-07-v3",
         purpose: "site_builder_copy_quality_matrix",
         fixedSourceCommit: FIXED_SOURCE_COMMIT,
         dispatchAuthorization: "NOT_AUTHORIZED",
@@ -136,6 +136,27 @@ describe("Copy quality matrix create-only manifest preparation", () => {
     expect(artifact.manifest.executions).toEqual(
       COPY_QUALITY_MATRIX_PLAN.executions,
     );
+    expect(
+      new Set(
+        artifact.manifest.executions
+          .filter(({ alias }) => alias === "gpt-5.6-terra")
+          .map(({ protocol }) => protocol),
+      ),
+    ).toEqual(new Set(["openai_chat_completions"]));
+    expect(
+      new Set(
+        artifact.manifest.executions
+          .filter(({ alias }) => alias === "gpt-5.6-sol")
+          .map(({ protocol }) => protocol),
+      ),
+    ).toEqual(new Set(["openai_chat_completions"]));
+    expect(
+      new Set(
+        artifact.manifest.executions
+          .filter(({ alias }) => alias === "claude-sonnet-5")
+          .map(({ protocol }) => protocol),
+      ),
+    ).toEqual(new Set(["anthropic_messages"]));
     expect(artifact.requiredFollowup).toContain(
       "SUCCESSFUL_CAPABILITY_PILOT_EVIDENCE",
     );
@@ -176,6 +197,7 @@ describe("Copy quality matrix create-only manifest preparation", () => {
       ["quality_evaluator", "evaluator"],
       ["quality_replay", "evaluator"],
       ["quality_fixture", "fixtures"],
+      ["runtime_adapter", "runtime"],
       ["runtime_execution", "runtime"],
     ] as const) {
       const drifted = buildCopyQualityMatrixManifestArtifact({
@@ -224,6 +246,10 @@ describe("Copy quality matrix create-only manifest preparation", () => {
           path: "apps/api/src/site-builder/eval/copy-assembly-eval.ts",
         },
         {
+          role: "runtime_adapter",
+          path: "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
+        },
+        {
           role: "runtime_capability",
           path: "apps/api/src/model-runtime/capability-registry.ts",
         },
@@ -238,6 +264,48 @@ describe("Copy quality matrix create-only manifest preparation", () => {
     );
     expect(specs.map(({ path }) => path)).toEqual(
       [...specs.map(({ path }) => path)].sort(),
+    );
+  });
+
+  it("preserves canonical v2 history but rejects it after the Chat plan drift", () => {
+    const historicalPath = resolve(
+      import.meta.dirname,
+      "../../../../../docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v2.json",
+    );
+    const historicalBytes = readFileSync(historicalPath, "utf8");
+    const historical = JSON.parse(historicalBytes) as {
+      artifactDigest: string;
+      manifest: {
+        planDigest: string;
+        sourceBundleDigest: string;
+        executions: Array<{ alias: string; protocol: string }>;
+      };
+      sourceBundle: { digest: string; files: unknown[] };
+    };
+    const { artifactDigest, ...withoutArtifactDigest } = historical;
+
+    expect(historicalBytes).toBe(`${JSON.stringify(historical, null, 2)}\n`);
+    expect(historical.sourceBundle.digest).toBe(
+      canonicalDigest(historical.sourceBundle.files),
+    );
+    expect(historical.manifest.sourceBundleDigest).toBe(
+      historical.sourceBundle.digest,
+    );
+    expect(artifactDigest).toBe(canonicalDigest(withoutArtifactDigest));
+    expect(historical.manifest.planDigest).not.toBe(
+      canonicalDigest(COPY_QUALITY_MATRIX_PLAN),
+    );
+    expect(
+      new Set(
+        historical.manifest.executions
+          .filter(({ alias }) =>
+            ["gpt-5.6-terra", "gpt-5.6-sol"].includes(alias),
+          )
+          .map(({ protocol }) => protocol),
+      ),
+    ).toEqual(new Set(["openai_responses"]));
+    expect(() => validateCopyQualityMatrixManifestArtifact(historical)).toThrow(
+      "COPY_QUALITY_MATRIX_MANIFEST_ARTIFACT_INVALID",
     );
   });
 

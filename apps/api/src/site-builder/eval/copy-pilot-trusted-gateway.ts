@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { AiSdkAnthropicMessagesAdapter } from "../../model-runtime/adapters/ai-sdk-anthropic-messages.adapter";
+import { AiSdkOpenAiChatCompletionsAdapter } from "../../model-runtime/adapters/ai-sdk-openai-chat-completions.adapter";
 import { AiSdkOpenAiResponsesAdapter } from "../../model-runtime/adapters/ai-sdk-openai-responses.adapter";
 import { NewApiRequestBoundSettlementResolver } from "../../model-gateway/new-api-request-bound-settlement";
 import type {
@@ -33,7 +34,8 @@ export interface CopyPilotTrustedGateway {
 
 export interface CopyPilotTrustedGatewayBindings {
   execute<Output>(
-    protocol: "openai_responses" | "anthropic_messages",
+    protocol:
+      "openai_responses" | "openai_chat_completions" | "anthropic_messages",
     request: NativeModelAdapterRequest,
   ): Promise<NativeModelAdapterResult<Output>>;
   resolve(
@@ -336,6 +338,9 @@ export function createCopyPilotTrustedGatewayBindings(
   );
   const adapters = Object.freeze({
     openai_responses: new AiSdkOpenAiResponsesAdapter(adapterSettings),
+    openai_chat_completions: new AiSdkOpenAiChatCompletionsAdapter(
+      adapterSettings,
+    ),
     anthropic_messages: new AiSdkAnthropicMessagesAdapter(adapterSettings),
   });
   const resolver = new NewApiRequestBoundSettlementResolver({
@@ -350,7 +355,8 @@ export function createCopyPilotTrustedGatewayBindings(
   if (!selected) fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
   return Object.freeze({
     execute: <Output>(
-      protocol: "openai_responses" | "anthropic_messages",
+      protocol:
+        "openai_responses" | "openai_chat_completions" | "anthropic_messages",
       request: NativeModelAdapterRequest,
     ) => {
       if (protocol !== selected.protocol || request.alias !== selected.alias) {

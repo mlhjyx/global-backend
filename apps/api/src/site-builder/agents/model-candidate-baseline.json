@@ -1,7 +1,7 @@
 {
   "schemaVersion": "site-builder-model-candidate-baseline/v1",
-  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-08-04-v2",
-  "effectiveDate": "2026-08-04",
+  "candidateBaselineId": "site-builder-model-candidate-baseline/2026-08-07-v3",
+  "effectiveDate": "2026-08-07",
   "scope": "non_runtime_evaluation_candidates",
   "statusDefinitions": {
     "runnable": "Admitted to a future capability probe or task-shaped evaluation; not promoted and not production-qualified.",
@@ -14,7 +14,7 @@
       "alias": "gpt-5.6-terra",
       "domain": "text",
       "status": "runnable",
-      "expectedProtocols": ["openai-responses"],
+      "expectedProtocols": ["openai-responses", "openai-chat-completions"],
       "boundary": "Existing BrandProfile promotion remains unchanged; other tasks require their own evaluation."
     },
     {
@@ -35,7 +35,7 @@
       "alias": "gpt-5.6-sol",
       "domain": "text",
       "status": "runnable",
-      "expectedProtocols": ["openai-responses"],
+      "expectedProtocols": ["openai-responses", "openai-chat-completions"],
       "boundary": "High-reasoning Copy and multimodal-review candidate; each task still requires independent evaluation and promotion."
     },
     {
@@ -276,13 +276,13 @@
       "candidates": [
         {
           "alias": "gpt-5.6-terra",
-          "expectedProtocol": "openai-responses",
+          "expectedProtocol": "openai-chat-completions",
           "preflight": "capability_probe",
           "gate": "capability pilot before claim-bound multilingual copy evaluation"
         },
         {
           "alias": "gpt-5.6-sol",
-          "expectedProtocol": "openai-responses",
+          "expectedProtocol": "openai-chat-completions",
           "preflight": "capability_probe",
           "gate": "capability pilot before claim-bound multilingual copy evaluation"
         },

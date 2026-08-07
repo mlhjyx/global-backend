@@ -13,6 +13,7 @@ import {
   COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES,
   buildCopyRealCapabilityManifestArtifact,
   buildCopyRealCapabilitySourceFileSpecs,
+  prepareCopyRealCapabilityManifestFromRepository,
   validateCopyRealCapabilityManifestArtifact,
   writeCopyRealCapabilityManifestCreateOnly,
   type CopyRealCapabilitySourceFile,
@@ -38,7 +39,7 @@ const HISTORICAL_MANIFEST_V8_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v8.json";
 const HISTORICAL_MANIFEST_V9_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json";
-const CURRENT_MANIFEST_V10_PATH =
+const HISTORICAL_MANIFEST_V10_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v10.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
@@ -49,124 +50,30 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("prepares the post-merge streaming settlement source as manifest v10 without dispatch", () => {
-    const artifact = buildCopyRealCapabilityManifestArtifact({
-      preparationHeadCommit: PREPARATION_HEAD,
-      sourceFiles: sourceFiles(),
-    });
-
-    expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "d819455dea736151a4c30d5ffdd0e224d74af917",
-    );
+  it("stays fail-closed until a post-merge Chat v11 fixed source exists", () => {
+    expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBeNull();
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
-      CURRENT_MANIFEST_V10_PATH,
+      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json",
     );
-    expect(artifact).toMatchObject({
-      schemaVersion:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
-      artifactId:
-        "site-builder-copy-real-capability-manifest-prep/2026-08-07-v10",
-      classification: "FIXED_SOURCE_CREATE_ONLY",
-      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
-      preparationHeadCommit: PREPARATION_HEAD,
-      createOnly: true,
-      dispatchAuthorization: "NOT_AUTHORIZED",
-      dispatchCapable: false,
-      observedNetworkCalls: 0,
-      observedModelWireCalls: 0,
-      observedModelCost: { CNY: 0, USD: 0 },
-      manifest: {
-        schemaVersion:
-          "site-builder-copy-real-capability-manifest/2026-08-05-v1",
-        manifestId: "site-builder-copy-real-capability/2026-08-07-v10",
-        fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
-        planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
-        dispatchAuthorization: "NOT_AUTHORIZED",
-        taskId: "site_builder.copy",
-        plannedExecutions: 3,
-        maximumWireCalls: 6,
-        maximumRepairCallsPerExecution: 1,
-        executions: [
-          {
-            alias: "gpt-5.6-terra",
-            protocol: "openai_responses",
-            reasoning: "medium",
-          },
-          {
-            alias: "gpt-5.6-sol",
-            protocol: "openai_responses",
-            reasoning: "high",
-          },
-          {
-            alias: "claude-sonnet-5",
-            protocol: "anthropic_messages",
-            reasoning: "medium",
-          },
-        ],
-      },
-      contractSnapshot: {
-        taskId: "site_builder.copy",
-        planId: "site-builder-copy-capability-pilot/2026-08-07-v9",
-        planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
-        executionScopeDigest: canonicalDigest(
-          COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions,
-        ),
-      },
-      preparationVerification: {
-        fixedCommitReachableFromPreparationHead: true,
-        fixedCommitReachableFromOriginMain: true,
-        trackedSourceBytesMatch: true,
-        futureExecutionMustReverify: true,
-      },
-      compiledRuntimeAttestation: "REQUIRED_BEFORE_DISPATCH",
-    });
-    expect(artifact.manifest.sourceBundleDigest).toBe(
-      artifact.sourceBundle.digest,
-    );
-    expect(artifact.requiredFollowup).toContain(
-      "PURPOSE_SPECIFIC_FINITE_CREDENTIAL_ATTESTATION",
-    );
-    expect(artifact.requiredFollowup).toContain(
-      "GIT_REVIEWED_RUNTIME_SETTLEMENT_EVIDENCE",
-    );
-    expect(artifact.requiredFollowup).toContain(
-      "SEPARATE_DISPATCH_AUTHORIZATION",
-    );
-    expect(artifact.artifactDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+      buildCopyRealCapabilityManifestArtifact({
+        preparationHeadCommit: PREPARATION_HEAD,
+        sourceFiles: sourceFiles(),
+      }),
+    ).toThrow("COPY_REAL_CAPABILITY_V11_FIXED_SOURCE_REQUIRED");
+    expect(() =>
+      prepareCopyRealCapabilityManifestFromRepository(REPOSITORY_ROOT),
+    ).toThrow("COPY_REAL_CAPABILITY_V11_FIXED_SOURCE_REQUIRED");
   });
 
-  it("rejects source bundle order, duplicate paths, and manifest drift", () => {
+  it("rejects all synthetic v11 artifacts while the fixed source is unset", () => {
     expect(() =>
       buildCopyRealCapabilityManifestArtifact({
         preparationHeadCommit: PREPARATION_HEAD,
         sourceFiles: sourceFiles().reverse(),
       }),
-    ).toThrow("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
-
-    const duplicated = sourceFiles();
-    duplicated[1] = { ...duplicated[0]! };
-    expect(() =>
-      buildCopyRealCapabilityManifestArtifact({
-        preparationHeadCommit: PREPARATION_HEAD,
-        sourceFiles: duplicated,
-      }),
-    ).toThrow("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
-
-    const artifact = buildCopyRealCapabilityManifestArtifact({
-      preparationHeadCommit: PREPARATION_HEAD,
-      sourceFiles: sourceFiles(),
-    });
-    const drifted = {
-      ...artifact,
-      manifest: {
-        ...artifact.manifest,
-        maximumWireCalls: 7 as never,
-      },
-    };
-    expect(() => validateCopyRealCapabilityManifestArtifact(drifted)).toThrow(
+    ).toThrow("COPY_REAL_CAPABILITY_V11_FIXED_SOURCE_REQUIRED");
+    expect(() => validateCopyRealCapabilityManifestArtifact({})).toThrow(
       "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
     );
   });
@@ -232,6 +139,10 @@ describe("Copy real capability create-only manifest preparation", () => {
           role: "runtime_transitive_source",
           path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
         },
+        {
+          role: "runtime_adapter",
+          path: "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
+        },
       ]),
     );
     expect(specs.map(({ path }) => path)).toEqual(
@@ -251,17 +162,17 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
-  it("freezes repository v10 as the current fixed-source create-only manifest", () => {
-    const artifactPath = resolve(REPOSITORY_ROOT, CURRENT_MANIFEST_V10_PATH);
+  it("keeps repository v10 as immutable superseded history after Chat source drift", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V10_PATH);
     const artifactBytes = readFileSync(artifactPath);
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "1fc5584042da0b8bce46692258fa8e049ee4fc235c9c58ac58a7980f06abfcf5",
     );
-    expect(() =>
-      validateCopyRealCapabilityManifestArtifact(artifact),
-    ).not.toThrow();
+    expect(() => validateCopyRealCapabilityManifestArtifact(artifact)).toThrow(
+      "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-07-v10",
@@ -311,6 +222,17 @@ describe("Copy real capability create-only manifest preparation", () => {
         }),
       ]),
     );
+    expect(
+      artifact.sourceBundle.files.map(
+        ({ path }: CopyRealCapabilitySourceFile) => path,
+      ),
+    ).not.toContain(
+      "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
+    );
+    expect(COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES).toContainEqual({
+      role: "runtime_adapter",
+      path: "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
+    });
     expect(artifact.sourceBundle.digest).toBe(
       canonicalDigest(artifact.sourceBundle.files),
     );

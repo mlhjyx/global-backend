@@ -11,13 +11,13 @@ export const COPY_EVALUATION_V2_CANDIDATES = Object.freeze([
   Object.freeze({
     alias: "gpt-5.6-terra",
     providerFamily: "openai" as const,
-    protocol: "openai_responses" as const,
+    protocol: "openai_chat_completions" as const,
     reasoning: "medium" as const,
   }),
   Object.freeze({
     alias: "gpt-5.6-sol",
     providerFamily: "openai" as const,
-    protocol: "openai_responses" as const,
+    protocol: "openai_chat_completions" as const,
     reasoning: "high" as const,
   }),
   Object.freeze({

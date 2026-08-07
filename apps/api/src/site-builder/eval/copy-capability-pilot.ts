@@ -61,9 +61,9 @@ const CHILD_CAMPAIGNS = EXECUTIONS.map((execution, index) =>
 );
 
 const PLAN = {
-  schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-07-v9",
-  planId: "site-builder-copy-capability-pilot/2026-08-07-v9",
-  executionStatus: "REAL_RUNTIME_READY_POST_MERGE_V9_MANIFEST_REQUIRED",
+  schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-07-v10",
+  planId: "site-builder-copy-capability-pilot/2026-08-07-v10",
+  executionStatus: "REAL_RUNTIME_READY_POST_MERGE_V10_MANIFEST_REQUIRED",
   dispatchAuthorization: "NOT_AUTHORIZED",
   observedModelWireCalls: 0,
   observedModelCost: { CNY: 0, USD: 0 },
