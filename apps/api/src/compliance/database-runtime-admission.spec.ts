@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertSafeApplicationDatabaseRole,
   resolveApplicationDatabaseUrl,
+  resolvePlatformOwnerDatabaseUrl,
   type ApplicationDatabaseRoleFacts,
 } from './database-runtime-admission';
 
@@ -78,5 +79,43 @@ describe('application database runtime admission', () => {
         bypassRls: undefined as never,
       }),
     ).toThrowError(/APP_DATABASE_ROLE_UNVERIFIED/);
+  });
+
+  it('requires an explicit platform owner URL and never falls back to DATABASE_URL', () => {
+    expect(() =>
+      resolvePlatformOwnerDatabaseUrl({
+        DEPLOYMENT_STAGE: 'development',
+        DATABASE_URL: 'postgresql://global:secret@db.example/app',
+      }),
+    ).toThrowError(/OWNER_DATABASE_URL_REQUIRED/);
+  });
+
+  it('rejects owner URLs that identify app_user or alias APP_DATABASE_URL', () => {
+    const appUrl = 'postgresql://app_user:secret@db.example/app';
+    expect(() =>
+      resolvePlatformOwnerDatabaseUrl({ OWNER_DATABASE_URL: appUrl }),
+    ).toThrowError(/OWNER_DATABASE_URL_REJECTED/);
+    expect(() =>
+      resolvePlatformOwnerDatabaseUrl({
+        OWNER_DATABASE_URL: 'postgresql://misnamed:secret@db.example/app',
+        APP_DATABASE_URL: 'postgresql://misnamed:secret@db.example/app',
+      }),
+    ).toThrowError(/OWNER_DATABASE_URL_REJECTED/);
+  });
+
+  it('accepts a distinct explicit owner URL without leaking it in failures', () => {
+    const owner = 'postgresql://platform_owner:secret@db.example/app';
+    expect(resolvePlatformOwnerDatabaseUrl({ OWNER_DATABASE_URL: owner })).toBe(
+      owner,
+    );
+    let rendered = '';
+    try {
+      resolvePlatformOwnerDatabaseUrl({
+        OWNER_DATABASE_URL: 'not-postgres-do-not-leak-owner-secret',
+      });
+    } catch (error) {
+      rendered = String(error);
+    }
+    expect(rendered).not.toContain('do-not-leak-owner-secret');
   });
 });
