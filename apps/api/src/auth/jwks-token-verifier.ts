@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
@@ -22,6 +22,7 @@ import { requestContextFromClaims } from './token-claims';
  */
 @Injectable()
 export class JwksTokenVerifier extends TokenVerifier {
+  private readonly logger = new Logger(JwksTokenVerifier.name);
   private readonly keyResolver: JWTVerifyGetKey;
   private readonly issuer: string;
   private readonly audience: string;
@@ -45,18 +46,47 @@ export class JwksTokenVerifier extends TokenVerifier {
         throw new Error('token is too large');
       }
       const { payload, protectedHeader } = await jwtVerify(token, this.keyResolver, {
+        algorithms: ['RS256'],
         issuer: this.issuer,
         audience: this.audience,
         clockTolerance: this.clockSkewS, // exp/nbf 容忍
       });
       validateSignedContract(payload, protectedHeader.kid, this.issuer, this.audience);
       return requestContextFromClaims(payload as Readonly<Record<string, unknown>>, this.wsClaim, this.rolesClaim);
-    } catch {
+    } catch (error) {
+      this.logger.warn(`token verification rejected: ${closedRejectionReason(error)}`);
       throw new UnauthorizedException({
         error: { code: 'TOKEN_INVALID', message: 'token verification failed' },
       });
     }
   }
+}
+
+type ClosedRejectionReason =
+  | 'claims_invalid'
+  | 'jwks_unavailable'
+  | 'malformed_token'
+  | 'signature_or_key_invalid'
+  | 'token_too_large'
+  | 'unsupported_algorithm';
+
+function closedRejectionReason(error: unknown): ClosedRejectionReason {
+  if (error instanceof Error && error.message === 'token is too large') return 'token_too_large';
+
+  const code =
+    typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : undefined;
+  if (code === 'ERR_JWS_INVALID' || code === 'ERR_JWT_INVALID') return 'malformed_token';
+  if (code === 'ERR_JOSE_ALG_NOT_ALLOWED') return 'unsupported_algorithm';
+  if (code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED' || code === 'ERR_JWKS_NO_MATCHING_KEY') {
+    return 'signature_or_key_invalid';
+  }
+  if (code === 'ERR_JWKS_TIMEOUT' || code === 'ERR_JOSE_GENERIC') return 'jwks_unavailable';
+  if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) {
+    return 'jwks_unavailable';
+  }
+  return 'claims_invalid';
 }
 
 function validateSignedContract(payload: JWTPayload, kid: string | undefined, issuer: string, audience: string): void {

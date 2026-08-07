@@ -1,5 +1,5 @@
 import { applyDecorators, SetMetadata, UseGuards } from '@nestjs/common';
-import { ApiExtension, ApiForbiddenResponse } from '@nestjs/swagger';
+import { ApiExtension } from '@nestjs/swagger';
 import { AuthScope, REQUIRED_AUTH_SCOPES } from './auth-scopes';
 import { ScopesGuard } from './scopes.guard';
 
@@ -16,8 +16,5 @@ export function RequireScopes(...required: readonly [AuthScope, ...AuthScope[]])
     SetMetadata(REQUIRED_AUTH_SCOPES, scopes),
     UseGuards(ScopesGuard),
     ApiExtension('x-required-scopes', scopes),
-    ApiForbiddenResponse({
-      description: `Requires all scopes: ${scopes.join(', ')}`,
-    }),
   );
 }

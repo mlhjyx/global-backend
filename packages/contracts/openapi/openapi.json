@@ -107,6 +107,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -164,8 +170,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -244,8 +253,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -295,8 +307,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -370,8 +385,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -420,8 +438,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -474,8 +495,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -535,8 +559,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -593,8 +620,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -643,8 +673,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -693,8 +726,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -743,8 +779,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -806,8 +845,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -868,8 +910,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -918,8 +963,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -971,8 +1019,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1021,8 +1072,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1079,8 +1133,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1129,8 +1186,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1189,8 +1249,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1249,8 +1312,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1305,8 +1371,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1365,8 +1434,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1416,8 +1488,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1466,8 +1541,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1517,8 +1595,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1567,8 +1648,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1630,8 +1714,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1719,8 +1806,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1810,8 +1900,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1863,8 +1956,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1916,8 +2012,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1937,7 +2036,7 @@
     },
     "/api/v1/contact-points/{pointId}/verify": {
       "post": {
-        "description": "合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。",
+        "description": "合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis，否则 BLOCKED（不探测）。公开 API 不提供无依据绕过。",
         "operationId": "DiscoveryController_verify_v1",
         "parameters": [
           {
@@ -1980,8 +2079,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1995,13 +2097,14 @@
         ],
         "x-required-scopes": [
           "acquisition:write",
-          "personal-data:read"
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
     "/api/v1/canonical-companies/{id}/guess-emails": {
       "post": {
-        "description": "合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。",
+        "description": "合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis，否则一律 blocked（零探测）；公开 API 不提供无依据绕过。RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。",
         "operationId": "DiscoveryController_guessEmails_v1",
         "parameters": [
           {
@@ -2044,8 +2147,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2059,7 +2165,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write",
-          "personal-data:read"
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
@@ -2098,8 +2205,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: compliance:manage"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2142,8 +2252,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: compliance:manage"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2200,8 +2313,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: compliance:manage"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2246,8 +2362,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: ops:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2309,8 +2428,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:write"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2416,8 +2538,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2486,8 +2611,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2538,8 +2666,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read, personal-data:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2601,8 +2732,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2615,7 +2749,8 @@
           "Leads"
         ],
         "x-required-scopes": [
-          "acquisition:review"
+          "acquisition:review",
+          "personal-data:read"
         ]
       }
     },
@@ -2663,8 +2798,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:review"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2731,8 +2869,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: compliance:manage"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2885,8 +3026,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:read"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2899,7 +3043,8 @@
           "Events"
         ],
         "x-required-scopes": [
-          "acquisition:read"
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -2944,8 +3089,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: acquisition:event:ack"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3081,8 +3229,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: compliance:manage"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3217,8 +3368,11 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
           "403": {
-            "description": "Requires all scopes: compliance:manage"
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3314,6 +3468,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "409": {
             "description": "幂等键复用冲突或 workspace 已有站点",
@@ -3419,6 +3579,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3463,6 +3629,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3995,6 +4167,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "409": {
             "description": "历史 Profile 不符合当前严格 schema，须显式替换无效组",
@@ -5131,6 +5309,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -5430,6 +5614,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -5653,6 +5843,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Asset",
@@ -5987,6 +6183,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -6150,6 +6352,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Asset",
@@ -6395,6 +6603,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -6600,6 +6814,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Site，或 BUILD_TARGET_NOT_FOUND",
@@ -6951,6 +7171,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Build",
             "content": {
@@ -7096,6 +7322,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Build",
@@ -8221,10 +8453,6 @@
           "lawfulBasisNote": {
             "type": "string",
             "description": "备注"
-          },
-          "allowPersonalWithoutBasis": {
-            "type": "boolean",
-            "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
           }
         }
       },
@@ -8248,10 +8476,6 @@
           "lawfulBasisNote": {
             "type": "string",
             "description": "备注"
-          },
-          "allowPersonalWithoutBasis": {
-            "type": "boolean",
-            "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
           },
           "maxContacts": {
             "type": "number",
@@ -8973,6 +9197,74 @@
           "finishedAt",
           "costSummary"
         ]
+      },
+      "AuthErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "AuthUnauthorized": {
+        "description": "Bearer token is missing or invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "TOKEN_INVALID",
+                "message": "token verification failed"
+              }
+            }
+          }
+        }
+      },
+      "AuthForbidden": {
+        "description": "Authenticated role lacks one or more required scopes.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "INSUFFICIENT_SCOPE",
+                "message": "the authenticated role is not authorized for this operation",
+                "details": {
+                  "requiredScopes": [
+                    "acquisition:read"
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

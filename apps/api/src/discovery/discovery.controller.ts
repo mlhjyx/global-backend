@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
@@ -41,7 +41,7 @@ class CreateSuppressionDto {
 }
 
 /**
- * 邮箱验证的合规上下文（可选）。职能邮箱可空；探测**人名邮箱**需给合法性基础或显式开关，
+ * 邮箱验证的合规上下文（可选）。职能邮箱可空；探测**人名邮箱**必须给合法性基础，
  * 否则合规门返回 status=BLOCKED（不做任何 SMTP 探测）。
  */
 class VerifyContactPointDto {
@@ -60,15 +60,11 @@ class VerifyContactPointDto {
   @IsString()
   lawfulBasisNote?: string;
 
-  @ApiPropertyOptional({ description: '显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）' })
-  @IsOptional()
-  @IsBoolean()
-  allowPersonalWithoutBasis?: boolean;
 }
 
 /**
  * 决策人邮箱猜测的合规上下文（可选）。猜出的候选**都是人名邮箱**（个人数据），缺 lawfulBasis
- * 且未开 allowPersonalWithoutBasis → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
+ * → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
  */
 class GuessEmailsDto {
   @ApiPropertyOptional({ enum: LAWFUL_BASIS_KINDS, description: '探测人名邮箱的合法性基础（GDPR Art.6）；猜出的都是人名邮箱' })
@@ -85,11 +81,6 @@ class GuessEmailsDto {
   @IsOptional()
   @IsString()
   lawfulBasisNote?: string;
-
-  @ApiPropertyOptional({ description: '显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）' })
-  @IsOptional()
-  @IsBoolean()
-  allowPersonalWithoutBasis?: boolean;
 
   @ApiPropertyOptional({ description: '最多补全几个缺邮箱决策人（有界护栏，默认 25）' })
   @IsOptional()
@@ -211,7 +202,7 @@ export class DiscoveryController {
   @ApiOperation({
     summary: '邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED',
     description:
-      '合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。',
+      '合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis，否则 BLOCKED（不探测）。公开 API 不提供无依据绕过。',
   })
   // body 可选：职能邮箱无需合规上下文即可 body-less 调用；仅人名邮箱要 lawfulBasis。
   @ApiBody({ type: VerifyContactPointDto, required: false })
@@ -226,7 +217,6 @@ export class DiscoveryController {
         lawfulBasis: dto?.lawfulBasis
           ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
           : undefined,
-        allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
       }),
     );
   }
@@ -237,7 +227,7 @@ export class DiscoveryController {
   @ApiOperation({
     summary: '猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）',
     description:
-      '合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。' +
+      '合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis，否则一律 blocked（零探测）；公开 API 不提供无依据绕过。' +
       'RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。',
   })
   // body 可选：无 body 则全 blocked（无 lawfulBasis），诚实不探。
@@ -249,7 +239,6 @@ export class DiscoveryController {
         lawfulBasis: dto?.lawfulBasis
           ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
           : undefined,
-        allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
         maxContacts: dto?.maxContacts,
         maxProbe: dto?.maxProbe,
       }),

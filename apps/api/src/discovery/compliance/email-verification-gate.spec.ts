@@ -123,7 +123,7 @@ describe('stampLawfulBasis · 落库前补断言人/时间（Codex #13 P2）', (
   });
 });
 
-describe('resolveEmailVerificationPolicy · env + 逐次覆盖', () => {
+describe('resolveEmailVerificationPolicy · server-owned call policy', () => {
   afterEach(() => {
     delete process.env.EMAIL_VERIFY_ALLOW_PERSONAL_WITHOUT_BASIS;
   });
@@ -132,13 +132,12 @@ describe('resolveEmailVerificationPolicy · env + 逐次覆盖', () => {
     expect(resolveEmailVerificationPolicy()).toEqual({ allowPersonalWithoutBasis: false });
   });
 
-  it('env=true → 全局开', () => {
+  it('ignores the legacy process env bypass', () => {
     process.env.EMAIL_VERIFY_ALLOW_PERSONAL_WITHOUT_BASIS = 'true';
-    expect(resolveEmailVerificationPolicy().allowPersonalWithoutBasis).toBe(true);
+    expect(resolveEmailVerificationPolicy().allowPersonalWithoutBasis).toBe(false);
   });
 
-  it('ctx 显式值优先于 env', () => {
-    process.env.EMAIL_VERIFY_ALLOW_PERSONAL_WITHOUT_BASIS = 'true';
-    expect(resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: false }).allowPersonalWithoutBasis).toBe(false);
+  it('accepts only an explicit trusted internal call policy', () => {
+    expect(resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: true }).allowPersonalWithoutBasis).toBe(true);
   });
 });

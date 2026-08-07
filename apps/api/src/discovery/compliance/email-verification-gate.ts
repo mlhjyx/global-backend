@@ -8,11 +8,11 @@ import { EmailVerifyContext, LawfulBasis, LawfulBasisKind } from '../provider-co
  *  - 🟢 **职能邮箱**（info@ / sales@ …，`kind='role'`）非个人数据（Recital 14）→ 默认自动探测。
  *  - 🔴 **人名邮箱**（max.mustermann@ …，`kind='personal'`）→ 默认**不探测**；仅当
  *      ① 显式给出合法性基础 `lawfulBasis`（LIA / 同意 / 合同），或
- *      ② 显式开关 `allowPersonalWithoutBasis`（仍留痕）
+ *      ② 仅受信内部调用显式开启 `allowPersonalWithoutBasis`（仍留痕；公开 API 与 process.env 均无此入口）
  *    才放行。
  *  - 禁联名单（suppression）命中 → 一律不探测（对外动作第一道检查）。
  *
- * 本模块是**纯逻辑、不触网、不读环境**（env 解析在 {@link resolveEmailVerificationPolicy}），供验证器与服务共用、可单测。
+ * 本模块是**纯逻辑、不触网、不读环境**，供验证器与服务共用、可单测。
  */
 
 export const LAWFUL_BASIS_KINDS: readonly LawfulBasisKind[] = [
@@ -46,7 +46,7 @@ export function isValidLawfulBasis(b?: LawfulBasis | null): b is LawfulBasis {
 
 /**
  * 给要落库的合法性基础补齐审计的「谁/何时」（缺才补，已填则尊重）。用于任何**将被持久化**的 basis——
- * 无论操作者显式断言的还是开关合成的（`allowPersonalWithoutBasis` 合成的 basis 无 who/when），
+ * 无论操作者显式断言的还是受信内部开关合成的（`allowPersonalWithoutBasis` 合成的 basis 无 who/when），
  * 都必须带断言人 + 时间，审计才可回溯。纯函数（时间由调用方传入，保持可测/不读时钟）。
  */
 export function stampLawfulBasis(basis: LawfulBasis, recordedBy: string, recordedAt: string): LawfulBasis {
@@ -58,12 +58,11 @@ export function stampLawfulBasis(basis: LawfulBasis, recordedBy: string, recorde
 }
 
 /**
- * 从 env + 每次调用的显式开关解析策略。env `EMAIL_VERIFY_ALLOW_PERSONAL_WITHOUT_BASIS=true` 为全局兜底开关，
- * ctx.allowPersonalWithoutBasis 优先（逐次覆盖）。**默认 false**（保守：人名邮箱需显式 basis）。
+ * 只从当前受信调用上下文解析策略；不读取 process.env，也不存在全局无依据绕过。
+ * **默认 false**（保守：人名邮箱需显式 basis）。
  */
 export function resolveEmailVerificationPolicy(ctx?: EmailVerifyContext): EmailVerificationPolicy {
-  const envDefault = /^(1|true|yes)$/i.test(process.env.EMAIL_VERIFY_ALLOW_PERSONAL_WITHOUT_BASIS ?? '');
-  return { allowPersonalWithoutBasis: ctx?.allowPersonalWithoutBasis ?? envDefault };
+  return { allowPersonalWithoutBasis: ctx?.allowPersonalWithoutBasis === true };
 }
 
 /**

@@ -162,7 +162,7 @@ jobs:
       # 导出不连任何服务：Prisma 懒连接、Temporal/relay 只在 app.init() 才启动，
       # 假 DATABASE_URL 即可（本地同款验证过）。
       - name: Export OpenAPI（code-first 单一真值）
-        run: node apps/api/dist/main.js --export-openapi
+        run: DEPLOYMENT_STAGE=development NODE_ENV=test node apps/api/dist/main.js --export-openapi
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
 

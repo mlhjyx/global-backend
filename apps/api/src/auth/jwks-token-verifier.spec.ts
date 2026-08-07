@@ -142,6 +142,30 @@ describe('JwksTokenVerifier offline contract', () => {
     expect(JSON.stringify(warning.mock.calls)).not.toContain(malformedInput);
   });
 
+  it('records a closed reason for oversized input without logging the input', async () => {
+    const oversizedInput = 'x'.repeat(16_385);
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await expectGenericRejection(oversizedInput);
+
+    expect(warning).toHaveBeenCalledWith('token verification rejected: token_too_large');
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(oversizedInput);
+  });
+
+  it('records a closed JWKS outage reason without logging provider details', async () => {
+    const providerDetail = 'socket failed for identity-provider.internal';
+    const resolver = vi.fn(async () => {
+      throw new TypeError(providerDetail);
+    });
+    const target = new JwksTokenVerifier(CONFIG, resolver as JWTVerifyGetKey);
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await expectGenericRejection(await signedToken(), target);
+
+    expect(warning).toHaveBeenCalledWith('token verification rejected: jwks_unavailable');
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(providerDetail);
+  });
+
   it('rejects non-RS256 signatures before consulting the JWKS resolver', async () => {
     const pair = await generateKeyPair('PS256');
     const resolver = vi.fn(async () => pair.publicKey);

@@ -26,8 +26,8 @@
 ## 3. 组件 A — 按需 HTTP 端点
 
 - 路由 `POST /canonical-companies/:id/guess-emails`（class 级 `AuthGuard` 已在），照 `discover-contacts` + `contact-points/:id/verify` 样式。
-- `GuessEmailsDto` 镜像 `VerifyContactPointDto`：`lawfulBasis?/lawfulBasisRef?/lawfulBasisNote?/allowPersonalWithoutBasis?` + 可选 `maxContacts?/maxProbe?`（后两者有界护栏）。
-- controller 组装 `{ lawfulBasis: {basis, ref, note}, allowPersonalWithoutBasis, maxContacts, maxProbe }` → 调 `discovery.guessEmailsForCompany(ctx, id, opts)`（**service 零改动**）。
+- `GuessEmailsDto` 镜像 `VerifyContactPointDto`：`lawfulBasis?/lawfulBasisRef?/lawfulBasisNote?` + 可选 `maxContacts?/maxProbe?`（后两者有界护栏）。公开 DTO 不暴露 `allowPersonalWithoutBasis`，未知字段由 ValidationPipe 丢弃；调用还必须同时具备 `acquisition:write`、`personal-data:read`、`compliance:manage`。
+- controller 只组装 `{ lawfulBasis: {basis, ref, note}, maxContacts, maxProbe }` → 调 `discovery.guessEmailsForCompany(ctx, id, opts)`；无 basis 时仍为 blocked/零探测。
 - 返回既有 summary（emaillessContacts/attempted/persisted/verified/unverified/blocked/perContact）。
 
 ## 4. 组件 B — 存量 sweep 自动触发（阶段⑤b）
