@@ -38,6 +38,19 @@ describe("sensitive data boundary integration", () => {
     );
   });
 
+  it("exports OpenAPI in Nest preview mode without instantiating runtime providers", () => {
+    const main = source("main.ts");
+    expect(main).toMatch(
+      /const exportOpenApi = process\.argv\.includes\(["']--export-openapi["']\)/,
+    );
+    expect(main).toMatch(
+      /NestFactory\.create\(AppModule,\s*\{\s*preview:\s*exportOpenApi\s*\}\)/,
+    );
+    expect(main.indexOf("const exportOpenApi")).toBeLessThan(
+      main.indexOf("NestFactory.create"),
+    );
+  });
+
   it("scrubs both persisted AI trace errors and trace write failures", () => {
     const sink = source("model-gateway/ai-trace.sink.ts");
     expect(sink).toMatch(
