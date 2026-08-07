@@ -144,6 +144,64 @@ describe("schedule governance", () => {
     );
   });
 
+  it("does not report a created schedule as healthy when the stored action still drifts", async () => {
+    const target = PLATFORM_SCHEDULES.find(
+      (item) => item.id === "external-intent-sweep",
+    )!;
+    const descriptions = new Map<
+      string,
+      ReturnType<typeof existingSchedule>
+    >();
+    const fake = fakeClient(descriptions);
+    fake.client.schedule.create = vi.fn(async (options: unknown) => {
+      const created = options as {
+        scheduleId: string;
+        spec: unknown;
+        policies: unknown;
+      };
+      descriptions.set(
+        created.scheduleId,
+        existingSchedule({
+          scheduleId: created.scheduleId,
+          spec: created.spec,
+          policies: created.policies,
+          action: {
+            type: "startWorkflow",
+            workflowType: "wrongWorkflow",
+            taskQueue: "understanding",
+            args: [{}],
+          },
+          state: { paused: false, note: undefined, remainingActions: 0 },
+        }),
+      );
+    });
+    const append = vi.fn().mockResolvedValue(undefined);
+
+    await reconcilePlatformSchedules({
+      client: fake.client as never,
+      contracts: [target],
+      receipts: { append },
+      env: {},
+    });
+
+    expect(fake.updates).toHaveLength(1);
+    expect(append).not.toHaveBeenCalledWith(
+      expect.objectContaining({ disposition: "CREATED" }),
+    );
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        disposition: "RECONCILED",
+        observedHash: scheduleCodeHash(target),
+        changedFields: expect.arrayContaining([
+          "workflowType",
+          "taskQueue",
+          "args",
+          "schemaVersion",
+        ]),
+      }),
+    );
+  });
+
   it("treats a concurrent ScheduleAlreadyRunning create as a race and reconciles the winner", async () => {
     const target = PLATFORM_SCHEDULES.find(
       (item) => item.id === "external-intent-sweep",

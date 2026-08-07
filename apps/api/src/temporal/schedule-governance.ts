@@ -406,16 +406,24 @@ export async function reconcilePlatformSchedules(input: {
         throw describeError;
       }
       if (created) {
-        await input.receipts.append({
-          scheduleId: contract.id,
-          disposition: 'CREATED',
-          desiredHash,
-          observedHash: observedCodeHash(description),
-          changedFields: ['missing'],
-          errorCode: null,
-          ...scheduleRuntimeObservation(description),
-        });
-        continue;
+        const createdHash = observedCodeHash(description);
+        const createdDrift = changedCodeFields(contract, description);
+        if (createdDrift.length === 0 && createdHash === desiredHash) {
+          await input.receipts.append({
+            scheduleId: contract.id,
+            disposition: 'CREATED',
+            desiredHash,
+            observedHash: createdHash,
+            changedFields: ['missing'],
+            errorCode: null,
+            ...scheduleRuntimeObservation(description),
+          });
+          continue;
+        }
+        // Temporal may accept a create request yet persist a normalized or
+        // otherwise drifting action. Treat the readback as the observed state
+        // and pass it through the same reconcile-and-verify path as any other
+        // existing schedule; a CREATED receipt must never certify drift.
       }
     }
 
