@@ -109,6 +109,28 @@ describe('pii-crypto.extension 入参加密', () => {
     expect(isEncryptedFieldEvidenceValue(data.value)).toBe(true);
   });
 
+  it('FieldEvidence update 缺少分类上下文时保守加密，且拒绝歧义 value 查询', () => {
+    const update = {
+      data: { value: { corrected: true } },
+      where: { id: 'evidence-1' },
+    } as Record<string, unknown>;
+    encryptArgs('update', update, EVIDENCE);
+    expect((update.data as Record<string, unknown>).dataClass).toBe('red');
+    expect(
+      isEncryptedFieldEvidenceValue(
+        (update.data as Record<string, unknown>).value,
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      encryptArgs(
+        'findMany',
+        { where: { value: 'ambiguous' } },
+        EVIDENCE,
+      ),
+    ).toThrow(/FIELD_EVIDENCE_VALUE_LOOKUP_UNSUPPORTED/);
+  });
+
   it('canonical JSON 使对象键序稳定，并拒绝非 JSON 数值/类型', () => {
     expect(
       encryptFieldEvidenceValue({ b: [2, true], a: null }).ciphertext,
