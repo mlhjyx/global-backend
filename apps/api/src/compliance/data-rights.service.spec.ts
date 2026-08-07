@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { describe, it, expect, vi } from 'vitest';
 import { DataRightsService } from './data-rights.service';
 import { JURISDICTION_POLICY_SEED } from './jurisdiction-policy.seed';
 import { DataRightsContext } from './data-rights.types';
@@ -35,6 +36,23 @@ function svc(fake: FakePrisma): DataRightsService {
 const WS = '00000000-0000-0000-0000-000000000001';
 
 describe('DataRightsService', () => {
+  it('startup loads rules and surfaces an empty policy set without owner-side seeding', async () => {
+    const populated = svc(new FakePrisma());
+    await populated.onModuleInit();
+    expect(populated.ruleCount()).toBe(JURISDICTION_POLICY_SEED.length);
+
+    const empty = new FakePrisma();
+    empty.rules = [];
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const service = svc(empty);
+    await service.onModuleInit();
+    expect(service.ruleCount()).toBe(0);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('fail-closed'),
+    );
+    error.mockRestore();
+  });
+
   it('loadRules 映射 DB 行到引擎规则', async () => {
     const fake = new FakePrisma();
     const s = svc(fake);
@@ -89,6 +107,36 @@ describe('DataRightsService', () => {
     });
     expect(fake.createdLogs[0].lawfulBasisRef).toBe('CONSENT-9');
     expect(JSON.stringify(fake.createdLogs[0])).not.toContain('private note');
+  });
+
+  it('explicit metadata null values and correlation reference override context defaults', async () => {
+    const fake = new FakePrisma();
+    const s = svc(fake);
+    await s.loadRules();
+    await s.evaluateAndLog(
+      WS,
+      {
+        action: 'STORE',
+        dataClass: 'green',
+        subjectJurisdiction: 'US',
+        processorJurisdiction: 'US',
+        lawfulBasis: { basis: 'contract', ref: 'CONTEXT-REF' },
+      },
+      {
+        subjectType: null,
+        subjectId: null,
+        lawfulBasisRef: 'META-REF',
+        actorId: null,
+        correlationId: 'corr-1',
+      },
+    );
+    expect(fake.createdLogs[0]).toMatchObject({
+      subjectType: null,
+      subjectId: null,
+      lawfulBasisRef: 'META-REF',
+      actorId: null,
+      correlationId: 'corr-1',
+    });
   });
 
   it('fail-closed：规则未加载时 red 数据一律拒', async () => {

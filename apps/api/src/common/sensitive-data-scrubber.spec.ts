@@ -70,4 +70,57 @@ describe('sensitive data scrubber', () => {
     expect(output.length).toBeLessThanOrEqual(256);
     expect(output).not.toContain('jane@example.com');
   });
+
+  it('normalizes non-JSON primitives, dates, error causes, and bounded collections', () => {
+    const caused = new Error('outer token=secret', {
+      cause: new Error('inner jane@example.com'),
+    });
+    const output = scrubSensitiveData(
+      {
+        bigint: 42n,
+        symbol: Symbol('private'),
+        functionValue: () => 'private',
+        date: new Date('2026-08-07T00:00:00.000Z'),
+        error: caused,
+        list: [1, 2, 3],
+      },
+      { maxItems: 2 },
+    ) as Record<string, unknown>;
+
+    expect(output.bigint).toBe('42');
+    // The object itself is bounded; exercise the remaining primitive branches
+    // independently so their rendered values cannot expose implementation text.
+    expect(scrubSensitiveData(Symbol('private'))).toBe('[symbol]');
+    expect(scrubSensitiveData(() => 'private')).toBe('[function]');
+    expect(scrubSensitiveData(new Date('2026-08-07T00:00:00.000Z'))).toBe(
+      '2026-08-07T00:00:00.000Z',
+    );
+    const renderedError = JSON.stringify(scrubSensitiveData(caused));
+    expect(renderedError).toContain('[redacted-email]');
+    expect(renderedError).not.toContain('secret');
+    expect(
+      scrubSensitiveData([1, 2, 3], { maxItems: 2 }),
+    ).toEqual([1, 2]);
+  });
+
+  it('enforces max depth and minimum text bounds for unusual values', () => {
+    const deep = { one: { two: { three: 'jane@example.com' } } };
+    expect(scrubSensitiveData(deep, { maxDepth: 2 })).toEqual({
+      one: { two: '[max-depth]' },
+    });
+    const bounded = scrubSensitiveText('x'.repeat(200), { maxLength: 1 });
+    expect(bounded.length).toBeLessThanOrEqual(32);
+    expect(bounded).toContain('[truncated]');
+  });
+
+  it('redacts normalized secret keys and malformed credential-like URLs', () => {
+    const output = scrubSensitiveData({
+      'client-secret': 'do-not-leak',
+      proxy_authorization: 'Bearer do-not-leak',
+      nested: 'postgresql://%zz:password@host/db',
+    });
+    const rendered = JSON.stringify(output);
+    expect(rendered).not.toContain('do-not-leak');
+    expect(rendered).not.toContain('password');
+  });
 });
