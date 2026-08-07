@@ -136,7 +136,7 @@ async function main(): Promise<void> {
 
   // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
   try {
-    await ensurePlatformSchedules();
+    await ensurePlatformSchedules(runtime);
   } catch (err) {
     console.error(
       `[worker] ensure schedules FAILED（定时 sweep 可能停摆，可手跑 scripts/ensure-*-schedule.mts）: ${String(err)}`,

@@ -12,6 +12,7 @@ describe('RuntimeModule single-snapshot DI', () => {
     const snapshot = resolveRuntimeAdmission({
       DEPLOYMENT_STAGE: 'development',
       NODE_ENV: 'test',
+      AUTH_ALLOW_DEV_TOKENS: 'true',
     });
     const dynamicModule = RuntimeModule.forRoot(snapshot);
     const provider = dynamicModule.providers?.find(

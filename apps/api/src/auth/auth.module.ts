@@ -12,7 +12,7 @@ import {
  * 身份 seam（PRD：身份归外部 SaaS 平台，我方只校验其签发的 token）。
  * 选择器（确定性）：
  *  - 配了 AUTH_JWKS_URI + AUTH_ISSUER → JwksTokenVerifier（生产：真验签）。
- *  - canonical development 未配 → DevTokenVerifier（base64 stub）。
+ *  - canonical development 未配且显式 AUTH_ALLOW_DEV_TOKENS=true → DevTokenVerifier（base64 stub）。
  *  - pilot/production 的 pre-Nest snapshot 强制 JWKS 且拒绝 dev override，
  *    本模块只消费该 snapshot，不再独立重算 stage 或读取 mutable env。
  */

@@ -159,12 +159,10 @@ jobs:
       - name: Build API
         run: pnpm --filter @global/api build
 
-      # 导出不连任何服务：Prisma 懒连接、Temporal/relay 只在 app.init() 才启动，
-      # 假 DATABASE_URL 即可（本地同款验证过）。
+      # 导出在 runtime admission 前进入 Nest preview 元数据模式：不构造 DB/Temporal provider，
+      # 不需要伪造运行时配置。
       - name: Export OpenAPI（code-first 单一真值）
         run: node apps/api/dist/main.js --export-openapi
-        env:
-          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
 
       # git status --porcelain 同时抓「有 diff」与「文件未被跟踪/被删除」（git diff 对 untracked 视而不见）
       - name: Drift check（提交的 openapi.json 必须与代码一致且被跟踪）

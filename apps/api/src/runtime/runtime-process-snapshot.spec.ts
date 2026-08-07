@@ -96,6 +96,7 @@ describe('canonical runtime process safety snapshot', () => {
     const snapshot = resolveRuntimeProcessSnapshot({
       DEPLOYMENT_STAGE: 'development',
       NODE_ENV: 'development',
+      AUTH_ALLOW_DEV_TOKENS: 'true',
     });
 
     expect(snapshot.safety).toMatchObject({
@@ -105,5 +106,29 @@ describe('canonical runtime process safety snapshot', () => {
       processorJurisdiction: 'EU',
       siteRendererBuildIdentity: 'site-renderer@dev-unpinned',
     });
+  });
+
+  it.each([undefined, 'false'] as const)(
+    'rejects development without JWKS when AUTH_ALLOW_DEV_TOKENS=%s',
+    (allowDevelopmentTokens) => {
+      expect(() =>
+        resolveRuntimeProcessSnapshot({
+          DEPLOYMENT_STAGE: 'development',
+          NODE_ENV: 'development',
+          AUTH_ALLOW_DEV_TOKENS: allowDevelopmentTokens,
+        }),
+      ).toThrow(/AUTH_ALLOW_DEV_TOKENS.*true/i);
+    },
+  );
+
+  it('does not require the dev-token opt-in when development uses JWKS', () => {
+    const snapshot = resolveRuntimeProcessSnapshot({
+      DEPLOYMENT_STAGE: 'development',
+      NODE_ENV: 'development',
+      AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
+      AUTH_ISSUER: 'https://identity.example.test',
+    });
+
+    expect(snapshot.safety.auth.mode).toBe('jwks');
   });
 });

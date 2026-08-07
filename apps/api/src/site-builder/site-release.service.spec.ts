@@ -814,6 +814,7 @@ describe('Site renderer build fencing', () => {
         resolveRuntimeProcessSnapshot({
           DEPLOYMENT_STAGE: 'development',
           NODE_ENV: 'development',
+          AUTH_ALLOW_DEV_TOKENS: 'true',
         }),
       ),
     ).toBe('site-renderer@dev-unpinned');

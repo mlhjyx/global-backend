@@ -235,8 +235,11 @@ function resolveAuthSafety(
     );
   }
   if (stage !== 'development' && !jwksUriValue) {
+    throw new Error(`AUTH_JWKS_URI and AUTH_ISSUER are required for ${stage}`);
+  }
+  if (stage === 'development' && !jwksUriValue && !allowDevelopmentTokens) {
     throw new Error(
-      `AUTH_JWKS_URI and AUTH_ISSUER are required for ${stage}`,
+      'AUTH_ALLOW_DEV_TOKENS=true is required to use development tokens without JWKS',
     );
   }
   const mode = jwksUriValue ? 'jwks' : 'development';

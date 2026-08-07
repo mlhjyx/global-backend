@@ -5,10 +5,11 @@ import { DevTokenVerifier } from './dev-token-verifier';
 import { JwksTokenVerifier } from './jwks-token-verifier';
 
 describe('AuthModule canonical runtime admission', () => {
-  it('uses the development verifier only when the canonical stage is development', () => {
+  it('uses the development verifier only after the explicit unsafe-development opt-in', () => {
     const runtime = resolveRuntimeProcessSnapshot({
       DEPLOYMENT_STAGE: 'development',
       NODE_ENV: 'test',
+      AUTH_ALLOW_DEV_TOKENS: 'true',
     });
     expect(createTokenVerifier(runtime)).toBeInstanceOf(DevTokenVerifier);
   });

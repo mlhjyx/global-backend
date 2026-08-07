@@ -272,6 +272,7 @@ describe('injected build identity', () => {
     const admission = resolveRuntimeAdmission({
       DEPLOYMENT_STAGE: 'development',
       NODE_ENV: 'development',
+      AUTH_ALLOW_DEV_TOKENS: 'true',
     });
 
     expect(admission.admission).toMatchObject({

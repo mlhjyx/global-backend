@@ -26,6 +26,10 @@ it does not edit credentials, containers, a live unit, or a live service.
   comma-separated, non-empty list of canonical HTTP(S) origins. Wildcards,
   credentials, paths, queries, fragments, and blank entries are rejected.
   Bootstrap uses the admitted list; it does not re-interpret `NODE_ENV`.
+- Development without `AUTH_JWKS_URI` and `AUTH_ISSUER` must explicitly set
+  `AUTH_ALLOW_DEV_TOKENS=true` before the base64 development verifier is
+  admitted. Missing or `false` fails closed. Pilot and production forbid this
+  switch and always require JWKS.
 
 The process environment is copied and frozen once before `NestFactory.create`.
 That single snapshot derives auth mode, model-stub permission, object-storage
@@ -35,6 +39,12 @@ Site Release, health, CORS, and listen receive the same DI object; none may
 re-read `NODE_ENV` or recalculate admission. In pilot and production, missing
 JWKS, model gateway, S3 credentials, processor jurisdiction, or renderer build
 identity—and any dev-token/model-stub override—fails before Nest is created.
+
+`--export-openapi` is the only non-runtime entrypoint. It branches before
+runtime admission and uses Nest preview metadata mode, where providers and
+controllers are not instantiated. It therefore does not construct database or
+Temporal clients and does not weaken the fail-closed admission used by a real
+API process.
 
 ## Build receipt: the runtime identity source
 

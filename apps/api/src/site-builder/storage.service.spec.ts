@@ -23,6 +23,7 @@ function storageService(
   env: RuntimeEnvironment = {
     DEPLOYMENT_STAGE: 'development',
     NODE_ENV: 'test',
+    AUTH_ALLOW_DEV_TOKENS: 'true',
   },
 ): StorageService {
   const snapshot = resolveRuntimeProcessSnapshot(env);
