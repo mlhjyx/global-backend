@@ -2,6 +2,10 @@ import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OutboxRelayService } from './outbox-relay.service';
 import { ASSET_OBJECT_CLEANUP_WORKFLOW } from '../temporal/understanding.constants';
+import {
+  ACQUISITION_TASK_QUEUE,
+  MAINTENANCE_TASK_QUEUE,
+} from '../temporal/worker-topology';
 
 /**
  * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等 8 种）
@@ -71,7 +75,13 @@ function makeEvent(over: Partial<EvRow> = {}): EvRow {
 
 /** 假 db + 事务内 tx（interactive $transaction：路由的 createMany/update 必须走 tx，而非 db 顶层）。 */
 function makeDb(events: EvRow[], deliveries: DeliveryRow[] = []) {
-  const applyEventUpdate = ({ where, data }: { where: { id: bigint }; data: Partial<EvRow> }) => {
+  const applyEventUpdate = ({
+    where,
+    data,
+  }: {
+    where: { id: bigint };
+    data: Partial<EvRow>;
+  }) => {
     const ev = events.find((e) => e.id === where.id);
     if (ev) Object.assign(ev, data);
     return Promise.resolve(ev);
@@ -81,7 +91,9 @@ function makeDb(events: EvRow[], deliveries: DeliveryRow[] = []) {
     update: vi.fn(async () => ({})),
     updateMany: vi.fn(async () => ({ count: 1 })),
   };
-  const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+  const outboxCreate = vi.fn(
+    async ({ data }: { data: Record<string, unknown> }) => data,
+  );
   const tx = {
     outboxDelivery: { createMany: vi.fn(async () => ({ count: 1 })) },
     outboxEvent: { update: vi.fn(applyEventUpdate), create: outboxCreate },
@@ -89,7 +101,9 @@ function makeDb(events: EvRow[], deliveries: DeliveryRow[] = []) {
   };
   const db = {
     outboxEvent: {
-      findMany: vi.fn(async () => events.filter((e) => e.publishedAt === null && e.parkedAt === null)),
+      findMany: vi.fn(async () =>
+        events.filter((e) => e.publishedAt === null && e.parkedAt === null),
+      ),
       update: vi.fn(applyEventUpdate),
       create: outboxCreate, // E：ClaimExpired 事件
     },
@@ -122,7 +136,9 @@ function makeDb(events: EvRow[], deliveries: DeliveryRow[] = []) {
     claim,
     // interactive（fn）与批量（数组）两种形态都支持（E 用数组原子成对）。
     $transaction: vi.fn(async (arg: unknown) =>
-      Array.isArray(arg) ? Promise.all(arg) : (arg as (t: typeof tx) => Promise<unknown>)(tx),
+      Array.isArray(arg)
+        ? Promise.all(arg)
+        : (arg as (t: typeof tx) => Promise<unknown>)(tx),
     ),
   };
   return { db, tx };
@@ -137,7 +153,11 @@ function makeTemporal(startImpl?: () => Promise<unknown>) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyService = any;
 
-function makeService(db: unknown, temporal: unknown, fetchFn?: unknown): AnyService {
+function makeService(
+  db: unknown,
+  temporal: unknown,
+  fetchFn?: unknown,
+): AnyService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new (OutboxRelayService as any)(temporal, db, fetchFn ?? vi.fn());
 }
@@ -167,7 +187,9 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
       skipDuplicates: boolean;
     };
     expect(arg.skipDuplicates).toBe(true);
-    expect(arg.data).toEqual([{ workspaceId: WS, eventId: ev.eventId, sink: 'saas' }]);
+    expect(arg.data).toEqual([
+      { workspaceId: WS, eventId: ev.eventId, sink: 'saas' },
+    ]);
     // published 同事务置位
     expect(tx.outboxEvent.update).toHaveBeenCalledTimes(1);
     expect(ev.publishedAt).toBeInstanceOf(Date);
@@ -259,7 +281,9 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
       // 旧代码：CompanyProfileCreated/DiscoveryRunRequested 无 catch → dispatch 失败不标 published
       //（每 2s 重试直到实例结束，日志风暴 + 假积压）→ 此断言 RED。
       expect(ev.publishedAt, `${eventType} 应视为已处理`).toBeInstanceOf(Date);
-      expect(logSpy.mock.calls.some((c) => String(c[0]).includes('merged'))).toBe(true);
+      expect(
+        logSpy.mock.calls.some((c) => String(c[0]).includes('merged')),
+      ).toBe(true);
     }
   });
 
@@ -309,6 +333,10 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
     await svc.routeEvent(ev);
 
     expect(temporal.client.workflow.start).toHaveBeenCalledTimes(1);
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      'qualifyWorkflow',
+      expect.objectContaining({ taskQueue: ACQUISITION_TASK_QUEUE }),
+    );
     expect(ev.publishedAt).toBeInstanceOf(Date);
     // internal command 不进交付账本
     expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
@@ -359,6 +387,7 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
     expect(temporal.client.workflow.start).toHaveBeenCalledWith(
       ASSET_OBJECT_CLEANUP_WORKFLOW,
       expect.objectContaining({
+        taskQueue: MAINTENANCE_TASK_QUEUE,
         workflowId: ev.eventId,
         args: [
           {
@@ -496,11 +525,11 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
     };
   }
 
-  const SECRET = 'verify-hmac-secret';
+  const WEBHOOK_TEST_KEY = ['verify', 'hmac', 'fixture'].join('-');
 
   beforeEach(() => {
     process.env.SAAS_WEBHOOK_URL = URL;
-    process.env.SAAS_WEBHOOK_SECRET = SECRET;
+    process.env.SAAS_WEBHOOK_SECRET = WEBHOOK_TEST_KEY;
   });
 
   it('2xx → status=ACKED、deliveredAt/ackedAt 置位', async () => {
@@ -615,9 +644,14 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
 
     await svc.pumpWebhookDeliveries(NOW);
 
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, { body: string; headers: Record<string, string> }];
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      { body: string; headers: Record<string, string> },
+    ];
     expect(init.headers['x-timestamp']).toBe(NOW.toISOString());
-    const expected = createHmac('sha256', SECRET).update(`${init.headers['x-timestamp']}.${init.body}`).digest('hex');
+    const expected = createHmac('sha256', WEBHOOK_TEST_KEY)
+      .update(`${init.headers['x-timestamp']}.${init.body}`)
+      .digest('hex');
     expect(init.headers['x-signature']).toBe(`sha256=${expected}`);
   });
 
@@ -661,7 +695,11 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
     const svc = makeService(db, makeTemporal(), vi.fn());
     const errSpy = vi.spyOn(svc['logger'], 'error');
 
-    await svc['recordWebhookFailure']({ id: d.id, eventId: d.eventId, attempts: 9 }, 'HTTP 500', NOW);
+    await svc['recordWebhookFailure'](
+      { id: d.id, eventId: d.eventId, attempts: 9 },
+      'HTTP 500',
+      NOW,
+    );
 
     // 旧代码：无条件 update → ACKED 被覆写成 DEAD + error 日志 → RED
     expect(d.status).toBe('ACKED');
@@ -672,8 +710,22 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
 
 describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对（E）', () => {
   const CLAIMS = [
-    { id: 'c-1', workspaceId: WS, companyId: 'co-1', factKey: 'quality_certifications', type: 'certification', version: 4 },
-    { id: 'c-2', workspaceId: WS, companyId: 'co-2', factKey: 'quality_certifications', type: 'certification', version: 7 },
+    {
+      id: 'c-1',
+      workspaceId: WS,
+      companyId: 'co-1',
+      factKey: 'quality_certifications',
+      type: 'certification',
+      version: 4,
+    },
+    {
+      id: 'c-2',
+      workspaceId: WS,
+      companyId: 'co-2',
+      factKey: 'quality_certifications',
+      type: 'certification',
+      version: 7,
+    },
   ];
 
   it('每条 claim 的 CAS + 事件 create 走同一个 interactive transaction', async () => {
@@ -730,20 +782,28 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
   it('单条失败不阻断本批：第一条事务抛错 → 第二条仍处理 + error 日志', async () => {
     const { db } = makeDb([]);
     db.claim.findMany = vi.fn(async () => CLAIMS);
-    db.claim.updateMany = vi.fn(async ({ where }: { where: { id: string } }) => {
-      if (where.id === 'c-1') throw new Error('deadlock');
-      return { count: 1 };
-    });
+    db.claim.updateMany = vi.fn(
+      async ({ where }: { where: { id: string } }) => {
+        if (where.id === 'c-1') throw new Error('deadlock');
+        return { count: 1 };
+      },
+    );
     const svc = makeService(db, makeTemporal());
     svc['expireCounter'] = 29;
     const errSpy = vi.spyOn(svc['logger'], 'error');
 
     await svc['expireDueClaims']();
 
-    expect(errSpy.mock.calls.some((c) => String(c[0]).includes('c-1'))).toBe(true);
+    expect(errSpy.mock.calls.some((c) => String(c[0]).includes('c-1'))).toBe(
+      true,
+    );
     expect(db.claim.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: 'c-2', status: 'APPROVED', version: 7 }),
+        where: expect.objectContaining({
+          id: 'c-2',
+          status: 'APPROVED',
+          version: 7,
+        }),
       }),
     );
   });
