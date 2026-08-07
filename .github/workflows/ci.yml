@@ -21,6 +21,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   renderer-visual-scope:
     name: renderer visual scope
@@ -28,9 +31,10 @@ jobs:
     outputs:
       run_visual: ${{ steps.scope.outputs.run_visual }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - id: scope
         name: Detect renderer visual-regression inputs
@@ -78,12 +82,14 @@ jobs:
     needs: renderer-visual-scope
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22 # engines: node>=20
           cache: pnpm
@@ -117,8 +123,8 @@ jobs:
       - name: Build（nest build = tsc 全量类型检查）
         run: pnpm --filter @global/api build
 
-      - name: Test（vitest 纯单测）
-        run: pnpm --filter @global/api test
+      - name: Test + API coverage ratchet（80% target remains explicit）
+        run: pnpm coverage:api
 
       - name: Renderer locale contract test
         run: pnpm --filter @global/site-renderer test
@@ -138,11 +144,13 @@ jobs:
     name: contracts · drift · lint · breaking
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm

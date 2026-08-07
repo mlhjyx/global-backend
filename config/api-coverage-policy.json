@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "api-coverage-policy/v1",
+  "baseCommit": "4562eab1bae16cdd424ff90a7d3403b0fb30d535",
+  "measuredAt": "2026-08-08T01:40:00+08:00",
+  "targetPercent": 80,
+  "status": "RATCHET_ACTIVE_TARGET_UNMET",
+  "scope": {
+    "include": ["src/**/*.ts"],
+    "exclude": ["src/**/*.spec.ts", "src/**/testing/**"]
+  },
+  "baseline": {
+    "statements": { "covered": 17217, "total": 24333, "percent": 70.75 },
+    "branches": { "covered": 13492, "total": 20168, "percent": 66.89 },
+    "functions": { "covered": 3519, "total": 4736, "percent": 74.3 },
+    "lines": { "covered": 16071, "total": 22036, "percent": 72.93 }
+  },
+  "critical": {
+    "auth": {
+      "targetPercent": 80,
+      "baseline": { "covered": 1, "total": 40, "percent": 2.5 },
+      "paths": ["src/auth/"],
+      "status": "DEBT"
+    },
+    "compliance": {
+      "targetPercent": 80,
+      "baseline": { "covered": 184, "total": 261, "percent": 70.49 },
+      "paths": ["src/compliance/"],
+      "status": "DEBT"
+    },
+    "events": {
+      "targetPercent": 80,
+      "baseline": { "covered": 22, "total": 23, "percent": 95.65 },
+      "paths": ["src/events/"],
+      "status": "TARGET_MET"
+    },
+    "budget": {
+      "targetPercent": 80,
+      "baseline": { "covered": 20, "total": 20, "percent": 100 },
+      "paths": ["src/tools/budget.ts"],
+      "status": "TARGET_MET"
+    },
+    "identity": {
+      "targetPercent": 80,
+      "baseline": { "covered": 77, "total": 84, "percent": 91.67 },
+      "paths": [
+        "src/discovery/identity.ts",
+        "src/discovery/person-identity.ts"
+      ],
+      "status": "TARGET_MET"
+    },
+    "outbox": {
+      "targetPercent": 80,
+      "baseline": { "covered": 69, "total": 93, "percent": 74.19 },
+      "paths": ["src/relay/"],
+      "status": "DEBT"
+    }
+  },
+  "measurementCommand": "pnpm coverage:api",
+  "interpretation": "A green ratchet means coverage did not decline. It does not mean the 80 percent target is met while status remains RATCHET_ACTIVE_TARGET_UNMET."
+}

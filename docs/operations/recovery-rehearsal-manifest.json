@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "recovery-rehearsal/v1",
+  "rehearsalId": "global-dev-recovery-NOT_RUN",
+  "status": "NOT_RUN",
+  "authorization": null,
+  "startedAt": null,
+  "completedAt": null,
+  "scope": [
+    "postgresql",
+    "new-api",
+    "minio",
+    "temporal-sqlite",
+    "configuration"
+  ],
+  "receipts": [],
+  "notes": [
+    "This is a create-only admission artifact.",
+    "No backup, restore, service connection, secret read, or rehearsal occurred."
+  ]
+}
