@@ -233,6 +233,19 @@ describe('externalIntentSweepWorkflow — 过期后 intent 复算 + patched 版�
     expect(out.swept).toBe(2);
   });
 
+  it('patched=false 的旧命令路径遇到敏感失败时仍只产机器码，不新增 recompute 命令', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    setPatched(() => false);
+    acts.projectExternalIntentForIcp.mockRejectedValue(new Error(SENSITIVE_ERROR));
+
+    const out = await externalIntentSweepWorkflow({});
+
+    expect(acts.recomputeExpiredIntent).not.toHaveBeenCalled();
+    expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(1);
+    expect(out.results[0]?.error).toBe('EXTERNAL_INTENT_PROJECTION_FAILED');
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
+  });
+
   it('recomputeExpiredIntent reject → fail-safe（out.recompute 记 error），workflow 仍完成投影', async () => {
     primeHappyPath([target('ws-1', 'icp-1')]);
     acts.recomputeExpiredIntent.mockRejectedValue(new Error(SENSITIVE_ERROR));
