@@ -34,6 +34,8 @@ const HISTORICAL_MANIFEST_V6_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v6.json";
 const HISTORICAL_MANIFEST_V7_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v7.json";
+const CURRENT_MANIFEST_V8_PATH =
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v8.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -242,6 +244,48 @@ describe("Copy real capability create-only manifest preparation", () => {
     await expect(
       writeCopyRealCapabilityManifestCreateOnly("/tmp", artifact),
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
+  });
+
+  it("freezes repository v8 as the current fixed-source create-only manifest", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, CURRENT_MANIFEST_V8_PATH);
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "c634d384ed32fd79ae5b53b870c303f6f9995b41562e8396bea9873f182eb14f",
+    );
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-06-v8",
+      fixedSourceCommit: "719aacc2ec328870316b71cb0666d22828b89e74",
+      preparationHeadCommit: "5e30427a2a08e95e1f4dfa80f039537bd96f5102",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-06-v8",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+    });
+    expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      "0740bb45fcb12a9f29b94ecad5fafbe5d1a5e6b1d58b44343c9ecc407a8c3809",
+    );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifactDigest).toBe(
+      "1a08697dec16333593dde4b655da0b36b676b11856bb7bbc5ecd7330a945ff0d",
+    );
   });
 
   it("keeps repository v7 as immutable superseded history", () => {
