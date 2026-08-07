@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePiiBackfillAuthorization } from './pii-backfill-admission';
+import {
+  resolvePiiBackfillAuthorization,
+  resolvePiiBackfillVerifierAuthorization,
+} from './pii-backfill-admission';
 
 const ENV = {
   PII_BACKFILL_DATABASE_URL: 'postgresql://maintenance:secret@db.example/pilot',
@@ -67,4 +70,35 @@ describe('PII backfill admission', () => {
     expect(rendered).not.toContain('super-secret');
     expect(rendered).not.toContain(ENV.PII_BACKFILL_DATABASE_URL);
   });
+
+  it('requires a second explicit isolated-database gate for the destructive verifier', () => {
+    expect(() =>
+      resolvePiiBackfillVerifierAuthorization({
+        ...ENV,
+        PII_BACKFILL_ISOLATED_VERIFY: undefined,
+      }),
+    ).toThrowError(/PII_BACKFILL_ISOLATED_VERIFY_REQUIRED/);
+
+    expect(
+      resolvePiiBackfillVerifierAuthorization({
+        ...ENV,
+        PII_BACKFILL_ISOLATED_VERIFY: 'true',
+      }),
+    ).toMatchObject({
+      mode: 'APPLY',
+      expectedDatabaseName: 'pilot',
+    });
+  });
+
+  it.each(['1', 'TRUE', 'yes', 'false']) (
+    'rejects ambiguous isolated-verifier gate value %s',
+    (PII_BACKFILL_ISOLATED_VERIFY) => {
+      expect(() =>
+        resolvePiiBackfillVerifierAuthorization({
+          ...ENV,
+          PII_BACKFILL_ISOLATED_VERIFY,
+        }),
+      ).toThrowError(/PII_BACKFILL_ISOLATED_VERIFY_REQUIRED/);
+    },
+  );
 });
