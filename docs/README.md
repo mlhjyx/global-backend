@@ -4,9 +4,9 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-07-24，`origin/main@d0e3d929130212b078f14f8254685852fd00012c`
+> 最后核验：2026-08-07；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
 
-这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；本仓当前开发主线是 Site Builder 后端能力。独立站管理属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
+这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；Site Builder M1 收口已经进入历史，当前在为获客侧恢复施工补齐治理、授权、运行身份、可观测性与首个受控 pilot 门。独立站管理仍属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
 
 ## 1. 先读五份当前真值
 
@@ -28,6 +28,7 @@
 | 设计/开发独立站管理 | [Capability Pack](frontend/modules/independent-site-management/README.md) | 当前唯一达到详细规格深度的 SaaS 产品域 |
 | 实现 Site Builder 后端 | [Site Builder 决策入口](site-builder/00-decisions-and-coordination.md) | PRD、架构、SiteSpec、API、测试与施工顺序 |
 | 查询稳定 ID、状态与责任 | [治理入口](governance/README.md) | Capability、Object、Scenario、Conflict 与追踪关系 |
+| 查询 Provider 当前合同 | [生成 Provider Registry](backend/provider-registry.md) | key、SourceClass、许可、个人数据、默认 enablement、调用门与测试；不代表 runtime 健康 |
 | 查询 OSS/外部能力决定 | [OSS / 外部能力注册表](backend/oss-registry.md) | 32 项采用决定、许可边界、Adapter/SoR、Owner 与退出门 |
 | 运行和维护开发环境 | [后端运行文档](backend/compose-project-migration.md) | Compose 迁移、Worktree、CI 及现役后端专题 |
 | 用自然语言需求与 Codex 协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界 |
@@ -72,8 +73,8 @@
 | 区域 | 当前深度 | 不应误读为 |
 |---|---|---|
 | 今日与公共 Shell | 目标产品地图 | 正式 SaaS 前端已存在 |
-| 客户开发 | 新增开发冻结已提前解除；M1 前准备、M1 后恢复实现，首项待重审与排期 | 本仓负责 Campaign、触达或商机 |
-| 独立站管理 | 当前在途主线；详细规格和后端纵切最深 | 公网发布、域名、回滚或生产就绪 |
+| 客户开发 | 冻结已解除；恢复治理与首个 pilot 门在途，当前机器链仍为 `INTERNAL_ONLY` | 本仓负责 Campaign、触达或商机，或历史真测等于当前 pilot |
+| 独立站管理 | M1 收口历史；详细规格和后端纵切最深 | 公网发布、域名、回滚或生产就绪 |
 | 增长执行 | 地图级目标 | 已有 SoR、合同或页面 |
 | 互动与商机 | 地图级目标 | 本仓负责 Conversation/Opportunity |
 | 洞察 | 目标读模型；Site 有局部成本事实 | Mock 图表是指标真值 |

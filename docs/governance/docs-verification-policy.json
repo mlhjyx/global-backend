@@ -4,11 +4,13 @@
     "exact": [
       "docs/README.md",
       "docs/backend/oss-registry.md",
+      "docs/backend/provider-registry.md",
       "docs/product-scope.md",
       "docs/status/current.md",
       "docs/architecture/current.md",
       "docs/adr/registry.md",
       "docs/roadmap/release-plan.md",
+      "docs/backend/provider-registry.md",
       "docs/site-builder/00-decisions-and-coordination.md",
       "docs/site-builder/01-prd.md",
       "docs/site-builder/02-architecture.md",
@@ -191,5 +193,16 @@
       "Approval",
       "Learning"
     ]
+  },
+  "machineGovernance": {
+    "providerRegistry": "docs/governance/provider-registry.json",
+    "providerGeneratedDocument": "docs/backend/provider-registry.md",
+    "deliveryTraceability": "docs/governance/delivery-traceability.json",
+    "runtimeEvidenceSchema": "docs/governance/runtime-evidence.schema.json",
+    "runtimeEvidenceDirectory": "docs/evidence/runtime",
+    "releaseBundleSchema": "docs/governance/release-bundle.schema.json",
+    "releaseBundleTemplate": "docs/templates/release-bundle.template.json",
+    "requiredContexts": ".github/required-contexts.json",
+    "verifier": "scripts/governance-verify.mjs"
   }
 }

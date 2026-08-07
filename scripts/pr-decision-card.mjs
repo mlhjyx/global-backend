@@ -209,7 +209,7 @@ export function evaluateDecisionCard(event, now = new Date()) {
   }
 
   return {
-    schemaVersion: "pr-decision-card-status/v2",
+    schemaVersion: "pr-decision-card-status/v3",
     status,
     blocking:
       recommendation === "MERGE" && !["CURRENT_UNVERIFIED"].includes(status),
@@ -228,6 +228,24 @@ export function evaluateDecisionCard(event, now = new Date()) {
     recommendation: recommendation ?? null,
     technicalGate: technicalGate ?? null,
     independentReview: independentReview ?? null,
+    gates: {
+      machine: {
+        status: technicalGate ?? "UNDECLARED",
+        trusted: false,
+        provenance: "PR_BODY_DECLARATION",
+      },
+      reviewer: {
+        status: independentReview ?? "UNDECLARED",
+        trusted: false,
+        provenance: "PR_BODY_DECLARATION",
+      },
+      userAuthorization: {
+        status: "NOT_AUTHORIZED",
+        trusted: false,
+        provenance: "PR_BODY_DECLARATION",
+        declared: card.productAuthorization || null,
+      },
+    },
     reasons: [...new Set(reasons)],
     card,
   };
@@ -261,11 +279,11 @@ export function renderDecisionCard(result) {
 - 明确没有改变什么：${shown(card.unchanged)}
 - 成功、失败与恢复：${shown(card.paths)}
 - 数据、权限、迁移、外部合同或生产影响：${shown(card.sensitiveImpact)}
-- 正文自报技术门（未验证）：${shown(card.technicalGate)}
-- 正文自报独立审查（未验证）：${shown(card.independentReview)}
+- 机器技术门：\`${result.gates.machine.status}\`（正文声明，未验证；真实门只认受信 check run）
+- 独立审查门：\`${result.gates.reviewer.status}\`（正文声明，未验证；真实门只认独立 review provenance）
+- 用户授权门：\`${result.gates.userAuthorization.status}\`（正文只展示：${shown(card.productAuthorization)}；机器人不把它当作自动合并输入）
 - 最大风险与回退：${shown(card.riskRollback)}
 - 正文自报 Codex 建议（未验证）：${shown(card.codexRecommendation)}
-- 产品负责人授权：${shown(card.productAuthorization)}（仅展示，机器人不把它当作自动合并输入）
 
 ### 自动检查发现
 

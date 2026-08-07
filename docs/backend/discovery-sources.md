@@ -2,7 +2,7 @@
 
 > 研究结论（2025-2026 现状）。目标：把发现从「只挖官网」扩展到真正多源。
 > 场景基准：为 TRUMPF（德国激光/钣金设备商）找全球中大型金属加工买家。
-> **2026-08-07 as-built 纠偏**：本文保留研究 provenance；当前 `executeQuery` 已对同 `source_class` 的全部 ENABLED adapter 并行 fan-out，`source_hint` 才会收窄。TED 发现/intent 与 SAM.gov Sources Sought ingest/projection 已实现；SAM 仍由默认 `DISABLED` kill-switch 保护。生产 `customs`/`trade_data`/Comtrade adapter 尚未实现，枚举或 sandbox 插槽不构成能力。
+> **2026-08-07 as-built 纠偏**：本文保留研究 provenance，表内优先级、实测数字和“已实现”措辞不再承担当前 registry 真值。Provider 的实现状态、SourceClass、默认 enablement、许可、个人数据等级、调用门与测试只认[机器生成 Provider Registry](provider-registry.md)。当前 `executeQuery` 已对同 `source_class` 的全部 ENABLED adapter 并行 fan-out，`source_hint` 才会收窄；生产 `customs`/`trade_data`/Comtrade adapter 尚未实现，枚举或 sandbox 插槽不构成能力。
 
 ## 映射表
 
@@ -44,7 +44,7 @@
 2. **查询计划契约（已实现基础面）**（`discovery.query_plan`）：`filters.source_hint` 可选；TED/openFDA 等已使用结构化 CPV/product-code 键。未安装的 customs/trade_data 键不得由计划器伪造成可执行能力。
 3. **结构化源 → 官网富化**：Wikidata/OSM/GLEIF/名录产出的 website 命中率参差，统一交给现有 `mineDomain`（Crawl4AI+Gemini）判站富化——「官网单源」降格为**所有源的公共富化层**，不再是唯一发现入口。
 4. **召回与信号分离**：发现类源（名录/展会/Wikidata/OSM/官网）→ canonical；信号类源（news/jobs/patents/trade-stats）不建 canonical，写 attributes 供资格门四门判别与优先级打分。
-5. **Source Registry（已实现于当前受治理工具面）**：ToolBroker 对 required 源执行 `source_policy` fail-closed，既有 Wikidata/GLEIF/OSM/TED/openFDA/SAM 等有 seed 与 kill-switch；Comtrade/customs 未安装，因而也没有可执行的 registry/tool/provider 链。
+5. **Source Registry（已实现于当前受治理工具面）**：ToolBroker 对 required 源执行 `source_policy` fail-closed；可执行 provider、seed default 与具体 call gate 见[生成 Registry](provider-registry.md)。Comtrade/customs 未安装，因而也没有可执行的 registry/tool/provider 链。
 
 ## 第一波落地（P0）
 

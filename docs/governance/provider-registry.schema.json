@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.local/schemas/provider-registry-v1.json",
+  "title": "Provider Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_document", "providers"],
+  "properties": {
+    "schema_version": { "const": "provider-registry/v1" },
+    "generated_document": { "const": "docs/backend/provider-registry.md" },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/provider" }
+    }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "status",
+        "source_classes",
+        "purpose",
+        "taxonomy",
+        "license",
+        "personal_data_class",
+        "default_enablement",
+        "call_gates",
+        "test_paths",
+        "evidence_refs"
+      ],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "status": {
+          "enum": ["IMPLEMENTED", "PARTIAL", "DESIGN_ONLY", "NOT_STARTED"]
+        },
+        "source_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "purpose": { "type": "string", "minLength": 1 },
+        "taxonomy": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classification", "note"],
+          "properties": {
+            "classification": { "type": "string", "minLength": 1 },
+            "note": { "type": "string", "minLength": 1 }
+          }
+        },
+        "personal_data_class": {
+          "enum": [
+            "NONE",
+            "COMPANY_ONLY",
+            "RESTRICTED_POSSIBLE",
+            "PERSONAL_DATA"
+          ]
+        },
+        "default_enablement": {
+          "enum": ["ENABLED", "DISABLED", "CONDITIONAL"]
+        },
+        "call_gates": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "test_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "path"],
+            "properties": {
+              "kind": { "enum": ["TEST_ANCHOR", "HISTORICAL_EVIDENCE"] },
+              "path": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

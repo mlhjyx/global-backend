@@ -36,10 +36,10 @@
 - 明确没有改变什么：`<由 Codex 填写>`
 - 成功、失败与恢复路径：`<由 Codex 填写>`
 - 数据、权限、迁移、外部合同或生产影响：`<由 Codex 填写>`
-- 技术门：`UNKNOWN`（进入合并候选后改为 `PASS / HOLD` 并附 commit、命令和 CI 证据）
-- 独立审查代理：`NEED_USER_DECISION`（审查后改为 `RECOMMEND_MERGE / RECOMMEND_HOLD` 并附结论）
+- 技术门：`UNKNOWN`（进入合并候选后可陈述 `PASS / HOLD` 并附 commit、命令和 CI URL；正文仍是未验证声明）
+- 独立审查代理：`NEED_USER_DECISION`（审查后可陈述 `RECOMMEND_MERGE / RECOMMEND_HOLD` 并附 review URL；正文仍是未验证声明）
 - 最大剩余风险、未知项与回退方式：`<由 Codex 填写>`
-- 产品负责人授权：`AWAITING_PRODUCT_OWNER`（或本任务已明确授权的精确语句）：
+- 产品负责人授权：`AWAITING_PRODUCT_OWNER`（仅展示；即使粘贴授权语句，机器人仍标 `NOT_AUTHORIZED`，真实授权必须有独立 provenance）：
 - Codex 建议：`NEED_USER_DECISION`（收口后改为 `MERGE / HOLD`）
 
 ## 合规（涉数据源 / 联系人 / 抓取时必填）

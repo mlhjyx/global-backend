@@ -1,144 +1,85 @@
-# AGENTS.md — 项目记忆（每会话自动加载）
+# AGENTS.md — `/global/backend` 稳定执行入口
 
-> 给接手本仓库的 Codex 会话。随 git 同步，是跨会话的权威上下文。
-> **当前开发主体（2026-07-16 用户确认）= Codex**：Codex 负责读项目记忆、规划、实现、验证、提 PR 与收口审查；旧 CC/Claude 会话、分支与 worktree 是**待 Codex 审计的历史/迁移 provenance**，不再代表当前执行责任，也不得在独有提交核验前删除。`CLAUDE.md` 仅保留兼容入口，冲突一律以本文件和下列权威文档为准。
-> **当前主线先看** [docs/status/current.md](docs/status/current.md) 与 [docs/roadmap/release-plan.md](docs/roadmap/release-plan.md)；边界看 [docs/product-scope.md](docs/product-scope.md)，as-built 看 [docs/architecture/current.md](docs/architecture/current.md)，承重决策只认 [docs/adr/registry.md](docs/adr/registry.md)。历史实施日志见 [docs/roadmap/changelog.md](docs/roadmap/changelog.md)。
+本文件只保留跨会话、低漂移的执行规则。当前提交、在途工作、阻塞和下一决策见 [`docs/status/current.md`](docs/status/current.md)；历史事实见 [`docs/roadmap/changelog.md`](docs/roadmap/changelog.md) 与 [`docs/evidence/README.md`](docs/evidence/README.md)。不要把本文件扩写成日期化实施日志。
 
-## 0. Codex 执行面审计（2026-08-07）
+## 1. 权威顺序
 
-- **项目本地 skill 真值**：当前 `.agents/skills/` 仅安装 `code-intelligence`。注入的 ECC 说明中列出的 `tdd-workflow`、`security-review`、`verification-loop` 在本仓没有对应 `SKILL.md`，不得伪称已调用或补造文件；TDD、安全与验证要求继续直接按本文件执行。导航、证据与隔离施工流程见 [Codex navigation guide](docs/CODEX-NAVIGATION-GUIDE.md)。
-- **获客侧当前纠偏（覆盖下文旧状态句）**：backlog 下游饿死 fast-follow 已由四个 LRU/TTL 水位 `lastEnrichedAt`、`lastSignalAt`、`lastWatchAt`、`contactDiscoveryAttemptedAt`、迁移与预算尾部不盖水位测试落地；公司发现 `executeQuery` 与联系人发现均 fan-out 到当前全部 ENABLED adapter，`source_hint` 仅作显式收窄。TED 发现/intent 与 SAM.gov Sources Sought ingest/projection 已有实现；SAM provider 仍默认 `DISABLED`，启用须重新核验合规、配置与真实运行门。`customs`/生产 `trade_data`/Comtrade adapter **未实现**；`SourceClass`/sandbox 的枚举插槽和研究稿不得写成已落地能力。
-- **文档瘦身 blocker / follow-up**：本次只补执行面与已核验漂移，**不代表全部文档治理完成**，也不重写或删除本文件的历史实施 provenance。当前 blocker 是该历史迁移尚无独立批准的文件 ownership、逐条权威去向和验收合同；解除后须另开受控任务，把 dated 细节迁入 changelog/implementation records，再把本文件收敛为短入口。
+发生冲突时按以下顺序取真：
 
-## 1. 这是什么 + 边界（关键）
+1. 仓库代码、机器合同、迁移和测试；
+2. [`docs/product-scope.md`](docs/product-scope.md)、[`docs/status/current.md`](docs/status/current.md)、[`docs/architecture/current.md`](docs/architecture/current.md)、[`docs/adr/registry.md`](docs/adr/registry.md)、[`docs/roadmap/release-plan.md`](docs/roadmap/release-plan.md)；
+3. 当前外部系统与运行证据；
+4. changelog、evidence、实施记录和研究；
+5. 历史聊天、旧分支、旧 worktree、Word、原型和记忆。
 
-出海企业 **AI 全球客户开发与增长执行平台**的后端仓库，现包含两个产品面：已于 2026-08-02 解除新增开发冻结、可在重新审计后恢复施工的**买家智能与机会资格后端**，以及已于 2026-08-04 完成 M1 阶段收口的 **Site Builder 独立站建设子系统**。
+分支、PR、worktree、服务、凭据、模型目录和运行状态都不是耐久事实。接手、状态评估和架构决策必须先读权威页，再做 live Git/worktree/PR/service 检查。导航和影响面流程见 [`docs/CODEX-NAVIGATION-GUIDE.md`](docs/CODEX-NAVIGATION-GUIDE.md)。
 
-- **获客侧边界不变**：止于 `LeadQualifiedPackage`；Campaign、触达、Conversation、Opportunity/QGO/SAO、归因归 SaaS。Site Builder 在本仓负责建站与发布能力，SaaS 负责身份、控制面和产品 UI。
-- 本后端**不做身份系统**：只校验 SaaS 平台签发的 token（JWKS 验签）→ 解出 `workspace_id` / `user` / `roles`。不签发、不刷新、不管用户表。
-- 不为前端并行造 mock、不等前端。接口 code-first OpenAPI，后期交付。
+## 2. 产品边界与 no-go
 
-## 2. 技术栈 / 架构
+- 本仓包含 Buyer Intelligence 后端与 Site Builder bounded context。
+- 获客边界止于不可变 `LeadQualifiedPackage`；Campaign、触达、Conversation、Opportunity/QGO/SAO、归因和 SaaS 产品 UI 不在本仓创建主状态。
+- 本仓不签发、不刷新、不存储用户身份；只验证 SaaS 签发的 JWKS token 并消费 workspace/user/role claims。
+- Site Builder 采用 NestJS + Temporal 固定 DAG + 有界 AI Task + `@global/contracts` SiteSpec + Astro 静态渲染；不得引入自由 Planner 代替确定性控制面。
+- MCP 是传输，不是授权。任何第三方能力必须位于 ProviderAdapter、ToolBroker、预算、来源政策和审计之后。
+- 不以 mock、目录可见、配置存在、测试 anchor、历史真测或开发机通过冒充生产部署、当前运行健康或用户可用。
 
-- **2026-08-04 统一 Model Execution Runtime 覆盖真值（覆盖下方旧 harness/七模型路由叙述）**：new-api 保持唯一模型网络出口；应用内 Runtime 统一版本化 task contract、不可变 ContextEnvelope、能力协商、reasoning、精确缓存、retry/repair、验证、fallback 与 settlement 生命周期。Site Builder 七个历史 task ID 保留，但只有 `brand_profile` 与 `copy` 是 generative；`design_spec`、`assemble`、`assembly_fix`、`qa_summarize`、`seo_review` 为 deterministic，任何模型/env override 在 client 前拒绝。旧 fee-card/native runner/fixed-digest 执行代码已退役，最终诊断 evidence 保留且不可晋级。AI SDK 7 只作为经 fake new-api 验证的原生 Responses/Messages adapter；Langfuse 是可选、脱敏、fail-open 的 OTel 旁路，不热加载 prompt、不决定路由。见 ADR-023 与 [AI observability profile](docs/backend/ai-observability.md)。本变更没有真实模型调用、Copy promotion、Gemini native enablement 或生产部署。
+## 3. 当前开发环境的稳定约束
 
-- **2026-08-04 M1-g 收口覆盖真值**：六个剩余文本 task 的 campaign `7c2e1b2d-2d91-4a6e-9c9c-34a006920804` 完成 206 executions / 262 wire calls，产物见 [`m1-g-text-evaluation-real-evidence-v1.json`](docs/evidence/site-builder/m1-g-text-evaluation-real-evidence-v1.json)。复审确认它未由 canonical fixed-HEAD/cost-safe executor 产生，也未内嵌 resolved upstream/channel 与逐 wire settlement attestation，因此已明确降级为 `diagnostic_only`、`promotionEligible=false`：62 accepted、99 validator rejected、45 transport failed，不能据此排序、晋级或切路由。M1-g 收口的是 12 视觉集、确定性发布门以及“本轮不晋级、保留现役路由”的决策；一次性 runner 已删除，仓库不再为这次运行计算价格。通用 suite/validator 与诊断产物保留；这不代表 MODEL-2、30+ 成熟系统集、生产部署或 M2-PUBLISH。
+- 唯一施工仓库是 Ubuntu 上的 `/global/backend`；Mac 只作为 SSH 客户端。
+- Compose 一律使用 `docker compose -p global ...`。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
+- Temporal 由 `temporal-dev.service` 管理，不另起手工开发服务。
+- 开发端口只绑定 `127.0.0.1`；跨主机访问使用 SSH 转发，不向 Tailscale 或公网直接暴露。
+- 密钥只进入环境变量或 secret store；不得读取、打印、提交或在文档中保存 token、密码、凭据指纹之外的秘密。
 
-- **2026-08-03 source/manifest split 当前真值（覆盖下方旧 harness truth-sync）**：当前源码合同为 `site-builder-model-evaluation-harness/2026-08-01-v18` 与 `design_spec` suite/source bundle v15，#266 已合并。12 fixtures、3 候选、2 次重复、一次 GPT-5.5 probe、24 个确定性 comparator case 及 73 executions / 146 wire calls 规划矩阵不变；admission、repair 和最终评分全部绑定模块加载时捕获的 validator。每个物理调用独立受 20¢ 上限约束，两次合法 repair 的聚合结算与 capability attestation 均按完整 40¢ execution reservation 核验。当前 v2 create-only manifest 固定 `origin/main@295038d323b4bd09ed16ab73ea981d24e1f010df`；当前仍无真实调用、费用、evidence、promotion 或路由变化。
-- **2026-08-03 `design_spec` v2 manifest（覆盖上一条作为当前合同的表述）**：`site-builder-design-spec-evaluation-manifest-prep/2026-08-03-v2` 生成新的 73/146 清单、24 个零调用 comparator case、source bundle、compiled contracts 与停止条件。2026-08-01 v1 与其 `e493ba1d09fe37feea927f70d12f17aadadc5c6a` fixed source 保留为历史审计产物，不能作为新原生双币执行的授权输入。v2 不读取 `.env`、OpenOx 价格、余额或凭据，不含 wire client，dispatch 仍为 `NOT_AUTHORIZED`，调用和费用均为零。
-  - 当前 create-only 机器输出与精确摘要见 [v2 manifest 决策卡](docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v2-decision-card.md)；唯一可用新 manifest 为 [v2 JSON](docs/evidence/site-builder/m1-g-design-spec-evaluation-manifest-v2.json)，v1 与历史分支内 v1–v13 输出不恢复、不作为新 evidence 输入。
-
-- **NestJS 单体（模块化）+ Prisma + PostgreSQL**（多租户 **RLS**：`app_user` 连接 + `set_config('app.current_workspace_id')` + `current_workspace_id()` policy；owner 连接绕 RLS 供 relay/seed）。
-- **Temporal** 持久工作流（understanding / discovery / qualify）；**Transactional Outbox** + relay 发领域事件。
-- **模型与 embedding 网关 = new-api 中转站**（单一网关，按模型显式选择已验证的 OpenAI Chat/Responses/Anthropic Messages 协议）。2026-07-27 Ubuntu 开发网关已建立按能力域跨供应商划分的三把模型白名单令牌：文本 23 型、图片 4 型、视频 5 型。图片目录精确包含 `gpt-image-2`、`gpt-image-2-4k`、`gemini-3-pro-image-preview`、`gemini-3.1-flash-image-preview`；OpenOx 文本目录新增 `gemini-3.1-pro-preview`、`gemini-3.5-flash`、`gpt-5.4/5.4-mini/5.5/5.6-luna/5.6-sol/5.6-terra`，上游组合密钥虽同时列出 `gpt-image-2`，渠道只由图片专用密钥承载该重叠型号；用户期望的 `gpt-5.3-codex` 未出现在该密钥的真实 `/v1/models`，不得虚配。Gemini 文本 key 虽能列目录，但 OpenAI Chat 两个官方展示入口均返回 `openai unified upstream not configured`，Gemini 原生入口返回 404；该渠道已 fail-closed 禁用，令牌 allowlist 中保留两型号不代表当前可调用。GPT 文本渠道实测内置最小测试约 2–3 秒；图片渠道的内置“测试”会真实生成并计费，GPT Image 2 三次约 36–44 秒，Gemini 图片因错误走 `/v1/chat/completions` 在 62–74 秒后失败，故图片/视频禁止用通用渠道测试按钮判断健康。分域令牌尚未接入应用消费者，历史 `MODEL_GATEWAY_KEY` 仍是宽权限令牌，因此当前只是为后续迁移建立真实白名单，不得称已完成端到端凭据隔离或路由切换。自托管 BGE-M3 只以私有别名 `site-builder-bge-m3-local` 暴露，专用令牌只允许该别名。#140 合并并完成 Ubuntu 开发环境切换后，真实 `EmbeddingsClient` 经 new-api 返回两组 1024 维有限向量，专用令牌 `/v1/models` 仅返回该别名；这不代表生产部署。现役文本路由唯一真值仍是 `task-routes.ts`：2026-07-19 只有 `site_builder.brand_profile` 成为代码级 `promotedRoute`=`gpt-5.6-terra`（Responses）→`claude-sonnet-5`（Messages）；active evidence id=`model1-brand-profile-20260719-v20` 在同一 final-code/source bundle 下证明 candidate 24/24（两模型各 12/12）与完整 legacy DeepSeek Pro→GLM baseline 12/12，并精确记录 transport 和 requested/reported/resolved model。旧失败/诊断证据保留且不覆盖；路由有 EvidenceRef v2 任务硬门与一键 rollback。其他 6 个文本 task 仍是原 currentRoute。ADR-020 记录整组质量优先目标，逐 task 晋级仍服从 ADR-016。`gpt-image-2` 的 `/images/generations` 单次历史真探已成功，但本轮没有 task-shaped 图片/视频接口验证；edit/mask、生产 MediaGateway 与消费者未落，绝不冒充上线。Preview 图片型号只能作为 shadow 候选，ADR-020 中无 `-preview` 的稳定目标名仍未由当前目录提供；`gemini-omni-flash-preview` 也仍不可见。旧别名 `deepseek-chat`/`deepseek-reasoner` 官方 2026-07-24 关停，一律用显式 V4 型号。
-- **2026-08-03 active-route retirement override（覆盖本节与下文所有“其他六个 currentRoute 不变”历史描述）**：`minimax-m3`、`doubao-seed-2.0-pro`、`doubao-seed-2.0-lite` 只保留为不可执行的历史 provenance。active policy 中 `design_spec` 在任何模型客户端前使用 `safe-blueprint`；copy 只保留 DeepSeek Pro→GLM，QA/SEO 不再保留 Doubao fallback，assemble/assembly_fix 维持非退役 DeepSeek/GLM 路由。registry、rollback 与环境覆盖解析后均会在客户端前拒绝 retired alias；design_spec 的任何模型环境覆盖是显式配置错误，不能被确定性降级吞掉。此变更没有真实模型调用、候选晋级、凭据、attestation 或生产部署。
-- **模型候选基线 = ADR-021 / `site-builder-model-candidate-baseline/2026-08-04-v2`**：它是独立于 execution policy v3 的非运行时候选唯一真值，[人类可读镜像](docs/site-builder/model-candidate-baseline.md) 由机器基线生成并受 `docs:verify` 校验。registry 的 targetCandidate 只能从该基线构造且不可路由；BrandProfile promotedRoute/rollback 与其他六个 currentRoute 不变。`runnable` 只表示可进后续 probe/评测；Gemini 文本为 deferred、Gemini 图片为 preview、无消费者的视频为 deferred，DeepSeek/GLM/MiniMax/Doubao 文本只以 currentRoute/rollback/legacy-only 语境保留。代码级 harness `site-builder-model-evaluation-harness/2026-07-28-v3` 新增 evaluation-only、依赖注入的协议 executor：目标文本只接受候选基线中的精确 alias+protocol，legacy Chat 仅供 comparator，媒体/embedding/preview/deferred/无 suite 均在任何 client 调用前阻断；评测 transport registry 独立于生产路由。`site-builder-model-evaluation-cost-safety/2026-07-28-v1` 进一步要求 executor 在任何预算/client 前绑定专用、有限额度 credential handle，由 factory 核对 attested bearer SHA-256 与 canonical gateway origin 后内建 transport，并强制一次性 authorization、完整 target/legacy scope、冻结显式价格表、与 resolver context 完全相同的 request 级 `executionId` 结算及 execution/wire/实际 prompt/output/campaign 绝对上限；伪造或畸形 request 必须先拒绝，不能提前创建 durable claim；authorization 必须精确绑定 ledgerId 与 resolved absolute path/device/inode/持久随机 marker SHA-256，拒绝 symlink/remount/target 漂移或目录删除重建后复用额度，marker 同时先行 fsync append-only claimed-authorization digest，并以 exclusive-create/device/inode 固定 lock 串行跨进程 check+append，因此锁竞争不会误烧授权，单删 claim JSONL 后重启也不能复用同一 authorizationId；claim file 自身也以 device/inode/ctime/size 固定并用 `O_NOFOLLOW` 重开，claim/reserve/settle/freeze 全部以完整写入+fsync 进入 append-only 账本，换目录、替换文件、重启或主机崩溃都不能重领额度；transport 在 JSON parse 前限制响应字节，Messages 固定协议版本头，非 2xx 的已知 provider cost 仍进入结算；首次或累计响应的已知 provider-reported cost 达到 attempt cap 时，必须在第二次计费 repair 前结算并持久冻结；attempt 超 cap、结算持久化失败或 hard stop 都持久冻结，即使事件循环延迟导致 timeout callback 未先运行，也必须以模块加载时捕获、不可由调用方注入的单调时钟拒绝 completed/failed/probe 结果，公开 evidence clock 只能提供更保守 elapsed，底层未及时响应 abort 后返回无效结果同样不能续发 repair 或新请求；冻结价格结算必须按完整 usage 复算，reported output 超 request/attestation 上限即拒绝，无限额度、默认/未配置倍率、scope/价格/身份漂移、未知结算或媒体通用测试均 fail-closed。trusted probe/run 只接受 executor factory 私有品牌化并冻结的 target execute，品牌 WeakMap/WeakSet 校验固定使用模块加载时捕获的内建方法，任意 callback/wrapper 或运行时 monkeypatch 在预算与 client 前拒绝，且没有公开 register/test seam。task/protocol/envelope/suite/预算/provenance 唯一说明见[生成评测基线](docs/site-builder/model-evaluation-harness.md)；当前唯一完整 suite 仍是 BrandProfile，测试只用 fake fetch 与 fake settlement，未读 `.env`、未发真实请求、未产 evidence、未改 new-api 配置、运行路由或消费者。真实 evidence、逐 task promotion 继续分 PR，禁止目录可见或 harness 存在即切换。
-  - **2026-07-30 harness truth-sync（覆盖上一段旧 ID/单 suite 描述）**：当前合同是 `site-builder-model-evaluation-harness/2026-08-01-v16`；canonical suite 为 BrandProfile 与零费用准备完成的 `design_spec` v13。后者固定六 Family 的 12 个 sparse/rich fixture、3 候选 × 2 重复、一次 GPT-5.5 probe 和 24 个零调用 deterministic catalog comparator case；每个 fixture 保存完整合成生产输入，并通过与产品运行共用的完整 catalog 枚举、required-role eligibility、排序和 top-3 projection 重建。`legacyComparatorAliases=[]` 是 suite 自身的执行合同，凭据必须逐字等于 73 executions / 146 wire calls 的三个 target alias，74/148 等超额 capacity 与 MiniMax/Doubao 额外 scope 均在预算/client 前拒绝；解释只允许四种封闭 claim，稳定性按完整标准化输出摘要计算。`site-builder-model-evaluation-cost-safety/2026-07-30-v2` 把 spend authorization 固定到准备阶段的 fixed commit、suite、source-bundle contract 与 SHA-256，其中 prepared commit 还必须逐字等于执行 worktree 的当前 `HEAD`，当前提交、task system prompt、`design_spec` validator identity 或 canonical case 不一致时在预算/client 前拒绝；repair 判断只调用模块加载时捕获的 validator。system prompt SHA-256 进入 task contract，executor 只发送模块加载时捕获的字符串。create-only runner 只向 `docs/evidence/site-builder/` 写入；它使用模块加载时捕获的 Array intrinsic 拒绝预加载 compiled contracts runtime，再清除并本地重建 ignored output，通过私有 build token 把构建回执、构建后 suite import 回执与最终 attestation 绑定。artifact-tree canonical serializer 不调用实时 `map`/`join`/`sort`；只有绑定到本次真实导入的 attestation 可写 evidence。writer 还会重构 canonical manifest，并逐文件比较当前 worktree、fixed commit blob 与 source digest，且要求 fixed source commit 是 prep head 的祖先；本 PR 必须使用 merge commit 保留该 source commit，若误用 squash/rebase 或合并后不可达，后续 evidence 在任何预算/client 前 fail-closed。repair reason 过长与 provider output-token 超限都会先结算并关闭 reservation，再持久写入 authorization freeze。运行时同时绑定 21 个 JS artifact 树摘要、`design_spec` catalog 构造实际使用的全部 contracts 运行时导出代码指纹与 `require.cache` 模块实例；首个 wire 前的 runtime drift 也先冻结 durable authorization，首调和 repair 的每个物理调用无论成功、拒绝、畸形响应或 usage 超限都先执行 post-wire guard，漂移必须结算已观察费用、冻结并 fail-closed。尚无真实 `design_spec` evidence、费用授权、promotion 或 active-route 变化。
-  - 评测成本安全补充：legacy comparator 只能经 canonical harness runner 获得一次性授权并受同一 budget/hard-stop 管理；attestation deep-freeze、run deep-freeze/复验及 executor/budget/run/capability 品牌 WeakMap/WeakSet 均使用模块加载时捕获的原生方法，运行时替换 Object/WeakMap/WeakSet prototype 不能伪造、改写 run 或排序证据；跨进程 claim lock 先完整写入并 fsync boot ID/PID/process-start-time owner，再以 hard link 原子发布，只有 owner 身份确定消失才按 device/inode 恢复 stale lock，临时锁竞争只允许同一 spend authorization 用新的 harness request 重试。ledger identity 额外绑定 Linux boot/mount generation、随机 marker 与 attestation 时完整 claim prefix；进程内继续核对已观察 marker history 只能追加，原地换 digest、截断、重启或 remount 后旧 authorization 必须重新批准。transport 对非 loopback 仍强制 HTTPS，仅为 Compose 暴露的 `localhost`/`127.0.0.1`/`[::1]` 开发网关允许 canonical HTTP origin。dispatch 后缺费用 observation 仍是 unknown，不能冒充已证明未收费；成功 HTTP 已知费用即使后续 body 解析失败也必须保留，非 2xx body cancel 失败也不得覆盖已知 cost；已知 attempt 成本达到 cap 必须先写 durable freeze 才能返回失败。
-  - 零费用 evidence 准备合同 `site-builder-model-evaluation-evidence-prep/2026-07-29-v1` 从上述机器真值冻结 fixed-commit/create-only BrandProfile 清单：1 个 capability probe、36 个 target、24 个 legacy comparator，共 61 executions / 最多 122 wire calls，每次最多一次 repair。61/122/2440¢ 只作未验证规划上界；真实费用卡必须消费 fixed commit 已跟踪的脱敏 safe-snapshot envelope，核对不可逆 credential fingerprint、精确有限 scope、余额采样、spend authorization/ledger 与冻结价格/计费单位；source bundle 只引用 Git 跟踪源码并逐文件对固定提交复核。runner 不读 `.env`、没有 client，`READY_FOR_PRODUCT_DECISION` 始终伴随 `dispatchAuthorization=NOT_AUTHORIZED`；图片/视频/embedding 和其余六个无 suite task 不进入清单。
-- **现役 Site Builder 付费模型结算门（2026-07-29 当前交付分支）**：durable structured call 在 ledger reserve 与 generative client 前必须加载最多 24 小时的 digest-bound runtime attestation，精确覆盖七 task 的 current primary/fallback、alias+protocol+channel、有限额度 exact-allowlist 应用 token 指纹及 **OpenOx 模型广场公开目录**的冻结上游价格；new-api 未配置用户价格，故只提供 `x-oneapi-request-id`、token-scoped consume log 的唯一 alias/channel/quota/token 与凭据 scope 证据，绝不再作为金额真值。金额按冻结 OpenOx input/output rate 记 `token_pricing`；closed repair 的每条物理 call 都须独立匹配。unknown settlement 保守 charge reservation、失败化 operation、关闭 BuildRun 后续 paid gate并阻断 fallback。2026-07-29 OpenOx 目录仍缺 currentRoute 的 `minimax-m3`、`deepseek-v4-flash`、`doubao-seed-2.0-pro/lite`，通用/文本 token 也不满足 finite exact scope，故完整 attestation 不可安装且预期 fail-closed；这项修复不改 task route、promotion、P4、Temporal、媒体或真实 evaluation authorization，详见 [runtime contract](docs/site-builder/model-settlement-preflight.md)。
-- **发现四层**：L0 Tool → L1 ProviderAdapter（按 SourceClass）→ L2 AI Task（有界任务契约，**非超级 Agent**）→ L3 Temporal Workflow。**ToolBroker** 是唯一确定性执行闸门（allowedTools 白名单 + 预算 reserve-settle + 限流 + source_policy + 幂等 + trace）。
-- **MCP = 传输非授权**，第一步不做；第三方 MCP 内化到 ProviderAdapter 后面。
-- **Site Builder** = NestJS bounded context + Temporal 固定 DAG + 有界 AI Task + `@global/contracts` SiteSpec + Astro 静态渲染；不使用自由 Planner。素材/KB 对象进 MinIO，KB 使用 Docling + BGE-M3；当前 renderer 构建产物仍是本地路径，不得把目标态 immutable Release 写成 as-built。
-
-## 3. 开发环境
-
-**Docker 服务**（`docker compose -p global up -d`，共 9 个，容器名 `global-*`）：postgres `:5432`(pgvector/pg16, global/global/global_dev) · redis `:6379` · **new-api** `:3001`(模型与 embedding 统一网关，key 在 `apps/api/.env`) · **openox-video-compat**（仅 Compose 内网，无宿主端口；把 new-api 固定发出的 `/v1/videos` 创建路径精确改写为 OpenOx `/v1/video/generations`，查询原样透传，不保存密钥/访问日志）· **crawl4ai** `:11235`(token 在 .env) · **searxng** `:8081`(配置 `infra/searxng/settings.yml`) · **minio** `:9000/9001` · **embeddings**(ollama `:11434`，`bge-m3` 1024 维；仅作 new-api 上游/健康诊断，应用目标调用 `:3001/v1/embeddings`) · **docling** `:5001`。
-**Temporal** 不在 compose，跑成 systemd 服务 `temporal-dev.service`（开机自启、`:7233`）——`systemctl status/restart temporal-dev`，不再手动 CLI。
-
-**Compose 项目名迁移护栏**：当前 Ubuntu 实机的容器标签、固定容器名和数据卷已核验为项目 `global`（例如 `global_pgdata`）；`-p global` 是现行真值。旧 Mac/WSL 曾可能使用目录推导的 `global-backend`，切换时**不得**直接 `down -v`、删除固定 `global-*` 容器或假定新卷已有数据。先读 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md)；若尚未迁移，临时使用 `pnpm infra:up:legacy`，完成 pg_dump/restore 和卷/服务验收后再切换。
-
-**跑起来**：
+最小启动与验证序列：
 
 ```bash
-cd /global/backend
-pnpm install
+pnpm install --frozen-lockfile
 docker compose -p global up -d
 DATABASE_URL=postgresql://global:global@localhost:5432/global_dev pnpm --filter @global/db exec prisma migrate deploy
 pnpm --filter @global/db generate
 pnpm --filter @global/contracts build
 pnpm --filter @global/api build
-DATABASE_URL=postgresql://global:global@localhost:5432/global_dev node apps/api/scripts/seed-taxonomy.mjs
-pnpm --filter @global/api start:dev    # API
-pnpm --filter @global/api worker       # Temporal worker
-pnpm --filter @global/api test         # vitest
+pnpm --filter @global/api test
 ```
 
-data_provider 源（gleif/directory/trade_fair/wikidata/…）在 **API/relay 启动时自动 seed**。
+## 4. 所有权、worktree 与外部动作
 
-**唯一当前开发环境**：**Ubuntu 26.04**（2026-07-15 迁入），代码在 `/global/backend`；Mac 仅作 SSH 瘦客户端，旧 Mac/WSL 路径都不是当前施工目录。Tailscale 主机 `xin`（root，`100.88.153.74`），8T 盘挂 `/data` 且承载 Docker data-root。墙内网络经桌面用户 xin 的 mihomo `127.0.0.1:7897`，apt 使用 `mirrors.aliyun.com`，Docker registry 使用 daocloud 镜像。`docker compose` 一律带 `-p global`；Temporal 一律走 systemd `temporal-dev.service`。Compose 开发服务端口一律只绑 `127.0.0.1`，Mac 访问须用 SSH 端口转发，不向 Tailscale/公网直接暴露。
+- Codex 是当前开发主体；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
+- `/global/backend` 主工作区只作 main 与现场审计；功能施工使用 `/global/backend/.codex/worktrees/<topic>` 的持久隔离 worktree 与 `codex/<topic>` 分支。
+- 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。
+- 保留用户删除、未跟踪文件、脏工作区、独有提交和历史证据。不得使用 `git reset --hard`、`git clean -fdx` 或未经明确授权的递归删除。
+- 网络工具默认只读。push、开/改 PR、发消息、发布、部署、合并、付费调用、远程任务、第三方配置与凭据变更都需要用户对该动作的明确授权。
+- 技术完成、机器检查、独立 review、产品决策卡、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。
 
-🔴 **抓取出口基线（R1-safety ②，2026-07-17）**：开发 Compose 已移除 `CRAWL4AI_ALLOW_INTERNAL_URLS`，Crawl4AI 固定到 0.9.1 不可变 digest，并保留上游 global-unicast 守卫与浏览器 pinning proxy。Ubuntu mihomo 把公网域名映射到 `198.18.0.0/15` 时，系统解析结果**全部且仅为 fake-IP**才允许经固定 Cloudflare DoH 回退；混入 private/loopback/metadata/保留地址一律拒绝。API 的 Crawl/robots/`http.get` 同样执行 global-unicast 校验、解析后连接钉扎、redirect 逐跳重验、跨域凭证剥离、超时与响应大小上限。真机已通过公网 `/md`+`/crawl` 正例，以及 private/loopback/metadata/IPv4-mapped/redirect-to-metadata 负例。端口继续只绑 `127.0.0.1`；这只是附加暴露面约束，不替代出口闸。
+## 5. 实现与安全门
 
-## 4. 已落地子系统（真实数据、已实测）
+- 复杂改动先计划；新功能和 bugfix 必须按 RED → GREEN → refactor 做 TDD，并维持相关范围 80%+ 覆盖。
+- 在系统边界做 schema 校验；外部数据、URL、身份、权限、费用和 provider 响应全部不可信，必须 fail closed。
+- 业务逻辑优先不可变数据与新对象；不得静默吞错。用户面返回稳定错误，服务端记录有界诊断且不泄露秘密或个人数据。
+- SQL 使用参数化/Prisma，租户数据遵守 `app_user` + `set_config('app.current_workspace_id')` + FORCE RLS；owner 连接只用于明确的平台级任务。
+- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。
+- API 唯一真值是 code-first [`packages/contracts/openapi/openapi.json`](packages/contracts/openapi/openapi.json)。文档引用 operationId，不手抄 path/operation 总数。
 
-- **Site Builder M0（当前主线）**：注册引导、`Site`/`SiteVersion`/`BuildRun`、素材直传与 KB、Demo v0 Temporal 流程、Astro 渲染器 55 型组件、SiteSpec 1.0.0 共享类型（DQ-1/#117）和 7 个有界 AI Task 路由已存在。#121 已做无条件触发 demo 的行为修复，#123 已禁虚构身份，#124 已落 businessEmail 隔离/可取消超时/失败保站；**R0 contract closeout（#126）**补齐 intake 幂等/稳定合同。**R1-safety ①+②与 R2-A1–A4（2026-07-17）均已完成**：Asset/KB/Profile 已具备 lease/fencing/CAS 与严格合同；A4 把 staging cleanup 接入 Outbox→Temporal，在 presigned PUT 到期后执行固定 15 分钟在途 grace、双 provenance 首删+HEAD，再 durable settle 5 分钟并二次删除+HEAD；命令不能缩短窗口，也不再声称“仅 URL 到期”即可绝对防复活。另补齐稳定 Asset/KB/Build 错误、Build cancel CAS、告警与 guarded redrive。canonical cleanup 继续 parked，MF-0 scanner 前绝不自动删。相关真服务结论仅指 Ubuntu 开发环境，不代表生产部署。
+## 6. Provider、追踪、证据与发布
 
-- **多源发现** → `canonical_company`：`public_web`(SearXNG+Crawl4AI+Gemini) · `wikidata`(SPARQL) · `openstreetmap` · `directory`(名录列表抽取，实测 151 家) · **`trade_fair`**(展会参展商，RX/Algolia 直连 API，实测 EuroBLECH 398/909)。executeQuery **fan-out** 到 source_class 全部 ENABLED 适配器。
-- **富集**（`enrichRun`，fit 门后只富集 match 公司，**attributes 按源命名空间** `attributes.gleif.*`/`attributes.wikidata.*`）：`gleif`(LEI/法人形式/母子关系) + `wikidata`(行业/产品/员工/财务/官网)。共享 `discovery/name-match.ts`（置信门槛 0.72 + 歧义边距，**绝不贴错身份**）。
-- **决策人抽取** `contact.find_decision_makers`：Impressum/管理层/团队页 → 具名人 + 职务 + 角色分类（对齐买家委员会）。具名人标 `personalData=true`。
-- **采集监控层**（源无关·平台级共享·无 RLS）：`monitored_source`/`source_entity`/`source_fetch`/`source_entity_change` 4 表 + `AcquisitionService.acquire`（抓取→清洗→落库→增量 diff，防误杀阈值）+ **Temporal Schedule 定时 sweep**（`acquisitionSweepWorkflow`，`nextFetchAt` 到期自动增量）。源适配器 `trade_fair`(RX/Algolia，实测 INTERPHEX 美国 602 家/12 国) + `mapyourshow`(MYS 无鉴权 JSON，实测 321)。
-- **v3.0 信号富集**（零付费，signal 源只写 `attributes.*` 喂 Intent/Reachability 评分，走 enrichRun 命名空间+field_evidence+幂等）：`digital_footprint`(官网 HTML/DNS→技术栈/在投广告/服务市场/邮件商/JSON-LD 事实) + `structured_harvest`(sitemap→careers/招聘信号)。设计见 [buyer-intelligence-v3.md](docs/research/buyer-intelligence-v3.md)。
-- **自建邮箱验证** `smtp_self`（v3.0 #3）：MX + SMTP RCPT 握手自校验 + catch-all 检测 + SSRF 护栏；Gmail/M365/catch-all/端口不可达 一律 **RISKY**（不谎报 VALID），写 `contact_point` 验证生命周期。
-- **网站变更 = intent 引擎** `web_watch`（v3.0 #4，`apps/api/src/intent/`）：**复用 `source_entity_change` diff**，锚点从「公司记录」换成「目标公司意图承载页」（产品/招聘/供应商招募·RFQ/新闻）。逐页抓渲染 HTML→抽结构化意图信号（page-signals，纯）→ **signalHash 只覆盖信号字段**（cosmetic 抖动不误触发）→ 前后快照 diff 出**具体 delta**→ 每条 = 一条 intent 事件（`SOURCING_OPENED`/`HIRING_UP`/`NEW_PRODUCTS`/`NEWS_POSTED`/`PAGE_CHANGED`，带强度+证据）。真实站多不发 Product/Article JSON-LD → 产品/新闻靠**主内容锚点链接**（去 nav/footer）；实测 TRUMPF supplier→`supplier_program`、Flex→3 招募词、products→主内容 7 品类、newsroom→8 新闻指纹。独立 `intentSweepWorkflow`+Schedule（与通用采集 sweep 分离，registry 正向过滤）；DAT-011 SUSPENDED + robots 合规 + R1-safety 双层 egress gate；🔴 新闻只存**指纹哈希**（不落标题/人名）、事件证据仅数量；保留期清理（GDPR 存储限制）。租户经 `IntentProjectionService` 按 `companyIdentity` dedupeKey 投影进 `attributes.intent.*`。
-- **存量对账管线**（2026-07-08 通脉）：`backlogSweepWorkflow`（Schedule 24h + `scripts/run-backlog-sweep.mts`）对**不属于任何 run 的存量公司**（投影进来的 900+ 家，此前永远够不到 fit 门）做 资格门→富集→信号→web_watch→联系人→重评分 全链对账（`fit-judge.ts` 共享四门核心、`id>cursor` 防活锁、批量+轮次双上限、DAT-011、ownerDb 仅平台级只读扫描）。**队列门**：`scoreLead` 的 `authoritativeFit` 只覆盖 Fit 维，recommended=六维总分≥0.55 **且 Reachability>0**（联系不上的不算推荐）。联系人发现首选 `decision_maker`（Impressum 具名决策人，🔴`person.profile` 证据 + `personal_data` 标记，`contact-persist.ts` 共享持久化）。worker 启动幂等 seed + 三 Schedule 自愈（acq/intent/backlog）；intentSweep 尾部 `projectIntentAllWorkspaces` 自动投影（loop 真收口）；`finalizeRun` 自动发 `QualifyRequested`；fit-judge **拒绝 stub 兜底假判定**。**dev 实测**（有界样本 `run-backlog-sweep --fit-batch=10 --max-fit-rounds=1` 等·真库真 crawl·无 sandbox）：首轮冷样本 6 阶段全产出——资格门 10 判/1 match、快事实 10 尝试、信号 4 抓/3 命中、web_watch 注册 4、联系人 5 尝试/1 具名、scored 1040 全量重评；重跑呈**正确幂等**（TTL 新鲜/已注册/已建联系人的行跳过）。**对抗式复审（5 维·14 agent·逐条核验）6 findings**：已修 3 手术刀——队列门 Reachability 硬底补齐**非权威（fitVerdict=null）路径**（此前老路径漏出「联系不上的伪推荐」）、DAT-011 监控注册阶段补 SUSPENDED 守、6 阶段静默 catch→log.warn；🟠 下游 enrich/signal/watch/contact **跨-sweep 游标复位+集不收缩→预算位次后公司饿死**（本 PR 立论 bug 在下游复现）走 fast-follow（根治需 schema 水位列 `lastEnrichedAt/lastSignalAt/lastWatchAt/contactDiscoveryAttemptedAt` + 迁移）。
-- **TED 招投标 provider**（2026-07-09，P1+P2+P3，[ted-provider-spec.md](docs/implementation-records/ted-provider-spec.md)）：欧盟采购官方 API（零鉴权 REST，绿事实 CC BY 4.0），归 `public_intelligence` 复用全管线、无需新 SourceClass。**P1 中标发现**（`adapters/ted-api.ts` + `discovery/providers/ted.provider.ts`：expert query/ITERATION 滚动/多语言 eng 优先解包/缺键当 null；中标方 `winner-name`+国别税号 → `ProviderCompanyRecord`，URL 身份安全归属）。**P2 ICP→CPV**（`discovery/icp-to-cpv.ts` `resolveIcpToCpv`=crosswalk 锚定+product 精修**限子树**+country 覆盖门 `icp_fit_warning`；**§8.2** 暴露 taxonomy `crosswalks`（`resolveCpvForProduct` 枚举限子树前缀·去尾零）；**§8.7** `generateQueryPlan` **确定性注入** TED 查询、LLM 不臆造 CPV；CPV 子树种子）。**P3 招标 intent**（`adapters/ted-api.ts` `searchContractNotices` cn-standard 只取绿字段 + 抽共享 `fetchNoticesRaw` 分页；`intent/ted-intent-projection.service.ts` `projectTenders`：**招标=买方需求**，买方 name+alpha-2 归并取最新发布日 → upsert canonical(有则更新/无则建线索) → `attributes.intent.events[{type:'TENDER_PUBLISHED', at:<发布日 ISO>, strength 0.9}]` → 动六维 Intent 维，复用 `mergeIntent`，新 event type 无需改评分）。🔴 合规：CC BY 署名（发现证据 `field_evidence.license` 修，非硬编码 licensed；P3 新建买方另写 `identity` 署名行）+ `winner-email`/`buyer-email` 不入绿库 + `source_policy` **用途门** fail-closed（个人数据源直连前必校验，P3 直连亦过同一 §8.8 门）+ 国别税号身份**按 alpha-2 国别限定**（防跨境同号误并；P3 无国别招标跳过同理）+ ISO-3→alpha-2 归一 + §8.6 发布日 `tedDateToIso` 归一（防 Date.parse NaN 静默 0 分）。**实测**（真库真 API 无 sandbox）：泵+德国 真拉 12~29 家中标（BBA Pumpen/KAESER，真税号）、ICP「pumps+德国」→CPV→buyer_country→TED 闭环；P3 泵+德国近 90 天 24 条开放招标→18 家买方 canonical，Intent 0→0.8657、同参再跑幂等（evidence 36→36）、SUSPENDED→零落地。质量：TDD 261 测 + 3 轮对抗复审（P1 修 1 HIGH、P2 修 3 findings、P3 修 5 findings 含 §8.8 门/幂等/无国别防误并；幂等修复被实测反抓 jsonb 键序 bug）。招标 P3 投影已**上 Temporal Schedule**（见「外部源 intent sweep」P5 · PR #38）。**SAM.gov Sources Sought P4 已落地**（PR #99，默认 `DISABLED`；获客冻结已解除，但启用仍须重新核验合规、配置与真实运行门）。
-- **openFDA 认证注册库 provider**（2026-07-09，P1 器械注册发现 + P2 ICP→FDA 产品码映射，[openfda-provider-spec.md](docs/implementation-records/openfda-provider-spec.md)）：美国 FDA 官方开放数据 API（`api.fda.gov`，零鉴权、**CC0 公共领域**）。`device/registrationlisting` = 「正在合规卖进美国」的规管品类活跃公司名单，归 `public_intelligence` 复用全管线、无需新 SourceClass。**P1 发现**（`adapters/openfda-api.ts` + `discovery/providers/openfda.provider.ts`：search 构造/有界分页 skip≤25000/`openfda` 谐调块缺块当 null/判 error.NOT_FOUND 空/429 退避；establishment → `ProviderCompanyRecord`，`name+iso_country_code` 主键、FDA 注册号→`fda-reg` 全局唯一 scheme、externalId 无号退 name:country 防跨国互撞；分类事实取**匹配搜索码**产品、`attributes.products`=device_name 喂 fit 门；无 product code → fail-safe 空）。**§8.1** 美国进口商=`initial_importer_flag:Y`（**非** establishment_type:Importer）。🔴 合规（**与 TED 关键差异**）：CC0 **署名非义务**（`license='CC0-1.0'`，非 TED 强制 CC BY）+ `us_agent`/`owner_operator`/`contact` 具名个人**不入绿库**（CC0≠GDPR 依据）+ **「注册≠核准」文案红线**（`attributes.fda.disclaimer`）+ `source_policy(api.fda.gov, personalData=true)` §8.8 门 + MAUDE/FAERS 不摄入。**实测**（真库真 API 无 sandbox）：LLZ 放射影像美国进口商 27 家（Philips Ultrasound/GE Healthcare/Karl Storz）→ canonical 27 + CC0 证据 108 → 无具名个人 → §8.8 SUSPENDED 零落地。质量：TDD 289 测 + 1 轮对抗复审（4 findings 全修）。**P2 ICP→FDA 产品码映射**（`taxonomy-resolver.resolveFdaProductCode`：产品词精修**枚举限 panel 子树**[`parentCode ∈ panelCodes`，FDA 3 字母码无前缀层级靠显式父维]+ `listFdaProductCodes` 宽网，**复用 parentCode 列零 migration**；`discovery/icp-to-fda.ts resolveIcpToFda`：industry `crosswalk.fdaPanels` 锚定 + 精修 + 宽网 + 直锚码**并集**；`icp.service injectFdaQuery` 注入；**国家维与 TED 反**=全美市场无覆盖门、选**贸易侧** importer/manufacturer；curated 种子 6 panel + 6 放射码 + ISIC 医疗器械节点，实测 ICP「放射器械+进口商」→ RA 码 → 闭环真拉 25 家在美进口商）。质量 TDD 302 测 + 2 轮对抗复审（P1 4 findings、P2 6 findings 含 wikidata QID 错锚[Q12140 药品→Q6554101 器械]/panel 过度声明/贸易侧兜底）。⚠️ fit 门先前受**网关 Gemini 额度耗尽(429)**阻（#35 已改路由 deepseek 恢复）。**P3 510(k)→intent**（`adapters/openfda-api.ts` `search510kClearances`/`build510kSearch`/`map510k`/`fdaDateToIso`/`isClearedDecision`；`intent/openfda-intent-projection.service.ts` `projectClearances`：**510k 具名申请人清关=新品/上市时机**，申请人 name+alpha-2 归并取最新决定日 → upsert canonical(有则更新/无则建线索) → `attributes.intent.events[{type:'FDA_CLEARANCE', at:<决定日 ISO>, strength 0.85}]` → 动六维 Intent 维，复用 `mergeIntent`、新 event type 无需改评分）。🔴 §8.6 gotcha#6 **只对正向清关投**（`isClearedDecision`=SE 家族+SN/ST/PT/SI+DENG；NSE/被拒/撤回排除，绝不给被拒公司误加分）+ §8.6 `fdaDateToIso` 归一(紧凑 YYYYMMDD 防 NaN 静默 0 分) + CC0 **署名非义务**(`license='CC0-1.0'`) +「清关≠核准」`attributes.fda.disclaimer` 恒置 + contact/us_agent 不入绿库 + §8.8 用途门 fail-closed + §6 **高精度**个体户边界(只判头衔/"Surname, Given"，绝不按形状误伤真公司)。DRY：`sameIntent`/`canonicalize` 上移 `intent-projection.service.ts` 供 TED/openFDA 共享，`mergeIntent` 排序比较器改一致(相等 at 保序)。**实测**（真库真 API 无 sandbox，五段全绿）：ICP「AI 放射软件 QAS」近 1 年 16 条清关(Qure.Ai/Aidoc/Ischemaview…IN/TW/US/CA/ES/IL)→ 11 家去重 canonical + 11 FDA_CLEARANCE、disclaimer/CC0/无 PII、幂等(evidence 22→22)、Intent 0→0.0252、§8.8 SUSPENDED 零落地。TDD 339 测 + 对抗复审（3 维·7 agent → 4 findings 全核验，2 条真机制加固：比较器一致性 + 共享幂等基石单测）。510k intent 投影已**上 Temporal Schedule**（见「外部源 intent sweep」P5 · PR #38）。**下一步** P4 `attributes.fda.*` 富集 · monitoring sweep · foiclass 全表种子扩专科。PR #34/#36/#37。
-- **外部源 intent sweep 上 Temporal Schedule**（P5，2026-07-09，loop 收口）：把已落地的两 P3 intent 投影（TED 招标 `TENDER_PUBLISHED` + openFDA 510k 清关 `FDA_CLEARANCE`）接进**第 4 个周期 Schedule**（`temporal/external-intent.{activities,workflow}.ts` + `ensure-schedules.ts`，默认 6h、overlap=SKIP、env 可调、worker 启动幂等自愈）——此前只在 verify 脚本活、生产永不触发。`listExternalIntentTargets`（ownerDb 只读枚举**全部** ACTIVE ICP——**无静默截断**防旧 ICP 饿死，稳定序 id asc；+ `ted`/`openfda` data_provider ENABLED kill-switch）→ 逐 ICP `projectExternalIntentForIcp`：ICP `companyAttributes`/`targetMarkets` → **确定性**(`allowLlm:false`，调度不臆造码/可复现/零 LLM 成本) `resolveIcpToCpv` + `resolveIcpToFda` → `projectTenders` + `projectClearances`。各 provider 独立 enabled 门 + 单 provider/ICP 失败 fail-safe；投影写走 `withWorkspace`(RLS)，跨租户枚举走「受信系统扫描器」先例；§8.8 门由两 service 各自守；worker 抽共享 `TaxonomyResolver` 一实例。**实测**（真库真 API 无 sandbox，`verify-external-intent-sweep.mts` 四段全绿·活动级）：pumps+EU→CPV 1 码→**68 招标→54 买方→54 TENDER_PUBLISHED**；radiology+US→6 FDA 码→**82 清关→70 公司→70 FDA_CLEARANCE**；`ted` DISABLED→跳过。340 单测 + 对抗复审（1 finding 加固：去枚举静默截断防饿死）。PR #38。
-- **词表归一**：`canonical_taxonomy` + `term_alias`（ISIC + ISO3166 + **CPV 子树**，265 节点），`TaxonomyResolver`（确定性 + LLM 冷路径 + `crosswalks` 暴露供 ICP→CPV）。
-- **接口门户** Scalar `/api/portal`；**JWKS 鉴权**（生产禁 dev stub）；helmet+CORS+限流护栏。
+- Provider 当前机器真值为 [`docs/governance/provider-registry.json`](docs/governance/provider-registry.json)，人类页由 `pnpm governance:providers` 生成；seed key、SourceClass 与默认 enablement 漂移必须使 CI 失败。
+- Capability → Core Object → operationId → code → test → Scenario 的机器链位于 [`docs/governance/delivery-traceability.json`](docs/governance/delivery-traceability.json)。路径存在只证明 anchor 存在，不证明运行通过。
+- RuntimeEvidence 必须满足 [`runtime-evidence.schema.json`](docs/governance/runtime-evidence.schema.json)，包含 commit、environment、verified_at、valid_until、evidence_kind、result 与 artifact_digest。到期证据自动降为 `HISTORICAL`，不能用于晋级。
+- `PILOT`/`GA` 必须同时拥有当前 PASS RuntimeEvidence 与有效 Release Bundle。每条机器追踪链须声明 `required_evidence_kinds`，Release Bundle 的 `traceability_bindings` 必须把同一 chain、capability 与同一 evidence set 精确绑定。Release Bundle 使用 [`release-bundle.schema.json`](docs/governance/release-bundle.schema.json)，并分别绑定机器检查、独立 reviewer、用户授权和真实 merge-method provenance；模板本身不是发布证据。
+- 运行 `pnpm governance:verify` 与 `pnpm docs:verify`。不得为过 CI 删除历史、改写 evidence 或把文件移出受控范围。
 
-## 5. 硬约束 / 决策（别违背）
+## 7. 模型、评测与费用
 
-- **真实数据，不用 sandbox**；要真实测试 + 评判。跑 provider 用 `node --import tsx` 或 `npx tsx`，脚本放 `apps/api` 且手动载 `.env`（ESM 相对 import 按文件位置解析）。
-- 🔴 **合规红线**（详见 [trade-fair-intelligence.md §0](docs/implementation-records/trade-fair-intelligence.md)）：**技术能抓 ≠ 合规能用**。RX 官网 ToS 禁爬；用 public key 打 Algolia 撞其 ToS §4.5(h)（灰偏红）；个人数据受 GDPR Art.14（欧盟「公开≠可自由再用」）。**数据分级**：🟢公司事实+GLEIF(CC0) 可商用 / 🟡职能邮箱 走 ePrivacy / 🔴人名邮箱·联系人 默认隔离 + LIA。
-- SearXNG 引擎以当前 Ubuntu 真机健康探测为准；旧 Mac 的 SNI 过滤只属迁移历史，不再作为现行选型约束。
-- Provider/富集失败 **fail-safe 返回 0/miss**，不阻断其余源；单展会/单源失败不影响整体。
+- 当前非运行时候选合同只认 `site-builder-model-candidate-baseline/2026-08-04-v2` 及其[生成页](docs/site-builder/model-candidate-baseline.md)；这个 ID 不是 active route、质量 evidence 或 dispatch 授权。
+- 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
+- “暂不调用模型”表示零费用、离线或 create-only。真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权。
+- 未知余额、价格、scope、身份、结算或输出上限一律停止；不得扩大候选、顺手测试媒体或使用通用渠道“测试”按钮制造真实费用。
+- 模型失败、非 2xx、响应解析失败、超时与 repair 都必须按已观察费用结算；unknown settlement 不得冒充零费用。
 
-## 6. 当前施工与恢复后的获客 backlog
+## 8. 文档与交付
 
-> 🟢 **2026-08-04 M1 已收口**。获客侧可恢复实现施工，但这不表示旧 backlog、旧 owner、旧 Claude/worktree 或默认 `DISABLED` provider 自动恢复。首个恢复任务必须基于最新 `origin/main`、活文档、代码、服务与合规状态重新审计并明确 owner/验收；2026-07-13 至 2026-08-02 的冻结作为历史 provenance 保留。
->
-> **DOC-12 状态**：#119/#120 已把主要设计内容分发入活文档；2026-07-16 truth-sync（#125）已收口项目级状态、00–14 漂移与接入说明，R0 contract（#126）、R1-safety ①+②、**R2-A1–A4、MF0-A/B、M1-c、R3-A、R3-B1/B2、R4-A1/A2/B-min、M1-d、R1-min、DI-0（#164）、M1-e-A/B、M1-f 与 M1-g** 均已闭环，不把 DOC-12 重新描述为一项代码能力。M1-e-A 的 55 型全部 `m1_e_a_qualified`，保留 385 份七件套证据与 165 张三断点 SHA-256 快照。M1-e-B 已交付六个 `1.0.0/approved` Family、DesignBrief、封闭 adapter/copy-slot/四层 validator、SiteSpec 1.1、tenant/catalog asset overlay、ReleaseManifest v2、局部 v2-base 与 Temporal patch；12 个 sparse/rich Golden 对应 36 张整站三断点证据。M1-f 已接入确定性 QA/SEO/a11y/genericness、三断点截图、closed-shape DesignEvaluation v2、最多三次闭合 optionId 修复、ReleaseManifest v3 与 replay-safe quality patch；M1-g 的真实候选结果没有自动改变路由。**下一施工顺序**：重新审计并选择获客侧首个恢复任务；`template-distillation` 未采纳。上述开发验证均不代表生产部署、MODEL-2、30+ 成熟系统集或 M2-PUBLISH。
->
-> **2026-07-30 M1-g QA/SEO consumer fast-follow**：`qa_summarize` / `seo_review` 已在当前交付分支接到 P4 确定性 finding，保存私有 create-only `QualityNarrativeSetV1`；输出只可引用既有 finding/group/explanation ID，不能改变 severity、pass、repair、ReleaseManifest 或公开 API。空 finding、付费拒绝、模型失败/无效输出和 unknown settlement 均按冻结规则降级或停止；既有未结算 spend 在传入 executor 前 fail-closed，私有 sidecar 存储/校验失败只省略非权威叙事而不推翻确定性结果，取消仍直接终止。该 PR 模型调用为 0、费用 $0.00，未改 active route/new-api/数据库；下一步仍须先独立审查和合并，再从合并提交准备 `design_spec` canonical suite。
->
-> 工作流程红线：**先研究对标 → 讨论 → 用户认可 → 再提交**。本节以下现为获客侧恢复候选 backlog；M1 收口前只允许准备，不启动实现，也不得因解除冻结而批量开工。每项仍须先做当前性、价值、成本、合规、依赖和真实验收审计。
-
-核心反转：从「公司名单」→「可成单线索」（补三缺环：**需求证据/对的人/时机**）。**免费优先**，复用已有基建（diff→网站变更 intent、pgvector→look-alike、name-match→consignee 实体解析、first-seen→新进口商、crawl4ai 抓包→通用 API 逆向）。
-
-- P0 复用四件套 ✅ 全部落地（见 §4）：✅ `digital_footprint` · ✅ `structured_harvest`（下一步主路加**自有 ATS JSON 逆向** Greenhouse/Lever，sitemap 兜底） · ✅ **自建邮箱验证** `smtp_self`（#3） · ✅ **网站变更=intent 引擎** `web_watch`（#4，复用 `source_entity_change` diff）。✅ intent 事件已接进**六维 Intent 维评分**（`lead/scoring.ts`：真实 `attributes.intent.*` 逐事件按新近度衰减(半衰期 60d)取最强 + 关键词代理兜底，压过纯代理；关键词代理排除 intent 命名空间防双重计数）。✅ **从 ICP 短名单自动 `registerWatch`**（`discovery.activities.registerWatchesForRun`：`discoveryWorkflow` 信号富集后，对本 run fit=match+域名公司自动建 web_watch，交 intentSweep 持续盯——loop 收口；best-effort 长活动）。**dev 实测整条链路**（`verify-intent-loop.mts`，真库真 crawl）：TRUMPF supplier 页真实 diff→`SOURCING_OPENED`→投影→**Intent 维 0→1、总分 0.39→0.54**。✅ **管线通脉（2026-07-08，见 §4 存量对账管线）**：存量 900+ 家进漏斗、recommended 加 Reachability 硬底、decision_maker 复活、双 loop 收口——「已建好的东西在存量上真跑」优先于建新能力。下一步主路：六维**加法→乘法门**（Fit^a×(1+Intent)×Reachability×…，让可达/需求=0 不被高 Fit 冲淡；需 backtest 校准阈值）+ TED v3/DLP 提单（需求证据）。
-- P1 免费外部源：**招投标 TED v3** ✅ **P1 中标发现 + P2 ICP→CPV + P3 招标 intent 已落地**（见 §4 · PR #30/#31/#33；SAM.gov Sources Sought P4 已落地 #99、默认 DISABLED） · **海关提单**（ImportYeti 免费按公司搜/50 票顶 + **Data Liberation Project FOIA 可再分发基线** + 逆向内部 API 做 HS 反查；美线法定公开 19 USC §1431） · **认证注册库**（openFDA/FCC/EUDAMED 免费官方，注册人=合规卖家；**openFDA P1 器械注册发现 + P2 ICP→FDA 产品码 + P3 510(k)→FDA_CLEARANCE intent 已落地** 见 §4 · PR #34/#36/#37；下一步 P4 富集/P5 monitoring/foiclass 全表种子） · **专利 inventor**（USPTO/EPO 免费=具名工程决策人） · 国家级贸易统计（Comtrade/Census/Eurostat）。
-- 付费仅留插槽（Panjiva/多国空运提单等）；决策人具名一律 `personalData=true` 🔴 + LIA。
-
-## 7. 文档索引（单一事实源体系，2026-07-10 重构）
-
-**权威层（先读这四份）**：`docs/product-scope.md`（产品面与边界）· `docs/architecture/current.md`（as-built）· `docs/adr/registry.md`（ADR-001~019 + PDR，唯一承重决策真值）· `docs/status/current.md`（当前主线与完成度）。
-**路线**：当前站建施工序看 `docs/roadmap/release-plan.md` + `docs/site-builder/09-m1-implementation-design.md`；获客历史见 `docs/roadmap/changelog.md`。
-**基底与归档**：`docs/platform/` 两份 docx 与仓内旧 Word 均是待批准/历史输入，不升级为权威；`docs/research/` 为研究归档；`docs/implementation-records/` 为已实施专题记录。
-**仍在 docs/backend/ 的活文档**：`discovery-sources.md` · `vocab-taxonomy.md` · `oss-registry.md` · `ci-merge-automation.md` · `worktree-management.md`。
-
-## 8. 团队协作 / PR / 测试流程（团队开发，每次改动照做）
-
-> 这是**团队仓库**（后续与其他成员合并），走 PR + CI + 自动审查，不直推 `main`。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-- **分支**：Codex 开发统一使用 `codex/<topic>`，从最新 `main` 切出；**不在 `main` 直接提交**（`main` 复位跟随 origin）。改动性质由 Conventional Commit 的 `feat` / `fix` / `docs` 等 type 表达。
-- **worktree 位置与创建**：`/global/backend` 只承载 `main`，不得作为功能施工目录。Codex 正式开发 worktree 统一放在项目内持久目录 `/global/backend/.codex/worktrees/<topic>`，并用 `pnpm worktree:new <topic>` 从刚 fetch 的 `origin/main` 创建 `codex/<topic>`；完整规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。**禁止**在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工 worktree；工具临时创建且仍被活跃任务持有的 worktree 不得手工移动。
-- **legacy worktree 隔离**：已有 `/global/wt/*` 是待审计历史现场，不因新规则批量迁移。干净且确认仍需继续开发的 worktree 才能用 `git worktree move` 迁入新目录；脏、锁定、失联、含独有提交或 provenance 的现场必须原地冻结，先做路径、状态、diff、未跟踪文件与提交归属审计。迁移不是清理授权。
-- **worktree 生命周期**：跨阶段修改及时 checkpoint commit + push，未提交工作区不承担备份职责。合并后删除只是可选清理；仅当 PR 已合并、提交已进入 `main`、工作区干净、未跟踪文件已逐项归属且用户明确授权时才可删除。项目内 worktree 是父 `main` 工作区的 ignored 子树，**禁止在 `/global/backend` 运行 `git clean -fdx`、删除 `.codex/` 或手工搬目录**。
-- **异常恢复**：重启/中断/目录消失后不得先断言“未提交修改已丢失”或立即重写；先按 [CONTRIBUTING.md「异常恢复审计」](CONTRIBUTING.md#异常恢复审计先取证后重做) 检查 Git、Codex 任务事件日志/UI、附件/子任务和文件系统，再在持久 recovery worktree 重放与三方核对。
-- **提交**：Conventional Commits（`feat(scope):` / `fix` / `docs` / `refactor` / `test` / `chore`）；正文说清「为什么 + 实测」；协作提交按实际参与者填写 `Co-Authored-By`，不伪造身份。
-- **本地必绿**：`pnpm --filter @global/db generate`（schema 变）→ `pnpm --filter @global/api build`（=tsc 类型检查）→ `pnpm --filter @global/api test`（vitest）。provider/采集/富集类改动**另需真实数据实测**（`cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox，§5 硬规矩）。
-- **PR**：`gh pr create --base main`，填 `.github/pull_request_template.md`。CI（`.github/workflows/ci.yml`：install→prisma generate→build→test）+ Security（`security.yml`：gitleaks 密钥扫描）绿了才合。
-- **代码审查**：仓库启用 **Codex 自动审查**（开 PR/标 ready/评论 `@codex review` 触发）。处置每条 inline 意见后，在该线程回复（`gh api …/comments/{id}/replies`）并 GraphQL `resolveReviewThread` 解决。
-- **合并权限**：Codex 负责把 CI、gitleaks、契约门和审查线程收口，并按风险追加真库/真源/对抗验证；**不得自行合并 `main`**。Codex 报告证据后，须由用户明确确认，再由用户或用户当次明确授权的 Codex 执行合并。详见 [docs/backend/ci-merge-automation.md](docs/backend/ci-merge-automation.md)。
-- **CI 只跑纯单测**（无 DB/网络）；需 DB/真源的验证走本地 verify 脚本。**依赖更新** dependabot（周更，npm+actions）。
-
-## 9. Codex 分析与取证纪律（用户纠正，跨任务生效）
-
-- **表象不等于状态**：把“看不见目录”“命令失败”“UI 显示完成”等表象拆成存储、可见性、持久化、可恢复性和业务结果分别判断，禁止一步跳到“已丢失/已完成/不可做”。
-- **多假设并行**：在采用一个解释前至少检查相互竞争的可能性；先写清已证事实、待证假设和结论门，不把记忆、猜测或单一工具输出当事实源。
-- **反证优先**：主动寻找能推翻当前判断的证据。若出现矛盾（例如文件系统目录消失但客户端仍能展示精确 diff），立即停止既定方案，解释矛盾并重建假设，不能沿原计划继续优化。
-- **跨层取证**：按问题覆盖 Git/PR、worktree/文件系统、Codex 任务事件/UI、附件与子任务、运行服务/数据库、外部系统等独立证据面；不能因为一个层面失败就宣布整体失败。
-- **可逆动作优先**：在删除、覆盖、重做、大规模迁移或高返工操作前，先冻结现场、建隔离快照并做最小判别检查；任何恢复稿先标候选，不冒充原始内容。
-- **结论必须有门**：声明“已恢复/已完成/已安全/可合并”前，列出可复核的充分证据和残余不确定性；存在未解释反证时，结论只能是“部分”或“待核验”。
+- 稳定规则写本文件或治理页；当前事实写 `docs/status/current.md`；追加历史写 changelog；原始/冻结证明写 evidence；架构承重决定写 ADR。
+- 不在多个 current 文档复制同一事实。迁移旧文字时保留 Git provenance，并在 changelog/evidence 索引留下 successor 指针。
+- 代码改动后运行相关单元/集成/E2E、lint、build、docs、ContractGraph 与安全检查；真实 provider/数据库/Temporal 验证只在范围、成本、数据与外部动作均获授权时执行。
+- 提交使用 Conventional Commits。提交前检查 diff、秘密、输入校验、授权、RLS、错误泄露和回滚路径。

@@ -1,0 +1,34 @@
+{
+  "schema_version": "required-contexts/v1",
+  "required_contexts": [
+    "renderer visual scope",
+    "build · typecheck · test",
+    "contracts · drift · lint · breaking",
+    "gitleaks 密钥扫描",
+    "governance · traceability · release",
+    "nontechnical decision card freshness"
+  ],
+  "context_implementations": [
+    { "name": "renderer visual scope", "workflow": ".github/workflows/ci.yml", "event": "pull_request" },
+    { "name": "build · typecheck · test", "workflow": ".github/workflows/ci.yml", "event": "pull_request" },
+    { "name": "contracts · drift · lint · breaking", "workflow": ".github/workflows/ci.yml", "event": "pull_request" },
+    { "name": "gitleaks 密钥扫描", "workflow": ".github/workflows/security.yml", "event": "pull_request" },
+    { "name": "governance · traceability · release", "workflow": ".github/workflows/governance.yml", "event": "pull_request" },
+    { "name": "nontechnical decision card freshness", "workflow": ".github/workflows/pr-decision-card.yml", "event": "pull_request_target" }
+  ],
+  "workflow_runtime_requirements": [
+    { "workflow": ".github/workflows/ci.yml", "node_major": 22 },
+    { "workflow": ".github/workflows/governance.yml", "node_major": 22 },
+    { "workflow": ".github/workflows/pr-decision-card.yml", "node_major": 22 }
+  ],
+  "external_ruleset_requirements": {
+    "required_approving_reviews": 1,
+    "require_code_owner_review": true,
+    "dismiss_stale_reviews": true,
+    "require_conversation_resolution": true,
+    "allow_force_push": false,
+    "allow_deletion": false,
+    "user_authorization": "A separate signed product-owner authorization is required; PR body declarations and machine checks cannot supply it.",
+    "merge_evidence": "Record MERGE_COMMIT, SQUASH, or REBASE provenance in the Release Bundle after the merge result exists."
+  }
+}

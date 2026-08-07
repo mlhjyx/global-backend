@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   renderProviderRegistry,
   renderReleaseBundle,
+  parseSeedProviders,
   validateDecisionGateSeparation,
   validateMergeEvidence,
   validateProviderRegistry,
@@ -37,6 +38,16 @@ function runtimeEvidence(overrides = {}) {
     artifact_digest: DIGEST,
     ...overrides,
   };
+}
+
+function releaseEvidence(overrides = {}) {
+  return runtimeEvidence({
+    commit: SHA_D,
+    environment: "pilot",
+    verified_at: "2026-08-07T10:26:00.000Z",
+    valid_until: "2026-08-08T10:26:00.000Z",
+    ...overrides,
+  });
 }
 
 function provider(overrides = {}) {
@@ -83,6 +94,13 @@ function releaseBundle(overrides = {}) {
     implementation_commit: SHA_D,
     released_at: "2026-08-07T10:30:00.000Z",
     capability_ids: ["CAP-BUYER-001"],
+    traceability_bindings: [
+      {
+        chain_id: "buyer-discovery-pilot",
+        capability_id: "CAP-BUYER-001",
+        evidence_ids: ["runtime-api-development-20260807"],
+      },
+    ],
     scope: {
       included: ["bounded buyer discovery"],
       excluded: ["campaigns and outreach"],
@@ -163,8 +181,21 @@ function traceability(overrides = {}) {
         scenario_ids: ["SCN-FE-BUYER-001"],
         delivery_state: "PILOT",
         evidence_ids: ["runtime-api-development-20260807"],
+        required_evidence_kinds: ["runtime_probe"],
       },
     ],
+    ...overrides,
+  };
+}
+
+function releaseValidationContext(overrides = {}) {
+  const chain = traceability().chains[0];
+  return {
+    evidence_by_id: new Map([
+      ["runtime-api-development-20260807", releaseEvidence()],
+    ]),
+    traceability_by_id: new Map([[chain.chain_id, chain]]),
+    now: NOW,
     ...overrides,
   };
 }
@@ -182,7 +213,9 @@ function traceabilityContext(overrides = {}) {
     evidence_by_id: new Map([
       ["runtime-api-development-20260807", runtimeEvidence()],
     ]),
-    release_bundle_capability_ids: new Set(["CAP-BUYER-001"]),
+    release_bundles_by_capability: new Map([
+      ["CAP-BUYER-001", [releaseBundle()]],
+    ]),
     now: NOW,
     ...overrides,
   };
@@ -212,6 +245,15 @@ test("runtime evidence rejects missing identity and non-SHA-256 artifacts", () =
   );
 });
 
+test("runtime evidence cannot self-authorize an unbounded freshness window", () => {
+  const result = validateRuntimeEvidence(
+    runtimeEvidence({ valid_until: "2026-08-08T01:00:00.001Z" }),
+    { now: NOW },
+  );
+  assert.ok(issueCodes(result).includes("EVIDENCE_WINDOW_TOO_LONG"));
+  assert.equal(result.eligible_for_promotion, false);
+});
+
 test("provider registry is bound to code-seeded key, SourceClass, and enablement", () => {
   const context = {
     seed_providers: [
@@ -235,6 +277,55 @@ test("provider registry is bound to code-seeded key, SourceClass, and enablement
       "PROVIDER_SOURCE_CLASS_DRIFT",
     ),
   );
+  const disabledMutant = providerRegistry({
+    providers: [provider({ default_enablement: "DISABLED" })],
+  });
+  assert.ok(
+    issueCodes(validateProviderRegistry(disabledMutant, context)).includes(
+      "PROVIDER_ENABLEMENT_DRIFT",
+    ),
+  );
+  const missingEvidenceMutant = providerRegistry({
+    providers: [
+      provider({
+        evidence_refs: [
+          { kind: "TEST_ANCHOR", path: "apps/api/src/missing.spec.ts" },
+        ],
+      }),
+    ],
+  });
+  assert.ok(
+    issueCodes(
+      validateProviderRegistry(missingEvidenceMutant, context),
+    ).includes("PROVIDER_EVIDENCE_MISSING"),
+  );
+});
+
+test("provider seed parsing tolerates formatting but fails closed when no seed can be read", () => {
+  const source = `
+    create: {
+      status: "ENABLED",
+      costPerCallCents: 0,
+      class: "industry_data",
+      key: "directory"
+    }
+  `;
+  assert.deepEqual(parseSeedProviders(source), [
+    {
+      key: "directory",
+      source_class: "industry_data",
+      default_enablement: "ENABLED",
+    },
+  ]);
+  const validation = validateProviderRegistry(providerRegistry(), {
+    seed_providers: [],
+    existing_paths: new Set([
+      "apps/api/src/discovery/providers/public-web.provider.spec.ts",
+    ]),
+  });
+  assert.ok(
+    issueCodes(validation).includes("PROVIDER_SEED_PARSE_EMPTY"),
+  );
 });
 
 test("provider human documentation is deterministic and exposes every governance field", () => {
@@ -255,6 +346,11 @@ test("traceability requires every registry, contract, code, test, scenario, evid
 
   const chain = traceability().chains[0];
   const mutants = [
+    [
+      { ...chain, capability_id: "CAP-MISSING-001" },
+      "TRACE_CAPABILITY_MISSING",
+    ],
+    [{ ...chain, object_ids: ["OBJ-FE-999"] }, "TRACE_OBJECT_MISSING"],
     [
       { ...chain, operation_ids: ["Missing_operation"] },
       "TRACE_OPERATION_MISSING",
@@ -292,9 +388,67 @@ test("pilot traceability fails closed on expired evidence or an absent Release B
 
   const noBundle = validateTraceability(
     traceability(),
-    traceabilityContext({ release_bundle_capability_ids: new Set() }),
+    traceabilityContext({ release_bundles_by_capability: new Map() }),
   );
   assert.ok(issueCodes(noBundle).includes("TRACE_RELEASE_BUNDLE_REQUIRED"));
+});
+
+test("pilot traceability binds the required evidence kind and exact Release Bundle chain", () => {
+  const wrongKind = runtimeEvidence({ evidence_kind: "generic_smoke" });
+  const wrongKindResult = validateTraceability(
+    traceability(),
+    traceabilityContext({
+      evidence_by_id: new Map([[wrongKind.evidence_id, wrongKind]]),
+    }),
+  );
+  assert.ok(
+    issueCodes(wrongKindResult).includes("TRACE_EVIDENCE_KIND_UNEXPECTED"),
+  );
+  assert.ok(
+    issueCodes(wrongKindResult).includes("TRACE_FRESH_EVIDENCE_REQUIRED"),
+  );
+
+  const wrongBinding = releaseBundle({
+    traceability_bindings: [
+      {
+        chain_id: "another-chain",
+        capability_id: "CAP-BUYER-001",
+        evidence_ids: ["runtime-api-development-20260807"],
+      },
+    ],
+  });
+  const wrongBindingResult = validateTraceability(
+    traceability(),
+    traceabilityContext({
+      release_bundles_by_capability: new Map([
+        ["CAP-BUYER-001", [wrongBinding]],
+      ]),
+    }),
+  );
+  assert.ok(
+    issueCodes(wrongBindingResult).includes("TRACE_RELEASE_BUNDLE_REQUIRED"),
+  );
+
+  const wrongEvidence = releaseBundle({
+    traceability_bindings: [
+      {
+        chain_id: "buyer-discovery-pilot",
+        capability_id: "CAP-BUYER-001",
+        evidence_ids: ["other-evidence"],
+      },
+    ],
+  });
+  const wrongEvidenceResult = validateTraceability(
+    traceability(),
+    traceabilityContext({
+      release_bundles_by_capability: new Map([
+        ["CAP-BUYER-001", [wrongEvidence]],
+      ]),
+    }),
+  );
+  assert.ok(
+    issueCodes(wrongEvidenceResult).includes("TRACE_RELEASE_BUNDLE_REQUIRED"),
+  );
 });
 
 test("internal-only traceability preserves missing runtime proof without pretending pilot readiness", () => {
@@ -311,19 +465,14 @@ test("internal-only traceability preserves missing runtime proof without pretend
   assert.deepEqual(
     validateTraceability(
       internal,
-      traceabilityContext({ release_bundle_capability_ids: new Set() }),
+      traceabilityContext({ release_bundles_by_capability: new Map() }),
     ).issues,
     [],
   );
 });
 
 test("Release Bundle keeps machine, reviewer, and user authorization evidence separate", () => {
-  const context = {
-    evidence_by_id: new Map([
-      ["runtime-api-development-20260807", runtimeEvidence()],
-    ]),
-    now: NOW,
-  };
+  const context = releaseValidationContext();
   assert.deepEqual(validateReleaseBundle(releaseBundle(), context).issues, []);
   assert.deepEqual(
     validateDecisionGateSeparation(releaseBundle().approval).issues,
@@ -386,6 +535,52 @@ test("Release Bundle rendering is deterministic and includes every review sectio
   assert.equal(rendered, renderReleaseBundle(releaseBundle()));
 });
 
+test("a copied Release Bundle template cannot be accepted as a real bundle", () => {
+  const mutant = releaseBundle({ release_id: "REPLACE_WITH_RELEASE_ID" });
+  const result = validateReleaseBundle(mutant, releaseValidationContext());
+  assert.ok(issueCodes(result).includes("RELEASE_PLACEHOLDER_PRESENT"));
+});
+
+test("Release Bundle binds every capability to a traceability chain and the same evidence set", () => {
+  const context = releaseValidationContext();
+  const missingChain = releaseBundle({ traceability_bindings: [] });
+  assert.ok(
+    issueCodes(validateReleaseBundle(missingChain, context)).includes(
+      "RELEASE_TRACEABILITY_REQUIRED",
+    ),
+  );
+
+  const unboundEvidence = releaseBundle({
+    traceability_bindings: [
+      {
+        chain_id: "buyer-discovery-pilot",
+        capability_id: "CAP-BUYER-001",
+        evidence_ids: ["different-evidence"],
+      },
+    ],
+  });
+  assert.ok(
+    issueCodes(validateReleaseBundle(unboundEvidence, context)).includes(
+      "RELEASE_TRACEABILITY_EVIDENCE_UNBOUND",
+    ),
+  );
+
+  const missingRegistryChain = releaseBundle({
+    traceability_bindings: [
+      {
+        chain_id: "not-in-traceability-registry",
+        capability_id: "CAP-BUYER-001",
+        evidence_ids: ["runtime-api-development-20260807"],
+      },
+    ],
+  });
+  assert.ok(
+    issueCodes(
+      validateReleaseBundle(missingRegistryChain, context),
+    ).includes("RELEASE_TRACEABILITY_CHAIN_MISSING"),
+  );
+});
+
 test("required-context policy fails when a repository workflow drops a named context", () => {
   const policy = {
     schema_version: "required-contexts/v1",
@@ -393,15 +588,40 @@ test("required-context policy fails when a repository workflow drops a named con
       "build · typecheck · test",
       "governance · traceability · release",
     ],
+    context_implementations: [
+      {
+        name: "build · typecheck · test",
+        workflow: ".github/workflows/ci.yml",
+        event: "pull_request",
+      },
+      {
+        name: "governance · traceability · release",
+        workflow: ".github/workflows/governance.yml",
+        event: "pull_request",
+      },
+    ],
+    workflow_runtime_requirements: [
+      { workflow: ".github/workflows/governance.yml", node_major: 22 },
+    ],
+    external_ruleset_requirements: {
+      required_approving_reviews: 1,
+      require_code_owner_review: true,
+      dismiss_stale_reviews: true,
+      require_conversation_resolution: true,
+      allow_force_push: false,
+      allow_deletion: false,
+      user_authorization: "separate signed authorization",
+      merge_evidence: "record the actual merge method",
+    },
   };
   const workflows = new Map([
     [
       ".github/workflows/ci.yml",
-      "jobs:\n  build:\n    name: build · typecheck · test\n",
+      "on:\n  pull_request:\njobs:\n  build:\n    name: build · typecheck · test\n",
     ],
     [
       ".github/workflows/governance.yml",
-      "jobs:\n  governance:\n    name: governance · traceability · release\n",
+      "on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n    steps:\n      - uses: actions/setup-node@v7\n        with:\n          node-version: 22\n",
     ],
   ]);
   assert.deepEqual(validateRequiredContexts(policy, workflows).issues, []);
@@ -412,16 +632,95 @@ test("required-context policy fails when a repository workflow drops a named con
       "REQUIRED_CONTEXT_NOT_IMPLEMENTED",
     ),
   );
+
+  const stepOnly = new Map([
+    [
+      ".github/workflows/ci.yml",
+      "on:\n  pull_request:\njobs:\n  build:\n    name: build · typecheck · test\n    steps:\n      - name: governance · traceability · release\n",
+    ],
+  ]);
+  assert.ok(
+    issueCodes(validateRequiredContexts(policy, stepOnly)).includes(
+      "REQUIRED_CONTEXT_NOT_IMPLEMENTED",
+    ),
+  );
+
+  const noPullRequest = new Map(workflows);
+  noPullRequest.set(
+    ".github/workflows/governance.yml",
+    "on:\n  workflow_dispatch:\njobs:\n  governance:\n    name: governance · traceability · release\n",
+  );
+  assert.ok(
+    issueCodes(validateRequiredContexts(policy, noPullRequest)).includes(
+      "REQUIRED_CONTEXT_EVENT_MISSING",
+    ),
+  );
+
+  const unsafeRuleset = {
+    ...policy,
+    external_ruleset_requirements: {
+      ...policy.external_ruleset_requirements,
+      allow_force_push: true,
+    },
+  };
+  assert.ok(
+    issueCodes(validateRequiredContexts(unsafeRuleset, noPullRequest)).includes(
+      "EXTERNAL_RULESET_REQUIREMENTS_UNSAFE",
+    ),
+  );
+
+  const unpinnedNode = new Map(workflows);
+  unpinnedNode.set(
+    ".github/workflows/governance.yml",
+    "on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n",
+  );
+  assert.ok(
+    issueCodes(validateRequiredContexts(policy, unpinnedNode)).includes(
+      "WORKFLOW_NODE_RUNTIME_UNPINNED",
+    ),
+  );
 });
 
 test("pilot Release Bundle rejects expired evidence even when every approval says PASS", () => {
-  const staleEvidence = runtimeEvidence({
+  const staleEvidence = releaseEvidence({
     valid_until: "2026-08-07T11:59:59.000Z",
   });
-  const result = validateReleaseBundle(releaseBundle(), {
+  const result = validateReleaseBundle(releaseBundle(), releaseValidationContext({
     evidence_by_id: new Map([[staleEvidence.evidence_id, staleEvidence]]),
-    now: NOW,
-  });
+  }));
   assert.ok(issueCodes(result).includes("RELEASE_FRESH_EVIDENCE_REQUIRED"));
 });
 
+test("pilot evidence must bind the exact implementation commit and environment", () => {
+  const wrongCommit = runtimeEvidence({ environment: "pilot" });
+  const wrongCommitResult = validateReleaseBundle(releaseBundle(), releaseValidationContext({
+    evidence_by_id: new Map([[wrongCommit.evidence_id, wrongCommit]]),
+  }));
+  assert.ok(
+    issueCodes(wrongCommitResult).includes("RELEASE_EVIDENCE_IDENTITY_MISMATCH"),
+  );
+
+  const wrongEnvironment = runtimeEvidence({ commit: SHA_D });
+  const wrongEnvironmentResult = validateReleaseBundle(releaseBundle(), releaseValidationContext({
+    evidence_by_id: new Map([
+      [wrongEnvironment.evidence_id, wrongEnvironment],
+    ]),
+  }));
+  assert.ok(
+    issueCodes(wrongEnvironmentResult).includes(
+      "RELEASE_EVIDENCE_IDENTITY_MISMATCH",
+    ),
+  );
+});
+
+test("Release Bundle implementation and source identity must match merge evidence", () => {
+  const mutant = releaseBundle({ implementation_commit: SHA_C });
+  const validation = validateReleaseBundle(mutant, releaseValidationContext({
+    evidence_by_id: new Map([
+      ["runtime-api-development-20260807", releaseEvidence({ commit: SHA_C })],
+    ]),
+  }));
+  assert.ok(
+    issueCodes(validation).includes("RELEASE_IMPLEMENTATION_MERGE_MISMATCH"),
+  );
+});

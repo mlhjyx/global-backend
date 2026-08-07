@@ -34,6 +34,11 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
+      - name: Pin trusted Node runtime
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
       - name: Render current decision card
         run: >-
           node scripts/pr-decision-card.mjs render
