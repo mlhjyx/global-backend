@@ -296,6 +296,7 @@ function makeDecideService(tx: unknown, rights: { effect: string; allowed: boole
   const dataRights = {
     evaluate: () => ({ reason: 'test', ruleId: null, ruleVersion: 'v1', requiresLawfulBasis: false, article14NoticeRequired: false, ...rights }),
     logDecision: vi.fn(async () => {}),
+    logDecisionForWorkspace: vi.fn(async () => {}),
   };
   // 制裁筛查桩：这些用例不测第五门 → 返回 not_screened（fail-open，decide 正常交棒；快照标 not_screened）。
   const sanctions = { screen: () => ({ status: 'not_screened' as const, matches: [], listVersions: {} }) };
@@ -303,6 +304,8 @@ function makeDecideService(tx: unknown, rights: { effect: string; allowed: boole
   const svc = new LeadService(prisma as any, dataRights as any, sanctions as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (svc as any).__logDecision = dataRights.logDecision;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (svc as any).__logDecisionForWorkspace = dataRights.logDecisionForWorkspace;
   return svc;
 }
 
@@ -349,13 +352,33 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     expect(logDecision.mock.invocationCallOrder[0]).toBeLessThan(outboxCreate.mock.invocationCallOrder[0]);
   });
 
-  it('DENY 路径不写审计（decide 上方 throw 回滚，logDecision 不被调）', async () => {
-    const svc = makeDecideService(makeDecideTx(makeLead(), makeCompany(), vi.fn(), vi.fn()), { effect: 'DENY', allowed: false });
+  it('DENY 路径在交棒事务回滚后另开租户事务写审计，且不写 handoff', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const svc = makeDecideService(
+      makeDecideTx(makeLead(), makeCompany(), outboxCreate, decisionCreate),
+      { effect: 'DENY', allowed: false },
+    );
     await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
       response: { error: { code: 'STORAGE_RIGHTS_NOT_GRANTED' } },
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((svc as any).__logDecision).not.toHaveBeenCalled();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const outside = (svc as any)
+      .__logDecisionForWorkspace as ReturnType<typeof vi.fn>;
+    expect(outside).toHaveBeenCalledTimes(1);
+    expect(outside.mock.calls[0][0]).toBe(WS);
+    expect(outside.mock.calls[0][2]).toMatchObject({
+      effect: 'DENY',
+      allowed: false,
+    });
+    expect(outside.mock.calls[0][3]).toMatchObject({
+      subjectType: 'lead',
+      subjectId: LEAD_ID,
+      actorId: 'user-1',
+    });
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 
   it('收口⑥ 强制：storage_rights !allowed（DENY/跨境人审）→ accept 抛 CONFLICT，绝不发 handoff', async () => {
