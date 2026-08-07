@@ -137,9 +137,19 @@ function makeTemporal(startImpl?: () => Promise<unknown>) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyService = any;
 
-function makeService(db: unknown, temporal: unknown, fetchFn?: unknown): AnyService {
+function makeService(
+  db: unknown,
+  temporal: unknown,
+  fetchFn?: unknown,
+  singleWriter: unknown = {
+    runExclusive: async (work: () => Promise<unknown>) => ({
+      acquired: true,
+      value: await work(),
+    }),
+  },
+): AnyService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new (OutboxRelayService as any)(temporal, db, fetchFn ?? vi.fn());
+  return new (OutboxRelayService as any)(temporal, db, fetchFn ?? vi.fn(), singleWriter);
 }
 
 beforeEach(() => {
@@ -472,6 +482,40 @@ describe('tick — 轮询条件（parked 不毒化轮询）', () => {
     expect(db.outboxEvent.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { publishedAt: null, parkedAt: null } }),
     );
+  });
+
+  it('非 advisory-lock holder 的 replica 不扫描、路由或派送', async () => {
+    const ev = makeEvent();
+    const { db, tx } = makeDb([ev]);
+    const lock = {
+      runExclusive: vi.fn(async () => ({ acquired: false })),
+    };
+    const svc = makeService(db, makeTemporal(), undefined, lock);
+
+    await svc.tick();
+
+    expect(lock.runExclusive).toHaveBeenCalledTimes(1);
+    expect(db.outboxEvent.findMany).not.toHaveBeenCalled();
+    expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
+    expect(db.outboxDelivery.findMany).not.toHaveBeenCalled();
+  });
+
+  it('只有 lock holder 执行完整 tick body', async () => {
+    const ev = makeEvent();
+    const { db, tx } = makeDb([ev]);
+    const lock = {
+      runExclusive: vi.fn(async (work: () => Promise<unknown>) => ({
+        acquired: true,
+        value: await work(),
+      })),
+    };
+    const svc = makeService(db, makeTemporal(), undefined, lock);
+
+    await svc.tick();
+
+    expect(db.outboxEvent.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.outboxDelivery.createMany).toHaveBeenCalledTimes(1);
+    expect(ev.publishedAt).toBeInstanceOf(Date);
   });
 });
 
