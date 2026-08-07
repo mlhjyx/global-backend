@@ -19,12 +19,14 @@ import {
   Matches,
 } from "class-validator";
 import { AuthGuard } from "../auth/auth.guard";
+import { AcquisitionAuthorizationIntegrationPendingGuard } from "../auth/acquisition-authorization-integration-pending.guard";
 import { Ctx } from "../auth/ctx.decorator";
 import type { RequestContext } from "../auth/request-context";
 import { ApiEnvelope } from "../common/api-envelope.decorator";
 import { envelope } from "../common/envelope";
 import {
   LEAD_QUALITY_COMMERCIAL_RESULTS,
+  LEAD_QUALITY_HELD_REASONS,
   LEAD_QUALITY_LABELS,
   LEAD_QUALITY_REASON_CODES,
   type LeadQualityCommercialResult,
@@ -142,13 +144,7 @@ const LABEL_RESPONSE_SCHEMA = {
     disposition: { type: "string", enum: ["ACCEPTED", "HELD"] },
     held_reason: {
       type: "string",
-      enum: [
-        "MISSING_QGO_CREATED",
-        "MISSING_PREREQUISITE",
-        "CONTRADICTORY_POSITIVE_LABEL",
-        "CONTRADICTORY_REJECTION",
-        "CONTRADICTORY_COMMERCIAL_RESULT",
-      ],
+      enum: LEAD_QUALITY_HELD_REASONS,
       nullable: true,
     },
     ingested_at: { type: "string", format: "date-time" },
@@ -159,7 +155,7 @@ const LABEL_RESPONSE_SCHEMA = {
 @ApiTags("Lead quality labels")
 @ApiBearerAuth()
 @Controller("lead-quality-labels")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, AcquisitionAuthorizationIntegrationPendingGuard)
 export class LeadQualityLabelsController {
   constructor(private readonly labels: LeadQualityLabelsService) {}
 
@@ -170,6 +166,26 @@ export class LeadQualityLabelsController {
       "Append a downstream lead quality fact without creating Opportunity/QGO state",
   })
   @ApiEnvelope(LABEL_RESPONSE_SCHEMA, { status: 201 })
+  @ApiResponse({
+    status: 503,
+    description:
+      "Unavailable until acquisition:label:write authorization is integrated",
+    schema: {
+      type: "object",
+      properties: {
+        error: {
+          type: "object",
+          properties: {
+            code: {
+              type: "string",
+              enum: ["AUTHORIZATION_INTEGRATION_PENDING"],
+            },
+            message: { type: "string" },
+          },
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 409,
     description:

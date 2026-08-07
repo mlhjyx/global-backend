@@ -15,6 +15,7 @@ import { EventsService } from './events.service';
 
 /** @nestjs/swagger 存 @ApiQuery 元数据的 key（DECORATORS.API_PARAMETERS）。 */
 const API_PARAMETERS_KEY = 'swagger/apiParameters';
+const API_RESPONSE_KEY = 'swagger/apiResponse';
 
 describe('EventsController — swagger 契约（K）', () => {
   it('GET /events 的 cursor/limit/type 都显式 required:false；limit 带 integer schema', () => {
@@ -32,6 +33,38 @@ describe('EventsController — swagger 契约（K）', () => {
       expect(p!.required, `@ApiQuery(${name}) 必须 required:false`).toBe(false);
     }
     expect(byName.get('limit')!.schema).toMatchObject({ type: 'integer', default: 50, maximum: 200 });
+  });
+
+  it('GET /events documents next_cursor as a non-empty-page checkpoint independent of has_more', () => {
+    const responses = Reflect.getMetadata(
+      API_RESPONSE_KEY,
+      EventsController.prototype.list,
+    ) as Record<
+      string,
+      {
+        schema?: {
+          properties?: {
+            page?: {
+              properties?: Record<
+                string,
+                { description?: string; pattern?: string }
+              >;
+            };
+          };
+        };
+      }
+    >;
+    const page = responses['200']?.schema?.properties?.page?.properties;
+
+    expect(page?.next_cursor).toMatchObject({
+      pattern: '^\\d+$',
+      description:
+        '最后一条返回事件的账本 checkpoint；非空页恒为数字字符串（包括 has_more=false 的终页），仅空页为 null',
+    });
+    expect(page?.has_more?.description).toBe(
+      '是否存在可立即读取的后续页；不决定 next_cursor 是否为 null',
+    );
+    expect(page?.next_cursor?.description).not.toContain('null = 没有更多');
   });
 });
 

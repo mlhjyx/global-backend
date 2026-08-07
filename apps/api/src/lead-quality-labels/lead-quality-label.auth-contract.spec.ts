@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ServiceUnavailableException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
+import { AcquisitionAuthorizationIntegrationPendingGuard } from "../auth/acquisition-authorization-integration-pending.guard";
 import { LEAD_QUALITY_LABEL_OPERATOR_AUTH_CONTRACT } from "./lead-quality-label.auth-contract";
 
 describe("lead-quality-label operator authorization integration contract", () => {
@@ -25,7 +27,9 @@ describe("lead-quality-label operator authorization integration contract", () =>
         },
       },
     });
-    expect(Object.isFrozen(LEAD_QUALITY_LABEL_OPERATOR_AUTH_CONTRACT)).toBe(true);
+    expect(Object.isFrozen(LEAD_QUALITY_LABEL_OPERATOR_AUTH_CONTRACT)).toBe(
+      true,
+    );
     for (const operation of Object.values(
       LEAD_QUALITY_LABEL_OPERATOR_AUTH_CONTRACT.operations,
     )) {
@@ -46,7 +50,10 @@ describe("lead-quality-label operator authorization integration contract", () =>
 
   it("keeps all three operator endpoints unavailable until real scope guards are integrated", () => {
     const labelController = readFileSync(
-      resolve(process.cwd(), "src/lead-quality-labels/lead-quality-label.controller.ts"),
+      resolve(
+        process.cwd(),
+        "src/lead-quality-labels/lead-quality-label.controller.ts",
+      ),
       "utf8",
     );
     const eventsController = readFileSync(
@@ -56,6 +63,30 @@ describe("lead-quality-label operator authorization integration contract", () =>
     expect(labelController).toContain(
       "AcquisitionAuthorizationIntegrationPendingGuard",
     );
-    expect(eventsController.match(/AcquisitionAuthorizationIntegrationPendingGuard/g)).toHaveLength(3);
+    expect(
+      eventsController.match(
+        /AcquisitionAuthorizationIntegrationPendingGuard/g,
+      ),
+    ).toHaveLength(3);
+  });
+
+  it("fails closed with an explicit 503 authorization-integration error", () => {
+    const guard = new AcquisitionAuthorizationIntegrationPendingGuard();
+    try {
+      guard.canActivate({} as never);
+      throw new Error(
+        "pending authorization guard unexpectedly allowed access",
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect((error as ServiceUnavailableException).getStatus()).toBe(503);
+      expect((error as ServiceUnavailableException).getResponse()).toEqual({
+        error: {
+          code: "AUTHORIZATION_INTEGRATION_PENDING",
+          message:
+            "This acquisition endpoint is unavailable until authorization scopes are integrated",
+        },
+      });
+    }
   });
 });

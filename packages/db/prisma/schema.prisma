@@ -1099,6 +1099,9 @@ enum LeadQualityLabelDisposition {
 }
 
 enum LeadQualityLabelHeldReason {
+  OCCURRED_BEFORE_HANDOFF
+  OCCURRED_AT_IN_FUTURE
+  OUT_OF_ORDER_ARRIVAL
   MISSING_QGO_CREATED
   MISSING_PREREQUISITE
   CONTRADICTORY_POSITIVE_LABEL
@@ -1183,8 +1186,8 @@ model LeadQualityLabel {
   actorId              String                       @map("actor_id") @db.VarChar(255)
   ingestedAt           DateTime                     @default(now()) @map("ingested_at")
 
-  lead               Lead        @relation("LeadQualityLabelLead", fields: [leadId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Cascade, map: "lead_quality_label_lead_scope_fkey")
-  leadQualifiedEvent OutboxEvent @relation("LeadQualityLabelQualifiedEvent", fields: [leadQualifiedEventId, workspaceId], references: [eventId, workspaceId], onDelete: Restrict, onUpdate: Cascade, map: "lead_quality_label_event_scope_fkey")
+  lead               Lead        @relation("LeadQualityLabelLead", fields: [leadId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "lead_quality_label_lead_scope_fkey")
+  leadQualifiedEvent OutboxEvent @relation("LeadQualityLabelQualifiedEvent", fields: [leadQualifiedEventId, workspaceId], references: [eventId, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "lead_quality_label_event_scope_fkey")
 
   @@unique([workspaceId, sourceSystem, sourceEventId], map: "lead_quality_label_source_event_key")
   @@index([workspaceId, leadId, disposition, occurredAt], map: "lead_quality_label_learning_idx")

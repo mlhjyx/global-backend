@@ -21,6 +21,9 @@ CREATE TYPE "lead_quality_reason_code" AS ENUM (
 CREATE TYPE "lead_quality_commercial_result" AS ENUM ('WON', 'LOST');
 CREATE TYPE "lead_quality_label_disposition" AS ENUM ('ACCEPTED', 'HELD');
 CREATE TYPE "lead_quality_label_held_reason" AS ENUM (
+  'OCCURRED_BEFORE_HANDOFF',
+  'OCCURRED_AT_IN_FUTURE',
+  'OUT_OF_ORDER_ARRIVAL',
   'MISSING_QGO_CREATED',
   'MISSING_PREREQUISITE',
   'CONTRADICTORY_POSITIVE_LABEL',
@@ -96,13 +99,98 @@ ALTER TABLE "lead_quality_label"
   ADD CONSTRAINT "lead_quality_label_lead_scope_fkey"
   FOREIGN KEY ("lead_id", "workspace_id")
   REFERENCES "lead"("id", "workspace_id")
-  ON DELETE RESTRICT ON UPDATE CASCADE;
+  ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 ALTER TABLE "lead_quality_label"
   ADD CONSTRAINT "lead_quality_label_event_scope_fkey"
   FOREIGN KEY ("lead_qualified_event_id", "workspace_id")
   REFERENCES "outbox_event"("event_id", "workspace_id")
-  ON DELETE RESTRICT ON UPDATE CASCADE;
+  ON DELETE RESTRICT ON UPDATE NO ACTION;
+
+-- The two-column FK proves tenant provenance but cannot encode event type and
+-- aggregate identity. This owner-defined trigger closes that gap even for a
+-- direct app_user INSERT; its fixed search_path and qualified relation prevent
+-- object-shadowing attacks.
+CREATE FUNCTION "enforce_lead_quality_label_handoff_identity"()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  previous_workspace text := current_setting('app.current_workspace_id', true);
+  handoff_matches boolean;
+BEGIN
+  -- SECURITY DEFINER does not bypass FORCE RLS when the function owner lacks
+  -- BYPASSRLS. Scope the lookup to the row's tenant, then restore the caller's
+  -- transaction-local setting before returning or raising.
+  PERFORM set_config('app.current_workspace_id', NEW."workspace_id"::text, true);
+  SELECT EXISTS (
+    SELECT 1
+    FROM public."outbox_event"
+    WHERE "event_id" = NEW."lead_qualified_event_id"
+      AND "workspace_id" = NEW."workspace_id"
+      AND "event_type" = 'LeadQualified'
+      AND "aggregate_type" = 'Lead'
+      AND "aggregate_id" = NEW."lead_id"::text
+  ) INTO handoff_matches;
+  PERFORM set_config('app.current_workspace_id', COALESCE(previous_workspace, ''), true);
+
+  IF NOT handoff_matches THEN
+    RAISE EXCEPTION 'lead quality label must bind the exact LeadQualified handoff'
+      USING ERRCODE = '23503',
+            CONSTRAINT = 'lead_quality_label_handoff_identity_fkey';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION "enforce_lead_quality_label_handoff_identity"() FROM PUBLIC;
+CREATE TRIGGER "enforce_lead_quality_label_handoff_identity"
+BEFORE INSERT ON "lead_quality_label"
+FOR EACH ROW EXECUTE FUNCTION "enforce_lead_quality_label_handoff_identity"();
+
+-- Preserve provenance after insertion. The ordinary FK already blocks event
+-- id/workspace updates; this companion trigger blocks later type/aggregate
+-- mutation by an owner or maintenance path while any label references it.
+CREATE FUNCTION "protect_lead_quality_label_handoff_identity"()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  previous_workspace text := current_setting('app.current_workspace_id', true);
+  referenced_label_exists boolean;
+BEGIN
+  PERFORM set_config('app.current_workspace_id', OLD."workspace_id"::text, true);
+  SELECT EXISTS (
+    SELECT 1
+    FROM public."lead_quality_label"
+    WHERE "lead_qualified_event_id" = OLD."event_id"
+      AND "workspace_id" = OLD."workspace_id"
+  ) INTO referenced_label_exists;
+  PERFORM set_config('app.current_workspace_id', COALESCE(previous_workspace, ''), true);
+
+  IF referenced_label_exists THEN
+    RAISE EXCEPTION 'referenced LeadQualified handoff identity is immutable'
+      USING ERRCODE = '23503',
+            CONSTRAINT = 'lead_quality_label_handoff_identity_fkey';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION "protect_lead_quality_label_handoff_identity"() FROM PUBLIC;
+CREATE TRIGGER "protect_lead_quality_label_handoff_identity"
+BEFORE UPDATE OF "event_type", "aggregate_type", "aggregate_id" ON "outbox_event"
+FOR EACH ROW
+WHEN (
+  OLD."event_type" IS DISTINCT FROM NEW."event_type"
+  OR OLD."aggregate_type" IS DISTINCT FROM NEW."aggregate_type"
+  OR OLD."aggregate_id" IS DISTINCT FROM NEW."aggregate_id"
+)
+EXECUTE FUNCTION "protect_lead_quality_label_handoff_identity"();
 
 ALTER TABLE "lead_quality_label" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "lead_quality_label" FORCE ROW LEVEL SECURITY;

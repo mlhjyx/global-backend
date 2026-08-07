@@ -32,13 +32,16 @@ export function envelopeSchema(dataSchema: RawSchema): RawSchema {
   };
 }
 
-export function pageEnvelopeSchema(itemSchema: RawSchema): RawSchema {
+export function pageEnvelopeSchema(
+  itemSchema: RawSchema,
+  pageSchema: RawSchema = PAGE_SCHEMA,
+): RawSchema {
   return {
     type: 'object',
     required: ['data', 'page'],
     properties: {
       data: { type: 'array', items: itemSchema },
-      page: PAGE_SCHEMA,
+      page: pageSchema,
     },
   };
 }
@@ -55,6 +58,11 @@ interface EnvelopeOptions {
   status?: number;
   description?: string;
   headers?: Record<string, RawSchema>;
+}
+
+interface PageEnvelopeOptions extends Omit<EnvelopeOptions, 'status'> {
+  /** Override only when an endpoint's cursor semantics differ from the shared list contract. */
+  pageSchema?: RawSchema;
 }
 
 /** `{ data: Model }` 响应声明。DTO 类走 $ref（自动注册 extraModels），裸 schema 内联。 */
@@ -90,13 +98,13 @@ export function ApiListEnvelope(
 /** `{ data: Model[], page }` 分页信封响应声明。 */
 export function ApiPageEnvelope(
   model: ModelOrSchema,
-  opts: Omit<EnvelopeOptions, 'status'> = {},
+  opts: PageEnvelopeOptions = {},
 ): MethodDecorator {
   const decorators = [
     ApiResponse({
       status: 200,
       description: opts.description,
-      schema: pageEnvelopeSchema(toSchema(model)),
+      schema: pageEnvelopeSchema(toSchema(model), opts.pageSchema),
     }),
   ];
   if (isDtoClass(model)) decorators.unshift(ApiExtraModels(model));

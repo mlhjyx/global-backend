@@ -146,7 +146,7 @@ export class LeadQualityLabelRepository {
             aggregateType: "Lead",
             aggregateId: request.leadId,
           },
-          select: { eventId: true },
+          select: { eventId: true, occurredAt: true },
         });
         if (!handoff) {
           throw new NotFoundException({
@@ -161,11 +161,20 @@ export class LeadQualityLabelRepository {
           where: {
             workspaceId: ctx.workspaceId,
             leadId: request.leadId,
+            leadQualifiedEventId: request.leadQualifiedEventId,
             disposition: "ACCEPTED",
           },
-          select: { label: true, commercialResult: true },
+          select: {
+            label: true,
+            reasonCode: true,
+            commercialResult: true,
+            occurredAt: true,
+          },
         });
-        const classification = classifyLeadQualityLabel(request, accepted);
+        const classification = classifyLeadQualityLabel(request, accepted, {
+          handoffOccurredAt: handoff.occurredAt,
+          observedAt: new Date(),
+        });
         const created = await tx.leadQualityLabel.create({
           data: {
             workspaceId: ctx.workspaceId,
@@ -227,15 +236,17 @@ export class LeadQualityLabelLearningConsumer {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Offline observability only; callers must not treat this as a tuning batch. */
-  observeForLead(
+  observeForHandoff(
     ctx: RequestContext,
     leadId: string,
+    leadQualifiedEventId: string,
   ): Promise<LeadQualityLabelRecord[]> {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.leadQualityLabel.findMany({
         where: {
           workspaceId: ctx.workspaceId,
           leadId,
+          leadQualifiedEventId,
           disposition: "ACCEPTED",
         },
         orderBy: [{ occurredAt: "asc" }, { ingestedAt: "asc" }, { id: "asc" }],
@@ -255,13 +266,16 @@ export class LeadQualityLabelLearningConsumer {
     labels: LeadQualityLabelRecord[];
   }> {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const confirmedQgoLabels = await tx.leadQualityLabel.count({
+      const confirmedQgoHandoffs = await tx.leadQualityLabel.findMany({
         where: {
           workspaceId: ctx.workspaceId,
           label: "QGO_CREATED",
           disposition: "ACCEPTED",
         },
+        select: { leadQualifiedEventId: true },
+        distinct: ["leadQualifiedEventId"],
       });
+      const confirmedQgoLabels = confirmedQgoHandoffs.length;
       if (confirmedQgoLabels < MIN_CONFIRMED_QGO_LABELS) {
         return {
           eligible: false,
@@ -270,15 +284,31 @@ export class LeadQualityLabelLearningConsumer {
           labels: [],
         };
       }
-      const rows = await tx.leadQualityLabel.findMany({
-        where: { workspaceId: ctx.workspaceId, disposition: "ACCEPTED" },
-        orderBy: [{ occurredAt: "asc" }, { ingestedAt: "asc" }, { id: "asc" }],
+      const rows = (
+        await tx.leadQualityLabel.findMany({
+          where: { workspaceId: ctx.workspaceId, disposition: "ACCEPTED" },
+          orderBy: [
+            { occurredAt: "asc" },
+            { ingestedAt: "asc" },
+            { id: "asc" },
+          ],
+        })
+      ).map(asRecord);
+      const seenFacts = new Set<string>();
+      const independentFacts = rows.filter((row) => {
+        // One handoff contributes at most one fact per semantic stage. Legacy
+        // or imported rows that disagree about rejection reason or commercial
+        // result therefore cannot both enter the learning batch.
+        const identity = [row.leadQualifiedEventId, row.label].join("\u0000");
+        if (seenFacts.has(identity)) return false;
+        seenFacts.add(identity);
+        return true;
       });
       return {
         eligible: true,
         confirmedQgoLabels,
         minimumRequired: MIN_CONFIRMED_QGO_LABELS,
-        labels: rows.map(asRecord),
+        labels: independentFacts,
       };
     });
   }

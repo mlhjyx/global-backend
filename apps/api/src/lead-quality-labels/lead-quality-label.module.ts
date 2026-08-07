@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AcquisitionAuthorizationIntegrationPendingGuard } from "../auth/acquisition-authorization-integration-pending.guard";
 import { LeadQualityLabelsController } from "./lead-quality-label.controller";
 import {
   LeadQualityLabelLearningConsumer,
@@ -9,6 +10,7 @@ import { LeadQualityLabelsService } from "./lead-quality-label.service";
 @Module({
   controllers: [LeadQualityLabelsController],
   providers: [
+    AcquisitionAuthorizationIntegrationPendingGuard,
     LeadQualityLabelRepository,
     LeadQualityLabelLearningConsumer,
     LeadQualityLabelsService,

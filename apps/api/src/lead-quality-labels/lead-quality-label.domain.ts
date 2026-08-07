@@ -18,6 +18,9 @@ export const LEAD_QUALITY_REASON_CODES = [
 export const LEAD_QUALITY_COMMERCIAL_RESULTS = ["WON", "LOST"] as const;
 
 export const LEAD_QUALITY_HELD_REASONS = [
+  "OCCURRED_BEFORE_HANDOFF",
+  "OCCURRED_AT_IN_FUTURE",
+  "OUT_OF_ORDER_ARRIVAL",
   "MISSING_QGO_CREATED",
   "MISSING_PREREQUISITE",
   "CONTRADICTORY_POSITIVE_LABEL",
@@ -58,8 +61,17 @@ export interface NormalizedLeadQualityLabelRequest {
 
 export interface AcceptedLeadQualityLabel {
   label: LeadQualityLabel;
+  reasonCode: LeadQualityReasonCode | null;
   commercialResult: LeadQualityCommercialResult | null;
+  occurredAt: Date;
 }
+
+export interface LeadQualityClassificationContext {
+  handoffOccurredAt: Date;
+  observedAt: Date;
+}
+
+export const MAX_LABEL_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 
 export interface LeadQualityClassification {
   disposition: LeadQualityDisposition;
@@ -233,20 +245,55 @@ export function normalizeLeadQualityLabelRequest(
  * HELD facts never become prerequisites and are never silently reclassified.
  */
 export function classifyLeadQualityLabel(
-  input: Pick<NormalizedLeadQualityLabelRequest, "label" | "commercialResult">,
+  input: Pick<
+    NormalizedLeadQualityLabelRequest,
+    "label" | "reasonCode" | "commercialResult" | "occurredAt"
+  >,
   accepted: readonly AcceptedLeadQualityLabel[],
+  context: LeadQualityClassificationContext,
 ): LeadQualityClassification {
-  const hasAccepted = (label: LeadQualityLabel): boolean =>
-    accepted.some((fact) => fact.label === label);
-  const acceptedRejection = hasAccepted("LEAD_OUTCOME_REJECTED");
-
-  if (input.label === "LEAD_OUTCOME_REJECTED") {
-    return accepted.some((fact) => fact.label !== "LEAD_OUTCOME_REJECTED")
-      ? { disposition: "HELD", heldReason: "CONTRADICTORY_POSITIVE_LABEL" }
-      : { disposition: "ACCEPTED", heldReason: null };
+  if (input.occurredAt.getTime() < context.handoffOccurredAt.getTime()) {
+    return { disposition: "HELD", heldReason: "OCCURRED_BEFORE_HANDOFF" };
+  }
+  if (
+    input.occurredAt.getTime() >
+    context.observedAt.getTime() + MAX_LABEL_FUTURE_SKEW_MS
+  ) {
+    return { disposition: "HELD", heldReason: "OCCURRED_AT_IN_FUTURE" };
+  }
+  if (
+    accepted.some(
+      (fact) => fact.occurredAt.getTime() > input.occurredAt.getTime(),
+    )
+  ) {
+    return { disposition: "HELD", heldReason: "OUT_OF_ORDER_ARRIVAL" };
   }
 
-  if (acceptedRejection) {
+  const causalFacts = accepted.filter(
+    (fact) => fact.occurredAt.getTime() <= input.occurredAt.getTime(),
+  );
+  const hasAccepted = (label: LeadQualityLabel): boolean =>
+    causalFacts.some((fact) => fact.label === label);
+  const acceptedRejections = causalFacts.filter(
+    (fact) => fact.label === "LEAD_OUTCOME_REJECTED",
+  );
+
+  if (input.label === "LEAD_OUTCOME_REJECTED") {
+    if (causalFacts.some((fact) => fact.label !== "LEAD_OUTCOME_REJECTED")) {
+      return {
+        disposition: "HELD",
+        heldReason: "CONTRADICTORY_POSITIVE_LABEL",
+      };
+    }
+    if (
+      acceptedRejections.some((fact) => fact.reasonCode !== input.reasonCode)
+    ) {
+      return { disposition: "HELD", heldReason: "CONTRADICTORY_REJECTION" };
+    }
+    return { disposition: "ACCEPTED", heldReason: null };
+  }
+
+  if (acceptedRejections.length > 0) {
     return { disposition: "HELD", heldReason: "CONTRADICTORY_REJECTION" };
   }
 
@@ -260,7 +307,7 @@ export function classifyLeadQualityLabel(
       : { disposition: "HELD", heldReason: "MISSING_QGO_CREATED" };
   }
 
-  const oppositeCommercialFact = accepted.some(
+  const oppositeCommercialFact = causalFacts.some(
     (fact) =>
       fact.label === "COMMERCIAL_OUTCOME_VERIFIED" &&
       fact.commercialResult !== null &&

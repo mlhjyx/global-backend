@@ -103,7 +103,9 @@ function canonical(value: unknown): string {
 
 function requestDigest(input = qgoInput): string {
   return createHash("sha256")
-    .update(canonical({ envelope: validLeadQualified, label: JSON.parse(input) }))
+    .update(
+      canonical({ envelope: validLeadQualified, label: JSON.parse(input) }),
+    )
     .digest("hex");
 }
 
@@ -260,10 +262,10 @@ describe("lead-quality-label operator CLI", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify(labelResponse()),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify(labelResponse()), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify(ackResponse()), {
@@ -274,10 +276,7 @@ describe("lead-quality-label operator CLI", () => {
     const h = deps(fetchImpl as unknown as typeof fetch);
 
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("qgo", true),
-        h.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("qgo", true), h.value),
     ).resolves.toBe(0);
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -302,10 +301,10 @@ describe("lead-quality-label operator CLI", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify(labelResponse(rejectInput, true)),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify(labelResponse(rejectInput, true)), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify(ackResponse("ALREADY_ACKED")), {
@@ -320,10 +319,7 @@ describe("lead-quality-label operator CLI", () => {
     );
 
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("reject", true),
-        h.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("reject", true), h.value),
     ).resolves.toBe(0);
     expect(h.stateStore.writes.at(-1)?.status).toBe("ACKED");
 
@@ -333,10 +329,7 @@ describe("lead-quality-label operator CLI", () => {
       qgoInput,
     );
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("reject", true),
-        wrong.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("reject", true), wrong.value),
     ).rejects.toThrow(/reject/i);
     expect(wrong.stateStore.writes).toHaveLength(0);
   });
@@ -355,10 +348,7 @@ describe("lead-quality-label operator CLI", () => {
     const h = deps(fetchImpl as unknown as typeof fetch);
 
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("qgo", true),
-        h.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("qgo", true), h.value),
     ).rejects.toThrow(/label post failed/i);
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(h.stateStore.writes).toHaveLength(0);
@@ -378,10 +368,10 @@ describe("lead-quality-label operator CLI", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify(labelResponse()),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
+        new Response(JSON.stringify(labelResponse()), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
       )
       .mockResolvedValueOnce(new Response("", { status: 503 }))
       .mockResolvedValueOnce(
@@ -393,10 +383,7 @@ describe("lead-quality-label operator CLI", () => {
     const h = deps(fetchImpl as unknown as typeof fetch);
 
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("qgo", true),
-        h.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("qgo", true), h.value),
     ).rejects.toThrow(/ack failed/i);
     expect(h.stateStore.records.get(EVENT_ID)?.status).toBe("LABEL_POSTED");
 
@@ -435,10 +422,7 @@ describe("lead-quality-label operator CLI", () => {
     const h = deps(fetchImpl as unknown as typeof fetch, state);
 
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("qgo", true),
-        h.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("qgo", true), h.value),
     ).resolves.toBe(0);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(state.writes).toHaveLength(0);
@@ -503,7 +487,7 @@ describe("lead-quality-label operator CLI", () => {
                 payload: { snapshot_version: 1, lead_id: LEAD_ID },
               },
             ],
-            page: { next_cursor: null, has_more: false },
+            page: { next_cursor: "11", has_more: false },
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
@@ -549,9 +533,9 @@ describe("lead-quality-label operator CLI", () => {
     );
     const h = deps(fetchImpl as unknown as typeof fetch);
 
-    await expect(runLeadQualityLabelOperator(["pull"], h.value)).rejects.toThrow(
-      /page response schema/i,
-    );
+    await expect(
+      runLeadQualityLabelOperator(["pull"], h.value),
+    ).rejects.toThrow(/page response schema/i);
   });
 
   it("fails closed when the LeadQualified envelope and payload identities are cross-wired", async () => {
@@ -576,7 +560,7 @@ describe("lead-quality-label operator CLI", () => {
           new Response(
             JSON.stringify({
               data: [candidate],
-              page: { next_cursor: null, has_more: false },
+              page: { next_cursor: "11", has_more: false },
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
@@ -604,10 +588,7 @@ describe("lead-quality-label operator CLI", () => {
     const h = deps(fetchImpl as unknown as typeof fetch);
 
     await expect(
-      runLeadQualityLabelOperator(
-        labelArgs("qgo", true),
-        h.value,
-      ),
+      runLeadQualityLabelOperator(labelArgs("qgo", true), h.value),
     ).rejects.toThrow(/response schema/i);
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(h.stateStore.writes).toHaveLength(0);
@@ -641,16 +622,17 @@ describe("lead-quality-label operator CLI", () => {
 
   it("rejects a UUID-only receipt and preserves LABEL_POSTED on non-acknowledging ACK outcomes", async () => {
     const sparse = deps(
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            data: {
-              id: "55555555-5555-4555-8555-555555555555",
-              replayed: false,
-            },
-          }),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                id: "55555555-5555-4555-8555-555555555555",
+                replayed: false,
+              },
+            }),
+            { status: 201, headers: { "content-type": "application/json" } },
+          ),
       ) as unknown as typeof fetch,
     );
     await expect(

@@ -2585,6 +2585,9 @@
                         "held_reason": {
                           "type": "string",
                           "enum": [
+                            "OCCURRED_BEFORE_HANDOFF",
+                            "OCCURRED_AT_IN_FUTURE",
+                            "OUT_OF_ORDER_ARRIVAL",
                             "MISSING_QGO_CREATED",
                             "MISSING_PREREQUISITE",
                             "CONTRADICTORY_POSITIVE_LABEL",
@@ -2632,6 +2635,32 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Unavailable until acquisition:label:write authorization is integrated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTHORIZATION_INTEGRATION_PENDING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2647,6 +2676,7 @@
     },
     "/api/v1/events": {
       "get": {
+        "description": "非空响应的 next_cursor 恒为最后一条返回账本记录的位置，包括 has_more=false 的终页；空页返回 null。",
         "operationId": "EventsController_list_v1",
         "parameters": [
           {
@@ -2769,10 +2799,12 @@
                         "next_cursor": {
                           "type": "string",
                           "nullable": true,
-                          "description": "下一页游标；null = 没有更多"
+                          "pattern": "^\\d+$",
+                          "description": "最后一条返回事件的账本 checkpoint；非空页恒为数字字符串（包括 has_more=false 的终页），仅空页为 null"
                         },
                         "has_more": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "description": "是否存在可立即读取的后续页；不决定 next_cursor 是否为 null"
                         }
                       }
                     }
@@ -2780,6 +2812,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Unavailable until acquisition:read and personal-data:read authorization is integrated"
           }
         },
         "security": [
@@ -2821,11 +2856,37 @@
                     "data": {
                       "type": "object",
                       "required": [
-                        "acked"
+                        "acked",
+                        "results"
                       ],
                       "properties": {
                         "acked": {
                           "type": "integer"
+                        },
+                        "results": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "event_id",
+                              "outcome"
+                            ],
+                            "properties": {
+                              "event_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "ACKED_NOW",
+                                  "ALREADY_ACKED",
+                                  "NOT_DELIVERED",
+                                  "NOT_FOUND"
+                                ]
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -2833,6 +2894,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Unavailable until acquisition:event:ack authorization is integrated"
           }
         },
         "security": [
@@ -2840,7 +2904,7 @@
             "bearer": []
           }
         ],
-        "summary": "ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）",
+        "summary": "ACK 已消费事件（逐事件返回 ACKED_NOW/ALREADY_ACKED/NOT_DELIVERED/NOT_FOUND）",
         "tags": [
           "Events"
         ]

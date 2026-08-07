@@ -13,6 +13,7 @@
     "prepare:site-builder:current-route-recovery": "node --import tsx scripts/prepare-site-builder-current-route-recovery.mts",
     "verify:site-builder:m1": "node --import tsx scripts/verify-site-builder-m1.mts",
     "lead-quality-labels:operator": "node --import tsx scripts/lead-quality-label-operator.mts",
+    "verify:lead-quality-labels:postgres": "node --import tsx scripts/verify-lead-quality-label-postgres.mts",
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
