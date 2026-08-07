@@ -33,6 +33,29 @@ describe("sensitive data boundary integration", () => {
     expect(admission).toBeLessThan(
       worker.indexOf("startLangfuseRuntimeTelemetry()"),
     );
+    const ownerClient = worker.indexOf('const ownerDb = new PrismaClient');
+    const ownerConnect = worker.indexOf('await ownerDb.$connect()');
+    const ownerVerify = worker.indexOf('await verifyPlatformOwnerDatabaseRole(ownerDb)');
+    const appConnect = worker.indexOf('await prisma.onModuleInit()');
+    const providerSeed = worker.indexOf('await providerRegistrySeed.seed(ownerDb)');
+    const rightsSeed = worker.indexOf('await seedJurisdictionPolicy(ownerDb)');
+    const sanctionsSeed = worker.indexOf('await seedSanctions(ownerDb)');
+    const telemetry = worker.indexOf('startLangfuseRuntimeTelemetry()');
+    for (const index of [
+      ownerClient,
+      ownerConnect,
+      ownerVerify,
+      appConnect,
+      providerSeed,
+      rightsSeed,
+      sanctionsSeed,
+    ]) {
+      expect(index).toBeGreaterThan(admission);
+      expect(index).toBeLessThan(telemetry);
+    }
+    expect(worker).not.toMatch(/try\s*\{\s*await providerRegistrySeed\.seed/s);
+    expect(worker).not.toMatch(/try\s*\{\s*const n = await seedJurisdictionPolicy/s);
+    expect(worker).not.toMatch(/try\s*\{\s*await seedSanctions/s);
     expect(worker).not.toMatch(
       /new PrismaClient\(\{ datasourceUrl: process\.env\.DATABASE_URL \}\)/,
     );
@@ -54,7 +77,7 @@ describe("sensitive data boundary integration", () => {
   it("scrubs both persisted AI trace errors and trace write failures", () => {
     const sink = source("model-gateway/ai-trace.sink.ts");
     expect(sink).toMatch(
-      /errorMessage:\s*diagnosticErrorToken\(entry\.errorMessage/,
+      /errorMessage:[\s\S]{0,100}diagnosticErrorToken\(entry\.errorMessage/,
     );
     expect(sink).toMatch(/trace write failed:[^`]*\$\{diagnosticErrorToken\(/s);
     expect(sink).not.toMatch(/String\(err\)\.slice\(/);

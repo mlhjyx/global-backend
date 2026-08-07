@@ -5,6 +5,7 @@ import {
   resolveDatabaseDeploymentStage,
   resolvePlatformOwnerDatabaseUrl,
   verifyApplicationDatabaseRole,
+  verifyPlatformOwnerDatabaseRole,
   type ApplicationDatabaseRoleFacts,
 } from './database-runtime-admission';
 
@@ -204,6 +205,33 @@ describe('application database runtime admission', () => {
           $queryRawUnsafe: vi.fn(async () => rows),
         } as never),
       ).rejects.toThrowError(/APP_DATABASE_ROLE_UNVERIFIED/);
+    }
+  });
+
+  it('admits a verified platform owner role and rejects app/ordinary roles', async () => {
+    const ownerFacts = {
+      ...SAFE_ROLE,
+      roleName: 'platform_owner',
+      databaseOwnerMember: true,
+      ownsApplicationRelations: true,
+    };
+    await expect(
+      verifyPlatformOwnerDatabaseRole({
+        $queryRawUnsafe: vi.fn(async () => [ownerFacts]),
+      }),
+    ).resolves.toEqual(ownerFacts);
+
+    for (const rows of [
+      [],
+      [{ ...SAFE_ROLE, roleName: 'app_user' }],
+      [{ ...SAFE_ROLE, roleName: 'ordinary_worker' }],
+      [{ ...ownerFacts, roleName: '' }],
+    ]) {
+      await expect(
+        verifyPlatformOwnerDatabaseRole({
+          $queryRawUnsafe: vi.fn(async () => rows),
+        } as never),
+      ).rejects.toThrowError(/OWNER_DATABASE_ROLE_(?:UNVERIFIED|UNSAFE)/);
     }
   });
 });
