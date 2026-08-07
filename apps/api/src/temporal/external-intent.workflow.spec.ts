@@ -14,6 +14,9 @@ vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock')
 import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { externalIntentSweepWorkflow } from './external-intent.workflow';
 
+const SENSITIVE_ERROR =
+  'Carol Importer <carol@example.com> https://private.example/tender bearer=super-secret';
+
 interface Target {
   workspaceId: string;
   icpId: string;
@@ -127,42 +130,78 @@ describe('externalIntentSweepWorkflow — fail-safe 分支', () => {
   it('一个投影 reject → 该目标记 fail-safe error 结果，另一目标仍处理，聚合只计成功者', async () => {
     primeHappyPath([target('ws-1', 'icp-1'), target('ws-2', 'icp-2')]);
     // call1 reject（→ 编排 fail-safe error 结果）；call2 落回 happy 默认（tenders 4）。
-    acts.projectExternalIntentForIcp.mockRejectedValueOnce(new Error('project boom'));
+    acts.projectExternalIntentForIcp.mockRejectedValueOnce(new Error(SENSITIVE_ERROR));
 
     const out = await externalIntentSweepWorkflow({});
 
     expect(out.swept).toBe(2);
     expect(out.results).toHaveLength(2);
-    expect(out.results[0].error).toContain('project boom');
+    expect(out.results[0].error).toBe('EXTERNAL_INTENT_PROJECTION_FAILED');
     expect(out.results[1].error).toBeUndefined();
     expect(out.tenderEvents).toBe(4); // 仅成功目标计入
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
   });
 
   it('resolveExternalIntentTarget reject 一次 → fail-safe 桩（空码 + error）仍进 ingest.targets，workflow 完成', async () => {
     const t1 = target('ws-1', 'icp-1');
     const t2 = target('ws-2', 'icp-2');
     primeHappyPath([t1, t2]);
-    acts.resolveExternalIntentTarget.mockRejectedValueOnce(new Error('resolve boom')); // t1 fail；t2 落回 echo 默认
+    acts.resolveExternalIntentTarget.mockRejectedValueOnce(new Error(SENSITIVE_ERROR)); // t1 fail；t2 落回 echo 默认
 
     await externalIntentSweepWorkflow({});
 
     const ingestArg = acts.ingestExternalSignals.mock.calls[0][0] as { targets: Array<Record<string, unknown>> };
     expect(ingestArg.targets).toHaveLength(2);
     expect(ingestArg.targets[0]).toMatchObject({ workspaceId: 'ws-1', cpvCodes: [], buyerCountries: [], fdaProductCodes: [] });
-    expect(ingestArg.targets[0].error).toContain('resolve boom');
+    expect(ingestArg.targets[0].error).toBe('EXTERNAL_TARGET_RESOLUTION_FAILED');
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(2); // 两个 resolved 条目仍投影
+    expect(JSON.stringify(ingestArg)).not.toContain(SENSITIVE_ERROR);
   });
 
   it('ingestExternalSignals reject → fail-safe ingest 汇总（errors 非空），投影仍跑（吃前窗已落库信号）', async () => {
     primeHappyPath([target('ws-1', 'icp-1'), target('ws-2', 'icp-2')]);
-    acts.ingestExternalSignals.mockRejectedValue(new Error('ingest boom'));
+    acts.ingestExternalSignals.mockRejectedValue(new Error(SENSITIVE_ERROR));
 
     const out = await externalIntentSweepWorkflow({});
 
-    expect(out.ingest?.errors?.[0]).toContain('ingest boom');
+    expect(out.ingest?.errors).toEqual(['EXTERNAL_SIGNAL_INGEST_FAILED']);
     expect(out.ingest).toMatchObject({ tedSpecs: 0, fdaSpecs: 0, signalsUpserted: 0, budgetExceeded: false });
     expect(acts.liveProviderState).toHaveBeenCalledTimes(1);
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
+  });
+
+  it('activity 返回的 raw error 字段也在 workflow 边界清洗；结构化 BudgetExceeded 保留截断语义', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    acts.resolveExternalIntentTarget.mockResolvedValue({
+      ...resolvedEcho(target('ws-1', 'icp-1')),
+      error: SENSITIVE_ERROR,
+    });
+    acts.ingestExternalSignals.mockRejectedValue({
+      name: 'ActivityFailure',
+      cause: { type: 'BudgetExceededError', message: SENSITIVE_ERROR },
+    });
+    acts.projectExternalIntentForIcp.mockResolvedValue({
+      workspaceId: 'ws-1',
+      icpId: 'icp-1',
+      cpvCodes: 1,
+      fdaProductCodes: 1,
+      naicsCodes: 1,
+      error: SENSITIVE_ERROR,
+    });
+
+    const out = await externalIntentSweepWorkflow({});
+
+    const ingestArg = acts.ingestExternalSignals.mock.calls[0][0] as {
+      targets: Array<{ error?: string }>;
+    };
+    expect(ingestArg.targets[0]?.error).toBe('EXTERNAL_TARGET_RESOLUTION_FAILED');
+    expect(out.ingest).toMatchObject({
+      budgetExceeded: true,
+      errors: ['BUDGET_EXCEEDED'],
+    });
+    expect(out.results[0]?.error).toBe('EXTERNAL_INTENT_PROJECTION_FAILED');
+    expect(JSON.stringify({ out, ingestArg })).not.toContain(SENSITIVE_ERROR);
   });
 });
 
@@ -196,13 +235,14 @@ describe('externalIntentSweepWorkflow — 过期后 intent 复算 + patched 版�
 
   it('recomputeExpiredIntent reject → fail-safe（out.recompute 记 error），workflow 仍完成投影', async () => {
     primeHappyPath([target('ws-1', 'icp-1')]);
-    acts.recomputeExpiredIntent.mockRejectedValue(new Error('recompute boom'));
+    acts.recomputeExpiredIntent.mockRejectedValue(new Error(SENSITIVE_ERROR));
 
     const out = await externalIntentSweepWorkflow({});
 
-    expect(out.recompute?.error).toContain('recompute boom');
+    expect(out.recompute?.error).toBe('EXTERNAL_INTENT_RECOMPUTE_FAILED');
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(1); // 复算失败不阻断投影
     expect(out.swept).toBe(1);
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
   });
 });
 

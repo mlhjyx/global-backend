@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TaxonomyResolver } from '../discovery/taxonomy-resolver';
+import { BudgetExceededError } from '../tools/budget';
 import { createExternalIntentActivities } from './external-intent.activities';
+
+const SENSITIVE_ERROR =
+  'Dana Buyer <dana@example.com> https://private.example/import client_secret=hidden';
 
 /**
  * 收口⑤ fast-follow（Codex #56 P1）：投影活动的 DataProvider **kill-switch live 重读**回归。
@@ -242,4 +246,103 @@ describe('recomputeExpiredIntent — 按 workspace 聚合投影面 + 分页轮�
     });
     expect(r.workspacesRecomputed).toBe(1); // ws-1 用 icp-ok 的面复算（失败 ICP 被跳过、不清空聚合面）
   });
+});
+
+describe('external intent activity result — 闭合错误码边界', () => {
+  it('ICP taxonomy 三路失败只返回固定 stage codes，不复制异常 message', async () => {
+    const ownerDb = {
+      icpDefinition: {
+        findUnique: vi.fn().mockResolvedValue({
+          companyAttributes: { industry: 'industrial pumps', product: 'pump' },
+          targetMarkets: ['USA', 'Germany'],
+        }),
+      },
+      discoveryQueryPlan: { findFirst: vi.fn().mockResolvedValue(null) },
+    } as unknown as PrismaClient;
+    const taxonomy = {
+      resolveMany: vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR)),
+      resolve: vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR)),
+      resolveCpvForProduct: vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR)),
+      resolveFdaProductCode: vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR)),
+      listFdaProductCodes: vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR)),
+      resolveNaicsForProduct: vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR)),
+    } as unknown as TaxonomyResolver;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy,
+      ownerDb,
+    });
+
+    const out = await acts.resolveExternalIntentTarget({ workspaceId: 'ws-1', icpId: 'icp-1' });
+
+    expect(out.error).toBe(
+      'CPV_RESOLUTION_FAILED;FDA_RESOLUTION_FAILED;NAICS_RESOLUTION_FAILED',
+    );
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
+  });
+
+  it('投影 activity 清洗上游 raw error，并用固定 provider codes 代替内部异常', async () => {
+    const findMany = vi.fn().mockRejectedValue(new Error(SENSITIVE_ERROR));
+    const prisma = {
+      sourceSignal: { findMany },
+      withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>) => fn({}),
+    } as unknown as PrismaService;
+    const acts = createExternalIntentActivities({
+      prisma,
+      taxonomy: {} as TaxonomyResolver,
+    });
+
+    const out = await acts.projectExternalIntentForIcp({
+      ...TARGET,
+      ...CAPTURED,
+      error: SENSITIVE_ERROR,
+      samgovEnabled: true,
+      live: { ted: true, openfda: true, samgov: true },
+    });
+
+    expect(out.error).toBe(
+      'EXTERNAL_TARGET_RESOLUTION_FAILED;TED_PROJECTION_FAILED;OPENFDA_PROJECTION_FAILED;SAMGOV_PROJECTION_FAILED',
+    );
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
+  });
+
+  it.each([
+    [new Error(SENSITIVE_ERROR), false, 'TED_SIGNAL_INGEST_FAILED'],
+    [
+      new BudgetExceededError('sweep:external-intent', 1, 0),
+      true,
+      'BUDGET_EXCEEDED',
+    ],
+  ])(
+    '摄取异常 %s 只返回闭合 code，BudgetExceeded=%s',
+    async (failure, budgetExceeded, expectedCode) => {
+      const prisma = {
+        signalIngest: { findUnique: vi.fn().mockRejectedValue(failure) },
+      } as unknown as PrismaService;
+      const ownerDb = {
+        dataProvider: {
+          findMany: vi.fn().mockResolvedValue([
+            { key: 'ted', status: 'ENABLED' },
+          ]),
+        },
+      } as unknown as PrismaClient;
+      const acts = createExternalIntentActivities({
+        prisma,
+        taxonomy: {} as TaxonomyResolver,
+        ownerDb,
+        broker: {} as never,
+      });
+
+      const out = await acts.ingestExternalSignals({
+        targets: [TARGET],
+        tedEnabled: true,
+        openfdaEnabled: false,
+        samgovEnabled: false,
+      });
+
+      expect(out.budgetExceeded).toBe(budgetExceeded);
+      expect(out.errors).toEqual([expectedCode]);
+      expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
+    },
+  );
 });
