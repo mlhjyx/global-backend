@@ -142,4 +142,24 @@ describe('normalizeLeadQualityLabelRequest', () => {
       normalizeLeadQualityLabelRequest({ ...base, label: 'QGO_CREATED', source_system: 'Bad System' }),
     ).toThrow(/source_system/i);
   });
+
+  it('bounds source identifiers and rejects control/format characters without echoing the value', () => {
+    for (const [field, value] of [
+      ['source_event_id', `event:${'x'.repeat(129)}`],
+      ['source_event_id', 'event:\u200bhidden'],
+      ['source_system', 'crm\u0000shadow'],
+      ['external_object_ref', `ref:${'x'.repeat(257)}`],
+      ['external_object_ref', 'object:\u2066hidden'],
+    ] as const) {
+      let thrown: unknown;
+      try {
+        normalizeLeadQualityLabelRequest({ ...base, label: 'QGO_CREATED', [field]: value });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String((thrown as Error).message)).toContain(field);
+      expect(String((thrown as Error).message)).not.toContain(value);
+    }
+  });
 });

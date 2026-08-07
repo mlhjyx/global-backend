@@ -38,7 +38,10 @@ describe('lead_quality_label persistence contract', () => {
   it('closes semantic value combinations and models the table in Prisma', () => {
     expect(sql).toContain('lead_quality_label_semantic_fields_check');
     expect(sql).toContain('lead_quality_label_disposition_check');
+    expect(sql).toMatch(/"ingested_at" TIMESTAMP\(3\) NOT NULL DEFAULT CURRENT_TIMESTAMP/);
     expect(schema).toContain('model LeadQualityLabel');
+    expect(schema).toContain('ingestedAt');
+    expect(schema).toContain('@map("ingested_at")');
     expect(schema).toContain('@@unique([workspaceId, sourceSystem, sourceEventId]');
   });
 });

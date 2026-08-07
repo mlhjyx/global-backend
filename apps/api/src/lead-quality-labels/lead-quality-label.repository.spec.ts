@@ -44,20 +44,31 @@ function row(overrides: Record<string, unknown> = {}) {
     disposition: 'ACCEPTED',
     heldReason: null,
     actorId: CTX.userId,
+    ingestedAt: new Date('2026-08-07T12:01:00.000Z'),
     createdAt: new Date('2026-08-07T12:01:00.000Z'),
     ...overrides,
   };
 }
 
-function harness(options: { existing?: ReturnType<typeof row> | null; accepted?: unknown[]; event?: unknown } = {}) {
+function harness(options: {
+  existing?: ReturnType<typeof row> | null;
+  existingSequence?: Array<ReturnType<typeof row> | null>;
+  accepted?: unknown[];
+  event?: unknown;
+  lockedLead?: boolean;
+  createError?: unknown;
+} = {}) {
   let existingCalls = 0;
   const findFirst = vi.fn(async () => {
     existingCalls += 1;
-    return options.existing ?? null;
+    return options.existingSequence?.shift() ?? options.existing ?? null;
   });
-  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => row(data));
+  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    if (options.createError) throw options.createError;
+    return row(data);
+  });
   const tx = {
-    $queryRaw: vi.fn(async () => [{ id: LEAD_ID }]),
+    $queryRaw: vi.fn(async () => (options.lockedLead === false ? [] : [{ id: LEAD_ID }])),
     outboxEvent: {
       findFirst: vi.fn(async () =>
         options.event === undefined ? { eventId: EVENT_ID } : options.event,
@@ -84,6 +95,16 @@ describe('LeadQualityLabelRepository.append', () => {
     expect(result.record).toMatchObject({ disposition: 'ACCEPTED', heldReason: null });
     expect(h.prisma.withWorkspace).toHaveBeenCalledWith(CTX.workspaceId, expect.any(Function));
     expect(h.tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(h.tx.outboxEvent.findFirst).toHaveBeenCalledWith({
+      where: {
+        eventId: EVENT_ID,
+        workspaceId: CTX.workspaceId,
+        eventType: 'LeadQualified',
+        aggregateType: 'Lead',
+        aggregateId: LEAD_ID,
+      },
+      select: { eventId: true },
+    });
     expect(h.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         workspaceId: CTX.workspaceId,
@@ -128,6 +149,35 @@ describe('LeadQualityLabelRepository.append', () => {
     const h = harness({ event: null });
     await expect(h.repository.append(CTX, REQUEST)).rejects.toBeInstanceOf(NotFoundException);
     expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it('returns NOT_FOUND when the workspace-scoped lead lock finds no row', async () => {
+    const h = harness({ lockedLead: false });
+    await expect(h.repository.append(CTX, REQUEST)).rejects.toMatchObject({
+      response: { error: { code: 'LEAD_NOT_FOUND' } },
+    });
+    expect(h.tx.outboxEvent.findFirst).not.toHaveBeenCalled();
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it('recovers a concurrent P2002 race by rereading: identical payload replays, conflicting payload returns 409', async () => {
+    const uniqueRace = Object.assign(new Error('unique constraint'), { code: 'P2002' });
+    const identical = harness({
+      existingSequence: [null, null, row()],
+      createError: uniqueRace,
+    });
+    await expect(identical.repository.append(CTX, REQUEST)).resolves.toMatchObject({
+      replayed: true,
+      record: { sourceEventId: REQUEST.sourceEventId, label: REQUEST.label },
+    });
+
+    const conflicting = harness({
+      existingSequence: [null, null, row({ label: 'SALES_ACCEPTED' })],
+      createError: uniqueRace,
+    });
+    await expect(conflicting.repository.append(CTX, REQUEST)).rejects.toMatchObject({
+      response: { error: { code: 'SOURCE_EVENT_CONFLICT' } },
+    });
   });
 });
 
