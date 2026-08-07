@@ -36,6 +36,18 @@ interface FakeDb {
   signals: Map<string, Record<string, unknown>>;
 }
 
+interface FakeLedgerWhere {
+  providerKey?: string;
+  queryFingerprint?: string;
+  windowKey?: string;
+  status?: string | { not?: string; in?: string[] };
+  leaseOwner?: string;
+  leaseToken?: string;
+  leaseFence?: number;
+  leaseExpiresAt?: { lt?: Date; gte?: Date };
+  OR?: FakeLedgerWhere[];
+}
+
 /** 平台两表的内存假体（唯一键语义与 schema 一致）。 */
 function fakePrisma(): PrismaService & FakeDb {
   const ledger = new Map<string, Record<string, unknown>>();
@@ -79,13 +91,13 @@ function fakePrisma(): PrismaService & FakeDb {
         where,
         data,
       }: {
-        where: Record<string, any>;
-        data: Record<string, any>;
+        where: FakeLedgerWhere;
+        data: Record<string, unknown>;
       }) => {
         const k = `${where.providerKey}|${where.queryFingerprint}|${where.windowKey}`;
         const row = ledger.get(k);
         if (!row) return { count: 0 };
-        const matches = (condition: Record<string, any>): boolean => {
+        const matches = (condition: FakeLedgerWhere): boolean => {
           if (condition.status !== undefined) {
             if (
               typeof condition.status === 'string' &&
@@ -300,8 +312,16 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     const svc = new SignalIngestService({ prisma, broker });
 
     const r1 = await svc.ingestTed(tedParams, { nowMs: NOW });
-    expect(r1.error).toContain('ted 500');
-    expect([...prisma.ledger.values()][0].status).toBe('ERROR');
+    expect(r1.error).toBe('signal_fetch_failed');
+    expect([...prisma.ledger.values()][0]).toEqual(
+      expect.objectContaining({
+        status: 'ERROR',
+        error: 'SIGNAL_FETCH_FAILED',
+      }),
+    );
+    expect(JSON.stringify([...prisma.ledger.values()])).not.toContain(
+      'ted 500',
+    );
 
     fail = false;
     const r2 = await svc.ingestTed(tedParams, { nowMs: NOW });
@@ -381,6 +401,21 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
 });
 
 describe('SignalIngestService.ingestFda —— openFDA 同构 + §6 个体户摄取层拒收', () => {
+  it('空产品码 fail-closed，带申请国时只发送规范化 countries', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => ({ clearances: [] }));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    expect((await svc.ingestFda({ productCodes: [] })).error).toBe(
+      'empty_query',
+    );
+    await svc.ingestFda(
+      { productCodes: ['LLZ'], applicantCountries: ['de'] },
+      { nowMs: NOW },
+    );
+    expect(broker.calls).toHaveLength(1);
+  });
+
   it('清关落 Signal；个体户自然人计入 skipped 不落库', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker(() => ({
@@ -395,6 +430,96 @@ describe('SignalIngestService.ingestFda —— openFDA 同构 + §6 个体户摄
     expect(r.signalsUpserted).toBe(1);
     expect(r.skipped.individual).toBe(1);
     expect(prisma.signals.size).toBe(1);
+  });
+
+  it('provider 缺少 records 数组时按零结果结算，不伪造记录', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => ({}));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    const result = await svc.ingestFda(
+      { productCodes: ['LLZ'] },
+      { nowMs: NOW },
+    );
+    expect(result.recordsFetched).toBe(0);
+    expect(result.signalsUpserted).toBe(0);
+  });
+});
+
+describe('SignalIngestService.ingestSam —— 共享 bulk window', () => {
+  it('允许无 NAICS 的单窗 bulk 拉取并对缺失 notices 按零结果结算', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => ({}));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    const result = await svc.ingestSam({}, { nowMs: NOW });
+    expect(result.recordsFetched).toBe(0);
+    expect(result.signalsUpserted).toBe(0);
+    expect(broker.calls[0]?.toolId).toBe('samgov.search');
+  });
+});
+
+describe('lease admission and settlement edge cases', () => {
+  it('rejects ambiguous lease owners and out-of-range lease durations before egress', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker();
+    const svc = new SignalIngestService({ prisma, broker });
+
+    await expect(
+      svc.ingestTed(tedParams, { nowMs: NOW, leaseOwner: 'bad owner' }),
+    ).rejects.toThrow('INVALID_SIGNAL_INGEST_LEASE_OWNER');
+    await expect(
+      svc.ingestTed(tedParams, { nowMs: NOW, leaseMs: 999 }),
+    ).rejects.toThrow('INVALID_SIGNAL_INGEST_LEASE_MS');
+    expect(broker.calls).toHaveLength(0);
+  });
+
+  it('re-observes a concurrent create winner as an OK ledger hit without egress', async () => {
+    const prisma = fakePrisma();
+    const originalFind = prisma.signalIngest.findUnique.bind(
+      prisma.signalIngest,
+    );
+    let reads = 0;
+    prisma.signalIngest.findUnique = async (input: never) => {
+      reads += 1;
+      if (reads < 3) return null;
+      return { status: 'OK' } as never;
+    };
+    prisma.signalIngest.create = async () => {
+      throw Object.assign(new Error('unique'), { code: 'P2002' });
+    };
+    const broker = fakeBroker();
+    const result = await new SignalIngestService({ prisma, broker }).ingestTed(
+      tedParams,
+      { nowMs: NOW },
+    );
+    prisma.signalIngest.findUnique = originalFind;
+
+    expect(result.ledgerHit).toBe(true);
+    expect(broker.calls).toHaveLength(0);
+  });
+
+  it('rolls back source_signal writes if fenced OK settlement cannot be committed', async () => {
+    const prisma = fakePrisma();
+    const originalUpdateMany = prisma.signalIngest.updateMany.bind(
+      prisma.signalIngest,
+    );
+    prisma.signalIngest.updateMany = async (input: {
+      data: Record<string, unknown>;
+    }) => {
+      if (input.data.status === 'OK') return { count: 0 } as never;
+      return originalUpdateMany(input as never);
+    };
+    await expect(
+      new SignalIngestService({
+        prisma,
+        broker: fakeBroker(),
+      }).ingestTed(tedParams, { nowMs: NOW }),
+    ).rejects.toThrow('SIGNAL_LEASE_SETTLEMENT_FAILED');
+    expect(prisma.signals.size).toBe(0);
+    expect([...prisma.ledger.values()][0]).toEqual(
+      expect.objectContaining({ status: 'ERROR' }),
+    );
   });
 });
 

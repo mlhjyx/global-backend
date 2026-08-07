@@ -53,7 +53,7 @@ function fakeClient(
   const getHandle = vi.fn((id: string) => {
     const cached = handles.get(id);
     if (cached) return cached;
-    const current = descriptions.get(id);
+    let current = descriptions.get(id);
     if (!current)
       throw Object.assign(new Error("not found"), {
         name: "ScheduleNotFoundError",
@@ -61,7 +61,10 @@ function fakeClient(
     const handle = {
       describe: vi.fn().mockResolvedValue(current),
       update: vi.fn(async (fn: (previous: typeof current) => unknown) => {
-        updates.push({ id, next: fn(current) });
+        const next = fn(current) as Record<string, unknown>;
+        updates.push({ id, next });
+        current = { ...current, ...next } as typeof current;
+        descriptions.set(id, current);
       }),
     };
     handles.set(id, handle);
@@ -73,6 +76,22 @@ function fakeClient(
         getHandle,
         create: vi.fn(async (options: unknown) => {
           creates.push(options);
+          const created = options as {
+            scheduleId: string;
+            spec: unknown;
+            action: unknown;
+            policies: unknown;
+          };
+          descriptions.set(
+            created.scheduleId,
+            existingSchedule({
+              scheduleId: created.scheduleId,
+              spec: created.spec,
+              action: created.action,
+              policies: created.policies,
+              state: { paused: false, note: undefined, remainingActions: 0 },
+            }),
+          );
         }),
       },
     },
@@ -179,6 +198,16 @@ describe("schedule governance", () => {
     },
   );
 
+  it.each(["1000ms", "1s", "1m", "1h", "1d"])(
+    "accepts a bounded Temporal cadence in every supported unit: %s",
+    (cadence) => {
+      const target = PLATFORM_SCHEDULES[0]!;
+      expect(
+        desiredScheduleOptions(target, { [target.cadenceEnv]: cadence }).spec,
+      ).toEqual({ intervals: [{ every: cadence }] });
+    },
+  );
+
   it("reconciles only code-owned action fields and preserves pause, note, remaining actions and cadence override", async () => {
     const target = PLATFORM_SCHEDULES.find(
       (item) => item.id === "external-intent-sweep",
@@ -214,12 +243,98 @@ describe("schedule governance", () => {
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
         disposition: "RECONCILED",
+        observedHash: scheduleCodeHash(target),
         changedFields: expect.arrayContaining([
           "workflowType",
           "taskQueue",
           "args",
           "schemaVersion",
         ]),
+      }),
+    );
+  });
+
+  it("repairs overlap/catchup safety policy while preserving cadence, pause and pause-on-failure", async () => {
+    const target = PLATFORM_SCHEDULES.find(
+      (item) => item.id === "external-intent-sweep",
+    )!;
+    const desired = desiredScheduleOptions(target, {});
+    const current = existingSchedule({
+      action: desired.action,
+      policies: {
+        overlap: ScheduleOverlapPolicy.ALLOW_ALL,
+        catchupWindow: 5 * 60_000,
+        pauseOnFailure: true,
+      },
+    });
+    const fake = fakeClient(new Map([[target.id, current]]));
+    const append = vi.fn().mockResolvedValue(undefined);
+
+    await reconcilePlatformSchedules({
+      client: fake.client as never,
+      contracts: [target],
+      receipts: { append },
+      env: {},
+    });
+
+    expect(fake.updates).toHaveLength(1);
+    const next = fake.updates[0]!.next as {
+      spec: unknown;
+      state: unknown;
+      policies: {
+        overlap: ScheduleOverlapPolicy;
+        catchupWindow: number;
+        pauseOnFailure: boolean;
+      };
+    };
+    expect(next.spec).toBe(current.spec);
+    expect(next.state).toBe(current.state);
+    expect(next.policies).toEqual({
+      overlap: ScheduleOverlapPolicy.SKIP,
+      catchupWindow: 60_000,
+      pauseOnFailure: true,
+    });
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        disposition: "RECONCILED",
+        observedHash: scheduleCodeHash(target),
+        changedFields: expect.arrayContaining([
+          "overlapPolicy",
+          "catchupWindow",
+        ]),
+      }),
+    );
+  });
+
+  it("fails closed when Temporal does not retain the repaired code contract", async () => {
+    const target = PLATFORM_SCHEDULES.find(
+      (item) => item.id === "external-intent-sweep",
+    )!;
+    const current = existingSchedule();
+    const append = vi.fn().mockResolvedValue(undefined);
+    const handle = {
+      describe: vi.fn().mockResolvedValue(current),
+      update: vi.fn().mockResolvedValue(undefined),
+    };
+    const client = {
+      schedule: {
+        getHandle: vi.fn(() => handle),
+        create: vi.fn(),
+      },
+    };
+
+    await expect(
+      reconcilePlatformSchedules({
+        client: client as never,
+        contracts: [target],
+        receipts: { append },
+        env: {},
+      }),
+    ).rejects.toThrow("SCHEDULE_POST_RECONCILE_DRIFT");
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        disposition: "FAILED",
+        errorCode: "SCHEDULE_POST_RECONCILE_DRIFT",
       }),
     );
   });

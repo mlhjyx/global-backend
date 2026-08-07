@@ -32,6 +32,8 @@ function fakeDb() {
         {
           scheduleId: "acq-sweep",
           disposition: "IN_SYNC",
+          desiredHash: "a".repeat(64),
+          observedHash: "a".repeat(64),
           recordedAt: new Date(NOW.getTime() - 1_000),
           paused: false,
           nextActionAt: new Date(NOW.getTime() + 60_000),
@@ -41,6 +43,8 @@ function fakeDb() {
         {
           scheduleId: "acq-sweep",
           disposition: "FAILED",
+          desiredHash: "a".repeat(64),
+          observedHash: "b".repeat(64),
           recordedAt: new Date(NOW.getTime() - 2_000),
           paused: false,
           nextActionAt: new Date(NOW.getTime() - 60_000),
@@ -50,6 +54,8 @@ function fakeDb() {
         {
           scheduleId: "intent-sweep",
           disposition: "FAILED",
+          desiredHash: "a".repeat(64),
+          observedHash: null,
           recordedAt: new Date(NOW.getTime() - 1_000),
           paused: true,
           nextActionAt: null,
@@ -135,6 +141,8 @@ describe("RuntimeOpsReadService", () => {
       ["acq-sweep", "intent-sweep"].map((scheduleId) => ({
         scheduleId,
         disposition: "IN_SYNC",
+        desiredHash: "a".repeat(64),
+        observedHash: "a".repeat(64),
         recordedAt: new Date(NOW.getTime() - 1_000),
         paused: false,
         nextActionAt: new Date(NOW.getTime() + 60_000),
@@ -181,6 +189,8 @@ describe("RuntimeOpsReadService", () => {
       {
         scheduleId: "acq-sweep",
         disposition: "IN_SYNC",
+        desiredHash: "a".repeat(64),
+        observedHash: "a".repeat(64),
         recordedAt: new Date(NOW.getTime() - 11 * 60_000),
         paused: false,
         nextActionAt: new Date(NOW.getTime() + 60_000),
@@ -206,6 +216,52 @@ describe("RuntimeOpsReadService", () => {
     }).snapshot(NOW);
 
     expect(snapshot.schedules.staleEvidence).toEqual(["acq-sweep"]);
+    expect(snapshot.ready).toBe(false);
+  });
+
+  it("does not treat a RECONCILED receipt with a pre-repair hash as healthy", async () => {
+    const db = fakeDb();
+    db.workerHeartbeat.findMany.mockResolvedValue(
+      ["acquisition", "site-builder", "maintenance", "understanding"].map(
+        (taskQueue) => ({
+          taskQueue,
+          status: "POLLING",
+          lastSeenAt: new Date(NOW.getTime() - 1_000),
+          workerBuildSha: "a".repeat(40),
+        }),
+      ),
+    );
+    db.scheduleDriftReceipt.findMany.mockResolvedValue([
+      {
+        scheduleId: "acq-sweep",
+        disposition: "RECONCILED",
+        desiredHash: "a".repeat(64),
+        observedHash: "b".repeat(64),
+        recordedAt: new Date(NOW.getTime() - 1_000),
+        paused: false,
+        nextActionAt: new Date(NOW.getTime() + 60_000),
+        missedCatchupCount: 0,
+        skippedOverlapCount: 0,
+      },
+    ]);
+    db.workflowRunReceipt.count.mockResolvedValue(0);
+    db.signalIngest.count.mockResolvedValue(0);
+
+    const snapshot = await new RuntimeOpsReadService(db as never, {
+      expectedTaskQueues: [
+        "acquisition",
+        "site-builder",
+        "maintenance",
+        "understanding",
+      ],
+      expectedWorkerBuildSha: "a".repeat(40),
+      expectedScheduleIds: ["acq-sweep"],
+      heartbeatFreshnessMs: 30_000,
+      scheduleLatenessToleranceMs: 30_000,
+      scheduleObservationFreshnessMs: 10 * 60_000,
+    }).snapshot(NOW);
+
+    expect(snapshot.schedules.drifted).toEqual(["acq-sweep"]);
     expect(snapshot.ready).toBe(false);
   });
 });

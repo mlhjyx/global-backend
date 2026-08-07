@@ -138,6 +138,39 @@ describe("RuntimeOpsWriter", () => {
     ).rejects.toThrow("INVALID_RUNTIME_RECEIPT");
   });
 
+  it.each([
+    { field: "runId", value: "not-a-uuid" },
+    { field: "workflowId", value: "person@example.com" },
+    { field: "workflowType", value: "bad/type" },
+    { field: "taskQueue", value: "unknown" },
+    { field: "phase", value: "RUNNING" },
+    { field: "stage", value: "Bad Stage" },
+    { field: "errorCode", value: "free text" },
+    { field: "retryAttempt", value: 0 },
+  ])("rejects an invalid workflow receipt $field", async ({ field, value }) => {
+    const writer = new RuntimeOpsWriter(fakeDb() as never, {
+      buildSha: BUILD_SHA,
+    });
+    const input = {
+      workspaceId: null,
+      workflowId: "discovery-run",
+      runId: RUN_ID,
+      workflowType: "discoveryWorkflow",
+      taskQueue: "acquisition",
+      phase: "STARTED",
+      stage: "started",
+      stats: {},
+      errorCode: null,
+      budgetTruncated: false,
+      retryAttempt: 1,
+      [field]: value,
+    };
+
+    await expect(writer.appendWorkflowReceipt(input as never)).rejects.toThrow(
+      "INVALID_RUNTIME_RECEIPT",
+    );
+  });
+
   it("upserts a bounded worker heartbeat keyed by worker instance and task queue", async () => {
     const db = fakeDb();
     const writer = new RuntimeOpsWriter(db as never, { buildSha: BUILD_SHA });
@@ -202,6 +235,49 @@ describe("RuntimeOpsWriter", () => {
       /note|cadence|ops incident/i,
     );
   });
+
+  it("rejects malformed build identities, heartbeat state, and schedule observations", async () => {
+    expect(
+      () => new RuntimeOpsWriter(fakeDb() as never, { buildSha: "dirty" }),
+    ).toThrow("WORKER_BUILD_IDENTITY_REQUIRED");
+    const writer = new RuntimeOpsWriter(fakeDb() as never, {
+      buildSha: BUILD_SHA,
+    });
+    await expect(
+      writer.recordWorkerHeartbeat({
+        workerInstanceId: "not-a-uuid",
+        taskQueue: "acquisition",
+        status: "POLLING",
+        observedAt: new Date(),
+        activityConcurrency: 8,
+        workflowConcurrency: 8,
+      }),
+    ).rejects.toThrow("INVALID_RUNTIME_RECEIPT");
+    await expect(
+      writer.recordWorkerHeartbeat({
+        workerInstanceId: "33333333-3333-4333-8333-333333333333",
+        taskQueue: "acquisition",
+        status: "POLLING",
+        observedAt: new Date("invalid"),
+        activityConcurrency: 8,
+        workflowConcurrency: 8,
+      }),
+    ).rejects.toThrow("INVALID_RUNTIME_RECEIPT");
+    await expect(
+      writer.appendScheduleDriftReceipt({
+        scheduleId: "external-intent-sweep",
+        disposition: "IN_SYNC",
+        desiredHash: "b".repeat(64),
+        observedHash: null,
+        changedFields: [],
+        errorCode: null,
+        paused: false,
+        nextActionAt: null,
+        missedCatchupCount: -1,
+        skippedOverlapCount: 0,
+      }),
+    ).rejects.toThrow("INVALID_RUNTIME_RECEIPT");
+  });
 });
 
 describe("buildWorkerIdentity", () => {
@@ -222,6 +298,12 @@ describe("buildWorkerIdentity", () => {
         DEPLOYMENT_STAGE: "production",
         BUILD_SHA: "dirty",
       }),
+    ).toThrow("WORKER_BUILD_IDENTITY_REQUIRED");
+    expect(
+      buildWorkerIdentity({ NODE_ENV: "production", BUILD_SHA }),
+    ).toEqual({ buildSha: BUILD_SHA });
+    expect(() =>
+      buildWorkerIdentity({ DEPLOYMENT_STAGE: "staging", BUILD_SHA }),
     ).toThrow("WORKER_BUILD_IDENTITY_REQUIRED");
   });
 });
