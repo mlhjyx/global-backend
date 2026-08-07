@@ -87,6 +87,7 @@ describe("RuntimeOpsReadService", () => {
       expectedScheduleIds: ["acq-sweep", "intent-sweep", "backlog-sweep"],
       heartbeatFreshnessMs: 30_000,
       scheduleLatenessToleranceMs: 30_000,
+      scheduleObservationFreshnessMs: 10 * 60_000,
     }).snapshot(NOW);
 
     expect(snapshot).toEqual({
@@ -106,6 +107,8 @@ describe("RuntimeOpsReadService", () => {
         drifted: ["intent-sweep"],
         paused: ["intent-sweep"],
         late: [],
+        staleEvidence: [],
+        unobservable: [],
         missedCatchup: ["intent-sweep"],
         skippedOverlap: ["intent-sweep"],
       },
@@ -153,10 +156,56 @@ describe("RuntimeOpsReadService", () => {
       expectedScheduleIds: ["acq-sweep", "intent-sweep"],
       heartbeatFreshnessMs: 30_000,
       scheduleLatenessToleranceMs: 30_000,
+      scheduleObservationFreshnessMs: 10 * 60_000,
     }).snapshot(NOW);
 
     expect(snapshot.ready).toBe(true);
     expect(snapshot.workers.unexpectedBuildShas).toEqual([]);
     expect(snapshot.schedules.missing).toEqual([]);
+    expect(snapshot.schedules.unobservable).toEqual([]);
+  });
+
+  it("fails readiness when the last persisted Temporal observation is stale", async () => {
+    const db = fakeDb();
+    db.workerHeartbeat.findMany.mockResolvedValue(
+      ["acquisition", "site-builder", "maintenance", "understanding"].map(
+        (taskQueue) => ({
+          taskQueue,
+          status: "POLLING",
+          lastSeenAt: new Date(NOW.getTime() - 1_000),
+          workerBuildSha: "a".repeat(40),
+        }),
+      ),
+    );
+    db.scheduleDriftReceipt.findMany.mockResolvedValue([
+      {
+        scheduleId: "acq-sweep",
+        disposition: "IN_SYNC",
+        recordedAt: new Date(NOW.getTime() - 11 * 60_000),
+        paused: false,
+        nextActionAt: new Date(NOW.getTime() + 60_000),
+        missedCatchupCount: 0,
+        skippedOverlapCount: 0,
+      },
+    ]);
+    db.workflowRunReceipt.count.mockResolvedValue(0);
+    db.signalIngest.count.mockResolvedValue(0);
+
+    const snapshot = await new RuntimeOpsReadService(db as never, {
+      expectedTaskQueues: [
+        "acquisition",
+        "site-builder",
+        "maintenance",
+        "understanding",
+      ],
+      expectedWorkerBuildSha: "a".repeat(40),
+      expectedScheduleIds: ["acq-sweep"],
+      heartbeatFreshnessMs: 30_000,
+      scheduleLatenessToleranceMs: 30_000,
+      scheduleObservationFreshnessMs: 10 * 60_000,
+    }).snapshot(NOW);
+
+    expect(snapshot.schedules.staleEvidence).toEqual(["acq-sweep"]);
+    expect(snapshot.ready).toBe(false);
   });
 });
