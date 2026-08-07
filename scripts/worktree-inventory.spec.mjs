@@ -16,7 +16,7 @@ const DETACHED_HEAD = "3333333333333333333333333333333333333333";
 const MERGE_BASE = "4444444444444444444444444444444444444444";
 const ORIGIN_MAIN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const BRANCH_FORMAT =
-  "--format=%(refname)%00%(upstream)%00%(upstream:short)%00%(upstream:track,nobracket)";
+  "--format=%(refname)%00%(upstream)%00%(upstream:short)%00%(upstream:track,nobracket)%00";
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function gitResult(stdout = "", exitCode = 0) {
@@ -84,16 +84,18 @@ test("inventory reports dirty state, untracked files, gone upstream, detached lo
     "",
   ].join("\0");
   const branchMetadata = [
-    "refs/heads/feature",
-    "refs/remotes/origin/feature",
-    "origin/feature",
-    "gone",
-    "refs/heads/main",
-    "refs/remotes/origin/main",
-    "origin/main",
+    [
+      "refs/heads/feature",
+      "refs/remotes/origin/feature",
+      "origin/feature",
+      "gone",
+      "",
+    ].join("\0"),
+    ["refs/heads/main", "refs/remotes/origin/main", "origin/main", "", ""].join(
+      "\0",
+    ),
     "",
-    "",
-  ].join("\0");
+  ].join("\n");
   const responses = new Map([
     [
       commandKey(["worktree", "list", "--porcelain", "-z"]),
@@ -172,7 +174,9 @@ test("inventory reports dirty state, untracked files, gone upstream, detached lo
         "-z",
         "--untracked-files=all",
       ]),
-      gitResult(" M tracked.ts\0?? new-one.ts\0?? nested/new-two.ts\0"),
+      gitResult(
+        " M tracked.ts\0R  renamed.ts\0?? old-name.ts\0?? new-one.ts\0?? nested/new-two.ts\0",
+      ),
     ],
     [
       commandKey([
@@ -275,7 +279,7 @@ test("missing paths and command failures remain typed UNAVAILABLE without prunin
     calls.push([...args]);
     if (args[0] === "worktree") return gitResult(porcelain);
     if (args[0] === "for-each-ref") return gitResult("", 127);
-    if (args[0] === "rev-parse") return gitResult("", 128);
+    if (args[0] === "rev-parse") return gitResult("", 1);
     if (args[0] === "show") return gitResult("", 128);
     return gitResult("", 128);
   };
@@ -311,6 +315,48 @@ test("missing paths and command failures remain typed UNAVAILABLE without prunin
   assert.equal(entry.prunable, true);
   assert.equal(
     calls.some((args) => args.includes("prune") || args.includes("remove")),
+    false,
+  );
+  assert.equal(
+    calls.some((args) => args[0] === "-C"),
+    false,
+  );
+});
+
+test("bare entries without HEAD remain typed instead of invoking path commands", () => {
+  const porcelain = ["worktree /repo/bare", "bare", ""].join("\0");
+  const calls = [];
+  const runGit = (args) => {
+    calls.push([...args]);
+    if (args[0] === "worktree") return gitResult(porcelain);
+    if (args[0] === "rev-parse") return gitResult("", 1);
+    return gitResult("", 128);
+  };
+
+  const inventory = collectWorktreeInventory({
+    runGit,
+    pathExists: () => true,
+  });
+  const [entry] = inventory.worktrees;
+
+  assert.deepEqual(entry.relativeToOriginMain, {
+    status: "UNKNOWN",
+    reason: "HEAD_NOT_AVAILABLE",
+  });
+  assert.deepEqual(entry.lastCommitAt, {
+    status: "NOT_APPLICABLE",
+    reason: "HEAD_NOT_AVAILABLE",
+  });
+  assert.deepEqual(entry.dirty, {
+    status: "NOT_APPLICABLE",
+    reason: "BARE_REPOSITORY",
+  });
+  assert.equal(
+    calls.some((args) => args[0] === "show"),
+    false,
+  );
+  assert.equal(
+    calls.some((args) => args[0] === "merge-base"),
     false,
   );
   assert.equal(

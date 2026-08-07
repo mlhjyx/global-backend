@@ -16,6 +16,7 @@
     "infra:up:legacy": "docker compose -p global-backend up -d",
     "infra:down:legacy": "docker compose -p global-backend down",
     "worktree:new": "node scripts/create-codex-worktree.mjs",
+    "worktree:inventory": "node scripts/worktree-inventory.mjs",
     "docs:verify": "node --test scripts/model-candidate-baseline.spec.mjs && pnpm --filter @global/contracts build && pnpm exec tsx --test scripts/verify-model-candidate-registry.spec.mts && node scripts/verify-docs.mjs",
     "docs:model-candidates": "node scripts/generate-model-candidate-baseline.mjs",
     "memoryctl": "node scripts/memoryctl.mjs",

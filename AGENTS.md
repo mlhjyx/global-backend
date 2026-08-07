@@ -4,6 +4,12 @@
 > **当前开发主体（2026-07-16 用户确认）= Codex**：Codex 负责读项目记忆、规划、实现、验证、提 PR 与收口审查；旧 CC/Claude 会话、分支与 worktree 是**待 Codex 审计的历史/迁移 provenance**，不再代表当前执行责任，也不得在独有提交核验前删除。`CLAUDE.md` 仅保留兼容入口，冲突一律以本文件和下列权威文档为准。
 > **当前主线先看** [docs/status/current.md](docs/status/current.md) 与 [docs/roadmap/release-plan.md](docs/roadmap/release-plan.md)；边界看 [docs/product-scope.md](docs/product-scope.md)，as-built 看 [docs/architecture/current.md](docs/architecture/current.md)，承重决策只认 [docs/adr/registry.md](docs/adr/registry.md)。历史实施日志见 [docs/roadmap/changelog.md](docs/roadmap/changelog.md)。
 
+## 0. Codex 执行面审计（2026-08-07）
+
+- **项目本地 skill 真值**：当前 `.agents/skills/` 仅安装 `code-intelligence`。注入的 ECC 说明中列出的 `tdd-workflow`、`security-review`、`verification-loop` 在本仓没有对应 `SKILL.md`，不得伪称已调用或补造文件；TDD、安全与验证要求继续直接按本文件执行。导航、证据与隔离施工流程见 [Codex navigation guide](docs/CODEX-NAVIGATION-GUIDE.md)。
+- **获客侧当前纠偏（覆盖下文旧状态句）**：backlog 下游饿死 fast-follow 已由四个 LRU/TTL 水位 `lastEnrichedAt`、`lastSignalAt`、`lastWatchAt`、`contactDiscoveryAttemptedAt`、迁移与预算尾部不盖水位测试落地；公司发现 `executeQuery` 与联系人发现均 fan-out 到当前全部 ENABLED adapter，`source_hint` 仅作显式收窄。TED 发现/intent 与 SAM.gov Sources Sought ingest/projection 已有实现；SAM provider 仍默认 `DISABLED`，启用须重新核验合规、配置与真实运行门。`customs`/生产 `trade_data`/Comtrade adapter **未实现**；`SourceClass`/sandbox 的枚举插槽和研究稿不得写成已落地能力。
+- **文档瘦身 blocker / follow-up**：本次只补执行面与已核验漂移，**不代表全部文档治理完成**，也不重写或删除本文件的历史实施 provenance。当前 blocker 是该历史迁移尚无独立批准的文件 ownership、逐条权威去向和验收合同；解除后须另开受控任务，把 dated 细节迁入 changelog/implementation records，再把本文件收敛为短入口。
+
 ## 1. 这是什么 + 边界（关键）
 
 出海企业 **AI 全球客户开发与增长执行平台**的后端仓库，现包含两个产品面：已于 2026-08-02 解除新增开发冻结、可在重新审计后恢复施工的**买家智能与机会资格后端**，以及已于 2026-08-04 完成 M1 阶段收口的 **Site Builder 独立站建设子系统**。

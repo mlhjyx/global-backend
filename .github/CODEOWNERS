@@ -1,0 +1,27 @@
+# Minimal approval surface for repository governance and high-risk runtime changes.
+/.github/ @mlhjyx
+
+/AGENTS.md @mlhjyx
+/docs/CODEX-NAVIGATION-GUIDE.md @mlhjyx
+/docs/status/ @mlhjyx
+/docs/roadmap/release-plan.md @mlhjyx
+/docs/product-scope.md @mlhjyx
+/docs/architecture/ @mlhjyx
+/docs/adr/ @mlhjyx
+/docs/governance/ @mlhjyx
+
+/packages/contracts/ @mlhjyx
+/packages/db/prisma/ @mlhjyx
+
+/apps/api/src/main.ts @mlhjyx
+/apps/api/src/health/ @mlhjyx
+/apps/api/src/auth/ @mlhjyx
+/apps/api/src/compliance/ @mlhjyx
+/apps/api/src/tools/ @mlhjyx
+/apps/api/src/model-runtime/ @mlhjyx
+/apps/api/src/temporal/ @mlhjyx
+/apps/api/src/relay/ @mlhjyx
+
+/docker-compose.yml @mlhjyx
+/infra/*.compose.yml @mlhjyx
+/infra/systemd/ @mlhjyx
