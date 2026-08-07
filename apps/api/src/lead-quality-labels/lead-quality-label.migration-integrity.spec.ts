@@ -1,8 +1,12 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migrationPath = resolve(
+  process.cwd(),
+  "../../packages/db/prisma/migrations/20260807231000_lead_quality_labels/migration.sql",
+);
+const collidingMigrationPath = resolve(
   process.cwd(),
   "../../packages/db/prisma/migrations/20260807230000_lead_quality_labels/migration.sql",
 );
@@ -12,8 +16,18 @@ const schemaPath = resolve(
 );
 
 describe("lead_quality_label persistence contract", () => {
-  const sql = readFileSync(migrationPath, "utf8");
+  const sql = existsSync(migrationPath)
+    ? readFileSync(migrationPath, "utf8")
+    : "";
   const schema = readFileSync(schemaPath, "utf8");
+
+  it(
+    "uses a strictly later migration directory and retires the colliding timestamp",
+    () => {
+      expect(existsSync(collidingMigrationPath)).toBe(false);
+      expect(existsSync(migrationPath)).toBe(true);
+    },
+  );
 
   it("creates a workspace-scoped append-only table with source-event idempotency", () => {
     expect(sql).toMatch(/CREATE TABLE "lead_quality_label"/);
