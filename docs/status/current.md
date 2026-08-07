@@ -32,7 +32,7 @@
 
 ## 3. 最近一次运行观测（历史，非 current evidence）
 
-2026-08-07 在 `/global/backend/.codex/worktrees/acquisition-governance-foundation` 的干净提交 `35145699db63fc8aef2350a0ca331fef9724f617` 上运行：
+2026-08-08 在 `/global/backend/.codex/worktrees/acquisition-governance-foundation` 的干净治理实现提交 `929dacca74a2407b73182c6fd9da39f05f4082b8` 上运行：
 
 ```bash
 pnpm code-intelligence:runtime:status
