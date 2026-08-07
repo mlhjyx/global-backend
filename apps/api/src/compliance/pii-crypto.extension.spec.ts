@@ -5,6 +5,7 @@ import { encryptPii, isEncryptedPii } from './pii-crypto';
 const TEST_KEY = 'b'.repeat(64);
 const CONTACT = piiSpecFor('CanonicalContact')!;
 const POINT = piiSpecFor('ContactPoint')!;
+const EVIDENCE = piiSpecFor('FieldEvidence')!;
 
 describe('pii-crypto.extension 入参加密', () => {
   beforeEach(() => {
@@ -41,6 +42,42 @@ describe('pii-crypto.extension 入参加密', () => {
     encryptArgs('upsert', args, POINT);
     expect((args.create as Record<string, unknown>).value).toBe('ch:12345');
   });
+
+  it.each(['amber', 'red'])(
+    'FieldEvidence %s：整个 value 经统一 writer 加密为版本化 envelope',
+    (dataClass) => {
+      const args = {
+        data: {
+          workspaceId: 'w',
+          entityType: 'contact',
+          entityId: 'c',
+          field: 'email.verification',
+          dataClass,
+          value: {
+            email: 'jane@example.com',
+            providerExcerpt: 'RCPT jane@example.com accepted',
+          },
+        },
+      } as Record<string, unknown>;
+      encryptArgs('create', args, EVIDENCE);
+      const value = (args.data as Record<string, unknown>).value as Record<
+        string,
+        unknown
+      >;
+      expect(value.schemaVersion).toBe('field-evidence-pii/v1');
+      expect(isEncryptedPii(value.ciphertext as string)).toBe(true);
+      expect(JSON.stringify(value)).not.toContain('jane@example.com');
+    },
+  );
+
+  it('FieldEvidence green：公司事实不加密，保持可查询 provenance', () => {
+    const value = { product: 'industrial pump' };
+    const args = {
+      data: { dataClass: 'green', value },
+    } as Record<string, unknown>;
+    encryptArgs('create', args, EVIDENCE);
+    expect((args.data as Record<string, unknown>).value).toEqual(value);
+  });
 });
 
 describe('pii-crypto.extension 结果解密', () => {
@@ -63,5 +100,25 @@ describe('pii-crypto.extension 结果解密', () => {
 
   it('null 结果不抛', () => {
     expect(() => decryptResult(null, CONTACT)).not.toThrow();
+  });
+
+  it('FieldEvidence 版本化 envelope 解密回原 JSON value', () => {
+    const args = {
+      data: {
+        dataClass: 'red',
+        value: { email: 'jane@example.com', nested: { lawfulBasis: 'LIA-1' } },
+      },
+    } as Record<string, unknown>;
+    encryptArgs('create', args, EVIDENCE);
+    const row = {
+      id: 'e1',
+      dataClass: 'red',
+      value: (args.data as Record<string, unknown>).value,
+    };
+    decryptResult(row, EVIDENCE);
+    expect(row.value).toEqual({
+      email: 'jane@example.com',
+      nested: { lawfulBasis: 'LIA-1' },
+    });
   });
 });
