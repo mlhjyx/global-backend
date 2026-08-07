@@ -15,6 +15,7 @@ const TEST_KEY = 'b'.repeat(64);
 const CONTACT = piiSpecFor('CanonicalContact')!;
 const POINT = piiSpecFor('ContactPoint')!;
 const EVIDENCE = piiSpecFor('FieldEvidence')!;
+const SUPPRESSION = piiSpecFor('SuppressionRecord')!;
 
 describe('pii-crypto.extension 入参加密', () => {
   beforeEach(() => {
@@ -57,6 +58,22 @@ describe('pii-crypto.extension 入参加密', () => {
     } as Record<string, unknown>;
     encryptArgs('upsert', args, POINT);
     expect((args.create as Record<string, unknown>).value).toBe('ch:12345');
+  });
+
+  it('SuppressionRecord email 透明加密，而 domain/company_name 保持可匹配事实', () => {
+    const email = {
+      data: { type: 'email', value: 'jane@example.com' },
+    } as Record<string, unknown>;
+    encryptArgs('create', email, SUPPRESSION);
+    expect(isEncryptedPii((email.data as { value: string }).value)).toBe(true);
+
+    for (const type of ['domain', 'company_name']) {
+      const args = {
+        data: { type, value: 'example.com' },
+      } as Record<string, unknown>;
+      encryptArgs('create', args, SUPPRESSION);
+      expect((args.data as { value: string }).value).toBe('example.com');
+    }
   });
 
   it.each(['amber', 'red'])(
