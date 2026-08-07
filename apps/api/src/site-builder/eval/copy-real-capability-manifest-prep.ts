@@ -17,9 +17,9 @@ const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 /** Set only in the post-merge manifest PR, never to an unmerged source SHA. */
 export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
-  "5775945c6e056e99ba9357d8d8794b01fad0c66b" as const;
+  "d819455dea736151a4c30d5ffdd0e224d74af917" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v10.json" as const;
 
 export interface CopyRealCapabilitySourceFileSpec {
   role: string;
@@ -249,7 +249,7 @@ export interface CopyRealCapabilityContractSnapshot {
 
 export interface CopyRealCapabilityManifestArtifact {
   schemaVersion: "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1";
-  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-07-v9";
+  artifactId: "site-builder-copy-real-capability-manifest-prep/2026-08-07-v10";
   classification: "FIXED_SOURCE_CREATE_ONLY";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -290,7 +290,7 @@ function fixedSourceCommit(): string {
     COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT == null ||
     !GIT_COMMIT.test(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT)
   ) {
-    fail("COPY_REAL_CAPABILITY_V9_FIXED_SOURCE_REQUIRED");
+    fail("COPY_REAL_CAPABILITY_V10_FIXED_SOURCE_REQUIRED");
   }
   return COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT;
 }
@@ -384,7 +384,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-real-capability-manifest/2026-08-05-v1" as const,
-    manifestId: "site-builder-copy-real-capability/2026-08-07-v9",
+    manifestId: "site-builder-copy-real-capability/2026-08-07-v10",
     fixedSourceCommit: sourceCommit,
     sourceBundleDigest: sourceBundle.digest,
     planDigest: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.planDigest,
@@ -399,7 +399,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     schemaVersion:
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1" as const,
     artifactId:
-      "site-builder-copy-real-capability-manifest-prep/2026-08-07-v9" as const,
+      "site-builder-copy-real-capability-manifest-prep/2026-08-07-v10" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
     fixedSourceCommit: sourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,
