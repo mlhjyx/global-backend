@@ -1,17 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
   automaticCanonicalKey,
+  COMPANY_IDENTITY_RULE_VERSION,
   companyIdentity,
   contactEmailKind,
   contactIdentity,
   contactSuppressionKeys,
+  createCompanyIdentityDecision,
   declinedContactIdentity,
   IdentityReviewRequiredError,
   normalizeCompanyName,
   normalizeDomain,
   normalizeRegistrableDomain,
+  provisionalReviewCanonicalKey,
   resolveCompanyIdentity,
 } from './identity';
+
+const decisionContext = {
+  ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+  actor: { type: 'SYSTEM' as const, id: 'identity-pilot-test' },
+  decidedAt: '2026-08-07T00:00:00.000Z',
+  evidence: [{ type: 'RAW_RECORD' as const, id: 'raw-test-1' }],
+};
 
 describe('identity resolution（PRD 8.8 确定性规则）', () => {
   it('域名规范化：协议/www/路径剥离', () => {
@@ -49,8 +59,24 @@ describe('controlled pilot company identity decisions', () => {
     expect(normalizeRegistrableDomain('https://branch.example.co.uk')).toBe('example.co.uk');
   });
 
+  it.each([
+    ['IPv4', 'https://127.0.0.1/path'],
+    ['IPv6', 'http://[::1]/path'],
+    ['localhost', 'http://localhost:3000'],
+    ['bare public suffix', 'de'],
+    ['multi-label public suffix', 'co.uk'],
+    ['invalid host', 'https://exa mple.de'],
+  ])('rejects %s as a registrable company domain', (_label, value) => {
+    expect(normalizeRegistrableDomain(value)).toBeNull();
+  });
+
+  it('normalizes an IDN through the maintained suffix parser', () => {
+    expect(normalizeRegistrableDomain('https://www.bücher.de/produkte')).toBe('xn--bcher-kva.de');
+  });
+
   it('AUTO_LINKs an exact authoritative country-qualified identifier', () => {
     const decision = resolveCompanyIdentity({
+      context: decisionContext,
       incoming: {
         name: 'Nordstern Pumpenhandel GmbH',
         country: 'DE',
@@ -70,12 +96,17 @@ describe('controlled pilot company identity decisions', () => {
       identity: { dedupeKey: 'id:ted-natid:de:de991002', matchRule: 'identifier_exact' },
       ambiguous: false,
       recommendationEligible: true,
+      ruleVersion: COMPANY_IDENTITY_RULE_VERSION,
+      actor: decisionContext.actor,
+      decidedAt: decisionContext.decidedAt,
+      evidence: decisionContext.evidence,
     });
     expect(automaticCanonicalKey(decision)).toBe('id:ted-natid:de:de991002');
   });
 
   it('AUTO_LINKs a registrable domain only with compatible country and legal-name evidence', () => {
     const decision = resolveCompanyIdentity({
+      context: decisionContext,
       incoming: {
         name: 'Rheinland Pumpensysteme GmbH',
         legalName: 'Rheinland Pumpensysteme GmbH',
@@ -127,6 +158,7 @@ describe('controlled pilot company identity decisions', () => {
     },
   ])('keeps a domain match in REVIEW_LINK on $label', ({ incoming, candidate, reason }) => {
     const decision = resolveCompanyIdentity({
+      context: decisionContext,
       incoming: { ...incoming, domain: 'rheinland-pumpen.de' },
       candidates: [
         {
@@ -148,6 +180,7 @@ describe('controlled pilot company identity decisions', () => {
 
   it('never automatically canonicalizes name_country evidence', () => {
     const decision = resolveCompanyIdentity({
+      context: decisionContext,
       incoming: { name: 'Muster Pumpenhandel GmbH', country: 'DE' },
       candidates: [
         {
@@ -164,6 +197,122 @@ describe('controlled pilot company identity decisions', () => {
       recommendationEligible: false,
     });
     expect(() => automaticCanonicalKey(decision)).toThrow(IdentityReviewRequiredError);
+  });
+
+  it('keeps name_country review-only even with no existing candidate and derives a stable provisional key', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: { name: 'Unmatched Muster Pumpen GmbH', country: 'DE' },
+      candidates: [],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(provisionalReviewCanonicalKey('raw-stable-1')).toBe(provisionalReviewCanonicalKey('raw-stable-1'));
+    expect(provisionalReviewCanonicalKey('raw-stable-1')).toBe(decision.identity.dedupeKey);
+    expect(provisionalReviewCanonicalKey('raw-stable-1')).not.toMatch(/^n:/);
+  });
+
+  it('requires explicit legal-name evidence before a domain can AUTO_LINK', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: { name: 'Rheinland Pumpensysteme GmbH', country: 'DE', domain: 'rheinland-pumpen.de' },
+      candidates: [
+        {
+          dedupeKey: 'd:rheinland-pumpen.de',
+          name: 'Rheinland Pumpensysteme GmbH',
+          country: 'DE',
+          domain: 'rheinland-pumpen.de',
+        },
+      ],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toContain('LEGAL_NAME_EVIDENCE_MISSING');
+  });
+
+  it('rejects AUTO_LINK when the identifier country encoded in the scheme conflicts with incoming country', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'AT',
+        identifier: { scheme: 'ted-natid:de', value: 'DE 991 002' },
+      },
+      candidates: [
+        { dedupeKey: 'id:ted-natid:de:de991002', name: 'Nordstern Pumpenhandel GmbH', country: 'DE' },
+      ],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toContain('IDENTIFIER_COUNTRY_CONFLICT');
+  });
+
+  it('does not cross-link the same identifier value across schemes', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        identifier: { scheme: 'ted-natid:de', value: '991002' },
+      },
+      candidates: [
+        { dedupeKey: 'id:lei:de:991002', name: 'Nordstern Pumpenhandel GmbH', country: 'DE' },
+      ],
+    });
+    expect(decision.decision).toBe('AUTO_LINK');
+    expect(decision.identity.dedupeKey).toBe('id:ted-natid:de:991002');
+    expect(decision.reasons).toContain('NEW_AUTHORITATIVE_IDENTIFIER');
+  });
+
+  it('requires review when authoritative identifier and domain evidence point to different canonicals', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        legalName: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        domain: 'nordstern-pumpen.de',
+        identifier: { scheme: 'ted-natid:de', value: '991002' },
+      },
+      candidates: [
+        {
+          dedupeKey: 'id:ted-natid:de:991002',
+          name: 'Nordstern Pumpenhandel GmbH',
+          legalName: 'Nordstern Pumpenhandel GmbH',
+          country: 'DE',
+          domain: 'different-pumpen.de',
+        },
+        {
+          dedupeKey: 'd:nordstern-pumpen.de',
+          name: 'Nordstern Pumpen Service GmbH',
+          legalName: 'Nordstern Pumpen Service GmbH',
+          country: 'DE',
+          domain: 'nordstern-pumpen.de',
+        },
+      ],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toContain('IDENTIFIER_DOMAIN_CONFLICT');
+  });
+});
+
+describe('immutable identity decision vocabulary', () => {
+  it.each(['REJECT_LINK', 'SPLIT'] as const)('creates a frozen %s decision with provenance', (decision) => {
+    const value = createCompanyIdentityDecision({
+      decision,
+      identity: { dedupeKey: 'n:muster pumpenhandel:de', matchRule: 'name_country' },
+      reasons: [decision === 'SPLIT' ? 'HUMAN_SPLIT_REQUIRED' : 'HUMAN_LINK_REJECTED'],
+      ...decisionContext,
+    });
+    expect(value).toMatchObject({
+      decision,
+      ruleVersion: COMPANY_IDENTITY_RULE_VERSION,
+      recommendationEligible: false,
+      actor: decisionContext.actor,
+      decidedAt: decisionContext.decidedAt,
+      evidence: decisionContext.evidence,
+    });
+    expect(Object.isFrozen(value)).toBe(true);
+    expect(Object.isFrozen(value.actor)).toBe(true);
+    expect(Object.isFrozen(value.evidence)).toBe(true);
+    expect(Object.isFrozen(value.reasons)).toBe(true);
   });
 });
 

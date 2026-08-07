@@ -26,11 +26,19 @@ describe('German industrial-pump controlled-pilot fixture', () => {
     const parsed = validateControlledPilotFixture(await fixture());
     expect(parsed.classification).toBe('SYNTHETIC_PUBLIC_SAFE');
     expect(parsed.workspace.id).toBe('00000000-0000-4000-8000-000000000701');
+    expect(parsed.companyOffering).toEqual({
+      id: '00000000-0000-4000-8000-000000000703',
+      companyName: 'Synthetic Export Pump Works',
+      offeringName: 'Industrial process-pump export package',
+      classification: 'SYNTHETIC',
+    });
     expect(parsed.icp.id).toBe('00000000-0000-4000-8000-000000000702');
+    expect(parsed.icp.version).toBe(1);
     expect(parsed.icp.country).toBe('DE');
+    expect(parsed.icp.region).toBe('EU');
     expect(parsed.records.map((record) => record.expectedDecision)).toEqual([
       'AUTO_LINK',
-      'AUTO_LINK',
+      'REVIEW_LINK',
       'REVIEW_LINK',
       'REVIEW_LINK',
     ]);
@@ -67,9 +75,16 @@ describe('German industrial-pump controlled-pilot fixture', () => {
 describe('controlled acquisition pilot manifest', () => {
   it('freezes one workspace, one ICP, exact allowed/forbidden sources, exact caps, and zero-call authorization', async () => {
     const parsedFixture = validateControlledPilotFixture(await fixture());
-    const manifest = buildControlledPilotManifest({ fixture: parsedFixture, fixturePath: 'docs/evidence/acquisition/german-industrial-pump-pilot-fixture-v1.json' });
+    const manifest = buildControlledPilotManifest({
+      fixture: parsedFixture,
+      fixturePath: 'docs/evidence/acquisition/german-industrial-pump-pilot-fixture-v1.json',
+      sourceCommit: '4562eab1bae16cdd424ff90a7d3403b0fb30d535',
+      expiresAt: '2026-08-14T00:00:00.000Z',
+    });
     const validated = validateControlledPilotManifest(manifest);
 
+    expect(validated.contractVersion).toBe('acquisition-identity-pilot-prep-manifest/2026-08-07-v1');
+    expect(validated.artifactKind).toBe('IDENTITY_PILOT_PREP_CREATE_ONLY_MANIFEST');
     expect(validated.mode).toBe('CREATE_ONLY');
     expect(validated.dispatchAuthorization).toBe('NOT_AUTHORIZED');
     expect(validated.dispatchCapable).toBe(false);
@@ -77,11 +92,35 @@ describe('controlled acquisition pilot manifest', () => {
     expect(validated.actualModelCalls).toBe(0);
     expect(validated.containsCredentials).toBe(false);
     expect(validated.containsPersonalData).toBe(false);
+    expect(validated.sourceCommit).toBe('4562eab1bae16cdd424ff90a7d3403b0fb30d535');
+    expect(validated.expiresAt).toBe('2026-08-14T00:00:00.000Z');
     expect(validated.scope.workspaceIds).toEqual([parsedFixture.workspace.id]);
+    expect(validated.scope.companyOfferingIds).toEqual([parsedFixture.companyOffering.id]);
     expect(validated.scope.icpIds).toEqual([parsedFixture.icp.id]);
+    expect(validated.scope.icpVersions).toEqual([parsedFixture.icp.version]);
+    expect(validated.scope.countries).toEqual(['DE']);
+    expect(validated.scope.regions).toEqual(['EU']);
     expect(validated.scope.allowedSources).toEqual(ACQUISITION_PILOT_ALLOWED_SOURCES);
     expect(validated.scope.forbiddenSources).toEqual(ACQUISITION_PILOT_FORBIDDEN_SOURCES);
     expect(validated.caps).toEqual(ACQUISITION_PILOT_CAPS);
+    expect(validated.caps).toMatchObject({
+      rawRecords: 50,
+      canonicalCompanies: 30,
+      enrichedCompanies: 10,
+      humanReviewedCompanies: 5,
+      leadQualifiedPackages: 3,
+      externalRequests: 0,
+      modelCalls: 0,
+      repairs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      maxCostCents: 0,
+    });
+    expect(validated.nextStage).toMatchObject({
+      requiresCurrentTaskGraphManifest: true,
+      requiresSeparateCostAuthorization: true,
+      dispatchAuthorization: 'NOT_AUTHORIZED',
+    });
   });
 
   it.each([
@@ -94,7 +133,12 @@ describe('controlled acquisition pilot manifest', () => {
     ['a network call', (m: Record<string, any>) => ({ ...m, actualNetworkCalls: 1 })],
   ])('fails closed on %s', async (_label, mutate) => {
     const parsedFixture = validateControlledPilotFixture(await fixture());
-    const manifest = buildControlledPilotManifest({ fixture: parsedFixture, fixturePath: 'docs/evidence/acquisition/german-industrial-pump-pilot-fixture-v1.json' });
+    const manifest = buildControlledPilotManifest({
+      fixture: parsedFixture,
+      fixturePath: 'docs/evidence/acquisition/german-industrial-pump-pilot-fixture-v1.json',
+      sourceCommit: '4562eab1bae16cdd424ff90a7d3403b0fb30d535',
+      expiresAt: '2026-08-14T00:00:00.000Z',
+    });
     expect(() => validateControlledPilotManifest(mutate(manifest as unknown as Record<string, any>))).toThrow();
   });
 
@@ -103,7 +147,12 @@ describe('controlled acquisition pilot manifest', () => {
     const output = resolve(temp, 'manifest.json');
     try {
       const parsedFixture = validateControlledPilotFixture(await fixture());
-      const manifest = buildControlledPilotManifest({ fixture: parsedFixture, fixturePath: 'fixture.json' });
+      const manifest = buildControlledPilotManifest({
+        fixture: parsedFixture,
+        fixturePath: 'fixture.json',
+        sourceCommit: '4562eab1bae16cdd424ff90a7d3403b0fb30d535',
+        expiresAt: '2026-08-14T00:00:00.000Z',
+      });
       await writeControlledPilotManifestCreateOnly(output, manifest);
       expect(validateControlledPilotManifest(JSON.parse(await readFile(output, 'utf8')))).toEqual(manifest);
       await expect(writeControlledPilotManifestCreateOnly(output, manifest)).rejects.toMatchObject({ code: 'EEXIST' });

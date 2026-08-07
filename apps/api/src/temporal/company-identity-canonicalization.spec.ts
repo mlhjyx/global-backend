@@ -23,12 +23,12 @@ function makeActivities(raws: unknown[], existingByKey: Record<string, unknown> 
     withWorkspace: async <T>(_workspaceId: string, fn: (client: Prisma.TransactionClient) => Promise<T>): Promise<T> => fn(tx),
   };
   const activities = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
-  return { activities, upsert };
+  return { activities, upsert, fieldEvidenceCreate: tx.fieldEvidence.create as ReturnType<typeof vi.fn> };
 }
 
 describe('canonicalizeRun identity safety guard', () => {
   it('isolates name_country evidence under a provisional review key instead of merging the legacy canonical', async () => {
-    const { activities, upsert } = makeActivities(
+    const { activities, upsert, fieldEvidenceCreate } = makeActivities(
       [
         {
           id: 'raw-name-country-1',
@@ -62,6 +62,20 @@ describe('canonicalizeRun identity safety guard', () => {
         recommendation_eligible: false,
       },
     });
+    expect(fieldEvidenceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          field: 'identity.resolution_decision',
+          value: expect.objectContaining({
+            decision: 'REVIEW_LINK',
+            ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+            actor: expect.any(Object),
+            decidedAt: expect.any(String),
+            evidence: expect.any(Array),
+          }),
+        }),
+      }),
+    );
   });
 
   it('uses the authoritative country-qualified identifier key for safe new canonical creation', async () => {
