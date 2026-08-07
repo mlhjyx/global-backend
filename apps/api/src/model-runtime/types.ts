@@ -223,6 +223,7 @@ export interface ModelObservation<Output> {
   usageComplete?: boolean;
   requestId?: string;
   settlement: "known" | "unknown";
+  settlementUnknownReason?: string;
   settlementProof?: unknown;
   warnings?: readonly string[];
 }

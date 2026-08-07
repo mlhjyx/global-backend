@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -343,6 +343,45 @@ describe("DurableModelExecutionRuntime", () => {
     });
   });
 
+  it("records known billed failure settlement before warning freeze without content repair", async () => {
+    const durableLedger = await ledger();
+    const dispatch = vi.fn().mockResolvedValue({
+      ...observation({ headline: "" }),
+      warnings: ["native_api_failure_http_524:settled"],
+    });
+    const findings = vi.fn();
+    const compile = vi.fn();
+    const runtime = new DurableModelExecutionRuntime<Input, Output>({
+      ledger: durableLedger,
+      transport: { dispatch },
+      repairCompiler: { findings, compile },
+    });
+    const plan = executionPlan("copy-known-api-failure");
+
+    await expect(
+      runtime.execute({
+        ...plan,
+        contract: {
+          ...plan.contract,
+          retryPolicy: {
+            ...plan.contract.retryPolicy,
+            contentRepairMaxAttempts: 1,
+          },
+        },
+      }),
+    ).rejects.toThrow(/provider warnings/u);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(findings).not.toHaveBeenCalled();
+    expect(compile).not.toHaveBeenCalled();
+    expect(await durableLedger.summary()).toMatchObject({
+      wireClaims: 1,
+      knownWireSettlements: 1,
+      unknownWireSettlements: 0,
+      completedExecutions: 0,
+      frozen: true,
+    });
+  });
+
   it("durably freezes unknown post-dispatch settlement and blocks later executions", async () => {
     const durableLedger = await ledger();
     const runtime = new DurableModelExecutionRuntime<Input, Output>({
@@ -352,6 +391,7 @@ describe("DurableModelExecutionRuntime", () => {
           ...observation({ headline: "Unknown" }),
           requestId: undefined,
           settlement: "unknown",
+          settlementUnknownReason: "Bearer must-not-enter-ledger",
         }),
       },
     });
@@ -363,6 +403,12 @@ describe("DurableModelExecutionRuntime", () => {
       unknownWireSettlements: 1,
       frozen: true,
     });
+    const ledgerText = await readFile(
+      join(temporaryDirectories.at(-1)!, "ledger.jsonl"),
+      "utf8",
+    );
+    expect(ledgerText).not.toContain("Bearer must-not-enter-ledger");
+    expect(ledgerText).toContain("observation_or_settlement_incomplete");
     await expect(
       runtime.execute(executionPlan("copy-after-unknown")),
     ).rejects.toThrow("MODEL_EXECUTION_CAMPAIGN_FROZEN");

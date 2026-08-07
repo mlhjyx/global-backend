@@ -72,6 +72,71 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
+function sendOpenAiResponsesStream(
+  response: ServerResponse,
+  input: {
+    model: string;
+    text: string;
+    inputTokens: number;
+    cachedInputTokens?: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+  },
+  headers: Record<string, string> = {},
+): void {
+  const messageId = "msg_stream_fixture";
+  const events = [
+    {
+      type: "response.created",
+      response: {
+        id: "resp_stream_fixture",
+        created_at: 1_786_000_000,
+        model: input.model,
+      },
+    },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { type: "message", id: messageId },
+    },
+    {
+      type: "response.output_text.delta",
+      item_id: messageId,
+      delta: input.text,
+    },
+    {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: { type: "message", id: messageId },
+    },
+    {
+      type: "response.completed",
+      response: {
+        usage: {
+          input_tokens: input.inputTokens,
+          input_tokens_details: {
+            cached_tokens: input.cachedInputTokens ?? 0,
+          },
+          output_tokens: input.outputTokens,
+          output_tokens_details: {
+            reasoning_tokens: input.reasoningTokens ?? 0,
+          },
+        },
+      },
+    },
+  ];
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...headers,
+  });
+  for (const event of events) {
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+}
+
 afterEach(async () => {
   await Promise.all(
     openServers
@@ -93,35 +158,21 @@ const companySchema = {
 } as const;
 
 describe("AI SDK 7 native provider adapters", () => {
-  it("preserves OpenAI Responses path, schema, reasoning and response metadata", async () => {
-    const gateway = await startFakeGateway((_request, response) => {
-      sendJson(
+  it("streams OpenAI Responses while preserving schema, reasoning and response metadata", async () => {
+    const gateway = await startFakeGateway((_request, response, observed) => {
+      if (observed.body.stream !== true) {
+        sendJson(response, 400, { error: { message: "stream required" } });
+        return;
+      }
+      sendOpenAiResponsesStream(
         response,
-        200,
         {
-          id: "resp_test",
-          created_at: 1_786_000_000,
           model: "gpt-5.6-terra-resolved",
-          output: [
-            {
-              type: "message",
-              id: "msg_test",
-              role: "assistant",
-              content: [
-                {
-                  type: "output_text",
-                  text: '{"name":"Acme"}',
-                  annotations: [],
-                },
-              ],
-            },
-          ],
-          usage: {
-            input_tokens: 17,
-            input_tokens_details: { cached_tokens: 5 },
-            output_tokens: 9,
-            output_tokens_details: { reasoning_tokens: 3 },
-          },
+          text: '{"name":"Acme"}',
+          inputTokens: 17,
+          cachedInputTokens: 5,
+          outputTokens: 9,
+          reasoningTokens: 3,
         },
         { "x-oneapi-request-id": OPENAI_REQUEST_ID },
       );
@@ -147,6 +198,7 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(request.headers.authorization).toBe(`Bearer ${FIXTURE_API_KEY}`);
     expect(request.body).toMatchObject({
       model: "gpt-5.6-terra",
+      stream: true,
       max_output_tokens: 128,
       reasoning: { effort: "high" },
       text: {
@@ -368,34 +420,20 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(gateway.observed).toHaveLength(0);
   });
 
-  it("preserves settlement metadata when structured output validation fails", async () => {
-    const gateway = await startFakeGateway((_request, response) => {
-      sendJson(
+  it("preserves settlement metadata when streamed structured output validation fails", async () => {
+    const gateway = await startFakeGateway((_request, response, observed) => {
+      if (observed.body.stream !== true) {
+        sendJson(response, 400, { error: { message: "stream required" } });
+        return;
+      }
+      sendOpenAiResponsesStream(
         response,
-        200,
         {
-          id: "resp_invalid",
-          created_at: 1_786_000_000,
           model: "gpt-5.6-terra-resolved",
-          output: [
-            {
-              type: "message",
-              id: "msg_invalid",
-              role: "assistant",
-              content: [
-                {
-                  type: "output_text",
-                  text: '{"name":42}',
-                  annotations: [],
-                },
-              ],
-            },
-          ],
-          usage: {
-            input_tokens: 13,
-            output_tokens: 6,
-            output_tokens_details: { reasoning_tokens: 2 },
-          },
+          text: '{"name":42}',
+          inputTokens: 13,
+          outputTokens: 6,
+          reasoningTokens: 2,
         },
         { "x-oneapi-request-id": INVALID_REQUEST_ID },
       );
