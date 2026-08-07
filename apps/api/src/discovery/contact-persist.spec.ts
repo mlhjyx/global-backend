@@ -225,6 +225,22 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     expect(createdKey).not.toContain('anna'); // 明文 email 不泄进去重键
     expect(createdKey).not.toContain('e:'); // 非 legacy 明文键形
   });
+
+  it('scopes a role mailbox identity to the company before blind-key persistence', async () => {
+    const { tx, canonicalUpsert } = fakeTx([]);
+    await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'public_web',
+      contacts: [{ externalId: 'switchboard-1', fullName: 'Sales Desk', email: 'info@shared.example' }],
+      suppressedEmails: new Set(),
+    });
+
+    expect(upsertDedupeKey(canonicalUpsert)).toBe(
+      blindContactKey(contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, company.dedupeKey)),
+    );
+    expect(upsertDedupeKey(canonicalUpsert)).not.toBe(blindContactKey('e:info@shared.example'));
+  });
 });
 
 describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63）', () => {

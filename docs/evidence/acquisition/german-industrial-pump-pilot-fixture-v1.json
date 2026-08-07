@@ -1,0 +1,102 @@
+{
+  "contractVersion": "acquisition-identity-pilot-fixture/2026-08-07-v1",
+  "classification": "SYNTHETIC_PUBLIC_SAFE",
+  "workspace": {
+    "id": "00000000-0000-4000-8000-000000000701",
+    "label": "synthetic-german-industrial-pump-pilot"
+  },
+  "icp": {
+    "id": "00000000-0000-4000-8000-000000000702",
+    "name": "German industrial-pump importer and procurement pilot",
+    "country": "DE",
+    "productTerms": [
+      "industrial pump",
+      "centrifugal pump",
+      "process pump"
+    ],
+    "buyerOrganizationTypes": [
+      "industrial importer",
+      "procurement organization"
+    ]
+  },
+  "records": [
+    {
+      "fixtureId": "authoritative-country-qualified-id",
+      "source": "ted",
+      "incoming": {
+        "name": "Nordstern Pumpenhandel GmbH",
+        "country": "DE",
+        "identifier": {
+          "scheme": "ted-natid:de",
+          "value": "SYNTH-DE-991002"
+        }
+      },
+      "candidates": [
+        {
+          "dedupeKey": "id:ted-natid:de:synthde991002",
+          "name": "Nordstern Pumpenhandel GmbH",
+          "country": "DE"
+        }
+      ],
+      "expectedDecision": "AUTO_LINK"
+    },
+    {
+      "fixtureId": "compatible-registrable-domain",
+      "source": "public_web",
+      "incoming": {
+        "name": "Rheinland Pumpensysteme GmbH",
+        "legalName": "Rheinland Pumpensysteme GmbH",
+        "country": "DE",
+        "domain": "procurement.rheinland-pumpen.example"
+      },
+      "candidates": [
+        {
+          "dedupeKey": "d:rheinland-pumpen.example",
+          "name": "Rheinland Pumpensysteme GmbH",
+          "legalName": "Rheinland Pumpensysteme GmbH",
+          "country": "DE",
+          "domain": "www.rheinland-pumpen.example"
+        }
+      ],
+      "expectedDecision": "AUTO_LINK"
+    },
+    {
+      "fixtureId": "shared-group-domain-ambiguity",
+      "source": "public_web",
+      "incoming": {
+        "name": "Rheinland Pumpen Service GmbH",
+        "legalName": "Rheinland Pumpen Service GmbH",
+        "country": "DE",
+        "domain": "service.rheinland-group.example",
+        "sharedGroupAmbiguity": true
+      },
+      "candidates": [
+        {
+          "dedupeKey": "d:rheinland-group.example",
+          "name": "Rheinland Pumpen Holding GmbH",
+          "legalName": "Rheinland Pumpen Holding GmbH",
+          "country": "DE",
+          "domain": "rheinland-group.example"
+        }
+      ],
+      "expectedDecision": "REVIEW_LINK"
+    },
+    {
+      "fixtureId": "name-country-only",
+      "source": "ted",
+      "incoming": {
+        "name": "Muster Pumpenhandel GmbH",
+        "country": "DE"
+      },
+      "candidates": [
+        {
+          "dedupeKey": "n:muster pumpenhandel:de",
+          "name": "Muster Pumpenhandel GmbH",
+          "country": "DE"
+        }
+      ],
+      "expectedDecision": "REVIEW_LINK"
+    }
+  ],
+  "enrichmentSource": "gleif"
+}

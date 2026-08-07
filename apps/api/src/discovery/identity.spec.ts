@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  automaticCanonicalKey,
   companyIdentity,
+  contactEmailKind,
   contactIdentity,
   contactSuppressionKeys,
   declinedContactIdentity,
+  IdentityReviewRequiredError,
   normalizeCompanyName,
   normalizeDomain,
+  normalizeRegistrableDomain,
+  resolveCompanyIdentity,
 } from './identity';
 
 describe('identity resolution（PRD 8.8 确定性规则）', () => {
@@ -34,6 +39,151 @@ describe('identity resolution（PRD 8.8 确定性规则）', () => {
     const a = companyIdentity({ name: 'Acme', domain: 'www.acme.com' });
     const b = companyIdentity({ name: 'ACME Inc.', domain: 'https://acme.com' });
     expect(a.dedupeKey).toBe(b.dedupeKey);
+  });
+});
+
+describe('controlled pilot company identity decisions', () => {
+  it('normalizes a host to its registrable domain without changing the legacy host normalizer', () => {
+    expect(normalizeDomain('https://sales.eu.pumpenwerk.de/catalog')).toBe('sales.eu.pumpenwerk.de');
+    expect(normalizeRegistrableDomain('https://sales.eu.pumpenwerk.de/catalog')).toBe('pumpenwerk.de');
+    expect(normalizeRegistrableDomain('https://branch.example.co.uk')).toBe('example.co.uk');
+  });
+
+  it('AUTO_LINKs an exact authoritative country-qualified identifier', () => {
+    const decision = resolveCompanyIdentity({
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        identifier: { scheme: 'ted-natid:de', value: 'DE 991 002' },
+      },
+      candidates: [
+        {
+          dedupeKey: 'id:ted-natid:de:de991002',
+          name: 'Nordstern Pumpenhandel GmbH',
+          country: 'DE',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'AUTO_LINK',
+      identity: { dedupeKey: 'id:ted-natid:de:de991002', matchRule: 'identifier_exact' },
+      ambiguous: false,
+      recommendationEligible: true,
+    });
+    expect(automaticCanonicalKey(decision)).toBe('id:ted-natid:de:de991002');
+  });
+
+  it('AUTO_LINKs a registrable domain only with compatible country and legal-name evidence', () => {
+    const decision = resolveCompanyIdentity({
+      incoming: {
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        domain: 'procurement.rheinland-pumpen.de',
+      },
+      candidates: [
+        {
+          dedupeKey: 'd:rheinland-pumpen.de',
+          name: 'Rheinland Pumpensysteme GmbH',
+          legalName: 'Rheinland Pumpensysteme GmbH',
+          country: 'DE',
+          domain: 'www.rheinland-pumpen.de',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'AUTO_LINK',
+      identity: { dedupeKey: 'd:rheinland-pumpen.de', matchRule: 'domain_exact' },
+      ambiguous: false,
+      recommendationEligible: true,
+    });
+  });
+
+  it.each([
+    {
+      label: 'country conflict',
+      incoming: { name: 'Rheinland Pumpensysteme GmbH', legalName: 'Rheinland Pumpensysteme GmbH', country: 'AT' },
+      candidate: { name: 'Rheinland Pumpensysteme GmbH', legalName: 'Rheinland Pumpensysteme GmbH', country: 'DE' },
+      reason: 'COUNTRY_CONFLICT',
+    },
+    {
+      label: 'legal-name conflict',
+      incoming: { name: 'Rheinland Pumpen Service GmbH', legalName: 'Rheinland Pumpen Service GmbH', country: 'DE' },
+      candidate: { name: 'Rheinland Pumpen Holding GmbH', legalName: 'Rheinland Pumpen Holding GmbH', country: 'DE' },
+      reason: 'LEGAL_NAME_CONFLICT',
+    },
+    {
+      label: 'shared group ambiguity',
+      incoming: {
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        sharedGroupAmbiguity: true,
+      },
+      candidate: { name: 'Rheinland Pumpensysteme GmbH', legalName: 'Rheinland Pumpensysteme GmbH', country: 'DE' },
+      reason: 'SHARED_GROUP_DOMAIN',
+    },
+  ])('keeps a domain match in REVIEW_LINK on $label', ({ incoming, candidate, reason }) => {
+    const decision = resolveCompanyIdentity({
+      incoming: { ...incoming, domain: 'rheinland-pumpen.de' },
+      candidates: [
+        {
+          ...candidate,
+          dedupeKey: 'd:rheinland-pumpen.de',
+          domain: 'rheinland-pumpen.de',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'REVIEW_LINK',
+      ambiguous: true,
+      recommendationEligible: false,
+    });
+    expect(decision.reasons).toContain(reason);
+    expect(() => automaticCanonicalKey(decision)).toThrow(IdentityReviewRequiredError);
+  });
+
+  it('never automatically canonicalizes name_country evidence', () => {
+    const decision = resolveCompanyIdentity({
+      incoming: { name: 'Muster Pumpenhandel GmbH', country: 'DE' },
+      candidates: [
+        {
+          dedupeKey: 'n:muster pumpenhandel:de',
+          name: 'Muster Pumpenhandel GmbH',
+          country: 'DE',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'REVIEW_LINK',
+      identity: { matchRule: 'name_country' },
+      recommendationEligible: false,
+    });
+    expect(() => automaticCanonicalKey(decision)).toThrow(IdentityReviewRequiredError);
+  });
+});
+
+describe('role mailbox identity scope', () => {
+  it('classifies common role mailboxes with the same conservative policy as acquisition cleaning', () => {
+    expect(contactEmailKind('info@pumpen.example')).toBe('role');
+    expect(contactEmailKind('sales2@pumpen.example')).toBe('role');
+    expect(contactEmailKind('max@pumpen.example')).toBe('personal');
+  });
+
+  it('includes company scope for role mailboxes but retains personal-email compatibility', () => {
+    const roleA = contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, 'd:company-a.example');
+    const roleB = contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, 'd:company-b.example');
+    expect(roleA).toBe('re:d:company-a.example:info@shared.example');
+    expect(roleB).toBe('re:d:company-b.example:info@shared.example');
+    expect(roleA).not.toBe(roleB);
+
+    expect(contactIdentity({ fullName: 'Max Muster', email: 'max@shared.example' }, 'd:company-a.example')).toBe(
+      contactIdentity({ fullName: 'Max Muster', email: 'max@shared.example' }, 'd:company-b.example'),
+    );
   });
 });
 

@@ -280,6 +280,55 @@ describe('scoreLead — Reachability 硬底（非权威路径同样生效）', (
   });
 });
 
+describe('scoreLead — unresolved company identity is never recommended', () => {
+  const reachable = {
+    contacts: [
+      { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+      { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+    ],
+  };
+
+  it('keeps a legacy name_country canonical in needs_review even when score and reachability pass', () => {
+    const result = scoreLead(
+      company({ dedupeKey: 'n:muster pumpenhandel:de', ...reachable }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(result.totalScore).toBeGreaterThanOrEqual(0.55);
+    expect(result.scores.reachability).toBeGreaterThan(0);
+    expect(result.queue).toBe('needs_review');
+    expect(result.detail.notes).toContain('公司身份仍需人工复核 —— 禁止进入推荐队列');
+  });
+
+  it('keeps an explicitly ambiguous provisional identity in needs_review', () => {
+    const result = scoreLead(
+      company({
+        dedupeKey: 'review:raw-name-country-1',
+        attributes: {
+          identity_resolution: {
+            decision: 'REVIEW_LINK',
+            ambiguous: true,
+            recommendation_eligible: false,
+          },
+        },
+        ...reachable,
+      }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(result.queue).toBe('needs_review');
+  });
+
+  it('does not regress a safely resolved domain identity', () => {
+    const result = scoreLead(
+      company({ dedupeKey: 'd:nordstern-pumpen.example', ...reachable }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(result.queue).toBe('recommended');
+  });
+});
+
 describe('scoreLead — Fit 维值域护栏（J：clamp01 系统边界兜底）', () => {
   it('负权重混入（绕过 DTO 的历史/直写数据）→ 归一化比可超 1，fit 与总分仍被夹回 [0,1]', () => {
     // nice-to-have 权重 [5, -4]：分母 total=1，命中 weight=5 的规则 → got/total=5 → 未夹取时
