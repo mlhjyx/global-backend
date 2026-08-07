@@ -83,4 +83,14 @@ describe('suppression release policy', () => {
       ),
     ).toThrowError(/INVALID_JUSTIFICATION/);
   });
+
+  it.each([
+    'The address jane@example.com belongs to someone else',
+    'Call +49 30 1234 5678 to confirm',
+    'token=do-not-store-this',
+  ])('rejects personal or credential material in justification: %s', (justification) => {
+    expect(() =>
+      evaluateSuppressionReleaseRequest(request({ justification })),
+    ).toThrowError(/JUSTIFICATION_SENSITIVE_DATA_FORBIDDEN/);
+  });
 });
