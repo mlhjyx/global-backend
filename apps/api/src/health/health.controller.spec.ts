@@ -18,9 +18,11 @@ const BUILD_HEALTH = Object.freeze({
   missingFields: [] as const,
 });
 
-function controller(readinessResult: { status: 'READY' | 'NOT_READY' }) {
+function makeController(readinessResult: { status: 'READY' | 'NOT_READY' }) {
   const queryRaw = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
-  const runtime = { getBuildHealth: () => BUILD_HEALTH } as unknown as RuntimeIdentityService;
+  const runtime = {
+    getBuildHealth: () => BUILD_HEALTH,
+  } as unknown as RuntimeIdentityService;
   const readiness = {
     check: vi.fn().mockResolvedValue({
       ...readinessResult,
@@ -41,32 +43,43 @@ function controller(readinessResult: { status: 'READY' | 'NOT_READY' }) {
 
 describe('HealthController', () => {
   it('preserves /health and /health/db behavior', async () => {
-    const { controller, queryRaw } = controller({ status: 'READY' });
+    const { controller, queryRaw } = makeController({ status: 'READY' });
 
-    expect(controller.check()).toMatchObject({ status: 'ok', service: 'global-api' });
+    expect(controller.check()).toMatchObject({
+      status: 'ok',
+      service: 'global-api',
+    });
     expect(Number.isNaN(Date.parse(controller.check().ts))).toBe(false);
     await expect(controller.db()).resolves.toEqual({ db: 'ok' });
     expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('exposes separate liveness and injected build provenance', () => {
-    const { controller } = controller({ status: 'READY' });
+    const { controller } = makeController({ status: 'READY' });
 
-    expect(controller.live()).toMatchObject({ status: 'ok', service: 'global-api' });
+    expect(controller.live()).toMatchObject({
+      status: 'ok',
+      service: 'global-api',
+    });
     expect(controller.build()).toEqual(BUILD_HEALTH);
   });
 
   it.each([
     ['READY', 200],
     ['NOT_READY', 503],
-  ] as const)('maps %s readiness to HTTP %i without an error envelope', async (status, httpStatus) => {
-    const { controller } = controller({ status });
-    const response = { status: vi.fn().mockReturnThis() } as unknown as Response;
+  ] as const)(
+    'maps %s readiness to HTTP %i without an error envelope',
+    async (status, httpStatus) => {
+      const { controller } = makeController({ status });
+      const response = {
+        status: vi.fn().mockReturnThis(),
+      } as unknown as Response;
 
-    const body = await controller.ready(response);
+      const body = await controller.ready(response);
 
-    expect(response.status).toHaveBeenCalledWith(httpStatus);
-    expect(body.status).toBe(status);
-    expect(body).not.toHaveProperty('error');
-  });
+      expect(response.status).toHaveBeenCalledWith(httpStatus);
+      expect(body.status).toBe(status);
+      expect(body).not.toHaveProperty('error');
+    },
+  );
 });

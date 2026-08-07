@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { TemporalModule } from './temporal/temporal.module';
 import { RelayModule } from './relay/relay.module';
+import { HealthModule } from './health/health.module';
 import { HealthController } from './health/health.controller';
 import { WhoamiController } from './whoami/whoami.controller';
 import { CompanyModule } from './company/company.module';
@@ -39,6 +40,7 @@ import { ModelRuntimeModule } from './model-runtime';
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,
+    HealthModule,
     CompanyModule,
     ClaimModule,
     IcpModule,

@@ -26,12 +26,18 @@ describe('ReadinessService', () => {
   it('returns READY only when every required typed check passes', async () => {
     const service = new ReadinessService(
       [
-        probe('configuration', true, { status: 'PASS', code: 'CONFIGURATION_VALID' }),
+        probe('configuration', true, {
+          status: 'PASS',
+          code: 'CONFIGURATION_VALID',
+        }),
         probe('build_identity', true, {
           status: 'PASS',
           code: 'BUILD_IDENTITY_VERIFIED',
         }),
-        probe('database', true, { status: 'PASS', code: 'DATABASE_REACHABLE' }),
+        probe('database', true, {
+          status: 'PASS',
+          code: 'DATABASE_REACHABLE_AND_MIGRATED',
+        }),
         probe('temporal', true, { status: 'PASS', code: 'TEMPORAL_REACHABLE' }),
         probe('worker_heartbeat', false, {
           status: 'UNVERIFIED',
@@ -51,7 +57,10 @@ describe('ReadinessService', () => {
   it('makes an unavailable required proof source an explicit NOT_READY gate', async () => {
     const service = new ReadinessService(
       [
-        probe('database', true, { status: 'PASS', code: 'DATABASE_REACHABLE' }),
+        probe('database', true, {
+          status: 'PASS',
+          code: 'DATABASE_REACHABLE_AND_MIGRATED',
+        }),
         probe('worker_heartbeat', true, {
           status: 'UNVERIFIED',
           code: 'PROOF_SOURCE_UNAVAILABLE',
@@ -69,7 +78,7 @@ describe('ReadinessService', () => {
           name: 'database',
           required: true,
           status: 'PASS',
-          code: 'DATABASE_REACHABLE',
+          code: 'DATABASE_REACHABLE_AND_MIGRATED',
         },
         {
           name: 'worker_heartbeat',
@@ -105,6 +114,30 @@ describe('ReadinessService', () => {
     });
     expect(JSON.stringify(result)).not.toContain('secret');
     expect(JSON.stringify(result)).not.toContain('postgresql://');
+  });
+
+  it('rejects a valid code paired with an inconsistent status', async () => {
+    const service = new ReadinessService(
+      [
+        probe('gateway_admission', true, {
+          status: 'PASS',
+          code: 'PROOF_SOURCE_UNAVAILABLE',
+        }),
+      ],
+      { timeoutMs: 25, now: () => NOW },
+    );
+
+    await expect(service.check()).resolves.toMatchObject({
+      status: 'NOT_READY',
+      checks: [
+        {
+          name: 'gateway_admission',
+          required: true,
+          status: 'FAIL',
+          code: 'PROBE_FAILED',
+        },
+      ],
+    });
   });
 
   it('bounds stalled probes and fails closed with PROBE_TIMEOUT', async () => {

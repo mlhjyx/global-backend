@@ -20,4 +20,30 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.connection?.close();
   }
+
+  /** Bounded connectivity proof for API readiness; response contents are never exposed. */
+  async checkSystemInfo(options: {
+    readonly timeoutMs: number;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
+    const connection = this.connection;
+    if (!connection) throw new Error('Temporal connection is not initialized');
+    if (
+      !Number.isInteger(options.timeoutMs) ||
+      options.timeoutMs <= 0 ||
+      options.timeoutMs > 10_000
+    ) {
+      throw new Error(
+        'Temporal health timeout must be an integer between 1 and 10000ms',
+      );
+    }
+
+    const request = () =>
+      connection.workflowService.getSystemInfo({}).then(() => undefined);
+    await connection.withDeadline(Date.now() + options.timeoutMs, () =>
+      options.signal
+        ? connection.withAbortSignal(options.signal, request)
+        : request(),
+    );
+  }
 }
