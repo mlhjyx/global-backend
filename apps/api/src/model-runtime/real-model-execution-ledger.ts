@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, unlink } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -22,7 +23,10 @@ import {
   validateDigest,
   validateIdentifier,
   writeExclusive,
+  type GitAcceptedOutputReplayConsumeInput,
+  type GitAcceptedOutputReplayInput,
   type GitEvidenceAcceptanceInput,
+  type RealCompletedExecutionSnapshot,
   type RealKnownSettlementEvidence,
   type RealLedgerEnvelope,
   type RealLedgerEvent,
@@ -32,12 +36,22 @@ import {
 } from "./real-model-execution-ledger-storage";
 import type { ModelProtocol } from "./types";
 
+const CREATE_HASH = createHash;
+const BUFFER_FROM = Buffer.from.bind(Buffer);
+const OBJECT_KEYS = Object.keys.bind(Object);
+const OBJECT_HAS_OWN = Object.hasOwn.bind(Object);
+
 export {
   REAL_MODEL_EXECUTION_LEDGER_SCHEMA_VERSION,
+  REAL_MODEL_SHARED_CAMPAIGN_BINDING_SCHEMA_VERSION,
+  type GitAcceptedOutputReplayConsumeInput,
+  type GitAcceptedOutputReplayInput,
   type GitEvidenceAcceptanceInput,
+  type RealCompletedExecutionSnapshot,
   type RealKnownSettlementEvidence,
   type RealModelExecutionAuthorization,
   type RealModelExecutionLedgerSummary,
+  type RealModelSharedCampaignBinding,
   type RealWireSettlementProof,
 } from "./real-model-execution-ledger-storage";
 
@@ -747,6 +761,90 @@ export class RealModelExecutionLedger {
     ).digest;
   }
 
+  private completedExecutionSnapshotFromEvents(
+    events: readonly RealLedgerEnvelope[],
+    executionId: string,
+    expectedPlanDigest: string | undefined,
+    failureCode: string,
+  ): RealCompletedExecutionSnapshot {
+    let settlement: RealKnownSettlementEvidence;
+    try {
+      settlement = this.knownSettlementEvidenceFromEvents(
+        events,
+        executionId,
+        expectedPlanDigest,
+      );
+    } catch {
+      return fail(failureCode);
+    }
+    const completionEnvelopes = events.filter(
+      ({ event }) =>
+        event.kind === "execution_completed" &&
+        event.executionId === executionId,
+    );
+    const observations = events.flatMap(({ event }) =>
+      event.kind === "wire_observed" && event.executionId === executionId
+        ? [event]
+        : [],
+    );
+    const firstObservation = observations[0];
+    if (
+      completionEnvelopes.length !== 1 ||
+      firstObservation?.kind !== "wire_observed" ||
+      firstObservation.settlement !== "known" ||
+      observations.some(
+        (observation) =>
+          observation.settlement !== "known" ||
+          observation.requestedAlias !== firstObservation.requestedAlias ||
+          observation.resolvedAlias !== firstObservation.resolvedAlias ||
+          observation.requestedAlias !== observation.resolvedAlias ||
+          observation.protocol !== firstObservation.protocol,
+      )
+    ) {
+      return fail(failureCode);
+    }
+    const completion = completionEnvelopes[0]!;
+    return Object.freeze({
+      schemaVersion:
+        "real-model-completed-execution-snapshot/2026-08-07-v1" as const,
+      executionId,
+      completionSequence: completion.sequence,
+      planDigest: settlement.executionClaim.planDigest,
+      outputDigest: settlement.completion.outputDigest,
+      ledgerDigest: completion.digest,
+      knownSettlementDigest: settlement.digest,
+      alias: firstObservation.resolvedAlias,
+      protocol: firstObservation.protocol,
+      wireCount: observations.length,
+    });
+  }
+
+  async completedExecutionSnapshot(
+    executionId: string,
+    expectedPlanDigest?: string,
+  ): Promise<RealCompletedExecutionSnapshot> {
+    validateIdentifier(executionId, "REAL_MODEL_EXECUTION_ID_INVALID");
+    if (expectedPlanDigest != null) {
+      validateDigest(
+        expectedPlanDigest,
+        "REAL_MODEL_EXECUTION_PLAN_DIGEST_INVALID",
+      );
+    }
+    const ledgerIdentity = await readSecure(this.ledgerPath);
+    if (
+      ledgerIdentity.device !== this.ledgerDevice ||
+      ledgerIdentity.inode !== this.ledgerInode
+    ) {
+      fail("REAL_MODEL_EXECUTION_LEDGER_REPLACED");
+    }
+    return this.completedExecutionSnapshotFromEvents(
+      parseLedger(ledgerIdentity.raw),
+      executionId,
+      expectedPlanDigest,
+      "REAL_MODEL_COMPLETED_EXECUTION_SNAPSHOT_MISMATCH",
+    );
+  }
+
   async executionKnownSettlementEvidence(
     executionId: string,
     expectedPlanDigest?: string,
@@ -856,15 +954,18 @@ export class RealModelExecutionLedger {
       };
       const existingAcceptance = events.find(
         ({ event }) =>
-          event.kind === "git_evidence_acceptance_consumed" &&
+          (event.kind === "git_evidence_acceptance_consumed" ||
+            event.kind === "git_accepted_output_replay_consumed") &&
           (event.acceptanceId === input.acceptanceId ||
             event.executionId === input.executionId ||
             event.artifactDigest === input.artifactDigest),
       );
       if (existingAcceptance != null) {
         if (
+          existingAcceptance.event.kind !==
+            "git_evidence_acceptance_consumed" ||
           canonicalDigest(existingAcceptance.event) !==
-          canonicalDigest(acceptanceEvent)
+            canonicalDigest(acceptanceEvent)
         ) {
           fail("REAL_MODEL_GIT_ACCEPTANCE_ALREADY_CONSUMED");
         }
@@ -909,6 +1010,215 @@ export class RealModelExecutionLedger {
     if (evidenceLedgerDigest != null) return evidenceLedgerDigest;
     const existing = await this.gitEvidenceAcceptanceDigest(input);
     return existing ?? fail("REAL_MODEL_GIT_ACCEPTANCE_BINDING_MISMATCH");
+  }
+
+  private validateGitAcceptedOutputReplay(
+    input: GitAcceptedOutputReplayInput,
+  ): void {
+    this.validateGitEvidenceAcceptance(input);
+    validateIdentifier(input.fixtureId, "REAL_MODEL_GIT_OUTPUT_REPLAY_INVALID");
+    validateDigest(
+      input.outputBytesDigest,
+      "REAL_MODEL_GIT_OUTPUT_REPLAY_INVALID",
+    );
+    validateDigest(
+      input.admissionDigest,
+      "REAL_MODEL_GIT_OUTPUT_REPLAY_INVALID",
+    );
+    if (
+      input.acceptedEvidenceClass !==
+        "git_reviewed_gateway_settlement_accepted" ||
+      input.evidenceKind !== "quality_matrix" ||
+      !safeInteger(input.completionSequence, 1) ||
+      ![0, 1].includes(input.repeatIndex) ||
+      !safeInteger(input.outputByteLength, 1) ||
+      input.outputByteLength > 64 * 1024
+    ) {
+      fail("REAL_MODEL_GIT_OUTPUT_REPLAY_INVALID");
+    }
+  }
+
+  private outputReplayEventInput(
+    input: GitAcceptedOutputReplayConsumeInput,
+  ): GitAcceptedOutputReplayInput {
+    const eventInput: GitAcceptedOutputReplayInput = {
+      acceptanceId: input.acceptanceId,
+      artifactDigest: input.artifactDigest,
+      artifactCommit: input.artifactCommit,
+      mergeCommit: input.mergeCommit,
+      pullRequestNumber: input.pullRequestNumber,
+      acceptedEvidenceClass: input.acceptedEvidenceClass,
+      evidenceKind: input.evidenceKind,
+      candidateReceiptDigest: input.candidateReceiptDigest,
+      executionId: input.executionId,
+      planDigest: input.planDigest,
+      outputDigest: input.outputDigest,
+      candidateLedgerDigest: input.candidateLedgerDigest,
+      fixedSourceCommit: input.fixedSourceCommit,
+      sourceBundleDigest: input.sourceBundleDigest,
+      manifestDigest: input.manifestDigest,
+      admissionDigest: input.admissionDigest,
+      compiledRuntimeDigest: input.compiledRuntimeDigest,
+      compiledBindingDigest: input.compiledBindingDigest,
+      settlementObserverDigest: input.settlementObserverDigest,
+      knownSettlementDigest: input.knownSettlementDigest,
+      alias: input.alias,
+      protocol: input.protocol,
+      reasoning: input.reasoning,
+      completionSequence: input.completionSequence,
+      fixtureId: input.fixtureId,
+      repeatIndex: input.repeatIndex,
+      outputBytesDigest: input.outputBytesDigest,
+      outputByteLength: input.outputByteLength,
+    };
+    const eventKeys = new Set(OBJECT_KEYS(eventInput));
+    const inputKeys = OBJECT_KEYS(input);
+    if (
+      inputKeys.length !== eventKeys.size + 1 ||
+      !OBJECT_HAS_OWN(input, "outputBytes") ||
+      inputKeys.some((key) => key !== "outputBytes" && !eventKeys.has(key)) ||
+      !(input.outputBytes instanceof Uint8Array)
+    ) {
+      fail("REAL_MODEL_GIT_OUTPUT_REPLAY_INVALID");
+    }
+    this.validateGitAcceptedOutputReplay(eventInput);
+    const outputBytes = BUFFER_FROM(input.outputBytes);
+    const observedByteLength = outputBytes.byteLength;
+    const observedBytesDigest = CREATE_HASH("sha256")
+      .update(outputBytes)
+      .digest("hex");
+    if (
+      observedByteLength !== eventInput.outputByteLength ||
+      observedByteLength < 1 ||
+      observedByteLength > 64 * 1024 ||
+      observedBytesDigest !== eventInput.outputBytesDigest ||
+      eventInput.outputBytesDigest !== eventInput.outputDigest
+    ) {
+      fail("REAL_MODEL_GIT_OUTPUT_REPLAY_BINDING_MISMATCH");
+    }
+    return eventInput;
+  }
+
+  async gitAcceptedOutputReplayDigest(
+    input: GitAcceptedOutputReplayInput,
+  ): Promise<string | undefined> {
+    this.validateGitAcceptedOutputReplay(input);
+    const ledgerIdentity = await readSecure(this.ledgerPath);
+    if (
+      ledgerIdentity.device !== this.ledgerDevice ||
+      ledgerIdentity.inode !== this.ledgerInode
+    ) {
+      fail("REAL_MODEL_EXECUTION_LEDGER_REPLACED");
+    }
+    return parseLedger(ledgerIdentity.raw).find(
+      ({ event }) =>
+        event.kind === "git_accepted_output_replay_consumed" &&
+        canonicalDigest(event) ===
+          canonicalDigest({
+            kind: "git_accepted_output_replay_consumed",
+            ...input,
+          }),
+    )?.digest;
+  }
+
+  async consumeGitAcceptedOutputReplay(
+    input: GitAcceptedOutputReplayConsumeInput,
+  ): Promise<string> {
+    const eventInput = this.outputReplayEventInput(input);
+    const replayLedgerDigest = await this.mutate((events) => {
+      const replayEvent = {
+        kind: "git_accepted_output_replay_consumed" as const,
+        ...eventInput,
+      };
+      const existingReplay = events.find(
+        ({ event }) =>
+          (event.kind === "git_evidence_acceptance_consumed" ||
+            event.kind === "git_accepted_output_replay_consumed") &&
+          (event.acceptanceId === eventInput.acceptanceId ||
+            event.executionId === eventInput.executionId ||
+            event.artifactDigest === eventInput.artifactDigest),
+      );
+      if (existingReplay != null) {
+        if (
+          existingReplay.event.kind !== "git_accepted_output_replay_consumed" ||
+          canonicalDigest(existingReplay.event) !== canonicalDigest(replayEvent)
+        ) {
+          fail("REAL_MODEL_GIT_OUTPUT_REPLAY_ALREADY_CONSUMED");
+        }
+        return [];
+      }
+      if (frozen(events)) fail("REAL_MODEL_EXECUTION_CAMPAIGN_FROZEN");
+      const snapshot = this.completedExecutionSnapshotFromEvents(
+        events,
+        eventInput.executionId,
+        eventInput.planDigest,
+        "REAL_MODEL_GIT_OUTPUT_REPLAY_BINDING_MISMATCH",
+      );
+      const binding = this.authorization.evidenceBinding;
+      const sharedCampaignBinding = this.authorization.sharedCampaignBinding;
+      if (
+        (binding == null && sharedCampaignBinding == null) ||
+        snapshot.completionSequence !== eventInput.completionSequence ||
+        snapshot.outputDigest !== eventInput.outputDigest ||
+        snapshot.ledgerDigest !== eventInput.candidateLedgerDigest ||
+        snapshot.knownSettlementDigest !== eventInput.knownSettlementDigest ||
+        snapshot.alias !== eventInput.alias ||
+        snapshot.protocol !== eventInput.protocol ||
+        eventInput.manifestDigest !== this.authorization.manifestDigest ||
+        eventInput.settlementObserverDigest !==
+          this.authorization.settlementObserverDigest ||
+        (binding != null &&
+          (binding.executionId !== eventInput.executionId ||
+            binding.executionPlanDigest !== eventInput.planDigest ||
+            binding.alias !== eventInput.alias ||
+            binding.protocol !== eventInput.protocol ||
+            binding.reasoning !== eventInput.reasoning ||
+            binding.fixtureId !== eventInput.fixtureId ||
+            binding.fixedSourceCommit !== eventInput.fixedSourceCommit ||
+            binding.sourceBundleDigest !== eventInput.sourceBundleDigest ||
+            binding.manifestDigest !== eventInput.manifestDigest ||
+            binding.admissionDigest !== eventInput.admissionDigest ||
+            binding.compiledRuntimeDigest !==
+              eventInput.compiledRuntimeDigest ||
+            binding.compiledBindingDigest !==
+              eventInput.compiledBindingDigest)) ||
+        (sharedCampaignBinding != null &&
+          (sharedCampaignBinding.taskId !== this.campaign.taskId ||
+            sharedCampaignBinding.planDigest !== this.campaign.planDigest ||
+            sharedCampaignBinding.fixedSourceCommit !==
+              eventInput.fixedSourceCommit ||
+            sharedCampaignBinding.sourceBundleDigest !==
+              eventInput.sourceBundleDigest ||
+            sharedCampaignBinding.manifestDigest !==
+              eventInput.manifestDigest ||
+            sharedCampaignBinding.admissionDigest !==
+              eventInput.admissionDigest ||
+            sharedCampaignBinding.credentialAttestationDigest !==
+              this.authorization.credentialAttestationDigest ||
+            sharedCampaignBinding.settlementObserverDigest !==
+              eventInput.settlementObserverDigest ||
+            sharedCampaignBinding.compiledRuntimeDigest !==
+              eventInput.compiledRuntimeDigest ||
+            sharedCampaignBinding.compiledBindingDigest !==
+              eventInput.compiledBindingDigest ||
+            sharedCampaignBinding.maximumExecutions !==
+              this.campaign.maximumExecutions ||
+            sharedCampaignBinding.maximumExecutions !==
+              this.authorization.maximumExecutions ||
+            sharedCampaignBinding.maximumWireCalls !==
+              this.campaign.maximumWireCalls ||
+            sharedCampaignBinding.maximumWireCalls !==
+              this.authorization.maximumWireCalls ||
+            sharedCampaignBinding.maximumRepairCallsPerExecution !==
+              this.authorization.maximumRepairCallsPerExecution))
+      ) {
+        fail("REAL_MODEL_GIT_OUTPUT_REPLAY_BINDING_MISMATCH");
+      }
+      return [replayEvent];
+    });
+    if (replayLedgerDigest != null) return replayLedgerDigest;
+    const existing = await this.gitAcceptedOutputReplayDigest(eventInput);
+    return existing ?? fail("REAL_MODEL_GIT_OUTPUT_REPLAY_BINDING_MISMATCH");
   }
 
   private validateOperatorEvidenceAuthorization(
@@ -1082,6 +1392,10 @@ export class RealModelExecutionLedger {
       gitEvidenceAcceptances: eventCount(
         events,
         "git_evidence_acceptance_consumed",
+      ),
+      gitAcceptedOutputReplays: eventCount(
+        events,
+        "git_accepted_output_replay_consumed",
       ),
       completedExecutions: eventCount(events, "execution_completed"),
       frozen: frozen(events),

@@ -17,7 +17,7 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 export const COPY_QUALITY_MATRIX_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v1.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-quality-matrix-manifest-v2.json" as const;
 
 export interface CopyQualityMatrixSourceFileSpec {
   role: string;
@@ -111,6 +111,14 @@ const SOURCE_FILE_SPECS = [
     path: "apps/api/src/site-builder/eval/copy-quality-evaluator.ts",
   },
   {
+    role: "quality_replay",
+    path: "apps/api/src/site-builder/eval/copy-quality-accepted-replay.ts",
+  },
+  {
+    role: "quality_replay",
+    path: "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts",
+  },
+  {
     role: "quality_matrix_admission",
     path: "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts",
   },
@@ -198,7 +206,7 @@ export function buildCopyQualityMatrixSourceFileSpecs(
 }
 
 export interface CopyQualityMatrixSourceBundle {
-  schemaVersion: "site-builder-copy-quality-matrix-source-bundle/2026-08-06-v1";
+  schemaVersion: "site-builder-copy-quality-matrix-source-bundle/2026-08-07-v2";
   files: readonly CopyQualityMatrixSourceFile[];
   digest: string;
 }
@@ -211,8 +219,8 @@ export interface CopyQualityMatrixSourceDigests {
 }
 
 export interface CopyQualityMatrixManifest {
-  schemaVersion: "site-builder-copy-quality-matrix-manifest/2026-08-06-v1";
-  manifestId: "site-builder-copy-quality-matrix/2026-08-06-v1";
+  schemaVersion: "site-builder-copy-quality-matrix-manifest/2026-08-07-v2";
+  manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2";
   purpose: "site_builder_copy_quality_matrix";
   fixedSourceCommit: string;
   sourceBundleDigest: string;
@@ -222,12 +230,16 @@ export interface CopyQualityMatrixManifest {
   plannedExecutions: 36;
   maximumWireCalls: 72;
   maximumRepairCallsPerExecution: 1;
+  ledgerTopology: "shared_campaign_ledger";
+  acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted";
+  evidenceKind: "quality_matrix";
+  outputReplayPolicy: "git_reviewed_canonical_output_bytes_consume_once";
   executions: readonly CopyQualityMatrixExecution[];
 }
 
 export interface CopyQualityMatrixManifestArtifact {
-  schemaVersion: "site-builder-copy-quality-matrix-manifest-prep/2026-08-06-v1";
-  artifactId: "site-builder-copy-quality-matrix-manifest-prep/2026-08-06-v1";
+  schemaVersion: "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2";
+  artifactId: "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2";
   classification: "FIXED_SOURCE_CREATE_ONLY";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -333,7 +345,7 @@ function buildSourceDigests(
     runner: digestFilesByRoles(files, new Set(["quality_matrix_runner"])),
     evaluator: digestFilesByRoles(
       files,
-      new Set(["quality_evaluator", "quality_rubric"]),
+      new Set(["quality_evaluator", "quality_replay", "quality_rubric"]),
     ),
     fixtures: digestFilesByRoles(files, new Set(["quality_fixture"])),
     runtime: digestFilesByRoles(files, runtimeRoles),
@@ -357,7 +369,14 @@ function assertMatrixContracts(): void {
       "site_builder_copy_quality_matrix" ||
     COPY_QUALITY_MATRIX_ADMISSION_SOURCE.plannedExecutions !== 36 ||
     COPY_QUALITY_MATRIX_ADMISSION_SOURCE.maximumWireCalls !== 72 ||
-    COPY_QUALITY_MATRIX_ADMISSION_SOURCE.maximumRepairCallsPerExecution !== 1
+    COPY_QUALITY_MATRIX_ADMISSION_SOURCE.maximumRepairCallsPerExecution !== 1 ||
+    COPY_QUALITY_MATRIX_ADMISSION_SOURCE.ledgerTopology !==
+      "shared_campaign_ledger" ||
+    COPY_QUALITY_MATRIX_ADMISSION_SOURCE.acceptedEvidenceClass !==
+      "git_reviewed_gateway_settlement_accepted" ||
+    COPY_QUALITY_MATRIX_ADMISSION_SOURCE.evidenceKind !== "quality_matrix" ||
+    COPY_QUALITY_MATRIX_ADMISSION_SOURCE.outputReplayPolicy !==
+      "git_reviewed_canonical_output_bytes_consume_once"
   ) {
     fail("COPY_QUALITY_MATRIX_CONTRACT_INVALID");
   }
@@ -384,7 +403,7 @@ export function buildCopyQualityMatrixManifestArtifact(input: {
   );
   const sourceBundle = Object.freeze({
     schemaVersion:
-      "site-builder-copy-quality-matrix-source-bundle/2026-08-06-v1" as const,
+      "site-builder-copy-quality-matrix-source-bundle/2026-08-07-v2" as const,
     files,
     digest: canonicalDigest(files),
   });
@@ -396,8 +415,8 @@ export function buildCopyQualityMatrixManifestArtifact(input: {
   );
   const manifest = Object.freeze({
     schemaVersion:
-      "site-builder-copy-quality-matrix-manifest/2026-08-06-v1" as const,
-    manifestId: "site-builder-copy-quality-matrix/2026-08-06-v1" as const,
+      "site-builder-copy-quality-matrix-manifest/2026-08-07-v2" as const,
+    manifestId: "site-builder-copy-quality-matrix/2026-08-07-v2" as const,
     purpose: "site_builder_copy_quality_matrix" as const,
     fixedSourceCommit: input.fixedSourceCommit,
     sourceBundleDigest: sourceBundle.digest,
@@ -407,13 +426,18 @@ export function buildCopyQualityMatrixManifestArtifact(input: {
     plannedExecutions: 36 as const,
     maximumWireCalls: 72 as const,
     maximumRepairCallsPerExecution: 1 as const,
+    ledgerTopology: "shared_campaign_ledger" as const,
+    acceptedEvidenceClass: "git_reviewed_gateway_settlement_accepted" as const,
+    evidenceKind: "quality_matrix" as const,
+    outputReplayPolicy:
+      "git_reviewed_canonical_output_bytes_consume_once" as const,
     executions,
   });
   const withoutDigest = {
     schemaVersion:
-      "site-builder-copy-quality-matrix-manifest-prep/2026-08-06-v1" as const,
+      "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2" as const,
     artifactId:
-      "site-builder-copy-quality-matrix-manifest-prep/2026-08-06-v1" as const,
+      "site-builder-copy-quality-matrix-manifest-prep/2026-08-07-v2" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
     fixedSourceCommit: input.fixedSourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,

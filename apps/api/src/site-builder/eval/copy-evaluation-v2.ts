@@ -16,6 +16,7 @@ import {
   type CopyEvaluationV2Candidate,
 } from "./copy-evaluation-v2-candidates";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
+import { COPY_QUALITY_ACCEPTED_REPLAY_SCHEMA_VERSION } from "./copy-quality-accepted-replay";
 import {
   COPY_QUALITY_GATE,
   COPY_QUALITY_REVIEW_SCHEMA_VERSION,
@@ -24,7 +25,7 @@ import {
 } from "./copy-quality-rubric";
 
 export const COPY_EVALUATION_V2_SCHEMA_VERSION =
-  "site-builder-copy-evaluation-plan/2026-08-07-v5" as const;
+  "site-builder-copy-evaluation-plan/2026-08-07-v6" as const;
 
 const COPY_PROFILE = "copy.premium" as const;
 const CURRENT_TASK_CONTRACT_VERSION =
@@ -146,7 +147,7 @@ const EVALUATOR_ADMISSION_STATUS = exactList(
   CURRENT_SCORED_DIMENSIONS,
   SCORED_DIMENSIONS,
 )
-  ? "BLOCKED_ON_DURABLE_ACCEPTED_ARTIFACT_REPLAY"
+  ? "READY"
   : "BLOCKED_ON_SCORED_EVALUATOR";
 const CANDIDATE_ADMISSION_STATUS = exactList(CURRENT_ALIASES, REQUIRED_ALIASES)
   ? exactList(
@@ -304,10 +305,10 @@ const PLAN = {
     findingVocabulary: "closed_code_only",
     reviewerPolicy: "human_blind_or_independent_model_with_provider_separation",
     candidateIdentityVisibleToReviewer: false,
-    executionReceiptPolicy:
-      "blocked_pending_restart_safe_git_reviewed_quality_replay",
+    executionReceiptPolicy: "restart_safe_git_reviewed_quality_output_replay",
     evidenceAcceptance: {
-      status: "NOT_IMPLEMENTED_FOR_QUALITY_MATRIX",
+      replayContractVersion: COPY_QUALITY_ACCEPTED_REPLAY_SCHEMA_VERSION,
+      status: "IMPLEMENTED_RESTART_SAFE",
       requiredClass: "git_reviewed_gateway_settlement_accepted",
       requiredKind: "quality_matrix",
       gitReviewPolicy: "immutable_artifact_on_merged_commit_required",
@@ -316,6 +317,10 @@ const PLAN = {
         "reopen_accepted_ledger_consume_once_and_verify_persisted_output_bytes",
       identityBindingPolicy:
         "candidate_fixture_repeat_input_prompt_plan_output_and_settlement",
+      outputBytesPolicy:
+        "canonical_utf8_json_exact_digest_and_length_max_65536",
+      ledgerConsumptionPolicy:
+        "one_shot_shared_git_acceptance_identity_namespace",
     },
     repeatBindingPolicy: "candidate_fixture_repeat_execution_output_digest",
     stabilityPolicy: "deterministic_two_repeat_normalized_token_dice",
@@ -348,14 +353,17 @@ const PLAN = {
     status:
       CANDIDATE_ADMISSION_STATUS !== "READY"
         ? CANDIDATE_ADMISSION_STATUS
-        : EVALUATOR_ADMISSION_STATUS,
+        : EVALUATOR_ADMISSION_STATUS === "READY"
+          ? "BLOCKED_BEFORE_CAPABILITY_PILOT_RESULT"
+          : EVALUATOR_ADMISSION_STATUS,
   },
   hardGates: HARD_GATES,
   scoredDimensions: SCORED_DIMENSIONS,
   cachePolicy: {
     exactResultCache: "disabled_for_evaluation",
     repeatIdentity: "distinct_execution_and_cache_identity_per_repeat",
-    durableReplay: "same_physical_execution_only",
+    durableReplay:
+      "git_reviewed_exact_output_bytes_same_physical_execution_only",
   },
   settlementPolicy: "known_per_physical_call_required",
   decisionBoundaries: DECISION_BOUNDARIES,

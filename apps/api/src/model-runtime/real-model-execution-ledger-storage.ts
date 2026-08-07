@@ -11,9 +11,30 @@ export const REAL_MODEL_EXECUTION_LEDGER_SCHEMA_VERSION =
   "real-model-execution-ledger/2026-08-05-v1" as const;
 export const AUTHORIZATION_CLAIM_SCHEMA_VERSION =
   "real-model-execution-authorization-claim/2026-08-05-v1" as const;
+export const REAL_MODEL_SHARED_CAMPAIGN_BINDING_SCHEMA_VERSION =
+  "real-model-shared-campaign-binding/2026-08-07-v1" as const;
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
+
+export interface RealModelSharedCampaignBinding {
+  schemaVersion: typeof REAL_MODEL_SHARED_CAMPAIGN_BINDING_SCHEMA_VERSION;
+  purpose: string;
+  ledgerTopology: string;
+  taskId: string;
+  planDigest: string;
+  fixedSourceCommit: string;
+  sourceBundleDigest: string;
+  manifestDigest: string;
+  admissionDigest: string;
+  credentialAttestationDigest: string;
+  settlementObserverDigest: string;
+  compiledRuntimeDigest: string;
+  compiledBindingDigest: string;
+  maximumExecutions: number;
+  maximumWireCalls: number;
+  maximumRepairCallsPerExecution: number;
+}
 
 export interface RealModelExecutionAuthorization {
   authorizationId: string;
@@ -26,6 +47,7 @@ export interface RealModelExecutionAuthorization {
   maximumExecutions: number;
   maximumWireCalls: number;
   maximumRepairCallsPerExecution: number;
+  sharedCampaignBinding?: RealModelSharedCampaignBinding;
   evidenceBinding?: {
     schemaVersion: "real-model-execution-evidence-binding/2026-08-07-v1";
     executionId: string;
@@ -124,6 +146,32 @@ export interface GitEvidenceAcceptanceInput {
   reasoning: ReasoningLevel;
 }
 
+export interface RealCompletedExecutionSnapshot {
+  schemaVersion: "real-model-completed-execution-snapshot/2026-08-07-v1";
+  executionId: string;
+  completionSequence: number;
+  planDigest: string;
+  outputDigest: string;
+  ledgerDigest: string;
+  knownSettlementDigest: string;
+  alias: string;
+  protocol: ModelProtocol;
+  wireCount: number;
+}
+
+export interface GitAcceptedOutputReplayInput extends GitEvidenceAcceptanceInput {
+  admissionDigest: string;
+  completionSequence: number;
+  fixtureId: string;
+  repeatIndex: 0 | 1;
+  outputBytesDigest: string;
+  outputByteLength: number;
+}
+
+export interface GitAcceptedOutputReplayConsumeInput extends GitAcceptedOutputReplayInput {
+  outputBytes: Uint8Array;
+}
+
 export type RealLedgerEvent =
   | {
       kind: "campaign_opened";
@@ -176,6 +224,9 @@ export type RealLedgerEvent =
       kind: "operator_evidence_authorization_consumed";
     } & OperatorEvidenceAuthorizationInput)
   | ({ kind: "git_evidence_acceptance_consumed" } & GitEvidenceAcceptanceInput)
+  | ({
+      kind: "git_accepted_output_replay_consumed";
+    } & GitAcceptedOutputReplayInput)
   | { kind: "campaign_frozen"; executionId: string; reason: string };
 
 export interface RealLedgerEnvelope {
@@ -207,6 +258,7 @@ export interface RealModelExecutionLedgerSummary extends ModelExecutionLedgerSum
   repairPlans: number;
   operatorEvidenceAuthorizations: number;
   gitEvidenceAcceptances: number;
+  gitAcceptedOutputReplays: number;
 }
 
 export function fail(code: string): never {
@@ -301,6 +353,51 @@ export function validateAuthorization(
       value.evidenceBinding.compiledBindingDigest,
     ]) {
       validateDigest(digest, "REAL_MODEL_AUTHORIZATION_INVALID");
+    }
+  }
+  if (value.sharedCampaignBinding != null) {
+    const binding = value.sharedCampaignBinding;
+    for (const identifier of [
+      binding.purpose,
+      binding.ledgerTopology,
+      binding.taskId,
+    ]) {
+      validateIdentifier(identifier, "REAL_MODEL_AUTHORIZATION_INVALID");
+    }
+    if (
+      binding.schemaVersion !==
+        REAL_MODEL_SHARED_CAMPAIGN_BINDING_SCHEMA_VERSION ||
+      !/^[0-9a-f]{40}$/u.test(binding.fixedSourceCommit)
+    ) {
+      fail("REAL_MODEL_AUTHORIZATION_INVALID");
+    }
+    for (const digest of [
+      binding.planDigest,
+      binding.sourceBundleDigest,
+      binding.manifestDigest,
+      binding.admissionDigest,
+      binding.credentialAttestationDigest,
+      binding.settlementObserverDigest,
+      binding.compiledRuntimeDigest,
+      binding.compiledBindingDigest,
+    ]) {
+      validateDigest(digest, "REAL_MODEL_AUTHORIZATION_INVALID");
+    }
+    if (
+      binding.taskId !== campaign.taskId ||
+      binding.planDigest !== campaign.planDigest ||
+      binding.manifestDigest !== value.manifestDigest ||
+      binding.credentialAttestationDigest !==
+        value.credentialAttestationDigest ||
+      binding.settlementObserverDigest !== value.settlementObserverDigest ||
+      binding.maximumExecutions !== campaign.maximumExecutions ||
+      binding.maximumExecutions !== value.maximumExecutions ||
+      binding.maximumWireCalls !== campaign.maximumWireCalls ||
+      binding.maximumWireCalls !== value.maximumWireCalls ||
+      binding.maximumRepairCallsPerExecution !==
+        value.maximumRepairCallsPerExecution
+    ) {
+      fail("REAL_MODEL_AUTHORIZATION_MISMATCH");
     }
   }
 }
