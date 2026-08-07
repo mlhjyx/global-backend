@@ -2,8 +2,16 @@ import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
-import type { JwksRuntimeConfig } from './auth-runtime-admission';
 import { requestContextFromClaims } from './token-claims';
+
+export interface JwksRuntimeConfig {
+  readonly uri: string;
+  readonly issuer: string;
+  readonly audience: string;
+  readonly clockSkewSeconds: number;
+  readonly workspaceClaim: string;
+  readonly rolesClaim: string;
+}
 
 /**
  * 生产鉴权：校验外部 SaaS 平台签发的 JWT（PRD 12.2；评审点名的越权漏洞修复）。

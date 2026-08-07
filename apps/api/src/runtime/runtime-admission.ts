@@ -106,6 +106,12 @@ const RENDERER_BUILD_ID_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9._+@:/-]{0,127}$/u;
 const JURISDICTIONS = ['EU', 'UK', 'US', 'CN', 'OTHER'] as const;
 const NODE_ENV_VALUES = ['development', 'test', 'production'] as const;
+const LOOPBACK_HOSTNAMES = new Set([
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+  'localhost',
+]);
 
 function invalid(name: string, expectation: string): never {
   throw new Error(`${name} is invalid; ${expectation}`);
@@ -218,14 +224,53 @@ function canonicalHttpUrl(
   return value;
 }
 
+function authIdentityUrl(
+  name: 'AUTH_JWKS_URI' | 'AUTH_ISSUER',
+  value: string,
+  stage: DeploymentStage,
+): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return invalid(name, 'expected an absolute HTTP(S) URL');
+  }
+  const secure = parsed.protocol === 'https:';
+  const loopbackDevelopment =
+    stage === 'development' &&
+    parsed.protocol === 'http:' &&
+    LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase());
+  if (
+    (!secure && !loopbackDevelopment) ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.hash !== ''
+  ) {
+    return invalid(
+      name,
+      'expected HTTPS without credentials or fragments, except loopback HTTP in development',
+    );
+  }
+  // jose compares issuer bytes exactly; validation must not normalize it.
+  return value;
+}
+
 function resolveAuthSafety(
   stage: DeploymentStage,
   env: RuntimeEnvironment,
 ): RuntimeAuthSafety {
   const jwksUriValue = optionalCanonical(env, 'AUTH_JWKS_URI');
   const issuer = optionalCanonical(env, 'AUTH_ISSUER');
-  if ((jwksUriValue === undefined) !== (issuer === undefined)) {
-    throw new Error('AUTH_JWKS_URI and AUTH_ISSUER must be configured together');
+  const audience = optionalCanonical(env, 'AUTH_AUDIENCE');
+  if (
+    [jwksUriValue, issuer, audience].filter(
+      (value): value is string => value !== undefined,
+    ).length !== 0 &&
+    (!jwksUriValue || !issuer || !audience)
+  ) {
+    throw new Error(
+      'AUTH_JWKS_URI, AUTH_ISSUER, and AUTH_AUDIENCE must be configured together',
+    );
   }
   const allowDevelopmentTokens =
     optionalBoolean(env, 'AUTH_ALLOW_DEV_TOKENS') ?? false;
@@ -235,12 +280,17 @@ function resolveAuthSafety(
     );
   }
   if (stage !== 'development' && !jwksUriValue) {
-    throw new Error(`AUTH_JWKS_URI and AUTH_ISSUER are required for ${stage}`);
+    throw new Error(
+      `AUTH_JWKS_URI, AUTH_ISSUER, and AUTH_AUDIENCE are required for ${stage}`,
+    );
   }
   if (stage === 'development' && !jwksUriValue && !allowDevelopmentTokens) {
     throw new Error(
       'AUTH_ALLOW_DEV_TOKENS=true is required to use development tokens without JWKS',
     );
+  }
+  if (audience && audience.length > 512) {
+    return invalid('AUTH_AUDIENCE', 'expected at most 512 characters');
   }
   const mode = jwksUriValue ? 'jwks' : 'development';
   const workspaceClaim =
@@ -255,10 +305,10 @@ function resolveAuthSafety(
   return Object.freeze({
     mode,
     jwksUri: jwksUriValue
-      ? canonicalHttpUrl('AUTH_JWKS_URI', jwksUriValue, stage)
+      ? authIdentityUrl('AUTH_JWKS_URI', jwksUriValue, stage)
       : null,
-    issuer: issuer ?? null,
-    audience: optionalCanonical(env, 'AUTH_AUDIENCE') ?? null,
+    issuer: issuer ? authIdentityUrl('AUTH_ISSUER', issuer, stage) : null,
+    audience: audience ?? null,
     clockSkewSeconds: boundedInteger(
       env,
       'AUTH_CLOCK_SKEW_S',

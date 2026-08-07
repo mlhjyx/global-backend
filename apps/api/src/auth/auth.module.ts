@@ -6,14 +6,16 @@ import {
 import { RoleScopePolicy, ROLE_SCOPE_POLICY } from './auth-scopes';
 import { AuthGuard } from './auth.guard';
 import { DevTokenVerifier } from './dev-token-verifier';
-import type { JwksRuntimeConfig } from './auth-runtime-admission';
-import { JwksTokenVerifier } from './jwks-token-verifier';
+import {
+  JwksTokenVerifier,
+  type JwksRuntimeConfig,
+} from './jwks-token-verifier';
 import { ScopesGuard } from './scopes.guard';
 import { TokenVerifier } from './token-verifier';
 
 /**
  * Identity and authorization consume the single immutable pre-Nest runtime
- * snapshot. No provider re-reads mutable process.env or recomputes stage.
+ * snapshot. No provider re-reads mutable environment state or recomputes stage.
  */
 const logger = new Logger('AuthModule');
 

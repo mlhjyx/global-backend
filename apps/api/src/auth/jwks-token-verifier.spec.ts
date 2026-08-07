@@ -12,7 +12,7 @@ import {
   type JWTPayload,
 } from 'jose';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { JwksRuntimeConfig } from './auth-runtime-admission';
+import type { JwksRuntimeConfig } from './jwks-token-verifier';
 import { JwksTokenVerifier } from './jwks-token-verifier';
 
 const ISSUER = 'https://identity.example.test/';
