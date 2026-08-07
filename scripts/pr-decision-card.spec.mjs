@@ -51,13 +51,14 @@ function body(overrides = {}) {
 `;
 }
 
-function event(cardBody = body(), headSha = HEAD) {
+function event(cardBody = body(), headSha = HEAD, draft = false) {
   return {
     repository: { full_name: "mlhjyx/global-backend" },
     number: 237,
     pull_request: {
       number: 237,
       head: { sha: headSha },
+      draft,
       body: cardBody,
     },
   };
@@ -76,10 +77,20 @@ test("author-controlled positive declarations never become a trusted ready state
     new Date("2026-07-27T12:05:00.000Z"),
   );
   assert.equal(result.status, "CURRENT_UNVERIFIED");
-  assert.equal(result.blocking, false);
+  assert.equal(result.blocking, true);
   assert.equal(result.technicalGate, "PASS");
   assert.equal(result.independentReview, "RECOMMEND_MERGE");
+  assert.match(result.reasons.join(" "), /可信外部 provenance/);
   assert.match(renderDecisionCard(result), /未验证声明/);
+});
+
+test("a Draft may display an unverified merge declaration without blocking planning", () => {
+  const result = evaluateDecisionCard(
+    event(body(), HEAD, true),
+    new Date("2026-07-27T12:05:00.000Z"),
+  );
+  assert.equal(result.status, "CURRENT_UNVERIFIED");
+  assert.equal(result.blocking, false);
 });
 
 test("a future timestamp cannot enter a nonblocking MERGE state", () => {
@@ -93,6 +104,7 @@ test("a future timestamp cannot enter a nonblocking MERGE state", () => {
 });
 
 test("pull_request_target execution is restricted to the default branch", () => {
+  assert.match(WORKFLOW, /name:\s*nontechnical decision card integrity/);
   assert.match(
     WORKFLOW,
     /if:\s*github\.event\.pull_request\.base\.ref\s*==\s*github\.event\.repository\.default_branch/,
@@ -102,6 +114,22 @@ test("pull_request_target execution is restricted to the default branch", () => 
     /ref:\s*\${{\s*github\.event\.pull_request\.base\.sha\s*}}/,
   );
   assert.doesNotMatch(WORKFLOW, /pull_request\.head\.sha/);
+});
+
+test("decision-card workflow actions are pinned to verified full revisions", () => {
+  assert.match(
+    WORKFLOW,
+    /uses:\s*actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\s+# v7/,
+  );
+  assert.match(
+    WORKFLOW,
+    /uses:\s*actions\/setup-node@820762786026740c76f36085b0efc47a31fe5020\s+# v7/,
+  );
+  assert.match(
+    WORKFLOW,
+    /uses:\s*actions\/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd\s+# v8/,
+  );
+  assert.doesNotMatch(WORKFLOW, /uses:\s*[^\s#]+@v\d/);
 });
 
 test("a changed head makes an old MERGE recommendation stale and blocking", () => {

@@ -94,6 +94,11 @@ function releaseBundle(overrides = {}) {
     implementation_commit: SHA_D,
     released_at: "2026-08-07T10:30:00.000Z",
     capability_ids: ["CAP-BUYER-001"],
+    external_provenance: {
+      status: "EXTERNAL_UNVERIFIED",
+      verifier: "NONE",
+      verification_ref: "NONE",
+    },
     traceability_bindings: [
       {
         chain_id: "buyer-discovery-pilot",
@@ -471,9 +476,12 @@ test("internal-only traceability preserves missing runtime proof without pretend
   );
 });
 
-test("Release Bundle keeps machine, reviewer, and user authorization evidence separate", () => {
+test("Release Bundle keeps decision lanes separate but documentary until external readback", () => {
   const context = releaseValidationContext();
-  assert.deepEqual(validateReleaseBundle(releaseBundle(), context).issues, []);
+  assert.deepEqual(
+    issueCodes(validateReleaseBundle(releaseBundle(), context)),
+    ["RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED"],
+  );
   assert.deepEqual(
     validateDecisionGateSeparation(releaseBundle().approval).issues,
     [],
@@ -490,6 +498,37 @@ test("Release Bundle keeps machine, reviewer, and user authorization evidence se
     issueCodes(validateDecisionGateSeparation(flattened)).includes(
       "AUTHORIZATION_PROVENANCE_UNTRUSTED",
     ),
+  );
+});
+
+test("forged external URLs and VERIFIED strings cannot promote a Release Bundle", () => {
+  const forged = releaseBundle({
+    external_provenance: {
+      status: "VERIFIED",
+      verifier: "INDEPENDENT_EXTERNAL_READBACK",
+      verification_ref: "https://attacker.invalid/readback",
+    },
+    approval: {
+      machine: {
+        ...releaseBundle().approval.machine,
+        evidence_ref: "https://attacker.invalid/check",
+      },
+      reviewer: {
+        ...releaseBundle().approval.reviewer,
+        evidence_ref: "https://attacker.invalid/review",
+      },
+      user_authorization: {
+        ...releaseBundle().approval.user_authorization,
+        evidence_ref: "https://attacker.invalid/authorization",
+      },
+    },
+  });
+  const result = validateReleaseBundle(forged, releaseValidationContext());
+  assert.ok(
+    issueCodes(result).includes("RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED"),
+  );
+  assert.ok(
+    issueCodes(result).includes("RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED"),
   );
 });
 
@@ -582,6 +621,16 @@ test("Release Bundle binds every capability to a traceability chain and the same
 });
 
 test("required-context policy fails when a repository workflow drops a named context", () => {
+  const setupNodeRevision = "820762786026740c76f36085b0efc47a31fe5020";
+  const codeowners = [
+    "# ordinary ownership",
+    "/apps/api/src/auth/ @mlhjyx",
+    "# terminal governance ownership block",
+    "/.github/ @mlhjyx",
+    "/docs/governance/ @mlhjyx",
+    "/package.json @mlhjyx",
+    "/scripts/governance-*.mjs @mlhjyx",
+  ].join("\n");
   const policy = {
     schema_version: "required-contexts/v1",
     required_contexts: [
@@ -603,6 +652,23 @@ test("required-context policy fails when a repository workflow drops a named con
     workflow_runtime_requirements: [
       { workflow: ".github/workflows/governance.yml", node_major: 22 },
     ],
+    workflow_action_pins: [
+      {
+        workflow: ".github/workflows/governance.yml",
+        action: "actions/setup-node",
+        revision: setupNodeRevision,
+        version: "v7",
+      },
+    ],
+    codeowner_requirements: {
+      owner: "@mlhjyx",
+      terminal_patterns: [
+        "/.github/",
+        "/docs/governance/",
+        "/package.json",
+        "/scripts/governance-*.mjs",
+      ],
+    },
     external_ruleset_requirements: {
       required_approving_reviews: 1,
       require_code_owner_review: true,
@@ -621,14 +687,20 @@ test("required-context policy fails when a repository workflow drops a named con
     ],
     [
       ".github/workflows/governance.yml",
-      "on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n    steps:\n      - uses: actions/setup-node@v7\n        with:\n          node-version: 22\n",
+      `on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n    steps:\n      - uses: actions/setup-node@${setupNodeRevision} # v7\n        with:\n          node-version: 22\n`,
     ],
   ]);
-  assert.deepEqual(validateRequiredContexts(policy, workflows).issues, []);
+  const repositoryContext = { codeowners };
+  assert.deepEqual(
+    validateRequiredContexts(policy, workflows, repositoryContext).issues,
+    [],
+  );
 
   workflows.delete(".github/workflows/governance.yml");
   assert.ok(
-    issueCodes(validateRequiredContexts(policy, workflows)).includes(
+    issueCodes(
+      validateRequiredContexts(policy, workflows, repositoryContext),
+    ).includes(
       "REQUIRED_CONTEXT_NOT_IMPLEMENTED",
     ),
   );
@@ -640,7 +712,9 @@ test("required-context policy fails when a repository workflow drops a named con
     ],
   ]);
   assert.ok(
-    issueCodes(validateRequiredContexts(policy, stepOnly)).includes(
+    issueCodes(
+      validateRequiredContexts(policy, stepOnly, repositoryContext),
+    ).includes(
       "REQUIRED_CONTEXT_NOT_IMPLEMENTED",
     ),
   );
@@ -651,7 +725,9 @@ test("required-context policy fails when a repository workflow drops a named con
     "on:\n  workflow_dispatch:\njobs:\n  governance:\n    name: governance · traceability · release\n",
   );
   assert.ok(
-    issueCodes(validateRequiredContexts(policy, noPullRequest)).includes(
+    issueCodes(
+      validateRequiredContexts(policy, noPullRequest, repositoryContext),
+    ).includes(
       "REQUIRED_CONTEXT_EVENT_MISSING",
     ),
   );
@@ -664,7 +740,9 @@ test("required-context policy fails when a repository workflow drops a named con
     },
   };
   assert.ok(
-    issueCodes(validateRequiredContexts(unsafeRuleset, noPullRequest)).includes(
+    issueCodes(
+      validateRequiredContexts(unsafeRuleset, noPullRequest, repositoryContext),
+    ).includes(
       "EXTERNAL_RULESET_REQUIREMENTS_UNSAFE",
     ),
   );
@@ -675,9 +753,34 @@ test("required-context policy fails when a repository workflow drops a named con
     "on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n",
   );
   assert.ok(
-    issueCodes(validateRequiredContexts(policy, unpinnedNode)).includes(
+    issueCodes(
+      validateRequiredContexts(policy, unpinnedNode, repositoryContext),
+    ).includes(
       "WORKFLOW_NODE_RUNTIME_UNPINNED",
     ),
+  );
+
+  const ownershipDeleted = codeowners.replace(
+    "/scripts/governance-*.mjs @mlhjyx\n",
+    "",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, workflows, {
+        codeowners: ownershipDeleted,
+      }),
+    ).includes("CODEOWNER_PROTECTION_MISSING"),
+  );
+
+  const movingTag = new Map(workflows);
+  movingTag.set(
+    ".github/workflows/governance.yml",
+    "on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n    steps:\n      - uses: actions/setup-node@v7\n        with:\n          node-version: 22\n",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, movingTag, repositoryContext),
+    ).includes("WORKFLOW_ACTION_UNPINNED"),
   );
 });
 
