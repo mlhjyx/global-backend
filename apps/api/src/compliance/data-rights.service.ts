@@ -1,9 +1,7 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import type { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { evaluateDataRights } from './data-rights.engine';
-import { seedJurisdictionPolicy } from './jurisdiction-policy.seed';
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { evaluateDataRights } from "./data-rights.engine";
 import {
   CURRENT_RULE_VERSION,
   DataRightsContext,
@@ -34,17 +32,15 @@ export class DataRightsService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit(): Promise<void> {
-    // jurisdiction_policy 是平台表，app_user 只读 → 用 owner 连接播种（同 provider seed）。
-    // seed 失败要**大声**：规则空则引擎对 red 数据 fail-closed（安全但会全拒），运维需知晓。
-    const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-    try {
-      await seedJurisdictionPolicy(owner);
-    } catch (err) {
-      this.logger.error(`jurisdiction_policy seed FAILED — DataRights fail-closed until seeded: ${String(err)}`);
-    } finally {
-      await owner.$disconnect();
+    // The ordinary API never opens an owner connection. Platform rules are
+    // seeded by the explicit maintenance/worker path; missing rules leave red
+    // data fail-closed and are surfaced by readiness/operations evidence.
+    const count = await this.loadRules();
+    if (count === 0) {
+      this.logger.error(
+        "jurisdiction_policy is empty — DataRights remains fail-closed for red data",
+      );
     }
-    await this.loadRules();
   }
 
   /** 从 DB 加载当前版本规则到内存缓存（app_user SELECT，无 RLS 平台表）。 */
@@ -74,8 +70,24 @@ export class DataRightsService implements OnModuleInit {
     meta?: PolicyDecisionMeta,
   ): Promise<DataRightsDecision> {
     const decision = this.evaluate(ctx);
-    await this.prisma.withWorkspace(workspaceId, (tx) => this.logDecision(tx, workspaceId, ctx, decision, meta));
+    await this.logDecisionForWorkspace(workspaceId, ctx, decision, meta);
     return decision;
+  }
+
+  /**
+   * Persist an already-computed decision in a new tenant transaction. Denied
+   * business operations use this after their write transaction rolls back, so
+   * the denial itself remains auditable without committing the rejected write.
+   */
+  async logDecisionForWorkspace(
+    workspaceId: string,
+    ctx: DataRightsContext,
+    decision: DataRightsDecision,
+    meta?: PolicyDecisionMeta,
+  ): Promise<void> {
+    await this.prisma.withWorkspace(workspaceId, (tx) =>
+      this.logDecision(tx, workspaceId, ctx, decision, meta),
+    );
   }
 
   /**

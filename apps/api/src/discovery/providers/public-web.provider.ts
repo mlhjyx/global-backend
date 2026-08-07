@@ -26,6 +26,7 @@ import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
 
 const PARSER_VERSION = 'public_web/v1';
 
@@ -154,7 +155,7 @@ export class PublicWebDiscoveryProvider
       );
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
-      this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
+      this.log(`skip ${domain}: crawl failed (${diagnosticErrorToken(err)})`);
       return null; // 站点不可达/闸门拒绝 → 放弃该候选
     }
     if (text.trim().length < 200) {

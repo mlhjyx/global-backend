@@ -55,15 +55,60 @@ import { ClosedRepairService } from "../site-builder/quality/closed-repair.servi
 import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
+import { installSensitiveLogger } from "../common/sensitive-logger";
+import { diagnosticErrorToken } from "../common/sensitive-data-scrubber";
+import {
+  resolvePlatformOwnerDatabaseUrl,
+  verifyPlatformOwnerDatabaseRole,
+} from "../compliance/database-runtime-admission";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
  * directly — no Nest bootstrap — so it never starts HTTP or the relay.
  */
 async function main(): Promise<void> {
-  const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
+  installSensitiveLogger();
+  // Resolve every privileged connection before telemetry, DB, storage or any
+  // other external client can start. A missing/aliased owner URL is a startup
+  // admission failure, not a late worker initialization error.
+  const ownerDatabaseUrl = resolvePlatformOwnerDatabaseUrl(process.env);
+  // 显式平台 owner 连接（OWNER_DATABASE_URL；绝不回退 DATABASE_URL/APP_DATABASE_URL）：
+  // ① data_provider seed（平台配置表，app_user 无写权）；
+  // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
+  // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
+  const ownerDb = new PrismaClient({
+    datasourceUrl: ownerDatabaseUrl,
+  });
+  await ownerDb.$connect();
+  await verifyPlatformOwnerDatabaseRole(ownerDb);
+
   const prisma = new PrismaService();
-  await prisma.$connect();
+  // Uses APP_DATABASE_URL in pilot/production and performs the same
+  // non-owner/non-superuser/non-BYPASSRLS admission as the HTTP process.
+  await prisma.onModuleInit();
+
+  // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
+  // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
+  const providerRegistrySeed = new DiscoveryProviderRegistry();
+  await providerRegistrySeed.seed(ownerDb);
+  console.log("[worker] data_provider seed ok");
+
+  // 收口⑥：jurisdiction_policy seed（平台规则表，owner 写）。worker 的删除编排/合规判定需之；
+  // 失败大声——规则空则 DataRights 对 red 数据 fail-closed。
+  const jurisdictionRuleCount = await seedJurisdictionPolicy(ownerDb);
+  console.log(
+    `[worker] jurisdiction_policy seed ok (${jurisdictionRuleCount} rules)`,
+  );
+
+  // 制裁名单源 + source_policy seed（第五门，owner 写平台表；全 DISABLED，真测绿后 ops 翻 ENABLED）。
+  await seedSanctions(ownerDb);
+  console.log(
+    "[worker] sanctions source/policy seed ok (DISABLED until ops enables)",
+  );
+
+  // Only after both DB roles and required governance registries are admitted
+  // may telemetry, storage, model or Temporal clients start.
+  const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const costLedger = new SiteBuildCostLedger(prisma);
   const siteBuilderStorage = new StorageService();
   await siteBuilderStorage.onModuleInit();
@@ -89,53 +134,12 @@ async function main(): Promise<void> {
     new IsolatedImagePipelineRunner(),
   );
 
-  // owner 连接（DATABASE_URL）：① data_provider seed（平台配置表，app_user 无写权）；
-  // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
-  // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
-  const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-  await ownerDb.$connect();
-
-  // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
-  // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
-  const providerRegistrySeed = new DiscoveryProviderRegistry();
-  try {
-    await providerRegistrySeed.seed(ownerDb);
-    console.log("[worker] data_provider seed ok");
-  } catch (err) {
-    console.error(
-      `[worker] data_provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`,
-    );
-  }
-
-  // 收口⑥：jurisdiction_policy seed（平台规则表，owner 写）。worker 的删除编排/合规判定需之；
-  // 失败大声——规则空则 DataRights 对 red 数据 fail-closed。
-  try {
-    const n = await seedJurisdictionPolicy(ownerDb);
-    console.log(`[worker] jurisdiction_policy seed ok (${n} rules)`);
-  } catch (err) {
-    console.error(
-      `[worker] jurisdiction_policy seed FAILED — DataRights fail-closed for red data: ${String(err)}`,
-    );
-  }
-
-  // 制裁名单源 + source_policy seed（第五门，owner 写平台表；全 DISABLED，真测绿后 ops 翻 ENABLED）。
-  try {
-    await seedSanctions(ownerDb);
-    console.log(
-      "[worker] sanctions source/policy seed ok (DISABLED until ops enables)",
-    );
-  } catch (err) {
-    console.error(
-      `[worker] sanctions seed FAILED — refresh/screening may be misconfigured: ${String(err)}`,
-    );
-  }
-
   // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
   try {
     await ensurePlatformSchedules();
   } catch (err) {
     console.error(
-      `[worker] ensure schedules FAILED（定时 sweep 可能停摆，可手跑 scripts/ensure-*-schedule.mts）: ${String(err)}`,
+      `[worker] ensure schedules FAILED（定时 sweep 可能停摆，可手跑 scripts/ensure-*-schedule.mts）: ${diagnosticErrorToken(err)}`,
     );
   }
 
@@ -172,7 +176,7 @@ async function main(): Promise<void> {
     .rebuildIndex()
     .catch((err) =>
       console.error(
-        `[worker] sanctions index build FAILED (fail-open, gate=not_screened): ${String(err)}`,
+        `[worker] sanctions index build FAILED (fail-open, gate=not_screened): ${diagnosticErrorToken(err)}`,
       ),
     );
   // prisma（app_user）给专利缓存读/enqueue 闭包（平台表无 RLS）——PATENT_SOURCE_MODE=cache 时零 BQ 字节读缓存。

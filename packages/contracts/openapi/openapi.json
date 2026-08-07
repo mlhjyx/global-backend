@@ -1858,6 +1858,7 @@
     },
     "/api/v1/suppressions": {
       "post": {
+        "description": "Current source slice: this operation currently reaches only the fixed 503 SUPPRESSION_GOVERNANCE_AUTHZ_PENDING response. The success response documents the future compliance:manage contract; integration must remove this pending marker when server-side scope enforcement becomes reachable.",
         "operationId": "DiscoveryController_addSuppression_v1",
         "parameters": [],
         "requestBody": {
@@ -1890,6 +1891,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Pending server-side compliance scope integration"
           }
         },
         "security": [
@@ -1900,9 +1904,11 @@
         "summary": "加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED",
         "tags": [
           "Discovery"
-        ]
+        ],
+        "x-runtime-availability": "AUTHORIZATION_INTEGRATION_PENDING"
       },
       "get": {
+        "description": "Current source slice: this operation currently reaches only the fixed 503 SUPPRESSION_GOVERNANCE_AUTHZ_PENDING response. The success response documents the future compliance:manage contract; integration must remove this pending marker when server-side scope enforcement becomes reachable.",
         "operationId": "DiscoveryController_listSuppressions_v1",
         "parameters": [],
         "responses": {
@@ -1928,6 +1934,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Pending server-side compliance scope integration"
           }
         },
         "security": [
@@ -1938,11 +1947,14 @@
         "summary": "禁联名单",
         "tags": [
           "Discovery"
-        ]
+        ],
+        "x-runtime-availability": "AUTHORIZATION_INTEGRATION_PENDING"
       }
     },
     "/api/v1/suppressions/{id}": {
       "delete": {
+        "deprecated": true,
+        "description": "Current source slice: this operation currently reaches only the fixed 503 SUPPRESSION_GOVERNANCE_AUTHZ_PENDING response. The success response documents the future compliance:manage contract; integration must remove this pending marker when server-side scope enforcement becomes reachable.",
         "operationId": "DiscoveryController_removeSuppression_v1",
         "parameters": [
           {
@@ -1980,6 +1992,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Pending server-side compliance scope integration"
           }
         },
         "security": [
@@ -1987,10 +2002,72 @@
             "bearer": []
           }
         ],
-        "summary": "移除禁联记录",
+        "summary": "已弃用：禁联记录不可物理删除；改用 release review request",
         "tags": [
           "Discovery"
-        ]
+        ],
+        "x-runtime-availability": "AUTHORIZATION_INTEGRATION_PENDING"
+      }
+    },
+    "/api/v1/suppressions/{id}/release-requests": {
+      "post": {
+        "description": "只创建 PENDING review fact，不会解除禁联。退订、投诉、Art.17/Art.21 等不得通过普通偏好请求释放。 Current source slice: this operation currently reaches only the fixed 503 SUPPRESSION_GOVERNANCE_AUTHZ_PENDING response. The success response documents the future compliance:manage contract; integration must remove this pending marker when server-side scope enforcement becomes reachable.",
+        "operationId": "DiscoveryController_requestSuppressionRelease_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestSuppressionReleaseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "append-only suppression release review request"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Pending server-side compliance scope integration"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "提交 append-only suppression release/correction 人工复核请求",
+        "tags": [
+          "Discovery"
+        ],
+        "x-runtime-availability": "AUTHORIZATION_INTEGRATION_PENDING"
       }
     },
     "/api/v1/data-providers": {
@@ -7987,6 +8064,10 @@
               "bounce",
               "complaint",
               "manual",
+              "preference",
+              "user_preference",
+              "art17",
+              "art21",
               "legal"
             ]
           }
@@ -7994,6 +8075,32 @@
         "required": [
           "type",
           "value"
+        ]
+      },
+      "RequestSuppressionReleaseDto": {
+        "type": "object",
+        "properties": {
+          "requestKind": {
+            "type": "string",
+            "enum": [
+              "USER_PREFERENCE",
+              "IDENTITY_CORRECTION"
+            ]
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "审核理由；不得包含联系人值或其他个人数据"
+          },
+          "evidenceRef": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "非 PII 的 case/evidence 引用；身份纠错时必填"
+          }
+        },
+        "required": [
+          "requestKind",
+          "justification"
         ]
       },
       "AcceptLeadDto": {

@@ -6,11 +6,13 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
+import { SuppressionGovernancePendingGuard } from '../compliance/suppression-governance-pending.guard';
 
 @Module({
   controllers: [DiscoveryController],
   providers: [
     DiscoveryService,
+    SuppressionGovernancePendingGuard,
     {
       provide: DiscoveryProviderRegistry,
       // API 侧的联系人发现/邮箱验证走真实 public_web —— 注入全局 ModelGateway。

@@ -1,5 +1,14 @@
-import { Prisma } from '@prisma/client';
-import { encryptPii, decryptPii, isEncryptedPii } from './pii-crypto';
+import { Prisma } from "@prisma/client";
+import {
+  encryptPii,
+  decryptPii,
+  isEncryptedPii,
+  piiKeyConfigured,
+} from "./pii-crypto";
+import {
+  resolveDatabaseDeploymentStage,
+  verifyApplicationDatabaseRole,
+} from "./database-runtime-admission";
 
 /**
  * 收口⑥ PII 透明加解密（Prisma v6 **client extension**）。挂在 PrismaService 上 →
@@ -17,6 +26,8 @@ interface FieldSpec {
   piiTypes?: ReadonlySet<string>;
   /** where 复合键名（contact_point 的 contactId_type_value）。 */
   compositeWhereKey?: string;
+  /** Encrypt the complete JSON value for amber/red FieldEvidence rows. */
+  jsonEnvelope?: boolean;
 }
 
 const SPECS: Record<string, FieldSpec> = {
@@ -27,12 +38,116 @@ const SPECS: Record<string, FieldSpec> = {
     piiTypes: new Set(['email', 'phone', 'linkedin']),
     compositeWhereKey: 'contactId_type_value',
   },
+  SuppressionRecord: {
+    field: 'value',
+    typeField: 'type',
+    piiTypes: new Set(['email']),
+    compositeWhereKey: 'workspaceId_type_value',
+  },
+  FieldEvidence: { field: "value", jsonEnvelope: true },
 };
+
+export const FIELD_EVIDENCE_PII_SCHEMA = "field-evidence-pii/v1";
+const FIELD_EVIDENCE_PII_CLASSES = new Set(["amber", "red"]);
+
+function canonicalJson(value: unknown): string {
+  const normalize = (item: unknown): unknown => {
+    if (
+      item === null ||
+      typeof item === "string" ||
+      typeof item === "boolean"
+    ) {
+      return item;
+    }
+    if (typeof item === "number") {
+      if (!Number.isFinite(item))
+        throw new Error("FIELD_EVIDENCE_JSON_INVALID");
+      return item;
+    }
+    if (Array.isArray(item)) return item.map(normalize);
+    if (typeof item === "object") {
+      return Object.fromEntries(
+        Object.entries(item as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, nested]) => [key, normalize(nested)]),
+      );
+    }
+    throw new Error("FIELD_EVIDENCE_JSON_INVALID");
+  };
+  return JSON.stringify(normalize(value));
+}
+
+export function isEncryptedFieldEvidenceValue(value: unknown): value is {
+  schemaVersion: string;
+  ciphertext: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    row.schemaVersion === FIELD_EVIDENCE_PII_SCHEMA &&
+    typeof row.ciphertext === "string" &&
+    isEncryptedPii(row.ciphertext)
+  );
+}
+
+export function encryptFieldEvidenceValue(value: unknown): {
+  schemaVersion: typeof FIELD_EVIDENCE_PII_SCHEMA;
+  ciphertext: string;
+} {
+  if (isEncryptedFieldEvidenceValue(value)) {
+    JSON.parse(decryptPii(value.ciphertext));
+    return value as {
+      schemaVersion: typeof FIELD_EVIDENCE_PII_SCHEMA;
+      ciphertext: string;
+    };
+  }
+  return {
+    schemaVersion: FIELD_EVIDENCE_PII_SCHEMA,
+    ciphertext: encryptPii(canonicalJson(value)),
+  };
+}
+
+export function decryptFieldEvidenceValue(value: unknown): unknown {
+  return isEncryptedFieldEvidenceValue(value)
+    ? JSON.parse(decryptPii(value.ciphertext))
+    : value;
+}
+
+function inferredEvidenceClass(record: Record<string, unknown>): string {
+  const explicit = record.dataClass;
+  if (typeof explicit === "string") return explicit;
+  if (
+    typeof record.entityType === "string" &&
+    record.entityType !== "contact"
+  ) {
+    return "green";
+  }
+  // Contact evidence can contain names, identity-resolution facts, or future
+  // personal-data fields that are not yet known to this writer. Missing
+  // classification must therefore fail closed instead of relying on an
+  // allow-list that inevitably drifts as new evidence fields are introduced.
+  record.dataClass = "red";
+  return "red";
+}
+
+function encryptJsonEvidence(
+  record: Record<string, unknown>,
+  field: string,
+): void {
+  const value = record[field];
+  if (value === undefined) return;
+  if (!FIELD_EVIDENCE_PII_CLASSES.has(inferredEvidenceClass(record))) return;
+  record[field] = encryptFieldEvidenceValue(value);
+}
 
 /** 记录对象（data/create/update/where 复合键）内目标字段加密（就地）。 */
 function encryptRecord(rec: unknown, spec: FieldSpec): void {
   if (!rec || typeof rec !== 'object') return;
   const r = rec as Record<string, unknown>;
+  if (spec.jsonEnvelope) {
+    encryptJsonEvidence(r, spec.field);
+    return;
+  }
   const v = r[spec.field];
   if (typeof v !== 'string') return;
   if (spec.piiTypes) {
@@ -46,6 +161,12 @@ function encryptWhere(where: unknown, spec: FieldSpec): void {
   if (!where || typeof where !== 'object') return;
   const w = where as Record<string, unknown>;
   if (spec.compositeWhereKey && w[spec.compositeWhereKey]) encryptRecord(w[spec.compositeWhereKey], spec);
+  if (spec.jsonEnvelope && w[spec.field] !== undefined) {
+    // A value-only predicate has no row classification context. Encrypting it
+    // as a scalar would never match the versioned JSON envelope, while blindly
+    // wrapping it could hide green provenance. Make the ambiguity explicit.
+    throw new Error("FIELD_EVIDENCE_VALUE_LOOKUP_UNSUPPORTED");
+  }
   if (typeof w[spec.field] === 'string') {
     if (spec.piiTypes) {
       const t = w[spec.typeField as string];
@@ -96,7 +217,11 @@ function decryptRecord(rec: unknown, spec: FieldSpec): void {
   if (!rec || typeof rec !== 'object') return;
   const r = rec as Record<string, unknown>;
   const v = r[spec.field];
-  if (typeof v === 'string' && isEncryptedPii(v)) r[spec.field] = decryptPii(v);
+  if (spec.jsonEnvelope) {
+    r[spec.field] = decryptFieldEvidenceValue(v);
+    return;
+  }
+  if (typeof v === "string" && isEncryptedPii(v)) r[spec.field] = decryptPii(v);
 }
 
 /** 结果（对象或数组）内目标字段解密（导出供单测）。安全：只作用于 enc: 前缀，legacy 明文不动。 */
@@ -118,17 +243,17 @@ const CONTACT_SPEC = SPECS.CanonicalContact;
 const POINT_SPEC = SPECS.ContactPoint;
 
 /** 解密嵌套 include 里的 contact/contactPoint（company/lead 查询把它们嵌在结果里）。只作用于 enc: 前缀，安全。 */
-function decryptNested(node: unknown): void {
+export function decryptNestedResult(node: unknown): void {
   if (!node || typeof node !== 'object') return;
   if (Array.isArray(node)) {
-    node.forEach(decryptNested);
+    node.forEach(decryptNestedResult);
     return;
   }
   const o = node as Record<string, unknown>;
   decryptRecord(o, CONTACT_SPEC);
   decryptRecord(o, POINT_SPEC);
   for (const key of ['contacts', 'contact', 'contactPoints']) {
-    if (key in o) decryptNested(o[key]);
+    if (key in o) decryptNestedResult(o[key]);
   }
 }
 
@@ -145,7 +270,7 @@ export const piiExtension = Prisma.defineExtension({
         if (spec) encryptArgs(operation, args as Record<string, unknown>, spec);
         const result = await query(args);
         if (spec) decryptResult(result, spec);
-        decryptNested(result);
+        decryptNestedResult(result);
         return result;
       },
     },
@@ -170,11 +295,25 @@ export const piiExtension = Prisma.defineExtension({
     },
     /** NestJS 生命周期（$extends 会剥掉，故在 client 组件重挂，保持既有连接行为）。 */
     async onModuleInit(): Promise<void> {
-      await (
-        Prisma.getExtensionContext(this) as unknown as {
-          $connect: () => Promise<void>;
+      const client = Prisma.getExtensionContext(this) as unknown as {
+        $connect: () => Promise<void>;
+        $disconnect: () => Promise<void>;
+        $queryRawUnsafe: <T>(query: string) => Promise<T>;
+      };
+      const stage = resolveDatabaseDeploymentStage(process.env);
+      if (stage !== "development") {
+        if (!piiKeyConfigured()) throw new Error("PII_ENCRYPTION_KEY_REQUIRED");
+        encryptPii("__pii_runtime_admission__");
+      }
+      await client.$connect();
+      if (stage !== "development") {
+        try {
+          await verifyApplicationDatabaseRole(client);
+        } catch (error) {
+          await client.$disconnect().catch(() => undefined);
+          throw error;
         }
-      ).$connect();
+      }
     },
     async onModuleDestroy(): Promise<void> {
       await (

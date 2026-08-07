@@ -1,14 +1,15 @@
-import 'reflect-metadata';
-import 'dotenv/config';
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { apiReference } from '@scalar/nestjs-api-reference';
-import helmet from 'helmet';
-import { AppModule } from './app.module';
-import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
+import "reflect-metadata";
+import "dotenv/config";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { NestFactory } from "@nestjs/core";
+import { ValidationPipe, VersioningType } from "@nestjs/common";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { apiReference } from "@scalar/nestjs-api-reference";
+import helmet from "helmet";
+import { AppModule } from "./app.module";
+import { GlobalHttpExceptionFilter } from "./common/http-exception.filter";
+import { installSensitiveLogger } from "./common/sensitive-logger";
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
@@ -40,7 +41,12 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
 }
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  installSensitiveLogger();
+  const exportOpenApi = process.argv.includes('--export-openapi');
+  // Preview mode scans module/controller metadata but does not instantiate
+  // application providers. Contract export therefore cannot connect to the
+  // database, Temporal, object storage, relay or any external provider.
+  const app = await NestFactory.create(AppModule, { preview: exportOpenApi });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
@@ -73,7 +79,7 @@ async function bootstrap(): Promise<void> {
 
   // --export-openapi：把契约落盘到 packages/contracts，供门户/CI 消费后退出。
   // 让 code-first 装饰器成为唯一事实源，手写 openapi.yaml 降级为生成物。
-  if (process.argv.includes('--export-openapi')) {
+  if (exportOpenApi) {
     const out = resolve(__dirname, '../../../packages/contracts/openapi/openapi.json');
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify(document, null, 2));

@@ -1,5 +1,16 @@
+import { execFileSync } from 'node:child_process';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { verifyPiiBackfillSourceIdentity } from './pii-backfill-source-identity';
+import {
+  probePiiBackfillGitSource,
+  verifyPiiBackfillSourceIdentity,
+} from './pii-backfill-source-identity';
 
 const SHA = 'a'.repeat(40);
 const ROOT = '/srv/global/backend-release';
@@ -50,5 +61,51 @@ describe('PII backfill source identity', () => {
         probe(),
       ).actualBuildSha,
     ).toBe(SHA);
+  });
+
+  it('reads a real clean Git checkout and detects later worktree dirtiness', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pii-backfill-source-'));
+    try {
+      execFileSync('git', ['init', '--initial-branch=main'], { cwd: root });
+      execFileSync('git', ['config', 'user.email', 'test@example.invalid'], {
+        cwd: root,
+      });
+      execFileSync('git', ['config', 'user.name', 'PII Backfill Test'], {
+        cwd: root,
+      });
+      writeFileSync(join(root, 'tracked.txt'), 'fixed\n');
+      execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
+      execFileSync('git', ['commit', '-m', 'fixed source'], { cwd: root });
+
+      const clean = probePiiBackfillGitSource(root);
+      expect(clean.repositoryRoot).toBe(root);
+      expect(clean.headSha).toMatch(/^[0-9a-f]{40}$/);
+      expect(clean.porcelainStatus).toBe('');
+      expect(
+        verifyPiiBackfillSourceIdentity({
+          expectedBuildSha: clean.headSha,
+          expectedRepositoryRoot: root,
+        }),
+      ).toEqual({ actualBuildSha: clean.headSha, repositoryRoot: root });
+
+      writeFileSync(join(root, 'tracked.txt'), 'drifted\n');
+      expect(probePiiBackfillGitSource(root).porcelainStatus).not.toBe('');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('masks invalid path and non-repository failures', () => {
+    expect(() => probePiiBackfillGitSource('/definitely/missing/source')).toThrow(
+      /PII_BACKFILL_SOURCE_IDENTITY_UNVERIFIED/,
+    );
+    const root = mkdtempSync(join(tmpdir(), 'pii-backfill-not-git-'));
+    try {
+      expect(() => probePiiBackfillGitSource(root)).toThrow(
+        /PII_BACKFILL_SOURCE_IDENTITY_UNVERIFIED/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
