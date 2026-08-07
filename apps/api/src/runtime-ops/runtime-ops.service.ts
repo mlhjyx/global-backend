@@ -66,6 +66,21 @@ export interface WorkerBuildIdentity {
   buildSha: string;
 }
 
+export function buildWorkerIdentityFromAttestation(
+  deploymentStage: 'development' | 'pilot' | 'production',
+  identity:
+    | { readonly status: 'VERIFIED'; readonly buildSha: string }
+    | { readonly status: 'UNVERIFIED'; readonly buildSha: string | null },
+): WorkerBuildIdentity {
+  if (identity.status === 'VERIFIED' && BUILD_SHA.test(identity.buildSha)) {
+    return { buildSha: identity.buildSha };
+  }
+  if (deploymentStage === 'development') {
+    return { buildSha: 'development-unattested' };
+  }
+  throw new Error('WORKER_BUILD_ATTESTATION_REQUIRED');
+}
+
 function invalidReceipt(): never {
   throw new Error('INVALID_RUNTIME_RECEIPT');
 }

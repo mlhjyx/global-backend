@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -71,11 +72,12 @@ import {
 } from "./worker-topology";
 import {
   RuntimeOpsWriter,
-  buildWorkerIdentity,
+  buildWorkerIdentityFromAttestation,
   type WorkflowRunReceiptInput,
 } from "../runtime-ops/runtime-ops.service";
 import { acquisitionActivityFailureInterceptorsForDomain } from "./acquisition-activity-failure.interceptor";
 import { connectNativeTemporal } from "./native-connection";
+import { loadRuntimeBuildIdentity } from "../runtime/build-receipt";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -84,6 +86,11 @@ import { connectNativeTemporal } from "./native-connection";
 async function main(): Promise<void> {
   installSensitiveLogger();
   const runtime = resolveRuntimeProcessSnapshot(process.env);
+  const buildIdentity = loadRuntimeBuildIdentity({
+    artifactRoot: resolve(__dirname, '..'),
+    env: runtime.environment,
+    required: runtime.deploymentStage !== 'development',
+  });
   // Resolve every privileged connection before telemetry, DB, storage or any
   // other external client can start. A missing/aliased owner URL is a startup
   // admission failure, not a late worker initialization error.
@@ -99,7 +106,7 @@ async function main(): Promise<void> {
   await verifyPlatformOwnerDatabaseRole(ownerDb);
   const runtimeOps = new RuntimeOpsWriter(
     ownerDb,
-    buildWorkerIdentity(runtime.environment),
+    buildWorkerIdentityFromAttestation(runtime.deploymentStage, buildIdentity),
   );
   const prisma = new PrismaService();
   // Uses APP_DATABASE_URL in pilot/production and performs the same

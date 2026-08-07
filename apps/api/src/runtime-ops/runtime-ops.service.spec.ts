@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   RuntimeOpsWriter,
   buildWorkerIdentity,
+  buildWorkerIdentityFromAttestation,
   sanitizeRuntimeStats,
 } from "./runtime-ops.service";
 
@@ -305,5 +306,28 @@ describe("buildWorkerIdentity", () => {
     expect(() =>
       buildWorkerIdentity({ DEPLOYMENT_STAGE: "staging", BUILD_SHA }),
     ).toThrow("WORKER_BUILD_IDENTITY_REQUIRED");
+  });
+
+  it('binds pilot and production identity to a verified artifact receipt', () => {
+    expect(
+      buildWorkerIdentityFromAttestation('pilot', {
+        status: 'VERIFIED',
+        buildSha: BUILD_SHA,
+      }),
+    ).toEqual({ buildSha: BUILD_SHA });
+    expect(
+      buildWorkerIdentityFromAttestation('development', {
+        status: 'UNVERIFIED',
+        buildSha: null,
+      }),
+    ).toEqual({ buildSha: 'development-unattested' });
+    for (const stage of ['pilot', 'production'] as const) {
+      expect(() =>
+        buildWorkerIdentityFromAttestation(stage, {
+          status: 'UNVERIFIED',
+          buildSha: BUILD_SHA,
+        }),
+      ).toThrow('WORKER_BUILD_ATTESTATION_REQUIRED');
+    }
   });
 });
