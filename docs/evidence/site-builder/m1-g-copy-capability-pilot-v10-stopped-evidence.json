@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "site-builder-copy-capability-pilot-stopped-evidence/2026-08-07-v5",
+  "artifactDigest": "b76921dcf66b96716a24a7cf7dcabb095486ab891a6c27711d25cc7b0dee05a8",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "taskId": "site_builder.copy",
+  "campaignId": "copy-capability-v10-replacement-user-auth-20260807T143949Z",
+  "executionHead": "4562eab1bae16cdd424ff90a7d3403b0fb30d535",
+  "fixedSourceCommit": "d819455dea736151a4c30d5ffdd0e224d74af917",
+  "preparationHeadCommit": "abdc41cb656deca55eec7248b54b5ebb6c7f6868",
+  "sourceBundleDigest": "01e541e1b3e238d198ec0b4d2c671b3fdab3c0e8bb292f69f16a6c6c5f5de189",
+  "manifestArtifactDigest": "ea2783ddb648f3ec6590addbf925566a87dbd7f90a0a09f065ec398d88b0abaf",
+  "manifestDigest": "6ebb59fe3324a328dd8ff6c3a15be580baf9e42f66e7fc554cb8c33a15fb41c9",
+  "authorizationScope": {
+    "plannedExecutions": 3,
+    "maximumWireCalls": 6,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumQuotaPointsPerWire": 500000,
+    "totalQuotaCapPoints": 3000000,
+    "purposeSpecificTokenOperationsAuthorized": true,
+    "excluded": [
+      "copy_quality_matrix_36_executions_72_wires",
+      "model_promotion",
+      "production_route_adoption"
+    ]
+  },
+  "startedAt": "2026-08-07T14:41:41.094Z",
+  "stoppedAt": "2026-08-07T14:43:49.463Z",
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopReason": "openox_responses_cloudflare_524_with_request_id_but_no_matching_consume_log",
+  "attemptedCandidate": {
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_responses",
+    "reasoning": "medium",
+    "maximumOutputTokens": 1200,
+    "timeoutMs": 240000,
+    "wireClaims": 1,
+    "repairPlans": 0,
+    "requestIdInRunner": "202608071441431041174208268d9d6haswosoD",
+    "requestIdPreservedInRunner": true,
+    "gatewayHttpStatus": 524,
+    "gatewayDurationMs": 125722.53777,
+    "settlement": "unknown",
+    "completed": false,
+    "candidateReceiptProduced": false
+  },
+  "unattemptedCandidates": [
+    {
+      "alias": "gpt-5.6-sol",
+      "protocol": "openai_responses",
+      "reason": "authorization_stop_after_unknown_settlement"
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic_messages",
+      "reason": "authorization_stop_after_unknown_settlement"
+    }
+  ],
+  "ledgers": {
+    "terra": {
+      "ledgerDigest": "eab39eda28932dbc429ca6c3fd7df29375e269a8534d559000b83f1551f88990",
+      "eventCount": 5,
+      "executionClaims": 1,
+      "wireClaims": 1,
+      "knownWireSettlements": 0,
+      "unknownWireSettlements": 1,
+      "repairPlans": 0,
+      "operatorEvidenceAuthorizations": 0,
+      "gitEvidenceAcceptances": 0,
+      "completedExecutions": 0,
+      "frozen": true,
+      "freezeReason": "non_2xx_unknown_settlement"
+    },
+    "sol": {
+      "executionClaims": 0,
+      "wireClaims": 0,
+      "completedExecutions": 0,
+      "frozen": false
+    },
+    "sonnet": {
+      "executionClaims": 0,
+      "wireClaims": 0,
+      "completedExecutions": 0,
+      "frozen": false
+    }
+  },
+  "gatewayObservation": {
+    "provenanceClass": "operator_observed_local_docker_json_log",
+    "settlementAuthority": false,
+    "gatewayEndpoint": "/v1/responses",
+    "gatewayChannelId": 17,
+    "upstreamHost": "openox.tech",
+    "upstreamDiagnostic": "cloudflare_524_timeout",
+    "gatewayRequestId": "202608071441431041174208268d9d6haswosoD",
+    "gatewayDurationMs": 125722.53777,
+    "gatewayPrechargeCurrency": "CNY",
+    "gatewayPrechargeAmount": 0.040092,
+    "matchingConsumeLogRows": 0,
+    "quotaPointsBefore": 3000000,
+    "quotaPointsAfterGatewayRefund": 3000000,
+    "usedQuotaPointsAfterGatewayRefund": 0,
+    "newApiPrechargeRefundObserved": true,
+    "providerCostSettlement": "unknown",
+    "requestBodyPersistedInEvidence": false,
+    "responseBodyPersistedInEvidence": false
+  },
+  "tokenLifecycle": {
+    "tokenId": 18,
+    "purpose": "site_builder_copy_capability_pilot",
+    "finiteExactScope": true,
+    "disabledInDatabase": true,
+    "disabledStatus": 3,
+    "remainingQuotaPointsAfterDisable": 0,
+    "finalUsedQuotaPoints": 0,
+    "rejectedByGatewayAfterDisable": true,
+    "disableVerificationStatus": 401,
+    "rawBearerPersistedInEvidence": false,
+    "rawTokenRecordPersistedInEvidence": false
+  },
+  "publicOpenOxTransportObservation": {
+    "sourceClass": "public_openox_examples",
+    "observedExamplePath": "/v1/chat/completions",
+    "responsesExampleObserved": false,
+    "decision": "offline_chat_transport_rebaseline_before_any_real_retry"
+  },
+  "qualityConclusion": "inconclusive",
+  "candidateRanking": null,
+  "promotionDecision": "NOT_ELIGIBLE",
+  "routeChange": false,
+  "requiredRecovery": [
+    "preserve this v10 campaign and its Terra child ledger as frozen and do not retry them",
+    "do not retry the OpenAI Responses transport for this OpenOx route",
+    "offline rebaseline the Terra and Sol adapters against OpenAI-compatible Chat Completions because the current public OpenOx examples only show /v1/chat/completions",
+    "prove the Chat path, headers, strict schema, reasoning, usage, request ID, and non-2xx settlement behavior with a fake gateway before changing the fixed task contract",
+    "create a new fixed-source manifest after the explicit transport rebaseline",
+    "obtain a new campaign-bound exact authorization before any further model wire",
+    "keep capability evidence, quality matrix, promotion, and production route adoption separate"
+  ]
+}
