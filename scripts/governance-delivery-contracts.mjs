@@ -365,6 +365,50 @@ export function validateMergeEvidence(mergeEvidence) {
   return result(issues);
 }
 
+function validateExternalProvenance(bundle, issues) {
+  const provenance = bundle?.external_provenance;
+  const shapeIsValid =
+    isObject(provenance) &&
+    ["EXTERNAL_UNVERIFIED", "VERIFIED"].includes(provenance.status) &&
+    ["NONE", "INDEPENDENT_EXTERNAL_READBACK"].includes(provenance.verifier) &&
+    isNonEmptyString(provenance.verification_ref);
+
+  if (!shapeIsValid) {
+    issues.push(
+      issue(
+        "RELEASE_EXTERNAL_PROVENANCE_INVALID",
+        "external_provenance must declare a supported status, verifier, and verification_ref",
+      ),
+    );
+  }
+
+  const claimsUnsupportedVerification =
+    provenance?.status === "VERIFIED" ||
+    provenance?.verifier === "INDEPENDENT_EXTERNAL_READBACK" ||
+    (isNonEmptyString(provenance?.verification_ref) &&
+      provenance.verification_ref !== "NONE");
+  if (claimsUnsupportedVerification) {
+    issues.push(
+      issue(
+        "RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED",
+        "this verifier has no trusted external readback implementation; strings and URLs cannot self-attest verification",
+      ),
+    );
+  }
+
+  if (PROMOTION_STATES.has(bundle?.release_status)) {
+    // Intentionally fail closed. There is no caller-provided trust seam: a future
+    // external verifier must verify the check run, review, authorization, and
+    // merge result independently before this issue can be removed.
+    issues.push(
+      issue(
+        "RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED",
+        `${bundle.release_status} is blocked until an independently verified external readback receipt is supported`,
+      ),
+    );
+  }
+}
+
 export function validateReleaseBundle(bundle, context = {}) {
   const issues = [];
   if (!isObject(bundle) || bundle.schema_version !== "release-bundle/v1") {
@@ -401,6 +445,7 @@ export function validateReleaseBundle(bundle, context = {}) {
   if (!isIsoInstant(bundle?.released_at)) {
     issues.push(issue("RELEASE_TIME_INVALID", "released_at is invalid"));
   }
+  validateExternalProvenance(bundle, issues);
   if (!Array.isArray(bundle?.capability_ids) || bundle.capability_ids.length === 0) {
     issues.push(
       issue("RELEASE_CAPABILITIES_EMPTY", "capability_ids must not be empty"),
@@ -695,6 +740,10 @@ ${jsonBlock(bundle.source)}
 ## Evidence
 
 ${evidence}
+
+## External provenance
+
+${jsonBlock(bundle.external_provenance)}
 
 ## Operations
 

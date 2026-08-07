@@ -562,6 +562,7 @@ test("Release Bundle rendering is deterministic and includes every review sectio
     "Promise",
     "Source",
     "Evidence",
+    "External provenance",
     "Operations",
     "Data",
     "Rollback and exit",
@@ -761,7 +762,7 @@ test("required-context policy fails when a repository workflow drops a named con
   );
 
   const ownershipDeleted = codeowners.replace(
-    "/scripts/governance-*.mjs @mlhjyx\n",
+    "/scripts/governance-*.mjs @mlhjyx",
     "",
   );
   assert.ok(
@@ -780,6 +781,28 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(policy, movingTag, repositoryContext),
+    ).includes("WORKFLOW_ACTION_UNPINNED"),
+  );
+
+  const unlistedWorkflow = new Map(workflows);
+  unlistedWorkflow.set(
+    ".github/workflows/unlisted.yml",
+    "on:\n  pull_request:\njobs:\n  audit:\n    name: unlisted audit\n    steps:\n      - uses: actions/checkout@v7\n",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, unlistedWorkflow, repositoryContext),
+    ).includes("WORKFLOW_ACTION_UNPINNED"),
+  );
+
+  const missingRevision = new Map(workflows);
+  missingRevision.set(
+    ".github/workflows/governance.yml",
+    "on:\n  pull_request:\njobs:\n  governance:\n    name: governance · traceability · release\n    steps:\n      - uses: actions/setup-node\n        with:\n          node-version: 22\n",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, missingRevision, repositoryContext),
     ).includes("WORKFLOW_ACTION_UNPINNED"),
   );
 });

@@ -46,7 +46,7 @@ Release Bundle 必须分别引用：
 
 其中 `traceability_bindings` 必须逐链记录 `chain_id`、`capability_id` 和该链实际消费的 `evidence_ids`；只有 capability 名称相同、但 chain 或 evidence set 不同的 Bundle 不能授权晋级。
 
-PR 正文、机器人建议或一个共享 URL 不能同时充当这些门。
+Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary declaration。它们只有在一个可信、独立的外部 readback verifier 真实读回对象，核对仓库/PR/head/actor/result，并产出身份绑定 receipt 后才能作为 promotion provenance。当前没有这个 verifier，所以 `external_provenance` 必须保持 `EXTERNAL_UNVERIFIED / NONE / NONE`，所有 `PILOT/GA` 都 fail closed。伪造 `VERIFIED`、攻击者 URL、PR 正文、机器人建议或一个共享 URL 都不能充当这些门。
 
 ## 4. 历史入口迁移
 

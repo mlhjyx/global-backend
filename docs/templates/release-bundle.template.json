@@ -7,6 +7,11 @@
   "implementation_commit": "REPLACE_WITH_40_CHARACTER_GIT_SHA",
   "released_at": "REPLACE_WITH_ISO_8601_INSTANT",
   "capability_ids": ["REPLACE_WITH_CAPABILITY_ID"],
+  "external_provenance": {
+    "status": "EXTERNAL_UNVERIFIED",
+    "verifier": "NONE",
+    "verification_ref": "NONE"
+  },
   "traceability_bindings": [
     {
       "chain_id": "REPLACE_WITH_TRACEABILITY_CHAIN_ID",

@@ -13,6 +13,7 @@
     "implementation_commit",
     "released_at",
     "capability_ids",
+    "external_provenance",
     "traceability_bindings",
     "scope",
     "promise",
@@ -39,6 +40,21 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": { "type": "string", "pattern": "^CAP-" }
+    },
+    "external_provenance": {
+      "description": "Documentary declaration only. Until a trusted independent readback verifier exists, status strings and references cannot authorize PILOT or GA promotion.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "verifier", "verification_ref"],
+      "properties": {
+        "status": { "enum": ["EXTERNAL_UNVERIFIED", "VERIFIED"] },
+        "verifier": { "enum": ["NONE", "INDEPENDENT_EXTERNAL_READBACK"] },
+        "verification_ref": {
+          "description": "A reference is not proof by itself and must be read back and identity-bound by a trusted verifier.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "traceability_bindings": {
       "type": "array",
@@ -76,6 +92,7 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "approval": {
+      "description": "Documentary declarations. CHECK_RUN, GITHUB_REVIEW, and SIGNED_AUTHORIZATION values remain externally unverified until independent readback binds their identity and content.",
       "type": "object",
       "additionalProperties": false,
       "required": ["machine", "reviewer", "user_authorization"],
@@ -117,7 +134,10 @@
         }
       }
     },
-    "merge_evidence": { "$ref": "#/$defs/nonEmptyObject" },
+    "merge_evidence": {
+      "description": "Documentary merge-shape declaration until an independent verifier reads the repository result back and binds it to this bundle.",
+      "$ref": "#/$defs/nonEmptyObject"
+    },
     "learning": { "$ref": "#/$defs/nonEmptyObject" }
   },
   "allOf": [
@@ -130,6 +150,12 @@
         "properties": {
           "evidence_ids": { "minItems": 1 },
           "traceability_bindings": { "minItems": 1 },
+          "external_provenance": {
+            "properties": {
+              "status": { "const": "VERIFIED" },
+              "verifier": { "const": "INDEPENDENT_EXTERNAL_READBACK" }
+            }
+          },
           "approval": {
             "properties": {
               "machine": {

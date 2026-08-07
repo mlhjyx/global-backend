@@ -29,6 +29,7 @@ const TRACEABILITY = "docs/governance/delivery-traceability.json";
 const RUNTIME_EVIDENCE_DIRECTORY = "docs/evidence/runtime";
 const RELEASE_DIRECTORY = "docs/releases";
 const REQUIRED_CONTEXTS = ".github/required-contexts.json";
+const CODEOWNERS = ".github/CODEOWNERS";
 const WORKFLOW_DIRECTORY = ".github/workflows";
 
 function absolute(repoPath) {
@@ -292,8 +293,11 @@ async function verifyRepository() {
   issues.push(...traceValidation.issues);
 
   const requiredContexts = await readJson(REQUIRED_CONTEXTS);
+  const workflows = await workflowTexts();
   issues.push(
-    ...validateRequiredContexts(requiredContexts, await workflowTexts()).issues,
+    ...validateRequiredContexts(requiredContexts, workflows, {
+      codeowners: await readText(CODEOWNERS),
+    }).issues,
   );
   await verifyNoHandwrittenOpenApiCounts(issues);
 

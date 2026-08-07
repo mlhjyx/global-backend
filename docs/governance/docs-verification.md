@@ -32,7 +32,8 @@ pnpm docs:verify
 | Provider Registry | 机器清单与代码 seed 的 key/SourceClass/default enablement 漂移，test path 不存在，或生成页被手改 | Provider 当前启用、外部源健康或运行成功 |
 | Delivery traceability | Capability/Object/operationId/code/test/Scenario 任一不存在；`PILOT/GA` 无 fresh PASS RuntimeEvidence 或 Release Bundle | test 内容足以覆盖业务语义，或用户已经可用 |
 | RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
-| Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，或 merge-method provenance 不闭合 | 发布实际成功、用户授权可由机器推断 |
+| Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权 |
+| Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。
@@ -81,6 +82,7 @@ pnpm docs:verify
 - `APPROVED_AT_GATE_*` 只来自真实批准记录；脚本不根据推荐语句自动升级。
 - `AS_BUILT` 声明必须在 Capability/Traceability/Release Bundle 中链接到代码或机器合同，并把 `TEST_ANCHOR` 与当前运行结果分开。
 - 只有真实用户可见的 candidate/pilot/GA 才在 `docs/releases/` 创建 Release Bundle。`docs/templates/release-bundle.template.json` 是带显式占位符的输入模板，不是 release；验证器拒绝把占位符、空目录、文档提交或开发机探针冒充发布。
+- Bundle 中的 provenance 字段和 refs 只是 documentary；当前没有可信外部 readback verifier，所以 `EXTERNAL_UNVERIFIED` 是唯一可证当前状态，任何自报 `VERIFIED` 或 URL 都不能满足 `PILOT/GA`。
 - 大体积日志、截图、扫描报告和含敏感字段的证据放受控 artifact store；Markdown 只保存脱敏索引、hash、环境、提交、时间、结果和 Owner。
 - 普通文档的“最后核验”日期仅是人工追溯信息，不作为机械过期门。RuntimeEvidence 是例外：它必须显式绑定 `verified_at`/`valid_until`，到期后自动降为 `HISTORICAL`；模型、运行环境、阶段完成或发布事实不能靠延长文档日期续命。
 

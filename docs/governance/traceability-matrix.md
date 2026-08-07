@@ -31,7 +31,7 @@ Segment/Actor/Problem/Job
 - “测试文件存在”只记 `TEST_ANCHOR`；除非有精确运行日期/提交/结果，不标 `TEST_PASSED_NOW`。
 - hidden preview controller 是内部输出边界，不进入 public OpenAPI operation 列。
 - 当前真实 Release Bundle 数由 `governance:verify` 扫描 `docs/releases/*.release.json` 得出；模板明确位于 `docs/templates/` 且永远不计作 release，不能从文档计划推出“用户可用”或“已发布”。
-- 进入交付的机器链以 [`delivery-traceability.json`](delivery-traceability.json) 为准：Capability、Object、OpenAPI operationId、code path、test path 与 Scenario 都做真实存在性检查；`PILOT/GA` 另须满足链上全部 `required_evidence_kinds` 的 fresh PASS RuntimeEvidence，并由有效 Release Bundle 的 `traceability_bindings` 精确绑定同一 chain、capability 与 evidence set。
+- 进入交付的机器链以 [`delivery-traceability.json`](delivery-traceability.json) 为准：Capability、Object、OpenAPI operationId、code path、test path 与 Scenario 都做真实存在性检查；`PILOT/GA` 另须满足链上全部 `required_evidence_kinds` 的 fresh PASS RuntimeEvidence，并由有效 Release Bundle 的 `traceability_bindings` 精确绑定同一 chain、capability 与 evidence set。Bundle 中的外部 refs 仅是待回读声明；当前独立 external verifier 不存在，所以所有 `PILOT/GA` 仍被 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED` 阻断。
 
 ## 2. 全 SaaS 产品地图追踪
 

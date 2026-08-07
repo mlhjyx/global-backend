@@ -1,4 +1,5 @@
 import {
+  SHA_40,
   asArray,
   isNonEmptyString,
   isObject,
@@ -46,7 +47,141 @@ function workflowPinsNodeMajor(text, nodeMajor) {
   );
 }
 
-export function validateRequiredContexts(policy, workflows = new Map()) {
+function workflowActions(text) {
+  const actions = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = line.match(
+      /^\s*(?:-\s*)?uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/,
+    );
+    if (!match) continue;
+    const reference = match[1];
+    const separator = reference.lastIndexOf("@");
+    actions.push({
+      action: separator > 0 ? reference.slice(0, separator) : reference,
+      revision: separator > 0 ? reference.slice(separator + 1) : "",
+      version: match[2] ?? null,
+    });
+  }
+  return actions;
+}
+
+function codeownerRules(text) {
+  return String(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => line.split(/\s+/).join(" "));
+}
+
+function validateWorkflowActionPins(policy, workflows, issues) {
+  const pins = asArray(policy?.workflow_action_pins);
+  const identities = pins.map((pin) => `${pin?.workflow}\0${pin?.action}`);
+  if (
+    pins.length === 0 ||
+    pins.some(
+      (pin) =>
+        !isObject(pin) ||
+        !isNonEmptyString(pin.workflow) ||
+        !/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+$/.test(pin.action ?? "") ||
+        !SHA_40.test(pin.revision ?? "") ||
+        !/^v[0-9]+(?:\.[0-9]+){0,2}$/.test(pin.version ?? ""),
+    ) ||
+    !uniqueStrings(identities)
+  ) {
+    issues.push(
+      issue(
+        "WORKFLOW_ACTION_PIN_POLICY_INVALID",
+        "workflow_action_pins must contain unique workflow/action pairs with a full revision and version comment",
+      ),
+    );
+  }
+
+  for (const pin of pins) {
+    if (!isObject(pin) || !isNonEmptyString(pin.workflow)) continue;
+    const actions = workflowActions(workflows.get(pin.workflow) ?? "");
+    const declared = actions.find((item) => item.action === pin.action);
+    if (!declared) {
+      issues.push(
+        issue(
+          "WORKFLOW_ACTION_PIN_MISSING",
+          `${pin.workflow} does not use required action ${pin.action}`,
+        ),
+      );
+    } else if (
+      declared.revision !== pin.revision ||
+      declared.version !== pin.version ||
+      !SHA_40.test(declared.revision)
+    ) {
+      issues.push(
+        issue(
+          "WORKFLOW_ACTION_UNPINNED",
+          `${pin.workflow} must pin ${pin.action} to ${pin.revision} with comment ${pin.version}`,
+        ),
+      );
+    }
+  }
+
+  for (const [workflowPath, workflow] of workflows) {
+    for (const declared of workflowActions(workflow)) {
+      if (declared.action.startsWith("./")) continue;
+      const matchingPin = pins.find(
+        (pin) =>
+          pin?.workflow === workflowPath &&
+          pin?.action === declared.action &&
+          pin?.revision === declared.revision &&
+          pin?.version === declared.version,
+      );
+      if (!SHA_40.test(declared.revision) || !matchingPin) {
+        issues.push(
+          issue(
+            "WORKFLOW_ACTION_UNPINNED",
+            `${workflowPath} contains an unapproved action reference ${declared.action}@${declared.revision}`,
+          ),
+        );
+      }
+    }
+  }
+}
+
+function validateCodeownerProtection(policy, repositoryContext, issues) {
+  const requirements = policy?.codeowner_requirements;
+  const patterns = asArray(requirements?.terminal_patterns);
+  if (
+    !isObject(requirements) ||
+    !/^@[A-Za-z0-9_.-]+$/.test(requirements.owner ?? "") ||
+    patterns.length === 0 ||
+    patterns.some((pattern) => !isNonEmptyString(pattern)) ||
+    !uniqueStrings(patterns)
+  ) {
+    issues.push(
+      issue(
+        "CODEOWNER_POLICY_INVALID",
+        "codeowner_requirements must define one owner and unique terminal patterns",
+      ),
+    );
+    return;
+  }
+  const expected = patterns.map((pattern) => `${pattern} ${requirements.owner}`);
+  const actualRules = codeownerRules(repositoryContext?.codeowners);
+  const terminalRules = actualRules.slice(-expected.length);
+  if (
+    terminalRules.length !== expected.length ||
+    expected.some((rule, index) => terminalRules[index] !== rule)
+  ) {
+    issues.push(
+      issue(
+        "CODEOWNER_PROTECTION_MISSING",
+        "CODEOWNERS must end with the complete governance ownership block so later rules cannot override it",
+      ),
+    );
+  }
+}
+
+export function validateRequiredContexts(
+  policy,
+  workflows = new Map(),
+  repositoryContext = {},
+) {
   const issues = [];
   if (!isObject(policy) || policy.schema_version !== "required-contexts/v1") {
     issues.push(
@@ -188,6 +323,8 @@ export function validateRequiredContexts(policy, workflows = new Map()) {
       );
     }
   }
+  validateWorkflowActionPins(policy, workflows, issues);
+  validateCodeownerProtection(policy, repositoryContext, issues);
   return result(issues, {
     implemented_contexts: Object.freeze([...implemented].sort()),
   });
