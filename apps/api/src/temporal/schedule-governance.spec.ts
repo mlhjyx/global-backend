@@ -51,6 +51,8 @@ function fakeClient(
     { describe: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> }
   >();
   const getHandle = vi.fn((id: string) => {
+    const cached = handles.get(id);
+    if (cached) return cached;
     const current = descriptions.get(id);
     if (!current)
       throw Object.assign(new Error("not found"), {
@@ -122,6 +124,60 @@ describe("schedule governance", () => {
       }),
     );
   });
+
+  it("treats a concurrent ScheduleAlreadyRunning create as a race and reconciles the winner", async () => {
+    const target = PLATFORM_SCHEDULES.find(
+      (item) => item.id === "external-intent-sweep",
+    )!;
+    const desired = desiredScheduleOptions(target, {});
+    let describeCalls = 0;
+    const update = vi.fn();
+    const client = {
+      schedule: {
+        getHandle: vi.fn(() => ({
+          describe: vi.fn(async () => {
+            describeCalls += 1;
+            if (describeCalls === 1) {
+              throw Object.assign(new Error("missing"), {
+                name: "ScheduleNotFoundError",
+              });
+            }
+            return existingSchedule({ action: desired.action });
+          }),
+          update,
+        })),
+        create: vi.fn(async () => {
+          throw Object.assign(new Error("winner created it"), {
+            name: "ScheduleAlreadyRunning",
+          });
+        }),
+      },
+    };
+    const append = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      reconcilePlatformSchedules({
+        client: client as never,
+        contracts: [target],
+        receipts: { append },
+        env: {},
+      }),
+    ).resolves.toBeUndefined();
+    expect(update).not.toHaveBeenCalled();
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({ disposition: "IN_SYNC" }),
+    );
+  });
+
+  it.each(["", " 1h", "1 hour", "unbounded", "0m"])(
+    "rejects invalid code-default or override cadence %s before a Temporal call",
+    (cadence) => {
+      const target = PLATFORM_SCHEDULES[0]!;
+      expect(() =>
+        desiredScheduleOptions(target, { [target.cadenceEnv]: cadence }),
+      ).toThrow("INVALID_SCHEDULE_CADENCE");
+    },
+  );
 
   it("reconciles only code-owned action fields and preserves pause, note, remaining actions and cadence override", async () => {
     const target = PLATFORM_SCHEDULES.find(
