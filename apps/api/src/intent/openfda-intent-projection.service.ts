@@ -1,5 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { createCompanyIdentityDecision, provisionalReviewCanonicalKey } from '../discovery/identity';
+import {
+  appendCompanyIdentityDecisionEvidence,
+  companyIdentityResolutionProjection,
+} from '../discovery/company-identity-persistence';
 import { OPENFDA_ATTRIBUTION, OPENFDA_LICENSE, FDA_REGISTRATION_DISCLAIMER } from '../adapters/openfda-api';
 import { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
@@ -28,6 +33,7 @@ export interface ProjectClearancesParams {
 }
 
 interface Clearance {
+  sourceSignalId: string;
   applicant: string;
   country: string; // alpha-2
   decisionDateIso: string; // 事件时间（source_signal.occurredAt 的 UTC ISO）
@@ -92,6 +98,7 @@ export class OpenFdaIntentProjectionService {
       if (byKey.size >= maxCompanies) { overflow.add(s.subjectKey); continue; }
       const payload = (s.payload ?? {}) as Record<string, unknown>;
       byKey.set(s.subjectKey, {
+        sourceSignalId: s.id,
         applicant: s.subjectName,
         country: s.subjectCountry,
         decisionDateIso: s.occurredAt.toISOString(),
@@ -123,11 +130,25 @@ export class OpenFdaIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, c: Clearance): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
+      const reviewKey = provisionalReviewCanonicalKey(`openfda:${dedupeKey}`);
+      const decision = createCompanyIdentityDecision({
+        decision: 'REVIEW_LINK',
+        identity: { dedupeKey: reviewKey, matchRule: 'name_country' },
+        reasons: ['NAME_COUNTRY_REQUIRES_REVIEW'],
+        ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+        actor: { type: 'SYSTEM', id: 'intent.openfdaProjection' },
+        decidedAt: c.decisionDateIso,
+        evidence: [{ type: 'SOURCE_SIGNAL', id: c.sourceSignalId }],
+      });
       const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: reviewKey } },
         select: { id: true, attributes: true, status: true },
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      const legacy = await tx.canonicalCompany.findUnique({
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        select: { id: true, status: true },
+      });
+      if (prior?.status === 'SUPPRESSED' || legacy?.status === 'SUPPRESSED') return false;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
@@ -146,17 +167,28 @@ export class OpenFdaIntentProjectionService {
       const fda = { ...priorFda, disclaimer: FDA_REGISTRATION_DISCLAIMER };
 
       const saved = await tx.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: reviewKey } },
         create: {
           workspaceId,
           name: c.applicant,
           country: c.country,
-          dedupeKey,
+          dedupeKey: reviewKey,
           status: 'NEW',
-          attributes: { fda_applicant: true, fda, intent } as unknown as Prisma.InputJsonValue, // 标记来源=510k 申请人
+          attributes: {
+            fda_applicant: true,
+            fda,
+            intent,
+            identity_resolution: companyIdentityResolutionProjection(decision, dedupeKey),
+          } as unknown as Prisma.InputJsonValue, // 标记来源=510k 申请人
         },
         update: {
-          attributes: { ...priorAttrs, fda_applicant: true, fda, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...priorAttrs,
+            fda_applicant: true,
+            fda,
+            intent,
+            identity_resolution: companyIdentityResolutionProjection(decision, dedupeKey),
+          } as unknown as Prisma.InputJsonValue,
           version: { increment: 1 },
         },
         select: { id: true },
@@ -180,6 +212,13 @@ export class OpenFdaIntentProjectionService {
       });
       // 🟢 申请人身份事实 provenance（CC0）——仅新建时写一次（幂等，避免每 sweep 堆行）。
       if (!prior) {
+        await appendCompanyIdentityDecisionEvidence(tx, {
+          workspaceId,
+          entityId: saved.id,
+          providerKey: 'openfda',
+          license: OPENFDA_LICENSE,
+          decision,
+        });
         await tx.fieldEvidence.create({
           data: {
             workspaceId,

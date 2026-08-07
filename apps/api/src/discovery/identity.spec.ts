@@ -93,6 +93,7 @@ describe('controlled pilot company identity decisions', () => {
 
     expect(decision).toMatchObject({
       decision: 'AUTO_LINK',
+      action: 'LINK_EXISTING',
       identity: { dedupeKey: 'id:ted-natid:de:de991002', matchRule: 'identifier_exact' },
       ambiguous: false,
       recommendationEligible: true,
@@ -126,9 +127,34 @@ describe('controlled pilot company identity decisions', () => {
 
     expect(decision).toMatchObject({
       decision: 'AUTO_LINK',
+      action: 'LINK_EXISTING',
       identity: { dedupeKey: 'd:rheinland-pumpen.de', matchRule: 'domain_exact' },
       ambiguous: false,
       recommendationEligible: true,
+    });
+  });
+
+  it('links a compatible domain to an existing identifier-key canonical instead of creating a duplicate', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        domain: 'rheinland-pumpen.de',
+      },
+      candidates: [{
+        dedupeKey: 'id:ted-natid:de:991002',
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        domain: 'www.rheinland-pumpen.de',
+      }],
+    });
+    expect(decision).toMatchObject({
+      decision: 'AUTO_LINK',
+      action: 'LINK_EXISTING',
+      identity: { dedupeKey: 'id:ted-natid:de:991002', matchRule: 'domain_exact' },
     });
   });
 
@@ -200,8 +226,12 @@ describe('controlled pilot company identity decisions', () => {
   });
 
   it('keeps name_country review-only even with no existing candidate and derives a stable provisional key', () => {
+    const rawStableContext = {
+      ...decisionContext,
+      evidence: [{ type: 'RAW_RECORD' as const, id: 'raw-stable-1' }],
+    };
     const decision = resolveCompanyIdentity({
-      context: decisionContext,
+      context: rawStableContext,
       incoming: { name: 'Unmatched Muster Pumpen GmbH', country: 'DE' },
       candidates: [],
     });
@@ -257,6 +287,7 @@ describe('controlled pilot company identity decisions', () => {
       ],
     });
     expect(decision.decision).toBe('AUTO_LINK');
+    expect(decision.action).toBe('CREATE_CANONICAL');
     expect(decision.identity.dedupeKey).toBe('id:ted-natid:de:991002');
     expect(decision.reasons).toContain('NEW_AUTHORITATIVE_IDENTIFIER');
   });
@@ -303,6 +334,7 @@ describe('immutable identity decision vocabulary', () => {
     });
     expect(value).toMatchObject({
       decision,
+      action: 'HOLD_FOR_REVIEW',
       ruleVersion: COMPANY_IDENTITY_RULE_VERSION,
       recommendationEligible: false,
       actor: decisionContext.actor,
@@ -313,6 +345,20 @@ describe('immutable identity decision vocabulary', () => {
     expect(Object.isFrozen(value.actor)).toBe(true);
     expect(Object.isFrozen(value.evidence)).toBe(true);
     expect(Object.isFrozen(value.reasons)).toBe(true);
+  });
+
+  it.each([
+    ['rule version', { ...decisionContext, ruleVersion: 'wrong-version' }],
+    ['actor', { ...decisionContext, actor: { type: 'SYSTEM' as const, id: '' } }],
+    ['decision time', { ...decisionContext, decidedAt: 'not-a-date' }],
+    ['evidence', { ...decisionContext, evidence: [] }],
+  ])('fails closed on invalid %s provenance', (_label, context) => {
+    expect(() => createCompanyIdentityDecision({
+      decision: 'REVIEW_LINK',
+      identity: { dedupeKey: 'review:raw-test', matchRule: 'name_country' },
+      reasons: ['NAME_COUNTRY_REQUIRES_REVIEW'],
+      ...context,
+    } as Parameters<typeof createCompanyIdentityDecision>[0])).toThrow();
   });
 });
 

@@ -7,9 +7,11 @@ import {
   ACQUISITION_PILOT_CAPS,
   ACQUISITION_PILOT_FORBIDDEN_SOURCES,
   buildControlledPilotManifest,
+  readControlledPilotFixture,
   validateControlledPilotFixture,
   validateControlledPilotManifest,
   writeControlledPilotManifestCreateOnly,
+  type ControlledPilotManifest,
 } from './controlled-pilot-manifest';
 
 const fixturePath = resolve(
@@ -22,6 +24,12 @@ async function fixture(): Promise<unknown> {
 }
 
 describe('German industrial-pump controlled-pilot fixture', () => {
+  it('loads the checked-in fixture through the closed validator', async () => {
+    expect((await readControlledPilotFixture(fixturePath)).contractVersion).toBe(
+      'acquisition-identity-pilot-fixture/2026-08-07-v1',
+    );
+  });
+
   it('is synthetic/public-safe and covers the closed identity decision cases', async () => {
     const parsed = validateControlledPilotFixture(await fixture());
     expect(parsed.classification).toBe('SYNTHETIC_PUBLIC_SAFE');
@@ -54,6 +62,15 @@ describe('German industrial-pump controlled-pilot fixture', () => {
     expect(() =>
       validateControlledPilotFixture({ ...base, apiKey: 'REDACTED' }),
     ).toThrow(/unknown field|credential/i);
+    expect(() =>
+      validateControlledPilotFixture({
+        ...base,
+        icp: {
+          ...(base.icp as Record<string, unknown>),
+          productTerms: ['industrial pump', 'Bearer synthetic-secret-token-value'],
+        },
+      }),
+    ).toThrow(/credential|secret|token/i);
     expect(() =>
       validateControlledPilotFixture({
         ...base,
@@ -123,15 +140,41 @@ describe('controlled acquisition pilot manifest', () => {
     });
   });
 
-  it.each([
-    ['an extra workspace', (m: Record<string, any>) => ({ ...m, scope: { ...m.scope, workspaceIds: [...m.scope.workspaceIds, '00000000-0000-4000-8000-000000000799'] } })],
-    ['an extra ICP', (m: Record<string, any>) => ({ ...m, scope: { ...m.scope, icpIds: [...m.scope.icpIds, '00000000-0000-4000-8000-000000000798'] } })],
-    ['a forbidden source', (m: Record<string, any>) => ({ ...m, scope: { ...m.scope, allowedSources: [...m.scope.allowedSources, 'openfda'] } })],
-    ['a raised raw cap', (m: Record<string, any>) => ({ ...m, caps: { ...m.caps, rawRecords: 51 } })],
-    ['dispatch authorization', (m: Record<string, any>) => ({ ...m, dispatchAuthorization: 'AUTHORIZED' })],
-    ['dispatch capability', (m: Record<string, any>) => ({ ...m, dispatchCapable: true })],
-    ['a network call', (m: Record<string, any>) => ({ ...m, actualNetworkCalls: 1 })],
-  ])('fails closed on %s', async (_label, mutate) => {
+  const unsafeMutations: readonly [string, (manifest: ControlledPilotManifest) => unknown][] = [
+    [
+      'an extra workspace',
+      (manifest) => ({
+        ...manifest,
+        scope: {
+          ...manifest.scope,
+          workspaceIds: [...manifest.scope.workspaceIds, '00000000-0000-4000-8000-000000000799'],
+        },
+      }),
+    ],
+    [
+      'an extra ICP',
+      (manifest) => ({
+        ...manifest,
+        scope: {
+          ...manifest.scope,
+          icpIds: [...manifest.scope.icpIds, '00000000-0000-4000-8000-000000000798'],
+        },
+      }),
+    ],
+    [
+      'a forbidden source',
+      (manifest) => ({
+        ...manifest,
+        scope: { ...manifest.scope, allowedSources: [...manifest.scope.allowedSources, 'openfda'] },
+      }),
+    ],
+    ['a raised raw cap', (manifest) => ({ ...manifest, caps: { ...manifest.caps, rawRecords: 51 } })],
+    ['dispatch authorization', (manifest) => ({ ...manifest, dispatchAuthorization: 'AUTHORIZED' })],
+    ['dispatch capability', (manifest) => ({ ...manifest, dispatchCapable: true })],
+    ['a network call', (manifest) => ({ ...manifest, actualNetworkCalls: 1 })],
+  ];
+
+  it.each(unsafeMutations)('fails closed on %s', async (_label, mutate) => {
     const parsedFixture = validateControlledPilotFixture(await fixture());
     const manifest = buildControlledPilotManifest({
       fixture: parsedFixture,
@@ -139,7 +182,7 @@ describe('controlled acquisition pilot manifest', () => {
       sourceCommit: '4562eab1bae16cdd424ff90a7d3403b0fb30d535',
       expiresAt: '2026-08-14T00:00:00.000Z',
     });
-    expect(() => validateControlledPilotManifest(mutate(manifest as unknown as Record<string, any>))).toThrow();
+    expect(() => validateControlledPilotManifest(mutate(manifest))).toThrow();
   });
 
   it('writes with create-only semantics and refuses an overwrite', async () => {

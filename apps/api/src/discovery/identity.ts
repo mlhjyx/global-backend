@@ -2,7 +2,13 @@
  * 身份解析（PRD 8.8）：确定性规则优先 —— 域名精确匹配 > 名称+国家规范化。
  * 纯函数，可测试；匹配规则名记入 identity_link.match_rule 供审计。
  */
+import { createHash } from 'node:crypto';
+import { domainToASCII } from 'node:url';
+import { parse } from 'tldts-icann';
+import { contactEmailKind } from '../compliance/email-kind';
 import { normalizePersonName, personNameKeyVariants } from './person-name';
+
+export { contactEmailKind } from '../compliance/email-kind';
 
 const LEGAL_SUFFIXES =
   /\b(gmbh|ag|kg|co\.?|ltd\.?|llc|inc\.?|corp\.?|s\.?a\.?|s\.?r\.?l\.?|b\.?v\.?|oy|ab|as|plc|pty|limited|company|holdings?)\b|有限公司|株式会社|주식회사/gi;
@@ -13,6 +19,26 @@ export function normalizeDomain(raw?: string | null): string | null {
   d = d.replace(/^https?:\/\//, '').replace(/^www\./, '');
   d = d.split(/[/?#]/)[0];
   return d || null;
+}
+
+/**
+ * ICANN registrable-domain normalizer used by the controlled identity resolver.
+ * Special-use domains, IP literals, invalid hosts and bare public suffixes fail closed.
+ * The legacy {@link normalizeDomain} remains unchanged for persisted-key compatibility.
+ */
+export function normalizeRegistrableDomain(raw?: string | null): string | null {
+  if (!raw?.trim()) return null;
+  const parsed = parse(raw.trim(), {
+    allowIcannDomains: true,
+    allowPrivateDomains: false,
+    detectIp: true,
+    detectSpecialUse: true,
+    extractHostname: true,
+    mixedInputs: true,
+    validateHostname: true,
+  });
+  if (!parsed.domain || parsed.isIp || parsed.isSpecialUse || parsed.isPrivate === true) return null;
+  return domainToASCII(parsed.domain).toLowerCase() || null;
 }
 
 export function normalizeCompanyName(raw: string): string {
@@ -61,6 +87,285 @@ export function companyIdentity(rec: {
   };
 }
 
+export const COMPANY_IDENTITY_RULE_VERSION = 'company-identity-resolution/2026-08-07-v1' as const;
+
+const COUNTRY_QUALIFIED_AUTHORITATIVE_SCHEMES = new Set(['ted-natid']);
+
+export type CompanyIdentityDecisionKind = 'AUTO_LINK' | 'REVIEW_LINK' | 'REJECT_LINK' | 'SPLIT';
+export type CompanyIdentityAction = 'CREATE_CANONICAL' | 'LINK_EXISTING' | 'HOLD_FOR_REVIEW';
+
+export type CompanyIdentityDecisionReason =
+  | 'AUTHORITATIVE_IDENTIFIER_EXACT'
+  | 'NEW_AUTHORITATIVE_IDENTIFIER'
+  | 'REGISTRABLE_DOMAIN_COMPATIBLE'
+  | 'NEW_GROUNDED_DOMAIN'
+  | 'COUNTRY_EVIDENCE_MISSING'
+  | 'COUNTRY_CONFLICT'
+  | 'LEGAL_NAME_EVIDENCE_MISSING'
+  | 'LEGAL_NAME_CONFLICT'
+  | 'SHARED_GROUP_DOMAIN'
+  | 'MULTIPLE_DOMAIN_CANDIDATES'
+  | 'MULTIPLE_IDENTIFIER_CANDIDATES'
+  | 'NAME_COUNTRY_REQUIRES_REVIEW'
+  | 'IDENTIFIER_NOT_AUTHORITATIVE_OR_COUNTRY_QUALIFIED'
+  | 'IDENTIFIER_COUNTRY_CONFLICT'
+  | 'IDENTIFIER_DOMAIN_CONFLICT'
+  | 'HUMAN_LINK_REJECTED'
+  | 'HUMAN_SPLIT_REQUIRED';
+
+export interface CompanyIdentityEvidence {
+  readonly name: string;
+  readonly legalName?: string | null;
+  readonly domain?: string | null;
+  readonly country?: string | null;
+  readonly identifier?: CompanyIdentifier | null;
+  readonly sharedGroupAmbiguity?: boolean;
+}
+
+export interface CompanyIdentityCandidate {
+  readonly dedupeKey: string;
+  readonly name: string;
+  readonly legalName?: string | null;
+  readonly domain?: string | null;
+  readonly country?: string | null;
+  readonly sharedGroupAmbiguity?: boolean;
+}
+
+export interface CompanyIdentityActor {
+  readonly type: 'SYSTEM' | 'USER';
+  readonly id: string;
+}
+
+export interface CompanyIdentityEvidenceRef {
+  readonly type: 'RAW_RECORD' | 'FIELD_EVIDENCE' | 'CANONICAL_COMPANY' | 'SOURCE_SIGNAL';
+  readonly id: string;
+}
+
+export interface CompanyIdentityDecisionContext {
+  readonly ruleVersion: typeof COMPANY_IDENTITY_RULE_VERSION;
+  readonly actor: CompanyIdentityActor;
+  readonly decidedAt: string;
+  readonly evidence: readonly CompanyIdentityEvidenceRef[];
+}
+
+export interface CompanyIdentityDecision {
+  readonly decision: CompanyIdentityDecisionKind;
+  readonly action: CompanyIdentityAction;
+  readonly identity: Readonly<IdentityKey>;
+  readonly ambiguous: boolean;
+  readonly recommendationEligible: boolean;
+  readonly reasons: readonly CompanyIdentityDecisionReason[];
+  readonly ruleVersion: typeof COMPANY_IDENTITY_RULE_VERSION;
+  readonly actor: Readonly<CompanyIdentityActor>;
+  readonly decidedAt: string;
+  readonly evidence: readonly Readonly<CompanyIdentityEvidenceRef>[];
+}
+
+export interface ResolveCompanyIdentityInput {
+  readonly incoming: CompanyIdentityEvidence;
+  readonly candidates?: readonly CompanyIdentityCandidate[];
+  readonly context: CompanyIdentityDecisionContext;
+}
+
+export function provisionalReviewCanonicalKey(seed: string): string {
+  const normalized = seed.trim().toLowerCase();
+  if (/^[a-z0-9][a-z0-9_-]{0,127}$/.test(normalized)) return `review:${normalized}`;
+  return `review:h${createHash('sha256').update(normalized).digest('hex')}`;
+}
+
+function assertDecisionContext(context: CompanyIdentityDecisionContext): void {
+  if (context.ruleVersion !== COMPANY_IDENTITY_RULE_VERSION) throw new Error('unsupported company identity ruleVersion');
+  if (!context.actor.id.trim()) throw new Error('company identity actor id is required');
+  if (!Number.isFinite(Date.parse(context.decidedAt))) throw new Error('company identity decidedAt must be ISO-8601');
+  if (!context.evidence.length || context.evidence.some((item) => !item.id.trim())) {
+    throw new Error('company identity evidence references are required');
+  }
+}
+
+export function createCompanyIdentityDecision(input: {
+  readonly decision: CompanyIdentityDecisionKind;
+  readonly identity: IdentityKey;
+  readonly reasons: readonly CompanyIdentityDecisionReason[];
+} & CompanyIdentityDecisionContext): CompanyIdentityDecision {
+  assertDecisionContext(input);
+  if (!input.identity.dedupeKey.trim() || !input.reasons.length) throw new Error('identity and reasons are required');
+  const automatic = input.decision === 'AUTO_LINK';
+  const createsCanonical = automatic && input.reasons.some(
+    (reason) => reason === 'NEW_AUTHORITATIVE_IDENTIFIER' || reason === 'NEW_GROUNDED_DOMAIN',
+  );
+  const actor = Object.freeze({ ...input.actor });
+  const evidence = Object.freeze(input.evidence.map((item) => Object.freeze({ ...item })));
+  return Object.freeze({
+    decision: input.decision,
+    action: automatic ? (createsCanonical ? 'CREATE_CANONICAL' : 'LINK_EXISTING') : 'HOLD_FOR_REVIEW',
+    identity: Object.freeze({ ...input.identity }),
+    ambiguous: !automatic,
+    recommendationEligible: automatic,
+    reasons: Object.freeze([...new Set(input.reasons)]),
+    ruleVersion: COMPANY_IDENTITY_RULE_VERSION,
+    actor,
+    decidedAt: input.decidedAt,
+    evidence,
+  });
+}
+
+function normalizedCountry(raw?: string | null): string | null {
+  const country = raw?.trim().toUpperCase() ?? '';
+  return /^[A-Z]{2}$/.test(country) ? country : null;
+}
+
+interface AuthoritativeIdentifier {
+  readonly identity: IdentityKey;
+  readonly schemeCountry: string;
+}
+
+function countryQualifiedAuthoritativeIdentifier(incoming: CompanyIdentityEvidence): AuthoritativeIdentifier | null {
+  if (!incoming.identifier) return null;
+  const scheme = incoming.identifier.scheme.trim().toLowerCase();
+  const match = /^([a-z][a-z0-9_-]*):([a-z]{2})$/.exec(scheme);
+  const identifier = normalizeIdentifier(incoming.identifier);
+  if (!match || !identifier || !COUNTRY_QUALIFIED_AUTHORITATIVE_SCHEMES.has(match[1])) return null;
+  return {
+    identity: Object.freeze({ dedupeKey: `id:${identifier}`, matchRule: 'identifier_exact' as const }),
+    schemeCountry: match[2].toUpperCase(),
+  };
+}
+
+function countryCompatibility(
+  incoming: CompanyIdentityEvidence,
+  candidate: CompanyIdentityCandidate,
+): CompanyIdentityDecisionReason | null {
+  const incomingCountry = normalizedCountry(incoming.country);
+  const candidateCountry = normalizedCountry(candidate.country);
+  if (!incomingCountry || !candidateCountry) return 'COUNTRY_EVIDENCE_MISSING';
+  return incomingCountry === candidateCountry ? null : 'COUNTRY_CONFLICT';
+}
+
+function legalNameCompatibility(
+  incoming: CompanyIdentityEvidence,
+  candidate: CompanyIdentityCandidate,
+): CompanyIdentityDecisionReason | null {
+  const incomingName = incoming.legalName ? normalizeCompanyName(incoming.legalName) : '';
+  const candidateName = candidate.legalName ? normalizeCompanyName(candidate.legalName) : '';
+  if (!incomingName || !candidateName) return 'LEGAL_NAME_EVIDENCE_MISSING';
+  return incomingName === candidateName ? null : 'LEGAL_NAME_CONFLICT';
+}
+
+function matchingDomainCandidates(
+  registrableDomain: string,
+  candidates: readonly CompanyIdentityCandidate[],
+): CompanyIdentityCandidate[] {
+  const matches = candidates.filter(
+    (candidate) =>
+      candidate.dedupeKey === `d:${registrableDomain}` ||
+      normalizeRegistrableDomain(candidate.domain) === registrableDomain,
+  );
+  return [...new Map(matches.map((candidate) => [candidate.dedupeKey, candidate])).values()];
+}
+
+function decision(
+  context: CompanyIdentityDecisionContext,
+  kind: 'AUTO_LINK' | 'REVIEW_LINK',
+  identity: IdentityKey,
+  reasons: readonly CompanyIdentityDecisionReason[],
+): CompanyIdentityDecision {
+  return createCompanyIdentityDecision({ decision: kind, identity, reasons, ...context });
+}
+
+function reviewIdentity(context: CompanyIdentityDecisionContext): IdentityKey {
+  const seed = context.evidence[0]?.id ?? 'missing-evidence';
+  return { dedupeKey: provisionalReviewCanonicalKey(seed), matchRule: 'name_country' };
+}
+
+/**
+ * Immutable, fail-closed company identity decision for the controlled pilot.
+ * Name+country never selects an existing canonical. A domain must have explicit,
+ * compatible country and legal-name evidence. Only an allowlisted identifier scheme
+ * carrying the same country may select an identifier canonical automatically.
+ */
+export function resolveCompanyIdentity(input: ResolveCompanyIdentityInput): CompanyIdentityDecision {
+  const { incoming, context } = input;
+  const candidates = input.candidates ?? [];
+  const authoritative = countryQualifiedAuthoritativeIdentifier(incoming);
+  const incomingCountry = normalizedCountry(incoming.country);
+  const registrableDomain = normalizeRegistrableDomain(incoming.domain);
+
+  if (authoritative) {
+    if (!incomingCountry || incomingCountry !== authoritative.schemeCountry) {
+      return decision(context, 'REVIEW_LINK', reviewIdentity(context), ['IDENTIFIER_COUNTRY_CONFLICT']);
+    }
+    const identifierCandidates = candidates.filter(
+      (candidate) => candidate.dedupeKey === authoritative.identity.dedupeKey,
+    );
+    if (identifierCandidates.length > 1) {
+      return decision(context, 'REVIEW_LINK', reviewIdentity(context), ['MULTIPLE_IDENTIFIER_CANDIDATES']);
+    }
+    const exact = identifierCandidates[0];
+    const domainCandidates = registrableDomain ? matchingDomainCandidates(registrableDomain, candidates) : [];
+    const domainPointsElsewhere = domainCandidates.some(
+      (candidate) => candidate.dedupeKey !== authoritative.identity.dedupeKey,
+    );
+    const exactDomain = exact ? normalizeRegistrableDomain(exact.domain) : null;
+    const identifierDomainConflicts = exactDomain != null && registrableDomain != null && exactDomain !== registrableDomain;
+    if (domainPointsElsewhere || identifierDomainConflicts) {
+      return decision(context, 'REVIEW_LINK', reviewIdentity(context), ['IDENTIFIER_DOMAIN_CONFLICT']);
+    }
+    if (exact) {
+      const countryReason = countryCompatibility(incoming, exact);
+      if (countryReason) return decision(context, 'REVIEW_LINK', reviewIdentity(context), [countryReason]);
+      return decision(context, 'AUTO_LINK', authoritative.identity, ['AUTHORITATIVE_IDENTIFIER_EXACT']);
+    }
+    return decision(context, 'AUTO_LINK', authoritative.identity, ['NEW_AUTHORITATIVE_IDENTIFIER']);
+  }
+
+  if (registrableDomain) {
+    const domainIdentity: IdentityKey = { dedupeKey: `d:${registrableDomain}`, matchRule: 'domain_exact' };
+    const domainCandidates = matchingDomainCandidates(registrableDomain, candidates);
+    if (domainCandidates.length > 1) {
+      return decision(context, 'REVIEW_LINK', reviewIdentity(context), ['MULTIPLE_DOMAIN_CANDIDATES']);
+    }
+    const candidate = domainCandidates[0];
+    const reasons: CompanyIdentityDecisionReason[] = [];
+    if (incoming.identifier) reasons.push('IDENTIFIER_NOT_AUTHORITATIVE_OR_COUNTRY_QUALIFIED');
+    if (incoming.sharedGroupAmbiguity || candidate?.sharedGroupAmbiguity) reasons.push('SHARED_GROUP_DOMAIN');
+    if (candidate) {
+      const countryReason = countryCompatibility(incoming, candidate);
+      if (countryReason) reasons.push(countryReason);
+      const legalNameReason = legalNameCompatibility(incoming, candidate);
+      if (legalNameReason) reasons.push(legalNameReason);
+      if (reasons.length) return decision(context, 'REVIEW_LINK', reviewIdentity(context), reasons);
+      return decision(
+        context,
+        'AUTO_LINK',
+        { dedupeKey: candidate.dedupeKey, matchRule: 'domain_exact' },
+        ['REGISTRABLE_DOMAIN_COMPATIBLE'],
+      );
+    }
+    if (!incomingCountry) reasons.push('COUNTRY_EVIDENCE_MISSING');
+    if (!incoming.legalName || !normalizeCompanyName(incoming.legalName)) reasons.push('LEGAL_NAME_EVIDENCE_MISSING');
+    if (reasons.length) return decision(context, 'REVIEW_LINK', reviewIdentity(context), reasons);
+    return decision(context, 'AUTO_LINK', domainIdentity, ['NEW_GROUNDED_DOMAIN']);
+  }
+
+  const reasons: CompanyIdentityDecisionReason[] = ['NAME_COUNTRY_REQUIRES_REVIEW'];
+  if (incoming.identifier) reasons.push('IDENTIFIER_NOT_AUTHORITATIVE_OR_COUNTRY_QUALIFIED');
+  if (!incomingCountry) reasons.push('COUNTRY_EVIDENCE_MISSING');
+  return decision(context, 'REVIEW_LINK', reviewIdentity(context), reasons);
+}
+
+export class IdentityReviewRequiredError extends Error {
+  constructor(readonly decision: CompanyIdentityDecision) {
+    super(`identity requires review: ${decision.reasons.join(',')}`);
+    this.name = 'IdentityReviewRequiredError';
+  }
+}
+
+/** Guard used at canonicalization boundaries; only AUTO_LINK has an automatic target key. */
+export function automaticCanonicalKey(value: CompanyIdentityDecision): string {
+  if (value.decision !== 'AUTO_LINK') throw new IdentityReviewRequiredError(value);
+  return value.identity.dedupeKey;
+}
+
 /** 联系人去重键的人名归一（小写 + 折叠空白 + 去首尾）；contactIdentity 的明文 c 形用。 */
 function contactNameKeyPart(fullName: string): string {
   return fullName.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -76,7 +381,10 @@ function declinedNameKeyPart(fullName: string): string {
 }
 
 export function contactIdentity(contact: { fullName: string; email?: string | null }, companyKey: string): string {
-  if (contact.email) return `e:${contact.email.trim().toLowerCase()}`;
+  if (contact.email) {
+    const email = contact.email.trim().toLowerCase();
+    return contactEmailKind(email) === 'role' ? `re:${companyKey}:${email}` : `e:${email}`;
+  }
   return `c:${companyKey}:${contactNameKeyPart(contact.fullName)}`;
 }
 

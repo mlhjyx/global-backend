@@ -319,9 +319,30 @@ describe('scoreLead — unresolved company identity is never recommended', () =>
     expect(result.queue).toBe('needs_review');
   });
 
-  it('does not regress a safely resolved domain identity', () => {
+  it('keeps a legacy domain canonical without resolution provenance in needs_review', () => {
     const result = scoreLead(
-      company({ dedupeKey: 'd:nordstern-pumpen.example', ...reachable }),
+      company({ dedupeKey: 'd:nordstern-pumpen.de', ...reachable }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(result.queue).toBe('needs_review');
+  });
+
+  it('allows a domain identity only with a complete AUTO_LINK projection', () => {
+    const result = scoreLead(
+      company({
+        dedupeKey: 'd:nordstern-pumpen.de',
+        attributes: {
+          identity_resolution: {
+            decision: 'AUTO_LINK',
+            action: 'CREATE_CANONICAL',
+            rule_version: 'company-identity-resolution/2026-08-07-v1',
+            ambiguous: false,
+            recommendation_eligible: true,
+          },
+        },
+        ...reachable,
+      }),
       icp,
       { authoritativeFit: 'match' },
     );

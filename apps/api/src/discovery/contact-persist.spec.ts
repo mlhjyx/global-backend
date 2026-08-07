@@ -15,7 +15,12 @@ type FakeCandidate = { id: string; fullName: string; contactPoints: { type: stri
  */
 function fakeTx(
   candidates: FakeCandidate[],
-  opts?: { existingBlindedKeys?: string[]; companyStatus?: string; suppressedContactKeys?: string[] },
+  opts?: {
+    existingBlindedKeys?: string[];
+    existingContactsByKey?: Record<string, { id: string; companyId: string }>;
+    companyStatus?: string;
+    suppressedContactKeys?: string[];
+  },
 ) {
   const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
   const contactPointUpsert = vi.fn(async () => ({}));
@@ -26,7 +31,7 @@ function fakeTx(
     const where = arg?.where ?? {};
     if ('workspaceId_dedupeKey' in where) {
       const key = (where.workspaceId_dedupeKey as { dedupeKey: string }).dedupeKey;
-      return existingKeys.has(key) ? { id: 'collide-existing' } : null;
+      return opts?.existingContactsByKey?.[key] ?? (existingKeys.has(key) ? { id: 'collide-existing', companyId: 'unknown' } : null);
     }
     return { title: 'Geschäftsführer', seniority: null, department: null };
   });
@@ -240,6 +245,62 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
       blindContactKey(contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, company.dedupeKey)),
     );
     expect(upsertDedupeKey(canonicalUpsert)).not.toBe(blindContactKey('e:info@shared.example'));
+  });
+
+  it('does not reuse a legacy global role-mailbox row from another company and records split review', async () => {
+    const legacyKey = blindContactKey('e:info@shared.example');
+    const scopedKey = blindContactKey(
+      contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, company.dedupeKey),
+    );
+    const { tx, canonicalUpsert, fieldEvidenceCreate } = fakeTx([], {
+      existingContactsByKey: {
+        [legacyKey]: { id: 'legacy-contact-other-company', companyId: 'co-other' },
+      },
+    });
+
+    await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'public_web',
+      contacts: [{ externalId: 'switchboard-legacy', fullName: 'Sales Desk', email: 'info@shared.example' }],
+      suppressedEmails: new Set(),
+    });
+
+    expect(upsertDedupeKey(canonicalUpsert)).toBe(scopedKey);
+    expect(upsertDedupeKey(canonicalUpsert)).not.toBe(legacyKey);
+    const review = fieldEvidenceCreate.mock.calls
+      .map((call) => call[0] as { data: { field: string; value: Record<string, unknown> } })
+      .find((entry) => entry.data.field === 'identity.role_mailbox_legacy_review');
+    expect(review?.data.value).toMatchObject({
+      decision: 'REVIEW_LINK',
+      required_action: 'SPLIT_REQUIRED',
+      legacy_contact_id: 'legacy-contact-other-company',
+      legacy_company_id: 'co-other',
+      target_company_id: company.id,
+    });
+  });
+
+  it('does not treat a same-company legacy role mailbox as a person-identity merge', async () => {
+    const legacyKey = blindContactKey('e:sales@shared.example');
+    const { tx, canonicalUpsert, fieldEvidenceCreate } = fakeTx(
+      [{ id: 'legacy-role-same-company', fullName: 'Old Sales Desk', contactPoints: [{ type: 'email', value: 'sales@shared.example', status: 'VALID' }] }],
+      { existingContactsByKey: { [legacyKey]: { id: 'legacy-role-same-company', companyId: company.id } } },
+    );
+    const result = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'public_web',
+      contacts: [{ externalId: 'switchboard-same', fullName: 'Sales Desk', email: 'sales@shared.example' }],
+      suppressedEmails: new Set(),
+    });
+
+    expect(result).toMatchObject({ created: 1, merged: 0 });
+    expect(upsertDedupeKey(canonicalUpsert)).toBe(
+      blindContactKey(contactIdentity({ fullName: 'Sales Desk', email: 'sales@shared.example' }, company.dedupeKey)),
+    );
+    expect(fieldEvidenceCreate.mock.calls.some(
+      (call) => (call[0] as { data: { field: string } }).data.field === 'identity.role_mailbox_legacy_review',
+    )).toBe(true);
   });
 });
 

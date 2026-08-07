@@ -11,6 +11,7 @@
     "mg:check": "node scripts/mg-check.cjs",
     "new-api:ensure-embeddings": "node --import tsx scripts/ensure-new-api-embeddings.mts",
     "prepare:site-builder:current-route-recovery": "node --import tsx scripts/prepare-site-builder-current-route-recovery.mts",
+    "prepare:acquisition-identity-pilot": "node --import tsx scripts/prepare-acquisition-identity-pilot-manifest.mts",
     "verify:site-builder:m1": "node --import tsx scripts/verify-site-builder-m1.mts",
     "lint": "eslint \"src/**/*.ts\""
   },
@@ -57,6 +58,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "0.35.3",
+    "tldts-icann": "7.4.9",
     "world-countries": "^5.1.0"
   },
   "devDependencies": {

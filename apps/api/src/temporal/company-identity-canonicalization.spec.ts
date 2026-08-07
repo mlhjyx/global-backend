@@ -14,6 +14,7 @@ function makeActivities(raws: unknown[], existingByKey: Record<string, unknown> 
       findUnique: vi.fn(async ({ where }: { where: { workspaceId_dedupeKey: { dedupeKey: string } } }) =>
         existingByKey[where.workspaceId_dedupeKey.dedupeKey] ?? null,
       ),
+      findMany: vi.fn(async () => Object.values(existingByKey)),
       upsert,
     },
     identityLink: { findFirst: vi.fn(async () => null), create: vi.fn(async () => ({})) },
@@ -97,5 +98,70 @@ describe('canonicalizeRun identity safety guard', () => {
     expect(result).toEqual({ companies: 1, suppressed: 0, reviewRequired: 0 });
     const call = upsert.mock.calls[0][0] as { where: { workspaceId_dedupeKey: { dedupeKey: string } } };
     expect(call.where.workspaceId_dedupeKey.dedupeKey).toBe('id:ted-natid:de:de991002');
+  });
+
+  it('persists explicit legal-name evidence for repeat compatible domain resolution', async () => {
+    const { activities, upsert } = makeActivities([
+      {
+        id: 'raw-domain-legal-name-1',
+        providerKey: 'public_web',
+        payload: {
+          name: 'Rheinland Pumpensysteme GmbH',
+          legalName: 'Rheinland Pumpensysteme GmbH',
+          country: 'DE',
+          domain: 'www.rheinland-pumpen.de',
+        },
+      },
+    ]);
+
+    expect(await activities.canonicalizeRun({ workspaceId: 'workspace-1', runId: 'run-1' })).toEqual({
+      companies: 1,
+      suppressed: 0,
+      reviewRequired: 0,
+    });
+    const call = upsert.mock.calls[0][0] as { create: { attributes: Record<string, unknown> } };
+    expect(call.create.attributes).toMatchObject({
+      legal_name: 'Rheinland Pumpensysteme GmbH',
+      identity_resolution: { decision: 'AUTO_LINK', action: 'CREATE_CANONICAL' },
+    });
+  });
+
+  it('links compatible domain evidence to an existing identifier canonical instead of duplicating it', async () => {
+    const existing = {
+      id: 'existing-identifier-canonical',
+      dedupeKey: 'id:ted-natid:de:991002',
+      name: 'Rheinland Pumpensysteme GmbH',
+      domain: 'www.rheinland-pumpen.de',
+      country: 'DE',
+      status: 'NEW',
+      attributes: { legal_name: 'Rheinland Pumpensysteme GmbH' },
+    };
+    const { activities, upsert } = makeActivities(
+      [{
+        id: 'raw-domain-to-id-1',
+        providerKey: 'public_web',
+        payload: {
+          name: 'Rheinland Pumpensysteme GmbH',
+          legalName: 'Rheinland Pumpensysteme GmbH',
+          country: 'DE',
+          domain: 'rheinland-pumpen.de',
+        },
+      }],
+      { [existing.dedupeKey]: existing },
+    );
+
+    expect(await activities.canonicalizeRun({ workspaceId: 'workspace-1', runId: 'run-1' })).toEqual({
+      companies: 1,
+      suppressed: 0,
+      reviewRequired: 0,
+    });
+    const call = upsert.mock.calls[0][0] as {
+      where: { workspaceId_dedupeKey: { dedupeKey: string } };
+      create: { attributes: Record<string, unknown> };
+    };
+    expect(call.where.workspaceId_dedupeKey.dedupeKey).toBe(existing.dedupeKey);
+    expect(call.create.attributes).toMatchObject({
+      identity_resolution: { decision: 'AUTO_LINK', action: 'LINK_EXISTING' },
+    });
   });
 });

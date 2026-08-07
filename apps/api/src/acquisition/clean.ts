@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { contactEmailKind } from '../compliance/email-kind';
 import { normalizeDomain } from '../discovery/identity';
 
 /**
@@ -27,19 +28,6 @@ export interface CleanedEntity {
   personalData: boolean;
 }
 
-// 职能邮箱本地部分（非个人数据，GDPR Recital 14 豁免）——**白名单**：只有明确的职能别名判 role，
-// 未知一律保守判 personal（含单词名如 max@/jane@，防常见个人邮箱绕过 GDPR 隔离门）。
-const ROLE_LOCALPARTS = new Set([
-  'info', 'sales', 'contact', 'kontakt', 'office', 'mail', 'email', 'hello', 'hallo',
-  'service', 'support', 'vertrieb', 'verkauf', 'anfrage', 'enquiry', 'enquiries', 'inquiry',
-  'marketing', 'admin', 'welcome', 'team', 'press', 'presse', 'export', 'import', 'shop',
-  'orders', 'order', 'bestellung', 'purchasing', 'procurement', 'einkauf', 'buy',
-  'hr', 'jobs', 'job', 'career', 'careers', 'recruiting', 'recruitment', 'bewerbung',
-  'accounts', 'accounting', 'billing', 'invoice', 'invoicing', 'finance', 'buchhaltung',
-  'help', 'helpdesk', 'webmaster', 'postmaster', 'abuse', 'privacy', 'legal', 'dpo',
-  'compliance', 'quality', 'qa', 'rfq', 'quote', 'quotes', 'reception', 'empfang', 'zentrale',
-  'general', 'main', 'company', 'all', 'newsletter', 'noreply', 'mailbox',
-]);
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
 export function cleanName(raw: string): string {
@@ -50,14 +38,7 @@ export function cleanEmail(raw?: string | null): { value: string; kind: 'role' |
   if (!raw) return null;
   const v = raw.trim().toLowerCase();
   if (!EMAIL_RE.test(v)) return null;
-  const local = v.split('@')[0];
-  // 白名单：明确职能别名（或去掉数字/分隔后是职能别名，如 sales2 / info-eu）→ role；其余一律 personal（GDPR 保守）
-  const bare = local.replace(/[._-]?\d+$/, '').replace(/[._-](eu|us|de|uk|global|team)$/i, '');
-  const isRole =
-    ROLE_LOCALPARTS.has(local) ||
-    ROLE_LOCALPARTS.has(bare) ||
-    /^(no-?reply|do-?not-?reply|newsletter|mailbox|postmaster|webmaster)$/.test(local);
-  return { value: v, kind: isRole ? 'role' : 'personal' };
+  return { value: v, kind: contactEmailKind(v) };
 }
 
 export function cleanPhone(raw?: string | null): string | null {
