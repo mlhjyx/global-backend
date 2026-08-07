@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { canonicalize, sameIntent, mergeIntent, IntentAttr, IntentEvent } from './intent-projection.service';
+import { describe, expect, it, vi } from 'vitest';
+import type { PrismaService } from '../prisma/prisma.service';
+import {
+  canonicalize,
+  sameIntent,
+  mergeIntent,
+  IntentAttr,
+  IntentEvent,
+  IntentProjectionService,
+} from './intent-projection.service';
 
 // 这三个纯函数是 TED P3 / openFDA P3 / web_watch 共享的**幂等基石**——每 sweep 复现同一信号时靠它们判「实质未变」
 // 而不重写 canonical / 不堆 field_evidence。TED P3 实测抓到过 jsonb 键序 bug（DB 取回对象键序被 Postgres 规范化，
@@ -104,5 +112,112 @@ describe('mergeIntent — at 格式漂移免疫（存量旧格式与新 UTC ISO 
       { type: 'HIRING_UP', at: '2026-07-01T00:00:00.000Z', strength: 0.6 },
     ]);
     expect(merged.events).toHaveLength(3);
+  });
+});
+
+function projectionHarness(priorIntent?: IntentAttr) {
+  const occurredAt = new Date('2026-08-07T12:00:00.000Z');
+  const company = {
+    id: 'co-1',
+    status: 'ACTIVE',
+    version: 1,
+    attributes: priorIntent ? { retained: 'yes', intent: priorIntent } : { retained: 'yes' },
+  };
+  const evidence: Record<string, unknown>[] = [];
+  const update = vi.fn(async ({ data }: { data: { attributes: Record<string, unknown> } }) => {
+    company.attributes = data.attributes as typeof company.attributes;
+    company.version += 1;
+    return { id: company.id };
+  });
+  const evidenceCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    evidence.push(data);
+    return { id: `fe-${evidence.length}` };
+  });
+  const tx = {
+    canonicalCompany: {
+      findUnique: vi.fn(async () => company),
+      update,
+    },
+    fieldEvidence: { create: evidenceCreate },
+  };
+  const changes = [
+    {
+      changeType: 'NEW_PRODUCTS',
+      createdAt: occurredAt,
+      detail: {
+        strength: 0.7,
+        page_kind: 'products',
+        url: 'https://acme.example/products/pump',
+        evidence: { added: ['pump'] },
+      },
+      source: {
+        config: {
+          company: { name: 'Acme GmbH', domain: 'acme.example' },
+        },
+      },
+    },
+  ];
+  const prisma = {
+    sourceEntityChange: { findMany: vi.fn(async () => changes) },
+    withWorkspace: vi.fn(
+      async (_workspaceId: string, fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
+    ),
+  } as unknown as PrismaService;
+  return {
+    service: new IntentProjectionService({ prisma }),
+    company,
+    evidence,
+    update,
+    evidenceCreate,
+  };
+}
+
+describe('IntentProjectionService.projectIntent', () => {
+  it('is idempotent for a replayed canonical change and does not duplicate evidence', async () => {
+    const h = projectionHarness();
+
+    expect(await h.service.projectIntent('ws-1')).toEqual({
+      companiesTouched: 1,
+      eventsProjected: 1,
+    });
+    const versionAfterFirst = h.company.version;
+    const evidenceAfterFirst = h.evidence.length;
+
+    expect(await h.service.projectIntent('ws-1')).toEqual({
+      companiesTouched: 0,
+      eventsProjected: 0,
+    });
+    expect(h.company.version).toBe(versionAfterFirst);
+    expect(h.evidence).toHaveLength(evidenceAfterFirst);
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(h.evidenceCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cross-source intent in canonical attributes but only writes web-watch events as web-watch evidence', async () => {
+    const priorIntent = mergeIntent(undefined, [
+      {
+        type: 'TENDER_PUBLISHED',
+        at: '2026-08-06T12:00:00.000Z',
+        strength: 0.9,
+        evidence: { notice: 'ted-1', source: 'ted' },
+      },
+    ]);
+    const h = projectionHarness(priorIntent);
+
+    await h.service.projectIntent('ws-1');
+
+    expect(h.company.attributes.retained).toBe('yes');
+    expect(
+      (h.company.attributes.intent as IntentAttr).events.map((event) => event.type),
+    ).toEqual(['NEW_PRODUCTS', 'TENDER_PUBLISHED']);
+    expect(h.evidence).toHaveLength(1);
+    expect(h.evidence[0]).toMatchObject({
+      field: 'intent.website_change',
+      providerKey: 'web_watch',
+      value: {
+        events: [expect.objectContaining({ type: 'NEW_PRODUCTS' })],
+      },
+    });
+    expect(JSON.stringify(h.evidence[0])).not.toContain('TENDER_PUBLISHED');
   });
 });
