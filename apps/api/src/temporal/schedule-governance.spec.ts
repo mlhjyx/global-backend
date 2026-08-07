@@ -59,7 +59,7 @@ function fakeClient(
         name: "ScheduleNotFoundError",
       });
     const handle = {
-      describe: vi.fn().mockResolvedValue(current),
+      describe: vi.fn(async () => current),
       update: vi.fn(async (fn: (previous: typeof current) => unknown) => {
         const next = fn(current) as Record<string, unknown>;
         updates.push({ id, next });

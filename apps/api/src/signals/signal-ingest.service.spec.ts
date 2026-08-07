@@ -56,7 +56,7 @@ function fakePrisma(): PrismaService & FakeDb {
     `${w.providerKey}|${w.queryFingerprint}|${w.windowKey}`;
   const sKey = (w: Record<string, string>) =>
     `${w.providerKey}|${w.externalId}|${w.signalType}|${w.subjectKey}`;
-  return {
+  const db = {
     ledger,
     signals,
     signalIngest: {
@@ -235,6 +235,26 @@ function fakePrisma(): PrismaService & FakeDb {
       },
     },
   } as unknown as PrismaService & FakeDb;
+  db.$transaction = (async <T>(
+    fn: (tx: PrismaService) => Promise<T>,
+  ): Promise<T> => {
+      const ledgerSnapshot = new Map(
+        [...ledger].map(([key, value]) => [key, { ...value }]),
+      );
+      const signalSnapshot = new Map(
+        [...signals].map(([key, value]) => [key, { ...value }]),
+      );
+      try {
+        return await fn(db);
+      } catch (error) {
+        ledger.clear();
+        for (const [key, value] of ledgerSnapshot) ledger.set(key, value);
+        signals.clear();
+        for (const [key, value] of signalSnapshot) signals.set(key, value);
+        throw error;
+      }
+    }) as never;
+  return db;
 }
 
 function fakeBroker(
@@ -480,7 +500,7 @@ describe('lease admission and settlement edge cases', () => {
       prisma.signalIngest,
     );
     let reads = 0;
-    prisma.signalIngest.findUnique = async (input: never) => {
+    prisma.signalIngest.findUnique = async (_input: never) => {
       reads += 1;
       if (reads < 3) return null;
       return { status: 'OK' } as never;

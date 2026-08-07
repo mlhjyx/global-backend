@@ -6,7 +6,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { Client, Connection } from '@temporalio/client';
-import { BACKLOG_SWEEP_WORKFLOW, UNDERSTANDING_TASK_QUEUE } from '../src/temporal/understanding.constants';
+import { BACKLOG_SWEEP_WORKFLOW } from '../src/temporal/understanding.constants';
+import { ACQUISITION_TASK_QUEUE } from '../src/temporal/worker-topology';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -37,7 +38,7 @@ const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPAC
 
 const workflowId = `backlog-sweep-manual-${Date.now()}`;
 const handle = await client.workflow.start(BACKLOG_SWEEP_WORKFLOW, {
-  taskQueue: UNDERSTANDING_TASK_QUEUE,
+  taskQueue: ACQUISITION_TASK_QUEUE,
   workflowId,
   args: [input],
 });

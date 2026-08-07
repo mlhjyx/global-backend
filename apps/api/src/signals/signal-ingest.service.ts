@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import { BudgetExceededError } from '../tools/budget';
@@ -161,6 +162,8 @@ export class SignalIngestService {
       provider: spec.provider, fingerprint, windowKey, ledgerHit: false, recordsFetched: 0, signalsUpserted: 0, skipped: {},
     };
 
+    // Fast path before requiring a broker. The atomic lease claim below repeats
+    // this read because another process may change the row between these steps.
     const prior = await this.deps.prisma.signalIngest.findUnique({
       where: { providerKey_queryFingerprint_windowKey: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey } },
     });
@@ -176,6 +179,26 @@ export class SignalIngestService {
       return { ...base, error: 'broker_unavailable' };
     }
 
+    const clock = opts?.nowMs === undefined ? () => Date.now() : () => opts.nowMs!;
+    const leaseMs = resolveLeaseMs(opts?.leaseMs);
+    const leaseOwner = opts?.leaseOwner ?? randomUUID();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(leaseOwner)) {
+      throw new Error('INVALID_SIGNAL_INGEST_LEASE_OWNER');
+    }
+    const claim = await this.acquireLease({
+      spec,
+      fingerprint,
+      windowKey,
+      leaseOwner,
+      leaseToken: randomUUID(),
+      now: new Date(clock()),
+      leaseMs,
+    });
+    if (claim.kind === 'OK_HIT') return { ...base, ledgerHit: true };
+    if (claim.kind === 'BUSY') {
+      return { ...base, error: 'lease_busy', leaseBusy: true };
+    }
+
     let fetched: { records: number; outcomes: MapOutcome[] };
     try {
       fetched = await fetch(this.deps.broker, {
@@ -186,21 +209,217 @@ export class SignalIngestService {
         observedAt: new Date(nowMs),
       });
     } catch (err) {
-      if (err instanceof BudgetExceededError) throw err; // 预算真拦截透传（绝不吞成 ERROR 账本行）
-      const msg = String(err).slice(0, 300);
-      await this.writeLedgerError(spec, fingerprint, windowKey, msg);
-      console.warn(`[signal-ingest] fetch failed provider=${spec.provider}: ${msg.slice(0, 150)}`);
-      return { ...base, error: msg.slice(0, 150) };
+      if (err instanceof BudgetExceededError) {
+        await this.finalizeLeaseError(claim, 'BUDGET_EXCEEDED', new Date(clock()));
+        throw err; // 预算真拦截透传；lease 立即释放而不是僵死到超时
+      }
+      const finalized = await this.finalizeLeaseError(
+        claim,
+        'SIGNAL_FETCH_FAILED',
+        new Date(clock()),
+      );
+      if (!finalized) return { ...base, error: 'lease_lost', leaseLost: true };
+      console.warn(
+        `[signal-ingest] fetch failed provider=${spec.provider} code=SIGNAL_FETCH_FAILED`,
+      );
+      return { ...base, error: 'signal_fetch_failed' };
     }
 
-    const { upserted, skipped } = await this.persistSignals(fetched.outcomes);
-    await this.writeLedger(spec, fingerprint, windowKey, {
-      recordsFetched: fetched.records, signalsUpserted: upserted, status: 'OK', error: null,
-    });
+    let persisted: {
+      owned: boolean;
+      upserted: number;
+      skipped: Record<string, number>;
+    };
+    try {
+      persisted = await this.persistSignalsAndFinalize({
+        claim,
+        outcomes: fetched.outcomes,
+        recordsFetched: fetched.records,
+        now: new Date(clock()),
+        leaseMs,
+      });
+    } catch (error) {
+      await this.finalizeLeaseError(claim, 'SIGNAL_PERSIST_FAILED', new Date(clock()));
+      throw error;
+    }
+    if (!persisted.owned) return { ...base, error: 'lease_lost', leaseLost: true };
+    const { upserted, skipped } = persisted;
     return { ...base, recordsFetched: fetched.records, signalsUpserted: upserted, skipped };
   }
 
-  private async persistSignals(outcomes: MapOutcome[]): Promise<{ upserted: number; skipped: Record<string, number> }> {
+  private async acquireLease(input: {
+    spec: CanonicalQuerySpec;
+    fingerprint: string;
+    windowKey: string;
+    leaseOwner: string;
+    leaseToken: string;
+    now: Date;
+    leaseMs: number;
+  }): Promise<LeaseClaim> {
+    const key = {
+      providerKey: input.spec.provider,
+      queryFingerprint: input.fingerprint,
+      windowKey: input.windowKey,
+    };
+    for (let pass = 0; pass < 3; pass += 1) {
+      const prior = await this.deps.prisma.signalIngest.findUnique({
+        where: { providerKey_queryFingerprint_windowKey: key },
+      });
+      if (prior?.status === 'OK') return { kind: 'OK_HIT' };
+      if (!prior) {
+        try {
+          await this.deps.prisma.signalIngest.create({
+            data: {
+              ...key,
+              querySpec: input.spec as unknown as Prisma.InputJsonValue,
+              recordsFetched: 0,
+              signalsUpserted: 0,
+              status: 'PENDING',
+              error: null,
+              fetchedAt: input.now,
+              leaseOwner: input.leaseOwner,
+              leaseToken: input.leaseToken,
+              leaseFence: 1,
+              leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
+              startedAt: input.now,
+              completedAt: null,
+              attempt: 1,
+            },
+          });
+          return {
+            kind: 'CLAIMED',
+            ...key,
+            leaseOwner: input.leaseOwner,
+            leaseToken: input.leaseToken,
+            leaseFence: 1,
+          };
+        } catch (error) {
+          if (!isUniqueViolation(error)) throw error;
+          continue;
+        }
+      }
+
+      const priorExpiry = prior.leaseExpiresAt?.getTime();
+      if (prior.status === 'PENDING' && priorExpiry !== undefined && priorExpiry >= input.now.getTime()) {
+        return { kind: 'BUSY' };
+      }
+      const nextFence = Number(prior.leaseFence ?? 0) + 1;
+      const updated = await this.deps.prisma.signalIngest.updateMany({
+        where: {
+          ...key,
+          OR: [
+            { status: 'ERROR' },
+            { status: 'PENDING', leaseExpiresAt: { lt: input.now } },
+          ],
+        },
+        data: {
+          status: 'PENDING',
+          error: null,
+          recordsFetched: 0,
+          signalsUpserted: 0,
+          fetchedAt: input.now,
+          leaseOwner: input.leaseOwner,
+          leaseToken: input.leaseToken,
+          leaseFence: { increment: 1 },
+          leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
+          startedAt: input.now,
+          completedAt: null,
+          attempt: { increment: 1 },
+        },
+      });
+      if (updated.count === 1) {
+        return {
+          kind: 'CLAIMED',
+          ...key,
+          leaseOwner: input.leaseOwner,
+          leaseToken: input.leaseToken,
+          leaseFence: nextFence,
+        };
+      }
+    }
+    return { kind: 'BUSY' };
+  }
+
+  private async finalizeLeaseError(
+    claim: ClaimedLease,
+    error: string,
+    now: Date,
+  ): Promise<boolean> {
+    const result = await this.deps.prisma.signalIngest.updateMany({
+      where: leaseWhere(claim),
+      data: {
+        status: 'ERROR',
+        error: error.slice(0, 300),
+        recordsFetched: 0,
+        signalsUpserted: 0,
+        fetchedAt: now,
+        completedAt: now,
+        leaseOwner: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+      },
+    });
+    return result.count === 1;
+  }
+
+  private async persistSignalsAndFinalize(input: {
+    claim: ClaimedLease;
+    outcomes: MapOutcome[];
+    recordsFetched: number;
+    now: Date;
+    leaseMs: number;
+  }): Promise<{
+    owned: boolean;
+    upserted: number;
+    skipped: Record<string, number>;
+  }> {
+    return this.deps.prisma.$transaction(
+      async (tx) => {
+        // This conditional UPDATE both revalidates the exact fence and holds a
+        // row lock until source writes + OK settlement commit. A successor
+        // reclaim therefore happens either wholly before this transaction
+        // (zero writes) or wholly after the row becomes OK (no reclaim).
+        const renewed = await tx.signalIngest.updateMany({
+          where: {
+            ...leaseWhere(input.claim),
+            leaseExpiresAt: { gte: input.now },
+          },
+          data: {
+            leaseExpiresAt: new Date(input.now.getTime() + input.leaseMs),
+          },
+        });
+        if (renewed.count !== 1) {
+          return { owned: false, upserted: 0, skipped: {} };
+        }
+
+        const persisted = await this.persistSignals(input.outcomes, tx);
+        const finalized = await tx.signalIngest.updateMany({
+          where: leaseWhere(input.claim),
+          data: {
+            status: 'OK',
+            error: null,
+            recordsFetched: input.recordsFetched,
+            signalsUpserted: persisted.upserted,
+            fetchedAt: input.now,
+            completedAt: input.now,
+            leaseOwner: null,
+            leaseToken: null,
+            leaseExpiresAt: null,
+          },
+        });
+        if (finalized.count !== 1) {
+          throw new Error('SIGNAL_LEASE_SETTLEMENT_FAILED');
+        }
+        return { owned: true, ...persisted };
+      },
+      { maxWait: 5_000, timeout: 120_000 },
+    );
+  }
+
+  private async persistSignals(
+    outcomes: MapOutcome[],
+    db: Pick<Prisma.TransactionClient, 'sourceSignal'>,
+  ): Promise<{ upserted: number; skipped: Record<string, number> }> {
     let upserted = 0;
     const skipped: Record<string, number> = {};
     for (const o of outcomes) {
@@ -209,7 +428,7 @@ export class SignalIngestService {
         continue;
       }
       const r = o.row;
-      await this.deps.prisma.sourceSignal.upsert({
+      await db.sourceSignal.upsert({
         where: {
           providerKey_externalId_signalType_subjectKey: {
             providerKey: r.providerKey, externalId: r.externalId, signalType: r.signalType, subjectKey: r.subjectKey,
@@ -239,55 +458,47 @@ export class SignalIngestService {
     return { upserted, skipped };
   }
 
-  private async writeLedger(
-    spec: CanonicalQuerySpec,
-    fingerprint: string,
-    windowKey: string,
-    patch: { recordsFetched: number; signalsUpserted: number; status: 'OK' | 'ERROR'; error: string | null },
-  ): Promise<void> {
-    await this.deps.prisma.signalIngest.upsert({
-      where: { providerKey_queryFingerprint_windowKey: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey } },
-      create: {
-        providerKey: spec.provider,
-        queryFingerprint: fingerprint,
-        windowKey,
-        querySpec: spec as unknown as Prisma.InputJsonValue,
-        ...patch,
-        fetchedAt: new Date(),
-      },
-      update: { ...patch, fetchedAt: new Date() },
-    });
-  }
+}
 
-  /**
-   * ERROR 记账（TOCTOU 护栏，对抗复审）：**绝不覆盖并发成功方刚写的 OK 行**——检查→拉取→记账非原子，
-   * 慢失败方（Temporal 超时僵尸 attempt / 并行 verify）若用 upsert 会把 OK 行清成 ERROR/0/0，令同窗
-   * 下一调用方误判可重试再出网。先条件更新非 OK 行；无行再 create（撞唯一键=他方已写，放弃写入）。
-   * 记档：双拉本身（都过检查才写）由 source_signal 幂等 upsert 兜底数据不坏，根治需 PENDING 抢锁（后续）。
-   */
-  private async writeLedgerError(spec: CanonicalQuerySpec, fingerprint: string, windowKey: string, error: string): Promise<void> {
-    const updated = await this.deps.prisma.signalIngest.updateMany({
-      where: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey, status: { not: 'OK' } },
-      data: { status: 'ERROR', error, recordsFetched: 0, signalsUpserted: 0, fetchedAt: new Date() },
-    });
-    if (updated.count === 0) {
-      await this.deps.prisma.signalIngest
-        .create({
-          data: {
-            providerKey: spec.provider,
-            queryFingerprint: fingerprint,
-            windowKey,
-            querySpec: spec as unknown as Prisma.InputJsonValue,
-            recordsFetched: 0,
-            signalsUpserted: 0,
-            status: 'ERROR',
-            error,
-            fetchedAt: new Date(),
-          },
-        })
-        .catch(() => undefined); // P2002 唯一键冲突 = 并发方已写行（多半是 OK）→ 保留他方结果
-    }
+interface ClaimedLease {
+  kind: 'CLAIMED';
+  providerKey: string;
+  queryFingerprint: string;
+  windowKey: string;
+  leaseOwner: string;
+  leaseToken: string;
+  leaseFence: number;
+}
+
+type LeaseClaim = ClaimedLease | { kind: 'OK_HIT' } | { kind: 'BUSY' };
+
+function leaseWhere(claim: ClaimedLease): Record<string, unknown> {
+  return {
+    providerKey: claim.providerKey,
+    queryFingerprint: claim.queryFingerprint,
+    windowKey: claim.windowKey,
+    status: 'PENDING',
+    leaseOwner: claim.leaseOwner,
+    leaseToken: claim.leaseToken,
+    leaseFence: claim.leaseFence,
+  };
+}
+
+function resolveLeaseMs(explicit?: number): number {
+  const raw = explicit ?? Number(process.env.SIGNAL_INGEST_LEASE_MS ?? 35 * 60_000);
+  if (!Number.isSafeInteger(raw) || raw < 1_000 || raw > 60 * 60_000) {
+    throw new Error('INVALID_SIGNAL_INGEST_LEASE_MS');
   }
+  return raw;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
 }
 
 /** 撤回补丁：状态翻转 + 脱敏（subjectName 占位、payload 清空）。 */
@@ -305,6 +516,10 @@ export interface IngestOpts {
   nowMs?: number;
   /** 预算账键（sweep 开账后传入，经 ctx.runId 入 Broker reserve-settle）。 */
   budgetKey?: string;
+  /** Bounded machine identity for the current activity attempt. */
+  leaseOwner?: string;
+  /** Explicit lease duration for deterministic tests; production defaults to 35 minutes. */
+  leaseMs?: number;
 }
 
 export interface IngestOutcome {
@@ -317,6 +532,8 @@ export interface IngestOutcome {
   signalsUpserted: number;
   skipped: Record<string, number>;
   error?: string;
+  leaseBusy?: boolean;
+  leaseLost?: boolean;
 }
 
 function emptyOutcome(provider: 'ted' | 'openfda' | 'samgov', error: string): IngestOutcome {

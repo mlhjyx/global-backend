@@ -253,9 +253,15 @@ export function createExternalIntentActivities(deps: {
           try {
             const r = await fetch();
             // fetches=真实出网尝试次数（含失败——外部配额审计口径；复审 LOW）；未出网的
-            // broker_unavailable/empty_query 不计；ledgerHit 命中不出网只计 ledgerHits。
+            // broker_unavailable/empty_query/lease_busy 不计；ledgerHit 命中不出网只计 ledgerHits。
             if (r.ledgerHit) summary.ledgerHits += 1;
-            else if (r.error !== 'broker_unavailable' && r.error !== 'empty_query') summary.fetches += 1;
+            else if (
+              r.error !== 'broker_unavailable' &&
+              r.error !== 'empty_query' &&
+              r.error !== 'lease_busy'
+            ) {
+              summary.fetches += 1;
+            }
             if (r.error) summary.errors.push(`${r.provider}: ${r.error}`);
             summary.signalsUpserted += r.signalsUpserted; // ledgerHit 归 0（本轮真实落库数，不跨窗双计）
             return true;

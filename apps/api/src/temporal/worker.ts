@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -42,7 +43,6 @@ import {
   sourcePolicyReaderFrom,
 } from "../tools/tool-broker.factory";
 import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
-import { UNDERSTANDING_TASK_QUEUE } from "./understanding.constants";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import {
   SiteReleaseService,
@@ -55,6 +55,17 @@ import { ClosedRepairService } from "../site-builder/quality/closed-repair.servi
 import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
+import {
+  parseBoundedIntervalMs,
+  resolveWorkerDomains,
+  runWorkerFleet,
+  type ResolvedWorkerDomain,
+} from "./worker-topology";
+import {
+  RuntimeOpsWriter,
+  buildWorkerIdentity,
+  type WorkflowRunReceiptInput,
+} from "../runtime-ops/runtime-ops.service";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -94,6 +105,7 @@ async function main(): Promise<void> {
   // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
   const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   await ownerDb.$connect();
+  const runtimeOps = new RuntimeOpsWriter(ownerDb, buildWorkerIdentity(process.env));
 
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
@@ -132,7 +144,9 @@ async function main(): Promise<void> {
 
   // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
   try {
-    await ensurePlatformSchedules();
+    await ensurePlatformSchedules({
+      append: (receipt) => runtimeOps.appendScheduleDriftReceipt(receipt),
+    });
   } catch (err) {
     console.error(
       `[worker] ensure schedules FAILED（定时 sweep 可能停摆，可手跑 scripts/ensure-*-schedule.mts）: ${String(err)}`,
@@ -183,93 +197,182 @@ async function main(): Promise<void> {
     runtimeTelemetry: runtimeTelemetry.telemetry,
   });
 
-  const worker = await Worker.create({
-    connection,
-    namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
-    taskQueue: UNDERSTANDING_TASK_QUEUE,
-    workflowsPath: require.resolve("./workflows"),
-    activities: {
-      ...createUnderstandingActivities({
+  const receiptActivities = {
+    recordWorkflowRunReceipt: (input: WorkflowRunReceiptInput) =>
+      runtimeOps.appendWorkflowReceipt(input),
+  };
+  const acquisitionActivities = {
+    ...createUnderstandingActivities({
+      prisma,
+      gateway,
+      broker,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+    }),
+    ...createDiscoveryActivities({
+      prisma,
+      providers,
+      gateway,
+      taxonomy,
+      broker,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+    }),
+    ...createQualifyActivities({ prisma, sanctionsScreening }),
+    ...createAcquisitionActivities({
+      prisma,
+      registry: buildSourceAdapterRegistry(broker),
+    }),
+    ...createIntentActivities({
+      prisma,
+      fetcher: new Crawl4aiPageFetcher(broker),
+      ownerDb,
+      broker,
+    }),
+    ...createBacklogActivities({
+      prisma,
+      providers,
+      gateway,
+      ownerDb,
+      broker,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+    }),
+    ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
+    ...receiptActivities,
+  };
+  const maintenanceActivities = {
+    ...createDeletionActivities({ prisma }),
+    ...createPatentsCacheActivities({ ownerDb }),
+    ...createSanctionsRefreshActivities({
+      ownerDb,
+      broker,
+      sanctionsScreening,
+    }),
+    ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
+    ...createSiteReleaseMaintenanceActivities({
+      ownerDb,
+      storage: siteBuilderStorage,
+    }),
+    ...receiptActivities,
+  };
+  const siteBuilderActivities = {
+    ...createSiteBuilderActivities({
+      prisma,
+      costLedger,
+      ownerDb,
+      gateway,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+      broker,
+      imagePipeline,
+      releaseService,
+      qualityCandidateService,
+      qualityNarrativeService,
+      closedRepairService,
+      storage: siteBuilderStorage,
+      rendererBuildIdentity,
+      kb: new KbService(
         prisma,
-        gateway,
-        broker,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
+        new EmbeddingsClient(),
+        new DoclingClient(),
+        siteBuilderStorage,
+      ),
+    }),
+    ...receiptActivities,
+  };
+  const allActivities = {
+    ...acquisitionActivities,
+    ...siteBuilderActivities,
+    ...maintenanceActivities,
+  };
+  const activitiesByDomain: Record<ResolvedWorkerDomain["domain"], object> = {
+    legacy: allActivities,
+    acquisition: acquisitionActivities,
+    "site-builder": siteBuilderActivities,
+    maintenance: maintenanceActivities,
+  };
+  const domains = resolveWorkerDomains(process.env);
+  const workers = await Promise.all(
+    domains.map((domain) =>
+      Worker.create({
+        connection,
+        namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+        taskQueue: domain.taskQueue,
+        workflowsPath: require.resolve("./workflows"),
+        activities: activitiesByDomain[domain.domain],
+        maxConcurrentActivityTaskExecutions: domain.activityConcurrency,
+        maxConcurrentWorkflowTaskExecutions: domain.workflowConcurrency,
+        interceptors: {
+          workflowModules: [
+            require.resolve("./workflow-run-receipt.interceptor"),
+          ],
+        },
       }),
-      ...createDiscoveryActivities({
-        prisma,
-        providers,
-        gateway,
-        taxonomy,
-        broker,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-      }),
-      ...createQualifyActivities({ prisma, sanctionsScreening }),
-      ...createAcquisitionActivities({
-        prisma,
-        registry: buildSourceAdapterRegistry(broker),
-      }),
-      ...createIntentActivities({
-        prisma,
-        fetcher: new Crawl4aiPageFetcher(broker),
-        ownerDb,
-        broker,
-      }),
-      ...createBacklogActivities({
-        prisma,
-        providers,
-        gateway,
-        ownerDb,
-        broker,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-      }),
-      // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
-      ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
-      // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
-      ...createDeletionActivities({ prisma }),
-      // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
-      ...createPatentsCacheActivities({ ownerDb }),
-      // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
-      ...createSanctionsRefreshActivities({
-        ownerDb,
-        broker,
-        sanctionsScreening,
-      }),
-      // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
-      ...createSiteBuilderActivities({
-        prisma,
-        costLedger,
-        ownerDb,
-        gateway,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-        broker,
-        imagePipeline,
-        releaseService,
-        qualityCandidateService,
-        qualityNarrativeService,
-        closedRepairService,
-        storage: siteBuilderStorage,
-        rendererBuildIdentity,
-        kb: new KbService(
-          prisma,
-          new EmbeddingsClient(),
-          new DoclingClient(),
-          siteBuilderStorage,
-        ),
-      }),
-      ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
-      ...createSiteReleaseMaintenanceActivities({
-        ownerDb,
-        storage: siteBuilderStorage,
-      }),
-    },
-  });
+    ),
+  );
+
+  const workerInstanceId = randomUUID();
+  const heartbeatIntervalMs = parseBoundedIntervalMs(
+    process.env.WORKER_HEARTBEAT_INTERVAL_MS,
+    "WORKER_HEARTBEAT_INTERVAL_MS",
+    15_000,
+    5_000,
+    60_000,
+  );
+  const scheduleObservationIntervalMs = parseBoundedIntervalMs(
+    process.env.SCHEDULE_OBSERVATION_INTERVAL_MS,
+    "SCHEDULE_OBSERVATION_INTERVAL_MS",
+    5 * 60_000,
+    60_000,
+    60 * 60_000,
+  );
+  const heartbeat = (status: "POLLING" | "STOPPING") =>
+    Promise.all(
+      domains.map((domain) =>
+        runtimeOps.recordWorkerHeartbeat({
+          workerInstanceId,
+          taskQueue: domain.taskQueue,
+          status,
+          observedAt: new Date(),
+          activityConcurrency: domain.activityConcurrency,
+          workflowConcurrency: domain.workflowConcurrency,
+        }),
+      ),
+    ).then(() => undefined);
+  await heartbeat("POLLING");
+  let heartbeatInFlight = false;
+  const heartbeatTimer = setInterval(() => {
+    if (heartbeatInFlight) return;
+    heartbeatInFlight = true;
+    void heartbeat("POLLING")
+      .catch(() => console.error("[worker] heartbeat failed"))
+      .finally(() => {
+        heartbeatInFlight = false;
+      });
+  }, heartbeatIntervalMs);
+  let scheduleObservation: Promise<void> | null = null;
+  const scheduleObservationTimer = setInterval(() => {
+    if (scheduleObservation !== null) return;
+    scheduleObservation = ensurePlatformSchedules({
+      append: (receipt) => runtimeOps.appendScheduleDriftReceipt(receipt),
+    })
+      .catch(() => {
+        console.error("[worker] schedule observation failed");
+      })
+      .finally(() => {
+        scheduleObservation = null;
+      });
+  }, scheduleObservationIntervalMs);
 
   console.log(
-    `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
+    `[worker] polling task queues: ${domains.map((domain) => domain.taskQueue).join(", ")}`,
   );
   try {
-    await worker.run();
+    await runWorkerFleet(workers);
   } finally {
+    clearInterval(heartbeatTimer);
+    clearInterval(scheduleObservationTimer);
+    await scheduleObservation;
+    await heartbeat("STOPPING").catch(() =>
+      console.error("[worker] final heartbeat failed"),
+    );
     await runtimeTelemetry.shutdown();
   }
 }

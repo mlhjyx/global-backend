@@ -5,15 +5,17 @@
  * 频率用 env BACKLOG_SWEEP_EVERY（默认 24h；新公司走 run 内前向路径即时处理，backlog 只兜存量）。
  */
 import { readFileSync } from 'node:fs';
-import { Client, Connection, ScheduleOverlapPolicy } from '@temporalio/client';
-import { BACKLOG_SWEEP_SCHEDULE_ID, BACKLOG_SWEEP_WORKFLOW, UNDERSTANDING_TASK_QUEUE } from '../src/temporal/understanding.constants';
+import { Client, Connection } from '@temporalio/client';
+import { BACKLOG_SWEEP_SCHEDULE_ID } from '../src/temporal/understanding.constants';
+import { PLATFORM_SCHEDULES, desiredScheduleOptions } from '../src/temporal/schedule-governance';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
   if (m && !line.trimStart().startsWith('#')) process.env[m[1]] ??= m[2].replace(/^["']|["']$/g, '');
 }
 
-const EVERY = process.env.BACKLOG_SWEEP_EVERY ?? '24h';
+const contract = PLATFORM_SCHEDULES.find((item) => item.id === BACKLOG_SWEEP_SCHEDULE_ID);
+if (!contract) throw new Error('BACKLOG_SCHEDULE_CONTRACT_MISSING');
 const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
 const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' });
 
@@ -28,18 +30,8 @@ if (process.argv.includes('--describe')) {
   });
 } else {
   try {
-    await client.schedule.create({
-      scheduleId: BACKLOG_SWEEP_SCHEDULE_ID,
-      spec: { intervals: [{ every: EVERY }] },
-      action: {
-        type: 'startWorkflow',
-        workflowType: BACKLOG_SWEEP_WORKFLOW,
-        taskQueue: UNDERSTANDING_TASK_QUEUE,
-        args: [{}],
-      },
-      policies: { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' },
-    });
-    console.log(`✓ schedule '${BACKLOG_SWEEP_SCHEDULE_ID}' created — every ${EVERY}, overlap=SKIP`);
+    await client.schedule.create(desiredScheduleOptions(contract, process.env));
+    console.log(`✓ schedule '${BACKLOG_SWEEP_SCHEDULE_ID}' created from the code-owned action contract`);
   } catch (e) {
     if (e?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) {
       console.log(`schedule '${BACKLOG_SWEEP_SCHEDULE_ID}' already exists — leaving as is`);

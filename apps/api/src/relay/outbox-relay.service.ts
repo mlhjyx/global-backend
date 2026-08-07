@@ -7,9 +7,12 @@ import {
   DISCOVERY_WORKFLOW,
   ASSET_OBJECT_CLEANUP_WORKFLOW,
   QUALIFY_WORKFLOW,
-  UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
+import {
+  ACQUISITION_TASK_QUEUE,
+  MAINTENANCE_TASK_QUEUE,
+} from '../temporal/worker-topology';
 import { matchesAssetCleanupPayload, parseAssetCleanupCommand } from '../temporal/asset-cleanup.contract';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { seedSanctions } from '../sanctions/sanctions-seed';
@@ -407,7 +410,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         UNDERSTANDING_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: ACQUISITION_TASK_QUEUE,
           workflowId: `understanding-${ev.aggregateId}`,
           args: [
             {
@@ -425,7 +428,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         DISCOVERY_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: ACQUISITION_TASK_QUEUE,
           workflowId: `discovery-${ev.aggregateId}`,
           args: [
             {
@@ -443,7 +446,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         QUALIFY_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: ACQUISITION_TASK_QUEUE,
           // 同一 ICP 重复请求合并到一个在跑实例；跑完可再触发
           workflowId: `qualify-${ev.aggregateId}`,
           args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
@@ -460,7 +463,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         DELETION_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: MAINTENANCE_TASK_QUEUE,
           workflowId: `deletion-${ev.aggregateId}`,
           args: [
             {
@@ -507,7 +510,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         ASSET_OBJECT_CLEANUP_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: MAINTENANCE_TASK_QUEUE,
           workflowId: ev.eventId,
           args: [command],
         },

@@ -5,7 +5,7 @@ import {
   WorkflowIdReusePolicy,
 } from "@temporalio/client";
 import { TemporalClient } from "../temporal/temporal.client";
-import { UNDERSTANDING_TASK_QUEUE } from "../temporal/understanding.constants";
+import { SITE_BUILDER_TASK_QUEUE } from "../temporal/worker-topology";
 import {
   DemoV0Launcher,
   DemoV0LaunchInput,
@@ -35,7 +35,7 @@ export class TemporalDemoV0Launcher implements DemoV0Launcher {
       const handle = await this.temporal.client.workflow.start(
         "demoV0Workflow",
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: SITE_BUILDER_TASK_QUEUE,
           workflowId,
           args: [input],
           // Closed duplicate = the same build already ran; running duplicate = reuse its handle.
