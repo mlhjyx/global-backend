@@ -13,13 +13,17 @@ import {
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { DiscoveryService } from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { LawfulBasisKind } from './provider-contract';
+
+const DISCOVERY_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.DiscoveryController.operations;
 
 class CreateSuppressionDto {
   @ApiProperty({ enum: ['email', 'domain', 'company_name'] })
@@ -115,6 +119,7 @@ export class DiscoveryController {
   constructor(private readonly discovery: DiscoveryService) {}
 
   @Post('query-plans/:planId/execute')
+  @RequireScopes(...DISCOVERY_SCOPES.execute)
   @HttpCode(202)
   @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）' })
   @ApiEnvelope(
@@ -134,6 +139,7 @@ export class DiscoveryController {
   }
 
   @Get('discovery-runs/:runId')
+  @RequireScopes(...DISCOVERY_SCOPES.getRun)
   @ApiOperation({ summary: '发现执行状态与统计（每源计数/归一/Suppression）' })
   @ApiEnvelope({
     type: 'object',
@@ -162,6 +168,7 @@ export class DiscoveryController {
   }
 
   @Get('canonical-companies')
+  @RequireScopes(...DISCOVERY_SCOPES.listCompanies)
   @ApiOperation({ summary: '发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）' })
   @ApiQuery({ name: 'status', required: false })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } })
@@ -179,6 +186,7 @@ export class DiscoveryController {
   }
 
   @Get('canonical-companies/:id')
+  @RequireScopes(...DISCOVERY_SCOPES.getCompany)
   @ApiOperation({ summary: '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）' })
   @ApiEnvelope(CANONICAL_COMPANY_SCHEMA)
   async getCompany(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
@@ -186,6 +194,7 @@ export class DiscoveryController {
   }
 
   @Post('canonical-companies/:id/discover-contacts')
+  @RequireScopes(...DISCOVERY_SCOPES.discoverContacts)
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）' })
   @ApiEnvelope(
@@ -197,6 +206,7 @@ export class DiscoveryController {
   }
 
   @Post('contact-points/:pointId/verify')
+  @RequireScopes(...DISCOVERY_SCOPES.verify)
   @HttpCode(200)
   @ApiOperation({
     summary: '邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED',
@@ -222,6 +232,7 @@ export class DiscoveryController {
   }
 
   @Post('canonical-companies/:id/guess-emails')
+  @RequireScopes(...DISCOVERY_SCOPES.guessEmails)
   @HttpCode(200)
   @ApiOperation({
     summary: '猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）',
@@ -248,6 +259,7 @@ export class DiscoveryController {
   // ── Suppression ───────────────────────────────────────────────────────────
 
   @Post('suppressions')
+  @RequireScopes(...DISCOVERY_SCOPES.addSuppression)
   @HttpCode(201)
   @ApiOperation({ summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED' })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' }, { status: 201 })
@@ -256,6 +268,7 @@ export class DiscoveryController {
   }
 
   @Get('suppressions')
+  @RequireScopes(...DISCOVERY_SCOPES.listSuppressions)
   @ApiOperation({ summary: '禁联名单' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
   async listSuppressions(@Ctx() ctx: RequestContext) {
@@ -263,6 +276,7 @@ export class DiscoveryController {
   }
 
   @Delete('suppressions/:id')
+  @RequireScopes(...DISCOVERY_SCOPES.removeSuppression)
   @ApiOperation({ summary: '移除禁联记录' })
   @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
   async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
@@ -270,6 +284,7 @@ export class DiscoveryController {
   }
 
   @Get('data-providers')
+  @RequireScopes(...DISCOVERY_SCOPES.listProviders)
   @ApiOperation({ summary: 'Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'DataProvider（源/状态/成本）' })
   async listProviders(@Ctx() ctx: RequestContext) {

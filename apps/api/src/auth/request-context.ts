@@ -1,6 +1,6 @@
 /** Resolved from the external platform's token on every authenticated request. */
 export interface RequestContext {
-  userId: string;
-  workspaceId: string;
-  roles: string[];
+  readonly userId: string;
+  readonly workspaceId: string;
+  readonly roles: readonly string[];
 }

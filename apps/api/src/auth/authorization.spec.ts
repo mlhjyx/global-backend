@@ -1,16 +1,10 @@
 import 'reflect-metadata';
-import {
-  ExecutionContext,
-  ForbiddenException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
-import {
-  AUTH_SCOPES,
-  REQUIRED_AUTH_SCOPES,
-  RoleScopePolicy,
-} from './auth-scopes';
+import { AUTH_SCOPES, REQUIRED_AUTH_SCOPES, RoleScopePolicy } from './auth-scopes';
+import { DevTokenVerifier } from './dev-token-verifier';
+import { DisabledTokenVerifier } from './disabled-token-verifier';
 import { RequireScopes } from './require-scopes.decorator';
 import { ScopesGuard } from './scopes.guard';
 
@@ -27,10 +21,7 @@ class ProtectedController {
   unscoped(): void {}
 }
 
-function contextFor(
-  handler: () => void,
-  request: Record<string, unknown>,
-): ExecutionContext {
+function contextFor(handler: () => void, request: Record<string, unknown>): ExecutionContext {
   return {
     getClass: () => ProtectedController,
     getHandler: () => handler,
@@ -85,12 +76,13 @@ describe('RequireScopes + ScopesGuard', () => {
   const guard = new ScopesGuard(new Reflector(), policy);
 
   it('publishes immutable required-scope metadata for authorization and OpenAPI', () => {
-    const scopes = Reflect.getMetadata(
-      REQUIRED_AUTH_SCOPES,
-      ProtectedController.prototype.detail,
-    );
+    const scopes = Reflect.getMetadata(REQUIRED_AUTH_SCOPES, ProtectedController.prototype.detail);
     expect(scopes).toEqual(['acquisition:read', 'personal-data:read']);
     expect(Object.isFrozen(scopes)).toBe(true);
+  });
+
+  it('rejects duplicate required scopes at declaration time', () => {
+    expect(() => RequireScopes('acquisition:read', 'acquisition:read')).toThrow(/duplicate/u);
   });
 
   it('requires every declared scope across the signed context roles', () => {
@@ -137,5 +129,31 @@ describe('RequireScopes + ScopesGuard', () => {
     const unscoped = contextFor(ProtectedController.prototype.unscoped, {});
 
     expect(guard.canActivate(unscoped)).toBe(true);
+  });
+});
+
+describe('non-JWKS verifier boundaries', () => {
+  it('accepts only a bounded, validated development claim envelope', async () => {
+    const token = Buffer.from(
+      JSON.stringify({
+        sub: 'local-user',
+        workspace_id: '11111111-1111-4111-8111-111111111111',
+        roles: ['acquisition.reader'],
+      }),
+    ).toString('base64url');
+
+    await expect(new DevTokenVerifier().verify(token)).resolves.toEqual({
+      userId: 'local-user',
+      workspaceId: '11111111-1111-4111-8111-111111111111',
+      roles: ['acquisition.reader'],
+    });
+  });
+
+  it.each(['not-json', 'a'.repeat(16_385)])('rejects malformed or oversized development tokens', async (token) => {
+    await expect(new DevTokenVerifier().verify(token)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('keeps the OpenAPI-only verifier fail-closed', async () => {
+    await expect(new DisabledTokenVerifier().verify()).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

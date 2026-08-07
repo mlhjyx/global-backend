@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 import { ClaimController } from '../claim/claim.controller';
 import { CompanyController } from '../company/company.controller';
@@ -15,6 +15,7 @@ import {
   NON_ACQUISITION_CONTROLLER_EXEMPTIONS,
 } from './acquisition-scope-inventory';
 import { REQUIRED_AUTH_SCOPES } from './auth-scopes';
+import { AuthGuard } from './auth.guard';
 
 const CONTROLLERS = {
   ClaimController,
@@ -47,6 +48,10 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
     for (const [controllerName, controller] of Object.entries(CONTROLLERS)) {
       const inventory = ACQUISITION_CONTROLLER_SCOPE_INVENTORY[controllerName];
       expect(inventory, `${controllerName} is missing from the inventory`).toBeDefined();
+      expect(
+        Reflect.getMetadata(GUARDS_METADATA, controller),
+        `${controllerName} must establish signed context with AuthGuard`,
+      ).toContain(AuthGuard);
       expect(Object.keys(inventory.operations).sort()).toEqual(routeMethods(controller));
 
       for (const [operation, expectedScopes] of Object.entries(inventory.operations)) {
@@ -60,12 +65,8 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
   });
 
   it('forces every non-Site-Builder controller file to be inventoried or explicitly exempted', () => {
-    const inventoried = Object.values(ACQUISITION_CONTROLLER_SCOPE_INVENTORY).map(
-      ({ file }) => file,
-    );
-    expect(controllerFiles()).toEqual(
-      [...inventoried, ...NON_ACQUISITION_CONTROLLER_EXEMPTIONS].sort(),
-    );
+    const inventoried = Object.values(ACQUISITION_CONTROLLER_SCOPE_INVENTORY).map(({ file }) => file);
+    expect(controllerFiles()).toEqual([...inventoried, ...NON_ACQUISITION_CONTROLLER_EXEMPTIONS].sort());
   });
 
   it('keeps quality-label write and identity-review scopes unbound until their separate endpoints exist', () => {

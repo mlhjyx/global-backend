@@ -4,42 +4,17 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { assertServingAdmission, resolveAuthRuntimeAdmission } from './auth/auth-runtime-admission';
 import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
-
-/** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
-function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
-  const config = new DocumentBuilder()
-    .setTitle('Global API')
-    .setDescription('出海企业 AI 全球客户开发与增长平台 · 后端 API（前端接入见 packages/contracts/INTEGRATION.md）')
-    .setVersion('0.1.0')
-    .addServer('/', '同源部署（相对路径；具体 host 由部署环境决定）')
-    .addTag('Companies')
-    .addTag('Claims')
-    .addTag('ICP')
-    .addTag('Discovery')
-    .addTag('Leads')
-    .addTag('Events')
-    .addTag('System')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  const buildStatus = document.components?.schemas?.BuildStatusResponseDto;
-  if (buildStatus && !('$ref' in buildStatus)) {
-    // ApiProperty uses `required` both for the parent property flag and the
-    // nested object's required field list. Keep the closed nested schema and
-    // restore the pre-existing required+nullable response key explicitly.
-    buildStatus.required = Array.from(
-      new Set([...(buildStatus.required ?? []), 'costSummary']),
-    );
-  }
-  return document;
-}
+import { buildOpenApi } from './openapi-document';
 
 async function bootstrap(): Promise<void> {
+  const authAdmission = resolveAuthRuntimeAdmission(process.env, process.argv);
+  const exportOpenApi = process.argv.includes('--export-openapi');
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
@@ -51,7 +26,7 @@ async function bootstrap(): Promise<void> {
   // CORS 白名单：逗号分隔的允许源；未配置时 dev 放行、prod 收紧。
   const origins = (process.env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   app.enableCors({
-    origin: origins.length ? origins : process.env.NODE_ENV === 'production' ? false : true,
+    origin: origins.length ? origins : authAdmission.stage === 'development' ? true : false,
     credentials: true,
     exposedHeaders: ['Location', 'X-Request-Id', 'ETag'],
   });
@@ -73,20 +48,22 @@ async function bootstrap(): Promise<void> {
 
   // --export-openapi：把契约落盘到 packages/contracts，供门户/CI 消费后退出。
   // 让 code-first 装饰器成为唯一事实源，手写 openapi.yaml 降级为生成物。
-  if (process.argv.includes('--export-openapi')) {
+  if (exportOpenApi) {
     const out = resolve(__dirname, '../../../packages/contracts/openapi/openapi.json');
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify(document, null, 2));
-     
+
     console.log(`[openapi] exported ${Object.keys(document.paths ?? {}).length} paths → ${out}`);
     await app.close();
     return;
   }
 
+  // OpenAPI-only admission uses a rejecting verifier and can never become a server.
+  assertServingAdmission(authAdmission);
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
-  await app.listen(port);
-   
-  console.log(`[api] listening on http://localhost:${port}/api  (docs: /api/docs)`);
+  await app.listen(port, authAdmission.bindHost);
+
+  console.log(`[api] listening on http://${authAdmission.bindHost}:${port}/api  (docs: /api/docs)`);
 }
 
 void bootstrap();

@@ -13,7 +13,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
@@ -29,6 +31,8 @@ import {
   UpdateRuleDto,
 } from './dto/qualification.dto';
 
+const ICP_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.IcpController.operations;
+
 @ApiTags('ICP')
 @ApiBearerAuth()
 @Controller()
@@ -37,6 +41,7 @@ export class IcpController {
   constructor(private readonly icps: IcpService) {}
 
   @Post('companies/:companyId/icps')
+  @RequireScopes(...ICP_SCOPES.generate)
   @HttpCode(201)
   @ApiOperation({ summary: '基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）' })
   @ApiEnvelope(IcpDto, { status: 201 })
@@ -48,6 +53,7 @@ export class IcpController {
   }
 
   @Get('icps')
+  @RequireScopes(...ICP_SCOPES.list)
   @ApiOperation({ summary: '列出 ICP（可用 ?companyId= 过滤）' })
   @ApiQuery({ name: 'companyId', required: false })
   @ApiListEnvelope(IcpDto)
@@ -60,6 +66,7 @@ export class IcpController {
   }
 
   @Get('icps/:icpId')
+  @RequireScopes(...ICP_SCOPES.get)
   @ApiOperation({ summary: '获取 ICP 详情（含 Persona + 买家委员会）' })
   @ApiEnvelope(IcpDto)
   async get(
@@ -70,6 +77,7 @@ export class IcpController {
   }
 
   @Post('icps/:icpId/activate')
+  @RequireScopes(...ICP_SCOPES.activate)
   @HttpCode(200)
   @ApiOperation({ summary: '激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件' })
   @ApiEnvelope(IcpDto)
@@ -81,6 +89,7 @@ export class IcpController {
   }
 
   @Patch('icps/:icpId')
+  @RequireScopes(...ICP_SCOPES.update)
   @ApiOperation({ summary: '人工修订 ICP（AI 产出是假设，可编辑；乐观锁）' })
   @ApiEnvelope(IcpDto)
   async update(
@@ -95,6 +104,7 @@ export class IcpController {
   // ── 验证规则（LED-003）──────────────────────────────────────────────────
 
   @Post('icps/:icpId/rules')
+  @RequireScopes(...ICP_SCOPES.addRule)
   @HttpCode(201)
   @ApiOperation({ summary: '新增验证规则（must_have / nice_to_have / exclusion，机器可评估）' })
   @ApiEnvelope(RuleDto, { status: 201 })
@@ -107,6 +117,7 @@ export class IcpController {
   }
 
   @Patch('icp-rules/:ruleId')
+  @RequireScopes(...ICP_SCOPES.updateRule)
   @ApiOperation({ summary: '修改验证规则' })
   @ApiEnvelope(RuleDto)
   async updateRule(
@@ -118,6 +129,7 @@ export class IcpController {
   }
 
   @Delete('icp-rules/:ruleId')
+  @RequireScopes(...ICP_SCOPES.deleteRule)
   @ApiOperation({ summary: '删除验证规则' })
   @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
   async deleteRule(
@@ -130,6 +142,7 @@ export class IcpController {
   // ── 样例回测（LED-004）──────────────────────────────────────────────────
 
   @Post('icps/:icpId/backtests')
+  @RequireScopes(...ICP_SCOPES.runBacktest)
   @HttpCode(201)
   @ApiOperation({
     summary: '用已知客户/非客户样例回测 ICP 规则（确定性评估）；HYPOTHESIS → VALIDATING',
@@ -144,6 +157,7 @@ export class IcpController {
   }
 
   @Get('icps/:icpId/backtests')
+  @RequireScopes(...ICP_SCOPES.listBacktests)
   @ApiOperation({ summary: '回测历史' })
   @ApiListEnvelope(BacktestDto)
   async listBacktests(
@@ -156,6 +170,7 @@ export class IcpController {
   // ── 查询计划（LED-005）──────────────────────────────────────────────────
 
   @Post('icps/:icpId/query-plans')
+  @RequireScopes(...ICP_SCOPES.generateQueryPlan)
   @HttpCode(201)
   @ApiOperation({ summary: '从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）' })
   @ApiEnvelope(QueryPlanDto, { status: 201 })
@@ -167,6 +182,7 @@ export class IcpController {
   }
 
   @Get('icps/:icpId/query-plans')
+  @RequireScopes(...ICP_SCOPES.listQueryPlans)
   @ApiOperation({ summary: '查询计划列表' })
   @ApiListEnvelope(QueryPlanDto)
   async listQueryPlans(
@@ -177,6 +193,7 @@ export class IcpController {
   }
 
   @Post('query-plans/:planId/confirm')
+  @RequireScopes(...ICP_SCOPES.confirmQueryPlan)
   @HttpCode(200)
   @ApiOperation({ summary: '人工确认查询计划（DRAFT → READY，Discover 可执行）' })
   @ApiEnvelope(QueryPlanDto)
