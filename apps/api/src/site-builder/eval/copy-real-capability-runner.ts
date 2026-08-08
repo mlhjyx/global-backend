@@ -170,12 +170,15 @@ export interface CopyRealCapabilityReceipt {
 }
 
 export interface CopyRealCapabilityRuntimeBinding {
-  schemaVersion: "copy-real-capability-runtime-binding/2026-08-07-v3";
+  schemaVersion: "copy-real-capability-runtime-binding/2026-08-08-v4";
   taskId: "site_builder.copy";
   planDigest: string;
   fixedSourceCommit: string;
+  preparationHeadCommit: string;
   sourceBundleDigest: string;
   manifestDigest: string;
+  manifestArtifactDigest: string;
+  expectedCompiledRuntimeDigest: string;
   credentialAttestationDigest: string;
   settlementObserverDigest: string;
   globalAuthorizationDigest: string;
@@ -348,8 +351,11 @@ const RUNTIME_BINDING_KEYS = FREEZE_OBJECT([
   "taskId",
   "planDigest",
   "fixedSourceCommit",
+  "preparationHeadCommit",
   "sourceBundleDigest",
   "manifestDigest",
+  "manifestArtifactDigest",
+  "expectedCompiledRuntimeDigest",
   "credentialAttestationDigest",
   "settlementObserverDigest",
   "globalAuthorizationDigest",
@@ -688,15 +694,25 @@ function childLedgerCampaign(input: {
 
 function runtimeBinding(input: {
   admission: CopyRealCapabilityAdmissionInput;
-  source: { fixedSourceCommit: string; sourceBundleDigest: string };
+  source: {
+    fixedSourceCommit: string;
+    preparationHeadCommit: string;
+    sourceBundleDigest: string;
+    artifactDigest: string;
+    compiledRuntimeExpectation: { artifactTreeDigest: string };
+  };
 }): CopyRealCapabilityRuntimeBinding {
   return FREEZE_OBJECT({
-    schemaVersion: "copy-real-capability-runtime-binding/2026-08-07-v3",
+    schemaVersion: "copy-real-capability-runtime-binding/2026-08-08-v4",
     taskId: input.admission.manifest.taskId,
     planDigest: input.admission.manifest.planDigest,
     fixedSourceCommit: input.source.fixedSourceCommit,
+    preparationHeadCommit: input.source.preparationHeadCommit,
     sourceBundleDigest: input.source.sourceBundleDigest,
     manifestDigest: CANONICAL_DIGEST(input.admission.manifest),
+    manifestArtifactDigest: input.source.artifactDigest,
+    expectedCompiledRuntimeDigest:
+      input.source.compiledRuntimeExpectation.artifactTreeDigest,
     credentialAttestationDigest: CANONICAL_DIGEST(input.admission.credential),
     settlementObserverDigest: CANONICAL_DIGEST(input.admission.settlement),
     globalAuthorizationDigest: CANONICAL_DIGEST(input.admission.authorization),
@@ -921,11 +937,15 @@ function historicalReceiptBindingIsExact(
     receipt.repaired === (receipt.wireCount === 2) &&
     receipt.repeatIndex === null &&
     receipt.runtimeBinding.schemaVersion ===
-      "copy-real-capability-runtime-binding/2026-08-07-v3" &&
+      "copy-real-capability-runtime-binding/2026-08-08-v4" &&
     receipt.runtimeBinding.taskId === receipt.taskId &&
     receipt.runtimeBinding.fixedSourceCommit === receipt.fixedSourceCommit &&
+    /^[0-9a-f]{40}$/u.test(receipt.runtimeBinding.preparationHeadCommit) &&
     receipt.runtimeBinding.sourceBundleDigest === receipt.sourceBundleDigest &&
     receipt.runtimeBinding.manifestDigest === receipt.manifestDigest &&
+    /^[0-9a-f]{64}$/u.test(receipt.runtimeBinding.manifestArtifactDigest) &&
+    receipt.runtimeBinding.expectedCompiledRuntimeDigest ===
+      receipt.compiledRuntimeDigest &&
     receipt.runtimeBinding.credentialAttestationDigest ===
       receipt.credentialAttestationDigest &&
     receipt.runtimeBinding.settlementObserverDigest ===
@@ -1138,7 +1158,7 @@ async function acceptCopyGitReviewedEvidence(input: {
         CANONICAL_DIGEST(
           runtimeBinding({
             admission: input.liveDetail.admission,
-            source: input.liveDetail.admission.manifest,
+            source: input.liveDetail.source,
           }),
         ))
   ) {
@@ -1412,11 +1432,18 @@ export async function createCopyRealCapabilityRunner(input: {
     repositoryRoot: LOADED_REPOSITORY_ROOT,
     artifactPaths: COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
     binding: runtimeBinding({ admission: input.admission, source }),
+    expectation: source.compiledRuntimeExpectation,
   });
   await ASSERT_COMPILED_CURRENT(compiledGuard);
   const compiledAtOpen = GET_COMPILED_ATTESTATION(compiledGuard);
   if (compiledAtOpen == null) {
     fail("COPY_REAL_CAPABILITY_COMPILED_ATTESTATION_REQUIRED");
+  }
+  if (
+    compiledAtOpen.artifactTreeDigest !==
+    source.compiledRuntimeExpectation.artifactTreeDigest
+  ) {
+    fail("COPY_REAL_CAPABILITY_COMPILED_EXPECTATION_MISMATCH");
   }
   const ledgerEvidenceBinding = FREEZE_OBJECT({
     schemaVersion:
