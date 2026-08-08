@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "git-reviewed-evidence-acceptance/2026-08-07-v1",
+  "artifactId": "site-builder-copy-capability-v11-1-gpt-5.6-terra",
+  "classification": "GIT_REVIEWED_CREATE_ONLY_ACCEPTANCE",
+  "createOnly": true,
+  "decision": "ACCEPT",
+  "acceptedEvidenceClass": "git_reviewed_gateway_settlement_accepted",
+  "taskId": "site_builder.copy",
+  "evidenceKind": "capability_pilot",
+  "candidateReceipt": {
+    "classification": "DISPATCH_PREFLIGHT_RECEIPT_ONLY",
+    "evidenceClass": "copy_gateway_settlement_candidate",
+    "evidenceKind": "capability_pilot",
+    "taskId": "site_builder.copy",
+    "campaignId": "copy-capability-v11-user-auth-20260808T134140Z-child-1",
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_chat_completions",
+    "reasoning": "medium",
+    "wireCount": 1,
+    "repaired": false,
+    "fixtureId": "copy-factual-claims",
+    "repeatIndex": null,
+    "planDigest": "61ade6ab67031c4f2ccf5e75dbb0028ee7804c616610cefbe2acee929fc9f567",
+    "inputDigest": "2cbc5dae8a6a082c138dbe8240e31269aa0da327c9ce341fff2987aea26831c0",
+    "contextDigest": "c8ff2b31b214cc7098a8571fddbeaf717fad6faf45611daf760320b7988c81df",
+    "promptDigest": "931163495ab4b454febaaecd528a32babe8fc0768c28648568ded6cb5a3b421a",
+    "ledgerDigest": "276b9994ddd910b76392d0cc444d6ecb6076ce3df3b50d15e7d3527bd183fd7d",
+    "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+    "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+    "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+    "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+    "admissionDigest": "597ececa56b7f7154a801f742fdce117d314fa6e7366029fe42dbcbd20b313cf",
+    "credentialAttestationDigest": "4dec2f2ea31a8d21649a0528d825c15737406c5cdb627756172bf6bbff56c0bd",
+    "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+    "knownSettlementDigest": "523bdefcd1ba7eff2623df283aeed46a86560e3c254b7b4726a62c38ae13f507",
+    "settlementChain": {
+      "schemaVersion": "real-model-known-settlement-evidence/2026-08-07-v1",
+      "executionId": "copy-capability-1-gpt-5.6-terra",
+      "executionClaim": {
+        "planDigest": "61ade6ab67031c4f2ccf5e75dbb0028ee7804c616610cefbe2acee929fc9f567"
+      },
+      "wires": [
+        {
+          "wireIndex": 1,
+          "claim": {
+            "wireId": "copy-capability-1-gpt-5.6-terra:wire:1",
+            "requestDigest": "9005a66c1ae349d76671114c57f09288821f667bbbb7d4e09675d340d19dcde7"
+          },
+          "observation": {
+            "settlement": "known",
+            "requestIdDigest": "4b7813f1651f2633412a9d3154bc1df052ef86758c760fdd4bf99eff46dc58d5",
+            "requestedAlias": "gpt-5.6-terra",
+            "resolvedAlias": "gpt-5.6-terra",
+            "reportedModel": "gpt-5.6-terra",
+            "protocol": "openai_chat_completions",
+            "usage": {
+              "inputTokens": 5305,
+              "outputTokens": 101
+            },
+            "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+            "receiptDigest": "d749dd8527c03eda6311efe8615d7274981c0def1b09fdb1bd8d9014ebd176dc",
+            "quota": 7389,
+            "resolverId": "copy-capability-v11-user-auth-20260808T134140Z-settlement",
+            "channelId": 17
+          }
+        }
+      ],
+      "completion": {
+        "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84"
+      },
+      "digest": "523bdefcd1ba7eff2623df283aeed46a86560e3c254b7b4726a62c38ae13f507"
+    },
+    "authorizationId": "copy-capability-v11-user-auth-20260808T134140Z-child-auth-1",
+    "reservationId": "copy-capability-v11-user-auth-20260808T134140Z-reservation-1",
+    "globalAuthorizationDigest": "375bbc1277a6c304225745efd8a56462b4b303654aa19e879389a9f8a7c36a4d",
+    "childAuthorizationDigest": "16fdd06a2f421fb8b11c3f46b2b44f946263da1205f6714d37fa40c138f751fc",
+    "childSlotId": "copy-capability-child-1-gpt-5.6-terra",
+    "ledgerCampaign": {
+      "campaignId": "copy-capability-v11-user-auth-20260808T134140Z-child-1",
+      "taskId": "site_builder.copy",
+      "planDigest": "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+      "maximumExecutions": 1,
+      "maximumWireCalls": 2
+    },
+    "ledgerAuthorization": {
+      "authorizationId": "copy-capability-v11-user-auth-20260808T134140Z-child-auth-1",
+      "reservationId": "copy-capability-v11-user-auth-20260808T134140Z-reservation-1",
+      "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+      "credentialAttestationDigest": "4dec2f2ea31a8d21649a0528d825c15737406c5cdb627756172bf6bbff56c0bd",
+      "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+      "ledgerIdentityDigest": "fb933cad70f541f4e3628085acfc0ec285171bce26de3cb1d035eb12920ae572",
+      "reservationDigest": "a2a16916f480a93cbf500ea37ae378a15e08224840a6c2e216accb781ea32f1a",
+      "maximumExecutions": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCallsPerExecution": 1,
+      "evidenceBinding": {
+        "schemaVersion": "real-model-execution-evidence-binding/2026-08-07-v1",
+        "executionId": "copy-capability-1-gpt-5.6-terra",
+        "childSlotId": "copy-capability-child-1-gpt-5.6-terra",
+        "alias": "gpt-5.6-terra",
+        "protocol": "openai_chat_completions",
+        "reasoning": "medium",
+        "fixtureId": "copy-factual-claims",
+        "executionPlanDigest": "61ade6ab67031c4f2ccf5e75dbb0028ee7804c616610cefbe2acee929fc9f567",
+        "inputDigest": "2cbc5dae8a6a082c138dbe8240e31269aa0da327c9ce341fff2987aea26831c0",
+        "contextDigest": "c8ff2b31b214cc7098a8571fddbeaf717fad6faf45611daf760320b7988c81df",
+        "promptDigest": "931163495ab4b454febaaecd528a32babe8fc0768c28648568ded6cb5a3b421a",
+        "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+        "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+        "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+        "admissionDigest": "597ececa56b7f7154a801f742fdce117d314fa6e7366029fe42dbcbd20b313cf",
+        "globalAuthorizationDigest": "375bbc1277a6c304225745efd8a56462b4b303654aa19e879389a9f8a7c36a4d",
+        "childAuthorizationDigest": "16fdd06a2f421fb8b11c3f46b2b44f946263da1205f6714d37fa40c138f751fc",
+        "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+        "compiledBindingDigest": "388d940c02a0093feb38a0057ceff280cd24af17227e884279300d45b33d2f87"
+      }
+    },
+    "runtimeBinding": {
+      "schemaVersion": "copy-real-capability-runtime-binding/2026-08-08-v4",
+      "taskId": "site_builder.copy",
+      "planDigest": "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+      "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+      "preparationHeadCommit": "892c18a9da005020ed2665c42ee1a7bedb078b35",
+      "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+      "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+      "manifestArtifactDigest": "80f6a95979eb3c0fff880038d501043241f057f5fe4f35980409525ace1e8172",
+      "expectedCompiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+      "credentialAttestationDigest": "4dec2f2ea31a8d21649a0528d825c15737406c5cdb627756172bf6bbff56c0bd",
+      "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+      "globalAuthorizationDigest": "375bbc1277a6c304225745efd8a56462b4b303654aa19e879389a9f8a7c36a4d",
+      "childAuthorizationDigest": "16fdd06a2f421fb8b11c3f46b2b44f946263da1205f6714d37fa40c138f751fc",
+      "selectedExecutionKey": "copy-capability-1-gpt-5.6-terra",
+      "childCampaignId": "copy-capability-v11-user-auth-20260808T134140Z-child-1",
+      "gitReviewedEvidenceAcceptanceSchemaVersion": "git-reviewed-evidence-acceptance/2026-08-07-v1",
+      "artifactPathsDigest": "27c5486863f90b2d5ab88accec3e245aaeb1cf389638c88e6facc7d0ded504ad"
+    },
+    "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+    "compiledBindingDigest": "388d940c02a0093feb38a0057ceff280cd24af17227e884279300d45b33d2f87"
+  },
+  "candidateReceiptDigest": "aa901129fe592c8236276fd77e1c529d2507922d6456f96ef2caec994559ce02",
+  "subject": {
+    "executionId": "copy-capability-1-gpt-5.6-terra",
+    "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+    "candidateLedgerDigest": "276b9994ddd910b76392d0cc444d6ecb6076ce3df3b50d15e7d3527bd183fd7d",
+    "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+    "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+    "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+    "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+    "compiledBindingDigest": "388d940c02a0093feb38a0057ceff280cd24af17227e884279300d45b33d2f87",
+    "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+    "knownSettlementDigest": "523bdefcd1ba7eff2623df283aeed46a86560e3c254b7b4726a62c38ae13f507",
+    "alias": "gpt-5.6-terra",
+    "protocol": "openai_chat_completions",
+    "reasoning": "medium"
+  },
+  "artifactDigest": "91f06c42d5b314ed6f722e6cf3733d8394ee0ed0c95d11c6252fbbe56024b0df"
+}
