@@ -6,7 +6,15 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createRequire } from "node:module";
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -23,6 +31,7 @@ import {
 } from "./copy-real-capability-admission";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
+  COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
   createCopyGitEvidenceAcceptanceChallenge,
   copyPilotLedgerIdentityDigest,
   copyPilotReservationDigest,
@@ -30,6 +39,7 @@ import {
   getCopyGitAcceptedExecutionAttestation,
 } from "./copy-real-capability-runner";
 import { prepareCopyPilotLedgerIdentity } from "./copy-pilot-ledger-identity";
+import { COPY_PILOT_COMPILED_BUILD_COMMANDS } from "./copy-pilot-source-verifier";
 
 const EXEC_FILE = promisify(execFile);
 const REQUIRE = createRequire(import.meta.url);
@@ -337,6 +347,14 @@ async function compiledExecutionRepository() {
     maximumRepairCallsPerExecution: 1,
     executions: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions,
   };
+  const compiledArtifacts = await Promise.all(
+    [...COPY_REAL_CAPABILITY_ARTIFACT_PATHS].sort().map(async (path) => ({
+      path,
+      sha256: createHash("sha256")
+        .update(await readFile(join(root, path)))
+        .digest("hex"),
+    })),
+  );
   const withoutDigest = {
     schemaVersion:
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
@@ -344,6 +362,7 @@ async function compiledExecutionRepository() {
       "site-builder-copy-real-capability-manifest-prep/integration-v3",
     classification: "FIXED_SOURCE_CREATE_ONLY",
     fixedSourceCommit,
+    preparationHeadCommit: fixedSourceCommit,
     createOnly: true,
     dispatchAuthorization: "NOT_AUTHORIZED",
     dispatchCapable: false,
@@ -356,6 +375,15 @@ async function compiledExecutionRepository() {
         "site-builder-copy-real-capability-source-bundle/2026-08-05-v1",
       files,
       digest: canonicalDigest(files),
+    },
+    compiledRuntimeExpectation: {
+      schemaVersion: "compiled-runtime-expectation/2026-08-08-v1",
+      buildSourceCommit: fixedSourceCommit,
+      sourceBundleDigest: canonicalDigest(files),
+      buildCommands: COPY_PILOT_COMPILED_BUILD_COMMANDS,
+      artifactCount: compiledArtifacts.length,
+      artifacts: compiledArtifacts,
+      artifactTreeDigest: canonicalDigest(compiledArtifacts),
     },
   };
   const manifestPath = join(root, "docs", "evidence", "manifest.json");

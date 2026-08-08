@@ -5,12 +5,23 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import {
+  createCompiledRuntimeGuard,
+  validateCompiledRuntimeExpectation,
+  type CompiledRuntimeExpectation,
+} from "../../model-runtime/compiled-runtime-guard";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const MAXIMUM_MANIFEST_BYTES = 2 * 1024 * 1024;
+
+export const COPY_PILOT_COMPILED_BUILD_COMMANDS = Object.freeze([
+  "pnpm --filter @global/db generate",
+  "pnpm --filter @global/contracts build",
+  "pnpm --filter @global/api build",
+] as const);
 
 interface SourceFile {
   role: string;
@@ -23,6 +34,7 @@ interface ManifestArtifact {
   artifactId: string;
   classification: string;
   fixedSourceCommit: string;
+  preparationHeadCommit: string;
   createOnly: boolean;
   dispatchAuthorization: string;
   dispatchCapable: boolean;
@@ -47,6 +59,7 @@ interface ManifestArtifact {
     files: readonly SourceFile[];
     digest: string;
   };
+  compiledRuntimeExpectation: CompiledRuntimeExpectation;
   artifactDigest: string;
   [key: string]: unknown;
 }
@@ -59,9 +72,11 @@ export interface CopyPilotVerifiedSourceBinding {
   repositoryRoot: string;
   manifestArtifactPath: string;
   fixedSourceCommit: string;
+  preparationHeadCommit: string;
   sourceBundleDigest: string;
   manifestDigest: string;
   artifactDigest: string;
+  compiledRuntimeExpectation: CompiledRuntimeExpectation;
 }
 
 const VERIFIED_SOURCES = new WeakMap<object, CopyPilotVerifiedSourceBinding>();
@@ -141,6 +156,11 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
   }
   const artifact = value as ManifestArtifact;
   const { artifactDigest, ...withoutDigest } = artifact;
+  try {
+    validateCompiledRuntimeExpectation(artifact.compiledRuntimeExpectation);
+  } catch {
+    return fail("COPY_PILOT_MANIFEST_INVALID");
+  }
   if (
     artifact.schemaVersion !==
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1" ||
@@ -155,6 +175,7 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
     !SHA256.test(artifactDigest) ||
     artifactDigest !== canonicalDigest(withoutDigest) ||
     !GIT_COMMIT.test(artifact.fixedSourceCommit) ||
+    !GIT_COMMIT.test(artifact.preparationHeadCommit) ||
     artifact.manifest?.schemaVersion !==
       "site-builder-copy-real-capability-manifest/2026-08-05-v1" ||
     artifact.manifest.fixedSourceCommit !== artifact.fixedSourceCommit ||
@@ -173,7 +194,13 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
     artifact.sourceBundle.files.length === 0 ||
     artifact.sourceBundle.digest !==
       canonicalDigest(artifact.sourceBundle.files) ||
-    artifact.manifest.sourceBundleDigest !== artifact.sourceBundle.digest
+    artifact.manifest.sourceBundleDigest !== artifact.sourceBundle.digest ||
+    artifact.compiledRuntimeExpectation.buildSourceCommit !==
+      artifact.fixedSourceCommit ||
+    artifact.compiledRuntimeExpectation.sourceBundleDigest !==
+      artifact.sourceBundle.digest ||
+    canonicalDigest(artifact.compiledRuntimeExpectation.buildCommands) !==
+      canonicalDigest(COPY_PILOT_COMPILED_BUILD_COMMANDS)
   ) {
     fail("COPY_PILOT_MANIFEST_INVALID");
   }
@@ -241,6 +268,22 @@ export async function createCopyPilotVerifiedSource(input: {
   ) {
     fail("COPY_PILOT_FIXED_SOURCE_NOT_ON_MAIN");
   }
+  for (const reference of ["HEAD", "origin/main"] as const) {
+    if (
+      spawnSync(
+        "git",
+        [
+          "merge-base",
+          "--is-ancestor",
+          artifact.preparationHeadCommit,
+          reference,
+        ],
+        { cwd: root, stdio: "ignore" },
+      ).status !== 0
+    ) {
+      fail("COPY_PILOT_PREPARATION_SOURCE_UNREACHABLE");
+    }
+  }
 
   const seen = new Set<string>();
   for (const file of artifact.sourceBundle.files) {
@@ -271,13 +314,44 @@ export async function createCopyPilotVerifiedSource(input: {
     }
   }
 
+  try {
+    await createCompiledRuntimeGuard({
+      repositoryRoot: root,
+      artifactPaths: artifact.compiledRuntimeExpectation.artifacts.map(
+        ({ path }) => path,
+      ),
+      binding: {
+        artifactDigest: artifact.artifactDigest,
+        fixedSourceCommit: artifact.fixedSourceCommit,
+        sourceBundleDigest: artifact.sourceBundle.digest,
+      },
+      expectation: artifact.compiledRuntimeExpectation,
+    });
+  } catch {
+    fail("COPY_PILOT_COMPILED_RUNTIME_MISMATCH");
+  }
+
+  const compiledRuntimeExpectation = Object.freeze({
+    ...artifact.compiledRuntimeExpectation,
+    buildCommands: Object.freeze([
+      ...artifact.compiledRuntimeExpectation.buildCommands,
+    ]),
+    artifacts: Object.freeze(
+      artifact.compiledRuntimeExpectation.artifacts.map((entry) =>
+        Object.freeze({ ...entry }),
+      ),
+    ),
+  });
+
   const binding = Object.freeze({
     repositoryRoot: root,
     manifestArtifactPath: manifestPath,
     fixedSourceCommit: artifact.fixedSourceCommit,
+    preparationHeadCommit: artifact.preparationHeadCommit,
     sourceBundleDigest: artifact.sourceBundle.digest,
     manifestDigest: canonicalDigest(artifact.manifest),
     artifactDigest: artifact.artifactDigest,
+    compiledRuntimeExpectation,
   });
   const handle = Object.freeze({}) as CopyPilotVerifiedSource;
   VERIFIED_SOURCES.set(handle, binding);
