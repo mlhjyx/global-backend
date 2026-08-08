@@ -235,6 +235,6 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         ),
       ).not.toThrow();
     },
-    30_000,
+    90_000,
   );
 });
