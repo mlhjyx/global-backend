@@ -93,7 +93,11 @@ async function repository() {
       schemaVersion: "compiled-runtime-expectation/2026-08-08-v1",
       buildSourceCommit: fixedSourceCommit,
       sourceBundleDigest: canonicalDigest(files),
-      buildCommands: ["pnpm --filter @global/api build"],
+      buildCommands: [
+        "pnpm --filter @global/db generate",
+        "pnpm --filter @global/contracts build",
+        "pnpm --filter @global/api build",
+      ],
       artifactCount: compiledArtifacts.length,
       artifacts: compiledArtifacts,
       artifactTreeDigest: canonicalDigest(compiledArtifacts),

@@ -19,6 +19,19 @@ export interface CompiledRuntimeGuardAttestation extends CompiledRuntimeGuard {
   }[];
 }
 
+export interface CompiledRuntimeExpectation {
+  readonly schemaVersion: "compiled-runtime-expectation/2026-08-08-v1";
+  readonly buildSourceCommit: string;
+  readonly sourceBundleDigest: string;
+  readonly buildCommands: readonly string[];
+  readonly artifactCount: number;
+  readonly artifacts: readonly {
+    path: string;
+    sha256: string;
+  }[];
+  readonly artifactTreeDigest: string;
+}
+
 interface ArtifactIdentity {
   path: string;
   absolutePath: string;
@@ -37,6 +50,7 @@ interface GuardState {
 
 const GUARDS = new WeakMap<object, GuardState>();
 const SHA256 = /^[0-9a-f]{64}$/u;
+const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 
 function fail(code: string): never {
   throw new Error(code);
@@ -55,6 +69,82 @@ function safeRelativePath(path: string): boolean {
     posix.normalize(path) === path &&
     path !== "."
   );
+}
+
+function exactKeys(value: object, expected: readonly string[]): boolean {
+  return (
+    JSON.stringify(Object.keys(value).sort()) ===
+    JSON.stringify([...expected].sort())
+  );
+}
+
+export function validateCompiledRuntimeExpectation(
+  value: unknown,
+): asserts value is CompiledRuntimeExpectation {
+  if (
+    value == null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !exactKeys(value, [
+      "schemaVersion",
+      "buildSourceCommit",
+      "sourceBundleDigest",
+      "buildCommands",
+      "artifactCount",
+      "artifacts",
+      "artifactTreeDigest",
+    ])
+  ) {
+    fail("COMPILED_RUNTIME_EXPECTATION_INVALID");
+  }
+  const expectation = value as CompiledRuntimeExpectation;
+  if (
+    expectation.schemaVersion !==
+      "compiled-runtime-expectation/2026-08-08-v1" ||
+    !GIT_COMMIT.test(expectation.buildSourceCommit) ||
+    !SHA256.test(expectation.sourceBundleDigest) ||
+    !Array.isArray(expectation.buildCommands) ||
+    expectation.buildCommands.length === 0 ||
+    expectation.buildCommands.some(
+      (command) =>
+        typeof command !== "string" ||
+        command.length === 0 ||
+        command.length > 256 ||
+        command.trim() !== command ||
+        /[\r\n\0]/u.test(command),
+    ) ||
+    !Number.isSafeInteger(expectation.artifactCount) ||
+    expectation.artifactCount <= 0 ||
+    !Array.isArray(expectation.artifacts) ||
+    expectation.artifacts.length !== expectation.artifactCount ||
+    !SHA256.test(expectation.artifactTreeDigest)
+  ) {
+    fail("COMPILED_RUNTIME_EXPECTATION_INVALID");
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < expectation.artifacts.length; index += 1) {
+    const artifact = expectation.artifacts[index];
+    if (
+      artifact == null ||
+      typeof artifact !== "object" ||
+      Array.isArray(artifact) ||
+      !exactKeys(artifact, ["path", "sha256"]) ||
+      !safeRelativePath(artifact.path) ||
+      !SHA256.test(artifact.sha256) ||
+      seen.has(artifact.path) ||
+      (index > 0 &&
+        expectation.artifacts[index - 1]!.path >= artifact.path)
+    ) {
+      fail("COMPILED_RUNTIME_EXPECTATION_INVALID");
+    }
+    seen.add(artifact.path);
+  }
+  if (
+    canonicalDigest(expectation.artifacts) !==
+    expectation.artifactTreeDigest
+  ) {
+    fail("COMPILED_RUNTIME_EXPECTATION_INVALID");
+  }
 }
 
 function withinRoot(root: string, path: string): boolean {
@@ -115,10 +205,56 @@ async function readArtifact(
   }
 }
 
+export async function createCompiledRuntimeExpectation(input: {
+  repositoryRoot: string;
+  artifactPaths: readonly string[];
+  buildSourceCommit: string;
+  sourceBundleDigest: string;
+  buildCommands: readonly string[];
+}): Promise<CompiledRuntimeExpectation> {
+  const requestedRoot = await lstat(input.repositoryRoot).catch(() =>
+    fail("COMPILED_RUNTIME_ROOT_INVALID"),
+  );
+  if (!requestedRoot.isDirectory() || requestedRoot.isSymbolicLink()) {
+    fail("COMPILED_RUNTIME_ROOT_INVALID");
+  }
+  const repositoryRoot = await realpath(input.repositoryRoot).catch(() =>
+    fail("COMPILED_RUNTIME_ROOT_INVALID"),
+  );
+  if (
+    input.artifactPaths.length === 0 ||
+    new Set(input.artifactPaths).size !== input.artifactPaths.length
+  ) {
+    fail("COMPILED_RUNTIME_ARTIFACT_INVALID");
+  }
+  const artifacts = Object.freeze(
+    await Promise.all(
+      [...input.artifactPaths]
+        .sort()
+        .map(async (path) => {
+          const artifact = await readArtifact(repositoryRoot, path);
+          return Object.freeze({ path: artifact.path, sha256: artifact.sha256 });
+        }),
+    ),
+  );
+  const expectation = Object.freeze({
+    schemaVersion: "compiled-runtime-expectation/2026-08-08-v1" as const,
+    buildSourceCommit: input.buildSourceCommit,
+    sourceBundleDigest: input.sourceBundleDigest,
+    buildCommands: Object.freeze([...input.buildCommands]),
+    artifactCount: artifacts.length,
+    artifacts,
+    artifactTreeDigest: canonicalDigest(artifacts),
+  });
+  validateCompiledRuntimeExpectation(expectation);
+  return expectation;
+}
+
 export async function createCompiledRuntimeGuard(input: {
   repositoryRoot: string;
   artifactPaths: readonly string[];
   binding: unknown;
+  expectation?: CompiledRuntimeExpectation;
 }): Promise<CompiledRuntimeGuard> {
   const requestedRoot = await lstat(input.repositoryRoot).catch(() =>
     fail("COMPILED_RUNTIME_ROOT_INVALID"),
@@ -161,6 +297,17 @@ export async function createCompiledRuntimeGuard(input: {
     ),
   );
   const artifactTreeDigest = canonicalDigest(publicArtifacts);
+  if (input.expectation != null) {
+    validateCompiledRuntimeExpectation(input.expectation);
+    if (
+      input.expectation.artifactCount !== publicArtifacts.length ||
+      input.expectation.artifactTreeDigest !== artifactTreeDigest ||
+      canonicalDigest(input.expectation.artifacts) !==
+        canonicalDigest(publicArtifacts)
+    ) {
+      fail("COMPILED_RUNTIME_EXPECTATION_MISMATCH");
+    }
+  }
   const attestation = Object.freeze({
     schemaVersion: "compiled-runtime-guard/2026-08-05-v1" as const,
     bindingDigest,

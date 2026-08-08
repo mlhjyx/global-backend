@@ -4,12 +4,21 @@ import { constants, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
-import { canonicalDigest } from "../../model-runtime";
+import {
+  canonicalDigest,
+  createCompiledRuntimeExpectation,
+  validateCompiledRuntimeExpectation,
+  type CompiledRuntimeExpectation,
+} from "../../model-runtime";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
+import {
+  COPY_PILOT_COMPILED_BUILD_COMMANDS,
+} from "./copy-pilot-source-verifier";
 import {
   COPY_REAL_CAPABILITY_ADMISSION_SOURCE,
   type CopyRealCapabilityManifest,
 } from "./copy-real-capability-admission";
+import { COPY_REAL_CAPABILITY_ARTIFACT_PATHS } from "./copy-real-capability-runner";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
@@ -32,8 +41,32 @@ export interface CopyRealCapabilitySourceFile extends CopyRealCapabilitySourceFi
 
 const SOURCE_FILE_SPECS = [
   {
+    role: "workspace_manifest",
+    path: "package.json",
+  },
+  {
+    role: "workspace_manifest",
+    path: "pnpm-workspace.yaml",
+  },
+  {
+    role: "compiler_config",
+    path: "tsconfig.base.json",
+  },
+  {
     role: "api_manifest",
     path: "apps/api/package.json",
+  },
+  {
+    role: "compiler_config",
+    path: "apps/api/nest-cli.json",
+  },
+  {
+    role: "compiler_config",
+    path: "apps/api/tsconfig.build.json",
+  },
+  {
+    role: "compiler_config",
+    path: "apps/api/tsconfig.json",
   },
   {
     role: "gateway_settlement",
@@ -176,6 +209,14 @@ const SOURCE_FILE_SPECS = [
     path: "packages/contracts/tsconfig.json",
   },
   {
+    role: "build_dependency_manifest",
+    path: "packages/db/package.json",
+  },
+  {
+    role: "build_dependency_schema",
+    path: "packages/db/prisma/schema.prisma",
+  },
+  {
     role: "dependency_lock",
     path: "pnpm-lock.yaml",
   },
@@ -257,6 +298,7 @@ export interface CopyRealCapabilityManifestArtifact {
   classification: "FIXED_SOURCE_CREATE_ONLY";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
+  requiredMergeMethod: "merge_commit";
   createOnly: true;
   dispatchAuthorization: "NOT_AUTHORIZED";
   dispatchCapable: false;
@@ -265,11 +307,14 @@ export interface CopyRealCapabilityManifestArtifact {
   observedModelCost: { CNY: 0; USD: 0 };
   manifest: CopyRealCapabilityManifest;
   sourceBundle: CopyRealCapabilitySourceBundle;
+  compiledRuntimeExpectation: CompiledRuntimeExpectation;
   contractSnapshot: CopyRealCapabilityContractSnapshot;
   preparationVerification: {
     fixedCommitReachableFromPreparationHead: true;
-    fixedCommitReachableFromOriginMain: true;
+    fixedCommitReachableFromOriginMainAtPreparation: boolean;
+    preparationHeadMustRemainReachableFromOriginMainBeforeDispatch: true;
     trackedSourceBytesMatch: true;
+    compiledRuntimeBuiltFromFixedSource: true;
     futureExecutionMustReverify: true;
   };
   compiledRuntimeAttestation: "REQUIRED_BEFORE_DISPATCH";
@@ -281,6 +326,7 @@ export interface CopyRealCapabilityManifestArtifact {
     "TRUSTED_OPERATIONAL_PROOF_FACTORIES_AND_BRANDED_RECEIPT",
     "REAL_GATEWAY_POST_WIRE_FREEZE",
     "REAL_GATEWAY_REPAIR_PAYLOAD_BINDING",
+    "FIXED_SOURCE_COMPILED_RUNTIME_EXPECTATION",
   ];
   artifactDigest: string;
 }
@@ -370,6 +416,8 @@ function contractSnapshot(): CopyRealCapabilityContractSnapshot {
 export function buildCopyRealCapabilityManifestArtifact(input: {
   preparationHeadCommit: string;
   sourceFiles: readonly CopyRealCapabilitySourceFile[];
+  compiledRuntimeExpectation: CompiledRuntimeExpectation;
+  fixedCommitReachableFromOriginMainAtPreparation?: boolean;
 }): CopyRealCapabilityManifestArtifact {
   const sourceCommit = fixedSourceCommit();
   if (!GIT_COMMIT.test(input.preparationHeadCommit)) {
@@ -384,6 +432,34 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
       "site-builder-copy-real-capability-source-bundle/2026-08-05-v1" as const,
     files: Object.freeze(files),
     digest: canonicalDigest(files),
+  });
+  try {
+    validateCompiledRuntimeExpectation(input.compiledRuntimeExpectation);
+  } catch {
+    fail("COPY_REAL_CAPABILITY_COMPILED_RUNTIME_EXPECTATION_INVALID");
+  }
+  if (
+    input.compiledRuntimeExpectation.buildSourceCommit !== sourceCommit ||
+    input.compiledRuntimeExpectation.sourceBundleDigest !==
+      sourceBundle.digest ||
+    canonicalDigest(input.compiledRuntimeExpectation.buildCommands) !==
+      canonicalDigest(COPY_PILOT_COMPILED_BUILD_COMMANDS) ||
+    canonicalDigest(
+      input.compiledRuntimeExpectation.artifacts.map(({ path }) => path),
+    ) !== canonicalDigest([...COPY_REAL_CAPABILITY_ARTIFACT_PATHS].sort())
+  ) {
+    fail("COPY_REAL_CAPABILITY_COMPILED_RUNTIME_EXPECTATION_INVALID");
+  }
+  const compiledRuntimeExpectation = Object.freeze({
+    ...input.compiledRuntimeExpectation,
+    buildCommands: Object.freeze([
+      ...input.compiledRuntimeExpectation.buildCommands,
+    ]),
+    artifacts: Object.freeze(
+      input.compiledRuntimeExpectation.artifacts.map((entry) =>
+        Object.freeze({ ...entry }),
+      ),
+    ),
   });
   const manifest = Object.freeze({
     schemaVersion:
@@ -407,6 +483,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     classification: "FIXED_SOURCE_CREATE_ONLY" as const,
     fixedSourceCommit: sourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,
+    requiredMergeMethod: "merge_commit" as const,
     createOnly: true as const,
     dispatchAuthorization: "NOT_AUTHORIZED" as const,
     dispatchCapable: false as const,
@@ -415,11 +492,16 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
     observedModelCost: Object.freeze({ CNY: 0 as const, USD: 0 as const }),
     manifest,
     sourceBundle,
+    compiledRuntimeExpectation,
     contractSnapshot: Object.freeze(contractSnapshot()),
     preparationVerification: Object.freeze({
       fixedCommitReachableFromPreparationHead: true as const,
-      fixedCommitReachableFromOriginMain: true as const,
+      fixedCommitReachableFromOriginMainAtPreparation:
+        input.fixedCommitReachableFromOriginMainAtPreparation ?? true,
+      preparationHeadMustRemainReachableFromOriginMainBeforeDispatch:
+        true as const,
       trackedSourceBytesMatch: true as const,
+      compiledRuntimeBuiltFromFixedSource: true as const,
       futureExecutionMustReverify: true as const,
     }),
     compiledRuntimeAttestation: "REQUIRED_BEFORE_DISPATCH" as const,
@@ -431,6 +513,7 @@ export function buildCopyRealCapabilityManifestArtifact(input: {
       "TRUSTED_OPERATIONAL_PROOF_FACTORIES_AND_BRANDED_RECEIPT",
       "REAL_GATEWAY_POST_WIRE_FREEZE",
       "REAL_GATEWAY_REPAIR_PAYLOAD_BINDING",
+      "FIXED_SOURCE_COMPILED_RUNTIME_EXPECTATION",
     ] as const),
   };
   return deepFreeze({
@@ -450,6 +533,10 @@ export function validateCopyRealCapabilityManifestArtifact(
     const rebuilt = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: artifact.preparationHeadCommit,
       sourceFiles: artifact.sourceBundle.files,
+      compiledRuntimeExpectation: artifact.compiledRuntimeExpectation,
+      fixedCommitReachableFromOriginMainAtPreparation:
+        artifact.preparationVerification
+          .fixedCommitReachableFromOriginMainAtPreparation,
     });
     if (canonicalDigest(rebuilt) !== canonicalDigest(artifact)) {
       throw new Error();
@@ -488,9 +575,9 @@ function gitAncestor(
   );
 }
 
-export function prepareCopyRealCapabilityManifestFromRepository(
+export async function prepareCopyRealCapabilityManifestFromRepository(
   repositoryRoot: string,
-): CopyRealCapabilityManifestArtifact {
+): Promise<CopyRealCapabilityManifestArtifact> {
   const sourceCommit = fixedSourceCommit();
   const root = realpathSync(repositoryRoot);
   if (
@@ -501,8 +588,7 @@ export function prepareCopyRealCapabilityManifestFromRepository(
   const preparationHeadCommit = gitText(root, ["rev-parse", "HEAD"]);
   if (
     !GIT_COMMIT.test(preparationHeadCommit) ||
-    !gitAncestor(root, sourceCommit, preparationHeadCommit) ||
-    !gitAncestor(root, sourceCommit, "origin/main")
+    !gitAncestor(root, sourceCommit, preparationHeadCommit)
   ) {
     fail("COPY_REAL_CAPABILITY_FIXED_SOURCE_UNREACHABLE");
   }
@@ -532,9 +618,34 @@ export function prepareCopyRealCapabilityManifestFromRepository(
     return Object.freeze({ role, path, sha256: sha256(fixedBytes) });
   });
 
+  for (const command of [
+    ["--filter", "@global/db", "generate"],
+    ["--filter", "@global/contracts", "build"],
+    ["--filter", "@global/api", "build"],
+  ] as const) {
+    execFileSync("pnpm", [...command], {
+      cwd: root,
+      stdio: "inherit",
+    });
+  }
+  const sourceBundleDigest = canonicalDigest(sourceFiles);
+  const compiledRuntimeExpectation = await createCompiledRuntimeExpectation({
+    repositoryRoot: root,
+    artifactPaths: COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
+    buildSourceCommit: sourceCommit,
+    sourceBundleDigest,
+    buildCommands: COPY_PILOT_COMPILED_BUILD_COMMANDS,
+  });
+
   const artifact = buildCopyRealCapabilityManifestArtifact({
     preparationHeadCommit,
     sourceFiles,
+    compiledRuntimeExpectation,
+    fixedCommitReachableFromOriginMainAtPreparation: gitAncestor(
+      root,
+      sourceCommit,
+      "origin/main",
+    ),
   });
   VERIFIED_PREPARATION_ARTIFACTS.add(artifact);
   return artifact;

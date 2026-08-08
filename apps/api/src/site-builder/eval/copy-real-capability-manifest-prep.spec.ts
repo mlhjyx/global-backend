@@ -56,10 +56,12 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 function compiledRuntimeExpectation(
   files: readonly CopyRealCapabilitySourceFile[],
 ): CompiledRuntimeExpectation {
-  const artifacts = COPY_REAL_CAPABILITY_ARTIFACT_PATHS.map((path, index) => ({
-    path,
-    sha256: index.toString(16).padStart(64, "0"),
-  }));
+  const artifacts = [...COPY_REAL_CAPABILITY_ARTIFACT_PATHS]
+    .sort()
+    .map((path, index) => ({
+      path,
+      sha256: index.toString(16).padStart(64, "0"),
+    }));
   return {
     schemaVersion: "compiled-runtime-expectation/2026-08-08-v1",
     buildSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
