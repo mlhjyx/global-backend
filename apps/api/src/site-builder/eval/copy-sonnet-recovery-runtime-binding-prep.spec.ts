@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +13,8 @@ import {
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
   COPY_SONNET_RECOVERY_RUNTIME_SOURCE_FILE_SPECS,
   buildCopySonnetRecoveryRuntimeBindingArtifact,
+  prepareCopySonnetRecoveryRuntimeBindingFromRepository,
+  validateCopySonnetRecoveryRuntimeBindingArtifact,
 } from "./copy-sonnet-recovery-runtime-binding-prep";
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
@@ -175,4 +178,63 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       }),
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
   });
+
+  it("validates exact recovery bytes and rejects post-build mutation", () => {
+    const input = fixture();
+    const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
+      fixedSourceCommit: input.fixedSourceCommit,
+      preparationHeadCommit: input.fixedSourceCommit,
+      sourceFiles: input.sourceFiles,
+      recoveryManifestBytes: input.recoveryBytes,
+      compiledRuntimeExpectation: input.compiledRuntimeExpectation,
+      fixedCommitReachableFromOriginMainAtPreparation: false,
+    });
+
+    expect(() =>
+      validateCopySonnetRecoveryRuntimeBindingArtifact(
+        artifact,
+        input.recoveryBytes,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateCopySonnetRecoveryRuntimeBindingArtifact(
+        { ...artifact, dispatchCapable: true },
+        input.recoveryBytes,
+      ),
+    ).toThrow("COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_INVALID");
+  });
+
+  it(
+    "rebuilds the create-only binding from the clean current commit",
+    async () => {
+      const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: REPOSITORY_ROOT,
+        encoding: "utf8",
+      }).trim();
+      const artifact =
+        await prepareCopySonnetRecoveryRuntimeBindingFromRepository(
+          REPOSITORY_ROOT,
+        );
+
+      expect(artifact).toMatchObject({
+        fixedSourceCommit: currentCommit,
+        preparationHeadCommit: currentCommit,
+        dispatchAuthorization: "NOT_AUTHORIZED",
+        dispatchCapable: false,
+        observedNetworkCalls: 0,
+        observedModelWireCalls: 0,
+        observedModelCost: { CNY: 0, USD: 0 },
+      });
+      expect(artifact.compiledRuntimeExpectation.artifactCount).toBe(
+        COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS.length,
+      );
+      expect(() =>
+        validateCopySonnetRecoveryRuntimeBindingArtifact(
+          artifact,
+          readFileSync(resolve(REPOSITORY_ROOT, RECOVERY_MANIFEST_PATH)),
+        ),
+      ).not.toThrow();
+    },
+    30_000,
+  );
 });
