@@ -4,7 +4,6 @@ import {
   PLATFORM_SCHEDULES,
   desiredScheduleOptions,
   reconcilePlatformSchedules,
-  scheduleCodeHash,
   type ScheduleDriftReceiptPort,
 } from "./schedule-governance";
 import { KB_RECOVERY_SWEEP_SCHEDULE_ID } from "./understanding.constants";
