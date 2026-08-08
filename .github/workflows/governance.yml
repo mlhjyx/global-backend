@@ -9,13 +9,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: governance-${{ github.ref }}
+  group: governance-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   governance:
     name: governance · traceability · release
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -32,5 +33,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify governance contracts and mutation tests
-        run: pnpm governance:verify
+      - name: Verify docs, traceability, evidence freshness, and governance mutations
+        run: pnpm docs:verify
+
+      - name: Verify memory-control transactions
+        run: pnpm memory:test
+
+      - name: Verify nontechnical decision-card contracts
+        run: pnpm decision-card:test

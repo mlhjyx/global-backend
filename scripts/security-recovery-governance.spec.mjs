@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  evaluateDependencyAuditRegression,
   evaluateCoverage,
   scanSourceForSecurityFindings,
   validateComposeLock,
@@ -9,6 +10,43 @@ import {
   validateRecoveryRehearsal,
   validateWorkflowPolicy,
 } from "./security-recovery-governance.mjs";
+
+function auditReport(advisories = []) {
+  return {
+    actions: [],
+    advisories: Object.fromEntries(
+      advisories.map((advisory, index) => [String(index + 1), advisory]),
+    ),
+    muted: [],
+    metadata: {
+      vulnerabilities: {
+        info: 0,
+        low: advisories.filter(({ severity }) => severity === "low").length,
+        moderate: advisories.filter(({ severity }) => severity === "moderate")
+          .length,
+        high: advisories.filter(({ severity }) => severity === "high").length,
+        critical: advisories.filter(({ severity }) => severity === "critical")
+          .length,
+      },
+    },
+  };
+}
+
+function advisory({
+  id = "GHSA-existing",
+  severity = "high",
+  moduleName = "example-package",
+  paths = ["apps/api > example-package@1.0.0"],
+} = {}) {
+  return {
+    github_advisory_id: id,
+    id: 123,
+    severity,
+    module_name: moduleName,
+    vulnerable_versions: "<2.0.0",
+    findings: [{ version: "1.0.0", paths }],
+  };
+}
 
 const coveragePolicy = {
   schemaVersion: "api-coverage-policy/v1",
@@ -139,13 +177,18 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
+  secret-scan:
+    name: gitleaks 密钥扫描
+    steps:
+      - run: gitleaks detect
   dependency-audit:
     name: dependency audit
     steps:
       - uses: ${pinnedCheckout}
         with:
           persist-credentials: false
-      - run: pnpm audit --prod --audit-level=high
+      - run: pnpm audit --prod --json
+      - run: node scripts/security-recovery-governance.mjs dependency-regression --base=base.json --head=head.json
   source-sast:
     name: repository SAST
     steps:
@@ -160,6 +203,20 @@ jobs:
         with:
           persist-credentials: false
       - run: pnpm security:compose
+  required-security:
+    if: always()
+    name: security · required gate
+    needs: [secret-scan, dependency-audit, source-sast, compose-iac]
+    steps:
+      - env:
+          SECRET_SCAN: \${{ needs.secret-scan.result }}
+          DEPENDENCY_AUDIT: \${{ needs.dependency-audit.result }}
+          SOURCE_SAST: \${{ needs.source-sast.result }}
+          COMPOSE_IAC: \${{ needs.compose-iac.result }}
+        run: |
+          for result in "$SECRET_SCAN" "$DEPENDENCY_AUDIT" "$SOURCE_SAST" "$COMPOSE_IAC"; do
+            if [[ "$result" != "success" ]]; then exit 1; fi
+          done
 `,
     });
     assert.equal(result.ok, true);
@@ -223,6 +280,150 @@ jobs:
     });
     assert.equal(result.ok, false);
     assert.match(result.errors.join("\n"), /persist-credentials: false/);
+  });
+
+  it("rejects a dependency lane that reports debt without comparing the PR against its base", () => {
+    const result = validateWorkflowPolicy({
+      ".github/workflows/security.yml": `
+permissions:
+  contents: read
+jobs:
+  dependency-audit:
+    name: dependency audit
+    steps:
+      - run: pnpm audit --prod --audit-level=high
+  source-sast:
+    name: repository SAST
+    steps: [{ run: pnpm security:sast }]
+  compose-iac:
+    name: container and Compose IaC
+    steps: [{ run: pnpm security:compose }]
+`,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /dependency regression comparator/);
+    assert.match(result.errors.join("\n"), /security required gate/);
+  });
+
+  it("rejects a security aggregator that can skip failures or ignores a lane result", () => {
+    const result = validateWorkflowPolicy({
+      ".github/workflows/security.yml": `
+permissions:
+  contents: read
+jobs:
+  secret-scan:
+    name: gitleaks 密钥扫描
+    steps: [{ run: gitleaks detect }]
+  dependency-audit:
+    name: dependency audit
+    steps:
+      - run: pnpm audit --prod --json
+      - run: node scripts/security-recovery-governance.mjs dependency-regression --base=base.json --head=head.json
+  source-sast:
+    name: repository SAST
+    steps: [{ run: pnpm security:sast }]
+  compose-iac:
+    name: container and Compose IaC
+    steps: [{ run: pnpm security:compose }]
+  required-security:
+    name: security · required gate
+    needs: [secret-scan, dependency-audit, source-sast, compose-iac]
+    continue-on-error: true
+    steps:
+      - run: test "\${{ needs.secret-scan.result }}" = success
+`,
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /cannot continue on error/);
+    assert.match(result.errors.join("\n"), /must run with if: always/);
+    assert.match(
+      result.errors.join("\n"),
+      /must inspect dependency-audit result/,
+    );
+  });
+});
+
+describe("dependency audit regression", () => {
+  it("keeps inherited high-severity debt visible without blaming an unrelated PR", () => {
+    const existing = advisory();
+    const result = evaluateDependencyAuditRegression(
+      auditReport([existing]),
+      auditReport([existing]),
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.inherited.length, 1);
+    assert.equal(result.inherited[0].pathCount, 1);
+    assert.equal(result.inheritedExposureCount, 1);
+    assert.deepEqual(result.regressions, []);
+    assert.equal(result.head.summary.high, 1);
+  });
+
+  it("fails when the head adds a high-severity advisory or a new vulnerable path", () => {
+    const existing = advisory();
+    const widened = advisory({
+      paths: [
+        "apps/api > example-package@1.0.0",
+        "apps/worker > example-package@1.0.0",
+      ],
+    });
+    const newCritical = advisory({
+      id: "GHSA-new-critical",
+      severity: "critical",
+      moduleName: "new-package",
+      paths: ["apps/api > new-package@1.0.0"],
+    });
+    const result = evaluateDependencyAuditRegression(
+      auditReport([existing]),
+      auditReport([widened, newCritical]),
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.regressions.length, 2);
+    assert.ok(
+      result.regressions.some(({ advisoryId }) =>
+        advisoryId.includes("GHSA-new-critical"),
+      ),
+    );
+    assert.ok(
+      result.regressions.some(({ path }) => path.startsWith("apps/worker")),
+    );
+  });
+
+  it("does not block a newly reported moderate advisory but includes it in debt totals", () => {
+    const result = evaluateDependencyAuditRegression(
+      auditReport([]),
+      auditReport([advisory({ severity: "moderate" })]),
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.head.summary.moderate, 1);
+    assert.deepEqual(result.regressions, []);
+  });
+
+  it("fails closed when either package registry response is an error envelope", () => {
+    const result = evaluateDependencyAuditRegression(
+      { error: { code: "AUDIT_UNAVAILABLE" } },
+      auditReport([]),
+    );
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /base audit response/);
+  });
+
+  it("fails closed when an advisory has no dependency path evidence", () => {
+    const withoutPath = {
+      ...advisory(),
+      findings: [],
+    };
+    const result = evaluateDependencyAuditRegression(
+      auditReport([withoutPath]),
+      auditReport([withoutPath]),
+    );
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join("\n"), /dependency paths/);
   });
 });
 

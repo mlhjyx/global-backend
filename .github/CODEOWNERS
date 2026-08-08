@@ -33,8 +33,14 @@
 /docs/evidence/runtime/ @mlhjyx
 /docs/releases/ @mlhjyx
 /docs/templates/release-bundle.template.json @mlhjyx
+/config/api-coverage-policy.json @mlhjyx
+/config/container-image-lock.json @mlhjyx
+/config/integration-context-matrix.json @mlhjyx
+/docs/backend/security-recovery-governance.md @mlhjyx
+/docs/operations/recovery-rehearsal-manifest.json @mlhjyx
 /package.json @mlhjyx
 /scripts/governance-*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx
+/scripts/security-recovery-governance*.mjs @mlhjyx
 /scripts/verify-docs.mjs @mlhjyx
 /scripts/worktree-inventory.mjs @mlhjyx
