@@ -12,10 +12,10 @@
 
 | 项目 | 当前事实 |
 |---|---|
-| 当前远端主线 | `origin/main@4f75a66925b71fa218395934a5722035e7ba0112`；2026-08-08 live `ls-remote` 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`，其后 4 个主线提交仅涉及 Site Builder Copy stopped evidence 与 Chat transport 重基。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。 |
+| 当前远端主线 | `origin/main@4f75a66925b71fa218395934a5722035e7ba0112`；2026-08-08 live fetch 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`，其后 4 个主线提交仅涉及 Site Builder Copy stopped evidence 与 Chat transport 重基。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。 |
 | 产品阶段 | Site Builder M1 收口属于已完成历史；Copy 当前仅完成 zero-call Chat transport 重基，仍无新的 capability/quality evidence、promotion 或 route adoption。获客侧处于“受控 pilot 前的治理、授权、运行身份与可观测性补齐”，尚未进入真实 pilot。 |
 | 当前交付状态 | Buyer/Intent 的机器追踪链均为 `INTERNAL_ONLY`。当前不存在可用于晋级的 RuntimeEvidence，也不存在真实 Release Bundle。 |
-| Source-only 质量/安全门 | 真实全范围 V8 基线为 statements 70.75%、branches 66.89%、functions 74.30%、lines 72.93%；ratchet 可防回退，但四项 80% 目标未完成。Actions 固定、source-only SAST、Compose lock 和恢复/集成声明验证已纳入本地门；PostgreSQL/Temporal 集成、恢复演练、GitHub ruleset 与镜像外部 provenance 仍是 `BLOCKED/NOT_RUN/UNVERIFIED`，不得解释为运行证明。 |
+| Source-only 质量/安全门 | 2026-08-08 干净集成树的全范围 V8 结果为 statements 85.20%、branches 80.00%、functions 86.79%、lines 86.63%；auth、compliance、event handoff、budget、identity 与 Outbox 关键 cohort 的分支门均达到 80%，coverage 状态为 `TARGET_MET`。Actions 固定、source-only SAST、Compose lock 和恢复/集成声明验证已纳入本地门；PostgreSQL/Temporal 集成、恢复演练、GitHub ruleset 与镜像外部 provenance 仍是 `BLOCKED/NOT_RUN/UNVERIFIED`，不得把 source-only 结果解释为运行证明。 |
 | Provider 真值 | 只认 [机器 Provider Registry](../governance/provider-registry.json) 与其[生成页](../backend/provider-registry.md)；实现、默认 enablement、当前 runtime health 与 pilot 授权是不同维度。 |
 | 模型候选基线 | 当前非运行时候选合同为 `site-builder-model-candidate-baseline/2026-08-07-v3`；它不证明 active route、质量、dispatch 授权或运行健康。 |
 | 合并/发布授权 | `NOT_AUTHORIZED / EXTERNAL_UNVERIFIED`。机器检查、独立 reviewer、用户授权和 merge-method provenance 必须分别取证；当前没有可信的外部 readback verifier。 |
@@ -45,7 +45,7 @@ pnpm code-intelligence:runtime:status
 
 1. **证据门**：当前 fresh RuntimeEvidence 数为零；历史开发验证和 TEST_ANCHOR 不可替代。
 2. **发布门**：当前真实 Release Bundle 数为零，且独立外部 readback verifier 尚未实现。Bundle 中的 `CHECK_RUN / GITHUB_REVIEW / SIGNED_AUTHORIZATION`、merge 形状和 URL 都只是 documentary declaration；即使自报 `VERIFIED`，`governance:verify` 仍会以 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED` 阻断任何 `PILOT`/`GA` 晋级。
-3. **集成门**：获客恢复切片尚需完成本地集成、全量验证、独立 review、主线合并授权，并在最终合入提交上重新生成运行证据。
+3. **集成门**：获客恢复切片已完成本地 source-only 集成与全量测试；仍需 Draft PR 的外部 CI、独立 review、逐 PR 用户合并授权，并在最终合入提交和目标环境上重新生成运行证据。
 4. **仓库设置门**：仓内已声明 required contexts 与 review 规则，但 GitHub ruleset/branch protection 是外部状态，必须由有权限的人实际配置并回读验证。
 5. **产品门**：首个 pilot 的 capability、租户/数据范围、允许 provider、成功指标、退出条件、运行 Owner 与用户授权尚未形成有效 Release Bundle。
 

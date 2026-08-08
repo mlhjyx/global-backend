@@ -98,6 +98,8 @@
 
 SaaS/QGO 侧消费 `LeadQualified` 后，以 `POST /api/v1/lead-quality-labels` 回传不可变事实。请求必须包含 `source_event_id`、`source_system`、`lead_id`、精确的 `lead_qualified_event_id`、`label` 与 `occurred_at`；`workspace_id` 和 `actor_id` 只能来自 bearer token 的 `RequestContext`，请求伪造会返回 400。
 
+权限由服务端角色映射后的 scope 强制执行：事件拉取要求 `acquisition:read + personal-data:read`，标签写入要求 `acquisition:label:write`，ACK 要求 `acquisition:event:ack`。客户端声明的 role、scope、workspace 或 actor 均不参与授权。
+
 - `label` 是封闭枚举：`QGO_CREATED`、`SALES_ACCEPTED`、`COMMERCIAL_OUTCOME_VERIFIED`、`LEAD_OUTCOME_REJECTED`。
 - `LEAD_OUTCOME_REJECTED` 必须且只能携带 `reason_code`：`NOT_ICP | BAD_TIMING | UNREACHABLE | DUPLICATE | INSUFFICIENT_EVIDENCE | COMPLIANCE_BLOCKED | OTHER`。
 - `COMMERCIAL_OUTCOME_VERIFIED` 必须且只能携带 `commercial_result: WON | LOST`。

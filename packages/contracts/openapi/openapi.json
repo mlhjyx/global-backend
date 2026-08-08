@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 84539)
-Total output lines: 10680
-
 {
   "openapi": "3.0.0",
   "paths": {
@@ -3433,7 +3430,3824 @@ Total output lines: 10680
             "content": {
               "application/json": {
                 "schema": {
-           …34539 tokens truncated…T_UPLOAD_INCOMPLETE",
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "accepted",
+                        "eventId"
+                      ],
+                      "properties": {
+                        "accepted": {
+                          "type": "boolean"
+                        },
+                        "eventId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/leads": {
+      "get": {
+        "operationId": "LeadController_list_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "queue",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "Lead（六维分+队列+裁决状态）"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/lead-queues": {
+      "get": {
+        "operationId": "LeadController_queues_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "recommended",
+                        "needs_review",
+                        "rejected",
+                        "suppressed"
+                      ],
+                      "properties": {
+                        "recommended": {
+                          "type": "integer"
+                        },
+                        "needs_review": {
+                          "type": "integer"
+                        },
+                        "rejected": {
+                          "type": "integer"
+                        },
+                        "suppressed": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}": {
+      "get": {
+        "operationId": "LeadController_get_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}/accept": {
+      "post": {
+        "operationId": "LeadController_accept_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptLeadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review",
+          "personal-data:read"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}/reject": {
+      "post": {
+        "operationId": "LeadController_reject_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectLeadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "拒绝 Lead（→ REJECTED，原因留痕做质量反馈）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}/sanctions-review": {
+      "post": {
+        "operationId": "LeadController_sanctionsReview_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SanctionsReviewDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "leadId": {
+                          "type": "string"
+                        },
+                        "reviewState": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
+    "/api/v1/lead-quality-labels": {
+      "post": {
+        "operationId": "LeadQualityLabelsController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLeadQualityLabelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "source_event_id",
+                        "lead_id",
+                        "lead_qualified_event_id",
+                        "label",
+                        "occurred_at",
+                        "source_system",
+                        "external_object_ref",
+                        "reason_code",
+                        "commercial_result",
+                        "disposition",
+                        "held_reason",
+                        "ingested_at",
+                        "replayed"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "source_event_id": {
+                          "type": "string"
+                        },
+                        "lead_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "lead_qualified_event_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "label": {
+                          "type": "string",
+                          "enum": [
+                            "QGO_CREATED",
+                            "SALES_ACCEPTED",
+                            "COMMERCIAL_OUTCOME_VERIFIED",
+                            "LEAD_OUTCOME_REJECTED"
+                          ]
+                        },
+                        "occurred_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "source_system": {
+                          "type": "string"
+                        },
+                        "external_object_ref": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "reason_code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_ICP",
+                            "BAD_TIMING",
+                            "UNREACHABLE",
+                            "DUPLICATE",
+                            "INSUFFICIENT_EVIDENCE",
+                            "COMPLIANCE_BLOCKED",
+                            "OTHER"
+                          ],
+                          "nullable": true
+                        },
+                        "commercial_result": {
+                          "type": "string",
+                          "enum": [
+                            "WON",
+                            "LOST"
+                          ],
+                          "nullable": true
+                        },
+                        "disposition": {
+                          "type": "string",
+                          "enum": [
+                            "ACCEPTED",
+                            "HELD"
+                          ]
+                        },
+                        "held_reason": {
+                          "type": "string",
+                          "enum": [
+                            "OCCURRED_BEFORE_HANDOFF",
+                            "OCCURRED_AT_IN_FUTURE",
+                            "OUT_OF_ORDER_ARRIVAL",
+                            "MISSING_QGO_CREATED",
+                            "MISSING_PREREQUISITE",
+                            "CONTRADICTORY_POSITIVE_LABEL",
+                            "CONTRADICTORY_REJECTION",
+                            "CONTRADICTORY_COMMERCIAL_RESULT"
+                          ],
+                          "nullable": true
+                        },
+                        "ingested_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "replayed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
+          "409": {
+            "description": "source_system + source_event_id was replayed with different content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SOURCE_EVENT_CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Append a downstream lead quality fact without creating Opportunity/QGO state",
+        "tags": [
+          "Lead quality labels"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write"
+        ]
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "description": "非空响应的 next_cursor 恒为最后一条返回账本记录的位置，包括 has_more=false 的终页；空页返回 null。",
+        "operationId": "EventsController_list_v1",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "游标（上次响应的 nextCursor；缺省从头拉）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "description": "按集成事件类型过滤（如 LeadQualified）",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "事件 envelope（见 packages/contracts/events/envelope.schema.json）",
+                        "required": [
+                          "event_id",
+                          "event_type",
+                          "schema_version",
+                          "workspace_id",
+                          "aggregate_type",
+                          "aggregate_id",
+                          "occurred_at",
+                          "producer",
+                          "privacy_classification",
+                          "payload"
+                        ],
+                        "properties": {
+                          "event_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "event_type": {
+                            "type": "string"
+                          },
+                          "schema_version": {
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "aggregate_type": {
+                            "type": "string"
+                          },
+                          "aggregate_id": {
+                            "type": "string"
+                          },
+                          "occurred_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "producer": {
+                            "type": "string"
+                          },
+                          "correlation_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "causation_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "privacy_classification": {
+                            "type": "string",
+                            "enum": [
+                              "PUBLIC",
+                              "INTERNAL",
+                              "CONFIDENTIAL",
+                              "RESTRICTED"
+                            ]
+                          },
+                          "payload": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "pattern": "^\\d+$",
+                          "description": "最后一条返回事件的账本 checkpoint；非空页恒为数字字符串（包括 has_more=false 的终页），仅空页为 null"
+                        },
+                        "has_more": {
+                          "type": "boolean",
+                          "description": "是否存在可立即读取的后续页；不决定 next_cursor 是否为 null"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）",
+        "tags": [
+          "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
+        ]
+      }
+    },
+    "/api/v1/events/ack": {
+      "post": {
+        "operationId": "EventsController_ack_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AckEventsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "acked",
+                        "results"
+                      ],
+                      "properties": {
+                        "acked": {
+                          "type": "integer"
+                        },
+                        "results": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "event_id",
+                              "outcome"
+                            ],
+                            "properties": {
+                              "event_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "ACKED_NOW",
+                                  "ALREADY_ACKED",
+                                  "NOT_DELIVERED",
+                                  "NOT_FOUND"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "ACK 已消费事件（逐事件返回 ACKED_NOW/ALREADY_ACKED/NOT_DELIVERED/NOT_FOUND）",
+        "tags": [
+          "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:event:ack"
+        ]
+      }
+    },
+    "/api/v1/deletion-requests": {
+      "post": {
+        "operationId": "DeletionController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeletionRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "RECEIVED",
+                            "FROZEN",
+                            "ERASING",
+                            "COMPLETED",
+                            "FAILED"
+                          ]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": [
+                            "contact",
+                            "company"
+                          ]
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "requestRef": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "receipt": {
+                          "type": "object",
+                          "nullable": true,
+                          "description": "擦除回执（COMPLETED 后有值）——🔴 只计数，无 PII",
+                          "properties": {
+                            "contactsErased": {
+                              "type": "integer"
+                            },
+                            "contactPointsErased": {
+                              "type": "integer"
+                            },
+                            "fieldEvidenceErased": {
+                              "type": "integer"
+                            },
+                            "signalsRevoked": {
+                              "type": "integer"
+                            },
+                            "companiesSuppressed": {
+                              "type": "integer"
+                            },
+                            "leadsRescoreRequested": {
+                              "type": "integer"
+                            },
+                            "patentCacheErased": {
+                              "type": "integer"
+                            },
+                            "ruleVersion": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "受理数据主体删除请求（GDPR Art.17）——异步编排，返回 202 + 请求 id",
+        "tags": [
+          "Compliance"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
+    "/api/v1/deletion-requests/{id}": {
+      "get": {
+        "operationId": "DeletionController_get_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "RECEIVED",
+                            "FROZEN",
+                            "ERASING",
+                            "COMPLETED",
+                            "FAILED"
+                          ]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": [
+                            "contact",
+                            "company"
+                          ]
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "requestRef": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "receipt": {
+                          "type": "object",
+                          "nullable": true,
+                          "description": "擦除回执（COMPLETED 后有值）——🔴 只计数，无 PII",
+                          "properties": {
+                            "contactsErased": {
+                              "type": "integer"
+                            },
+                            "contactPointsErased": {
+                              "type": "integer"
+                            },
+                            "fieldEvidenceErased": {
+                              "type": "integer"
+                            },
+                            "signalsRevoked": {
+                              "type": "integer"
+                            },
+                            "companiesSuppressed": {
+                              "type": "integer"
+                            },
+                            "leadsRescoreRequested": {
+                              "type": "integer"
+                            },
+                            "patentCacheErased": {
+                              "type": "integer"
+                            },
+                            "ruleVersion": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "查询删除请求状态与擦除回执",
+        "tags": [
+          "Compliance"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
+    "/api/v1/site-builder/intake": {
+      "post": {
+        "operationId": "IntakeController_create_v1",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "required": false,
+            "in": "header",
+            "description": "幂等键（1–128 位字母、数字、点、下划线、冒号或连字符）",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IntakeResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求字段或 idempotency-key 非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
+          "409": {
+            "description": "幂等键复用冲突或 workspace 已有站点",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "SITE_LIMIT_REACHED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "demo workflow 启动 ACK 不可用；有 key 时应同 key 重试",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "DEMO_LAUNCH_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "注册引导提交：无条件建站档案并秒级触发 demo v0",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites": {
+      "get": {
+        "operationId": "SitesController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SiteDto"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出本 workspace 站点（含预览地址）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}": {
+      "get": {
+        "operationId": "SitesController_get_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SiteDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "站点详情",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/profile": {
+      "get": {
+        "operationId": "SitesController_getProfile_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "versionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                        },
+                        "companyProfile": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "foundedYear": {
+                              "type": "integer",
+                              "minimum": 1800,
+                              "maximum": 2026
+                            },
+                            "employeeCountRange": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "min": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                },
+                                "max": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                }
+                              }
+                            },
+                            "businessType": {
+                              "enum": [
+                                "manufacturer",
+                                "trading_company",
+                                "manufacturer_and_trader"
+                              ]
+                            },
+                            "city": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "annualExportRevenue": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$"
+                                },
+                                "min": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "max": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "currency"
+                              ]
+                            },
+                            "exportMarkets": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{2}$"
+                              }
+                            },
+                            "capacityDescription": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "productionLines": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                              }
+                            },
+                            "moq": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "leadTime": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "trustAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "certifications": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "certificateAssetIds": {
+                                    "type": "array",
+                                    "maxItems": 5,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "patents": {
+                              "type": "array",
+                              "maxItems": 50,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "number": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "jurisdiction": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 16,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "title"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "number"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "customerCases": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "displayLabel": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "industry": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  },
+                                  "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "anonymized": {
+                                    "type": "boolean"
+                                  },
+                                  "assetIds": {
+                                    "type": "array",
+                                    "maxItems": 10,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "displayLabel"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "industry"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "summary"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "exhibitions": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "year": {
+                                    "type": "integer",
+                                    "minimum": 1900,
+                                    "maximum": 2027
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "year"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "onlineAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "storefronts": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "alibaba",
+                                      "made_in_china",
+                                      "global_sources",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "importAuthorized": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url",
+                                  "importAuthorized"
+                                ]
+                              }
+                            },
+                            "socialProfiles": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            },
+                            "googleBusinessProfiles": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            }
+                          }
+                        },
+                        "brand": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "logoAssetId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                            },
+                            "colors": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$"
+                              }
+                            },
+                            "referenceSites": {
+                              "type": "array",
+                              "maxItems": 3,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            },
+                            "slogan": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "contact": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "publicEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "whatsappNumbers": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "phoneNumbers": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "inquiryRecipientEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "displaySocialLinks": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "instagram",
+                                      "x",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 80,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "versionId"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
+          "409": {
+            "description": "历史 Profile 不符合当前严格 schema，须显式替换无效组",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "建站向导档案（五组）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      },
+      "patch": {
+        "operationId": "SitesController_patchProfile_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "if-match",
+            "in": "header",
+            "description": "Profile 强 ETag；与 body.baseVersionId 至少提供一个",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "example": "\"profile:11111111-1111-4111-8111-111111111111\""
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "baseVersionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                  },
+                  "companyProfile": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "foundedYear": {
+                        "type": "integer",
+                        "minimum": 1800,
+                        "maximum": 2026
+                      },
+                      "employeeCountRange": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          },
+                          "max": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000
+                          }
+                        }
+                      },
+                      "businessType": {
+                        "enum": [
+                          "manufacturer",
+                          "trading_company",
+                          "manufacturer_and_trader"
+                        ]
+                      },
+                      "city": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      },
+                      "annualExportRevenue": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$"
+                          },
+                          "min": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "max": {
+                            "type": "number",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "currency"
+                        ]
+                      },
+                      "exportMarkets": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Z]{2}$"
+                        }
+                      },
+                      "capacityDescription": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      },
+                      "productionLines": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120,
+                          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                        }
+                      },
+                      "moq": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      },
+                      "leadTime": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "trustAssets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "certifications": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "certificateAssetIds": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                              }
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ]
+                        }
+                      },
+                      "patents": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "number": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "jurisdiction": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 16,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          },
+                          "anyOf": [
+                            {
+                              "required": [
+                                "title"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "number"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "customerCases": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "displayLabel": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "industry": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "country": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{2}$"
+                            },
+                            "summary": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "anonymized": {
+                              "type": "boolean"
+                            },
+                            "assetIds": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                              }
+                            }
+                          },
+                          "anyOf": [
+                            {
+                              "required": [
+                                "displayLabel"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "industry"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "summary"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "exhibitions": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "year": {
+                              "type": "integer",
+                              "minimum": 1900,
+                              "maximum": 2027
+                            },
+                            "country": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{2}$"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "year"
+                          ]
+                        }
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "onlineAssets": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "storefronts": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "platform": {
+                              "enum": [
+                                "alibaba",
+                                "made_in_china",
+                                "global_sources",
+                                "other"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^https?://",
+                              "maxLength": 2048
+                            },
+                            "importAuthorized": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "platform",
+                            "url",
+                            "importAuthorized"
+                          ]
+                        }
+                      },
+                      "socialProfiles": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "platform": {
+                              "enum": [
+                                "linkedin",
+                                "facebook",
+                                "youtube",
+                                "other"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^https?://",
+                              "maxLength": 2048
+                            }
+                          },
+                          "required": [
+                            "platform",
+                            "url"
+                          ]
+                        }
+                      },
+                      "googleBusinessProfiles": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https?://",
+                          "maxLength": 2048
+                        }
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "brand": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "logoAssetId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                      },
+                      "colors": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^#[0-9A-Fa-f]{6}$"
+                        }
+                      },
+                      "referenceSites": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "pattern": "^https?://",
+                          "maxLength": 2048
+                        }
+                      },
+                      "slogan": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                      }
+                    },
+                    "nullable": true
+                  },
+                  "contact": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "publicEmails": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "email",
+                          "maxLength": 254
+                        }
+                      },
+                      "whatsappNumbers": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^\\+[1-9][0-9]{7,14}$"
+                        }
+                      },
+                      "phoneNumbers": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^\\+[1-9][0-9]{7,14}$"
+                        }
+                      },
+                      "inquiryRecipientEmails": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "email",
+                          "maxLength": 254
+                        }
+                      },
+                      "displaySocialLinks": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "platform": {
+                              "enum": [
+                                "linkedin",
+                                "facebook",
+                                "youtube",
+                                "instagram",
+                                "x",
+                                "other"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "pattern": "^https?://",
+                              "maxLength": 2048
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          },
+                          "required": [
+                            "platform",
+                            "url"
+                          ]
+                        }
+                      }
+                    },
+                    "nullable": true
+                  }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "companyProfile"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "trustAssets"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "onlineAssets"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "brand"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contact"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "versionId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                        },
+                        "companyProfile": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "foundedYear": {
+                              "type": "integer",
+                              "minimum": 1800,
+                              "maximum": 2026
+                            },
+                            "employeeCountRange": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "min": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                },
+                                "max": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 10000000
+                                }
+                              }
+                            },
+                            "businessType": {
+                              "enum": [
+                                "manufacturer",
+                                "trading_company",
+                                "manufacturer_and_trader"
+                              ]
+                            },
+                            "city": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "annualExportRevenue": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$"
+                                },
+                                "min": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "max": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "currency"
+                              ]
+                            },
+                            "exportMarkets": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{2}$"
+                              }
+                            },
+                            "capacityDescription": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "productionLines": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                              }
+                            },
+                            "moq": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            },
+                            "leadTime": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "trustAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "certifications": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "certificateAssetIds": {
+                                    "type": "array",
+                                    "maxItems": 5,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
+                              }
+                            },
+                            "patents": {
+                              "type": "array",
+                              "maxItems": 50,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "number": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "jurisdiction": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 16,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "title"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "number"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "customerCases": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "displayLabel": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "industry": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  },
+                                  "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "anonymized": {
+                                    "type": "boolean"
+                                  },
+                                  "assetIds": {
+                                    "type": "array",
+                                    "maxItems": 10,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                                    }
+                                  }
+                                },
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "displayLabel"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "industry"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "summary"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "exhibitions": {
+                              "type": "array",
+                              "maxItems": 30,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  },
+                                  "year": {
+                                    "type": "integer",
+                                    "minimum": 1900,
+                                    "maximum": 2027
+                                  },
+                                  "country": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{2}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "year"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "onlineAssets": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "storefronts": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "alibaba",
+                                      "made_in_china",
+                                      "global_sources",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "importAuthorized": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url",
+                                  "importAuthorized"
+                                ]
+                              }
+                            },
+                            "socialProfiles": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            },
+                            "googleBusinessProfiles": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            }
+                          }
+                        },
+                        "brand": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "logoAssetId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+                            },
+                            "colors": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$"
+                              }
+                            },
+                            "referenceSites": {
+                              "type": "array",
+                              "maxItems": 3,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "uri",
+                                "pattern": "^https?://",
+                                "maxLength": 2048
+                              }
+                            },
+                            "slogan": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 240,
+                              "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                            }
+                          }
+                        },
+                        "contact": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "publicEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "whatsappNumbers": {
+                              "type": "array",
+                              "maxItems": 5,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "phoneNumbers": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "pattern": "^\\+[1-9][0-9]{7,14}$"
+                              }
+                            },
+                            "inquiryRecipientEmails": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "format": "email",
+                                "maxLength": 254
+                              }
+                            },
+                            "displaySocialLinks": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "platform": {
+                                    "enum": [
+                                      "linkedin",
+                                      "facebook",
+                                      "youtube",
+                                      "instagram",
+                                      "x",
+                                      "other"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "pattern": "^https?://",
+                                    "maxLength": 2048
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 80,
+                                    "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+                                  }
+                                },
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "required": [
+                        "versionId"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "If-Match 非法或双判据矛盾",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "baseVersionId 已过期",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match 已过期",
+            "headers": {
+              "ETag": {
+                "description": "Profile 强校验器，格式为 \"profile:<versionId>\"",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Profile 为租户私有且每次使用前须重新验证",
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-cache"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Profile schema、数量、URL、引用或大小不合格",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match/baseVersionId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "向导分步保存：组级替换（companyProfile/trustAssets/onlineAssets/brand/contact），可跳过",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/assets/presign": {
+      "post": {
+        "operationId": "AssetsController_presign_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PresignAssetResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "UUID 或请求体格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "素材类型、MIME 或大小不合格",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "对象存储暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "素材上传第 1 步：校验并签发直传 URL（15 分钟有效）",
+        "tags": [
+          "SiteBuilder"
+        ]
+      }
+    },
+    "/api/v1/site-builder/assets/{id}/commit": {
+      "post": {
+        "operationId": "AssetsController_commit_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CommitAssetResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Asset UUID 格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 Asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "未上传、重复、忙或状态冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "素材内容校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
+                            "ASSET_DUPLICATE",
+                            "ASSET_STATE_CONFLICT",
+                            "ASSET_BUSY",
+                            "ASSET_STORAGE_UNAVAILABLE",
+                            "ASSET_COMMIT_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "对象存储暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "NOT_FOUND",
+                            "ASSET_VALIDATION_FAILED",
+                            "ASSET_UPLOAD_INCOMPLETE",
                             "ASSET_DUPLICATE",
                             "ASSET_STATE_CONFLICT",
                             "ASSET_BUSY",

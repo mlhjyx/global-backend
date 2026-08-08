@@ -189,20 +189,23 @@ describe('application database runtime admission', () => {
 
   it('probes exactly one safe role row and fails closed on missing or duplicate rows', async () => {
     const safeProbe = {
-      $queryRawUnsafe: vi.fn(async () => [SAFE_ROLE]),
+      $queryRaw: vi.fn(async () => [SAFE_ROLE]),
     };
     await expect(verifyApplicationDatabaseRole(safeProbe)).resolves.toEqual(
       SAFE_ROLE,
     );
-    expect(safeProbe.$queryRawUnsafe).toHaveBeenCalledTimes(1);
-    expect(safeProbe.$queryRawUnsafe.mock.calls[0][0]).toContain(
-      'rolbypassrls',
+    expect(safeProbe.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(safeProbe.$queryRaw.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        sql: expect.stringContaining('rolbypassrls'),
+        values: [],
+      }),
     );
 
     for (const rows of [[], [SAFE_ROLE, SAFE_ROLE], null]) {
       await expect(
         verifyApplicationDatabaseRole({
-          $queryRawUnsafe: vi.fn(async () => rows),
+          $queryRaw: vi.fn(async () => rows),
         } as never),
       ).rejects.toThrowError(/APP_DATABASE_ROLE_UNVERIFIED/);
     }
@@ -217,7 +220,7 @@ describe('application database runtime admission', () => {
     };
     await expect(
       verifyPlatformOwnerDatabaseRole({
-        $queryRawUnsafe: vi.fn(async () => [ownerFacts]),
+        $queryRaw: vi.fn(async () => [ownerFacts]),
       }),
     ).resolves.toEqual(ownerFacts);
 
@@ -229,7 +232,7 @@ describe('application database runtime admission', () => {
     ]) {
       await expect(
         verifyPlatformOwnerDatabaseRole({
-          $queryRawUnsafe: vi.fn(async () => rows),
+          $queryRaw: vi.fn(async () => rows),
         } as never),
       ).rejects.toThrowError(/OWNER_DATABASE_ROLE_(?:UNVERIFIED|UNSAFE)/);
     }

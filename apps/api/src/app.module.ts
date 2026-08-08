@@ -13,7 +13,6 @@ import { HealthModule } from './health/health.module';
 import { IcpModule } from './icp/icp.module';
 import { IdentityReviewModule } from './identity-review/identity-review.module';
 import { LeadModule } from './lead/lead.module';
-import { LeadQualityLabelModule } from './lead-quality-labels/lead-quality-label.module';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { PrismaModule } from './prisma/prisma.module';
@@ -26,6 +25,7 @@ import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { TemporalModule } from './temporal/temporal.module';
 import { WhoamiController } from './whoami/whoami.controller';
+import { LeadQualityLabelModule } from './lead-quality-labels/lead-quality-label.module';
 
 function positiveIntegerOrDefault(
   value: string | undefined,

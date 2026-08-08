@@ -370,13 +370,13 @@ describe('pii-crypto.extension Prisma wiring', () => {
     const context = {
       $connect: vi.fn(async () => undefined),
       $disconnect: vi.fn(async () => undefined),
-      $queryRawUnsafe: vi.fn(),
+      $queryRaw: vi.fn(),
     };
     vi.spyOn(Prisma, 'getExtensionContext').mockReturnValue(context as never);
     const client = extensionConfig().client;
     await client.onModuleInit.call({});
     expect(context.$connect).toHaveBeenCalledTimes(1);
-    expect(context.$queryRawUnsafe).not.toHaveBeenCalled();
+    expect(context.$queryRaw).not.toHaveBeenCalled();
     await client.onModuleDestroy.call({});
     expect(context.$disconnect).toHaveBeenCalledTimes(1);
   });
@@ -386,7 +386,7 @@ describe('pii-crypto.extension Prisma wiring', () => {
     const context = {
       $connect: vi.fn(async () => undefined),
       $disconnect: vi.fn(async () => undefined),
-      $queryRawUnsafe: vi.fn(async () => [
+      $queryRaw: vi.fn(async () => [
         {
           roleName: 'app_user',
           superuser: false,

@@ -33,6 +33,11 @@ describe('API bootstrap runtime admission wiring', () => {
       source.match(/resolveRuntimeAdmission\(process\.env\)/gu),
     ).toHaveLength(1);
     expect(createIndex).toBeGreaterThan(admissionIndex);
+    const policyIndex = source.indexOf(
+      'RoleScopePolicy.parse(runtime.process.environment.AUTH_ROLE_SCOPE_MAP)',
+    );
+    expect(policyIndex).toBeGreaterThan(admissionIndex);
+    expect(policyIndex).toBeLessThan(createIndex);
     expect(source).toMatch(
       /app\.listen\(runtime\.admission\.port,\s*runtime\.admission\.apiBindHost\)/u,
     );

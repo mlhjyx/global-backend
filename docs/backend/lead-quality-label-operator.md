@@ -13,7 +13,7 @@
 - 无“裸 ACK”命令。ACK 失败时只能对 durable `LABEL_POSTED` 执行 `retry-ack`；只有逐事件结果 `ACKED_NOW` 或 `ALREADY_ACKED` 才进入 `ACKED`，`NOT_DELIVERED`/`NOT_FOUND` 保持 `LABEL_POSTED` 并要求人工对账。ACK 只写消费证据 `ackedAt`，不会把 relay 尚未记录的 `deliveredAt` 伪造成当前时间。
 - 状态文件只存 event id、label receipt id、label、请求 SHA-256、ACK outcome 与时间；不存事件 payload、公司/联系人字段。专属目录必须由当前用户拥有且为 `0700`，文件为 `0600`；每个 event 的跨进程 operation lock 覆盖完整 state-read → label POST → durable receipt → ACK 链，状态写另走原子 lock + 临时文件 rename。锁记录绑定 PID+Linux process start time，只回收已证明进程不存在/PID 已复用且 inode 未漂移的 stale lock；畸形或不可判定锁 fail-closed。默认路径为 `~/.local/state/global-backend/lead-quality-label-operator.json`，可用 `GLOBAL_LEAD_QUALITY_LABEL_STATE_PATH` 指向另一个**专属 0700 目录**中的文件。
 
-当前分支只冻结授权集成合同，不能把普通 `AuthGuard` 误称为 scope enforcement。三条 operator endpoint 目前由 `AUTHORIZATION_INTEGRATION_PENDING` 硬门统一返回 503，故本分支上的 reference CLI **不可联机使用**。最终授权集成必须精确绑定：拉取=`acquisition:read + personal-data:read`，写标签=`acquisition:label:write`，ACK=`acquisition:event:ack`；只有 OpenAPI `x-required-scopes`、统一 401/403 测试和真实 runtime guard 全部通过，才能移除 503 硬门。
+当前集成源码已把三条 operator endpoint 精确绑定到服务端 `ScopesGuard`：拉取=`acquisition:read + personal-data:read`，写标签=`acquisition:label:write`，ACK=`acquisition:event:ack`；机器 inventory、OpenAPI `x-required-scopes` 与统一 401/403 合同共同防漂移。这里的“已绑定”只描述本地源码，不证明该提交已经部署、JWKS/角色映射已经配置或 pilot token 已签发；在受控部署和独立运行授权完成前，reference CLI 仍只可做默认 dry-run，不得连接现行服务或携带真实 token。
 
 ## 准备
 
