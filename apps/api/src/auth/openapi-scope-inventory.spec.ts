@@ -3,9 +3,9 @@ import { NestFactory } from '@nestjs/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module';
 import { buildOpenApi } from '../openapi-document';
+import { resolveRuntimeAdmission } from '../runtime/runtime-admission';
 import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from './acquisition-scope-inventory';
 
-const ORIGINAL_ENV = { ...process.env };
 let app: INestApplication;
 
 function operationsOf(document: ReturnType<typeof buildOpenApi>): Array<Record<string, unknown>> {
@@ -18,8 +18,7 @@ function operationsOf(document: ReturnType<typeof buildOpenApi>): Array<Record<s
 }
 
 beforeAll(async () => {
-  process.env = {
-    ...ORIGINAL_ENV,
+  const runtime = resolveRuntimeAdmission({
     NODE_ENV: 'test',
     DEPLOYMENT_STAGE: 'development',
     API_BIND_HOST: '127.0.0.1',
@@ -27,15 +26,17 @@ beforeAll(async () => {
     AUTH_ROLE_SCOPE_MAP: JSON.stringify({
       'test.reader': ['acquisition:read'],
     }),
-  };
-  app = await NestFactory.create(AppModule, { logger: false });
+  });
+  app = await NestFactory.create(AppModule.register(runtime), {
+    logger: false,
+    preview: true,
+  });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
 });
 
 afterAll(async () => {
   await app?.close();
-  process.env = { ...ORIGINAL_ENV };
 });
 
 describe('generated OpenAPI authorization inventory', () => {

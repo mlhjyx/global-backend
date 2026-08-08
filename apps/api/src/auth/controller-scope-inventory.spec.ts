@@ -13,6 +13,7 @@ import { EventsController } from '../events/events.controller';
 import { HealthController } from '../health/health.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { resolveRuntimeAdmission } from '../runtime/runtime-admission';
 import {
   ACQUISITION_CONTROLLER_SCOPE_INVENTORY,
   NON_ACQUISITION_CONTROLLER_EXEMPTIONS,
@@ -111,16 +112,17 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
   });
 
   it('matches the actual Nest production module graph bidirectionally', async () => {
-    const originalEnvironment = process.env;
-    process.env = {
-      ...process.env,
+    const runtime = resolveRuntimeAdmission({
       NODE_ENV: 'test',
       DEPLOYMENT_STAGE: 'development',
       API_BIND_HOST: '127.0.0.1',
       AUTH_ALLOW_DEV_TOKENS: 'true',
       AUTH_ROLE_SCOPE_MAP: JSON.stringify({ 'inventory.reader': ['acquisition:read'] }),
-    };
-    const app = await NestFactory.create(AppModule, { logger: false });
+    });
+    const app = await NestFactory.create(AppModule.register(runtime), {
+      logger: false,
+      preview: true,
+    });
     try {
       const modules = app.get(ModulesContainer);
       const registered = [...modules.values()]
@@ -132,7 +134,6 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
       expect(registered).toEqual([...REGISTERED_PRODUCTION_CONTROLLERS].sort());
     } finally {
       await app.close();
-      process.env = originalEnvironment;
     }
   });
 
