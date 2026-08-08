@@ -298,7 +298,7 @@ export const piiExtension = Prisma.defineExtension({
       const client = Prisma.getExtensionContext(this) as unknown as {
         $connect: () => Promise<void>;
         $disconnect: () => Promise<void>;
-        $queryRawUnsafe: <T>(query: string) => Promise<T>;
+        $queryRaw: <T>(query: Prisma.Sql) => Promise<T>;
       };
       const stage = resolveDatabaseDeploymentStage(process.env);
       if (stage !== "development") {
