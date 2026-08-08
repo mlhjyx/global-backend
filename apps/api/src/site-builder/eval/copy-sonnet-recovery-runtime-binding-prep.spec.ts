@@ -5,9 +5,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
-import {
-  COPY_SONNET_RECOVERY_ADMISSION_SOURCE,
-} from "./copy-sonnet-recovery-admission";
+import { COPY_SONNET_RECOVERY_ADMISSION_SOURCE } from "./copy-sonnet-recovery-admission";
 import {
   COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS,
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
@@ -110,8 +108,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         manifestDigest: canonicalDigest(input.recoveryArtifact.manifest),
       },
       compiledRuntimeExpectation: {
-        artifactTreeDigest:
-          input.compiledRuntimeExpectation.artifactTreeDigest,
+        artifactTreeDigest: input.compiledRuntimeExpectation.artifactTreeDigest,
       },
     });
     expect(artifact.artifactDigest).toBe(
@@ -162,10 +159,9 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     ).toThrow("COPY_SONNET_RECOVERY_COMPILED_RUNTIME_EXPECTATION_INVALID");
 
     const changedRecoveryBytes = Buffer.from(
-      input.recoveryBytes.toString("utf8").replace(
-        "claude-sonnet-5",
-        "gpt-5.6-terra",
-      ),
+      input.recoveryBytes
+        .toString("utf8")
+        .replace("claude-sonnet-5", "gpt-5.6-terra"),
     );
     expect(() =>
       buildCopySonnetRecoveryRuntimeBindingArtifact({
@@ -204,7 +200,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     ).toThrow("COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_INVALID");
   });
 
-  it(
+  it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(
     "rebuilds the create-only binding from the clean current commit",
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {

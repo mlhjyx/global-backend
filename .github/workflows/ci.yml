@@ -120,6 +120,12 @@ jobs:
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
 
+      - name: Copy Sonnet recovery fixed-source rebuild（顺序隔离）
+        run: >-
+          COPY_SONNET_RECOVERY_REBUILD_TEST=1
+          pnpm --filter @global/api exec vitest run
+          src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
+
       - name: Renderer locale contract test
         run: pnpm --filter @global/site-renderer test
 
