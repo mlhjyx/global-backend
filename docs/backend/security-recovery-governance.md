@@ -5,33 +5,35 @@ This document describes repository source on the
 GitHub rulesets changed, a workflow ran, an image was pulled, a backup exists,
 or a restore succeeded. No `.env` file or service was read while preparing it.
 
-## API coverage: ratchet first, 80% remains the target
+## API coverage: 80% target met and ratcheted
 
 The fixed-base measurement included every non-test TypeScript file below
 `apps/api/src`, including the API and worker process entrypoints; only test
 files and the test-only Temporal mock directory are excluded. After building
-the API, all 271 test files and all 4,291 tests passed. The measured coverage
+the API, all 367 test files and all 5,412 tests passed. The latest full source-only
+measurement on this stack was:
 was:
 
 | Scope               | Statements | Branches | Functions |  Lines | 80% status |
 | ------------------- | ---------: | -------: | --------: | -----: | ---------- |
-| API global          |     70.75% |   66.89% |    74.30% | 72.93% | debt       |
-| auth branches       |          — |    2.50% |         — |      — | debt       |
-| compliance branches |          — |   70.49% |         — |      — | debt       |
-| events branches     |          — |   95.65% |         — |      — | met        |
+| API global          |     85.25% |   80.12% |    86.87% | 86.68% | met        |
+| auth branches       |          — |   93.49% |         — |      — | met        |
+| compliance branches |          — |   93.10% |         — |      — | met        |
+| events branches     |          — |   96.29% |         — |      — | met        |
 | budget branches     |          — |  100.00% |         — |      — | met        |
-| identity branches   |          — |   91.67% |         — |      — | met        |
-| outbox branches     |          — |   74.19% |         — |      — | debt       |
+| identity branches   |          — |   96.63% |         — |      — | met        |
+| outbox branches     |          — |   82.46% |         — |      — | met        |
 
 [`config/api-coverage-policy.json`](../../config/api-coverage-policy.json)
 stores exact covered/total counts. `pnpm coverage:api` produces real V8 output
 and requires its file inventory to equal every non-test TypeScript source below
 `apps/api/src`; missing or out-of-scope files fail the gate. It compares ratios
 by integer cross-multiplication, so a decline cannot hide behind two-decimal
-rounding. A green ratchet means only that coverage did not decline. While the
-policy status is `RATCHET_ACTIVE_TARGET_UNMET`, it must not be described as
-satisfying the 80% target. Auth, compliance, and outbox need a separate
-test-coverage wave.
+rounding. The policy status is now `TARGET_MET`: every global metric and every
+critical branch cohort is at least 80%. This is source-only test evidence, not
+proof of PostgreSQL, Temporal, external-provider, deployment, or pilot behavior.
+Any future loss below the exact committed ratios fails even when a rounded
+percentage still displays the same value.
 
 ## Security required-context source and inherited debt
 
