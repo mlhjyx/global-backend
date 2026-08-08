@@ -1,27 +1,27 @@
 # Security and recovery governance
 
-This document describes repository source on the
-`codex/acquisition-security-recovery-governance` branch. It is not proof that
-GitHub rulesets changed, a workflow ran, an image was pulled, a backup exists,
-or a restore succeeded. No `.env` file or service was read while preparing it.
+This document describes source-only controls in the AI acquisition PR stack. It
+is not proof that GitHub rulesets changed, a workflow ran, an image was pulled,
+a backup exists, or a restore succeeded. No `.env` file or service was read
+while preparing it.
 
 ## API coverage: 80% target met and ratcheted
 
 The fixed-base measurement included every non-test TypeScript file below
 `apps/api/src`, including the API and worker process entrypoints; only test
 files and the test-only Temporal mock directory are excluded. After building
-the API, all 368 test files and all 5,425 tests passed. The latest full
+the API, all 368 test files and all 5,426 tests passed. The latest full
 source-only measurement on this stack was:
 
 | Scope               | Statements | Branches | Functions |  Lines | 80% status |
 | ------------------- | ---------: | -------: | --------: | -----: | ---------- |
-| API global          |     85.08% |   80.00% |    86.85% | 86.49% | met        |
-| auth branches       |          — |   93.49% |         — |      — | met        |
+| API global          |     85.12% |   80.01% |    86.85% | 86.53% | met        |
+| auth branches       |          — |   93.50% |         — |      — | met        |
 | compliance branches |          — |   93.10% |         — |      — | met        |
-| events branches     |          — |   96.29% |         — |      — | met        |
+| events branches     |          — |   96.30% |         — |      — | met        |
 | budget branches     |          — |  100.00% |         — |      — | met        |
 | identity branches   |          — |   96.63% |         — |      — | met        |
-| outbox branches     |          — |   82.46% |         — |      — | met        |
+| outbox branches     |          — |   82.47% |         — |      — | met        |
 
 [`config/api-coverage-policy.json`](../../config/api-coverage-policy.json)
 stores exact covered/total counts. `pnpm coverage:api` produces real V8 output
@@ -34,10 +34,10 @@ proof of PostgreSQL, Temporal, external-provider, deployment, or pilot behavior.
 Any future loss below the exact committed ratios fails even when a rounded
 percentage still displays the same value.
 
-The global branch result is only 1.6 covered branches above the mathematical
+The global branch result is only 4.6 covered branches above the mathematical
 80% boundary at the current denominator. The gate is satisfied, but this is a
 thin safety margin: follow-up tests should raise branch coverage rather than
-weakening the target, adding exclusions, or treating the displayed `80.00%` as
+weakening the target, adding exclusions, or treating the displayed `80.01%` as
 comfortable headroom.
 
 ## Security required-context source and inherited debt
