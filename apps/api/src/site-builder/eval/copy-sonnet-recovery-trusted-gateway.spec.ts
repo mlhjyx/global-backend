@@ -1,6 +1,23 @@
 import { createHash } from "node:crypto";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { execFileSync } from "node:child_process";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
@@ -14,25 +31,53 @@ import {
   createCopyPilotTrustedGatewayBindings,
   type CopyPilotTrustedGateway,
 } from "./copy-pilot-trusted-gateway";
-import { type CopyPilotVerifiedSource } from "./copy-pilot-source-verifier";
-import { createCopySonnetRecoveryRunner } from "./copy-real-capability-runner";
+import {
+  COPY_PILOT_COMPILED_BUILD_COMMANDS,
+  type CopyPilotVerifiedSource,
+} from "./copy-pilot-source-verifier";
+import {
+  COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
+  createCopySonnetRecoveryRunner,
+} from "./copy-real-capability-runner";
+import { COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION } from "./copy-sonnet-recovery-contract";
 
-const TOKEN = createHash("sha256").update(import.meta.url).digest("hex");
+const TOKEN = createHash("sha256")
+  .update(import.meta.url)
+  .digest("hex");
 const TOKEN_DIGEST = createHash("sha256").update(TOKEN).digest("hex");
+const REQUIRE = createRequire(import.meta.url);
+const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const servers: Array<ReturnType<typeof createServer>> = [];
+const directories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    servers.splice(0).map(
-      (server) =>
-        new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve())),
-        ),
-    ),
-  );
+  await Promise.all([
+    ...servers
+      .splice(0)
+      .map(
+        (server) =>
+          new Promise<void>((resolve, reject) =>
+            server.close((error) => (error ? reject(error) : resolve())),
+          ),
+      ),
+    ...directories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  ]);
 });
 
-function sendJson(response: ServerResponse, value: unknown, requestId?: string): void {
+function git(root: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+  }).trim();
+}
+
+function sendJson(
+  response: ServerResponse,
+  value: unknown,
+  requestId?: string,
+): void {
   response.writeHead(200, {
     "content-type": "application/json",
     ...(requestId == null ? {} : { "x-oneapi-request-id": requestId }),
@@ -40,13 +85,21 @@ function sendJson(response: ServerResponse, value: unknown, requestId?: string):
   response.end(JSON.stringify(value));
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(
+  request: IncomingMessage,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+    string,
+    unknown
+  >;
 }
 
-async function recoveryGateway(catalog: readonly string[] = ["claude-sonnet-5"]) {
+async function recoveryGateway(
+  catalog: readonly string[] = ["claude-sonnet-5"],
+) {
+  let liveCatalog = [...catalog];
   const observed: Array<{ path: string; body?: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
     if (
@@ -73,7 +126,7 @@ async function recoveryGateway(catalog: readonly string[] = ["claude-sonnet-5"])
       observed.push({ path: request.url });
       sendJson(response, {
         object: "list",
-        data: catalog.map((id) => ({ id })),
+        data: liveCatalog.map((id) => ({ id })),
       });
       return;
     }
@@ -103,14 +156,141 @@ async function recoveryGateway(catalog: readonly string[] = ["claude-sonnet-5"])
   return {
     origin: `http://127.0.0.1:${address.port}`,
     observed,
+    setCatalog: (next: readonly string[]) => {
+      liveCatalog = [...next];
+    },
   };
 }
 
-function admission(origin: string): CopySonnetRecoveryAdmissionInput {
+async function compiledRecoveryRepository() {
+  const root = await mkdtemp(join(tmpdir(), "copy-sonnet-recovery-repo-"));
+  directories.push(root);
+  await Promise.all([
+    mkdir(join(root, "apps", "api"), { recursive: true }),
+    mkdir(join(root, "packages", "contracts"), { recursive: true }),
+    mkdir(join(root, "docs", "evidence"), { recursive: true }),
+  ]);
+  await Promise.all([
+    cp(join(REPOSITORY_ROOT, "apps/api/dist"), join(root, "apps/api/dist"), {
+      recursive: true,
+    }),
+    cp(
+      join(REPOSITORY_ROOT, "packages/contracts/dist"),
+      join(root, "packages/contracts/dist"),
+      { recursive: true },
+    ),
+    symlink(
+      join(REPOSITORY_ROOT, "node_modules"),
+      join(root, "node_modules"),
+      "dir",
+    ),
+    writeFile(join(root, "source.txt"), "Copy Sonnet recovery source\n"),
+  ]);
+  git(root, "init", "-q");
+  git(root, "config", "user.email", "copy-recovery@example.test");
+  git(root, "config", "user.name", "Copy Recovery Test");
+  git(root, "add", "source.txt");
+  git(root, "commit", "-qm", "fixed recovery source");
+  const fixedSourceCommit = git(root, "rev-parse", "HEAD");
+  const files = [
+    {
+      role: "runtime_source",
+      path: "source.txt",
+      sha256: createHash("sha256")
+        .update("Copy Sonnet recovery source\n")
+        .digest("hex"),
+    },
+  ];
+  const sourceBundleDigest = canonicalDigest(files);
+  const manifest = {
+    schemaVersion:
+      "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
+    manifestId: "site-builder-copy-sonnet-recovery-runtime/integration-v1",
+    recoveryManifestArtifactDigest: "a".repeat(64),
+    recoveryManifestDigest: "b".repeat(64),
+    fixedSourceCommit,
+    sourceBundleDigest,
+    planDigest: COPY_SONNET_RECOVERY_ADMISSION_SOURCE.planDigest,
+    dispatchAuthorization: "NOT_AUTHORIZED" as const,
+    taskId: "site_builder.copy" as const,
+    plannedExecutions: 1 as const,
+    maximumWireCalls: 2 as const,
+    maximumRepairCallsPerExecution: 1 as const,
+    executions: COPY_SONNET_RECOVERY_ADMISSION_SOURCE.executions,
+  };
+  const artifactPaths = [
+    ...COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
+    "apps/api/dist/site-builder/eval/copy-sonnet-recovery-manifest-prep.js",
+  ]
+    .filter((path, index, paths) => paths.indexOf(path) === index)
+    .sort();
+  const compiledArtifacts = await Promise.all(
+    artifactPaths.map(async (path) => ({
+      path,
+      sha256: createHash("sha256")
+        .update(await readFile(join(root, path)))
+        .digest("hex"),
+    })),
+  );
+  const withoutDigest = {
+    schemaVersion:
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1",
+    artifactId:
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/integration-v1",
+    classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
+    fixedSourceCommit,
+    preparationHeadCommit: fixedSourceCommit,
+    requiredMergeMethod: "merge_commit",
+    createOnly: true,
+    dispatchAuthorization: "NOT_AUTHORIZED",
+    dispatchCapable: false,
+    observedNetworkCalls: 0,
+    observedModelWireCalls: 0,
+    observedModelCost: { CNY: 0, USD: 0 },
+    duplicatePrevention: COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+    manifest,
+    sourceBundle: {
+      schemaVersion:
+        "site-builder-copy-sonnet-recovery-runtime-source-bundle/2026-08-08-v1",
+      files,
+      digest: sourceBundleDigest,
+    },
+    compiledRuntimeExpectation: {
+      schemaVersion: "compiled-runtime-expectation/2026-08-08-v1",
+      buildSourceCommit: fixedSourceCommit,
+      sourceBundleDigest,
+      buildCommands: COPY_PILOT_COMPILED_BUILD_COMMANDS,
+      artifactCount: compiledArtifacts.length,
+      artifacts: compiledArtifacts,
+      artifactTreeDigest: canonicalDigest(compiledArtifacts),
+    },
+  };
+  const manifestPath = join(root, "docs", "evidence", "manifest.json");
+  await writeFile(
+    manifestPath,
+    `${JSON.stringify({
+      ...withoutDigest,
+      artifactDigest: canonicalDigest(withoutDigest),
+    })}\n`,
+  );
+  git(root, "add", "docs/evidence/manifest.json");
+  git(root, "commit", "-qm", "record recovery binding");
+  git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
+  return { root, manifestPath, manifest };
+}
+
+function admission(
+  origin: string,
+  options: {
+    manifest?: CopySonnetRecoveryAdmissionInput["manifest"];
+    campaignId?: string;
+    ledgerIdentityDigest?: string;
+  } = {},
+): CopySonnetRecoveryAdmissionInput {
   const now = Date.now();
   const issuedAt = new Date(now - 60_000).toISOString();
   const expiresAt = new Date(now + 60 * 60_000).toISOString();
-  const manifest = {
+  const manifest = options.manifest ?? {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
     manifestId: "site-builder-copy-sonnet-recovery-runtime/test-v1",
@@ -165,10 +345,10 @@ function admission(origin: string): CopySonnetRecoveryAdmissionInput {
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: "copy-sonnet-recovery-campaign-test",
+    campaignId: options.campaignId ?? "copy-sonnet-recovery-campaign-test",
     authorizationId: "copy-sonnet-recovery-child-auth-test",
     reservationId: "copy-sonnet-recovery-child-reservation-test",
-    ledgerIdentityDigest: "e".repeat(64),
+    ledgerIdentityDigest: options.ledgerIdentityDigest ?? "e".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
@@ -224,7 +404,8 @@ function admission(origin: string): CopySonnetRecoveryAdmissionInput {
     authorization,
     childAuthorization: {
       ...childWithoutDigest,
-      reservationDigest: copySonnetRecoveryReservationDigest(childWithoutDigest),
+      reservationDigest:
+        copySonnetRecoveryReservationDigest(childWithoutDigest),
     },
     selectedExecutionKey: child.executionKey,
   };
@@ -370,5 +551,86 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       "/api/usage/token",
       "/v1/models",
     ]);
+  });
+
+  it("durably freezes Sonnet recovery when live scope drifts before dispatch", async () => {
+    const repository = await compiledRecoveryRepository();
+    const directory = await mkdtemp(
+      join(tmpdir(), "copy-sonnet-recovery-pre-dispatch-drift-"),
+    );
+    directories.push(directory);
+    const campaignId = "copy-sonnet-recovery-pre-dispatch-drift-test";
+    const paths = {
+      ledgerPath: join(directory, "ledger.jsonl"),
+      authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
+      ledgerMarkerPath: join(directory, "ledger.marker.jsonl"),
+      campaignId,
+    };
+    const markerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
+      ),
+    ) as typeof import("./copy-pilot-ledger-identity");
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+    const gatewayModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+      ),
+    ) as typeof import("./copy-pilot-trusted-gateway");
+    const runnerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+      ),
+    ) as typeof import("./copy-real-capability-runner");
+    const prepared = await markerModule.prepareCopyPilotLedgerIdentity({
+      ...paths,
+      markerPath: paths.ledgerMarkerPath,
+    });
+    const live = await recoveryGateway();
+    const admitted = admission(live.origin, {
+      manifest: repository.manifest,
+      campaignId,
+      ledgerIdentityDigest: prepared.ledgerIdentityDigest,
+    });
+    const verifiedSource = await sourceModule.createCopyPilotVerifiedSource({
+      repositoryRoot: repository.root,
+      manifestArtifactPath: repository.manifestPath,
+    });
+    const trustedGateway = await gatewayModule.createCopyPilotTrustedGateway({
+      admission: admitted,
+      bearerToken: TOKEN,
+    });
+    const runner = await runnerModule.createCopySonnetRecoveryRunner({
+      ...paths,
+      admission: admitted,
+      verifiedSource,
+      trustedGateway,
+    });
+
+    live.setCatalog([]);
+    await expect(runner.execute(admitted.selectedExecutionKey)).rejects.toThrow(
+      "COPY_PILOT_LIVE_SCOPE_OR_QUOTA_MISMATCH",
+    );
+
+    expect(await runner.summary()).toMatchObject({
+      frozen: true,
+      executionClaims: 0,
+      wireClaims: 0,
+    });
+    live.setCatalog(["claude-sonnet-5"]);
+    await expect(runner.execute(admitted.selectedExecutionKey)).rejects.toThrow(
+      "REAL_MODEL_EXECUTION_CAMPAIGN_FROZEN",
+    );
+    expect(live.observed.some(({ path }) => path === "/v1/messages")).toBe(
+      false,
+    );
   });
 });

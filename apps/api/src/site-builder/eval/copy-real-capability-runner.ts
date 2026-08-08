@@ -750,9 +750,7 @@ function runtimeBinding(input: {
     childCampaignId: input.admission.childAuthorization.campaignId,
     gitReviewedEvidenceAcceptanceSchemaVersion:
       GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION,
-    artifactPathsDigest: CANONICAL_DIGEST(
-      artifactPathsFor(input.admission),
-    ),
+    artifactPathsDigest: CANONICAL_DIGEST(artifactPathsFor(input.admission)),
   });
 }
 
@@ -1969,6 +1967,16 @@ export async function createCopySonnetRecoveryRunner(input: {
       SET_BATCH_DISPATCH_AUTHORIZATION(child, executionKey);
       try {
         return await child.execute(executionKey);
+      } catch (error) {
+        const detail =
+          GET_REAL_CAPABILITY_RUNNER(child) ??
+          fail("COPY_REAL_CAPABILITY_TRUSTED_CHILD_RUNNER_REQUIRED");
+        await FREEZE_REAL_EXECUTION.call(
+          detail.ledger,
+          executionKey,
+          "sonnet_recovery_execution_failed",
+        );
+        throw error;
       } finally {
         DELETE_BATCH_DISPATCH_AUTHORIZATION(child);
       }
@@ -1990,7 +1998,9 @@ export function createCopyRealCapabilityCampaignRunner(input: {
     const detail = GET_REAL_CAPABILITY_RUNNER(runner);
     return detail ?? fail("COPY_REAL_CAPABILITY_TRUSTED_CHILD_RUNNER_REQUIRED");
   });
-  if (details.some(({ admission }) => isCopySonnetRecoveryAdmission(admission))) {
+  if (
+    details.some(({ admission }) => isCopySonnetRecoveryAdmission(admission))
+  ) {
     fail("COPY_REAL_CAPABILITY_CHILD_BATCH_MISMATCH");
   }
   const expectedKeys = COPY_CAPABILITY_PILOT_PLAN.childCampaigns.map(
