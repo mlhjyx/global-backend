@@ -7,7 +7,7 @@ import {
   WorkflowIdReusePolicy,
 } from '@temporalio/client';
 import { TemporalClient } from '../temporal/temporal.client';
-import { UNDERSTANDING_TASK_QUEUE } from '../temporal/understanding.constants';
+import { SITE_BUILDER_TASK_QUEUE } from '../temporal/worker-topology';
 import {
   KbIngestLauncher,
   KbIngestLaunchInput,
@@ -86,7 +86,7 @@ export class TemporalRefurbishLauncher implements RefurbishLauncher {
       const handle = await this.temporal.client.workflow.start(
         'refurbishWorkflow',
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: SITE_BUILDER_TASK_QUEUE,
           workflowId,
           args: [input],
           workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
@@ -140,7 +140,7 @@ export class TemporalKbIngestLauncher implements KbIngestLauncher {
 
   async launchKbIngest(input: KbIngestLaunchInput): Promise<void> {
     await this.temporal.client.workflow.start('kbIngestWorkflow', {
-      taskQueue: UNDERSTANDING_TASK_QUEUE,
+      taskQueue: SITE_BUILDER_TASK_QUEUE,
       workflowId: `site-kb-${input.assetId}`,
       args: [input],
     });

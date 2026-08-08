@@ -4,6 +4,11 @@ import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ExecutionBroker, ToolContext } from '../tools/tool-contract';
 import { SignalIngestService } from './signal-ingest.service';
+import {
+  canonicalTedSpec,
+  queryFingerprint,
+  windowKeyFor,
+} from './signal-query';
 
 const NOW = Date.UTC(2026, 6, 11, 7, 0); // 2026-07-11T07:00Z → 6h 桶 06:00Z
 const WINDOW_MS = 6 * 3600_000;
@@ -31,69 +36,180 @@ interface FakeDb {
   signals: Map<string, Record<string, unknown>>;
 }
 
+interface FakeLedgerWhere {
+  providerKey?: string;
+  queryFingerprint?: string;
+  windowKey?: string;
+  status?: string | { not?: string; in?: string[] };
+  leaseOwner?: string;
+  leaseToken?: string;
+  leaseFence?: number;
+  leaseExpiresAt?: { lt?: Date; gte?: Date };
+  OR?: FakeLedgerWhere[];
+}
+
 /** 平台两表的内存假体（唯一键语义与 schema 一致）。 */
 function fakePrisma(): PrismaService & FakeDb {
   const ledger = new Map<string, Record<string, unknown>>();
   const signals = new Map<string, Record<string, unknown>>();
-  const lKey = (w: Record<string, string>) => `${w.providerKey}|${w.queryFingerprint}|${w.windowKey}`;
-  const sKey = (w: Record<string, string>) => `${w.providerKey}|${w.externalId}|${w.signalType}|${w.subjectKey}`;
-  return {
+  const lKey = (w: Record<string, string>) =>
+    `${w.providerKey}|${w.queryFingerprint}|${w.windowKey}`;
+  const sKey = (w: Record<string, string>) =>
+    `${w.providerKey}|${w.externalId}|${w.signalType}|${w.subjectKey}`;
+  const db = {
     ledger,
     signals,
     signalIngest: {
-      findUnique: async ({ where }: { where: { providerKey_queryFingerprint_windowKey: Record<string, string> } }) =>
+      findUnique: async ({
+        where,
+      }: {
+        where: {
+          providerKey_queryFingerprint_windowKey: Record<string, string>;
+        };
+      }) =>
         ledger.get(lKey(where.providerKey_queryFingerprint_windowKey)) ?? null,
-      upsert: async ({ where, create, update }: {
-        where: { providerKey_queryFingerprint_windowKey: Record<string, string> };
-        create: Record<string, unknown>; update: Record<string, unknown>;
+      upsert: async ({
+        where,
+        create,
+        update,
+      }: {
+        where: {
+          providerKey_queryFingerprint_windowKey: Record<string, string>;
+        };
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
       }) => {
         const k = lKey(where.providerKey_queryFingerprint_windowKey);
         const prior = ledger.get(k);
-        const row = prior ? { ...prior, ...update } : { id: `li-${ledger.size}`, ...create };
+        const row = prior
+          ? { ...prior, ...update }
+          : { id: `li-${ledger.size}`, ...create };
         ledger.set(k, row);
         return row;
       },
-      updateMany: async ({ where, data }: {
-        where: { providerKey: string; queryFingerprint: string; windowKey: string; status?: { not: string } };
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: FakeLedgerWhere;
         data: Record<string, unknown>;
       }) => {
         const k = `${where.providerKey}|${where.queryFingerprint}|${where.windowKey}`;
         const row = ledger.get(k);
-        if (!row || (where.status?.not && row.status === where.status.not)) return { count: 0 };
-        ledger.set(k, { ...row, ...data });
+        if (!row) return { count: 0 };
+        const matches = (condition: FakeLedgerWhere): boolean => {
+          if (condition.status !== undefined) {
+            if (
+              typeof condition.status === 'string' &&
+              row.status !== condition.status
+            )
+              return false;
+            if (
+              condition.status?.not !== undefined &&
+              row.status === condition.status.not
+            )
+              return false;
+            if (
+              condition.status?.in &&
+              !condition.status.in.includes(row.status)
+            )
+              return false;
+          }
+          if (
+            condition.leaseToken !== undefined &&
+            row.leaseToken !== condition.leaseToken
+          )
+            return false;
+          if (
+            condition.leaseFence !== undefined &&
+            row.leaseFence !== condition.leaseFence
+          )
+            return false;
+          if (
+            condition.leaseExpiresAt?.lt &&
+            (!(row.leaseExpiresAt instanceof Date) ||
+              row.leaseExpiresAt.getTime() >=
+                condition.leaseExpiresAt.lt.getTime())
+          ) {
+            return false;
+          }
+          if (
+            condition.leaseExpiresAt?.gte &&
+            (!(row.leaseExpiresAt instanceof Date) ||
+              row.leaseExpiresAt.getTime() <
+                condition.leaseExpiresAt.gte.getTime())
+          ) {
+            return false;
+          }
+          return true;
+        };
+        if (!matches(where) || (where.OR && !where.OR.some(matches)))
+          return { count: 0 };
+        const next = { ...row };
+        for (const [field, value] of Object.entries(data)) {
+          next[field] =
+            value && typeof value === 'object' && 'increment' in value
+              ? Number(next[field] ?? 0) + Number(value.increment)
+              : value;
+        }
+        ledger.set(k, next);
         return { count: 1 };
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const k = `${data.providerKey}|${data.queryFingerprint}|${data.windowKey}`;
-        if (ledger.has(k)) throw Object.assign(new Error('unique violation'), { code: 'P2002' });
+        if (ledger.has(k))
+          throw Object.assign(new Error('unique violation'), { code: 'P2002' });
         const row = { id: `li-${ledger.size}`, ...data };
         ledger.set(k, row);
         return row;
       },
     },
     sourceSignal: {
-      upsert: async ({ where, create, update }: {
-        where: { providerKey_externalId_signalType_subjectKey: Record<string, string> };
-        create: Record<string, unknown>; update: Record<string, unknown>;
+      upsert: async ({
+        where,
+        create,
+        update,
+      }: {
+        where: {
+          providerKey_externalId_signalType_subjectKey: Record<string, string>;
+        };
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
       }) => {
         const k = sKey(where.providerKey_externalId_signalType_subjectKey);
         const prior = signals.get(k);
-        const row = prior ? { ...prior, ...update } : { id: `sig-${signals.size}`, status: 'ACTIVE', ...create };
+        const row = prior
+          ? { ...prior, ...update }
+          : { id: `sig-${signals.size}`, status: 'ACTIVE', ...create };
         signals.set(k, row);
         return row;
       },
-      updateMany: async ({ where, data }: {
-        where: { status?: string | { not: string }; expiresAt?: { lt: Date }; subjectKey?: string; providerKey?: string };
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: {
+          status?: string | { not: string };
+          expiresAt?: { lt: Date };
+          subjectKey?: string;
+          providerKey?: string;
+        };
         data: Record<string, unknown>;
       }) => {
         let count = 0;
         for (const [k, row] of signals) {
           const statusOk =
             where.status === undefined ||
-            (typeof where.status === 'string' ? row.status === where.status : row.status !== where.status.not);
-          const expiresOk = !where.expiresAt || (row.expiresAt as Date).getTime() < where.expiresAt.lt.getTime();
-          const subjectOk = !where.subjectKey || row.subjectKey === where.subjectKey;
-          const providerOk = !where.providerKey || row.providerKey === where.providerKey;
+            (typeof where.status === 'string'
+              ? row.status === where.status
+              : row.status !== where.status.not);
+          const expiresOk =
+            !where.expiresAt ||
+            (row.expiresAt as Date).getTime() < where.expiresAt.lt.getTime();
+          const subjectOk =
+            !where.subjectKey || row.subjectKey === where.subjectKey;
+          const providerOk =
+            !where.providerKey || row.providerKey === where.providerKey;
           if (statusOk && expiresOk && subjectOk && providerOk) {
             signals.set(k, { ...row, ...data });
             count += 1;
@@ -101,7 +217,13 @@ function fakePrisma(): PrismaService & FakeDb {
         }
         return { count };
       },
-      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      update: async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
         for (const [k, row] of signals) {
           if (row.id === where.id) {
             const next = { ...row, ...data };
@@ -113,9 +235,31 @@ function fakePrisma(): PrismaService & FakeDb {
       },
     },
   } as unknown as PrismaService & FakeDb;
+  db.$transaction = (async <T>(
+    fn: (tx: PrismaService) => Promise<T>,
+  ): Promise<T> => {
+      const ledgerSnapshot = new Map(
+        [...ledger].map(([key, value]) => [key, { ...value }]),
+      );
+      const signalSnapshot = new Map(
+        [...signals].map(([key, value]) => [key, { ...value }]),
+      );
+      try {
+        return await fn(db);
+      } catch (error) {
+        ledger.clear();
+        for (const [key, value] of ledgerSnapshot) ledger.set(key, value);
+        signals.clear();
+        for (const [key, value] of signalSnapshot) signals.set(key, value);
+        throw error;
+      }
+    }) as never;
+  return db;
 }
 
-function fakeBroker(handler?: (toolId: string) => unknown): ExecutionBroker & { calls: { toolId: string; ctx: ToolContext }[] } {
+function fakeBroker(
+  handler?: (toolId: string) => unknown | Promise<unknown>,
+): ExecutionBroker & { calls: { toolId: string; ctx: ToolContext }[] } {
   const calls: { toolId: string; ctx: ToolContext }[] = [];
   return {
     calls,
@@ -123,11 +267,14 @@ function fakeBroker(handler?: (toolId: string) => unknown): ExecutionBroker & { 
     invoke: async <I, O>(toolId: string, _input: I, ctx: ToolContext) => {
       calls.push({ toolId, ctx });
       if (handler) {
-        const out = handler(toolId);
+        const out = await handler(toolId);
         if (out instanceof Error) throw out;
         return { ok: true, data: out as O, meta: {} } as never;
       }
-      const data = toolId === 'ted.search' ? { notices: [TED_NOTICE] } : { clearances: [FDA_CLEARANCE_REC] };
+      const data =
+        toolId === 'ted.search'
+          ? { notices: [TED_NOTICE] }
+          : { clearances: [FDA_CLEARANCE_REC] };
       return { ok: true, data: data as O, meta: {} } as never;
     },
   } as never;
@@ -150,7 +297,10 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     expect(broker.calls[0].ctx.workspaceId).toBe(PLATFORM_WORKSPACE);
     expect(broker.calls[0].ctx.purpose).toEqual(['intent', 'discovery']);
 
-    const r2 = await svc.ingestTed({ cpvCodes: ['42122000'], buyerCountries: ['deu'] }, { nowMs: NOW + 60_000 });
+    const r2 = await svc.ingestTed(
+      { cpvCodes: ['42122000'], buyerCountries: ['deu'] },
+      { nowMs: NOW + 60_000 },
+    );
     expect(r2.ledgerHit).toBe(true); // 参数序/大小写无关 → 同指纹同窗 → 不再出网
     expect(r2.recordsFetched).toBe(0); // 命中计数如实归 0（本轮零拉取零落库——防 sweep 跨窗双计，复审 LOW）
     expect(r2.signalsUpserted).toBe(0);
@@ -166,23 +316,32 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     await svc.ingestTed(tedParams, { nowMs: NOW });
     await svc.ingestTed(tedParams, { nowMs: NOW + WINDOW_MS }); // 下一窗
     expect(broker.calls.length).toBe(2);
-    await svc.ingestTed({ cpvCodes: ['99999999'], buyerCountries: ['DEU'] }, { nowMs: NOW }); // 同窗异参
+    await svc.ingestTed(
+      { cpvCodes: ['99999999'], buyerCountries: ['DEU'] },
+      { nowMs: NOW },
+    ); // 同窗异参
     expect(broker.calls.length).toBe(3);
   });
 
   it('拉取失败 → 账本 ERROR 行可重试（下次同窗重新拉取并翻 OK）', async () => {
     const prisma = fakePrisma();
     let fail = true;
-    const broker = fakeBroker(() => (fail ? new Error('ted 500') : { notices: [TED_NOTICE] }));
+    const broker = fakeBroker(() =>
+      fail ? new Error('ted 500') : { notices: [TED_NOTICE] },
+    );
     const svc = new SignalIngestService({ prisma, broker });
 
     const r1 = await svc.ingestTed(tedParams, { nowMs: NOW });
-    expect(r1.error).toMatch(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
-    expect(r1.error).not.toContain('ted 500');
-    expect([...prisma.ledger.values()][0]).toMatchObject({
-      status: 'ERROR',
-      error: r1.error,
-    });
+    expect(r1.error).toBe('signal_fetch_failed');
+    expect([...prisma.ledger.values()][0]).toEqual(
+      expect.objectContaining({
+        status: 'ERROR',
+        error: 'SIGNAL_FETCH_FAILED',
+      }),
+    );
+    expect(JSON.stringify([...prisma.ledger.values()])).not.toContain(
+      'ted 500',
+    );
 
     fail = false;
     const r2 = await svc.ingestTed(tedParams, { nowMs: NOW });
@@ -204,17 +363,40 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     const prisma = fakePrisma();
     const broker = fakeBroker();
     const svc = new SignalIngestService({ prisma, broker });
-    expect((await svc.ingestTed({ cpvCodes: [], buyerCountries: ['DEU'] }, { nowMs: NOW })).error).toBe('empty_query');
-    expect((await svc.ingestTed({ cpvCodes: ['42122000'], buyerCountries: [] }, { nowMs: NOW })).error).toBe('empty_query');
+    expect(
+      (
+        await svc.ingestTed(
+          { cpvCodes: [], buyerCountries: ['DEU'] },
+          { nowMs: NOW },
+        )
+      ).error,
+    ).toBe('empty_query');
+    expect(
+      (
+        await svc.ingestTed(
+          { cpvCodes: ['42122000'], buyerCountries: [] },
+          { nowMs: NOW },
+        )
+      ).error,
+    ).toBe('empty_query');
     expect(broker.calls.length).toBe(0);
   });
 
   it('BudgetExceededError 透传（预算真拦截不被吞成 ERROR 账本行）', async () => {
     const prisma = fakePrisma();
-    const broker = fakeBroker(() => new BudgetExceededError('sweep:external-intent', 1, 0));
+    const broker = fakeBroker(
+      () => new BudgetExceededError('sweep:external-intent', 1, 0),
+    );
     const svc = new SignalIngestService({ prisma, broker });
-    await expect(svc.ingestTed(tedParams, { nowMs: NOW, budgetKey: 'sweep:external-intent' })).rejects.toBeInstanceOf(BudgetExceededError);
-    expect([...prisma.ledger.values()].filter((r) => r.status === 'OK').length).toBe(0);
+    await expect(
+      svc.ingestTed(tedParams, {
+        nowMs: NOW,
+        budgetKey: 'sweep:external-intent',
+      }),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    expect(
+      [...prisma.ledger.values()].filter((r) => r.status === 'OK').length,
+    ).toBe(0);
   });
 
   it('摄取幂等：同 externalId 复现 → 单行、observedAt 前移、status 绝不复活（EXPIRED 保持）', async () => {
@@ -225,7 +407,10 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     await svc.ingestTed(tedParams, { nowMs: NOW });
     const first = [...prisma.signals.values()][0];
     // 手动过期（模拟状态机翻转后同记录再现）
-    prisma.signals.set([...prisma.signals.keys()][0], { ...first, status: 'EXPIRED' });
+    prisma.signals.set([...prisma.signals.keys()][0], {
+      ...first,
+      status: 'EXPIRED',
+    });
 
     await svc.ingestTed(tedParams, { nowMs: NOW + WINDOW_MS }); // 下一窗重拉同记录
     expect(prisma.signals.size).toBe(1);
@@ -236,15 +421,125 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
 });
 
 describe('SignalIngestService.ingestFda —— openFDA 同构 + §6 个体户摄取层拒收', () => {
+  it('空产品码 fail-closed，带申请国时只发送规范化 countries', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => ({ clearances: [] }));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    expect((await svc.ingestFda({ productCodes: [] })).error).toBe(
+      'empty_query',
+    );
+    await svc.ingestFda(
+      { productCodes: ['LLZ'], applicantCountries: ['de'] },
+      { nowMs: NOW },
+    );
+    expect(broker.calls).toHaveLength(1);
+  });
+
   it('清关落 Signal；个体户自然人计入 skipped 不落库', async () => {
     const prisma = fakePrisma();
-    const broker = fakeBroker(() => ({ clearances: [FDA_CLEARANCE_REC, { ...FDA_CLEARANCE_REC, kNumber: 'K269999', applicant: 'Smith, John' }] }));
+    const broker = fakeBroker(() => ({
+      clearances: [
+        FDA_CLEARANCE_REC,
+        { ...FDA_CLEARANCE_REC, kNumber: 'K269999', applicant: 'Smith, John' },
+      ],
+    }));
     const svc = new SignalIngestService({ prisma, broker });
     const r = await svc.ingestFda({ productCodes: ['LLZ'] }, { nowMs: NOW });
     expect(r.recordsFetched).toBe(2);
     expect(r.signalsUpserted).toBe(1);
     expect(r.skipped.individual).toBe(1);
     expect(prisma.signals.size).toBe(1);
+  });
+
+  it('provider 缺少 records 数组时按零结果结算，不伪造记录', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => ({}));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    const result = await svc.ingestFda(
+      { productCodes: ['LLZ'] },
+      { nowMs: NOW },
+    );
+    expect(result.recordsFetched).toBe(0);
+    expect(result.signalsUpserted).toBe(0);
+  });
+});
+
+describe('SignalIngestService.ingestSam —— 共享 bulk window', () => {
+  it('允许无 NAICS 的单窗 bulk 拉取并对缺失 notices 按零结果结算', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => ({}));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    const result = await svc.ingestSam({}, { nowMs: NOW });
+    expect(result.recordsFetched).toBe(0);
+    expect(result.signalsUpserted).toBe(0);
+    expect(broker.calls[0]?.toolId).toBe('samgov.search');
+  });
+});
+
+describe('lease admission and settlement edge cases', () => {
+  it('rejects ambiguous lease owners and out-of-range lease durations before egress', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker();
+    const svc = new SignalIngestService({ prisma, broker });
+
+    await expect(
+      svc.ingestTed(tedParams, { nowMs: NOW, leaseOwner: 'bad owner' }),
+    ).rejects.toThrow('INVALID_SIGNAL_INGEST_LEASE_OWNER');
+    await expect(
+      svc.ingestTed(tedParams, { nowMs: NOW, leaseMs: 999 }),
+    ).rejects.toThrow('INVALID_SIGNAL_INGEST_LEASE_MS');
+    expect(broker.calls).toHaveLength(0);
+  });
+
+  it('re-observes a concurrent create winner as an OK ledger hit without egress', async () => {
+    const prisma = fakePrisma();
+    const originalFind = prisma.signalIngest.findUnique.bind(
+      prisma.signalIngest,
+    );
+    let reads = 0;
+    prisma.signalIngest.findUnique = async (_input: never) => {
+      reads += 1;
+      if (reads < 3) return null;
+      return { status: 'OK' } as never;
+    };
+    prisma.signalIngest.create = async () => {
+      throw Object.assign(new Error('unique'), { code: 'P2002' });
+    };
+    const broker = fakeBroker();
+    const result = await new SignalIngestService({ prisma, broker }).ingestTed(
+      tedParams,
+      { nowMs: NOW },
+    );
+    prisma.signalIngest.findUnique = originalFind;
+
+    expect(result.ledgerHit).toBe(true);
+    expect(broker.calls).toHaveLength(0);
+  });
+
+  it('rolls back source_signal writes if fenced OK settlement cannot be committed', async () => {
+    const prisma = fakePrisma();
+    const originalUpdateMany = prisma.signalIngest.updateMany.bind(
+      prisma.signalIngest,
+    );
+    prisma.signalIngest.updateMany = async (input: {
+      data: Record<string, unknown>;
+    }) => {
+      if (input.data.status === 'OK') return { count: 0 } as never;
+      return originalUpdateMany(input as never);
+    };
+    await expect(
+      new SignalIngestService({
+        prisma,
+        broker: fakeBroker(),
+      }).ingestTed(tedParams, { nowMs: NOW }),
+    ).rejects.toThrow('SIGNAL_LEASE_SETTLEMENT_FAILED');
+    expect(prisma.signals.size).toBe(0);
+    expect([...prisma.ledger.values()][0]).toEqual(
+      expect.objectContaining({ status: 'ERROR' }),
+    );
   });
 });
 
@@ -267,7 +562,13 @@ describe('状态机：expireStale / revoke', () => {
   it('revoke：置 REVOKED + revokedAt 且**撤即脱敏**（subjectName 占位、payload 清空——Art.17 擦除路径）', async () => {
     const prisma = fakePrisma();
     const svc = new SignalIngestService({ prisma });
-    prisma.signals.set('x', { id: 'sig-x', status: 'ACTIVE', expiresAt: new Date(NOW + 1), subjectName: 'Smith, John', payload: { device: 'X' } });
+    prisma.signals.set('x', {
+      id: 'sig-x',
+      status: 'ACTIVE',
+      expiresAt: new Date(NOW + 1),
+      subjectName: 'Smith, John',
+      payload: { device: 'X' },
+    });
     await svc.revoke('sig-x');
     const row = prisma.signals.get('x')!;
     expect(row.status).toBe('REVOKED');
@@ -280,7 +581,16 @@ describe('状态机：expireStale / revoke', () => {
     const prisma = fakePrisma();
     const svc = new SignalIngestService({ prisma });
     const put = (id: string, over: Record<string, unknown>) =>
-      prisma.signals.set(id, { id, status: 'ACTIVE', expiresAt: new Date(NOW + 1), subjectName: 'X', payload: {}, providerKey: 'ted', subjectKey: 'k-1', ...over });
+      prisma.signals.set(id, {
+        id,
+        status: 'ACTIVE',
+        expiresAt: new Date(NOW + 1),
+        subjectName: 'X',
+        payload: {},
+        providerKey: 'ted',
+        subjectKey: 'k-1',
+        ...over,
+      });
     put('a', { subjectKey: 'k-1' });
     put('b', { subjectKey: 'k-1', status: 'REVOKED' });
     put('c', { subjectKey: 'k-2', providerKey: 'openfda' });
@@ -292,34 +602,127 @@ describe('状态机：expireStale / revoke', () => {
 });
 
 describe('TOCTOU 护栏（对抗复审 MEDIUM）：失败方 ERROR 绝不覆盖并发成功方的 OK 账本行', () => {
-  it('慢僵尸失败晚于并发成功 → 账本保持 OK（计数不被清零，同窗不再重复出网）', async () => {
+  it('同一键并发摄取只有 lease owner 可以出网，竞争方返回 lease_busy', async () => {
     const prisma = fakePrisma();
-    let call = 0;
-    let releaseFirst!: () => void;
-    const firstGate = new Promise<void>((r) => (releaseFirst = r));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
     const broker = {
       checkSourcePolicy: async () => ({ allowed: true }),
       invoke: async <I, O>(_t: string, _i: I, _c: ToolContext) => {
-        call += 1;
-        if (call === 1) {
-          await firstGate; // 僵尸 attempt：挂起到并发方完成后才失败
-          throw new Error('slow zombie failed');
-        }
-        return { ok: true, data: { notices: [TED_NOTICE] } as O, meta: {} } as never;
+        calls += 1;
+        if (calls === 1) await gate;
+        return {
+          ok: true,
+          data: { notices: [TED_NOTICE] } as O,
+          meta: {},
+        } as never;
       },
     } as unknown as ExecutionBroker;
     const svc = new SignalIngestService({ prisma, broker });
 
-    const p1 = svc.ingestTed(tedParams, { nowMs: NOW }); // 通过账本检查进入 fetch 后挂起
+    const owner = svc.ingestTed(tedParams, {
+      nowMs: NOW,
+      leaseOwner: 'owner-1',
+    });
     await new Promise((r) => setTimeout(r, 5));
-    const r2 = await svc.ingestTed(tedParams, { nowMs: NOW }); // 并发方：真拉成功写 OK
-    expect(r2.signalsUpserted).toBe(1);
-    releaseFirst();
-    const r1 = await p1;
-    expect(r1.error).toMatch(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
-    expect(r1.error).not.toContain('slow zombie');
-    const row = [...prisma.ledger.values()][0];
-    expect(row.status).toBe('OK'); // ERROR 条件写（status≠OK 才更新）保住成功方账本行
-    expect(row.signalsUpserted).toBe(1);
+    const contender = await svc.ingestTed(tedParams, {
+      nowMs: NOW,
+      leaseOwner: 'owner-2',
+    });
+    expect(contender.error).toBe('lease_busy');
+    expect(contender.leaseBusy).toBe(true);
+    release();
+    await expect(owner).resolves.toEqual(
+      expect.objectContaining({ signalsUpserted: 1 }),
+    );
+    expect([...prisma.ledger.values()][0].status).toBe('OK');
+  });
+
+  it('an expired PENDING lease is recoverable and increments the fencing token before egress', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker();
+    const svc = new SignalIngestService({ prisma, broker });
+    const spec = canonicalLedgerKey();
+    prisma.ledger.set(spec.key, {
+      providerKey: 'ted',
+      queryFingerprint: spec.fingerprint,
+      windowKey: spec.windowKey,
+      status: 'PENDING',
+      leaseOwner: 'dead-owner',
+      leaseToken: 'dead-token',
+      leaseFence: 4,
+      leaseExpiresAt: new Date(NOW - 1),
+      attempt: 2,
+    });
+
+    const result = await svc.ingestTed(tedParams, {
+      nowMs: NOW,
+      leaseOwner: 'recovery-owner',
+    });
+    expect(result.signalsUpserted).toBe(1);
+    expect(prisma.ledger.get(spec.key)).toEqual(
+      expect.objectContaining({
+        status: 'OK',
+        leaseFence: 5,
+        attempt: 3,
+        leaseToken: null,
+      }),
+    );
+    expect(broker.calls).toHaveLength(1);
+  });
+
+  it('a stale owner that loses its fence cannot persist signals or overwrite the successor lease', async () => {
+    const prisma = fakePrisma();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const broker = fakeBroker(async () => {
+      await gate;
+      return { notices: [TED_NOTICE] };
+    });
+    const svc = new SignalIngestService({ prisma, broker });
+    const pending = svc.ingestTed(tedParams, {
+      nowMs: NOW,
+      leaseOwner: 'stale-owner',
+      leaseMs: 1_000,
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    const key = [...prisma.ledger.keys()][0]!;
+    const row = prisma.ledger.get(key)!;
+    prisma.ledger.set(key, {
+      ...row,
+      leaseOwner: 'successor',
+      leaseToken: 'successor-token',
+      leaseFence: Number(row.leaseFence) + 1,
+      leaseExpiresAt: new Date(NOW + 10_000),
+    });
+    release();
+
+    await expect(pending).resolves.toEqual(
+      expect.objectContaining({
+        error: 'lease_lost',
+        leaseLost: true,
+        signalsUpserted: 0,
+      }),
+    );
+    expect(prisma.signals.size).toBe(0);
+    expect(prisma.ledger.get(key)).toEqual(
+      expect.objectContaining({
+        leaseOwner: 'successor',
+        leaseToken: 'successor-token',
+        status: 'PENDING',
+      }),
+    );
   });
 });
+
+function canonicalLedgerKey(): {
+  key: string;
+  fingerprint: string;
+  windowKey: string;
+} {
+  // Values are produced by the same public query helpers used by the service; hard-coding no hash internals here.
+  const fingerprint = queryFingerprint(canonicalTedSpec(tedParams));
+  const windowKey = windowKeyFor(NOW);
+  return { key: `ted|${fingerprint}|${windowKey}`, fingerprint, windowKey };
+}

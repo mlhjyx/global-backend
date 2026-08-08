@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -42,7 +43,6 @@ import {
   sourcePolicyReaderFrom,
 } from "../tools/tool-broker.factory";
 import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
-import { UNDERSTANDING_TASK_QUEUE } from "./understanding.constants";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import {
   SiteReleaseService,
@@ -63,6 +63,18 @@ import {
   resolvePlatformOwnerDatabaseUrl,
   verifyPlatformOwnerDatabaseRole,
 } from "../compliance/database-runtime-admission";
+import {
+  parseBoundedIntervalMs,
+  resolveWorkerDomains,
+  runWorkerFleet,
+  type ResolvedWorkerDomain,
+} from "./worker-topology";
+import {
+  RuntimeOpsWriter,
+  buildWorkerIdentity,
+  type WorkflowRunReceiptInput,
+} from "../runtime-ops/runtime-ops.service";
+import { acquisitionActivityFailureInterceptorsForDomain } from "./acquisition-activity-failure.interceptor";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -84,6 +96,10 @@ async function main(): Promise<void> {
   });
   await ownerDb.$connect();
   await verifyPlatformOwnerDatabaseRole(ownerDb);
+  const runtimeOps = new RuntimeOpsWriter(
+    ownerDb,
+    buildWorkerIdentity(runtime.environment),
+  );
   const prisma = new PrismaService();
   // Uses APP_DATABASE_URL in pilot/production and performs the same
   // non-owner/non-superuser/non-BYPASSRLS admission as the HTTP process.
@@ -140,7 +156,9 @@ async function main(): Promise<void> {
 
   // Schedule 自愈：dev Temporal（start-dev/SQLite）重置即丢 Schedule，靠人手跑脚本必然遗忘。
   try {
-    await ensurePlatformSchedules(runtime);
+    await ensurePlatformSchedules(runtime, {
+      append: (receipt) => runtimeOps.appendScheduleDriftReceipt(receipt),
+    });
   } catch (err) {
     console.error(
       `[worker] ensure schedules FAILED（定时 sweep 可能停摆，可手跑 scripts/ensure-*-schedule.mts）: ${diagnosticErrorToken(err)}`,
@@ -159,6 +177,7 @@ async function main(): Promise<void> {
 
   const connection = await NativeConnection.connect({
     address: runtime.safety.temporal.address,
+    connectTimeout: runtime.safety.temporal.connectTimeoutMs,
   });
 
   // 收口②：全部原始出网仍经 ToolBroker 的同一政策面。openFDA discovery 先迁入
@@ -172,7 +191,7 @@ async function main(): Promise<void> {
   const acquisitionBroker = buildToolBroker({
     sourcePolicyReader,
     acquisitionBudget,
-    acquisitionBudgetMode: 'required',
+    acquisitionBudgetMode: "required",
   });
   const taxonomy = new TaxonomyResolver(
     prisma,
@@ -198,94 +217,201 @@ async function main(): Promise<void> {
     runtimeTelemetry: runtimeTelemetry.telemetry,
   });
 
-  const worker = await Worker.create({
-    connection,
-    namespace: runtime.safety.temporal.namespace,
-    taskQueue: UNDERSTANDING_TASK_QUEUE,
-    workflowsPath: require.resolve("./workflows"),
-    activities: {
-      ...createUnderstandingActivities({
+  const receiptActivities = {
+    recordWorkflowRunReceipt: (input: WorkflowRunReceiptInput) =>
+      runtimeOps.appendWorkflowReceipt(input),
+  };
+  const acquisitionCoreActivities = {
+    ...createUnderstandingActivities({
+      prisma,
+      gateway,
+      broker,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+    }),
+    ...createDiscoveryActivities({
+      prisma,
+      providers,
+      gateway,
+      taxonomy,
+      broker,
+      acquisitionBudget,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+    }),
+    ...createQualifyActivities({ prisma, sanctionsScreening }),
+    ...createAcquisitionActivities({
+      prisma,
+      registry: buildSourceAdapterRegistry(broker),
+    }),
+    ...createIntentActivities({
+      prisma,
+      fetcher: new Crawl4aiPageFetcher(broker),
+      ownerDb,
+      broker,
+    }),
+    ...createBacklogActivities({
+      prisma,
+      providers,
+      gateway,
+      ownerDb,
+      broker,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+    }),
+    ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
+  };
+  const acquisitionActivities = {
+    ...acquisitionCoreActivities,
+    ...receiptActivities,
+  };
+  const maintenanceActivities = {
+    ...createDeletionActivities({ prisma }),
+    ...createPatentsCacheActivities({ ownerDb }),
+    ...createSanctionsRefreshActivities({
+      ownerDb,
+      broker,
+      sanctionsScreening,
+    }),
+    ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
+    ...createSiteReleaseMaintenanceActivities({
+      ownerDb,
+      storage: siteBuilderStorage,
+    }),
+    ...receiptActivities,
+  };
+  const siteBuilderActivities = {
+    ...createSiteBuilderActivities({
+      prisma,
+      costLedger,
+      ownerDb,
+      gateway,
+      runtimeTelemetry: runtimeTelemetry.telemetry,
+      broker,
+      imagePipeline,
+      releaseService,
+      qualityCandidateService,
+      qualityNarrativeService,
+      closedRepairService,
+      storage: siteBuilderStorage,
+      rendererBuildIdentity,
+      kb: new KbService(
         prisma,
-        gateway,
-        broker,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
+        new EmbeddingsClient(),
+        new DoclingClient(),
+        siteBuilderStorage,
+      ),
+    }),
+    ...receiptActivities,
+  };
+  const allActivities = {
+    ...acquisitionActivities,
+    ...siteBuilderActivities,
+    ...maintenanceActivities,
+  };
+  const nonAcquisitionActivityTypes = new Set([
+    ...Object.keys(siteBuilderActivities),
+    ...Object.keys(maintenanceActivities),
+  ]);
+  const legacyAcquisitionActivityTypes = new Set(
+    Object.keys(acquisitionCoreActivities).filter(
+      (activityType) => !nonAcquisitionActivityTypes.has(activityType),
+    ),
+  );
+  const activitiesByDomain: Record<ResolvedWorkerDomain["domain"], object> = {
+    legacy: allActivities,
+    acquisition: acquisitionActivities,
+    "site-builder": siteBuilderActivities,
+    maintenance: maintenanceActivities,
+  };
+  const domains = resolveWorkerDomains(runtime.environment);
+  const workers = await Promise.all(
+    domains.map((domain) =>
+      Worker.create({
+        connection,
+        namespace: runtime.safety.temporal.namespace,
+        taskQueue: domain.taskQueue,
+        workflowsPath: require.resolve("./workflows"),
+        activities: activitiesByDomain[domain.domain],
+        maxConcurrentActivityTaskExecutions: domain.activityConcurrency,
+        maxConcurrentWorkflowTaskExecutions: domain.workflowConcurrency,
+        interceptors: {
+          activity: [
+            ...acquisitionActivityFailureInterceptorsForDomain(
+              domain.domain,
+              legacyAcquisitionActivityTypes,
+            ),
+          ],
+          workflowModules: [
+            require.resolve("./workflow-run-receipt.interceptor"),
+          ],
+        },
       }),
-      ...createDiscoveryActivities({
-        prisma,
-        providers,
-        gateway,
-        taxonomy,
-        broker,
-        acquisitionBudget,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-      }),
-      ...createQualifyActivities({ prisma, sanctionsScreening }),
-      ...createAcquisitionActivities({
-        prisma,
-        registry: buildSourceAdapterRegistry(broker),
-      }),
-      ...createIntentActivities({
-        prisma,
-        fetcher: new Crawl4aiPageFetcher(broker),
-        ownerDb,
-        broker,
-      }),
-      ...createBacklogActivities({
-        prisma,
-        providers,
-        gateway,
-        ownerDb,
-        broker,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-      }),
-      // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
-      ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
-      // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
-      ...createDeletionActivities({ prisma }),
-      // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
-      ...createPatentsCacheActivities({ ownerDb }),
-      // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
-      ...createSanctionsRefreshActivities({
-        ownerDb,
-        broker,
-        sanctionsScreening,
-      }),
-      // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
-      ...createSiteBuilderActivities({
-        prisma,
-        costLedger,
-        ownerDb,
-        gateway,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-        broker,
-        imagePipeline,
-        releaseService,
-        qualityCandidateService,
-        qualityNarrativeService,
-        closedRepairService,
-        storage: siteBuilderStorage,
-        rendererBuildIdentity,
-        kb: new KbService(
-          prisma,
-          new EmbeddingsClient(),
-          new DoclingClient(),
-          siteBuilderStorage,
-        ),
-      }),
-      ...createAssetCleanupActivities({ prisma, storage: siteBuilderStorage }),
-      ...createSiteReleaseMaintenanceActivities({
-        ownerDb,
-        storage: siteBuilderStorage,
-      }),
-    },
-  });
+    ),
+  );
+
+  const workerInstanceId = randomUUID();
+  const heartbeatIntervalMs = parseBoundedIntervalMs(
+    runtime.environment.WORKER_HEARTBEAT_INTERVAL_MS,
+    "WORKER_HEARTBEAT_INTERVAL_MS",
+    15_000,
+    5_000,
+    60_000,
+  );
+  const scheduleObservationIntervalMs = parseBoundedIntervalMs(
+    runtime.environment.SCHEDULE_OBSERVATION_INTERVAL_MS,
+    "SCHEDULE_OBSERVATION_INTERVAL_MS",
+    5 * 60_000,
+    60_000,
+    60 * 60_000,
+  );
+  const heartbeat = (status: "POLLING" | "STOPPING") =>
+    Promise.all(
+      domains.map((domain) =>
+        runtimeOps.recordWorkerHeartbeat({
+          workerInstanceId,
+          taskQueue: domain.taskQueue,
+          status,
+          observedAt: new Date(),
+          activityConcurrency: domain.activityConcurrency,
+          workflowConcurrency: domain.workflowConcurrency,
+        }),
+      ),
+    ).then(() => undefined);
+  await heartbeat("POLLING");
+  let heartbeatInFlight = false;
+  const heartbeatTimer = setInterval(() => {
+    if (heartbeatInFlight) return;
+    heartbeatInFlight = true;
+    void heartbeat("POLLING")
+      .catch(() => console.error("[worker] heartbeat failed"))
+      .finally(() => {
+        heartbeatInFlight = false;
+      });
+  }, heartbeatIntervalMs);
+  let scheduleObservation: Promise<void> | null = null;
+  const scheduleObservationTimer = setInterval(() => {
+    if (scheduleObservation !== null) return;
+    scheduleObservation = ensurePlatformSchedules(runtime, {
+      append: (receipt) => runtimeOps.appendScheduleDriftReceipt(receipt),
+    })
+      .catch(() => {
+        console.error("[worker] schedule observation failed");
+      })
+      .finally(() => {
+        scheduleObservation = null;
+      });
+  }, scheduleObservationIntervalMs);
 
   console.log(
-    `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
+    `[worker] polling task queues: ${domains.map((domain) => domain.taskQueue).join(", ")}`,
   );
   try {
-    await worker.run();
+    await runWorkerFleet(workers);
   } finally {
+    clearInterval(heartbeatTimer);
+    clearInterval(scheduleObservationTimer);
+    await scheduleObservation;
+    await heartbeat("STOPPING").catch(() =>
+      console.error("[worker] final heartbeat failed"),
+    );
     await runtimeTelemetry.shutdown();
   }
 }

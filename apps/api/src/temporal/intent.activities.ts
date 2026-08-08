@@ -4,6 +4,7 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageFetcher } from '../intent/page-fetcher';
 import { WebsiteWatchService, WatchResult, WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { IntentProjectionService, ProjectIntentResult } from '../intent/intent-projection.service';
+import { sanitizeTemporalResultReason } from './safe-error-code';
 
 const DUE_LIMIT = 50;
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000; // web_watch intent 事件保留 90 天（可 arg 覆盖）
@@ -48,7 +49,11 @@ export function createIntentActivities(deps: {
 
     /** 对一个 web_watch 源跑一次页面监控（抓每页→抽信号→diff→写 intent 事件）。幂等 by (source,url)。 */
     async watchSource(args: { sourceId: string }): Promise<WatchResult> {
-      return watchSvc.watch(args.sourceId);
+      const result = await watchSvc.watch(args.sourceId);
+      return sanitizeTemporalResultReason(result, {
+        failed: 'INTENT_WATCH_FAILED',
+        skipped: 'INTENT_WATCH_SKIPPED',
+      });
     },
 
     /** 把平台层新 intent 事件投影进某租户 canonical（attributes.intent.* + field_evidence）。按需触发。 */

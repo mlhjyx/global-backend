@@ -9,6 +9,9 @@ vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock')
 import { acts, resetActivities } from './testing/temporal-workflow.mock';
 import { intentSweepWorkflow } from './intent.workflow';
 
+const SENSITIVE_ERROR =
+  'Bob Operator <bob@example.com> https://private.example/watch api_secret=watch-token';
+
 function watchResult(sourceId: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return { sourceId, status: 'DONE', pagesFetched: 3, pagesMissed: 0, added: 1, changed: 2, intentEvents: 2, ...over };
 }
@@ -36,19 +39,45 @@ describe('intentSweepWorkflow', () => {
     expect(out.projected).toEqual({ workspaces: 2, companiesTouched: 5, eventsProjected: 9 });
   });
 
-  it('单源 watch 抛错 → fail-safe FAILED 条目，其余仍处理', async () => {
+  it('单源 watch 抛错 → 只返回闭合机器码且不把 PII/URL/secret 写进 workflow result', async () => {
     primeIntent(['s1', 's2']);
     acts.watchSource.mockReset();
     acts.watchSource
-      .mockRejectedValueOnce(new Error('watch boom'))
+      .mockRejectedValueOnce(new Error(SENSITIVE_ERROR))
       .mockImplementationOnce(async ({ sourceId }: { sourceId: string }) => watchResult(sourceId));
 
     const out = await intentSweepWorkflow({});
 
     expect(out.results[0]).toMatchObject({ sourceId: 's1', status: 'FAILED', intentEvents: 0 });
-    expect(out.results[0].error).toContain('watch boom');
+    expect(out.results[0].error).toBe('INTENT_WATCH_FAILED');
     expect(out.results[1].error).toBeUndefined();
     expect(out.swept).toBe(2);
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
+  });
+
+  it('activity 返回的 raw reason 也在 workflow 边界收敛，BudgetExceeded 保留显式语义', async () => {
+    primeIntent(['s1', 's2']);
+    acts.watchSource.mockReset();
+    acts.watchSource
+      .mockResolvedValueOnce(watchResult('s1', { status: 'FAILED', reason: SENSITIVE_ERROR }))
+      .mockRejectedValueOnce({
+        name: 'ActivityFailure',
+        cause: { code: 'BUDGET_EXCEEDED', message: SENSITIVE_ERROR },
+      });
+
+    const out = await intentSweepWorkflow({});
+
+    expect(out.results[0]).toMatchObject({
+      sourceId: 's1',
+      status: 'FAILED',
+      reason: 'INTENT_WATCH_FAILED',
+    });
+    expect(out.results[1]).toMatchObject({
+      sourceId: 's2',
+      status: 'FAILED',
+      error: 'BUDGET_EXCEEDED',
+    });
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE_ERROR);
   });
 
   it('purgeStaleIntentEvents 抛错 → 被 .catch 吞，workflow 继续', async () => {

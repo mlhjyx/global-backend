@@ -1,6 +1,10 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { AcquisitionActivities } from './acquisition.activities';
 import type { AcquireResult } from '../acquisition/acquisition.service';
+import {
+  safeTemporalErrorCode,
+  sanitizeTemporalResultReason,
+} from './safe-error-code';
 
 const acts = proxyActivities<AcquisitionActivities>({
   startToCloseTimeout: '5 minutes',
@@ -23,11 +27,16 @@ export async function acquisitionSweepWorkflow(input?: { limit?: number }): Prom
   const results: (AcquireResult & { error?: string })[] = [];
   for (const sourceId of sourceIds) {
     try {
-      results.push(await acts.acquireSource({ sourceId }));
+      results.push(
+        sanitizeTemporalResultReason(await acts.acquireSource({ sourceId }), {
+          failed: 'ACQUISITION_SOURCE_FAILED',
+          skipped: 'ACQUISITION_SOURCE_SKIPPED',
+        }),
+      );
     } catch (err) {
       results.push({
         sourceId, status: 'FAILED', total: 0, added: 0, updated: 0, removed: 0, unchanged: 0,
-        error: String(err).slice(0, 200),
+        error: safeTemporalErrorCode(err, 'ACQUISITION_SOURCE_FAILED'),
       });
     }
   }

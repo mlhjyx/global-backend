@@ -1,6 +1,7 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { SourceAdapterRegistry } from '../acquisition/source-adapter';
 import { AcquisitionService, AcquireResult } from '../acquisition/acquisition.service';
+import { sanitizeTemporalResultReason } from './safe-error-code';
 
 const DUE_LIMIT = 50;
 
@@ -35,7 +36,14 @@ export function createAcquisitionActivities(deps: { prisma: PrismaService; regis
 
     /** 对一个源跑一次 acquire（抓取→清洗→落库→增量）。幂等 by externalId，可安全重试。 */
     async acquireSource(args: { sourceId: string; limit?: number }): Promise<AcquireResult> {
-      return svc.acquire(args.sourceId, args.limit ? { limit: args.limit } : undefined);
+      const result = await svc.acquire(
+        args.sourceId,
+        args.limit ? { limit: args.limit } : undefined,
+      );
+      return sanitizeTemporalResultReason(result, {
+        failed: 'ACQUISITION_SOURCE_FAILED',
+        skipped: 'ACQUISITION_SOURCE_SKIPPED',
+      });
     },
   };
 }
