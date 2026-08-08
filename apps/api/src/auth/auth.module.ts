@@ -1,38 +1,79 @@
 import { Global, Logger, Module } from '@nestjs/common';
-import { TokenVerifier } from './token-verifier';
-import { DevTokenVerifier } from './dev-token-verifier';
-import { JwksTokenVerifier } from './jwks-token-verifier';
+import {
+  RuntimeIdentityService,
+  type RuntimeProcessSnapshot,
+} from '../runtime/runtime-admission';
+import { RoleScopePolicy, ROLE_SCOPE_POLICY } from './auth-scopes';
 import { AuthGuard } from './auth.guard';
+import { DevTokenVerifier } from './dev-token-verifier';
+import {
+  JwksTokenVerifier,
+  type JwksRuntimeConfig,
+} from './jwks-token-verifier';
+import { ScopesGuard } from './scopes.guard';
+import { TokenVerifier } from './token-verifier';
 
 /**
- * 身份 seam（PRD：身份归外部 SaaS 平台，我方只校验其签发的 token）。
- * 选择器（确定性）：
- *  - 配了 AUTH_JWKS_URI + AUTH_ISSUER → JwksTokenVerifier（生产：真验签）。
- *  - 未配 → DevTokenVerifier（base64 stub）；但**生产环境禁用 dev stub**，
- *    未配 JWKS 就在生产启动即失败，杜绝"任何人构造 claim 冒充租户"的越权漏洞。
+ * Identity and authorization consume the single immutable pre-Nest runtime
+ * snapshot. No provider re-reads mutable environment state or recomputes stage.
  */
 const logger = new Logger('AuthModule');
 
-function tokenVerifierFactory(): TokenVerifier {
-  const jwksConfigured = !!process.env.AUTH_JWKS_URI && !!process.env.AUTH_ISSUER;
-  const isProd = process.env.NODE_ENV === 'production';
-  if (jwksConfigured) {
-    logger.log('using JwksTokenVerifier (verifies SaaS-platform signed tokens)');
-    return new JwksTokenVerifier();
-  }
-  if (isProd && process.env.AUTH_ALLOW_DEV_TOKENS !== 'true') {
+function jwksConfig(runtime: RuntimeProcessSnapshot): JwksRuntimeConfig {
+  const config = runtime.safety.auth;
+  if (
+    config.mode !== 'jwks' ||
+    !config.jwksUri ||
+    !config.issuer ||
+    !config.audience
+  ) {
     throw new Error(
-      'Production requires AUTH_JWKS_URI + AUTH_ISSUER (real token verification). ' +
-        'Dev token stub is disabled in production — set AUTH_ALLOW_DEV_TOKENS=true only to override intentionally.',
+      'JwksTokenVerifier requires AUTH_JWKS_URI, AUTH_ISSUER, and AUTH_AUDIENCE',
     );
+  }
+  return Object.freeze({
+    uri: config.jwksUri,
+    issuer: config.issuer,
+    audience: config.audience,
+    clockSkewSeconds: config.clockSkewSeconds,
+    workspaceClaim: config.workspaceClaim,
+    rolesClaim: config.rolesClaim,
+  });
+}
+
+export function createTokenVerifier(
+  runtime: RuntimeProcessSnapshot,
+): TokenVerifier {
+  if (runtime.safety.auth.mode === 'jwks') {
+    logger.log('using JwksTokenVerifier (verifies SaaS-platform signed tokens)');
+    return new JwksTokenVerifier(jwksConfig(runtime));
   }
   logger.warn('using DevTokenVerifier (base64 stub — NOT for production)');
   return new DevTokenVerifier();
 }
 
+function roleScopePolicy(runtime: RuntimeProcessSnapshot): RoleScopePolicy {
+  return RoleScopePolicy.parse(runtime.environment.AUTH_ROLE_SCOPE_MAP);
+}
+
 @Global()
 @Module({
-  providers: [{ provide: TokenVerifier, useFactory: tokenVerifierFactory }, AuthGuard],
-  exports: [TokenVerifier, AuthGuard],
+  providers: [
+    {
+      provide: ROLE_SCOPE_POLICY,
+      useFactory: (runtime: RuntimeIdentityService) =>
+        roleScopePolicy(runtime.getProcessSnapshot()),
+      inject: [RuntimeIdentityService],
+    },
+    {
+      provide: TokenVerifier,
+      useFactory: (runtime: RuntimeIdentityService) =>
+        createTokenVerifier(runtime.getProcessSnapshot()),
+      inject: [RuntimeIdentityService],
+    },
+    AuthGuard,
+    ScopesGuard,
+  ],
+  exports: [TokenVerifier, AuthGuard, ScopesGuard, ROLE_SCOPE_POLICY],
 })
 export class AuthModule {}

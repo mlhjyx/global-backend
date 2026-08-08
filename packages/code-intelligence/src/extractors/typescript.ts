@@ -99,6 +99,66 @@ function declarationName(node: ts.Declaration): string | undefined {
   return undefined;
 }
 
+function unwrapStaticExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function staticScheduleElements(
+  declaration: ts.VariableDeclaration,
+): readonly ts.Expression[] | undefined {
+  if (
+    !ts.isIdentifier(declaration.name) ||
+    !/^(?:SPECS|PLATFORM_SCHEDULES)$/.test(declaration.name.text) ||
+    !declaration.initializer
+  ) {
+    return undefined;
+  }
+  const initializer = unwrapStaticExpression(declaration.initializer);
+  if (ts.isArrayLiteralExpression(initializer)) return initializer.elements;
+  if (
+    !ts.isCallExpression(initializer) ||
+    !ts.isPropertyAccessExpression(initializer.expression) ||
+    !ts.isIdentifier(initializer.expression.expression) ||
+    initializer.expression.expression.text !== "Object" ||
+    initializer.expression.name.text !== "freeze" ||
+    initializer.arguments.length !== 1
+  ) {
+    return undefined;
+  }
+  const frozen = unwrapStaticExpression(initializer.arguments[0]);
+  return ts.isArrayLiteralExpression(frozen) ? frozen.elements : undefined;
+}
+
+function staticScheduleProperties(
+  element: ts.Expression,
+): ReadonlyMap<string, ts.Expression> | undefined {
+  if (ts.isObjectLiteralExpression(element)) {
+    const properties = new Map<string, ts.Expression>();
+    for (const property of element.properties) {
+      if (!ts.isPropertyAssignment(property)) continue;
+      const name = declarationName(property);
+      if (name) properties.set(name, property.initializer);
+    }
+    return properties;
+  }
+  if (
+    ts.isCallExpression(element) &&
+    ts.isIdentifier(element.expression) &&
+    element.expression.text === "schedule" &&
+    element.arguments.length >= 2
+  ) {
+    return new Map([
+      ["id", element.arguments[0]],
+      ["workflowType", element.arguments[1]],
+    ]);
+  }
+  return undefined;
+}
+
 function propertyChain(node: ts.Expression): string[] {
   if (ts.isIdentifier(node)) return [node.text];
   if (node.kind === ts.SyntaxKind.ThisKeyword) return ["this"];
@@ -495,22 +555,11 @@ export async function extractTypeScript(
       for (const statement of sourceFile.statements) {
         if (!ts.isVariableStatement(statement)) continue;
         for (const declaration of statement.declarationList.declarations) {
-          if (
-            !ts.isIdentifier(declaration.name) ||
-            declaration.name.text !== "SPECS" ||
-            !declaration.initializer ||
-            !ts.isArrayLiteralExpression(declaration.initializer)
-          ) {
-            continue;
-          }
-          for (const element of declaration.initializer.elements) {
-            if (!ts.isObjectLiteralExpression(element)) continue;
-            const properties = new Map<string, ts.Expression>();
-            for (const property of element.properties) {
-              if (!ts.isPropertyAssignment(property)) continue;
-              const name = declarationName(property);
-              if (name) properties.set(name, property.initializer);
-            }
+          const elements = staticScheduleElements(declaration);
+          if (!elements) continue;
+          for (const element of elements) {
+            const properties = staticScheduleProperties(element);
+            if (!properties) continue;
             const scheduleId =
               resolveStaticString(properties.get("id")) ??
               properties.get("id")?.getText(sourceFile);

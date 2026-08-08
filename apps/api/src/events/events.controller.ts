@@ -2,11 +2,15 @@ import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { EventsService } from './events.service';
+
+const EVENT_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.EventsController.operations;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -79,6 +83,7 @@ export class EventsController {
   constructor(private readonly events: EventsService) {}
 
   @Get()
+  @RequireScopes(...EVENT_SCOPES.list)
   @ApiOperation({ summary: '拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）' })
   // swagger 对 @Query 推断 required:true，SaaS codegen 客户端会强制要参数——三个都显式 optional。
   @ApiQuery({ name: 'cursor', required: false, description: '游标（上次响应的 nextCursor；缺省从头拉）' })
@@ -103,6 +108,7 @@ export class EventsController {
   }
 
   @Post('ack')
+  @RequireScopes(...EVENT_SCOPES.ack)
   @HttpCode(200)
   @ApiOperation({ summary: 'ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）' })
   @ApiEnvelope({ type: 'object', required: ['acked'], properties: { acked: { type: 'integer' } } })

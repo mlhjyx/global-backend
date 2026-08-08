@@ -12,11 +12,15 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
+
+const LEAD_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.LeadController.operations;
 
 /** Lead 行（六维分+队列）；完整字段结构化 DTO 待收口⑤ 一等 Signal 后定型。 */
 const LEAD_SCHEMA = { type: 'object', additionalProperties: true, description: 'Lead（六维分+队列+裁决状态）' };
@@ -57,6 +61,7 @@ export class LeadController {
   constructor(private readonly leads: LeadService) {}
 
   @Post('icps/:icpId/qualify')
+  @RequireScopes(...LEAD_SCOPES.qualify)
   @HttpCode(202)
   @ApiOperation({ summary: '对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）' })
   @ApiEnvelope(
@@ -75,6 +80,7 @@ export class LeadController {
   }
 
   @Get('leads')
+  @RequireScopes(...LEAD_SCOPES.list)
   @ApiOperation({ summary: 'Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）' })
   // swagger 对裸 @Query 推断 required:true（无 CLI 插件），可选参数必须显式声明（同 events.controller）
   @ApiQuery({ name: 'icpId', required: false })
@@ -97,6 +103,7 @@ export class LeadController {
   }
 
   @Get('icps/:icpId/lead-queues')
+  @RequireScopes(...LEAD_SCOPES.queues)
   @ApiOperation({ summary: '四队列计数（推荐/待确认/拒绝/禁联）' })
   @ApiEnvelope({
     type: 'object',
@@ -113,6 +120,7 @@ export class LeadController {
   }
 
   @Get('leads/:leadId')
+  @RequireScopes(...LEAD_SCOPES.get)
   @ApiOperation({ summary: 'Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史' })
   @ApiEnvelope(LEAD_SCHEMA)
   async get(@Ctx() ctx: RequestContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
@@ -120,6 +128,7 @@ export class LeadController {
   }
 
   @Post('leads/:leadId/accept')
+  @RequireScopes(...LEAD_SCOPES.accept)
   @HttpCode(200)
   @ApiOperation({ summary: '接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）' })
   @ApiEnvelope(LEAD_SCHEMA)
@@ -132,6 +141,7 @@ export class LeadController {
   }
 
   @Post('leads/:leadId/reject')
+  @RequireScopes(...LEAD_SCOPES.reject)
   @HttpCode(200)
   @ApiOperation({ summary: '拒绝 Lead（→ REJECTED，原因留痕做质量反馈）' })
   @ApiEnvelope(LEAD_SCHEMA)
@@ -144,6 +154,7 @@ export class LeadController {
   }
 
   @Post('leads/:leadId/sanctions-review')
+  @RequireScopes(...LEAD_SCOPES.sanctionsReview)
   @HttpCode(200)
   @ApiOperation({
     summary: '制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付',

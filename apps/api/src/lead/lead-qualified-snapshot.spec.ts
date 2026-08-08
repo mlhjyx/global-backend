@@ -6,6 +6,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { buildLeadQualifiedSnapshot, classifyLeadQualified, computeValidUntil } from './lead-qualified-snapshot';
 import { LeadService } from './lead.service';
+import { storageRightsContextForLead } from '../compliance/data-rights.context';
 
 /**
  * 收口③ LeadQualified 快照 v1：decide(accept) 的 outbox payload 从「三字段摘要」升级为
@@ -294,6 +295,8 @@ function makeDecideService(tx: unknown, rights: { effect: string; allowed: boole
   // DataRights 桩：decide 用 evaluate().effect（快照）+ .allowed（强制门）；真判定由 data-rights.context.spec 覆盖。
   // logDecision（#72 P2）：decide 交棒事务内写审计——桩为 spy 记录调用供断言（同 tx / subject / 顺序）。
   const dataRights = {
+    storageContextForLead: (input: Parameters<typeof storageRightsContextForLead>[0]) =>
+      storageRightsContextForLead(input, 'EU'),
     evaluate: () => ({ reason: 'test', ruleId: null, ruleVersion: 'v1', requiresLawfulBasis: false, article14NoticeRequired: false, ...rights }),
     logDecision: vi.fn(async () => {}),
   };

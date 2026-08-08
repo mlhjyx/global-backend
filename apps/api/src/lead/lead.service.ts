@@ -8,7 +8,6 @@ import {
   LEAD_QUALIFIED_SCHEMA_VERSION,
 } from './lead-qualified-snapshot';
 import { DataRightsService } from '../compliance/data-rights.service';
-import { storageRightsContextForLead } from '../compliance/data-rights.context';
 import { SanctionsScreeningService, reconcileReviewState, matchesFromJson } from '../sanctions/sanctions-screening.service';
 
 @Injectable()
@@ -209,7 +208,7 @@ export class LeadService {
           .map((g) => ({ dataClass: g.dataClass, fetchedAt: g._min.fetchedAt as Date }));
         // 收口⑥：存储权利判定 + **强制**（不只标注，确定性纯引擎、缓存规则同步无 await）。
         // 具名决策人 → red；公司国别 → 主体法域；公司 SUPPRESSED → DENY。
-        const rightsCtx = storageRightsContextForLead({
+        const rightsCtx = this.dataRights.storageContextForLead({
           country: company.country,
           status: company.status,
           hasNamedContacts: company.contacts.length > 0,

@@ -11,6 +11,11 @@ import {
   Jurisdiction,
   JurisdictionRule,
 } from './data-rights.types';
+import { RuntimeIdentityService } from '../runtime/runtime-admission';
+import {
+  storageRightsContextForLead,
+  type StorageRightsLeadInput,
+} from './data-rights.context';
 
 /** policy_decision_log 留痕的引用元数据（🔴 只放引用/id，绝不嵌人名/邮箱明文）。 */
 export interface PolicyDecisionMeta {
@@ -31,12 +36,25 @@ export class DataRightsService implements OnModuleInit {
   private readonly logger = new Logger(DataRightsService.name);
   private rules: JurisdictionRule[] = [];
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly runtimeIdentity: RuntimeIdentityService,
+  ) {}
+
+  storageContextForLead(input: StorageRightsLeadInput): DataRightsContext {
+    return storageRightsContextForLead(
+      input,
+      this.runtimeIdentity.getProcessSnapshot().safety.processorJurisdiction,
+    );
+  }
 
   async onModuleInit(): Promise<void> {
     // jurisdiction_policy 是平台表，app_user 只读 → 用 owner 连接播种（同 provider seed）。
     // seed 失败要**大声**：规则空则引擎对 red 数据 fail-closed（安全但会全拒），运维需知晓。
-    const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+    const owner = new PrismaClient({
+      datasourceUrl:
+        this.runtimeIdentity.getProcessSnapshot().environment.DATABASE_URL,
+    });
     try {
       await seedJurisdictionPolicy(owner);
     } catch (err) {

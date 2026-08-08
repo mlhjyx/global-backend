@@ -1,7 +1,17 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
-import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
+import { requestContextFromClaims } from './token-claims';
+
+export interface JwksRuntimeConfig {
+  readonly uri: string;
+  readonly issuer: string;
+  readonly audience: string;
+  readonly clockSkewSeconds: number;
+  readonly workspaceClaim: string;
+  readonly rolesClaim: string;
+}
 
 /**
  * 生产鉴权：校验外部 SaaS 平台签发的 JWT（PRD 12.2；评审点名的越权漏洞修复）。
@@ -11,7 +21,7 @@ import { RequestContext } from './request-context';
  * 配置（.env）：
  *   AUTH_JWKS_URI      SaaS 平台的 JWKS 端点（必填，启用本验证器的开关）
  *   AUTH_ISSUER        期望 iss（必填）
- *   AUTH_AUDIENCE      期望 aud（可选但强烈建议）
+ *   AUTH_AUDIENCE      期望 aud（必填）
  *   AUTH_CLOCK_SKEW_S  允许时钟偏移秒（默认 60）
  *   AUTH_WORKSPACE_CLAIM  workspace 所在 claim 名（默认 'workspace_id'）
  *   AUTH_ROLES_CLAIM      roles 所在 claim 名（默认 'roles'）
@@ -20,54 +30,85 @@ import { RequestContext } from './request-context';
  */
 @Injectable()
 export class JwksTokenVerifier extends TokenVerifier {
-  private readonly logger = new Logger('JwksTokenVerifier');
-  private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
+  private readonly logger = new Logger(JwksTokenVerifier.name);
+  private readonly keyResolver: JWTVerifyGetKey;
   private readonly issuer: string;
-  private readonly audience?: string;
+  private readonly audience: string;
   private readonly clockSkewS: number;
   private readonly wsClaim: string;
   private readonly rolesClaim: string;
 
-  constructor() {
+  constructor(config: JwksRuntimeConfig, keyResolver?: JWTVerifyGetKey) {
     super();
-    const jwksUri = process.env.AUTH_JWKS_URI;
-    this.issuer = process.env.AUTH_ISSUER ?? '';
-    if (!jwksUri || !this.issuer) {
-      throw new Error('JwksTokenVerifier requires AUTH_JWKS_URI and AUTH_ISSUER');
-    }
-    this.jwks = createRemoteJWKSet(new URL(jwksUri)); // 内部按 kid 缓存/轮换
-    this.audience = process.env.AUTH_AUDIENCE || undefined;
-    this.clockSkewS = Number(process.env.AUTH_CLOCK_SKEW_S) || 60;
-    this.wsClaim = process.env.AUTH_WORKSPACE_CLAIM ?? 'workspace_id';
-    this.rolesClaim = process.env.AUTH_ROLES_CLAIM ?? 'roles';
+    this.issuer = config.issuer;
+    this.audience = config.audience;
+    this.keyResolver = keyResolver ?? createRemoteJWKSet(new URL(config.uri)); // 内部按 kid 缓存/轮换
+    this.clockSkewS = config.clockSkewSeconds;
+    this.wsClaim = config.workspaceClaim;
+    this.rolesClaim = config.rolesClaim;
   }
 
   async verify(token: string): Promise<RequestContext> {
-    let payload: JWTPayload;
     try {
-      ({ payload } = await jwtVerify(token, this.jwks, {
+      if (Buffer.byteLength(token, 'utf8') > 16_384) {
+        throw new Error('token is too large');
+      }
+      const { payload, protectedHeader } = await jwtVerify(token, this.keyResolver, {
+        algorithms: ['RS256'],
         issuer: this.issuer,
-        ...(this.audience ? { audience: this.audience } : {}),
+        audience: this.audience,
         clockTolerance: this.clockSkewS, // exp/nbf 容忍
-      }));
-    } catch (err) {
+      });
+      validateSignedContract(payload, protectedHeader.kid, this.issuer, this.audience);
+      return requestContextFromClaims(payload as Readonly<Record<string, unknown>>, this.wsClaim, this.rolesClaim);
+    } catch (error) {
+      this.logger.warn(`token verification rejected: ${closedRejectionReason(error)}`);
       throw new UnauthorizedException({
-        error: { code: 'TOKEN_INVALID', message: `token verification failed: ${String((err as Error).message).slice(0, 120)}` },
+        error: { code: 'TOKEN_INVALID', message: 'token verification failed' },
       });
     }
+  }
+}
 
-    const sub = payload.sub;
-    const workspaceId = payload[this.wsClaim];
-    if (!sub || !workspaceId) {
-      throw new UnauthorizedException({
-        error: { code: 'TOKEN_INVALID', message: `token missing sub or ${this.wsClaim}` },
-      });
-    }
-    const rolesRaw = payload[this.rolesClaim];
-    return {
-      userId: String(sub),
-      workspaceId: String(workspaceId),
-      roles: Array.isArray(rolesRaw) ? rolesRaw.map(String) : [],
-    };
+type ClosedRejectionReason =
+  | 'claims_invalid'
+  | 'jwks_unavailable'
+  | 'malformed_token'
+  | 'signature_or_key_invalid'
+  | 'token_too_large'
+  | 'unsupported_algorithm';
+
+function closedRejectionReason(error: unknown): ClosedRejectionReason {
+  if (error instanceof Error && error.message === 'token is too large') return 'token_too_large';
+
+  const code =
+    typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : undefined;
+  if (code === 'ERR_JWS_INVALID' || code === 'ERR_JWT_INVALID') return 'malformed_token';
+  if (code === 'ERR_JOSE_ALG_NOT_ALLOWED') return 'unsupported_algorithm';
+  if (code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED' || code === 'ERR_JWKS_NO_MATCHING_KEY') {
+    return 'signature_or_key_invalid';
+  }
+  if (code === 'ERR_JWKS_TIMEOUT' || code === 'ERR_JOSE_GENERIC') return 'jwks_unavailable';
+  if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) {
+    return 'jwks_unavailable';
+  }
+  return 'claims_invalid';
+}
+
+function validateSignedContract(payload: JWTPayload, kid: string | undefined, issuer: string, audience: string): void {
+  if (!kid || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(kid)) {
+    throw new Error('invalid kid');
+  }
+  if (payload.iss !== issuer || payload.aud !== audience) {
+    throw new Error('invalid issuer or audience');
+  }
+  if (
+    !Number.isSafeInteger(payload.exp) ||
+    !Number.isSafeInteger(payload.nbf) ||
+    (payload.exp as number) <= (payload.nbf as number)
+  ) {
+    throw new Error('invalid token lifetime');
   }
 }

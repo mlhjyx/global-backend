@@ -12,13 +12,17 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { Enveloped, envelope, PageEnveloped, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { CompanyDto, OfferingDto } from './dto/company.dto';
+
+const COMPANY_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.CompanyController.operations;
 
 @ApiTags('Companies')
 @ApiBearerAuth()
@@ -28,6 +32,7 @@ export class CompanyController {
   constructor(private readonly companies: CompanyService) {}
 
   @Post()
+  @RequireScopes(...COMPANY_SCOPES.create)
   @HttpCode(202)
   @ApiOperation({
     summary: '提交官网，创建企业画像并触发理解（异步）',
@@ -46,6 +51,7 @@ export class CompanyController {
   }
 
   @Get()
+  @RequireScopes(...COMPANY_SCOPES.list)
   @ApiOperation({ summary: '列出当前 workspace 的企业画像（游标分页）' })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } })
   @ApiQuery({ name: 'cursor', required: false })
@@ -61,6 +67,7 @@ export class CompanyController {
   }
 
   @Get(':companyId')
+  @RequireScopes(...COMPANY_SCOPES.get)
   @ApiOperation({ summary: '按 id 获取企业画像（跨租户返回 404）' })
   @ApiEnvelope(CompanyDto)
   async get(
@@ -71,6 +78,7 @@ export class CompanyController {
   }
 
   @Get(':companyId/completeness')
+  @RequireScopes(...COMPANY_SCOPES.completeness)
   @ApiOperation({ summary: '企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态' })
   @ApiEnvelope({
     type: 'object',
@@ -91,6 +99,7 @@ export class CompanyController {
   }
 
   @Post(':companyId/confirm')
+  @RequireScopes(...COMPANY_SCOPES.confirm)
   @HttpCode(200)
   @ApiOperation({ summary: '人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）' })
   @ApiEnvelope(CompanyDto)
@@ -102,6 +111,7 @@ export class CompanyController {
   }
 
   @Get(':companyId/offerings')
+  @RequireScopes(...COMPANY_SCOPES.listOfferings)
   @ApiOperation({ summary: '企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）' })
   @ApiListEnvelope(OfferingDto)
   async listOfferings(
