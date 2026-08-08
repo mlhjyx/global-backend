@@ -24,9 +24,9 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
-/** Set only in the post-merge manifest PR, never to an unmerged source SHA. */
+/** Merge-bound source; dispatch remains blocked until this SHA is on origin/main. */
 export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
-  "4f75a66925b71fa218395934a5722035e7ba0112" as const;
+  "0c5213e6ef1a4d8b7ea527b7522021d487bc5934" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json" as const;
 
