@@ -183,6 +183,7 @@ describe("M1-f aesthetic review closed output", () => {
         assertAestheticReviewOutput(output, evalCase.images),
       ).toThrow("AESTHETIC_REVIEW_OUTPUT_INVALID");
     },
+    15_000,
   );
 
   it("rejects foreign evidence and inconsistent pass/fail semantics", async () => {

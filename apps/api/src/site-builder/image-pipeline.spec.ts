@@ -240,6 +240,23 @@ describe('M1-c deterministic image policy', () => {
     expect(rendered?.info.contentHash).toBe(sha256(rendered!.data));
   });
 
+  it('queues child jobs deterministically beyond the hard process cap', async () => {
+    const input = await opaqueJpeg(64, 64);
+    const runner = new IsolatedImagePipelineRunner(30_000);
+
+    // The production hard cap is four even when the environment requests more.
+    // Five synchronously-started jobs therefore exercise the owned queue path
+    // without relying on unrelated test-file scheduling to create contention.
+    const inspections = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        runner.inspect(input, 'image/jpeg'),
+      ),
+    );
+
+    expect(inspections).toHaveLength(5);
+    expect(inspections.every(({ width, height }) => width === 64 && height === 64)).toBe(true);
+  });
+
   it('rejects an already-cancelled child job without starting codec work', async () => {
     const input = await opaqueJpeg(640, 360);
     const controller = new AbortController();
