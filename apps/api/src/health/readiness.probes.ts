@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuntimeIdentityService } from '../runtime/runtime-admission';
 import { TemporalClient } from '../temporal/temporal.client';
+import { WORKER_DOMAINS } from '../temporal/worker-topology';
 import type {
   ReadinessCheckName,
   ReadinessProbePort,
@@ -145,9 +146,93 @@ export class TemporalReadinessProbe implements ReadinessProbePort {
   }
 }
 
+interface WorkerHeartbeatProbeOptions {
+  readonly freshnessMs: number;
+  readonly now?: () => Date;
+}
+
+/**
+ * Durable worker proof. It deliberately selects no worker instance id and
+ * returns one closed decision: every code-owned queue must have a fresh
+ * POLLING heartbeat from the exact API build.
+ */
+export class WorkerHeartbeatReadinessProbe implements ReadinessProbePort {
+  readonly name = 'worker_heartbeat' as const;
+  readonly required = true;
+  private readonly now: () => Date;
+
+  constructor(
+    private readonly prisma: Pick<PrismaService, 'workerHeartbeat'>,
+    private readonly runtime: RuntimeIdentityService,
+    private readonly options: WorkerHeartbeatProbeOptions,
+  ) {
+    if (
+      !Number.isSafeInteger(options.freshnessMs) ||
+      options.freshnessMs < 1_000 ||
+      options.freshnessMs > 10 * 60_000
+    ) {
+      throw new Error('INVALID_WORKER_HEARTBEAT_READINESS_CONFIG');
+    }
+    this.now = options.now ?? (() => new Date());
+  }
+
+  async check(): Promise<ReadinessProbeResult> {
+    const now = this.now();
+    if (!Number.isFinite(now.getTime())) {
+      return { status: 'FAIL', code: 'WORKER_HEARTBEAT_NOT_READY' };
+    }
+    const admission = this.runtime.getSnapshot();
+    const expectedBuildSha =
+      admission.buildIdentity.status === 'VERIFIED'
+        ? admission.buildIdentity.buildSha
+        : 'development-unattested';
+    const freshnessCutoff = new Date(now.getTime() - this.options.freshnessMs);
+    const expectedQueues = WORKER_DOMAINS.map(({ taskQueue }) => taskQueue);
+    const rows = await this.prisma.workerHeartbeat.findMany({
+      where: {
+        taskQueue: { in: expectedQueues },
+        status: 'POLLING',
+        lastSeenAt: { gte: freshnessCutoff },
+      },
+      orderBy: { lastSeenAt: 'desc' },
+      take: 256,
+      select: {
+        taskQueue: true,
+        status: true,
+        lastSeenAt: true,
+        workerBuildSha: true,
+      },
+    });
+    const healthyQueues = new Set(
+      rows
+        .filter(
+          (row) =>
+            row.status === 'POLLING' &&
+            row.lastSeenAt >= freshnessCutoff &&
+            row.workerBuildSha === expectedBuildSha,
+        )
+        .map((row) => row.taskQueue),
+    );
+    const hasUnexpectedActiveBuild = rows.some(
+      (row) =>
+        expectedQueues.includes(row.taskQueue) &&
+        row.status === 'POLLING' &&
+        row.lastSeenAt >= freshnessCutoff &&
+        row.workerBuildSha !== expectedBuildSha,
+    );
+    if (
+      hasUnexpectedActiveBuild ||
+      expectedQueues.some((taskQueue) => !healthyQueues.has(taskQueue))
+    ) {
+      return { status: 'FAIL', code: 'WORKER_HEARTBEAT_NOT_READY' };
+    }
+    return { status: 'PASS', code: 'WORKER_HEARTBEAT_VERIFIED' };
+  }
+}
+
 export type UnavailableProofName = Extract<
   ReadinessCheckName,
-  'worker_heartbeat' | 'outbox_relay' | 'gateway_admission'
+  'outbox_relay' | 'gateway_admission'
 >;
 
 export class UnavailableProofReadinessProbe implements ReadinessProbePort {

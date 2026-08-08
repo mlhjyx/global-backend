@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "integration-context-matrix/v1",
+  "sourceCommit": "4562eab1bae16cdd424ff90a7d3403b0fb30d535",
+  "githubRulesetStatus": "UNVERIFIED_EXTERNAL_STATE",
+  "contexts": {
+    "postgresql": {
+      "requiredContext": "PostgreSQL integration",
+      "status": "BLOCKED",
+      "isolation": "DISPOSABLE_DATABASE_AND_ROLE",
+      "command": null,
+      "blockers": [
+        "A fail-closed isolated compliance verifier exists, but no CI job constructs its disposable database, owner role, app role, and dedicated environment variables.",
+        "No reviewed digest-pinned disposable PostgreSQL service workflow has executed migrations and the verifier as one hermetic required context."
+      ],
+      "activationRequirements": [
+        "Use a CI-only database name prefixed global_ci_ and a CI-only non-BYPASSRLS role.",
+        "Reject DATABASE_URL or APP_DATABASE_URL values not constructed inside the job.",
+        "Run only an explicit repository allowlist after prisma migrate deploy.",
+        "Destroy the disposable job environment after the check."
+      ]
+    },
+    "temporal": {
+      "requiredContext": "Temporal integration",
+      "status": "BLOCKED",
+      "isolation": "OFFICIAL_TEST_ENV_OR_PURE_HISTORY_REPLAY",
+      "command": null,
+      "blockers": [
+        "@temporalio/testing is not installed on the fixed base.",
+        "The existing M1-f replay script connects to TEMPORAL_ADDRESS and reads dotenv, so it is not CI-hermetic."
+      ],
+      "activationRequirements": [
+        "Use the official in-process test environment or immutable history replay without a live Temporal connection.",
+        "Do not read .env and do not connect 127.0.0.1:7233 or any external namespace.",
+        "Run an explicit immutable history allowlist with deterministic workflow code."
+      ]
+    }
+  }
+}

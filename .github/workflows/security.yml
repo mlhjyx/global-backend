@@ -1,32 +1,149 @@
 name: Security
 
-# 后端命门：仓库有 .env（DB URL / 中转站 key / crawl4ai token）。每个 PR + main 推送扫密钥泄漏。
+# Source-only gates. They may read the package registry for `pnpm audit`, but
+# have no write permission and never deploy, auto-fix, publish, or mutate an
+# external resource.
 on:
   pull_request:
   push:
     branches: [main]
 
 concurrency:
-  group: security-${{ github.ref }}
+  group: security-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 仓库转私有后，GITHUB_TOKEN 默认权限收紧，gitleaks-action 读取 PR commits
-# (GET pulls/{n}/commits) 会 403「Resource not accessible by integration」。
-# 显式授权：读取内容 + 读写 PR(供命中时回评)。缺此块则每个 PR 的密钥扫描都会挂。
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 jobs:
   secret-scan:
     name: gitleaks 密钥扫描
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 0 # 全历史，扫到被后续提交"覆盖"的历史泄漏
+          fetch-depth: 0
+          persist-credentials: false
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 个人账户仓库免费；若转组织私有库需在 secrets 配 GITLEAKS_LICENSE
+
+  dependency-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Compare production dependency exposure against the exact base
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]] ||
+            ! git cat-file -e "${BASE_SHA}^{commit}"; then
+            echo "::error::A readable base commit is required for dependency regression comparison"
+            exit 1
+          fi
+
+          base_dir="$(mktemp -d "$RUNNER_TEMP/dependency-base.XXXXXX")"
+          git archive "$BASE_SHA" | tar -x -C "$base_dir"
+
+          audit_report() {
+            local directory="$1"
+            local output="$2"
+            local status
+            (cd "$directory" && pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only)
+            set +e
+            (cd "$directory" && pnpm audit --prod --json --registry=https://registry.npmjs.org) > "$output"
+            status=$?
+            set -e
+            if [[ "$status" -ne 0 && "$status" -ne 1 ]]; then
+              echo "::error::pnpm audit failed with unexpected exit code $status"
+              exit "$status"
+            fi
+          }
+
+          audit_report "$base_dir" "$RUNNER_TEMP/dependency-base.json"
+          audit_report "$GITHUB_WORKSPACE" "$RUNNER_TEMP/dependency-head.json"
+          node scripts/security-recovery-governance.mjs dependency-regression \
+            --base="$RUNNER_TEMP/dependency-base.json" \
+            --head="$RUNNER_TEMP/dependency-head.json"
+
+  source-sast:
+    name: repository SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Governance mutation tests
+        run: node --test scripts/security-recovery-governance.spec.mjs
+      - name: Repository-local security static analysis
+        run: node scripts/security-recovery-governance.mjs sast
+      - name: Workflow permissions and immutable Action pins
+        run: node scripts/security-recovery-governance.mjs workflow --dir=.github/workflows
+
+  compose-iac:
+    name: container and Compose IaC
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Default Compose image and local-source lock
+        run: >-
+          node scripts/security-recovery-governance.mjs compose
+          --compose=docker-compose.yml
+          --manifest=config/container-image-lock.json
+          --profile=default
+      - name: Recovery rehearsal admission remains create-only
+        run: >-
+          node scripts/security-recovery-governance.mjs recovery
+          --manifest=docs/operations/recovery-rehearsal-manifest.json
+      - name: Integration required-context contract
+        run: >-
+          node scripts/security-recovery-governance.mjs integration
+          --matrix=config/integration-context-matrix.json
+
+  required-security:
+    if: always()
+    name: security · required gate
+    needs: [secret-scan, dependency-audit, source-sast, compose-iac]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every source-only security lane
+        shell: bash
+        env:
+          SECRET_SCAN: ${{ needs.secret-scan.result }}
+          DEPENDENCY_AUDIT: ${{ needs.dependency-audit.result }}
+          SOURCE_SAST: ${{ needs.source-sast.result }}
+          COMPOSE_IAC: ${{ needs.compose-iac.result }}
+        run: |
+          set -euo pipefail
+          for result in "$SECRET_SCAN" "$DEPENDENCY_AUDIT" "$SOURCE_SAST" "$COMPOSE_IAC"; do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::A required security lane ended as $result"
+              exit 1
+            fi
+          done

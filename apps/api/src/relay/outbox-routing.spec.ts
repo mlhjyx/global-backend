@@ -1,7 +1,11 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OutboxRelayService } from './outbox-relay.service';
 import { ASSET_OBJECT_CLEANUP_WORKFLOW } from '../temporal/understanding.constants';
+import {
+  ACQUISITION_TASK_QUEUE,
+  MAINTENANCE_TASK_QUEUE,
+} from '../temporal/worker-topology';
 
 /**
  * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等 8 种）
@@ -46,7 +50,51 @@ interface DeliveryRow {
   event: EvRow;
 }
 
+interface ClaimUpdateManyArgs {
+  where: {
+    id: string;
+    status?: string;
+    version?: number;
+    validUntil?: { lt: Date };
+  };
+  data?: unknown;
+}
+
+interface ClaimRow {
+  id: string;
+  workspaceId: string;
+  companyId: string;
+  factKey: string;
+  type: string;
+  version: number;
+}
+
+interface OutboxDeliveryCreateManyArgs {
+  data: Array<{ workspaceId: string; eventId: string; sink: string }>;
+  skipDuplicates: boolean;
+}
+
 const WS = '11111111-1111-1111-1111-111111111111';
+const SENSITIVE_EXCEPTION_MESSAGE =
+  'ECONNREFUSED operator=relay-admin@example.test url=https://hooks.example.test/callback?token=top-secret body={"credential":"relay-test-secret-value"}';
+const SENSITIVE_EXCEPTION_MARKERS = [
+  'ECONNREFUSED',
+  'relay-admin@example.test',
+  'https://hooks.example.test',
+  'top-secret',
+  'relay-test-secret-value',
+] as const;
+
+function sha256Token(value: string): string {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function expectNoSensitiveExceptionData(value: unknown): void {
+  const text = String(value);
+  for (const marker of SENSITIVE_EXCEPTION_MARKERS) {
+    expect(text).not.toContain(marker);
+  }
+}
 
 function makeEvent(over: Partial<EvRow> = {}): EvRow {
   return {
@@ -71,25 +119,37 @@ function makeEvent(over: Partial<EvRow> = {}): EvRow {
 
 /** 假 db + 事务内 tx（interactive $transaction：路由的 createMany/update 必须走 tx，而非 db 顶层）。 */
 function makeDb(events: EvRow[], deliveries: DeliveryRow[] = []) {
-  const applyEventUpdate = ({ where, data }: { where: { id: bigint }; data: Partial<EvRow> }) => {
+  const applyEventUpdate = ({
+    where,
+    data,
+  }: {
+    where: { id: bigint };
+    data: Partial<EvRow>;
+  }) => {
     const ev = events.find((e) => e.id === where.id);
     if (ev) Object.assign(ev, data);
     return Promise.resolve(ev);
   };
   const claim = {
-    findMany: vi.fn(async () => []),
+    findMany: vi.fn(async (): Promise<ClaimRow[]> => []),
     update: vi.fn(async () => ({})),
-    updateMany: vi.fn(async () => ({ count: 1 })),
+    updateMany: vi.fn(async (_args: ClaimUpdateManyArgs) => ({ count: 1 })),
   };
-  const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+  const outboxCreate = vi.fn(
+    async ({ data }: { data: Record<string, unknown> }) => data,
+  );
   const tx = {
-    outboxDelivery: { createMany: vi.fn(async () => ({ count: 1 })) },
+    outboxDelivery: {
+      createMany: vi.fn(async (_args: OutboxDeliveryCreateManyArgs) => ({ count: 1 })),
+    },
     outboxEvent: { update: vi.fn(applyEventUpdate), create: outboxCreate },
     claim,
   };
   const db = {
     outboxEvent: {
-      findMany: vi.fn(async () => events.filter((e) => e.publishedAt === null && e.parkedAt === null)),
+      findMany: vi.fn(async () =>
+        events.filter((e) => e.publishedAt === null && e.parkedAt === null),
+      ),
       update: vi.fn(applyEventUpdate),
       create: outboxCreate, // E：ClaimExpired 事件
     },
@@ -122,7 +182,9 @@ function makeDb(events: EvRow[], deliveries: DeliveryRow[] = []) {
     claim,
     // interactive（fn）与批量（数组）两种形态都支持（E 用数组原子成对）。
     $transaction: vi.fn(async (arg: unknown) =>
-      Array.isArray(arg) ? Promise.all(arg) : (arg as (t: typeof tx) => Promise<unknown>)(tx),
+      Array.isArray(arg)
+        ? Promise.all(arg)
+        : (arg as (t: typeof tx) => Promise<unknown>)(tx),
     ),
   };
   return { db, tx };
@@ -137,9 +199,19 @@ function makeTemporal(startImpl?: () => Promise<unknown>) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyService = any;
 
-function makeService(db: unknown, temporal: unknown, fetchFn?: unknown): AnyService {
+function makeService(
+  db: unknown,
+  temporal: unknown,
+  fetchFn?: unknown,
+  singleWriter: unknown = {
+    runExclusive: async (work: () => Promise<unknown>) => ({
+      acquired: true,
+      value: await work(),
+    }),
+  },
+): AnyService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new (OutboxRelayService as any)(temporal, db, fetchFn ?? vi.fn());
+  return new (OutboxRelayService as any)(temporal, db, fetchFn ?? vi.fn(), singleWriter);
 }
 
 beforeEach(() => {
@@ -167,7 +239,9 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
       skipDuplicates: boolean;
     };
     expect(arg.skipDuplicates).toBe(true);
-    expect(arg.data).toEqual([{ workspaceId: WS, eventId: ev.eventId, sink: 'saas' }]);
+    expect(arg.data).toEqual([
+      { workspaceId: WS, eventId: ev.eventId, sink: 'saas' },
+    ]);
     // published 同事务置位
     expect(tx.outboxEvent.update).toHaveBeenCalledTimes(1);
     expect(ev.publishedAt).toBeInstanceOf(Date);
@@ -259,7 +333,9 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
       // 旧代码：CompanyProfileCreated/DiscoveryRunRequested 无 catch → dispatch 失败不标 published
       //（每 2s 重试直到实例结束，日志风暴 + 假积压）→ 此断言 RED。
       expect(ev.publishedAt, `${eventType} 应视为已处理`).toBeInstanceOf(Date);
-      expect(logSpy.mock.calls.some((c) => String(c[0]).includes('merged'))).toBe(true);
+      expect(
+        logSpy.mock.calls.some((c) => String(c[0]).includes('merged')),
+      ).toBe(true);
     }
   });
 
@@ -270,7 +346,7 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
       publishedAt: null,
     });
     const temporal = makeTemporal(async () => {
-      throw new Error('temporal down');
+      throw new Error(SENSITIVE_EXCEPTION_MESSAGE);
     });
     const { db } = makeDb([ev]);
     const svc = makeService(db, temporal);
@@ -280,6 +356,10 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
 
     expect(ev.publishedAt).toBeNull();
     expect(errSpy).toHaveBeenCalled();
+    const logged = errSpy.mock.calls.flat().join(' ');
+    expect(logged).toContain('"code":"INTERNAL_DISPATCH_FAILED"');
+    expect(logged).toContain(sha256Token(SENSITIVE_EXCEPTION_MESSAGE));
+    expectNoSensitiveExceptionData(logged);
   });
 
   it('未注册类型 → parkedAt 置位、不标 published、不建 delivery、error 日志（大声）', async () => {
@@ -309,6 +389,10 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
     await svc.routeEvent(ev);
 
     expect(temporal.client.workflow.start).toHaveBeenCalledTimes(1);
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      'qualifyWorkflow',
+      expect.objectContaining({ taskQueue: ACQUISITION_TASK_QUEUE }),
+    );
     expect(ev.publishedAt).toBeInstanceOf(Date);
     // internal command 不进交付账本
     expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
@@ -359,6 +443,7 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
     expect(temporal.client.workflow.start).toHaveBeenCalledWith(
       ASSET_OBJECT_CLEANUP_WORKFLOW,
       expect.objectContaining({
+        taskQueue: MAINTENANCE_TASK_QUEUE,
         workflowId: ev.eventId,
         args: [
           {
@@ -473,6 +558,58 @@ describe('tick — 轮询条件（parked 不毒化轮询）', () => {
       expect.objectContaining({ where: { publishedAt: null, parkedAt: null } }),
     );
   });
+
+  it('非 advisory-lock holder 的 replica 不扫描、路由或派送', async () => {
+    const ev = makeEvent();
+    const { db, tx } = makeDb([ev]);
+    const lock = {
+      runExclusive: vi.fn(async () => ({ acquired: false })),
+    };
+    const svc = makeService(db, makeTemporal(), undefined, lock);
+
+    await svc.tick();
+
+    expect(lock.runExclusive).toHaveBeenCalledTimes(1);
+    expect(db.outboxEvent.findMany).not.toHaveBeenCalled();
+    expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
+    expect(db.outboxDelivery.findMany).not.toHaveBeenCalled();
+  });
+
+  it('只有 lock holder 执行完整 tick body', async () => {
+    const ev = makeEvent();
+    const { db, tx } = makeDb([ev]);
+    const lock = {
+      runExclusive: vi.fn(async (work: () => Promise<unknown>) => ({
+        acquired: true,
+        value: await work(),
+      })),
+    };
+    const svc = makeService(db, makeTemporal(), undefined, lock);
+
+    await svc.tick();
+
+    expect(db.outboxEvent.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.outboxDelivery.createMany).toHaveBeenCalledTimes(1);
+    expect(ev.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it('relay tick 异常日志只含闭合 code + 稳定 SHA256 token，不含原始异常数据', async () => {
+    const { db } = makeDb([]);
+    const lock = {
+      runExclusive: vi.fn(async () => {
+        throw new Error(SENSITIVE_EXCEPTION_MESSAGE);
+      }),
+    };
+    const svc = makeService(db, makeTemporal(), undefined, lock);
+    const errSpy = vi.spyOn(svc['logger'], 'error');
+
+    await svc.tick();
+
+    const logged = errSpy.mock.calls.flat().join(' ');
+    expect(logged).toContain('"code":"RELAY_TICK_FAILED"');
+    expect(logged).toContain(sha256Token(SENSITIVE_EXCEPTION_MESSAGE));
+    expectNoSensitiveExceptionData(logged);
+  });
 });
 
 describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
@@ -496,11 +633,11 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
     };
   }
 
-  const SECRET = 'verify-hmac-secret';
+  const WEBHOOK_TEST_KEY = ['verify', 'hmac', 'fixture'].join('-');
 
   beforeEach(() => {
     process.env.SAAS_WEBHOOK_URL = URL;
-    process.env.SAAS_WEBHOOK_SECRET = SECRET;
+    process.env.SAAS_WEBHOOK_SECRET = WEBHOOK_TEST_KEY;
   });
 
   it('2xx → status=ACKED、deliveredAt/ackedAt 置位', async () => {
@@ -560,7 +697,11 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
 
     expect(d.status).toBe('PENDING');
     expect(d.attempts).toBe(1);
-    expect(d.lastError).toContain('500');
+    expect(JSON.parse(d.lastError ?? '')).toEqual({
+      code: 'WEBHOOK_HTTP_ERROR',
+      httpStatus: 500,
+      token: sha256Token('HTTP 500'),
+    });
     // 2^1 × 30s = 60s
     expect(d.nextAttemptAt?.getTime()).toBe(NOW.getTime() + 60_000);
   });
@@ -577,10 +718,12 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
     expect(d.nextAttemptAt?.getTime()).toBe(NOW.getTime() + 3_600_000);
   });
 
-  it('第 10 次失败 → status=DEAD（DLQ）+ error 日志', async () => {
+  it('第 10 次网络失败 → DEAD；持久值与 DLQ 日志均不含原始 message/URL/body/secret', async () => {
     const d = makeDelivery({ attempts: 9 });
     const { db } = makeDb([], [d]);
-    const fetchMock = vi.fn(async () => ({ ok: false, status: 502 }));
+    const fetchMock = vi.fn(async () => {
+      throw new Error(SENSITIVE_EXCEPTION_MESSAGE);
+    });
     const svc = makeService(db, makeTemporal(), fetchMock);
     const errSpy = vi.spyOn(svc['logger'], 'error');
 
@@ -589,22 +732,45 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
     expect(d.attempts).toBe(10);
     expect(d.status).toBe('DEAD');
     expect(errSpy).toHaveBeenCalled();
+    expect(JSON.parse(d.lastError ?? '')).toEqual({
+      code: 'WEBHOOK_NETWORK_ERROR',
+      token: sha256Token(SENSITIVE_EXCEPTION_MESSAGE),
+    });
+    const logged = errSpy.mock.calls.flat().join(' ');
+    expect(logged).toContain('"code":"WEBHOOK_NETWORK_ERROR"');
+    expect(logged).toContain(sha256Token(SENSITIVE_EXCEPTION_MESSAGE));
+    expectNoSensitiveExceptionData(d.lastError);
+    expectNoSensitiveExceptionData(logged);
   });
 
-  it('fetch 异常（网络错）→ 与失败同路径：attempts+1、lastError 截断 500 字符', async () => {
-    const d = makeDelivery();
-    const { db } = makeDb([], [d]);
+  it('相同网络异常 → 持久化相同闭合 code + 稳定 SHA256 token，不保留 ECONNREFUSED 明文', async () => {
+    const first = makeDelivery();
+    const second = makeDelivery({
+      id: 11n,
+      eventId: 'aaaaaaaa-0000-0000-0000-000000000002',
+      event: makeEvent({
+        id: 2n,
+        eventId: 'aaaaaaaa-0000-0000-0000-000000000002',
+      }),
+    });
+    const { db } = makeDb([], [first, second]);
     const fetchMock = vi.fn(async () => {
-      throw new Error('ECONNREFUSED ' + 'x'.repeat(600));
+      throw new Error(SENSITIVE_EXCEPTION_MESSAGE);
     });
     const svc = makeService(db, makeTemporal(), fetchMock);
 
     await svc.pumpWebhookDeliveries(NOW);
 
-    expect(d.attempts).toBe(1);
-    expect(d.lastError).toContain('ECONNREFUSED');
-    expect((d.lastError ?? '').length).toBeLessThanOrEqual(500);
-    expect(d.status).toBe('PENDING');
+    expect(first.attempts).toBe(1);
+    expect(second.attempts).toBe(1);
+    expect(first.lastError).toBe(second.lastError);
+    expect(JSON.parse(first.lastError ?? '')).toEqual({
+      code: 'WEBHOOK_NETWORK_ERROR',
+      token: sha256Token(SENSITIVE_EXCEPTION_MESSAGE),
+    });
+    expectNoSensitiveExceptionData(first.lastError);
+    expect(first.status).toBe('PENDING');
+    expect(second.status).toBe('PENDING');
   });
 
   it('G：请求带 x-timestamp + x-signature，且签名可用同 secret 复算验证（HMAC_SHA256(ts.body)）', async () => {
@@ -615,9 +781,14 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
 
     await svc.pumpWebhookDeliveries(NOW);
 
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, { body: string; headers: Record<string, string> }];
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      { body: string; headers: Record<string, string> },
+    ];
     expect(init.headers['x-timestamp']).toBe(NOW.toISOString());
-    const expected = createHmac('sha256', SECRET).update(`${init.headers['x-timestamp']}.${init.body}`).digest('hex');
+    const expected = createHmac('sha256', WEBHOOK_TEST_KEY)
+      .update(`${init.headers['x-timestamp']}.${init.body}`)
+      .digest('hex');
     expect(init.headers['x-signature']).toBe(`sha256=${expected}`);
   });
 
@@ -658,12 +829,14 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
     // 若无乐观锁，会把 attempts 写回 9 并再退避一次（丢失更新）；attempts=9 快照则会误判 DEAD。
     const d = makeDelivery({ attempts: 9, status: 'ACKED' }); // 且已被 ACK
     const { db } = makeDb([], [d]);
-    const svc = makeService(db, makeTemporal(), vi.fn());
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500 }));
+    const svc = makeService(db, makeTemporal(), fetchMock);
     const errSpy = vi.spyOn(svc['logger'], 'error');
 
-    await svc['recordWebhookFailure']({ id: d.id, eventId: d.eventId, attempts: 9 }, 'HTTP 500', NOW);
+    await svc.pumpWebhookDeliveries(NOW);
 
     // 旧代码：无条件 update → ACKED 被覆写成 DEAD + error 日志 → RED
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(d.status).toBe('ACKED');
     expect(d.attempts).toBe(9);
     expect(errSpy).not.toHaveBeenCalled();
@@ -672,15 +845,41 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
 
 describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对（E）', () => {
   const CLAIMS = [
-    { id: 'c-1', workspaceId: WS, companyId: 'co-1', factKey: 'quality_certifications', type: 'certification', version: 4 },
-    { id: 'c-2', workspaceId: WS, companyId: 'co-2', factKey: 'quality_certifications', type: 'certification', version: 7 },
+    {
+      id: 'c-1',
+      workspaceId: WS,
+      companyId: 'co-1',
+      factKey: 'quality_certifications',
+      type: 'certification',
+      version: 4,
+    },
+    {
+      id: 'c-2',
+      workspaceId: WS,
+      companyId: 'co-2',
+      factKey: 'quality_certifications',
+      type: 'certification',
+      version: 7,
+    },
   ];
+
+  it('a newly elected replica performs its first sweep without needing 30 local lock wins', async () => {
+    const first = makeDb([]);
+    const second = makeDb([]);
+    const firstService = makeService(first.db, makeTemporal());
+    const secondService = makeService(second.db, makeTemporal());
+
+    await firstService['expireDueClaims']();
+    await secondService['expireDueClaims']();
+
+    expect(first.db.claim.findMany).toHaveBeenCalledTimes(1);
+    expect(second.db.claim.findMany).toHaveBeenCalledTimes(1);
+  });
 
   it('每条 claim 的 CAS + 事件 create 走同一个 interactive transaction', async () => {
     const { db } = makeDb([]);
     db.claim.findMany = vi.fn(async () => CLAIMS.slice(0, 1));
     const svc = makeService(db, makeTemporal());
-    svc['expireCounter'] = 29; // 下一次调用命中 %30===0 的扫描轮
 
     await svc['expireDueClaims']();
 
@@ -719,7 +918,6 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     db.claim.findMany = vi.fn(async () => CLAIMS.slice(0, 1));
     db.claim.updateMany = vi.fn(async () => ({ count: 0 }));
     const svc = makeService(db, makeTemporal());
-    svc['expireCounter'] = 29;
 
     await svc['expireDueClaims']();
 
@@ -727,23 +925,30 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     expect(db.outboxEvent.create).not.toHaveBeenCalled();
   });
 
-  it('单条失败不阻断本批：第一条事务抛错 → 第二条仍处理 + error 日志', async () => {
+  it('单条失败不阻断本批；error 日志只含闭合 code + token，不含原始异常', async () => {
     const { db } = makeDb([]);
     db.claim.findMany = vi.fn(async () => CLAIMS);
-    db.claim.updateMany = vi.fn(async ({ where }: { where: { id: string } }) => {
-      if (where.id === 'c-1') throw new Error('deadlock');
+    db.claim.updateMany = vi.fn(async ({ where }: ClaimUpdateManyArgs) => {
+      if (where.id === 'c-1') throw new Error(SENSITIVE_EXCEPTION_MESSAGE);
       return { count: 1 };
     });
     const svc = makeService(db, makeTemporal());
-    svc['expireCounter'] = 29;
     const errSpy = vi.spyOn(svc['logger'], 'error');
 
     await svc['expireDueClaims']();
 
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes('c-1'))).toBe(true);
+    const logged = errSpy.mock.calls.flat().join(' ');
+    expect(logged).toContain('"code":"CLAIM_EXPIRY_FAILED"');
+    expect(logged).toContain(sha256Token(SENSITIVE_EXCEPTION_MESSAGE));
+    expectNoSensitiveExceptionData(logged);
     expect(db.claim.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: 'c-2', status: 'APPROVED', version: 7 }),
+        where: expect.objectContaining({
+          id: 'c-2',
+          status: 'APPROVED',
+          version: 7,
+        }),
       }),
     );
   });

@@ -10,6 +10,7 @@ import { CompanyController } from '../company/company.controller';
 import { DeletionController } from '../compliance/deletion.controller';
 import { DiscoveryController } from '../discovery/discovery.controller';
 import { EventsController } from '../events/events.controller';
+import { HealthController } from '../health/health.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
 import { resolveRuntimeAdmission } from '../runtime/runtime-admission';
@@ -26,6 +27,7 @@ const CONTROLLERS = {
   DeletionController,
   DiscoveryController,
   EventsController,
+  HealthController,
   IcpController,
   LeadController,
 } as const;
@@ -69,14 +71,33 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
     for (const [controllerName, controller] of Object.entries(CONTROLLERS)) {
       const inventory = ACQUISITION_CONTROLLER_SCOPE_INVENTORY[controllerName];
       expect(inventory, `${controllerName} is missing from the inventory`).toBeDefined();
-      expect(
-        Reflect.getMetadata(GUARDS_METADATA, controller),
-        `${controllerName} must establish signed context with AuthGuard`,
-      ).toContain(AuthGuard);
-      expect(Object.keys(inventory.operations).sort()).toEqual(routeMethods(controller));
+      if (controllerName === 'HealthController') {
+        expect(Reflect.getMetadata(GUARDS_METADATA, controller)).toBeUndefined();
+        expect(Object.keys(inventory.operations).sort()).toEqual(['ops']);
+        expect(routeMethods(controller)).toEqual([
+          'build',
+          'check',
+          'db',
+          'live',
+          'ops',
+          'ready',
+        ]);
+      } else {
+        expect(
+          Reflect.getMetadata(GUARDS_METADATA, controller),
+          `${controllerName} must establish signed context with AuthGuard`,
+        ).toContain(AuthGuard);
+        expect(Object.keys(inventory.operations).sort()).toEqual(routeMethods(controller));
+      }
 
       for (const [operation, expectedScopes] of Object.entries(inventory.operations)) {
         const handler = controller.prototype[operation as keyof typeof controller.prototype];
+        if (controllerName === 'HealthController') {
+          expect(
+            Reflect.getMetadata(GUARDS_METADATA, handler),
+            'HealthController.ops must establish signed context with AuthGuard',
+          ).toContain(AuthGuard);
+        }
         expect(
           Reflect.getMetadata(REQUIRED_AUTH_SCOPES, handler),
           `${controllerName}.${operation} is missing @RequireScopes`,
@@ -145,5 +166,15 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
     );
     expect(used.has('acquisition:label:write')).toBe(false);
     expect(used.has('acquisition:identity:review')).toBe(false);
+  });
+
+  it('keeps public health probes unauthenticated while inventorying only the restricted ops route', () => {
+    expect(
+      ACQUISITION_CONTROLLER_SCOPE_INVENTORY.HealthController.operations,
+    ).toEqual({ ops: ['ops:read'] });
+    expect(Reflect.getMetadata(GUARDS_METADATA, HealthController)).toBeUndefined();
+    expect(
+      Reflect.getMetadata(GUARDS_METADATA, HealthController.prototype.ops),
+    ).toContain(AuthGuard);
   });
 });

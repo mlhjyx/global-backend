@@ -5,7 +5,7 @@ import {
 } from "@temporalio/client";
 import { describe, expect, it, vi } from "vitest";
 import type { TemporalClient } from "../temporal/temporal.client";
-import { UNDERSTANDING_TASK_QUEUE } from "../temporal/understanding.constants";
+import { SITE_BUILDER_TASK_QUEUE } from "../temporal/worker-topology";
 import { TemporalDemoV0Launcher } from "./temporal-demo-launcher";
 
 const INPUT = {
@@ -39,7 +39,7 @@ describe("TemporalDemoV0Launcher exactly-once ACK contract", () => {
       firstExecutionRunId: "temporal-run-1",
     });
     expect(start).toHaveBeenCalledWith("demoV0Workflow", {
-      taskQueue: UNDERSTANDING_TASK_QUEUE,
+      taskQueue: SITE_BUILDER_TASK_QUEUE,
       workflowId: WORKFLOW_ID,
       args: [INPUT],
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,

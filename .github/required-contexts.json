@@ -5,6 +5,7 @@
     "build · typecheck · test",
     "contracts · drift · lint · breaking",
     "gitleaks 密钥扫描",
+    "security · required gate",
     "governance · traceability · release",
     "nontechnical decision card freshness"
   ],
@@ -30,6 +31,11 @@
       "event": "pull_request"
     },
     {
+      "name": "security · required gate",
+      "workflow": ".github/workflows/security.yml",
+      "event": "pull_request"
+    },
+    {
       "name": "governance · traceability · release",
       "workflow": ".github/workflows/governance.yml",
       "event": "pull_request"
@@ -43,6 +49,7 @@
   "workflow_runtime_requirements": [
     { "workflow": ".github/workflows/ci.yml", "node_major": 22 },
     { "workflow": ".github/workflows/governance.yml", "node_major": 22 },
+    { "workflow": ".github/workflows/security.yml", "node_major": 22 },
     { "workflow": ".github/workflows/pr-decision-card.yml", "node_major": 22 }
   ],
   "workflow_action_pins": [
@@ -78,9 +85,33 @@
     },
     {
       "workflow": ".github/workflows/security.yml",
+      "action": "pnpm/action-setup",
+      "revision": "0ebf47130e4866e96fce0953f49152a61190b271",
+      "version": "v6.0.9"
+    },
+    {
+      "workflow": ".github/workflows/security.yml",
+      "action": "actions/setup-node",
+      "revision": "820762786026740c76f36085b0efc47a31fe5020",
+      "version": "v7"
+    },
+    {
+      "workflow": ".github/workflows/security.yml",
       "action": "gitleaks/gitleaks-action",
       "revision": "e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e",
       "version": "v3"
+    },
+    {
+      "workflow": ".github/workflows/integration-contracts.yml",
+      "action": "actions/checkout",
+      "revision": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "version": "v7"
+    },
+    {
+      "workflow": ".github/workflows/integration-contracts.yml",
+      "action": "actions/setup-node",
+      "revision": "820762786026740c76f36085b0efc47a31fe5020",
+      "version": "v7"
     },
     {
       "workflow": ".github/workflows/governance.yml",
@@ -132,9 +163,15 @@
       "/docs/evidence/runtime/",
       "/docs/releases/",
       "/docs/templates/release-bundle.template.json",
+      "/config/api-coverage-policy.json",
+      "/config/container-image-lock.json",
+      "/config/integration-context-matrix.json",
+      "/docs/backend/security-recovery-governance.md",
+      "/docs/operations/recovery-rehearsal-manifest.json",
       "/package.json",
       "/scripts/governance-*.mjs",
       "/scripts/pr-decision-card*.mjs",
+      "/scripts/security-recovery-governance*.mjs",
       "/scripts/verify-docs.mjs",
       "/scripts/worktree-inventory.mjs"
     ]

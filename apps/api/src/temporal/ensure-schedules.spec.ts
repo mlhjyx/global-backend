@@ -93,7 +93,7 @@ describe('platform schedule immutable runtime boundary', () => {
     );
 
     expect(scheduleSource).not.toContain('process.env');
-    expect(workerSource).toContain('ensurePlatformSchedules(runtime)');
+    expect(workerSource).toMatch(/ensurePlatformSchedules\(runtime,\s*\{/u);
   });
 
   it('connects and creates every schedule from the resolved snapshot', async () => {

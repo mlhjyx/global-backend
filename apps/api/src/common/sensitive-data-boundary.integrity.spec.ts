@@ -396,9 +396,13 @@ describe("sensitive data boundary integration", () => {
     const deletionActivities = source("temporal/deletion.activities.ts");
     const toolBroker = source("tools/tool-broker.ts");
 
-    for (const runtimeSource of [signalIngest, acquisition, toolBroker]) {
+    for (const runtimeSource of [acquisition, toolBroker]) {
       expect(runtimeSource).toMatch(/diagnosticErrorToken\(/);
     }
+    // Signal ingestion persists a closed machine code instead of any exception-
+    // derived text, which is stricter than retaining a one-way diagnostic token.
+    expect(signalIngest).toContain("'SIGNAL_FETCH_FAILED'");
+    expect(signalIngest).not.toMatch(/diagnosticErrorToken\(err\)/);
     expect(signalIngest).not.toMatch(/const msg = String\(err\)/);
     expect(acquisition).not.toMatch(/error:\s*String\(err\)/);
     expect(toolBroker).not.toMatch(/this\.trace\([^;]+String\(err\)\.slice/s);

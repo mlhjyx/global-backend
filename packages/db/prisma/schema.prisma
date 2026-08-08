@@ -21,9 +21,10 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  companyProfiles  CompanyProfile[]
-  outboxEvents     OutboxEvent[]
-  outboxDeliveries OutboxDelivery[]
+  companyProfiles           CompanyProfile[]
+  outboxEvents              OutboxEvent[]
+  outboxDeliveries          OutboxDelivery[]
+  acquisitionBudgetAccounts AcquisitionBudgetAccount[]
 
   @@map("workspace")
 }
@@ -68,6 +69,89 @@ model UsageLedger {
   @@index([workspaceId])
   @@index([workspaceId, resourceType])
   @@map("usage_ledger")
+}
+
+/// Acquisition/provider execution authorization. Unlike SiteBuildBudget this
+/// account is target-exact and multi-dimensional; Site Builder cost semantics
+/// remain owned by the separate SiteBuild* models.
+model AcquisitionBudgetAccount {
+  id                String    @id @db.VarChar(80)
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  runId             String    @map("run_id") @db.VarChar(200)
+  purpose           String    @db.VarChar(80)
+  targetKind        String    @map("target_kind") @db.VarChar(16)
+  targetId          String    @map("target_id") @db.VarChar(200)
+  currency          String    @db.Char(3)
+  billingUnit       String    @map("billing_unit") @db.VarChar(32)
+  requestLimit      BigInt    @map("request_limit")
+  callLimit         BigInt    @map("call_limit")
+  recordLimit       BigInt    @map("record_limit")
+  modelCallLimit    BigInt    @map("model_call_limit")
+  costLimit         BigInt    @map("cost_limit")
+  requestReserved   BigInt    @default(0) @map("request_reserved")
+  callReserved      BigInt    @default(0) @map("call_reserved")
+  recordReserved    BigInt    @default(0) @map("record_reserved")
+  modelCallReserved BigInt    @default(0) @map("model_call_reserved")
+  costReserved      BigInt    @default(0) @map("cost_reserved")
+  requestSettled    BigInt    @default(0) @map("request_settled")
+  callSettled       BigInt    @default(0) @map("call_settled")
+  recordSettled     BigInt    @default(0) @map("record_settled")
+  modelCallSettled  BigInt    @default(0) @map("model_call_settled")
+  costSettled       BigInt    @default(0) @map("cost_settled")
+  status            String    @default("ACTIVE") @db.VarChar(16)
+  authorizationHash String    @map("authorization_hash") @db.Char(64)
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(3)
+  exhaustedAt       DateTime? @map("exhausted_at")
+  frozenAt          DateTime? @map("frozen_at")
+  freezeReason      String?   @map("freeze_reason") @db.VarChar(200)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  workspace    Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "acquisition_budget_account_workspace_fkey")
+  reservations AcquisitionBudgetReservation[]
+
+  @@unique([id, workspaceId], map: "acquisition_budget_account_id_workspace_key")
+  @@index([workspaceId, runId, status], map: "acquisition_budget_account_workspace_run_status_idx")
+  @@index([workspaceId, expiresAt], map: "acquisition_budget_account_workspace_expiry_idx")
+  @@map("acquisition_budget_account")
+}
+
+/// One physical acquisition reservation. The unique identity includes every
+/// authorization dimension; payload_hash rejects a different request/maxima
+/// replay under that identity.
+model AcquisitionBudgetReservation {
+  id                   String    @id @db.VarChar(68)
+  accountId            String    @map("account_id") @db.VarChar(80)
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  runId                String    @map("run_id") @db.VarChar(200)
+  purpose              String    @db.VarChar(80)
+  targetKind           String    @map("target_kind") @db.VarChar(16)
+  targetId             String    @map("target_id") @db.VarChar(200)
+  executionId          String    @map("execution_id") @db.VarChar(240)
+  attempt              Int
+  idempotencyKey       String    @unique @map("idempotency_key") @db.Char(64)
+  requestFingerprint   String    @map("request_fingerprint") @db.Char(64)
+  payloadHash          String    @map("payload_hash") @db.Char(64)
+  settlementHash       String?   @map("settlement_hash") @db.Char(64)
+  maxRequestCount      BigInt    @map("max_request_count")
+  maxCallCount         BigInt    @map("max_call_count")
+  maxRecordCount       BigInt    @map("max_record_count")
+  maxModelCallCount    BigInt    @map("max_model_call_count")
+  maxCostMinor         BigInt    @map("max_cost_minor")
+  actualRequestCount   BigInt?   @map("actual_request_count")
+  actualCallCount      BigInt?   @map("actual_call_count")
+  actualRecordCount    BigInt?   @map("actual_record_count")
+  actualModelCallCount BigInt?   @map("actual_model_call_count")
+  actualCostMinor      BigInt?   @map("actual_cost_minor")
+  status               String    @default("RESERVED") @db.VarChar(16)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  settledAt            DateTime? @map("settled_at")
+
+  account AcquisitionBudgetAccount @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "acquisition_budget_reservation_account_fkey")
+
+  @@unique([workspaceId, runId, accountId, purpose, targetKind, targetId, executionId, attempt], map: "acq_budget_reservation_full_identity_key")
+  @@index([workspaceId, accountId, status], map: "acquisition_budget_reservation_account_status_idx")
+  @@map("acquisition_budget_reservation")
 }
 
 /// 幂等键（PRD 11.16）：POST 携带 Idempotency-Key 时，同 key 重放返回首个结果。
@@ -702,13 +786,87 @@ model SignalIngest {
   querySpec        Json     @map("query_spec") // 规范化查询参数（cpvCodes/countries/sinceDays…）
   recordsFetched   Int      @default(0) @map("records_fetched") // 外部 API 返回的原始记录数
   signalsUpserted  Int      @default(0) @map("signals_upserted") // 落进 source_signal 的行数（含更新）
-  status           String   @default("OK") // OK | ERROR
+  status           String   @default("PENDING") // PENDING | OK | ERROR
   error            String?
   fetchedAt        DateTime @default(now()) @map("fetched_at")
+  leaseOwner       String?  @map("lease_owner")
+  leaseToken       String?  @map("lease_token") @db.Uuid
+  leaseFence       Int      @default(0) @map("lease_fence")
+  leaseExpiresAt   DateTime? @map("lease_expires_at")
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  attempt          Int      @default(0)
 
   @@unique([providerKey, queryFingerprint, windowKey])
   @@index([fetchedAt])
+  @@index([status, leaseExpiresAt])
   @@map("signal_ingest")
+}
+
+/// Workflow lifecycle evidence. It stores only validated machine identifiers,
+/// bounded numeric statistics and error codes; workflow args/results/messages
+/// are structurally excluded. Each phase is an immutable append-only receipt.
+model WorkflowRunReceipt {
+  id              String   @id @default(uuid()) @db.Uuid
+  receiptKey      String   @unique @map("receipt_key")
+  workspaceId     String?  @map("workspace_id") @db.Uuid
+  workflowId      String   @map("workflow_id")
+  runId           String   @map("run_id") @db.Uuid
+  workflowType    String   @map("workflow_type")
+  taskQueue       String   @map("task_queue")
+  workerBuildSha  String   @map("worker_build_sha")
+  phase           String   // STARTED | COMPLETED | FAILED
+  stage           String
+  stats           Json
+  errorCode       String?  @map("error_code")
+  budgetTruncated Boolean  @default(false) @map("budget_truncated")
+  retryAttempt    Int      @map("retry_attempt")
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  @@index([workspaceId, recordedAt])
+  @@index([phase, recordedAt])
+  @@index([budgetTruncated, recordedAt])
+  @@map("workflow_run_receipt")
+}
+
+/// Current liveness for each worker process and task queue. This is deliberately
+/// mutable operational state (unlike receipts); app_user is read-only.
+model WorkerHeartbeat {
+  id                      String   @id @default(uuid()) @db.Uuid
+  workerInstanceId        String   @map("worker_instance_id") @db.Uuid
+  taskQueue               String   @map("task_queue")
+  workerBuildSha          String   @map("worker_build_sha")
+  status                  String   // POLLING | STOPPING
+  activityConcurrency     Int      @map("activity_concurrency")
+  workflowConcurrency     Int      @map("workflow_concurrency")
+  firstSeenAt             DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt              DateTime @map("last_seen_at")
+
+  @@unique([workerInstanceId, taskQueue])
+  @@index([taskQueue, lastSeenAt])
+  @@map("worker_heartbeat")
+}
+
+/// Append-only record of code-owned Temporal Schedule drift observations and
+/// repairs. Cadence and pause are ops-owned and therefore absent from the hash.
+model ScheduleDriftReceipt {
+  id             String   @id @default(uuid()) @db.Uuid
+  scheduleId     String   @map("schedule_id")
+  disposition    String   // CREATED | IN_SYNC | RECONCILED | FAILED
+  desiredHash    String   @map("desired_hash")
+  observedHash   String?  @map("observed_hash")
+  changedFields  Json     @map("changed_fields")
+  errorCode      String?  @map("error_code")
+  paused         Boolean?
+  nextActionAt   DateTime? @map("next_action_at")
+  missedCatchupCount Int? @map("missed_catchup_count")
+  skippedOverlapCount Int? @map("skipped_overlap_count")
+  workerBuildSha String   @map("worker_build_sha")
+  recordedAt     DateTime @default(now()) @map("recorded_at")
+
+  @@index([scheduleId, recordedAt])
+  @@index([disposition, recordedAt])
+  @@map("schedule_drift_receipt")
 }
 
 /// 一次发现执行（对应一个 READY 的查询计划）。

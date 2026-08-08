@@ -17,6 +17,14 @@
 
 唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会确认每个 context 在声明的 workflow 中以 job 名存在、该 workflow 订阅预期 PR event，并拒绝放宽 CODEOWNERS/review/history 保护的仓内政策。它还扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence 或 Release Bundle。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
 
+Security 必须以 `security · required gate` 聚合 secret scan、依赖回归、仓内 SAST 和 Compose/IaC；只要任一子 job 失败、取消或跳过，聚合门就失败。依赖门在同一次 CI 中对 exact base 和待合并结果分别执行只读 `pnpm audit`：新增 high/critical advisory、新增受影响路径或审计端点不可用都硬失败；base 已有的高危债务继续完整展示，但不冒充为当前 PR 引入。
+
+`build · typecheck · test` 只承担构建、ContractGraph、单元/纯合同测试、API 覆盖率与 renderer；`governance · traceability · release` 承担 `docs:verify`、memory-control 和 decision-card 合同。两者分开取证，避免文档漂移被 build 重复执行或一个绿色 job 隐藏另一个失败。`coverage:api` 是本地完整入口；CI 在同一 job 已 build/generate 后调用 `coverage:api:verify`，不重复构建。`code-intelligence:verify` 始终先跑 extractor tests 再检查全仓图，禁止只用一份看似 fresh 的派生图代替 extractor 测试。
+
+PostgreSQL/Temporal 仍不在 required contexts 中：当前 `integration-contracts.yml` 只是手动 fail-closed 模板，不执行真的可丢弃数据库或官方 Temporal test environment。在 allowlisted runner、隔离资源和真实命令全部实现前，不得把这两个名字加入外部 ruleset 或声称集成测试已覆盖。
+
+`nontechnical decision card integrity` 故意使用 `pull_request_target`、只 checkout 受信 default-branch base，并且只对目标为 default branch 的 PR 生成。堆叠 Draft PR 以前一层功能分支为 base 时，该 context 预期不存在；这不是通过，也不是可合并证据。每一层在改为直接目标 main 或进入 `merge-candidate` 后，必须针对当时 exact head 重跑决策卡、全部 required contexts 与独立 review。
+
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 
 1. 把清单中的全部 context 配为 required；

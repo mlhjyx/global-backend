@@ -4,6 +4,7 @@ import { registerBuiltinTools } from './builtin-tools';
 import { registerSourceTools } from './source-tools';
 import { ToolBroker, ToolTrace } from './tool-broker';
 import type { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
+import type { AcquisitionBudgetLedgerPort } from './acquisition-budget-ledger';
 
 /** source_policy 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type SourcePolicyDb = { sourcePolicy: PrismaClient['sourcePolicy'] };
@@ -39,6 +40,8 @@ export function buildToolBroker(deps?: {
   sourcePolicyReader?: SourcePolicyReader;
   traceRecorder?: (t: ToolTrace) => void;
   paidLedger?: SiteBuildCostLedger;
+  acquisitionBudget?: AcquisitionBudgetLedgerPort;
+  acquisitionBudgetMode?: 'legacy' | 'required';
 }): ToolBroker {
   const registry = registerSourceTools(registerBuiltinTools(new ToolRegistry()));
   const traceRecorder =
@@ -51,5 +54,7 @@ export function buildToolBroker(deps?: {
     sourcePolicyReader: deps?.sourcePolicyReader,
     traceRecorder,
     paidLedger: deps?.paidLedger,
+    acquisitionBudget: deps?.acquisitionBudget,
+    acquisitionBudgetMode: deps?.acquisitionBudgetMode,
   });
 }

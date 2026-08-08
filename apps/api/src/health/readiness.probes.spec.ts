@@ -11,6 +11,7 @@ import {
   DatabaseReadinessProbe,
   TemporalReadinessProbe,
   UnavailableProofReadinessProbe,
+  WorkerHeartbeatReadinessProbe,
 } from './readiness.probes';
 
 const MIGRATION_ENTRIES = Object.freeze([
@@ -232,7 +233,7 @@ describe('concrete readiness probes', () => {
     expect(checkSystemInfo).toHaveBeenCalledWith({ timeoutMs: 750, signal });
   });
 
-  it.each(['worker_heartbeat', 'outbox_relay', 'gateway_admission'] as const)(
+  it.each(['outbox_relay', 'gateway_admission'] as const)(
     'does not invent a proof source for %s',
     async (name) => {
       const probe = new UnavailableProofReadinessProbe(name);
@@ -243,4 +244,118 @@ describe('concrete readiness probes', () => {
       });
     },
   );
+
+  it('verifies durable fresh heartbeats for every expected queue at the exact API build', async () => {
+    const now = new Date('2026-08-08T10:00:00.000Z');
+    const findMany = vi.fn().mockResolvedValue(
+      ['understanding', 'acquisition', 'site-builder', 'maintenance'].map(
+        (taskQueue) => ({
+          taskQueue,
+          status: 'POLLING',
+          lastSeenAt: new Date(now.getTime() - 1_000),
+          workerBuildSha: 'a'.repeat(40),
+        }),
+      ),
+    );
+    const probe = new WorkerHeartbeatReadinessProbe(
+      { workerHeartbeat: { findMany } } as unknown as PrismaService,
+      runtime(),
+      { freshnessMs: 30_000, now: () => now },
+    );
+
+    await expect(probe.check()).resolves.toEqual({
+      status: 'PASS',
+      code: 'WORKER_HEARTBEAT_VERIFIED',
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        taskQueue: {
+          in: ['understanding', 'acquisition', 'site-builder', 'maintenance'],
+        },
+        status: 'POLLING',
+        lastSeenAt: { gte: new Date('2026-08-08T09:59:30.000Z') },
+      },
+      orderBy: { lastSeenAt: 'desc' },
+      take: 256,
+      select: {
+        taskQueue: true,
+        status: true,
+        lastSeenAt: true,
+        workerBuildSha: true,
+      },
+    });
+  });
+
+  it.each([
+    [
+      'stale heartbeat',
+      {
+        taskQueue: 'maintenance',
+        status: 'POLLING',
+        lastSeenAt: new Date('2026-08-08T09:00:00.000Z'),
+        workerBuildSha: 'a'.repeat(40),
+      },
+    ],
+    [
+      'wrong worker build',
+      {
+        taskQueue: 'maintenance',
+        status: 'POLLING',
+        lastSeenAt: new Date('2026-08-08T09:59:59.000Z'),
+        workerBuildSha: 'b'.repeat(40),
+      },
+    ],
+  ] as const)('fails closed for %s without returning worker identifiers', async (_case, bad) => {
+    const now = new Date('2026-08-08T10:00:00.000Z');
+    const rows = ['understanding', 'acquisition', 'site-builder'].map(
+      (taskQueue) => ({
+        taskQueue,
+        status: 'POLLING',
+        lastSeenAt: new Date(now.getTime() - 1_000),
+        workerBuildSha: 'a'.repeat(40),
+      }),
+    );
+    const probe = new WorkerHeartbeatReadinessProbe(
+      {
+        workerHeartbeat: { findMany: vi.fn().mockResolvedValue([...rows, bad]) },
+      } as unknown as PrismaService,
+      runtime(),
+      { freshnessMs: 30_000, now: () => now },
+    );
+
+    const result = await probe.check();
+    expect(result).toEqual({
+      status: 'FAIL',
+      code: 'WORKER_HEARTBEAT_NOT_READY',
+    });
+    expect(JSON.stringify(result)).not.toMatch(/maintenance|aaaa|bbbb/iu);
+  });
+
+  it('rejects an unsafe worker freshness window before reading durable state', () => {
+    expect(
+      () =>
+        new WorkerHeartbeatReadinessProbe(
+          {
+            workerHeartbeat: { findMany: vi.fn() },
+          } as unknown as PrismaService,
+          runtime(),
+          { freshnessMs: 999 },
+        ),
+    ).toThrow('INVALID_WORKER_HEARTBEAT_READINESS_CONFIG');
+  });
+
+  it('fails closed on an invalid observation clock without reading heartbeats', async () => {
+    const findMany = vi.fn();
+    const probe = new WorkerHeartbeatReadinessProbe(
+      { workerHeartbeat: { findMany } } as unknown as PrismaService,
+      runtime(),
+      { freshnessMs: 30_000, now: () => new Date(Number.NaN) },
+    );
+
+    await expect(probe.check()).resolves.toEqual({
+      status: 'FAIL',
+      code: 'WORKER_HEARTBEAT_NOT_READY',
+    });
+    expect(findMany).not.toHaveBeenCalled();
+  });
 });

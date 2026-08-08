@@ -30,6 +30,7 @@ jobs:
     # pull_request_target migration deadlock before the base workflow merges.
     name: nontechnical decision card freshness
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -1,6 +1,7 @@
 // Shared identifiers — no @temporalio imports, so this is safe to import from
 // both the workflow sandbox and normal Node code (the relay starts by name).
-// 单 worker 单队列跑获客主线的所有 workflow；量大后可按域拆队列。
+// Drain-only compatibility queue for histories started before the domain split.
+// New starts use worker-topology.ts and must not target this alias.
 export const UNDERSTANDING_TASK_QUEUE = 'understanding';
 export const UNDERSTANDING_WORKFLOW = 'understandingWorkflow';
 export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';

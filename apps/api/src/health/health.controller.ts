@@ -1,5 +1,12 @@
-import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
 import {
+  Controller,
+  Get,
+  HttpStatus,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
@@ -7,11 +14,20 @@ import {
 } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import type { Response } from 'express';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
+import { AuthGuard } from '../auth/auth.guard';
+import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
+import type { RequestContext } from '../auth/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   RuntimeIdentityService,
   type BuildHealthResponse,
 } from '../runtime/runtime-admission';
+import {
+  RuntimeOpsReadService,
+  type RuntimeOpsHttpSnapshot,
+} from '../runtime-ops/runtime-ops-read.service';
 import { ReadinessService, type ReadinessResponse } from './readiness.service';
 
 interface LivenessResponse {
@@ -135,6 +151,7 @@ const READINESS_SCHEMA: SchemaObject = {
               'DATABASE_REACHABLE_MIGRATION_UNVERIFIED',
               'TEMPORAL_REACHABLE',
               'WORKER_HEARTBEAT_VERIFIED',
+              'WORKER_HEARTBEAT_NOT_READY',
               'OUTBOX_RELAY_VERIFIED',
               'GATEWAY_ADMISSION_VERIFIED',
               'PROOF_SOURCE_UNAVAILABLE',
@@ -148,6 +165,181 @@ const READINESS_SCHEMA: SchemaObject = {
   },
 };
 
+const NON_NEGATIVE_INTEGER: SchemaObject = {
+  type: 'integer',
+  minimum: 0,
+};
+
+const RUNTIME_OPS_SCHEMA: SchemaObject = {
+  type: 'object',
+  required: [
+    'schemaVersion',
+    'observedAt',
+    'runtime',
+    'workspace',
+    'global',
+    'proof',
+  ],
+  additionalProperties: false,
+  properties: {
+    schemaVersion: { type: 'string', enum: ['runtime-ops/v1'] },
+    observedAt: { type: 'string', format: 'date-time' },
+    runtime: {
+      type: 'object',
+      required: [
+        'status',
+        'workers',
+        'schedules',
+        'workflows',
+        'signalIngest',
+      ],
+      additionalProperties: false,
+      properties: {
+        status: { type: 'string', enum: ['UNVERIFIED', 'DEGRADED'] },
+        workers: {
+          type: 'object',
+          required: ['expectedBuildSha', 'queues', 'observedBuildShas'],
+          additionalProperties: false,
+          properties: {
+            expectedBuildSha: { type: 'string' },
+            queues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['taskQueue', 'state'],
+                additionalProperties: false,
+                properties: {
+                  taskQueue: {
+                    type: 'string',
+                    enum: [
+                      'understanding',
+                      'acquisition',
+                      'site-builder',
+                      'maintenance',
+                    ],
+                  },
+                  state: {
+                    type: 'string',
+                    enum: [
+                      'POLLING',
+                      'STALE',
+                      'MISSING',
+                      'BUILD_MISMATCH',
+                    ],
+                  },
+                },
+              },
+            },
+            observedBuildShas: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+        },
+        schedules: {
+          type: 'object',
+          required: [
+            'expected',
+            'tracked',
+            'drifted',
+            'paused',
+            'late',
+            'staleEvidence',
+            'unobservable',
+            'missedCatchup',
+            'skippedOverlap',
+          ],
+          additionalProperties: false,
+          properties: {
+            expected: NON_NEGATIVE_INTEGER,
+            tracked: NON_NEGATIVE_INTEGER,
+            drifted: NON_NEGATIVE_INTEGER,
+            paused: NON_NEGATIVE_INTEGER,
+            late: NON_NEGATIVE_INTEGER,
+            staleEvidence: NON_NEGATIVE_INTEGER,
+            unobservable: NON_NEGATIVE_INTEGER,
+            missedCatchup: NON_NEGATIVE_INTEGER,
+            skippedOverlap: NON_NEGATIVE_INTEGER,
+          },
+        },
+        workflows: {
+          type: 'object',
+          required: ['failed24h', 'budgetTruncated24h'],
+          additionalProperties: false,
+          properties: {
+            failed24h: NON_NEGATIVE_INTEGER,
+            budgetTruncated24h: NON_NEGATIVE_INTEGER,
+          },
+        },
+        signalIngest: {
+          type: 'object',
+          required: ['pending', 'expiredLeases', 'errors'],
+          additionalProperties: false,
+          properties: {
+            pending: NON_NEGATIVE_INTEGER,
+            expiredLeases: NON_NEGATIVE_INTEGER,
+            errors: NON_NEGATIVE_INTEGER,
+          },
+        },
+      },
+    },
+    workspace: {
+      type: 'object',
+      required: ['outbox', 'acquisitionBudget'],
+      additionalProperties: false,
+      properties: {
+        outbox: {
+          type: 'object',
+          required: ['parked', 'dead'],
+          additionalProperties: false,
+          properties: {
+            parked: NON_NEGATIVE_INTEGER,
+            dead: NON_NEGATIVE_INTEGER,
+          },
+        },
+        acquisitionBudget: {
+          type: 'object',
+          required: ['exhausted', 'frozen', 'unknownSettlement'],
+          additionalProperties: false,
+          properties: {
+            exhausted: NON_NEGATIVE_INTEGER,
+            frozen: NON_NEGATIVE_INTEGER,
+            unknownSettlement: NON_NEGATIVE_INTEGER,
+          },
+        },
+      },
+    },
+    global: {
+      type: 'object',
+      required: ['suspendedSourcePolicies'],
+      additionalProperties: false,
+      properties: {
+        suspendedSourcePolicies: NON_NEGATIVE_INTEGER,
+      },
+    },
+    proof: {
+      type: 'object',
+      required: [
+        'outboxRelay',
+        'gatewayAdmission',
+        'providerConsecutiveZeroResults',
+      ],
+      additionalProperties: false,
+      properties: {
+        outboxRelay: { type: 'string', enum: ['UNVERIFIED'] },
+        gatewayAdmission: { type: 'string', enum: ['UNVERIFIED'] },
+        providerConsecutiveZeroResults: {
+          type: 'string',
+          enum: ['UNOBSERVABLE'],
+        },
+      },
+    },
+  },
+};
+
+const HEALTH_SCOPES =
+  ACQUISITION_CONTROLLER_SCOPE_INVENTORY.HealthController.operations;
+
 /** 基础设施探针：**不套统一信封**（LB/监控直读，见 common/envelope.ts 的定稿说明）。 */
 @ApiTags('System')
 @Controller('health')
@@ -156,6 +348,7 @@ export class HealthController {
     private readonly prisma: PrismaService,
     private readonly runtimeIdentity: RuntimeIdentityService,
     private readonly readiness: ReadinessService,
+    private readonly runtimeOps: RuntimeOpsReadService,
   ) {}
 
   @Get()
@@ -203,6 +396,18 @@ export class HealthController {
         : HttpStatus.SERVICE_UNAVAILABLE,
     );
     return result;
+  }
+
+  @Get('ops')
+  @ApiBearerAuth()
+  @RequireScopes(...HEALTH_SCOPES.ops)
+  @UseGuards(AuthGuard)
+  @ApiOperation({
+    summary: '受限运行态快照（聚合、无个人数据、保守证明状态）',
+  })
+  @ApiOkResponse({ schema: RUNTIME_OPS_SCHEMA })
+  async ops(@Ctx() ctx: RequestContext): Promise<RuntimeOpsHttpSnapshot> {
+    return this.runtimeOps.snapshotForWorkspace(ctx.workspaceId);
   }
 
   @Get('db')

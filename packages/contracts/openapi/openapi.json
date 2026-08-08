@@ -273,6 +273,7 @@
                               "DATABASE_REACHABLE_MIGRATION_UNVERIFIED",
                               "TEMPORAL_REACHABLE",
                               "WORKER_HEARTBEAT_VERIFIED",
+                              "WORKER_HEARTBEAT_NOT_READY",
                               "OUTBOX_RELAY_VERIFIED",
                               "GATEWAY_ADMISSION_VERIFIED",
                               "PROOF_SOURCE_UNAVAILABLE",
@@ -368,6 +369,7 @@
                               "DATABASE_REACHABLE_MIGRATION_UNVERIFIED",
                               "TEMPORAL_REACHABLE",
                               "WORKER_HEARTBEAT_VERIFIED",
+                              "WORKER_HEARTBEAT_NOT_READY",
                               "OUTBOX_RELAY_VERIFIED",
                               "GATEWAY_ADMISSION_VERIFIED",
                               "PROOF_SOURCE_UNAVAILABLE",
@@ -387,6 +389,321 @@
         "summary": "保守就绪门（所有必需证明均通过才返回 200）",
         "tags": [
           "System"
+        ]
+      }
+    },
+    "/api/v1/health/ops": {
+      "get": {
+        "operationId": "HealthController_ops_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "schemaVersion",
+                    "observedAt",
+                    "runtime",
+                    "workspace",
+                    "global",
+                    "proof"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "string",
+                      "enum": [
+                        "runtime-ops/v1"
+                      ]
+                    },
+                    "observedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "runtime": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "workers",
+                        "schedules",
+                        "workflows",
+                        "signalIngest"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "UNVERIFIED",
+                            "DEGRADED"
+                          ]
+                        },
+                        "workers": {
+                          "type": "object",
+                          "required": [
+                            "expectedBuildSha",
+                            "queues",
+                            "observedBuildShas"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "expectedBuildSha": {
+                              "type": "string"
+                            },
+                            "queues": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "taskQueue",
+                                  "state"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                  "taskQueue": {
+                                    "type": "string",
+                                    "enum": [
+                                      "understanding",
+                                      "acquisition",
+                                      "site-builder",
+                                      "maintenance"
+                                    ]
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "POLLING",
+                                      "STALE",
+                                      "MISSING",
+                                      "BUILD_MISMATCH"
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "observedBuildShas": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "schedules": {
+                          "type": "object",
+                          "required": [
+                            "expected",
+                            "tracked",
+                            "drifted",
+                            "paused",
+                            "late",
+                            "staleEvidence",
+                            "unobservable",
+                            "missedCatchup",
+                            "skippedOverlap"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "expected": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "tracked": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "drifted": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "paused": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "late": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "staleEvidence": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unobservable": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "missedCatchup": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "skippedOverlap": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        },
+                        "workflows": {
+                          "type": "object",
+                          "required": [
+                            "failed24h",
+                            "budgetTruncated24h"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "failed24h": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "budgetTruncated24h": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        },
+                        "signalIngest": {
+                          "type": "object",
+                          "required": [
+                            "pending",
+                            "expiredLeases",
+                            "errors"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "pending": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "expiredLeases": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "errors": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "workspace": {
+                      "type": "object",
+                      "required": [
+                        "outbox",
+                        "acquisitionBudget"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "outbox": {
+                          "type": "object",
+                          "required": [
+                            "parked",
+                            "dead"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "parked": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "dead": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        },
+                        "acquisitionBudget": {
+                          "type": "object",
+                          "required": [
+                            "exhausted",
+                            "frozen",
+                            "unknownSettlement"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "exhausted": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "frozen": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unknownSettlement": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "global": {
+                      "type": "object",
+                      "required": [
+                        "suspendedSourcePolicies"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "suspendedSourcePolicies": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "proof": {
+                      "type": "object",
+                      "required": [
+                        "outboxRelay",
+                        "gatewayAdmission",
+                        "providerConsecutiveZeroResults"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "outboxRelay": {
+                          "type": "string",
+                          "enum": [
+                            "UNVERIFIED"
+                          ]
+                        },
+                        "gatewayAdmission": {
+                          "type": "string",
+                          "enum": [
+                            "UNVERIFIED"
+                          ]
+                        },
+                        "providerConsecutiveZeroResults": {
+                          "type": "string",
+                          "enum": [
+                            "UNOBSERVABLE"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "受限运行态快照（聚合、无个人数据、保守证明状态）",
+        "tags": [
+          "System"
+        ],
+        "x-required-scopes": [
+          "ops:read"
         ]
       }
     },

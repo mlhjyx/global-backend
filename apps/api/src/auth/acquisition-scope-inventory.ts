@@ -79,11 +79,13 @@ export const ACQUISITION_CONTROLLER_SCOPE_INVENTORY = Object.freeze({
     create: scopes('compliance:manage'),
     get: scopes('compliance:manage'),
   }),
+  HealthController: controllerInventory('health/health.controller.ts', {
+    ops: scopes('ops:read'),
+  }),
 });
 
 /** Explicit boundary: System diagnostics and Site Builder need their own future scope design. */
 export const NON_ACQUISITION_CONTROLLER_EXEMPTIONS = Object.freeze([
-  'health/health.controller.ts',
   'whoami/whoami.controller.ts',
   'site-builder/assets.controller.ts',
   'site-builder/builds.controller.ts',

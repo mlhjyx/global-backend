@@ -7,7 +7,7 @@ import {
 } from '@temporalio/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { TemporalClient } from '../temporal/temporal.client';
-import { UNDERSTANDING_TASK_QUEUE } from '../temporal/understanding.constants';
+import { SITE_BUILDER_TASK_QUEUE } from '../temporal/worker-topology';
 import { refurbishWorkflowId } from './refurbish-launcher';
 import { TemporalRefurbishLauncher } from './temporal-refurbish-launcher';
 
@@ -47,7 +47,7 @@ describe('TemporalRefurbishLauncher ACK contract', () => {
       firstExecutionRunId: 'first-run',
     });
     expect(start).toHaveBeenCalledWith('refurbishWorkflow', {
-      taskQueue: UNDERSTANDING_TASK_QUEUE,
+      taskQueue: SITE_BUILDER_TASK_QUEUE,
       workflowId: WORKFLOW_ID,
       args: [INPUT],
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,

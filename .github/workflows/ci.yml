@@ -1,10 +1,11 @@
 name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
-# 55 型三断点视觉回归仅在渲染输出、其消费的契约或本工作流变更时运行；
-# 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终跑全量视觉门，避免路径过滤遗漏或运行器漂移长期未被发现。
-# 绿了才合。测试是纯单测（解析器/评分/身份解析等纯函数，无 DB/网络），故 CI 不需要 Postgres/服务。
-# 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 AGENTS.md §5「真实数据不用 sandbox」），不进 CI。
+# 真实 fixture Astro build、55 型三断点视觉回归和多语言 smoke 仅在渲染输出、
+# 其消费的契约、依赖或本工作流变更时运行；每日 03:17 UTC（11:17 中国标准时间）
+# 定时与手动触发始终跑全量重门，避免路径过滤遗漏或运行器漂移长期未被发现。
+# 本 workflow 只负责构建、单元/纯合同测试和覆盖率。文档/决策卡治理在 Governance workflow；
+# PostgreSQL/Temporal 的可丢弃集成环境在未实现前继续 fail-closed，不得由本 job 的绿色替代。
 # contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
 # pull_request 加 labeled/unlabeled：打/摘 `breaking-change-approved` label 要重估 breaking 门。
 
@@ -18,19 +19,24 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   renderer-visual-scope:
     name: renderer visual scope
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       run_visual: ${{ steps.scope.outputs.run_visual }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - id: scope
         name: Detect renderer visual-regression inputs
@@ -77,8 +83,11 @@ jobs:
     name: build · typecheck · test
     needs: renderer-visual-scope
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -91,19 +100,8 @@ jobs:
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
-      - name: Docs governance（structure · links · status · evidence）
-        run: pnpm docs:verify
-
-      - name: Memory control transaction tests
-        run: pnpm memory:test
-
-      - name: Nontechnical PR decision card tests
-        run: pnpm decision-card:test
-
       - name: ContractGraph extractor tests and deterministic full-repository gate
-        run: |
-          pnpm code-intelligence:test
-          pnpm code-intelligence:check
+        run: pnpm code-intelligence:verify
 
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
@@ -117,17 +115,29 @@ jobs:
       - name: Build（nest build = tsc 全量类型检查）
         run: pnpm --filter @global/api build
 
-      - name: Test（vitest 纯单测）
+      - name: Test
+        # The repository-wide 80% coverage ratchet is introduced by the
+        # dedicated coverage-closeout layer, after its deterministic tests and
+        # baseline are present. Earlier stacked PRs still run the complete API
+        # suite and must remain independently green.
         run: pnpm --filter @global/api test
 
-      - name: Renderer locale contract test
-        run: pnpm --filter @global/site-renderer test
+      - name: Renderer unit contract tests
+        run: pnpm --filter @global/site-renderer test:contracts
+
+      # fixture-build.spec.ts performs 64 real Astro builds. Keep it on the
+      # same fail-safe scope as visual regression: renderer/consumer contract,
+      # dependency and workflow changes, plus the daily/manual full baseline.
+      - name: Renderer fixture Astro build matrix
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
+        run: pnpm --filter @global/site-renderer test:fixtures
 
       - name: Renderer qualified component visual regression（375 · 768 · 1440）
         if: needs.renderer-visual-scope.outputs.run_visual == 'true'
         run: pnpm --filter @global/site-renderer test:visual
 
       - name: Renderer multilingual smoke build
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
         run: pnpm --filter @global/site-renderer build
         env:
           SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json
@@ -137,8 +147,11 @@ jobs:
   contracts:
     name: contracts · drift · lint · breaking
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 

@@ -100,4 +100,41 @@ describe('generated OpenAPI authorization inventory', () => {
     expect(schemas?.VerifyContactPointDto?.properties).not.toHaveProperty('allowPersonalWithoutBasis');
     expect(schemas?.GuessEmailsDto?.properties).not.toHaveProperty('allowPersonalWithoutBasis');
   });
+
+  it('publishes a bearer-protected, closed, non-PII health ops contract without protecting public probes', () => {
+    const document = buildOpenApi(app);
+    const ops = document.paths['/api/v1/health/ops']?.get as
+      | Record<string, unknown>
+      | undefined;
+    expect(ops?.security).toEqual([{ bearer: [] }]);
+    expect(ops?.['x-required-scopes']).toEqual(['ops:read']);
+    expect(ops?.parameters ?? []).toEqual([]);
+    expect(ops?.requestBody).toBeUndefined();
+    expect(document.paths['/api/v1/health/live']?.get?.security).toBeUndefined();
+    expect(document.paths['/api/v1/health/ready']?.get?.security).toBeUndefined();
+    expect(document.paths['/api/v1/health/build']?.get?.security).toBeUndefined();
+    expect(document.paths['/api/v1/health/db']?.get?.security).toBeUndefined();
+
+    const schema = (
+      ops?.responses as Record<
+        string,
+        { content?: Record<string, { schema?: Record<string, unknown> }> }
+      >
+    )?.['200']?.content?.['application/json']?.schema;
+    expect(schema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'schemaVersion',
+        'observedAt',
+        'runtime',
+        'workspace',
+        'global',
+        'proof',
+      ],
+    });
+    expect(JSON.stringify(schema)).not.toMatch(
+      /workspaceId|userId|eventId|workflowId|runId|accountId|payload|lastError|freezeReason|authorizationHash|personal/iu,
+    );
+  });
 });

@@ -1,0 +1,46 @@
+name: Integration context admission
+
+# Manual fail-closed template only. The fixed base has neither a CI-safe
+# PostgreSQL allowlist verifier nor a hermetic Temporal test environment.
+# PR required contexts must not be configured from this workflow until the
+# matrix changes to ENABLED with reviewed commands.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgresql-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Require an enabled disposable PostgreSQL verifier
+        run: >-
+          node scripts/security-recovery-governance.mjs integration
+          --matrix=config/integration-context-matrix.json
+          --require-ready
+
+  temporal-integration:
+    name: Temporal integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Require an enabled hermetic Temporal verifier
+        run: >-
+          node scripts/security-recovery-governance.mjs integration
+          --matrix=config/integration-context-matrix.json
+          --require-ready
