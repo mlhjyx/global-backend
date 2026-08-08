@@ -11,6 +11,7 @@ import { EventsModule } from './events/events.module';
 import { HealthController } from './health/health.controller';
 import { HealthModule } from './health/health.module';
 import { IcpModule } from './icp/icp.module';
+import { IdentityReviewModule } from './identity-review/identity-review.module';
 import { LeadModule } from './lead/lead.module';
 import { LeadQualityLabelModule } from './lead-quality-labels/lead-quality-label.module';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
@@ -66,6 +67,7 @@ export class AppModule {
         CompanyModule,
         ClaimModule,
         IcpModule,
+        IdentityReviewModule,
         DiscoveryModule,
         LeadModule,
         LeadQualityLabelModule,

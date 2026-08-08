@@ -81,6 +81,13 @@ export const ACQUISITION_CONTROLLER_SCOPE_INVENTORY = Object.freeze({
       create: scopes('acquisition:label:write'),
     },
   ),
+  IdentityReviewController: controllerInventory(
+    'identity-review/identity-review.controller.ts',
+    {
+      create: scopes('acquisition:identity:review'),
+      list: scopes('acquisition:identity:review'),
+    },
+  ),
   DeletionController: controllerInventory('compliance/deletion.controller.ts', {
     create: scopes('compliance:manage'),
     get: scopes('compliance:manage'),
