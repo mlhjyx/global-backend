@@ -2,12 +2,16 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards 
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { DeletionRequestView, DeletionService } from './deletion.service';
 import { DELETION_REASONS, DELETION_STATUSES, DELETION_SUBJECT_TYPES, DeletionSubjectType } from './deletion.types';
+
+const DELETION_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.DeletionController.operations;
 
 class CreateDeletionRequestDto {
   @ApiProperty({ enum: DELETION_SUBJECT_TYPES, description: '删除主体类型' })
@@ -64,8 +68,8 @@ const DELETION_REQUEST_SCHEMA = {
 
 /**
  * 收口⑥ PR-B 删除请求端点（GDPR Art.17 擦除编排）。
- * 🔐 授权模型：仅 AuthGuard（authN）+ RLS 工作区隔离——token 只能删本 workspace 内主体。本后端不做身份系统
- *（AGENTS.md §1），「谁可发起 DSR 删除」的授权由 SaaS 签发 token 时控制；细粒度 RolesGuard 归 R1 加固。
+ * 🔐 AuthGuard 从签名 token 建立 workspace/actor，RequireScopes 再以服务端 role mapping
+ * 强制 compliance:manage；请求体不能提供或覆盖 workspace/actor。
  */
 @ApiTags('Compliance')
 @ApiBearerAuth()
@@ -75,6 +79,7 @@ export class DeletionController {
   constructor(private readonly deletion: DeletionService) {}
 
   @Post()
+  @RequireScopes(...DELETION_SCOPES.create)
   @HttpCode(202)
   @ApiOperation({ summary: '受理数据主体删除请求（GDPR Art.17）——异步编排，返回 202 + 请求 id' })
   @ApiEnvelope(DELETION_REQUEST_SCHEMA, { status: 202 })
@@ -86,6 +91,7 @@ export class DeletionController {
   }
 
   @Get(':id')
+  @RequireScopes(...DELETION_SCOPES.get)
   @ApiOperation({ summary: '查询删除请求状态与擦除回执' })
   @ApiEnvelope(DELETION_REQUEST_SCHEMA)
   async get(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string): Promise<Enveloped<DeletionRequestView>> {

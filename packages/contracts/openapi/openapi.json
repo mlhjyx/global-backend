@@ -460,6 +460,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -516,6 +522,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -526,6 +538,10 @@
         "summary": "提交官网，创建企业画像并触发理解（异步）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read"
         ]
       },
       "get": {
@@ -589,6 +605,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -599,6 +621,10 @@
         "summary": "列出当前 workspace 的企业画像（游标分页）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -633,6 +659,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -643,6 +675,10 @@
         "summary": "按 id 获取企业画像（跨租户返回 404）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -701,6 +737,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -711,6 +753,9 @@
         "summary": "企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -745,6 +790,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -755,6 +806,10 @@
         "summary": "人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:review",
+          "personal-data:read"
         ]
       }
     },
@@ -792,6 +847,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -802,6 +863,9 @@
         "summary": "企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -847,6 +911,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -857,6 +927,9 @@
         "summary": "列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       },
       "post": {
@@ -899,6 +972,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -909,6 +988,9 @@
         "summary": "手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -943,6 +1025,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -953,6 +1041,9 @@
         "summary": "审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -987,6 +1078,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -997,6 +1094,9 @@
         "summary": "驳回（NEEDS_REVIEW → REVOKED）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1031,6 +1131,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1041,6 +1147,9 @@
         "summary": "撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1088,6 +1197,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1098,6 +1213,9 @@
         "summary": "知识冲突列表（KNW-004；?status=OPEN）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1144,6 +1262,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1154,6 +1278,9 @@
         "summary": "裁决冲突：保留一条，另一条 REVOKED",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1188,6 +1315,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1198,6 +1331,9 @@
         "summary": "基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1235,6 +1371,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1245,6 +1387,9 @@
         "summary": "列出 ICP（可用 ?companyId= 过滤）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1279,6 +1424,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1289,6 +1440,9 @@
         "summary": "获取 ICP 详情（含 Persona + 买家委员会）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       },
       "patch": {
@@ -1331,6 +1485,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1341,6 +1501,9 @@
         "summary": "人工修订 ICP（AI 产出是假设，可编辑；乐观锁）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1375,6 +1538,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1385,6 +1554,9 @@
         "summary": "激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1429,6 +1601,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1439,6 +1617,9 @@
         "summary": "新增验证规则（must_have / nice_to_have / exclusion，机器可评估）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1483,6 +1664,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1493,6 +1680,9 @@
         "summary": "修改验证规则",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "delete": {
@@ -1533,6 +1723,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1543,6 +1739,9 @@
         "summary": "删除验证规则",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1587,6 +1786,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1597,6 +1802,9 @@
         "summary": "用已知客户/非客户样例回测 ICP 规则（确定性评估）；HYPOTHESIS → VALIDATING",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "get": {
@@ -1632,6 +1840,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1642,6 +1856,9 @@
         "summary": "回测历史",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1676,6 +1893,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1686,6 +1909,9 @@
         "summary": "从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "get": {
@@ -1721,6 +1947,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1731,6 +1963,9 @@
         "summary": "查询计划列表",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1765,6 +2000,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1775,6 +2016,9 @@
         "summary": "人工确认查询计划（DRAFT → READY，Discover 可执行）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1822,6 +2066,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1832,6 +2082,9 @@
         "summary": "执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1905,6 +2158,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -1915,6 +2174,9 @@
         "summary": "发现执行状态与统计（每源计数/归一/Suppression）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1990,6 +2252,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2000,6 +2268,10 @@
         "summary": "发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -2036,6 +2308,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2046,6 +2324,10 @@
         "summary": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -2082,6 +2364,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2092,12 +2380,16 @@
         "summary": "按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read"
         ]
       }
     },
     "/api/v1/contact-points/{pointId}/verify": {
       "post": {
-        "description": "合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。",
+        "description": "合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis，否则 BLOCKED（不探测）。公开 API 不提供无依据绕过。",
         "operationId": "DiscoveryController_verify_v1",
         "parameters": [
           {
@@ -2139,6 +2431,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2149,12 +2447,17 @@
         "summary": "邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
     "/api/v1/canonical-companies/{id}/guess-emails": {
       "post": {
-        "description": "合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。",
+        "description": "合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis，否则一律 blocked（零探测）；公开 API 不提供无依据绕过。RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。",
         "operationId": "DiscoveryController_guessEmails_v1",
         "parameters": [
           {
@@ -2196,6 +2499,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2206,6 +2515,11 @@
         "summary": "猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
@@ -2243,6 +2557,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2253,6 +2573,9 @@
         "summary": "加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       },
       "get": {
@@ -2281,6 +2604,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2291,6 +2620,9 @@
         "summary": "禁联名单",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -2333,6 +2665,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2343,6 +2681,9 @@
         "summary": "移除禁联记录",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -2373,6 +2714,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2383,6 +2730,9 @@
         "summary": "Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "ops:read"
         ]
       }
     },
@@ -2430,6 +2780,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2440,6 +2796,9 @@
         "summary": "对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -2531,6 +2890,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2541,6 +2906,9 @@
         "summary": "Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -2595,6 +2963,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2605,6 +2979,9 @@
         "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -2641,6 +3018,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2651,6 +3034,10 @@
         "summary": "Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -2697,6 +3084,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2707,6 +3100,10 @@
         "summary": "接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review",
+          "personal-data:read"
         ]
       }
     },
@@ -2753,6 +3150,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2763,6 +3166,9 @@
         "summary": "拒绝 Lead（→ REJECTED，原因留痕做质量反馈）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -2815,6 +3221,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2825,6 +3237,9 @@
         "summary": "制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -2963,6 +3378,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -2973,6 +3394,10 @@
         "summary": "拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）",
         "tags": [
           "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -3016,6 +3441,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3026,6 +3457,9 @@
         "summary": "ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）",
         "tags": [
           "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:event:ack"
         ]
       }
     },
@@ -3147,6 +3581,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3157,6 +3597,9 @@
         "summary": "受理数据主体删除请求（GDPR Art.17）——异步编排，返回 202 + 请求 id",
         "tags": [
           "Compliance"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -3277,6 +3720,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3287,6 +3736,9 @@
         "summary": "查询删除请求状态与擦除回执",
         "tags": [
           "Compliance"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -3369,6 +3821,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "409": {
             "description": "幂等键复用冲突或 workspace 已有站点",
@@ -3474,6 +3932,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -3518,6 +3982,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           }
         },
         "security": [
@@ -4050,6 +4520,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "409": {
             "description": "历史 Profile 不符合当前严格 schema，须显式替换无效组",
@@ -5186,6 +5662,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -5485,6 +5967,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -5708,6 +6196,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Asset",
@@ -6042,6 +6536,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -6205,6 +6705,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Asset",
@@ -6450,6 +6956,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Site",
             "content": {
@@ -6655,6 +7167,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Site，或 BUILD_TARGET_NOT_FOUND",
@@ -7006,6 +7524,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          },
           "404": {
             "description": "当前 workspace 不可见该 Build",
             "content": {
@@ -7151,6 +7675,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
           },
           "404": {
             "description": "当前 workspace 不可见该 Build",
@@ -8276,10 +8806,6 @@
           "lawfulBasisNote": {
             "type": "string",
             "description": "备注"
-          },
-          "allowPersonalWithoutBasis": {
-            "type": "boolean",
-            "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
           }
         }
       },
@@ -8303,10 +8829,6 @@
           "lawfulBasisNote": {
             "type": "string",
             "description": "备注"
-          },
-          "allowPersonalWithoutBasis": {
-            "type": "boolean",
-            "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
           },
           "maxContacts": {
             "type": "number",
@@ -9028,6 +9550,74 @@
           "finishedAt",
           "costSummary"
         ]
+      },
+      "AuthErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "AuthUnauthorized": {
+        "description": "Bearer token is missing or invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "TOKEN_INVALID",
+                "message": "token verification failed"
+              }
+            }
+          }
+        }
+      },
+      "AuthForbidden": {
+        "description": "Authenticated role lacks one or more required scopes.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthErrorResponse"
+            },
+            "example": {
+              "error": {
+                "code": "INSUFFICIENT_SCOPE",
+                "message": "the authenticated role is not authorized for this operation",
+                "details": {
+                  "requiredScopes": [
+                    "acquisition:read"
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

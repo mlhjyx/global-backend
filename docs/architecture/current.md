@@ -158,6 +158,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 
 ## 7. API ownership
 
+- **2026-08-07 roles→scopes 当前交付分支**：获客/合规 controller 的每个 operation 由机器 inventory 绑定固定 scope，并由 `AuthGuard` 后置的服务端 `ScopesGuard` 执行；token 只提供已验签的 `sub/workspace_id/roles[]`，客户端 body/header 的 role、scope、workspace 或 actor 不参与授权。pilot/production admission 要求非空固定 scope mapping、完整 JWKS URI/issuer/audience，且 API 只绑规范 `127.0.0.1`；development base64 token 只在显式 flag + 显式 mapping + 明确 loopback 下可用。`acquisition:label:write` 与 `acquisition:identity:review` 目前只冻结词表、没有新增端点；Site Builder controller 不在本次获客 scope inventory 内，须另立能力/权限合同后才能加授权映射，不能套用或发明本批 scope。
 - 保留：`/companies` `/icps` `/query-plans` `/discovery-runs` `/canonical-companies` `/leads` `/suppressions`（+补 `/events` 拉取、`/evidence` 查询、`/deletion-requests`）。
 - `/campaigns` `/outreach` `/qgos` `/opportunities` **不属于本仓，任何时候不在本仓新增**；改边界唯一途径=修订 ADR-001+三方书面确认。
 - Site Builder 当前端点位于 `/site-builder/intake`、`/site-builder/sites*`、`/site-builder/assets*`、`/site-builder/builds*`；正式形状只认 code-first OpenAPI。目标契约草案 [07-api-contract-draft.md](../site-builder/07-api-contract-draft.md) 与 as-built 不同的部分必须显式标注，不能冒充已实现。

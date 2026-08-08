@@ -2,12 +2,16 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Use
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
 import { ClaimService } from './claim.service';
 import { ClaimDto } from './dto/claim.dto';
+
+const CLAIM_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.ClaimController.operations;
 
 class CreateManualClaimDto {
   @ApiProperty({
@@ -48,6 +52,7 @@ export class ClaimController {
   constructor(private readonly claims: ClaimService) {}
 
   @Get('companies/:companyId/claims')
+  @RequireScopes(...CLAIM_SCOPES.list)
   @ApiOperation({ summary: '列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）' })
   @ApiQuery({ name: 'status', required: false })
   @ApiListEnvelope(ClaimDto)
@@ -61,6 +66,7 @@ export class ClaimController {
   }
 
   @Post('claims/:claimId/approve')
+  @RequireScopes(...CLAIM_SCOPES.approve)
   @HttpCode(200)
   @ApiOperation({ summary: '审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件' })
   @ApiEnvelope(ClaimDto)
@@ -72,6 +78,7 @@ export class ClaimController {
   }
 
   @Post('claims/:claimId/reject')
+  @RequireScopes(...CLAIM_SCOPES.reject)
   @HttpCode(200)
   @ApiOperation({ summary: '驳回（NEEDS_REVIEW → REVOKED）' })
   @ApiEnvelope(ClaimDto)
@@ -83,6 +90,7 @@ export class ClaimController {
   }
 
   @Post('companies/:companyId/claims')
+  @RequireScopes(...CLAIM_SCOPES.createManual)
   @HttpCode(201)
   @ApiOperation({ summary: '手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）' })
   @ApiEnvelope(ClaimDto, { status: 201 })
@@ -95,6 +103,7 @@ export class ClaimController {
   }
 
   @Post('claims/:claimId/revoke')
+  @RequireScopes(...CLAIM_SCOPES.revoke)
   @HttpCode(200)
   @ApiOperation({ summary: '撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）' })
   @ApiEnvelope(ClaimDto)
@@ -106,6 +115,7 @@ export class ClaimController {
   }
 
   @Get('companies/:companyId/conflicts')
+  @RequireScopes(...CLAIM_SCOPES.listConflicts)
   @ApiOperation({ summary: '知识冲突列表（KNW-004；?status=OPEN）' })
   @ApiQuery({ name: 'status', required: false })
   @ApiListEnvelope(CONFLICT_SCHEMA)
@@ -118,6 +128,7 @@ export class ClaimController {
   }
 
   @Post('conflicts/:conflictId/resolve')
+  @RequireScopes(...CLAIM_SCOPES.resolveConflict)
   @HttpCode(200)
   @ApiOperation({ summary: '裁决冲突：保留一条，另一条 REVOKED' })
   @ApiEnvelope(CONFLICT_SCHEMA)

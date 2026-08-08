@@ -11,15 +11,19 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { DiscoveryService } from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { LawfulBasisKind } from './provider-contract';
+
+const DISCOVERY_SCOPES = ACQUISITION_CONTROLLER_SCOPE_INVENTORY.DiscoveryController.operations;
 
 class CreateSuppressionDto {
   @ApiProperty({ enum: ['email', 'domain', 'company_name'] })
@@ -37,7 +41,7 @@ class CreateSuppressionDto {
 }
 
 /**
- * 邮箱验证的合规上下文（可选）。职能邮箱可空；探测**人名邮箱**需给合法性基础或显式开关，
+ * 邮箱验证的合规上下文（可选）。职能邮箱可空；探测**人名邮箱**必须给合法性基础，
  * 否则合规门返回 status=BLOCKED（不做任何 SMTP 探测）。
  */
 class VerifyContactPointDto {
@@ -56,15 +60,11 @@ class VerifyContactPointDto {
   @IsString()
   lawfulBasisNote?: string;
 
-  @ApiPropertyOptional({ description: '显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）' })
-  @IsOptional()
-  @IsBoolean()
-  allowPersonalWithoutBasis?: boolean;
 }
 
 /**
  * 决策人邮箱猜测的合规上下文（可选）。猜出的候选**都是人名邮箱**（个人数据），缺 lawfulBasis
- * 且未开 allowPersonalWithoutBasis → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
+ * → 合规门 blocked（零探测）。maxContacts/maxProbe 为有界护栏。
  */
 class GuessEmailsDto {
   @ApiPropertyOptional({ enum: LAWFUL_BASIS_KINDS, description: '探测人名邮箱的合法性基础（GDPR Art.6）；猜出的都是人名邮箱' })
@@ -81,11 +81,6 @@ class GuessEmailsDto {
   @IsOptional()
   @IsString()
   lawfulBasisNote?: string;
-
-  @ApiPropertyOptional({ description: '显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）' })
-  @IsOptional()
-  @IsBoolean()
-  allowPersonalWithoutBasis?: boolean;
 
   @ApiPropertyOptional({ description: '最多补全几个缺邮箱决策人（有界护栏，默认 25）' })
   @IsOptional()
@@ -115,6 +110,7 @@ export class DiscoveryController {
   constructor(private readonly discovery: DiscoveryService) {}
 
   @Post('query-plans/:planId/execute')
+  @RequireScopes(...DISCOVERY_SCOPES.execute)
   @HttpCode(202)
   @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）' })
   @ApiEnvelope(
@@ -134,6 +130,7 @@ export class DiscoveryController {
   }
 
   @Get('discovery-runs/:runId')
+  @RequireScopes(...DISCOVERY_SCOPES.getRun)
   @ApiOperation({ summary: '发现执行状态与统计（每源计数/归一/Suppression）' })
   @ApiEnvelope({
     type: 'object',
@@ -162,6 +159,7 @@ export class DiscoveryController {
   }
 
   @Get('canonical-companies')
+  @RequireScopes(...DISCOVERY_SCOPES.listCompanies)
   @ApiOperation({ summary: '发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）' })
   @ApiQuery({ name: 'status', required: false })
   @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } })
@@ -179,6 +177,7 @@ export class DiscoveryController {
   }
 
   @Get('canonical-companies/:id')
+  @RequireScopes(...DISCOVERY_SCOPES.getCompany)
   @ApiOperation({ summary: '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）' })
   @ApiEnvelope(CANONICAL_COMPANY_SCHEMA)
   async getCompany(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
@@ -186,6 +185,7 @@ export class DiscoveryController {
   }
 
   @Post('canonical-companies/:id/discover-contacts')
+  @RequireScopes(...DISCOVERY_SCOPES.discoverContacts)
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）' })
   @ApiEnvelope(
@@ -197,11 +197,12 @@ export class DiscoveryController {
   }
 
   @Post('contact-points/:pointId/verify')
+  @RequireScopes(...DISCOVERY_SCOPES.verify)
   @HttpCode(200)
   @ApiOperation({
     summary: '邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED',
     description:
-      '合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。',
+      '合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis，否则 BLOCKED（不探测）。公开 API 不提供无依据绕过。',
   })
   // body 可选：职能邮箱无需合规上下文即可 body-less 调用；仅人名邮箱要 lawfulBasis。
   @ApiBody({ type: VerifyContactPointDto, required: false })
@@ -216,17 +217,17 @@ export class DiscoveryController {
         lawfulBasis: dto?.lawfulBasis
           ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
           : undefined,
-        allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
       }),
     );
   }
 
   @Post('canonical-companies/:id/guess-emails')
+  @RequireScopes(...DISCOVERY_SCOPES.guessEmails)
   @HttpCode(200)
   @ApiOperation({
     summary: '猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）',
     description:
-      '合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。' +
+      '合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis，否则一律 blocked（零探测）；公开 API 不提供无依据绕过。' +
       'RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。',
   })
   // body 可选：无 body 则全 blocked（无 lawfulBasis），诚实不探。
@@ -238,7 +239,6 @@ export class DiscoveryController {
         lawfulBasis: dto?.lawfulBasis
           ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote }
           : undefined,
-        allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
         maxContacts: dto?.maxContacts,
         maxProbe: dto?.maxProbe,
       }),
@@ -248,6 +248,7 @@ export class DiscoveryController {
   // ── Suppression ───────────────────────────────────────────────────────────
 
   @Post('suppressions')
+  @RequireScopes(...DISCOVERY_SCOPES.addSuppression)
   @HttpCode(201)
   @ApiOperation({ summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED' })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' }, { status: 201 })
@@ -256,6 +257,7 @@ export class DiscoveryController {
   }
 
   @Get('suppressions')
+  @RequireScopes(...DISCOVERY_SCOPES.listSuppressions)
   @ApiOperation({ summary: '禁联名单' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
   async listSuppressions(@Ctx() ctx: RequestContext) {
@@ -263,6 +265,7 @@ export class DiscoveryController {
   }
 
   @Delete('suppressions/:id')
+  @RequireScopes(...DISCOVERY_SCOPES.removeSuppression)
   @ApiOperation({ summary: '移除禁联记录' })
   @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
   async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
@@ -270,6 +273,7 @@ export class DiscoveryController {
   }
 
   @Get('data-providers')
+  @RequireScopes(...DISCOVERY_SCOPES.listProviders)
   @ApiOperation({ summary: 'Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'DataProvider（源/状态/成本）' })
   async listProviders(@Ctx() ctx: RequestContext) {

@@ -67,7 +67,7 @@ describe('R2-A3 generated OpenAPI contract', () => {
       'contact',
     ]);
     expect(new Set(Object.keys(patch?.responses ?? {}))).toEqual(
-      new Set(['200', '400', '404', '409', '412', '422', '428']),
+      new Set(['200', '400', '401', '403', '404', '409', '412', '422', '428']),
     );
     expect(patch?.responses?.['200']?.headers).toHaveProperty('ETag');
     expect(patch?.responses?.['409']?.headers).toHaveProperty('ETag');
