@@ -13,6 +13,8 @@ import { EventsController } from '../events/events.controller';
 import { HealthController } from '../health/health.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { LeadQualityLabelsController } from '../lead-quality-labels/lead-quality-label.controller';
+import { resolveRuntimeAdmission } from '../runtime/runtime-admission';
 import {
   ACQUISITION_CONTROLLER_SCOPE_INVENTORY,
   NON_ACQUISITION_CONTROLLER_EXEMPTIONS,
@@ -29,6 +31,7 @@ const CONTROLLERS = {
   HealthController,
   IcpController,
   LeadController,
+  LeadQualityLabelsController,
 } as const;
 
 const REGISTERED_PRODUCTION_CONTROLLERS = Object.freeze([
@@ -44,6 +47,7 @@ const REGISTERED_PRODUCTION_CONTROLLERS = Object.freeze([
   'IntakeController',
   'KbController',
   'LeadController',
+  'LeadQualityLabelsController',
   'SitePreviewController',
   'SitesController',
   'WhoamiController',
@@ -111,16 +115,17 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
   });
 
   it('matches the actual Nest production module graph bidirectionally', async () => {
-    const originalEnvironment = process.env;
-    process.env = {
-      ...process.env,
+    const runtime = resolveRuntimeAdmission({
       NODE_ENV: 'test',
       DEPLOYMENT_STAGE: 'development',
       API_BIND_HOST: '127.0.0.1',
       AUTH_ALLOW_DEV_TOKENS: 'true',
       AUTH_ROLE_SCOPE_MAP: JSON.stringify({ 'inventory.reader': ['acquisition:read'] }),
-    };
-    const app = await NestFactory.create(AppModule, { logger: false });
+    });
+    const app = await NestFactory.create(AppModule.register(runtime), {
+      logger: false,
+      preview: true,
+    });
     try {
       const modules = app.get(ModulesContainer);
       const registered = [...modules.values()]
@@ -132,7 +137,6 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
       expect(registered).toEqual([...REGISTERED_PRODUCTION_CONTROLLERS].sort());
     } finally {
       await app.close();
-      process.env = originalEnvironment;
     }
   });
 
@@ -157,13 +161,13 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
     ]);
   });
 
-  it('keeps quality-label write and identity-review scopes unbound until their separate endpoints exist', () => {
+  it('binds quality-label write while keeping identity review for its separate endpoint', () => {
     const used = new Set(
       Object.values(ACQUISITION_CONTROLLER_SCOPE_INVENTORY).flatMap(({ operations }) =>
         Object.values(operations).flat(),
       ),
     );
-    expect(used.has('acquisition:label:write')).toBe(false);
+    expect(used.has('acquisition:label:write')).toBe(true);
     expect(used.has('acquisition:identity:review')).toBe(false);
   });
 

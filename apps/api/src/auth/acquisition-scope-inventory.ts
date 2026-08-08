@@ -75,6 +75,12 @@ export const ACQUISITION_CONTROLLER_SCOPE_INVENTORY = Object.freeze({
     list: scopes('acquisition:read', 'personal-data:read'),
     ack: scopes('acquisition:event:ack'),
   }),
+  LeadQualityLabelsController: controllerInventory(
+    'lead-quality-labels/lead-quality-label.controller.ts',
+    {
+      create: scopes('acquisition:label:write'),
+    },
+  ),
   DeletionController: controllerInventory('compliance/deletion.controller.ts', {
     create: scopes('compliance:manage'),
     get: scopes('compliance:manage'),
