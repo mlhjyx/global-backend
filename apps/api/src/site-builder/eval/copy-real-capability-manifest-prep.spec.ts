@@ -80,7 +80,7 @@ function compiledRuntimeExpectation(
 describe("Copy real capability create-only manifest preparation", () => {
   it("binds Chat v11 to the exact post-merge main without dispatch", () => {
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "4f75a66925b71fa218395934a5722035e7ba0112",
+      "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
     );
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
       CURRENT_MANIFEST_V11_PATH,
