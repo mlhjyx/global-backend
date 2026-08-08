@@ -359,7 +359,11 @@ export function createCopyPilotTrustedGatewayBindings(
         "openai_responses" | "openai_chat_completions" | "anthropic_messages",
       request: NativeModelAdapterRequest,
     ) => {
-      if (protocol !== selected.protocol || request.alias !== selected.alias) {
+      if (
+        protocol !== selected.protocol ||
+        request.alias !== selected.alias ||
+        request.reasoning?.effort !== selected.reasoning
+      ) {
         return fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
       }
       return adapters[protocol].execute<Output>(request);

@@ -294,6 +294,38 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     ]);
   });
 
+  it("rejects reasoning drift before any model request", async () => {
+    const live = await recoveryGateway();
+    const handle = await createCopyPilotTrustedGateway({
+      admission: admission(live.origin),
+      bearerToken: TOKEN,
+    });
+    const bindings = createCopyPilotTrustedGatewayBindings(handle);
+
+    await expect(
+      Promise.resolve().then(() =>
+        bindings.execute<{ ok: boolean }>("anthropic_messages", {
+          alias: "claude-sonnet-5",
+          prompt: "This request must not reach the model endpoint.",
+          outputSchema: {
+            type: "object",
+            properties: { ok: { type: "boolean" } },
+            required: ["ok"],
+            additionalProperties: false,
+          },
+          outputSchemaName: "copy_sonnet_recovery_output",
+          reasoning: { effort: "high" },
+          maxOutputTokens: 1_200,
+          abortSignal: AbortSignal.timeout(2_000),
+        }),
+      ),
+    ).rejects.toThrow("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+    expect(live.observed.map(({ path }) => path)).toEqual([
+      "/api/usage/token",
+      "/v1/models",
+    ]);
+  });
+
   it("rejects a broadened live catalog before any model request", async () => {
     const live = await recoveryGateway(["claude-sonnet-5", "gpt-5.6-terra"]);
     await expect(
