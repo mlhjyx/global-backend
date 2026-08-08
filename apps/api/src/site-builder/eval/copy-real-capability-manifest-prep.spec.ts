@@ -6,7 +6,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime";
+import type { CompiledRuntimeExpectation } from "../../model-runtime/compiled-runtime-guard";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
+import { COPY_REAL_CAPABILITY_ARTIFACT_PATHS } from "./copy-real-capability-runner";
 import {
   COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
   COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH,
@@ -51,6 +53,28 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
   }));
 }
 
+function compiledRuntimeExpectation(
+  files: readonly CopyRealCapabilitySourceFile[],
+): CompiledRuntimeExpectation {
+  const artifacts = COPY_REAL_CAPABILITY_ARTIFACT_PATHS.map((path, index) => ({
+    path,
+    sha256: index.toString(16).padStart(64, "0"),
+  }));
+  return {
+    schemaVersion: "compiled-runtime-expectation/2026-08-08-v1",
+    buildSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+    sourceBundleDigest: canonicalDigest(files),
+    buildCommands: [
+      "pnpm --filter @global/db generate",
+      "pnpm --filter @global/contracts build",
+      "pnpm --filter @global/api build",
+    ],
+    artifactCount: artifacts.length,
+    artifacts,
+    artifactTreeDigest: canonicalDigest(artifacts),
+  };
+}
+
 describe("Copy real capability create-only manifest preparation", () => {
   it("binds Chat v11 to the exact post-merge main without dispatch", () => {
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
@@ -59,9 +83,11 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
       CURRENT_MANIFEST_V11_PATH,
     );
+    const files = sourceFiles();
     const artifact = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: PREPARATION_HEAD,
-      sourceFiles: sourceFiles(),
+      sourceFiles: files,
+      compiledRuntimeExpectation: compiledRuntimeExpectation(files),
     });
     expect(artifact).toMatchObject({
       artifactId:
@@ -74,6 +100,13 @@ describe("Copy real capability create-only manifest preparation", () => {
       observedNetworkCalls: 0,
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
+      compiledRuntimeExpectation: {
+        buildSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+        sourceBundleDigest: artifact.sourceBundle.digest,
+        artifactCount: COPY_REAL_CAPABILITY_ARTIFACT_PATHS.length,
+        artifactTreeDigest:
+          artifact.compiledRuntimeExpectation.artifactTreeDigest,
+      },
       manifest: {
         manifestId: "site-builder-copy-real-capability/2026-08-07-v11",
         fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
@@ -106,6 +139,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       buildCopyRealCapabilityManifestArtifact({
         preparationHeadCommit: PREPARATION_HEAD,
         sourceFiles: sourceFiles().reverse(),
+        compiledRuntimeExpectation: compiledRuntimeExpectation(sourceFiles()),
       }),
     ).toThrow("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
     expect(() => validateCopyRealCapabilityManifestArtifact({})).toThrow(
