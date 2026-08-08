@@ -11,6 +11,7 @@ const PILOT_ENV = Object.freeze({
   NODE_ENV: 'production',
   AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
   AUTH_ISSUER: 'https://identity.example.test',
+  AUTH_AUDIENCE: 'global-api',
   MODEL_GATEWAY_URL: 'https://models.example.test/v1',
   MODEL_GATEWAY_KEY: 'test-key',
   S3_ACCESS_KEY: 'test-access',

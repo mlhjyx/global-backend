@@ -307,8 +307,8 @@ describe("sensitive data boundary integration", () => {
     const worker = source("temporal/worker.ts");
     expect(main).toMatch(/installSensitiveLogger\s*\(\s*\)/);
     expect(worker).toMatch(/installSensitiveLogger\s*\(\s*\)/);
-    expect(main.indexOf("installSensitiveLogger()")).toBeLessThan(
-      main.indexOf("NestFactory.create"),
+    expect(main).toMatch(
+      /async function bootstrap[\s\S]*?installSensitiveLogger\(\);[\s\S]*?if \(process\.argv\.includes\(['"]--export-openapi['"]\)\)/,
     );
     expect(worker.indexOf("installSensitiveLogger()")).toBeLessThan(
       worker.indexOf(
@@ -363,13 +363,13 @@ describe("sensitive data boundary integration", () => {
   it("exports OpenAPI in Nest preview mode without instantiating runtime providers", () => {
     const main = source("main.ts");
     expect(main).toMatch(
-      /const exportOpenApi = process\.argv\.includes\(["']--export-openapi["']\)/,
+      /async function exportOpenApi[\s\S]*?NestFactory\.create\([\s\S]*?AppModule\.register\(OPENAPI_DOCUMENTATION_RUNTIME\)[\s\S]*?preview:\s*true/,
     );
     expect(main).toMatch(
-      /NestFactory\.create\(AppModule,\s*\{\s*preview:\s*exportOpenApi\s*\}\)/,
+      /if \(process\.argv\.includes\(['"]--export-openapi['"]\)\)\s*\{\s*await exportOpenApi\(\);\s*return;/,
     );
-    expect(main.indexOf("const exportOpenApi")).toBeLessThan(
-      main.indexOf("NestFactory.create"),
+    expect(main.indexOf("process.argv.includes('--export-openapi')")).toBeLessThan(
+      main.indexOf("resolveRuntimeAdmission(process.env)"),
     );
   });
 
