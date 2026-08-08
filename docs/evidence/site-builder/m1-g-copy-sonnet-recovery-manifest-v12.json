@@ -1,0 +1,498 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v1",
+  "artifactId": "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v12",
+  "classification": "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY",
+  "fixedSourceCommit": "2db159ed46f7f7c2acbcf2bb53a8c06d573c8382",
+  "preparationHeadCommit": "3bf99b5d605225989bbf33dcffbca21fa88e6328",
+  "requiredMergeMethod": "merge_commit",
+  "createOnly": true,
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "dispatchCapable": false,
+  "observedNetworkCalls": 0,
+  "observedModelWireCalls": 0,
+  "observedModelCost": {
+    "CNY": 0,
+    "USD": 0
+  },
+  "manifest": {
+    "schemaVersion": "site-builder-copy-sonnet-recovery-manifest/2026-08-08-v1",
+    "manifestId": "site-builder-copy-sonnet-recovery/2026-08-08-v12",
+    "fixedSourceCommit": "2db159ed46f7f7c2acbcf2bb53a8c06d573c8382",
+    "sourceBundleDigest": "3397a29a35cd51f5eb440d7911e380bf79a3ec343e17a1bd0b239737631ff321",
+    "recoveryPlanDigest": "db6af2cb0f1f4a4708c9a0dde5ff0284e64a73814ca90d8fb6283c44d21c734d",
+    "dispatchAuthorization": "NOT_AUTHORIZED",
+    "taskId": "site_builder.copy",
+    "plannedExecutions": 1,
+    "maximumWireCalls": 2,
+    "maximumRepairCallsPerExecution": 1,
+    "executions": [
+      {
+        "executionKey": "copy-sonnet-recovery-v12-claude-sonnet-5",
+        "sourcePilotExecutionKey": "copy-capability-3-claude-sonnet-5",
+        "alias": "claude-sonnet-5",
+        "protocol": "anthropic_messages",
+        "reasoning": "medium"
+      }
+    ]
+  },
+  "sourceBundle": {
+    "schemaVersion": "site-builder-copy-real-capability-source-bundle/2026-08-05-v1",
+    "files": [
+      {
+        "role": "compiler_config",
+        "path": "apps/api/nest-cli.json",
+        "sha256": "bcb15e3049ff5d131762d2bfe3a6f917c3c64c83ac772467a4073975cd423b5b"
+      },
+      {
+        "role": "api_manifest",
+        "path": "apps/api/package.json",
+        "sha256": "41ff3e9bb58269f574254e306a58929c49aeb3887393c6b02b25269371eed8cd"
+      },
+      {
+        "role": "gateway_settlement",
+        "path": "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+        "sha256": "3d370f523aa1c6d8c19974ca1169b674615e73eaafd196a3303a366e7481c2fd"
+      },
+      {
+        "role": "runtime_adapter",
+        "path": "apps/api/src/model-runtime/adapters/ai-sdk-adapter-result.ts",
+        "sha256": "8a25b5c0c562a7d110a9af8003590e09c813bc1dad9bce1c31552b4067a8ce55"
+      },
+      {
+        "role": "runtime_adapter",
+        "path": "apps/api/src/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.ts",
+        "sha256": "c7433805510d06effa6daaa906fb947e5f86e9f1ac52958426a367787b649697"
+      },
+      {
+        "role": "runtime_adapter_contract",
+        "path": "apps/api/src/model-runtime/adapters/ai-sdk-native-adapter.contract.ts",
+        "sha256": "f932c95b03f7676d6d3a2c33184020f027b9f104828bc1308fb5f870dadce5f6"
+      },
+      {
+        "role": "runtime_adapter",
+        "path": "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
+        "sha256": "95c173a91d930266f1c6ee1e149aa76adbba4e7aa8078233f044e4ba58c736a5"
+      },
+      {
+        "role": "runtime_adapter",
+        "path": "apps/api/src/model-runtime/adapters/ai-sdk-openai-responses.adapter.ts",
+        "sha256": "3cbcf1adcde8060c4442b5dc957c51ced1b4abeea47d4aeccf80b12500da2b08"
+      },
+      {
+        "role": "runtime_adapter_exports",
+        "path": "apps/api/src/model-runtime/adapters/index.ts",
+        "sha256": "7cf2bf2bca2d561b9e8f7e28eb3428bf4b9c3db810c4f6d7d176e765b44e82b8"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/capability-registry.ts",
+        "sha256": "496bd6c7f830ad01301af012e76409f983fc45b473c84a78cbf5e76cc0d4d869"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/compiled-runtime-guard.ts",
+        "sha256": "cec13421b3e636a7605883969fb705e35b6f334f313077b10d2c47db18e0c043"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/context-assembly-cache.ts",
+        "sha256": "694a803c7e5f31290a15fdafa834fd80e283f6fd5c8087c274be70628548009e"
+      },
+      {
+        "role": "runtime_context",
+        "path": "apps/api/src/model-runtime/context-engine.ts",
+        "sha256": "54a44894516ada77960df7c7c9a702395c37b8f505b54b2b46190d894b798d15"
+      },
+      {
+        "role": "runtime_execution",
+        "path": "apps/api/src/model-runtime/durable-model-execution-runtime.ts",
+        "sha256": "5958a049fd32eb440d28649a1e6758e9f258f68a348524cffc3fa5078ab7a2ff"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/exact-result-cache.ts",
+        "sha256": "4879ee5e084376725f232d0b326ab7ba5349c2cb64282ea0eddcc92f4d58de93"
+      },
+      {
+        "role": "git_reviewed_evidence_acceptance",
+        "path": "apps/api/src/model-runtime/git-reviewed-evidence-acceptance.ts",
+        "sha256": "781ec4f5bd3b612735f63cf30f939a488206d78f4231f664b32aefdabe560370"
+      },
+      {
+        "role": "runtime_immutable",
+        "path": "apps/api/src/model-runtime/immutable.ts",
+        "sha256": "a42400ea8ded8a236d4b7a061bba47d3b46d6f32076a64ca2ea1c2867ec99ce7"
+      },
+      {
+        "role": "runtime_exports",
+        "path": "apps/api/src/model-runtime/index.ts",
+        "sha256": "56ac873357dc14dc1f363cdc817e7a3462bced85bbc2e6ac5a929ee72bea5c01"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/langfuse-runtime-telemetry.service.ts",
+        "sha256": "26827209ed3a6e55f4cb879c5d4be05d9f386720f281a404aaa112d65f9b67ed"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/langfuse-runtime-telemetry.ts",
+        "sha256": "acc1664ecbd5ebea99072409fe48002a08ef0d5ce9d027674fba252836da199a"
+      },
+      {
+        "role": "runtime_ledger",
+        "path": "apps/api/src/model-runtime/model-execution-ledger.ts",
+        "sha256": "b2a67e61eb2634b8b8f0d9f86eef153fe273d686391a0c211f3e66782c5b57c2"
+      },
+      {
+        "role": "runtime_execution",
+        "path": "apps/api/src/model-runtime/model-execution-runtime.ts",
+        "sha256": "330fc0986d7a5f62261a2ff4fab8496b9a37308f4a7eda4f4c7b2590fc2f5ef3"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/model-runtime.module.ts",
+        "sha256": "b1d8227fd8063530fb2ebdea7198662f44f315a20c5abde679194205904d64e3"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/prompt-compiler.ts",
+        "sha256": "d2d176c749cee91041e7ccee63979e0f93d8e4d830d95cd0f28ddd547960ec65"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
+        "sha256": "868f2629fdf5728e2ca9257be0779e9ff1bfb73a2e7b0381a219dd035335940a"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+        "sha256": "2cf0c0bed49e89b559fc0277b09cbc59e43a34bf2057b26fc41af2192b03fcbb"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/site-builder-ai-task-bridge.ts",
+        "sha256": "0b6c91292f44bfe914eaf3778eb259198ee75145ca38d21a4624b2249932a342"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+        "sha256": "dc72b32e6d42f2e2b73be77f6e081d12926bbd1d1aa88457381ef98cc2750d2b"
+      },
+      {
+        "role": "runtime_transitive_source",
+        "path": "apps/api/src/model-runtime/task-contract-registry.ts",
+        "sha256": "07ffb7450cf4cf3ed4606ba6c771ee7535b324504e014ebe3bce5319405a2c40"
+      },
+      {
+        "role": "runtime_types",
+        "path": "apps/api/src/model-runtime/types.ts",
+        "sha256": "18bb108ef560137d9c99eee75108bf9352a2bb6452f7245bd68e959568c10787"
+      },
+      {
+        "role": "task_contract",
+        "path": "apps/api/src/site-builder/agents/ai-task.ts",
+        "sha256": "f0fbf22cf355bfd4d66b0376d425e37bdf61e0755a6ae21c4f63542902eb75cc"
+      },
+      {
+        "role": "task_contract",
+        "path": "apps/api/src/site-builder/agents/copy.ts",
+        "sha256": "017c8b2c195b3f1678d1d3f94a1b13694faea21834c374a6cde6affc8358b1df"
+      },
+      {
+        "role": "candidate_baseline",
+        "path": "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+        "sha256": "b7567b84590e0a1cc63bee82b0703ac82f2b1f9793444ad72df8df10d67d659a"
+      },
+      {
+        "role": "candidate_baseline",
+        "path": "apps/api/src/site-builder/agents/model-candidate-baseline.ts",
+        "sha256": "33ee50e03a667c66d2b91f1576865d341b22d7c1ff0a878db612bc300266cdae"
+      },
+      {
+        "role": "copy_context",
+        "path": "apps/api/src/site-builder/copy-bundle.service.ts",
+        "sha256": "5554b741487065cf7febc67b36c7b35b089c0914f2e624f06d012cb01365221d"
+      },
+      {
+        "role": "copy_fixture",
+        "path": "apps/api/src/site-builder/eval/copy-assembly-eval.ts",
+        "sha256": "551eedfb8dc6adc970b4c4ada321f2d3c199f24f4e4aef125f5daabbc8d1062f"
+      },
+      {
+        "role": "test_only_runner_contract",
+        "path": "apps/api/src/site-builder/eval/copy-capability-pilot-runner.ts",
+        "sha256": "cc7a81591c75cc115751caf9ec0162da5e0735f3c537eaea4ed77461f9039a13"
+      },
+      {
+        "role": "pilot_plan",
+        "path": "apps/api/src/site-builder/eval/copy-capability-pilot.ts",
+        "sha256": "185d73a59c36f862142c4d1cc1052507e4d587ff350fcab5f9641eea5cdf9758"
+      },
+      {
+        "role": "candidate_scope",
+        "path": "apps/api/src/site-builder/eval/copy-evaluation-v2-candidates.ts",
+        "sha256": "0dcb66eb6fa74d67e409236018ef16546bb689fce9e569b10b5c0054b23ab55a"
+      },
+      {
+        "role": "real_dispatch_ledger_identity",
+        "path": "apps/api/src/site-builder/eval/copy-pilot-ledger-identity.ts",
+        "sha256": "39b1368fdd7c03209919283c3d74f6d0564866390ea7c9c4332307e98d4772c0"
+      },
+      {
+        "role": "real_dispatch_source_verifier",
+        "path": "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts",
+        "sha256": "a069336b9a2cf7df729372b0fb5cf68649af36da8570a933d472fc0e7726c356"
+      },
+      {
+        "role": "real_dispatch_gateway",
+        "path": "apps/api/src/site-builder/eval/copy-pilot-trusted-gateway.ts",
+        "sha256": "441deb8f6f74a79469c08c68e3f22619fbf650aa3be044a6e1790b7e8c72e567"
+      },
+      {
+        "role": "quality_contract",
+        "path": "apps/api/src/site-builder/eval/copy-quality-rubric.ts",
+        "sha256": "0b7deebd96e5c3dc26e8b7d0e32fec388e79d8046ae9eda46e3641d4460fe4c0"
+      },
+      {
+        "role": "admission_contract",
+        "path": "apps/api/src/site-builder/eval/copy-real-capability-admission.ts",
+        "sha256": "6c30c0fbe0ef7daff08fa1858468ccb7b4496c4d8e3f6a7f04e84232836840d1"
+      },
+      {
+        "role": "real_dispatch_runner",
+        "path": "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+        "sha256": "691a391aa3554e126ff9e37f0939ead002412ef62d8da3f9cfb1ca8201415026"
+      },
+      {
+        "role": "claim_contract",
+        "path": "apps/api/src/site-builder/publishable-claim-snapshot.ts",
+        "sha256": "531b9e54118c8586dccb6dbf8aecc9b12e17067bf0d6082ca34a66e9ed22a38c"
+      },
+      {
+        "role": "compiler_config",
+        "path": "apps/api/tsconfig.build.json",
+        "sha256": "6316b935ae230f9ea544519f98df403ce0f1f50b417c04ebc4e43db558b0f016"
+      },
+      {
+        "role": "compiler_config",
+        "path": "apps/api/tsconfig.json",
+        "sha256": "63be1561b1b5819938e6c3a3a607b0ab3a9c101fc444a8c9a0886abfdc6dfed0"
+      },
+      {
+        "role": "workspace_manifest",
+        "path": "package.json",
+        "sha256": "791c17ee585a3830d27e1292759fb8c7a9e8b374a578739514930c4cb9f86f84"
+      },
+      {
+        "role": "contracts_manifest",
+        "path": "packages/contracts/package.json",
+        "sha256": "a5dcc4bd1ab6d62fab100e934250f72cc3e97b3e6101e2d2cf3929e4b7b4ee9d"
+      },
+      {
+        "role": "contracts_exports",
+        "path": "packages/contracts/src/index.ts",
+        "sha256": "9450aa661a61cf8135d6cf17bbdfb4ab6f701f9e3009bbc531f8d268b7082a9c"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/component-content-budget.ts",
+        "sha256": "a34b813052b828ba7e805e06036213ff46b35baaabfc4189df6e0fd00c3c7042"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/component-qualification.ts",
+        "sha256": "5042312fb1b0358eecb539fea758f4b24f6a313520c233898d6b9da0c995e87c"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/component-schema.ts",
+        "sha256": "1220416cfbf149f18057d07dabb4a7dc504035b4258a78a31e10b9e5a00aaf67"
+      },
+      {
+        "role": "contracts_source",
+        "path": "packages/contracts/src/site-builder/copy-bundle.ts",
+        "sha256": "a824f5d8f3e8ee9d4eec9757d7b65a667209e7a8c1e2bd0149aba1415b15202b"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-brief.ts",
+        "sha256": "122036af8d18ed76ebc7524a0555c046e195246e23f94e15be6ae40719c607d2"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-catalog-v2.ts",
+        "sha256": "9a304020e1dbbefc402bd3b30a839751ffd11ff03afa1d4bc6fa5b847632b550"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-catalog.ts",
+        "sha256": "080f2e4ab39b948ed12c94cd6b2e95f7e73da5cbf9ce927fa8b886ed2f751c3d"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-dna.ts",
+        "sha256": "e7d3d3b20f4c4f2875f84f82d25e3b4fd0e7b65cf4d9c4d45d16bceae794abf7"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-evaluation.ts",
+        "sha256": "557d5c372e52f677825580b15c07b3f699443aae78bbd2b697fcb52502959bd3"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-integrity.ts",
+        "sha256": "d056d0a92044c6374b063534f146d3a4d4bc9b0f5d1c68e4e85433abc59985ad"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-observation.ts",
+        "sha256": "b0df63c9195055434ad4195cccc6205c932d2feaee88b2770e9acba815d79b11"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/design-source.ts",
+        "sha256": "87c549188298fb16640f7a6b05108fee092cadc054423a9c01afe5e87710f970"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/evidence.ts",
+        "sha256": "965a77ff0c4d40aa2eb2845a0bb8e9a4f08ef87019395f3a019d43f4a00536b3"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/inquiry.ts",
+        "sha256": "90da4a7783592cbce4d96011b0a576c66902618c53e1b7947341b945522a5565"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/locales.ts",
+        "sha256": "e18ebcd1247cbc014d39a93fbc08cea030b455727ba2c74fde44c0015e40bea8"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/media-foundation.ts",
+        "sha256": "e899c4740aefacb3363f01867c473d3351a58dc452e93ee39aa8942cb7d2d7c8"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/model-policy.ts",
+        "sha256": "168d8cc048a7f24c0c7c04c8b0e5d9ead6042d97f1444c438b40500afbf2db13"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/site-spec-validation.ts",
+        "sha256": "539e3a321a306615ccef61856c4cd1bc756ea1e0095c74b2fd189fe282054b5d"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/site-spec.ts",
+        "sha256": "06b4b1025423edc0b723dbee4c0035be120429a1410a723c5eb6462cddb83674"
+      },
+      {
+        "role": "contracts_transitive_source",
+        "path": "packages/contracts/src/site-builder/template-family.ts",
+        "sha256": "1f1b16bdda6c4fef7b09a96a0281311784e1ee35e54bb218ce4f3fe90c637664"
+      },
+      {
+        "role": "contracts_build",
+        "path": "packages/contracts/tsconfig.json",
+        "sha256": "181cf970b57057abf1217eec64b40934f1c95d9197be2a012be04cb66c22e2fa"
+      },
+      {
+        "role": "build_dependency_manifest",
+        "path": "packages/db/package.json",
+        "sha256": "fbab144507607a2334e6090149085f31bf614c588e6374060f3b4fd1d9305d78"
+      },
+      {
+        "role": "build_dependency_schema",
+        "path": "packages/db/prisma/schema.prisma",
+        "sha256": "988780776a71facd4de130cee19833f55dd3a3cce379f385af83f107527c09bf"
+      },
+      {
+        "role": "dependency_lock",
+        "path": "pnpm-lock.yaml",
+        "sha256": "d98a61553ffa6ea3bca177f47c7c2a82362f774697ffd4c89fa299465072e868"
+      },
+      {
+        "role": "workspace_manifest",
+        "path": "pnpm-workspace.yaml",
+        "sha256": "08d75840c97ab0e72d1d9b5b84a17e47a2e06cb159a5fbec5ee0a6a56682dad7"
+      },
+      {
+        "role": "compiler_config",
+        "path": "tsconfig.base.json",
+        "sha256": "4f488e372142a428fd4b033be89fb27d74cf83448b0c6e60f858c4b3016849ea"
+      }
+    ],
+    "digest": "3397a29a35cd51f5eb440d7911e380bf79a3ec343e17a1bd0b239737631ff321"
+  },
+  "recoveryProvenance": {
+    "artifacts": [
+      {
+        "path": "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json",
+        "fileSha256": "f56ee0a7e565b3333e6781d4e2f9d2d0a49b769ffe0ae08f6b0ea2c41af72205",
+        "artifactDigest": "80f6a95979eb3c0fff880038d501043241f057f5fe4f35980409525ace1e8172"
+      },
+      {
+        "path": "docs/evidence/site-builder/m1-g-copy-capability-pilot-v11-partial-evidence.json",
+        "fileSha256": "94e5160380a77c717ba419155bd04aac04f8124bf303ba5eadea229c9fd2e537",
+        "artifactDigest": "fe4f215a19ea22916dadf1a14b6fd34f7dc5bf74d0fcc49099200b8a96bff652"
+      },
+      {
+        "path": "docs/evidence/site-builder/m1-g-copy-capability-v11-terra-acceptance.json",
+        "fileSha256": "5d0d0860a30889119e63bdda0b3f561756d928d0ed6e4c0f7927c8c85242a16b",
+        "artifactDigest": "91f06c42d5b314ed6f722e6cf3733d8394ee0ed0c95d11c6252fbbe56024b0df"
+      },
+      {
+        "path": "docs/evidence/site-builder/m1-g-copy-capability-v11-sol-acceptance.json",
+        "fileSha256": "f3b3ff91fec28611c822cbcf8613af0d1e65882ee3ae5ee633e7483aff461d41",
+        "artifactDigest": "c4afda144365b6b802609cdafd327a6174fae307d90dc5c4dbbfabc20866c23c"
+      }
+    ],
+    "v11Outcome": "TERRA_SOL_ACCEPTED_SONNET_FROZEN_UNKNOWN_SETTLEMENT",
+    "settlementFixMergeCommit": "2db159ed46f7f7c2acbcf2bb53a8c06d573c8382",
+    "settlementImplementationPath": "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+    "settlementImplementationSha256": "3d370f523aa1c6d8c19974ca1169b674615e73eaafd196a3303a366e7481c2fd"
+  },
+  "duplicatePrevention": {
+    "acceptedAliasesExcludedFromDispatch": [
+      "gpt-5.6-terra",
+      "gpt-5.6-sol"
+    ],
+    "acceptedWireReplayPolicy": "never_repeat_successful_v11_wires",
+    "consumedAuthorizationPolicy": "never_reuse_v11_authorization"
+  },
+  "contractSnapshot": {
+    "schemaVersion": "site-builder-copy-sonnet-recovery-contract-snapshot/2026-08-08-v1",
+    "taskId": "site_builder.copy",
+    "sourcePilotPlanId": "site-builder-copy-capability-pilot/2026-08-07-v10",
+    "sourcePilotPlanDigest": "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+    "recoveryPlanDigest": "db6af2cb0f1f4a4708c9a0dde5ff0284e64a73814ca90d8fb6283c44d21c734d",
+    "fixtureId": "copy-factual-claims",
+    "taskContractVersion": "site-builder-task-contract/site_builder.copy/v2",
+    "inputDigest": "2cbc5dae8a6a082c138dbe8240e31269aa0da327c9ce341fff2987aea26831c0",
+    "outputSchemaDigest": "dcce869ed97d82286ec5356bf2602ec4a1ae0c81d0d6389244f41989c30a7528",
+    "promptDigest": "73f0cba6b15ebcb066688e801bd8fd7e1d1519daeb52d706f7d9f112ef7cfa52",
+    "provenanceDigest": "cc09f236da87bc6b1b3ecea46d9cd0b4753225eb120de89db0666af724d17ea4"
+  },
+  "preparationVerification": {
+    "fixedCommitReachableFromPreparationHead": true,
+    "fixedCommitReachableFromOriginMainAtPreparation": true,
+    "preparationHeadMustRemainReachableFromOriginMainBeforeDispatch": true,
+    "trackedSourceBytesMatch": true,
+    "trackedProvenanceBytesMatch": true,
+    "compiledRuntimeBindingDeferred": true,
+    "futureExecutionMustReverify": true
+  },
+  "requiredFollowup": [
+    "RECOVERY_ADMISSION_AND_RUNNER_BINDING",
+    "FIXED_SOURCE_COMPILED_RUNTIME_EXPECTATION",
+    "PURPOSE_SPECIFIC_SONNET_ONLY_FINITE_CREDENTIAL_ATTESTATION",
+    "TRUSTED_SETTLEMENT_OBSERVER_AND_LEDGER_BINDING",
+    "SEPARATE_SONNET_RECOVERY_DISPATCH_AUTHORIZATION",
+    "GIT_REVIEWED_RECOVERY_RUNTIME_EVIDENCE",
+    "KNOWN_SETTLEMENT_PER_PHYSICAL_CALL",
+    "NEVER_REPEAT_TERRA_OR_SOL_V11_WIRES"
+  ],
+  "artifactDigest": "c2467ef639b2d773b6c0da0a5c9541c028d36274890d994edd07757d4a271e27"
+}
