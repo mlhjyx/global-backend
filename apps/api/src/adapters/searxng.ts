@@ -6,6 +6,8 @@
  * 仅内网调用（limiter off，勿对外暴露）。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 export type SearxCategory =
   | 'general'
   | 'news'
@@ -65,7 +67,9 @@ export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promis
     headers: { Accept: 'application/json' },
   });
   if (!res.ok) {
-    throw new Error(`searxng ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(
+      `searxng ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+    );
   }
   const json = (await res.json()) as Partial<SearxResponse> & {
     results?: SearxResult[];

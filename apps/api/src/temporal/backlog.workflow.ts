@@ -8,6 +8,7 @@ import type {
   WatchBacklogResult,
 } from './backlog.activities';
 import type { QualifyActivities } from './qualify.activities';
+import { safeTemporalErrorCode } from './safe-error-code';
 
 // 资格门批 = 每家一次 LLM 结构化调用。实测 gemini-2.5-pro 单家 10-30s（含 schema 修复重试可更长）
 // → 批默认 20 家 × 30s ≈ 10 分钟，配 30 分钟上界（40×20s 曾逼近 15 分钟超时线，会整批重试）。
@@ -56,6 +57,18 @@ export interface BacklogSweepTargetStats {
   scored: number;
 }
 
+function warnStageFailure(
+  message: string,
+  target: { workspaceId: string; icpId: string },
+  error: unknown,
+): void {
+  log.warn(message, {
+    workspaceId: target.workspaceId,
+    icpId: target.icpId,
+    errorCode: safeTemporalErrorCode(error, 'ACQUISITION_ACTIVITY_FAILED'),
+  });
+}
+
 /**
  * 存量对账 sweep（漏斗总闸）：资格门 → 快事实富集 → 信号富集 → 网站监控注册 → 联系人发现 → 重评分。
  * 每阶段游标分页 + 轮次上限（单次 sweep 有界；跑不完的交给下个 sweep —— Schedule 周期驱动，overlap=SKIP）。
@@ -95,7 +108,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         }
       }
     } catch (err) {
-      log.warn('[backlogSweep] 资格门阶段失败（网关不可用等），不阻断后续', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 资格门阶段失败（网关不可用等），不阻断后续', t, err);
     }
 
     // ② 快事实富集（GLEIF/Wikidata，fit=match 缺命名空间者）
@@ -110,7 +123,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
-      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', t, err);
     }
 
     // ③ 信号富集（数字足迹/结构化收割，TTL 感知）
@@ -125,7 +138,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
-      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', t, err);
     }
 
     // ④ 网站监控注册（web_watch → intentSweep 持续盯）
@@ -139,7 +152,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
-      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', t, err);
     }
 
     // ⑤ 联系人发现（decision_maker 首选：具名决策人 + 买家角色）
@@ -154,7 +167,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
-      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', t, err);
     }
 
     // ⑤b 决策人邮箱猜测（默认关；双闸 email_guess ENABLED + config.lawfulBasis 才自动探测。缺邮箱决策人补全）
@@ -169,7 +182,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
-      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', t, err);
     }
 
     // ⑥ 重评分（新 verdict/信号/联系人 → lead 四队列刷新）
@@ -177,7 +190,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
       const scored = await scoreActs.scoreCandidates({ workspaceId: t.workspaceId, icpId: t.icpId });
       stats.scored = scored.scored;
     } catch (err) {
-      log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
+      warnStageFailure('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', t, err);
     }
 
     all.push(stats);

@@ -115,12 +115,11 @@ jobs:
       - name: Build（nest build = tsc 全量类型检查）
         run: pnpm --filter @global/api build
 
-      - name: Test
-        # The repository-wide 80% coverage ratchet is introduced by the
-        # dedicated coverage-closeout layer, after its deterministic tests and
-        # baseline are present. Earlier stacked PRs still run the complete API
-        # suite and must remain independently green.
-        run: pnpm --filter @global/api test
+      - name: Test + API coverage ratchet（80% target met）
+        # This closeout layer owns the deterministic coverage additions and the
+        # exact covered/total baseline. Earlier stacked PRs run the full suite
+        # without claiming this repository-wide gate.
+        run: pnpm coverage:api:verify
 
       - name: Renderer unit contract tests
         run: pnpm --filter @global/site-renderer test:contracts

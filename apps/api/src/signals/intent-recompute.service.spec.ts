@@ -276,4 +276,81 @@ describe('IntentRecomputeService —— 收口⑤「信号可复算」（surface
     expect(p2.companiesScanned).toBe(1);
     expect(p2.nextCursor).toBeNull();
   });
+
+  it('treats missing and suppressed companies as non-projectable', async () => {
+    const f = fixture();
+    f.companies.get('co-1')!.status = 'SUPPRESSED';
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+    await expect(svc.recomputeCompany(WS, 'co-1', { surfaces: SURFACES })).resolves.toBe('missing');
+    await expect(svc.recomputeCompany(WS, 'does-not-exist', { surfaces: SURFACES })).resolves.toBe('missing');
+  });
+
+  it('matches a bounded SAM NAICS surface and emits fallback evidence', async () => {
+    const f = fixture({
+      signals: [
+        tedSignalRow({
+          providerKey: 'samgov', signalType: 'SOURCES_SOUGHT', externalId: 'SAM-1', subjectCountry: 'US',
+          taxonomyKeys: ['naics:333911'], payload: {}, occurredAt: new Date(now - 2 * DAY_MS),
+        }),
+      ],
+    });
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+    await expect(
+      svc.recomputeCompany(WS, 'co-1', { surfaces: [{ provider: 'samgov', naicsCodes: ['33391'], sinceDays: 10 }] }),
+    ).resolves.toBe('rebuilt');
+    expect((f.companies.get('co-1')!.attributes.intent as IntentAttr).events[0].evidence).toEqual({
+      naics: [], notice: 'SAM-1', source: 'samgov',
+    });
+
+    f.companies.get('co-1')!.attributes = {};
+    await expect(
+      svc.recomputeCompany(WS, 'co-1', { surfaces: [{ provider: 'samgov', naicsCodes: [] }] }),
+    ).resolves.toBe('unchanged');
+  });
+
+  it('matches FDA product/country surfaces and rejects stale, wrong-country, and malformed taxonomy rows', async () => {
+    const key = companyIdentity({ name: 'Acme Medical', country: 'US' }).dedupeKey;
+    const base = tedSignalRow({
+      providerKey: 'openfda', signalType: 'FDA_CLEARANCE', externalId: 'K-FALLBACK', subjectName: 'Acme Medical',
+      subjectCountry: 'us', subjectKey: key, taxonomyKeys: ['fda:qas'], payload: { device: 'Pump' },
+      occurredAt: new Date(now - 2 * DAY_MS), strength: 0.85,
+    });
+    const f = fixture({
+      companies: new Map([['co-1', { id: 'co-1', domain: null, dedupeKey: key, attributes: {}, status: 'NEW', version: 1 }]]),
+      signals: [
+        base,
+        { ...base, id: 'wrong', externalId: 'K-WRONG', subjectCountry: 'CA' },
+        { ...base, id: 'stale', externalId: 'K-STALE', occurredAt: new Date(now - 500 * DAY_MS) },
+        { ...base, id: 'malformed', externalId: 'K-BAD', taxonomyKeys: null },
+      ],
+    });
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+    await expect(
+      svc.recomputeCompany(WS, 'co-1', {
+        surfaces: [{ provider: 'openfda', productCodes: [' qas '], applicantCountries: [' us '], sinceDays: 365 }],
+      }),
+    ).resolves.toBe('rebuilt');
+    expect((f.companies.get('co-1')!.attributes.intent as IntentAttr).events[0].evidence).toEqual({
+      product_code: undefined,
+      k_number: 'K-FALLBACK',
+      device: 'Pump',
+      source: 'openfda',
+    });
+  });
+
+  it('counts rebuilt and cleared outcomes during workspace paging', async () => {
+    const stale = mergeIntent(undefined, [{ type: 'OLD', at: new Date(now - DAY_MS).toISOString(), strength: 0.1 }]);
+    const f = fixture({
+      companies: new Map([
+        ['co-1', { id: 'co-1', domain: null, dedupeKey: buyerKey, attributes: {}, status: 'NEW', version: 1 }],
+        ['co-2', { id: 'co-2', domain: null, dedupeKey: 'none', attributes: { intent: stale }, status: 'NEW', version: 1 }],
+      ]),
+    });
+    await expect(new IntentRecomputeService({ prisma: fakePrisma(f) }).recomputeWorkspace(WS, { limit: 10, surfaces: SURFACES })).resolves.toEqual({
+      companiesScanned: 2,
+      companiesRebuilt: 1,
+      companiesCleared: 1,
+      nextCursor: null,
+    });
+  });
 });

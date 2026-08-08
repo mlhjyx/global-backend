@@ -23,7 +23,7 @@ Security 必须以 `security · required gate` 聚合 secret scan、依赖回归
 
 PostgreSQL/Temporal 仍不在 required contexts 中：当前 `integration-contracts.yml` 只是手动 fail-closed 模板，不执行真的可丢弃数据库或官方 Temporal test environment。在 allowlisted runner、隔离资源和真实命令全部实现前，不得把这两个名字加入外部 ruleset 或声称集成测试已覆盖。
 
-`nontechnical decision card integrity` 故意使用 `pull_request_target`、只 checkout 受信 default-branch base，并且只对目标为 default branch 的 PR 生成。堆叠 Draft PR 以前一层功能分支为 base 时，该 context 预期不存在；这不是通过，也不是可合并证据。每一层在改为直接目标 main 或进入 `merge-candidate` 后，必须针对当时 exact head 重跑决策卡、全部 required contexts 与独立 review。
+`nontechnical decision card freshness` 故意使用 `pull_request_target`、只 checkout 受信 default-branch base，并且只对目标为 default branch 的 PR 生成。堆叠 Draft PR 以前一层功能分支为 base 时，该 context 预期不存在；这不是通过，也不是可合并证据。每一层在改为直接目标 main 或进入 `merge-candidate` 后，必须针对当时 exact head 重跑决策卡、全部 required contexts 与独立 review。由于 `pull_request_target` 执行 base 上的工作流，context 名称必须在迁移期间保持稳定；内部语义可以强化，但不得在 ruleset 与主线工作流未完成双向回读前顺带改名。
 
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 

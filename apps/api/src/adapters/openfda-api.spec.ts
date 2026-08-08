@@ -1,5 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { buildRegistrationSearch, mapRegistration, build510kSearch, map510k, fdaDateToIso, isClearedDecision } from './openfda-api';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  build510kSearch,
+  buildRegistrationSearch,
+  countField,
+  fdaDateToIso,
+  isClearedDecision,
+  map510k,
+  mapRegistration,
+  search510kClearances,
+  searchRegistrations,
+} from './openfda-api';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('openFDA search 构造（buildRegistrationSearch）', () => {
   it('单 product code：products.product_code:CODE', () => {
@@ -27,6 +42,10 @@ describe('openFDA search 构造（buildRegistrationSearch）', () => {
 
   it('空 product code 抛错（openFDA 发现必须带产品码，绝不裸拉全库）', () => {
     expect(() => buildRegistrationSearch({ productCodes: [] })).toThrow();
+  });
+
+  it('空白 product code 也 fail-closed，不生成可扩大查询面的畸形子句', () => {
+    expect(() => buildRegistrationSearch({ productCodes: ['   '] })).toThrow(/productCodes/);
   });
 });
 
@@ -144,6 +163,11 @@ describe('FDA 日期归一（fdaDateToIso）—— §8.6 防 Date.parse NaN 静�
     expect(fdaDateToIso('June 2024')).toBeUndefined();
     expect(fdaDateToIso('2024-13-40')).toBeUndefined(); // 合规格式但非法日期
   });
+  it('拒绝会被 Date.parse 自动滚动的非法日历日与畸形 datetime', () => {
+    expect(fdaDateToIso('2024-02-31')).toBeUndefined();
+    expect(fdaDateToIso('20240231')).toBeUndefined();
+    expect(fdaDateToIso('2024-02-29Tx')).toBeUndefined();
+  });
   it('归一结果 Date.parse 恒合法（喂 recencyDecay 不得 NaN）', () => {
     for (const d of ['2024-06-18', '20240618', '2004-03-11T00:00:00Z']) {
       expect(Number.isNaN(Date.parse(fdaExpect(fdaDateToIso(d))))).toBe(false);
@@ -185,6 +209,9 @@ describe('510(k) search 构造（build510kSearch）—— 顶层 product_code/co
   });
   it('空 product code 抛错（绝不裸拉全库）', () => {
     expect(() => build510kSearch({ productCodes: [] })).toThrow();
+  });
+  it('空白 product code 也 fail-closed', () => {
+    expect(() => build510kSearch({ productCodes: [''] })).toThrow(/productCodes/);
   });
 });
 
@@ -242,4 +269,159 @@ describe('510(k) 映射（map510k）—— 绿事实，剥离 🔴 具名 contac
 function fdaExpect(v: string | undefined): string {
   expect(v).toBeDefined();
   return v!;
+}
+
+describe('openFDA HTTP 与分页边界（仅 fake fetch）', () => {
+  it('registrationlisting 的 NOT_FOUND 是合法零结果，且查询参数有界', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ error: { code: 'NOT_FOUND', message: 'No matches found!' } }, 404),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      searchRegistrations({ productCodes: ['LLZ'], isoCountry: 'cn', limit: 2, maxRecords: 2 }),
+    ).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const url = fetchMock.mock.calls[0][0] as URL;
+    expect(url.pathname).toBe('/device/registrationlisting.json');
+    expect(url.searchParams.get('search')).toBe('products.product_code:LLZ AND registration.iso_country_code:CN');
+    expect(url.searchParams.get('limit')).toBe('2');
+    expect(url.searchParams.get('skip')).toBe('0');
+  });
+
+  it('非 NOT_FOUND 的结构化 API error 向上抛，但不回显不可信正文', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ error: { code: 'INVALID_QUERY', message: 'Contact jane@example.com about bad syntax' } }, 404),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await searchRegistrations({ productCodes: ['LLZ'] }).catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^openfda request failed: ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect((error as Error).message).not.toContain('jane@example.com');
+    expect((error as Error).message).not.toContain('bad syntax');
+  });
+
+  it('429 按 retry-after 退避后重试，最终返回结果', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'TOO_MANY_REQUESTS' } }, 429, { 'retry-after': '0.001' }))
+      .mockResolvedValueOnce(jsonResponse({ results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = searchRegistrations({ productCodes: ['LLZ'], limit: 2 });
+    await vi.runAllTimersAsync();
+
+    await expect(result).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('跨页保留 skip 与上限，并跳过缺法人名的畸形记录', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          results: [
+            { registration: { name: 'Alpha', iso_country_code: 'us' }, products: [{ product_code: 'LLZ' }] },
+            { registration: { registration_number: 'missing-name' }, products: [] },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          results: [{ registration: { name: 'Beta', iso_country_code: 'de' }, products: [{ product_code: 'LLZ' }] }],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = searchRegistrations({ productCodes: ['LLZ'], limit: 2, maxRecords: 2 });
+    await vi.runAllTimersAsync();
+
+    await expect(result).resolves.toMatchObject([{ name: 'Alpha', country: 'US' }, { name: 'Beta', country: 'DE' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((fetchMock.mock.calls[1][0] as URL).searchParams.get('skip')).toBe('2');
+  });
+
+  it('510(k) 默认只返回有法人、合法日期且已清关的记录', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        results: [
+          { applicant: 'Cleared GmbH', decision_date: '2024-02-29', decision_code: 'SESE', product_code: 'OHT' },
+          { applicant: 'Denied GmbH', decision_date: '2024-02-29', decision_code: 'NSEK', product_code: 'OHT' },
+          { applicant: 'Bad Date GmbH', decision_date: '2024-02-31', decision_code: 'SESE', product_code: 'OHT' },
+          { decision_date: '2024-02-29', decision_code: 'SESE', product_code: 'OHT' },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const rows = await search510kClearances({
+      productCodes: ['OHT'],
+      countries: ['de'],
+      sinceDays: 30,
+      now: Date.UTC(2024, 2, 1),
+      limit: 10,
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({ applicant: 'Cleared GmbH', decisionDateIso: '2024-02-29', decisionCode: 'SESE' }),
+    ]);
+    const url = fetchMock.mock.calls[0][0] as URL;
+    expect(url.pathname).toBe('/device/510k.json');
+    expect(url.searchParams.get('search')).toContain('country_code:DE');
+    expect(url.searchParams.get('search')).toContain('decision_date:[2024-01-31 TO 2024-03-01]');
+  });
+
+  it('clearedOnly=false 仍要求合法日期，但保留 NSE 供显式审计', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        results: [
+          { applicant: 'NSE Corp', decision_date: '20240618', decision_code: 'NSEK', product_code: 'OHT' },
+          { applicant: 'No Timing Corp', decision_date: 'bad', decision_code: 'NSEK', product_code: 'OHT' },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      search510kClearances({ productCodes: ['OHT'], clearedOnly: false, limit: 10, now: Date.UTC(2024, 5, 20) }),
+    ).resolves.toEqual([expect.objectContaining({ applicant: 'NSE Corp', decisionDateIso: '2024-06-18' })]);
+  });
+
+  it('count 聚合过滤空 term，并把数值字符串归一为 number', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ results: [{ term: 'US', count: '12' }, { term: '', count: 99 }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(countField('/device/510k.json', 'country_code', 'product_code:OHT')).resolves.toEqual([
+      { term: 'US', count: 12 },
+    ]);
+    const url = fetchMock.mock.calls[0][0] as URL;
+    expect(url.searchParams.get('count')).toBe('country_code.exact');
+    expect(url.searchParams.get('search')).toBe('product_code:OHT');
+  });
+
+  it('畸形 JSON 重试有界，最终向上抛而不是返回空数据', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response('{broken', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = searchRegistrations({ productCodes: ['LLZ'] });
+    const assertion = expect(result).rejects.toThrow();
+    await vi.runAllTimersAsync();
+
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+function jsonResponse(body: unknown, status = 200, headers?: Record<string, string>): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }

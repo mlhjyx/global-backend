@@ -159,6 +159,18 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
         sourceFiles: [...files].reverse(),
       }),
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_BUNDLE_INVALID");
+    expect(() =>
+      buildCopySonnetRecoveryManifestArtifact({
+        ...valid,
+        preparationHeadCommit: "not-a-git-commit",
+      }),
+    ).toThrow("COPY_SONNET_RECOVERY_PREPARATION_HEAD_INVALID");
+    expect(() =>
+      buildCopySonnetRecoveryManifestArtifact({
+        ...valid,
+        fixedCommitReachableFromOriginMainAtPreparation: "true" as never,
+      }),
+    ).toThrow("COPY_SONNET_RECOVERY_ORIGIN_MAIN_REACHABILITY_INVALID");
     expect(() => validateCopySonnetRecoveryManifestArtifact({})).toThrow(
       "COPY_SONNET_RECOVERY_MANIFEST_ARTIFACT_INVALID",
     );

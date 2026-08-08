@@ -22,6 +22,19 @@ const SAFE_ERROR_NAMES = new Set([
   "AggregateError",
 ]);
 
+function redactBearerCredential(
+  match: string,
+  scheme: string,
+  offset: number,
+  source: string,
+): string {
+  const publicMissingCredentialPhrase =
+    match.toLowerCase() === "bearer token" &&
+    source.slice(Math.max(0, offset - "missing ".length), offset).toLowerCase() ===
+      "missing ";
+  return publicMissingCredentialPhrase ? match : `${scheme} [redacted]`;
+}
+
 export interface ScrubOptions {
   maxDepth?: number;
   maxItems?: number;
@@ -114,7 +127,7 @@ export function scrubSensitiveText(
   const maxLength = Math.max(32, options.maxLength ?? 4_000);
   const scrubbed = String(text)
     .replace(URL_RE, sanitizeUrl)
-    .replace(BEARER_RE, "$1 [redacted]")
+    .replace(BEARER_RE, redactBearerCredential)
     .replace(JWT_RE, "[redacted-jwt]")
     .replace(SECRET_ASSIGNMENT_RE, "$1$2[redacted]")
     .replace(EMAIL_RE, "[redacted-email]")

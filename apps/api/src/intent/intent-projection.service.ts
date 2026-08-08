@@ -118,15 +118,23 @@ export class IntentProjectionService {
         const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const priorIntent = (existing.intent as IntentAttr | undefined) ?? undefined;
         const intent = mergeIntent(priorIntent, events);
+        // The same platform change is visible on every sweep inside the lookback window.
+        // Treat a replay as a no-op so it cannot bump the canonical version or append
+        // duplicate evidence solely because mergeIntent refreshes its private _ts field.
+        if (priorIntent && sameIntent(priorIntent, intent)) return false;
 
         await tx.canonicalCompany.update({
           where: { id: company.id },
           data: { attributes: { ...existing, intent } as unknown as Prisma.InputJsonValue, version: { increment: 1 } },
         });
+        // Canonical attributes intentionally merge intent from every provider. Evidence
+        // remains provider-scoped: do not attach TED/FDA/SAM events to web_watch's
+        // provider/license record when an existing cross-source intent is present.
+        const webWatchEvents = intent.events.filter((event) => INTENT_CHANGE_TYPES.includes(event.type));
         await tx.fieldEvidence.create({
           data: {
             workspaceId, entityType: 'company', entityId: company.id, field: 'intent.website_change',
-            value: intent as unknown as Prisma.InputJsonValue, providerKey: WEB_WATCH_KEY,
+            value: { events: webWatchEvents } as unknown as Prisma.InputJsonValue, providerKey: WEB_WATCH_KEY,
             confidence: 1, license: 'public',
             allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
           },

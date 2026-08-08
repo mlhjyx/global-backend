@@ -346,3 +346,170 @@ describe('external intent activity result — 闭合错误码边界', () => {
     },
   );
 });
+
+describe('external intent target discovery — disabled, empty, and error boundaries', () => {
+  it('missing owner connection fails closed across list, live state, and resolution', async () => {
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+    });
+
+    await expect(acts.listExternalIntentTargets()).resolves.toEqual({
+      targets: [],
+      tedEnabled: false,
+      openfdaEnabled: false,
+      samgovEnabled: false,
+    });
+    await expect(acts.liveProviderState()).resolves.toEqual({ ted: false, openfda: false, samgov: false });
+    await expect(acts.resolveExternalIntentTarget({ workspaceId: 'ws-1', icpId: 'icp-1' })).resolves.toEqual({
+      workspaceId: 'ws-1',
+      icpId: 'icp-1',
+      cpvCodes: [],
+      buyerCountries: [],
+      fdaProductCodes: [],
+      naicsCodes: [],
+    });
+  });
+
+  it('all providers disabled returns no targets without scanning ICPs', async () => {
+    const findIcps = vi.fn();
+    const ownerDb = {
+      dataProvider: {
+        findMany: vi.fn().mockResolvedValue([
+          { key: 'ted', status: 'DISABLED' },
+          { key: 'openfda', status: 'SUSPENDED' },
+          { key: 'samgov', status: 'DISABLED' },
+        ]),
+      },
+      icpDefinition: { findMany: findIcps },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+    });
+
+    await expect(acts.listExternalIntentTargets()).resolves.toEqual({
+      targets: [],
+      tedEnabled: false,
+      openfdaEnabled: false,
+      samgovEnabled: false,
+    });
+    expect(findIcps).not.toHaveBeenCalled();
+  });
+
+  it('enumerates ACTIVE ICPs in stable order and applies an explicit test limit', async () => {
+    const findIcps = vi.fn().mockResolvedValue([
+      { id: 'icp-1', workspaceId: 'ws-1' },
+      { id: 'icp-2', workspaceId: 'ws-2' },
+    ]);
+    const ownerDb = {
+      dataProvider: {
+        findMany: vi.fn().mockResolvedValue([
+          { key: 'ted', status: 'ENABLED' },
+          { key: 'openfda', status: 'DISABLED' },
+          { key: 'samgov', status: 'ENABLED' },
+        ]),
+      },
+      icpDefinition: { findMany: findIcps },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+    });
+
+    await expect(acts.listExternalIntentTargets({ limit: 2 })).resolves.toEqual({
+      targets: [
+        { workspaceId: 'ws-1', icpId: 'icp-1' },
+        { workspaceId: 'ws-2', icpId: 'icp-2' },
+      ],
+      tedEnabled: true,
+      openfdaEnabled: false,
+      samgovEnabled: true,
+    });
+    expect(findIcps).toHaveBeenCalledWith({
+      where: { status: 'ACTIVE' },
+      select: { id: true, workspaceId: true },
+      orderBy: { id: 'asc' },
+      take: 2,
+    });
+  });
+
+  it('propagates owner-DB discovery errors instead of reporting a false empty success', async () => {
+    const ownerDb = {
+      dataProvider: { findMany: vi.fn().mockRejectedValue(new Error('owner db unavailable')) },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+    });
+
+    await expect(acts.listExternalIntentTargets()).rejects.toThrow('owner db unavailable');
+  });
+
+  it('missing ICP produces an empty deterministic query surface without touching its query plan', async () => {
+    const findPlan = vi.fn();
+    const ownerDb = {
+      icpDefinition: { findUnique: vi.fn().mockResolvedValue(null) },
+      discoveryQueryPlan: { findFirst: findPlan },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+    });
+
+    await expect(acts.resolveExternalIntentTarget({ workspaceId: 'ws-1', icpId: 'missing' })).resolves.toEqual({
+      workspaceId: 'ws-1',
+      icpId: 'missing',
+      cpvCodes: [],
+      buyerCountries: [],
+      fdaProductCodes: [],
+      naicsCodes: [],
+    });
+    expect(findPlan).not.toHaveBeenCalled();
+  });
+});
+
+describe('external intent ingestion — empty and expiry boundaries', () => {
+  it('returns an exact zero summary when no enabled provider has a usable query surface', async () => {
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+    });
+
+    await expect(
+      acts.ingestExternalSignals({
+        targets: [TARGET],
+        tedEnabled: false,
+        openfdaEnabled: false,
+        samgovEnabled: false,
+      }),
+    ).resolves.toEqual({
+      tedSpecs: 0,
+      fdaSpecs: 0,
+      samSpecs: 0,
+      fetches: 0,
+      ledgerHits: 0,
+      signalsUpserted: 0,
+      budgetExceeded: false,
+      errors: [],
+    });
+  });
+
+  it('expires only stale ACTIVE signals through the state-machine update', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 3 });
+    const acts = createExternalIntentActivities({
+      prisma: { sourceSignal: { updateMany } } as unknown as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+    });
+
+    await expect(acts.expireStaleSignals()).resolves.toEqual({ expired: 3 });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { status: 'ACTIVE', expiresAt: { lt: expect.any(Date) } },
+      data: { status: 'EXPIRED' },
+    });
+  });
+});

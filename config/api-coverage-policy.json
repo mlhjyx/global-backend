@@ -1,35 +1,35 @@
 {
   "schemaVersion": "api-coverage-policy/v1",
-  "baseCommit": "4562eab1bae16cdd424ff90a7d3403b0fb30d535",
-  "measuredAt": "2026-08-08T01:40:00+08:00",
+  "baseCommit": "240a69537912f1e8b450aaaef5d6487ebd526819",
+  "measuredAt": "2026-08-09T01:22:58+08:00",
   "targetPercent": 80,
-  "status": "RATCHET_ACTIVE_TARGET_UNMET",
+  "status": "TARGET_MET",
   "scope": {
     "include": ["src/**/*.ts"],
     "exclude": ["src/**/*.spec.ts", "src/**/testing/**"]
   },
   "baseline": {
-    "statements": { "covered": 17217, "total": 24333, "percent": 70.75 },
-    "branches": { "covered": 13492, "total": 20168, "percent": 66.89 },
-    "functions": { "covered": 3519, "total": 4736, "percent": 74.3 },
-    "lines": { "covered": 16071, "total": 22036, "percent": 72.93 }
+    "statements": { "covered": 23829, "total": 27994, "percent": 85.12 },
+    "branches": { "covered": 18539, "total": 23168, "percent": 80.01 },
+    "functions": { "covered": 4711, "total": 5424, "percent": 86.85 },
+    "lines": { "covered": 21959, "total": 25376, "percent": 86.53 }
   },
   "critical": {
     "auth": {
       "targetPercent": 80,
-      "baseline": { "covered": 1, "total": 40, "percent": 2.5 },
+      "baseline": { "covered": 115, "total": 123, "percent": 93.5 },
       "paths": ["src/auth/"],
-      "status": "DEBT"
+      "status": "TARGET_MET"
     },
     "compliance": {
       "targetPercent": 80,
-      "baseline": { "covered": 184, "total": 261, "percent": 70.49 },
+      "baseline": { "covered": 432, "total": 464, "percent": 93.1 },
       "paths": ["src/compliance/"],
-      "status": "DEBT"
+      "status": "TARGET_MET"
     },
     "events": {
       "targetPercent": 80,
-      "baseline": { "covered": 22, "total": 23, "percent": 95.65 },
+      "baseline": { "covered": 26, "total": 27, "percent": 96.3 },
       "paths": ["src/events/"],
       "status": "TARGET_MET"
     },
@@ -41,7 +41,7 @@
     },
     "identity": {
       "targetPercent": 80,
-      "baseline": { "covered": 77, "total": 84, "percent": 91.67 },
+      "baseline": { "covered": 201, "total": 208, "percent": 96.63 },
       "paths": [
         "src/discovery/identity.ts",
         "src/discovery/person-identity.ts"
@@ -50,11 +50,11 @@
     },
     "outbox": {
       "targetPercent": 80,
-      "baseline": { "covered": 69, "total": 93, "percent": 74.19 },
+      "baseline": { "covered": 127, "total": 154, "percent": 82.47 },
       "paths": ["src/relay/"],
-      "status": "DEBT"
+      "status": "TARGET_MET"
     }
   },
   "measurementCommand": "pnpm coverage:api",
-  "interpretation": "A green ratchet means coverage did not decline. It does not mean the 80 percent target is met while status remains RATCHET_ACTIVE_TARGET_UNMET."
+  "interpretation": "TARGET_MET means every global metric and every critical branch cohort is at least 80 percent. Exact covered/total counts are the ratchet; a future rounded percentage cannot hide the loss of one covered item."
 }

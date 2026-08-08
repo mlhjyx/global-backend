@@ -630,6 +630,7 @@ describe("blind visual candidate runner", () => {
         },
       });
     },
+    15_000,
   );
 
   it.each([

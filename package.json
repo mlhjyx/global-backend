@@ -42,6 +42,7 @@
     "contracts:docs": "pnpm --filter @global/contracts docs",
     "contracts:mock": "pnpm --filter @global/contracts mock",
     "contracts:gen": "pnpm --filter @global/contracts gen",
+    "docs:acquisition-identity-pilot-prep": "pnpm --filter @global/api prepare:acquisition-identity-pilot",
     "coverage:api": "pnpm --filter @global/contracts build && pnpm --filter @global/db generate && pnpm --filter @global/api build && pnpm coverage:api:verify",
     "coverage:api:verify": "pnpm --filter @global/api exec vitest run --coverage && node scripts/security-recovery-governance.mjs coverage --summary=apps/api/coverage/coverage-summary.json --policy=config/api-coverage-policy.json",
     "security:governance:test": "node --test scripts/security-recovery-governance.spec.mjs",
@@ -52,7 +53,6 @@
     "integration:verify": "node scripts/security-recovery-governance.mjs integration --matrix=config/integration-context-matrix.json",
     "integration:require-ready": "node scripts/security-recovery-governance.mjs integration --matrix=config/integration-context-matrix.json --require-ready",
     "security:source": "pnpm security:governance:test && pnpm security:workflow && pnpm security:sast && pnpm security:compose && pnpm recovery:verify && pnpm integration:verify",
-    "docs:acquisition-identity-pilot-prep": "pnpm --filter @global/api prepare:acquisition-identity-pilot",
     "format": "prettier --write ."
   },
   "devDependencies": {

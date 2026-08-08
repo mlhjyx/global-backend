@@ -27,6 +27,7 @@ import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapt
 import { searchCompaniesWithDirigeants, FrCompanyHit } from '../adapters/inpi-rne';
 import { bigqueryPatents, PatentRecord } from '../adapters/bigquery-patents';
 import { fetchSourcesSought, SamSourcesSought, SamSearchParams } from '../adapters/sam-api';
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -228,7 +229,10 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
     if (input.kind === 'award') {
       return { data: { awards: await searchAwardNotices(input.params) }, costCents: 0 };
     }
-    return { data: { notices: await searchContractNotices(input.params) }, costCents: 0 };
+    if (input.kind === 'contract') {
+      return { data: { notices: await searchContractNotices(input.params) }, costCents: 0 };
+    }
+    throw new Error(`ted.search: unsupported kind ${String((input as { kind?: unknown }).kind)}`);
   },
 };
 
@@ -258,7 +262,10 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
     if (input.kind === 'registration') {
       return { data: { establishments: await searchRegistrations(input.params) }, costCents: 0 };
     }
-    return { data: { clearances: await search510kClearances(input.params) }, costCents: 0 };
+    if (input.kind === '510k') {
+      return { data: { clearances: await search510kClearances(input.params) }, costCents: 0 };
+    }
+    throw new Error(`openfda.search: unsupported kind ${String((input as { kind?: unknown }).kind)}`);
   },
 };
 
@@ -429,7 +436,11 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
       },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) throw new Error(`mapyourshow ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    if (!res.ok) {
+      throw new Error(
+        `mapyourshow ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+      );
+    }
     const json = (await res.json()) as { DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } } };
     return { data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] }, costCents: 0 };
   },

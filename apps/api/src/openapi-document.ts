@@ -113,6 +113,8 @@ export function buildOpenApi(app: INestApplication) {
     .addTag('ICP')
     .addTag('Discovery')
     .addTag('Leads')
+    .addTag('Lead quality labels')
+    .addTag('Identity reviews')
     .addTag('Events')
     .addTag('System')
     .addBearerAuth()

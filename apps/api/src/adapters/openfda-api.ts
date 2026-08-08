@@ -15,6 +15,8 @@
  * 「注册/收录 ≠ FDA 核准」——记录只承载自报事实，绝不标「FDA 认证/批准」（§3.3.2 文案红线）。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 const BASE_URL = process.env.OPENFDA_API_URL ?? 'https://api.fda.gov';
 const API_KEY = process.env.OPENFDA_API_KEY; // 免费 key（可选）→ 提配额到 120k/天
 const MAX_LIMIT = 1000; // 每调硬上限
@@ -76,10 +78,11 @@ export interface RegistrationSearchParams {
 
 /** search 子句 AND 拼接（`field:value AND field:value`）。 */
 export function buildRegistrationSearch(p: RegistrationSearchParams): string {
-  if (!p.productCodes.length) {
-    throw new Error('buildRegistrationSearch: productCodes required (openFDA 发现必须带产品码，绝不裸拉全库)');
-  }
-  const clauses: string[] = [orClause('products.product_code', p.productCodes)];
+  const productCodes = requireNonBlankValues(
+    p.productCodes,
+    'buildRegistrationSearch: productCodes required (openFDA 发现必须带产品码，绝不裸拉全库)',
+  );
+  const clauses: string[] = [orClause('products.product_code', productCodes)];
   if (p.isoCountry) clauses.push(`registration.iso_country_code:${p.isoCountry.toUpperCase()}`);
   if (p.importerOnly) clauses.push('registration.initial_importer_flag:Y');
   if (p.establishmentTypes?.length) clauses.push(orClause('establishment_type', p.establishmentTypes));
@@ -158,7 +161,7 @@ export async function searchRegistrations(params: RegistrationSearchParams): Pro
     const skip = page * limit;
     if (skip > MAX_SKIP) break; // 深翻超限 → 停（P1 不做 search_after）
     const json = await openFdaGet('/device/registrationlisting.json', { search, limit, skip });
-    if (json.error) break; // NOT_FOUND / 其它 → 视作无更多结果
+    if (isNotFoundOrThrow(json)) break;
     const results = Array.isArray(json.results) ? json.results : [];
     for (const r of results) {
       const est = mapRegistration(r as Record<string, unknown>, params.productCodes); // 分类事实优先取搜索命中的产品
@@ -199,11 +202,12 @@ export function fdaDateToIso(raw?: string): string | undefined {
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) iso = s; // 已 ISO 日期
   else if (/^\d{8}$/.test(s)) iso = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`; // 紧凑 YYYYMMDD
   else if (s.includes('T')) {
+    if (Number.isNaN(Date.parse(s))) return undefined;
     const d = s.slice(0, 10);
     iso = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined; // ISO datetime → 取日期部
   }
   if (!iso) return undefined;
-  return Number.isNaN(Date.parse(iso)) ? undefined : iso; // 兜住合规格式但非法日期（'2024-13-40'）
+  return isIsoCalendarDate(iso) ? iso : undefined;
 }
 
 // 只对**已清关**的 510(k) 投 FDA_CLEARANCE（spec §8.6 红线：NSE/被拒/撤回绝不投，否则给被拒公司误加分）。
@@ -247,10 +251,11 @@ export interface Build510kParams {
  * 日期范围括号 `[FROM TO TO]`：openFDA 语法，URLSearchParams 编码 `[`→`%5B`（spec §2.2 认可，裸括号会空返）。
  */
 export function build510kSearch(p: Build510kParams): string {
-  if (!p.productCodes.length) {
-    throw new Error('build510kSearch: productCodes required (openFDA 510k 发现必须带产品码，绝不裸拉全库)');
-  }
-  const clauses: string[] = [orClause('product_code', p.productCodes)];
+  const productCodes = requireNonBlankValues(
+    p.productCodes,
+    'build510kSearch: productCodes required (openFDA 510k 发现必须带产品码，绝不裸拉全库)',
+  );
+  const clauses: string[] = [orClause('product_code', productCodes)];
   const countries = (p.countries ?? []).map((c) => c.toUpperCase()).filter(Boolean);
   if (countries.length) clauses.push(orClause('country_code', countries));
   if (p.decisionDateFrom && p.decisionDateTo) clauses.push(`decision_date:[${p.decisionDateFrom} TO ${p.decisionDateTo}]`);
@@ -309,7 +314,7 @@ export async function search510kClearances(params: Search510kParams): Promise<Fd
     const skip = page * limit;
     if (skip > MAX_SKIP) break;
     const json = await openFdaGet('/device/510k.json', { search, limit, skip });
-    if (json.error) break; // NOT_FOUND / 其它 → 无更多结果
+    if (isNotFoundOrThrow(json)) break;
     const results = Array.isArray(json.results) ? json.results : [];
     for (const r of results) {
       const c = map510k(r as Record<string, unknown>);
@@ -334,6 +339,14 @@ interface OpenFdaResponse {
   error?: { code?: string; message?: string };
 }
 
+function isNotFoundOrThrow(json: OpenFdaResponse): boolean {
+  if (!json.error) return false;
+  if (json.error.code === 'NOT_FOUND') return true;
+  const code = json.error.code ?? 'UNKNOWN_ERROR';
+  const message = json.error.message ?? 'request failed';
+  throw new Error(`openfda request failed: ${diagnosticErrorToken(`${code}:${message}`)}`);
+}
+
 /** 带退避的 GET（api-umbrella 无限流头 → 429 感知 + 退避；其余错误状态原样解析交调用方判 error）。 */
 async function openFdaGet(path: string, params: Record<string, string | number>, timeoutMs = 30_000): Promise<OpenFdaResponse> {
   const url = new URL(path, BASE_URL);
@@ -350,7 +363,11 @@ async function openFdaGet(path: string, params: Record<string, string | number>,
         continue;
       }
       // 200 与 404(NOT_FOUND) 都是合法 JSON（404 带 error 体）；非 JSON/其它 → 抛。
-      if (!res.ok && res.status !== 404) throw new Error(`openfda ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (!res.ok && res.status !== 404) {
+        throw new Error(
+          `openfda ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+        );
+      }
       return (await res.json()) as OpenFdaResponse;
     } catch (err) {
       lastErr = err;
@@ -381,6 +398,24 @@ function isNonEmpty(v: string | undefined): v is string {
 }
 function dedupe(arr: string[]): string[] {
   return [...new Set(arr)];
+}
+function requireNonBlankValues(values: string[], message: string): string[] {
+  if (!Array.isArray(values) || !values.length) throw new Error(message);
+  const normalized = values.map((value) => (typeof value === 'string' ? value.trim() : ''));
+  if (normalized.some((value) => !value)) throw new Error(message);
+  return normalized;
+}
+function isIsoCalendarDate(value: string): boolean {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const [, year, month, day] = match;
+  const date = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() + 1 === Number(month) &&
+    date.getUTCDate() === Number(day)
+  );
 }
 function backoff(attempt: number): number {
   return 1000 * 2 ** attempt;

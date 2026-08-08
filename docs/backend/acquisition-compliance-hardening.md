@@ -58,12 +58,12 @@ Authentication alone is not authorization for suppression governance. In this
 source slice, all four HTTP surfaces (`POST /suppressions`,
 `GET /suppressions`, deprecated `DELETE /suppressions/{id}`, and
 `POST /suppressions/{id}/release-requests`) therefore fail closed with the
-fixed `SUPPRESSION_GOVERNANCE_AUTHZ_PENDING` 503 response before their handlers
+server-side `compliance:manage` scope enforcement before their handlers
 run. This prevents an arbitrary authenticated caller from reading decrypted
 suppression values or writing governance facts while the authorization branch
 is still separate. Their future success schemas remain documented, but each
 operation carries the machine-readable
-`x-runtime-availability: AUTHORIZATION_INTEGRATION_PENDING` marker and states
+the generated `x-required-scopes: [compliance:manage]` marker and states
 that only the fixed 503 is currently reachable.
 
 During integration, that temporary admission must be replaced—not removed—by

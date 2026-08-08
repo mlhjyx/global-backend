@@ -22,6 +22,15 @@ import {
 } from '../paid-model-settlement';
 import { resolveReportedModelIdentity } from '../model-identity';
 import { snapshotVisionReviewInput } from '../vision-review-input';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
+
+async function responseBodyDiagnosticToken(response: Response): Promise<string> {
+  try {
+    return diagnosticErrorToken(await response.text());
+  } catch {
+    return 'RESPONSE_BODY_UNAVAILABLE';
+  }
+}
 
 /**
  * The application still has one gateway credential and one logical model name.
@@ -508,24 +517,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
     model: string,
     ctx: AiContext | undefined,
   ): Promise<never> {
-    const responseExcerpt = async (): Promise<string> => {
-      try {
-        return (await response.text()).slice(0, 300);
-      } catch {
-        return 'response body unavailable';
-      }
-    };
     if (!ctx?.paidCost) {
       throw new ProviderHttpError({
         status: response.status,
         provider: this.id,
         model,
-        responseExcerpt: await responseExcerpt(),
+        responseExcerpt: await responseBodyDiagnosticToken(response),
       });
     }
     const usage = await this.settledUsage(response, undefined, ctx);
     throw new ProviderOutputError(
-      `${this.id} ${model}: HTTP ${response.status}: ${await responseExcerpt()}`,
+      `${this.id} ${model}: HTTP ${response.status}: ${await responseBodyDiagnosticToken(response)}`,
       usage,
       { provider: this.id, model },
     );
@@ -633,7 +635,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         status: res.status,
         provider: this.id,
         model: input.model,
-        responseExcerpt: (await res.text()).slice(0, 300),
+        responseExcerpt: await responseBodyDiagnosticToken(res),
       });
     }
     const json = (await res.json()) as {
@@ -747,7 +749,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         status: res.status,
         provider: this.id,
         model: input.model,
-        responseExcerpt: (await res.text()).slice(0, 300),
+        responseExcerpt: await responseBodyDiagnosticToken(res),
       });
     }
     const json = (await res.json()) as {
@@ -867,7 +869,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         status: res.status,
         provider: this.id,
         model: input.model,
-        responseExcerpt: (await res.text()).slice(0, 300),
+        responseExcerpt: await responseBodyDiagnosticToken(res),
       });
     }
     const json = (await res.json()) as {
@@ -983,7 +985,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         status: res.status,
         provider: this.id,
         model: input.model,
-        responseExcerpt: (await res.text()).slice(0, 300),
+        responseExcerpt: await responseBodyDiagnosticToken(res),
       });
     }
     const json = (await res.json()) as {

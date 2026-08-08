@@ -818,6 +818,26 @@ function nativeApiFailureReason(
   return `native_api_failure_${status}:${settlementReason}${digest}${bytes}`;
 }
 
+/**
+ * Internal validation surface for adversarial unit tests. These are the same captured functions
+ * used by the real runner; exposing frozen references avoids adding a second, weaker validator or
+ * requiring paid/compiled dispatch merely to exercise malformed evidence paths.
+ */
+export const copyRealCapabilityValidationForTests = FREEZE_OBJECT({
+  objectRecord,
+  exactObjectKeys,
+  containsForbiddenEvidenceKey,
+  exactSettlementChain,
+  exactCopyReceipt,
+  settlementWiresMatchReceipt,
+  historicalReceiptBindingIsExact,
+  challengeReceipt,
+  completeUsage,
+  runtimeProtocol,
+  invalidOutput,
+  nativeApiFailureReason,
+});
+
 export function getCopyRealCapabilityReceipt(
   result: ModelExecutionResult<unknown>,
 ): CopyRealCapabilityReceipt | undefined {

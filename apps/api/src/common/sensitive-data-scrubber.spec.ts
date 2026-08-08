@@ -7,6 +7,18 @@ import {
 } from './sensitive-data-scrubber';
 
 describe('sensitive data scrubber', () => {
+  it('preserves the stable missing-credential message while redacting real bearer values', () => {
+    expect(scrubSensitiveText('missing bearer token')).toBe(
+      'missing bearer token',
+    );
+    expect(scrubSensitiveText('Authorization: bearer token')).toBe(
+      'Authorization: bearer [redacted]',
+    );
+    expect(scrubSensitiveText('Bearer opaque-credential')).toBe(
+      'Bearer [redacted]',
+    );
+  });
+
   it('redacts credentials, bearer/JWT values, email, phone and URL secrets', () => {
     const input = [
       'contact=jane.doe@example.com',

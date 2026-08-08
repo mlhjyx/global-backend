@@ -15,6 +15,7 @@ class FakePrisma {
   }
   monitoredSource = {
     findUnique: async ({ where }: { where: { id: string } }) => this.sources.get(where.id) ?? null,
+    findMany: async () => [...this.sources.values()].filter((source) => source.providerKey === 'web_watch').map((source) => ({ id: source.id })),
     update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
       Object.assign(this.sources.get(where.id)!, data);
       return this.sources.get(where.id);
@@ -49,10 +50,12 @@ class FakePrisma {
       this.changes.push(...data);
       return { count: data.length };
     },
+    deleteMany: async () => ({ count: this.changes.splice(0).length }),
   };
   // DAT-011 kill-switch 查询：默认无 SUSPENDED 记录（测试不模拟封禁）。
   sourcePolicy = {
-    findFirst: async () => null,
+    suspended: false,
+    findFirst: async () => (this.sourcePolicy.suspended ? { id: 'policy-1' } : null),
   };
 }
 
@@ -160,5 +163,51 @@ describe('WebsiteWatchService', () => {
     (prisma.sources.get('src1') as Record<string, unknown>).status = 'PAUSED';
     const r = await svc.watch('src1');
     expect(r.status).toBe('SKIPPED');
+  });
+
+  it('rejects missing sources and skips malformed/empty page configs', async () => {
+    await expect(svc.watch('missing')).rejects.toThrow('not found');
+    (prisma.sources.get('src1') as Record<string, unknown>).config = null;
+    await expect(svc.watch('src1')).resolves.toMatchObject({ status: 'SKIPPED', reason: 'no pages in config' });
+    (prisma.sources.get('src1') as Record<string, unknown>).config = {
+      company: null,
+      pages: [null, 'bad', { nope: true }],
+    };
+    await expect(svc.watch('src1')).resolves.toMatchObject({ status: 'SKIPPED', reason: 'no pages in config' });
+  });
+
+  it('honors the DAT-011 suspended-domain gate before creating a fetch receipt', async () => {
+    prisma.sourcePolicy.suspended = true;
+    await expect(svc.watch('src1')).resolves.toMatchObject({
+      status: 'SKIPPED',
+      reason: 'domain SUSPENDED (DAT-011)',
+    });
+    expect(prisma.fetches.size).toBe(0);
+  });
+
+  it('treats a withdrawn page revival as a new baseline and retires removed config pages', async () => {
+    fetcher.next = { url: URL1, html: productHtml('Laser X1') };
+    await svc.watch('src1');
+    prisma.changes = [];
+    prisma.entities[0].withdrawnAt = new Date('2026-08-01T00:00:00.000Z');
+    fetcher.next = { url: URL1, html: productHtml('Laser X2') };
+    const revived = await svc.watch('src1');
+    expect(revived.changed).toBe(0);
+    expect(prisma.changes).toEqual([expect.objectContaining({ changeType: 'ADDED', detail: expect.objectContaining({ revived: true }) })]);
+
+    (prisma.sources.get('src1') as Record<string, unknown>).config = {
+      company: { name: '', domain: '' },
+      pages: [{ url: 'https://acme.com/news' }, { url: 'mailto:bad' }, { url: '%' }],
+    };
+    fetcher.next = { url: 'https://acme.com/news', html: '<html><body>news</body></html>' };
+    await svc.watch('src1');
+    expect(prisma.entities.find((entity) => entity.externalId === URL1)?.withdrawnAt).not.toBeNull();
+  });
+
+  it('purges retained events only when web-watch sources exist', async () => {
+    prisma.changes.push({ id: 'change-1' }, { id: 'change-2' });
+    await expect(svc.purgeStaleEvents(1000)).resolves.toEqual({ deleted: 2 });
+    prisma.sources.clear();
+    await expect(svc.purgeStaleEvents(1000)).resolves.toEqual({ deleted: 0 });
   });
 });
