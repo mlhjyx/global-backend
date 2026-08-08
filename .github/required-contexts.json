@@ -7,7 +7,7 @@
     "gitleaks 密钥扫描",
     "security · required gate",
     "governance · traceability · release",
-    "nontechnical decision card integrity"
+    "nontechnical decision card freshness"
   ],
   "context_implementations": [
     {
@@ -41,7 +41,7 @@
       "event": "pull_request"
     },
     {
-      "name": "nontechnical decision card integrity",
+      "name": "nontechnical decision card freshness",
       "workflow": ".github/workflows/pr-decision-card.yml",
       "event": "pull_request_target"
     }

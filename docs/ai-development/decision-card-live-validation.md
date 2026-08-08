@@ -6,7 +6,7 @@
 > 维护 Owner：`OWN-DOC-GOV（当前 UNASSIGNED）`
 > 产品批准：[`DEC-AIDEV-001`](../governance/conflict-register.md#11-aidev-gate-1-已批准决策)
 > 最后核验：2026-07-27，`origin/main@1f17636137a0efb826200866bacb21ceb007aa54` + `codex/decision-card-live-validation` 运营验收候选
-> 2026-08-08 合同更正：下表已按当前 fail-closed 语义更新；修改后的真实 GitHub 运营复验仍为 `NOT_RUN`，不从本地单测推导外部状态。
+> 2026-08-08 合同更正：下表已按当前 fail-closed 语义更新；修改后的真实 GitHub 运营复验仍为 `NOT_RUN`，不从本地单测推导外部状态。2026-08-09 只读回读确认线上 ruleset 仍要求旧稳定名称 `nontechnical decision card freshness`，因此本次保留该 context 名称，只强化内部 integrity 语义。
 
 ## 目的与边界
 
@@ -19,15 +19,15 @@
 
 ## 验证矩阵
 
-| 编号 | 操作 | 预期自动状态 | 预期检查结果 |
-| --- | --- | --- | --- |
-| V1 | PR 正文绑定当前 head，技术门和 Codex 建议保持 `HOLD` | `HOLD` | 通过 |
-| V2 | 非 Draft PR 正文绑定当前 head 并声明 `PASS / RECOMMEND_MERGE / MERGE` | `CURRENT_UNVERIFIED` | 失败；作者声明不是可信外部 provenance |
-| V2D | Draft PR 做同样的未验证声明，仅用于规划展示 | `CURRENT_UNVERIFIED` | 非阻断通过；不表示可合并 |
-| V3 | 推送新的 canary head，但暂不更新 V2 决策卡 | `STALE` | 失败 |
-| V4 | 把决策卡更新到新的精确 head，等待门保持 `HOLD` | `HOLD` | 恢复通过 |
-| V5 | 新 head 的三项正向声明再次收口，但仍无可信外部 provenance | `CURRENT_UNVERIFIED` | 非 Draft 继续失败 |
-| V6 | 将 `nontechnical decision card integrity` 加入 main 必需检查 | 当前 PR 继续可判定 | 规则集包含且强制该检查；该 context 不冒充授权 |
+| 编号 | 操作                                                                                           | 预期自动状态                                  | 预期检查结果                                  |
+| ---- | ---------------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
+| V1   | PR 正文绑定当前 head，技术门和 Codex 建议保持 `HOLD`                                           | `HOLD`                                        | 通过                                          |
+| V2   | 非 Draft PR 正文绑定当前 head 并声明 `PASS / RECOMMEND_MERGE / MERGE`                          | `CURRENT_UNVERIFIED`                          | 失败；作者声明不是可信外部 provenance         |
+| V2D  | Draft PR 做同样的未验证声明，仅用于规划展示                                                    | `CURRENT_UNVERIFIED`                          | 非阻断通过；不表示可合并                      |
+| V3   | 推送新的 canary head，但暂不更新 V2 决策卡                                                     | `STALE`                                       | 失败                                          |
+| V4   | 把决策卡更新到新的精确 head，等待门保持 `HOLD`                                                 | `HOLD`                                        | 恢复通过                                      |
+| V5   | 新 head 的三项正向声明再次收口，但仍无可信外部 provenance                                      | `CURRENT_UNVERIFIED`                          | 非 Draft 继续失败                             |
+| V6   | 保持 `nontechnical decision card freshness` 为 main 必需检查，并验证其新实现同时覆盖 integrity | 当前 PR 继续可判定且不产生 context 重命名空窗 | 规则集继续强制稳定名称；该 context 不冒充授权 |
 
 ## 证据要求
 
@@ -41,4 +41,4 @@
 
 ## 回退
 
-工作流异常时，先从 main 规则集中移除新增的 integrity context，保留原有必需检查；必要时再通过独立 PR revert 工作流。验证 PR 不自动合并，关闭它不会改变产品或运行环境。
+工作流异常时保留既有 `nontechnical decision card freshness` context，不通过改名制造检查空窗；必要时通过独立 PR revert 内部 integrity 语义，再以 canary PR 复验。验证 PR 不自动合并，关闭它不会改变产品或运行环境。
