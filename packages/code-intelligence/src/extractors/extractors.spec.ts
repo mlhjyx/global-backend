@@ -274,9 +274,10 @@ test("Prisma and TypeScript extraction connect API, Outbox, workflow activity, a
       path.join(root, "apps", "api", "src", "temporal", "ensure-schedules.ts"),
       [
         "import { SITE_SCHEDULE_ID, SITE_WORKFLOW } from './understanding.constants';",
-        "const SPECS = [{ id: SITE_SCHEDULE_ID, workflowType: SITE_WORKFLOW }];",
+        "function schedule(id: string, workflowType: string) { return { id, workflowType }; }",
+        "export const PLATFORM_SCHEDULES = Object.freeze([schedule(SITE_SCHEDULE_ID, SITE_WORKFLOW)]);",
         "export async function ensureSchedules(client: any) {",
-        "  for (const spec of SPECS) await client.schedule.create({ scheduleId: spec.id, action: { workflowType: spec.workflowType } });",
+        "  for (const spec of PLATFORM_SCHEDULES) await client.schedule.create({ scheduleId: spec.id, action: { workflowType: spec.workflowType } });",
         "}",
       ].join("\n"),
     );
