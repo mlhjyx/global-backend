@@ -9,8 +9,8 @@
       "isolation": "DISPOSABLE_DATABASE_AND_ROLE",
       "command": null,
       "blockers": [
-        "The fixed base has no CI-safe allowlisted integration verifier.",
-        "No verified digest-pinned disposable PostgreSQL service workflow is present on the fixed base."
+        "A fail-closed isolated compliance verifier exists, but no CI job constructs its disposable database, owner role, app role, and dedicated environment variables.",
+        "No reviewed digest-pinned disposable PostgreSQL service workflow has executed migrations and the verifier as one hermetic required context."
       ],
       "activationRequirements": [
         "Use a CI-only database name prefixed global_ci_ and a CI-only non-BYPASSRLS role.",

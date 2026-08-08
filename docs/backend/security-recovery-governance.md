@@ -114,10 +114,13 @@ contexts.
   Temporal address and loads dotenv, so it is not admissible in this context.
 
 The manual workflow template deliberately fails its two jobs while the matrix
-is blocked. Editing the JSON to `ENABLED` with a shell command is also rejected:
-the source validator admits only `BLOCKED` until a separately reviewed,
-allowlisted runner is implemented and tested. The template must not be added to
-a required-check ruleset until those runners execute the real isolated checks.
+is blocked. PostgreSQL now has a fail-closed isolated compliance verifier, but
+there is still no reviewed CI job that creates its disposable database and
+owner/application roles, applies migrations, injects only job-constructed URLs,
+and executes that verifier. Editing the JSON to `ENABLED` with a shell command
+is therefore still rejected. Temporal has neither an admissible test runtime nor
+an allowlisted replay runner. The template must not be added to a required-check
+ruleset until the corresponding hermetic jobs execute the real isolated checks.
 
 ## Recovery state
 
