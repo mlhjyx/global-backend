@@ -38,7 +38,7 @@ type ProviderDb = {
  * DataSourceRouter 的适配器面（PRD 8.13）：代码内注册适配器实现，
  * data_provider 表管运行状态（ENABLED/DISABLED = Kill Switch 执行点）与成本参数。
  *
- * 默认启用 **public_web**（真实公开数据挖掘：SearXNG + Crawl4AI + Gemini）。
+ * seed 中各 provider 的 ENABLED/DISABLED 状态才是默认路由真值；registry 注册不等于运行启用。
  * sandbox 仅在 DISCOVERY_ALLOW_SANDBOX=true 时注册（用于无外网的单元/离线测试），
  * 生产与常规验证一律走真实数据。
  */
@@ -82,8 +82,8 @@ export class DiscoveryProviderRegistry {
         runtimeTelemetry: deps.runtimeTelemetry,
       });
       this.discovery.push(web);
-      // 决策人抽取排联系人发现**首位**（调用方取 adapters[0]）：Impressum/管理层页的具名决策人
-      // 优先于 public_web 的正则邮箱扫描（后者只挖到 info@，Role/Reachability 维恒零的根因之一）。
+      // 决策人抽取排联系人发现首位，但调用方会 fan-out 全部 ENABLED adapter；顺序只让同 tx 持久化时
+      // 优先落具名决策人，再由 public_web/Companies House 等补充并经身份解析合并。
       this.contacts.push(new DecisionMakerContactAdapter({
         gateway: deps.gateway,
         broker,
@@ -199,7 +199,7 @@ export class DiscoveryProviderRegistry {
         },
       });
     }
-    // openFDA 认证注册库（美国 FDA 官方 API）——器械注册发现 + 510k intent（后续 P3）。零鉴权、costPerCallCents=0。
+    // openFDA 认证注册库（美国 FDA 官方 API）——器械注册发现 + 510k intent（均已实现）。零鉴权、costPerCallCents=0。
     await db.dataProvider.upsert({
       where: { key: 'openfda' },
       update: {},
@@ -366,8 +366,8 @@ export class DiscoveryProviderRegistry {
       });
     }
     // SAM.gov Sources Sought（美国联邦招标前意图，P4）——keyless 公开 CSV（datagov 分区）。
-    // **默认 DISABLED**：真测通过前不路由（同 google_patents 先例，update:{} 不覆盖 ops 手改）。
-    // ⚠️ 与专利缓存不同：SAM **不物化 PII**（联系官不入库、买方=联邦机构组织）→ 真测绿后可直接翻 ENABLED，无需 LIA/DPIA。
+    // **默认 DISABLED**：实现与历史验证不等于当前运行授权；启用前须重核合规、配置、限额和真实运行门。
+    // SAM 不物化 PII（联系官不入库、买方=联邦机构组织），但这不绕过 provider kill-switch 与受控 pilot 审批。
     await db.dataProvider.upsert({
       where: { key: 'samgov' },
       update: {},
@@ -419,7 +419,7 @@ export class DiscoveryProviderRegistry {
     }
   }
 
-  /** 某 source_class 当前可用（且 ENABLED）的公司发现适配器，按成本升序。 */
+  /** 某 source_class 当前 ENABLED 的公司发现适配器，保持显式注册顺序；调用方负责 fan-out。 */
   async routeCompanyDiscovery(db: ProviderDb, sourceClass: SourceClass): Promise<CompanyDiscoveryAdapter[]> {
     const enabled = await this.enabledKeys(db);
     return this.discovery.filter((a) => a.classes.includes(sourceClass) && enabled.has(a.key));
