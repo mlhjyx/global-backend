@@ -119,7 +119,7 @@ Codex 不能代替产品负责人批准产品范围，也不能代替隐私、�
 
 仓库的 `PR decision card` 工作流在 `pull_request_target` 上只执行默认分支的受信脚本，不 checkout 或执行 PR head。它从 PR 正文生成或更新一条 bot-owned 决策卡评论，并核对仓库、PR、head SHA 和生成时间；当正文仍自报 `MERGE` 但 head 已变化、技术门不是 `PASS` 或独立审查不是 `RECOMMEND_MERGE` 时，检查失败并标记 `STALE/INCOMPLETE`。状态值必须位于字段开头并精确匹配枚举，`NOT PASS`、`DO NOT RECOMMEND_MERGE`、`DO NOT MERGE` 等否定句不得命中正向状态。
 
-PR 正文由作者控制，所以 bot 评论必须把技术门、独立审查与 Codex 建议明确标为“未验证声明”；即使三项自报为正向，也只能显示 `CURRENT_UNVERIFIED`，绝不输出 `READY_FOR_PRODUCT_DECISION` 或其他“已准备合并”结论。`nontechnical decision card integrity` 是声明完整性门，不是授权 context：Draft 中可非阻断展示这个状态；非 Draft 中的完整 `PASS / RECOMMEND_MERGE / MERGE` 声明在缺少可信外部 provenance 时必须让 check 失败。真实 CI、审查代理结论和产品负责人授权仍由 Codex 分别核验并向产品负责人报告。该工作流永不读取“产品负责人授权”字段作为自动合并输入，也不执行合并。
+PR 正文由作者控制，所以 bot 评论必须把技术门、独立审查与 Codex 建议明确标为“未验证声明”；即使三项自报为正向，也只能显示 `CURRENT_UNVERIFIED`，绝不输出 `READY_FOR_PRODUCT_DECISION` 或其他“已准备合并”结论。`nontechnical decision card freshness` 保留线上 ruleset 的稳定 context 名称，但其实现同时验证声明新鲜度与完整性；它不是授权 context：Draft 中可非阻断展示这个状态；非 Draft 中的完整 `PASS / RECOMMEND_MERGE / MERGE` 声明在缺少可信外部 provenance 时必须让 check 失败。真实 CI、审查代理结论和产品负责人授权仍由 Codex 分别核验并向产品负责人报告。该工作流永不读取“产品负责人授权”字段作为自动合并输入，也不执行合并。
 
 ## 4. 什么问题 Codex 应自行解决
 
