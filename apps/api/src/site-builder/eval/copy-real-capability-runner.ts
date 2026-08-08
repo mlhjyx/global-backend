@@ -49,10 +49,19 @@ import {
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
   copyPilotChildReservationDigest,
-  validateCopyRealCapabilityAdmissionEnvelope,
   type CopyPilotChildDispatchAuthorization,
   type CopyRealCapabilityAdmissionInput,
 } from "./copy-real-capability-admission";
+import {
+  isCopySonnetRecoveryAdmission,
+  validateCopyCapabilityAdmissionEnvelope,
+  type CopyCapabilityAdmissionInput,
+} from "./copy-capability-admission";
+import {
+  copySonnetRecoveryReservationDigest,
+  type CopySonnetRecoveryAdmissionInput,
+  type CopySonnetRecoveryChildDispatchAuthorization,
+} from "./copy-sonnet-recovery-admission";
 import {
   createCopyPilotTrustedGatewayBindings,
   assertCopyPilotTrustedGatewayCurrent,
@@ -112,9 +121,20 @@ export const COPY_REAL_CAPABILITY_ARTIFACT_PATHS = FREEZE_OBJECT(
     "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
     "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
     "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+    "apps/api/dist/site-builder/eval/copy-capability-admission.js",
     "apps/api/dist/site-builder/eval/copy-real-capability-admission.js",
+    "apps/api/dist/site-builder/eval/copy-sonnet-recovery-admission.js",
+    "apps/api/dist/site-builder/eval/copy-sonnet-recovery-contract.js",
     "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
   ].filter((path, index, paths) => paths.indexOf(path) === index),
+);
+const COPY_SONNET_RECOVERY_ARTIFACT_PATHS = FREEZE_OBJECT(
+  [
+    ...COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
+    "apps/api/dist/site-builder/eval/copy-sonnet-recovery-manifest-prep.js",
+  ]
+    .filter((path, index, paths) => paths.indexOf(path) === index)
+    .sort(),
 );
 
 const LOADED_REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
@@ -233,6 +253,11 @@ export interface CopyRealCapabilityRunner {
   summary(): Promise<RealModelExecutionLedgerSummary>;
 }
 
+export interface CopySonnetRecoveryRunner {
+  execute(executionKey: string): Promise<ModelExecutionResult<CopyTaskOutput>>;
+  summary(): Promise<RealModelExecutionLedgerSummary>;
+}
+
 export interface CopyGitEvidenceAcceptanceRunner {
   acceptGitReviewedEvidence(input: {
     acceptance: VerifiedGitReviewedEvidenceAcceptance;
@@ -262,7 +287,7 @@ interface CopyGitEvidenceAcceptanceDetail {
 }
 
 interface CopyRealCapabilityRuntimeDetail extends CopyGitEvidenceAcceptanceDetail {
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   receipt?: CopyRealCapabilityReceipt;
   compiledGuard: Awaited<ReturnType<typeof createCompiledRuntimeGuard>>;
   verifiedSource: CopyPilotVerifiedSource;
@@ -659,7 +684,9 @@ export function copyPilotReservationDigest(
 }
 
 function childLedgerAuthorization(
-  child: CopyPilotChildDispatchAuthorization,
+  child:
+    | CopyPilotChildDispatchAuthorization
+    | CopySonnetRecoveryChildDispatchAuthorization,
   evidenceBinding?: NonNullable<
     RealModelExecutionAuthorization["evidenceBinding"]
   >,
@@ -681,7 +708,7 @@ function childLedgerAuthorization(
 
 function childLedgerCampaign(input: {
   campaignId: string;
-  manifest: CopyRealCapabilityAdmissionInput["manifest"];
+  manifest: CopyCapabilityAdmissionInput["manifest"];
 }): ModelExecutionCampaignContract {
   return FREEZE_OBJECT({
     campaignId: input.campaignId,
@@ -693,7 +720,7 @@ function childLedgerCampaign(input: {
 }
 
 function runtimeBinding(input: {
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   source: {
     fixedSourceCommit: string;
     preparationHeadCommit: string;
@@ -723,8 +750,90 @@ function runtimeBinding(input: {
     childCampaignId: input.admission.childAuthorization.campaignId,
     gitReviewedEvidenceAcceptanceSchemaVersion:
       GIT_REVIEWED_EVIDENCE_ACCEPTANCE_SCHEMA_VERSION,
-    artifactPathsDigest: CANONICAL_DIGEST(COPY_REAL_CAPABILITY_ARTIFACT_PATHS),
+    artifactPathsDigest: CANONICAL_DIGEST(artifactPathsFor(input.admission)),
   });
+}
+
+function artifactPathsFor(
+  admission: CopyCapabilityAdmissionInput,
+): readonly string[] {
+  return isCopySonnetRecoveryAdmission(admission)
+    ? COPY_SONNET_RECOVERY_ARTIFACT_PATHS
+    : COPY_REAL_CAPABILITY_ARTIFACT_PATHS;
+}
+
+function recoveryAwareReservationDigest(
+  admission: CopyCapabilityAdmissionInput,
+  child: Omit<
+    | CopyPilotChildDispatchAuthorization
+    | CopySonnetRecoveryChildDispatchAuthorization,
+    "reservationDigest"
+  >,
+): string {
+  return isCopySonnetRecoveryAdmission(admission)
+    ? copySonnetRecoveryReservationDigest(
+        child as Omit<
+          CopySonnetRecoveryChildDispatchAuthorization,
+          "reservationDigest"
+        >,
+      )
+    : copyPilotReservationDigest(
+        child as Omit<CopyPilotChildDispatchAuthorization, "reservationDigest">,
+      );
+}
+
+type CopyCapabilitySelectedExecution =
+  (typeof COPY_CAPABILITY_PILOT_PLAN.executions)[number] & {
+    sourcePilotExecutionKey: string;
+  };
+
+function selectedExecutionFor(
+  admission: CopyCapabilityAdmissionInput,
+): CopyCapabilitySelectedExecution | undefined {
+  if (!isCopySonnetRecoveryAdmission(admission)) {
+    const selected = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+      ({ executionKey }) => executionKey === admission.selectedExecutionKey,
+    );
+    return selected == null
+      ? undefined
+      : FREEZE_OBJECT({
+          ...selected,
+          sourcePilotExecutionKey: selected.executionKey,
+        });
+  }
+  const recovery = admission.manifest.executions.find(
+    ({ executionKey }) => executionKey === admission.selectedExecutionKey,
+  );
+  const source = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+    ({ executionKey }) => executionKey === recovery?.sourcePilotExecutionKey,
+  );
+  if (
+    recovery == null ||
+    source == null ||
+    source.alias !== recovery.alias ||
+    source.protocol !== recovery.protocol ||
+    source.reasoning !== recovery.reasoning
+  ) {
+    return undefined;
+  }
+  return FREEZE_OBJECT({
+    ...source,
+    executionKey: recovery.executionKey,
+    sourcePilotExecutionKey: recovery.sourcePilotExecutionKey,
+  });
+}
+
+function executionPlanFor(
+  execution: CopyCapabilitySelectedExecution,
+  campaignId: string,
+): ReturnType<typeof createCopyCapabilityExecutionPlan> {
+  const source = createCopyCapabilityExecutionPlan({
+    executionKey: execution.sourcePilotExecutionKey,
+    campaignId,
+    workspaceId: "copy-capability-real-gateway",
+  });
+  if (execution.executionKey === source.executionId) return source;
+  return FREEZE_OBJECT({ ...source, executionId: execution.executionKey });
 }
 
 function executionPlanDigest(
@@ -1085,7 +1194,7 @@ async function acceptCopyGitReviewedEvidence(input: {
       campaignId: input.detail.campaignId,
       workspaceId: "copy-capability-real-gateway",
     });
-    validateCopyRealCapabilityAdmissionEnvelope(input.liveDetail.admission);
+    validateCopyCapabilityAdmissionEnvelope(input.liveDetail.admission);
     await assertCopyPilotTrustedGatewayCurrent(input.liveDetail.trustedGateway);
     await assertCopyPilotVerifiedSourceCurrent(input.liveDetail.verifiedSource);
     await ASSERT_COMPILED_CURRENT(input.liveDetail.compiledGuard);
@@ -1347,17 +1456,17 @@ export async function reopenCopyGitEvidenceAcceptanceRunner(input: {
   return runner;
 }
 
-export async function createCopyRealCapabilityRunner(input: {
+async function createCopyCapabilityChildRunner(input: {
   ledgerPath: string;
   authorizationClaimPath: string;
   ledgerMarkerPath: string;
   campaignId: string;
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   verifiedSource: CopyPilotVerifiedSource;
   trustedGateway: CopyPilotTrustedGateway;
 }): Promise<CopyRealCapabilityRunner> {
   assertCompiledEntrypoint();
-  validateCopyRealCapabilityAdmissionEnvelope(input.admission);
+  validateCopyCapabilityAdmissionEnvelope(input.admission);
   const source = requireCopyPilotVerifiedSourceBinding(input.verifiedSource);
   const gatewayBinding = getCopyPilotTrustedAdmissionBinding(
     input.trustedGateway,
@@ -1400,14 +1509,15 @@ export async function createCopyRealCapabilityRunner(input: {
     input.admission.childAuthorization.ledgerIdentityDigest !==
       ledgerIdentity.ledgerIdentityDigest ||
     reservationDigest !==
-      copyPilotReservationDigest(authorizationWithoutReservationDigest)
+      recoveryAwareReservationDigest(
+        input.admission,
+        authorizationWithoutReservationDigest,
+      )
   ) {
     fail("COPY_REAL_CAPABILITY_RESERVATION_BINDING_MISMATCH");
   }
 
-  const selectedExecution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
-    ({ executionKey }) => executionKey === input.admission.selectedExecutionKey,
-  );
+  const selectedExecution = selectedExecutionFor(input.admission);
   const selectedChild = input.admission.authorization.children.find(
     ({ childSlotId }) =>
       childSlotId === input.admission.childAuthorization.childSlotId,
@@ -1422,15 +1532,14 @@ export async function createCopyRealCapabilityRunner(input: {
   ) {
     fail("COPY_REAL_CAPABILITY_ADMISSION_BINDING_MISMATCH");
   }
-  const selectedExecutionPlan = createCopyCapabilityExecutionPlan({
-    executionKey: selectedExecution.executionKey,
-    campaignId: input.campaignId,
-    workspaceId: "copy-capability-real-gateway",
-  });
+  const selectedExecutionPlan = executionPlanFor(
+    selectedExecution,
+    input.campaignId,
+  );
 
   const compiledGuard = await createCompiledRuntimeGuard({
     repositoryRoot: LOADED_REPOSITORY_ROOT,
-    artifactPaths: COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
+    artifactPaths: artifactPathsFor(input.admission),
     binding: runtimeBinding({ admission: input.admission, source }),
     expectation: source.compiledRuntimeExpectation,
   });
@@ -1494,7 +1603,7 @@ export async function createCopyRealCapabilityRunner(input: {
         fail("COPY_REAL_CAPABILITY_BATCH_RUNNER_REQUIRED");
       }
       DELETE_BATCH_DISPATCH_AUTHORIZATION(runner);
-      validateCopyRealCapabilityAdmissionEnvelope(input.admission);
+      validateCopyCapabilityAdmissionEnvelope(input.admission);
       await assertCopyPilotTrustedGatewayCurrent(input.trustedGateway);
       await assertCopyPilotVerifiedSourceCurrent(input.verifiedSource);
       await ASSERT_COMPILED_CURRENT(compiledGuard);
@@ -1659,7 +1768,7 @@ export async function createCopyRealCapabilityRunner(input: {
         transport,
         repairCompiler: createCopyCapabilityRepairCompiler(),
         preWireGuard: async () => {
-          validateCopyRealCapabilityAdmissionEnvelope(input.admission);
+          validateCopyCapabilityAdmissionEnvelope(input.admission);
           await assertCopyPilotTrustedGatewayCurrent(input.trustedGateway);
           await assertCopyPilotVerifiedSourceCurrent(input.verifiedSource);
           await assertCopyPilotLedgerIdentityCurrent(ledgerIdentity.handle);
@@ -1685,7 +1794,7 @@ export async function createCopyRealCapabilityRunner(input: {
             metadata.settlement !== "known" ||
             compiled == null ||
             compiled.artifactCount !==
-              COPY_REAL_CAPABILITY_ARTIFACT_PATHS.length ||
+              artifactPathsFor(input.admission).length ||
             compiled.bindingDigest !==
               CANONICAL_DIGEST(
                 runtimeBinding({ admission: input.admission, source }),
@@ -1827,6 +1936,55 @@ export async function createCopyRealCapabilityRunner(input: {
   return runner;
 }
 
+export function createCopyRealCapabilityRunner(input: {
+  ledgerPath: string;
+  authorizationClaimPath: string;
+  ledgerMarkerPath: string;
+  campaignId: string;
+  admission: CopyRealCapabilityAdmissionInput;
+  verifiedSource: CopyPilotVerifiedSource;
+  trustedGateway: CopyPilotTrustedGateway;
+}): Promise<CopyRealCapabilityRunner> {
+  return createCopyCapabilityChildRunner(input);
+}
+
+export async function createCopySonnetRecoveryRunner(input: {
+  ledgerPath: string;
+  authorizationClaimPath: string;
+  ledgerMarkerPath: string;
+  campaignId: string;
+  admission: CopySonnetRecoveryAdmissionInput;
+  verifiedSource: CopyPilotVerifiedSource;
+  trustedGateway: CopyPilotTrustedGateway;
+}): Promise<CopySonnetRecoveryRunner> {
+  const child = await createCopyCapabilityChildRunner(input);
+  const executionKey = input.admission.selectedExecutionKey;
+  return FREEZE_OBJECT({
+    execute: async (requestedExecutionKey: string) => {
+      if (requestedExecutionKey !== executionKey) {
+        fail("COPY_SONNET_RECOVERY_EXECUTION_MISMATCH");
+      }
+      SET_BATCH_DISPATCH_AUTHORIZATION(child, executionKey);
+      try {
+        return await child.execute(executionKey);
+      } catch (error) {
+        const detail =
+          GET_REAL_CAPABILITY_RUNNER(child) ??
+          fail("COPY_REAL_CAPABILITY_TRUSTED_CHILD_RUNNER_REQUIRED");
+        await FREEZE_REAL_EXECUTION.call(
+          detail.ledger,
+          executionKey,
+          "sonnet_recovery_execution_failed",
+        );
+        throw error;
+      } finally {
+        DELETE_BATCH_DISPATCH_AUTHORIZATION(child);
+      }
+    },
+    summary: () => child.summary(),
+  });
+}
+
 /**
  * Binds the three candidate-local runners into one batch guard. Candidate
  * settlement failures stay local; shared source, manifest, credential, or
@@ -1840,6 +1998,11 @@ export function createCopyRealCapabilityCampaignRunner(input: {
     const detail = GET_REAL_CAPABILITY_RUNNER(runner);
     return detail ?? fail("COPY_REAL_CAPABILITY_TRUSTED_CHILD_RUNNER_REQUIRED");
   });
+  if (
+    details.some(({ admission }) => isCopySonnetRecoveryAdmission(admission))
+  ) {
+    fail("COPY_REAL_CAPABILITY_CHILD_BATCH_MISMATCH");
+  }
   const expectedKeys = COPY_CAPABILITY_PILOT_PLAN.childCampaigns.map(
     ({ executionKey }) => executionKey,
   );
@@ -1915,7 +2078,7 @@ export function createCopyRealCapabilityCampaignRunner(input: {
         if (currentBinding !== sharedBinding[index]) {
           fail("COPY_REAL_CAPABILITY_SHARED_BINDING_DRIFT");
         }
-        validateCopyRealCapabilityAdmissionEnvelope(detail.admission);
+        validateCopyCapabilityAdmissionEnvelope(detail.admission);
         await assertCopyPilotTrustedGatewayCurrent(detail.trustedGateway);
         await assertCopyPilotVerifiedSourceCurrent(detail.verifiedSource);
         await ASSERT_COMPILED_CURRENT(detail.compiledGuard);

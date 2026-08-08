@@ -23,6 +23,11 @@ import {
 import { canonicalDigest } from "../../model-runtime";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
+  COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+  COPY_SONNET_RECOVERY_EXECUTION,
+  COPY_SONNET_RECOVERY_PLAN_DIGEST,
+} from "./copy-sonnet-recovery-contract";
+import {
   COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES,
   buildCopyRealCapabilitySourceFileSpecs,
   type CopyRealCapabilitySourceBundle,
@@ -91,23 +96,6 @@ const SOURCE_TASK_CONTRACT_VERSION: string = (() => {
   return value;
 })();
 
-const RECOVERY_EXECUTION = Object.freeze({
-  executionKey: "copy-sonnet-recovery-v12-claude-sonnet-5" as const,
-  sourcePilotExecutionKey: SOURCE_SONNET_EXECUTION.executionKey,
-  alias: "claude-sonnet-5" as const,
-  protocol: "anthropic_messages" as const,
-  reasoning: "medium" as const,
-});
-
-const DUPLICATE_PREVENTION = Object.freeze({
-  acceptedAliasesExcludedFromDispatch: Object.freeze([
-    "gpt-5.6-terra",
-    "gpt-5.6-sol",
-  ] as const),
-  acceptedWireReplayPolicy: "never_repeat_successful_v11_wires" as const,
-  consumedAuthorizationPolicy: "never_reuse_v11_authorization" as const,
-});
-
 export interface CopySonnetRecoveryProvenanceArtifactRef {
   path: string;
   fileSha256: string;
@@ -125,7 +113,7 @@ export interface CopySonnetRecoveryManifest {
   plannedExecutions: 1;
   maximumWireCalls: 2;
   maximumRepairCallsPerExecution: 1;
-  executions: readonly [typeof RECOVERY_EXECUTION];
+  executions: readonly [typeof COPY_SONNET_RECOVERY_EXECUTION];
 }
 
 export interface CopySonnetRecoveryManifestArtifact {
@@ -150,7 +138,7 @@ export interface CopySonnetRecoveryManifestArtifact {
     settlementImplementationPath: "apps/api/src/model-gateway/new-api-request-bound-settlement.ts";
     settlementImplementationSha256: string;
   };
-  duplicatePrevention: typeof DUPLICATE_PREVENTION;
+  duplicatePrevention: typeof COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION;
   contractSnapshot: {
     schemaVersion: "site-builder-copy-sonnet-recovery-contract-snapshot/2026-08-08-v1";
     taskId: "site_builder.copy";
@@ -266,19 +254,6 @@ function validProvenance(
   );
 }
 
-function recoveryPlanDigest(): string {
-  return canonicalDigest({
-    schemaVersion: "site-builder-copy-sonnet-recovery-plan/2026-08-08-v1",
-    planId: "site-builder-copy-sonnet-recovery/2026-08-08-v12",
-    taskId: "site_builder.copy",
-    plannedExecutions: 1,
-    maximumWireCalls: 2,
-    maximumRepairCallsPerExecution: 1,
-    execution: RECOVERY_EXECUTION,
-    duplicatePrevention: DUPLICATE_PREVENTION,
-  });
-}
-
 export function buildCopySonnetRecoveryManifestArtifact(input: {
   preparationHeadCommit: string;
   sourceFiles: readonly CopyRealCapabilitySourceFile[];
@@ -316,7 +291,7 @@ export function buildCopySonnetRecoveryManifestArtifact(input: {
   const provenanceArtifacts = input.provenanceArtifacts.map((entry) =>
     Object.freeze({ ...entry }),
   );
-  const planDigest = recoveryPlanDigest();
+  const planDigest = COPY_SONNET_RECOVERY_PLAN_DIGEST;
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-sonnet-recovery-manifest/2026-08-08-v1" as const,
@@ -329,7 +304,7 @@ export function buildCopySonnetRecoveryManifestArtifact(input: {
     plannedExecutions: 1 as const,
     maximumWireCalls: 2 as const,
     maximumRepairCallsPerExecution: 1 as const,
-    executions: Object.freeze([RECOVERY_EXECUTION] as const),
+    executions: Object.freeze([COPY_SONNET_RECOVERY_EXECUTION] as const),
   });
   const recoveryProvenance = Object.freeze({
     artifacts: Object.freeze(provenanceArtifacts),
@@ -357,7 +332,7 @@ export function buildCopySonnetRecoveryManifestArtifact(input: {
     manifest,
     sourceBundle,
     recoveryProvenance,
-    duplicatePrevention: DUPLICATE_PREVENTION,
+    duplicatePrevention: COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
     contractSnapshot: Object.freeze({
       schemaVersion:
         "site-builder-copy-sonnet-recovery-contract-snapshot/2026-08-08-v1" as const,

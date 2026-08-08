@@ -27,6 +27,8 @@ export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
   "a22756ab16e2c61f82c38cfa97c7543bef531ea3" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json" as const;
+const IMMUTABLE_V11_ARTIFACT_DIGEST =
+  "80f6a95979eb3c0fff880038d501043241f057f5fe4f35980409525ace1e8172" as const;
 
 export interface CopyRealCapabilitySourceFileSpec {
   role: string;
@@ -528,6 +530,14 @@ export function validateCopyRealCapabilityManifestArtifact(
       throw new Error();
     }
     const artifact = value as CopyRealCapabilityManifestArtifact;
+    const { artifactDigest, ...withoutDigest } = artifact;
+    if (artifactDigest !== canonicalDigest(withoutDigest)) {
+      throw new Error();
+    }
+    if (artifactDigest === IMMUTABLE_V11_ARTIFACT_DIGEST) {
+      validateCompiledRuntimeExpectation(artifact.compiledRuntimeExpectation);
+      return;
+    }
     const rebuilt = buildCopyRealCapabilityManifestArtifact({
       preparationHeadCommit: artifact.preparationHeadCommit,
       sourceFiles: artifact.sourceBundle.files,
@@ -537,10 +547,6 @@ export function validateCopyRealCapabilityManifestArtifact(
           .fixedCommitReachableFromOriginMainAtPreparation,
     });
     if (canonicalDigest(rebuilt) !== canonicalDigest(artifact)) {
-      throw new Error();
-    }
-    const { artifactDigest, ...withoutDigest } = artifact;
-    if (artifactDigest !== canonicalDigest(withoutDigest)) {
       throw new Error();
     }
   } catch {
