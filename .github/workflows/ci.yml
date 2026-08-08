@@ -1,8 +1,9 @@
 name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
-# 55 型三断点视觉回归仅在渲染输出、其消费的契约或本工作流变更时运行；
-# 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终跑全量视觉门，避免路径过滤遗漏或运行器漂移长期未被发现。
+# 真实 fixture Astro build、55 型三断点视觉回归和多语言 smoke 仅在渲染输出、
+# 其消费的契约、依赖或本工作流变更时运行；每日 03:17 UTC（11:17 中国标准时间）
+# 定时与手动触发始终跑全量重门，避免路径过滤遗漏或运行器漂移长期未被发现。
 # 本 workflow 只负责构建、单元/纯合同测试和覆盖率。文档/决策卡治理在 Governance workflow；
 # PostgreSQL/Temporal 的可丢弃集成环境在未实现前继续 fail-closed，不得由本 job 的绿色替代。
 # contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
@@ -121,14 +122,22 @@ jobs:
         # suite and must remain independently green.
         run: pnpm --filter @global/api test
 
-      - name: Renderer locale contract test
-        run: pnpm --filter @global/site-renderer test
+      - name: Renderer unit contract tests
+        run: pnpm --filter @global/site-renderer test:contracts
+
+      # fixture-build.spec.ts performs 64 real Astro builds. Keep it on the
+      # same fail-safe scope as visual regression: renderer/consumer contract,
+      # dependency and workflow changes, plus the daily/manual full baseline.
+      - name: Renderer fixture Astro build matrix
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
+        run: pnpm --filter @global/site-renderer test:fixtures
 
       - name: Renderer qualified component visual regression（375 · 768 · 1440）
         if: needs.renderer-visual-scope.outputs.run_visual == 'true'
         run: pnpm --filter @global/site-renderer test:visual
 
       - name: Renderer multilingual smoke build
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
         run: pnpm --filter @global/site-renderer build
         env:
           SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json
