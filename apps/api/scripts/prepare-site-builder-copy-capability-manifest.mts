@@ -9,9 +9,8 @@ const {
   writeCopyRealCapabilityManifestCreateOnly,
 } = await import("../src/site-builder/eval/copy-real-capability-manifest-prep");
 
-const artifact = await prepareCopyRealCapabilityManifestFromRepository(
-  repositoryRoot,
-);
+const artifact =
+  await prepareCopyRealCapabilityManifestFromRepository(repositoryRoot);
 await writeCopyRealCapabilityManifestCreateOnly(repositoryRoot, artifact);
 
 process.stdout.write(

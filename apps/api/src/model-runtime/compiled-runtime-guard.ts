@@ -132,16 +132,14 @@ export function validateCompiledRuntimeExpectation(
       !safeRelativePath(artifact.path) ||
       !SHA256.test(artifact.sha256) ||
       seen.has(artifact.path) ||
-      (index > 0 &&
-        expectation.artifacts[index - 1]!.path >= artifact.path)
+      (index > 0 && expectation.artifacts[index - 1]!.path >= artifact.path)
     ) {
       fail("COMPILED_RUNTIME_EXPECTATION_INVALID");
     }
     seen.add(artifact.path);
   }
   if (
-    canonicalDigest(expectation.artifacts) !==
-    expectation.artifactTreeDigest
+    canonicalDigest(expectation.artifacts) !== expectation.artifactTreeDigest
   ) {
     fail("COMPILED_RUNTIME_EXPECTATION_INVALID");
   }
@@ -229,12 +227,10 @@ export async function createCompiledRuntimeExpectation(input: {
   }
   const artifacts = Object.freeze(
     await Promise.all(
-      [...input.artifactPaths]
-        .sort()
-        .map(async (path) => {
-          const artifact = await readArtifact(repositoryRoot, path);
-          return Object.freeze({ path: artifact.path, sha256: artifact.sha256 });
-        }),
+      [...input.artifactPaths].sort().map(async (path) => {
+        const artifact = await readArtifact(repositoryRoot, path);
+        return Object.freeze({ path: artifact.path, sha256: artifact.sha256 });
+      }),
     ),
   );
   const expectation = Object.freeze({

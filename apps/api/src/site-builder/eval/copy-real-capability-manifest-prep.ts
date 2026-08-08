@@ -11,9 +11,7 @@ import {
   type CompiledRuntimeExpectation,
 } from "../../model-runtime";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
-import {
-  COPY_PILOT_COMPILED_BUILD_COMMANDS,
-} from "./copy-pilot-source-verifier";
+import { COPY_PILOT_COMPILED_BUILD_COMMANDS } from "./copy-pilot-source-verifier";
 import {
   COPY_REAL_CAPABILITY_ADMISSION_SOURCE,
   type CopyRealCapabilityManifest,
