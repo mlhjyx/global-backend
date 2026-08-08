@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "container-image-lock/v1",
+  "generatedAt": "2026-08-08T01:30:04+08:00",
+  "environment": "global-dev",
+  "productionProof": false,
+  "services": {
+    "postgres": {
+      "kind": "remote",
+      "image": "pgvector/pgvector@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb",
+      "status": "VERIFIED_GLOBAL_DEV",
+      "evidence": "read-only docker image inspect RepoDigests on global-dev"
+    },
+    "redis": {
+      "kind": "remote",
+      "image": "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+      "status": "VERIFIED_GLOBAL_DEV",
+      "evidence": "read-only docker image inspect RepoDigests on global-dev"
+    },
+    "new-api": {
+      "kind": "remote",
+      "image": "calciumion/new-api@sha256:428018a37c0b26c163a3367c18401161707cd0e08d0f26a3dde9ff0caa05e34c",
+      "status": "PINNED_SOURCE",
+      "evidence": "pre-existing repository digest pin; no new runtime attestation"
+    },
+    "openox-video-compat": {
+      "kind": "local-build",
+      "image": "global-openox-video-compat:src-523ae03dd8a7",
+      "status": "SOURCE_LOCKED",
+      "build": {
+        "context": "./infra/new-api",
+        "dockerfile": "Dockerfile.openox-video-compat"
+      },
+      "baseImages": [
+        "nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0"
+      ],
+      "sourceDigest": "523ae03dd8a770cf031fca41d126cc31fc090465cc109e7652a2d18d3e874392",
+      "sourceFiles": [
+        "infra/new-api/Dockerfile.openox-video-compat",
+        "infra/new-api/openox-video-compat.nginx.conf"
+      ],
+      "buildReceiptStatus": "NOT_RUN"
+    },
+    "crawl4ai": {
+      "kind": "local-build",
+      "image": "global-crawl4ai:src-ae005dba520f",
+      "status": "SOURCE_LOCKED",
+      "build": {
+        "context": "./infra/crawl4ai",
+        "dockerfile": "Dockerfile"
+      },
+      "baseImages": [
+        "unclecode/crawl4ai@sha256:c9e1b1217fdd04a013864482861db57fbf20d922fa55e3db3eb420ab0411a9af"
+      ],
+      "sourceDigest": "ae005dba520f266e668d9a51becda06fb2346b5aa69697014b0ff9a230c0a443",
+      "sourceFiles": [
+        "infra/crawl4ai/Dockerfile",
+        "infra/crawl4ai/fakeip_resolver.py",
+        "infra/crawl4ai/patch_egress_broker.py"
+      ],
+      "buildReceiptStatus": "NOT_RUN"
+    },
+    "minio": {
+      "kind": "remote",
+      "image": "minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      "status": "VERIFIED_GLOBAL_DEV",
+      "evidence": "read-only docker image inspect RepoDigests on global-dev"
+    },
+    "embeddings": {
+      "kind": "remote",
+      "image": "ollama/ollama@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a",
+      "status": "VERIFIED_GLOBAL_DEV",
+      "evidence": "read-only docker image inspect RepoDigests on global-dev"
+    },
+    "docling": {
+      "kind": "remote",
+      "image": "ghcr.io/docling-project/docling-serve@sha256:a8a3f8bb7b4da118fd5921519819080defc4e742e4626c5f39b1628ff31f3348",
+      "status": "VERIFIED_GLOBAL_DEV",
+      "evidence": "read-only docker image inspect RepoDigests on global-dev"
+    },
+    "searxng": {
+      "kind": "remote",
+      "image": "searxng/searxng@sha256:11ffedd387dc9cf99e881250c67861470384e55194a86f76df76aa0034a28a1a",
+      "status": "VERIFIED_GLOBAL_DEV",
+      "evidence": "read-only docker image inspect RepoDigests on global-dev"
+    }
+  },
+  "profiles": {
+    "default": {
+      "status": "SOURCE_LOCKED",
+      "services": [
+        "postgres",
+        "redis",
+        "new-api",
+        "openox-video-compat",
+        "crawl4ai",
+        "minio",
+        "embeddings",
+        "docling",
+        "searxng"
+      ],
+      "runtimeAttestation": "NOT_RUN"
+    },
+    "ai-observability": {
+      "status": "UNVERIFIED",
+      "services": [],
+      "unverifiedImages": [
+        "docker.io/langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG}",
+        "docker.io/langfuse/langfuse:${LANGFUSE_IMAGE_TAG}",
+        "clickhouse/clickhouse-server:25.12",
+        "redis:7-alpine",
+        "postgres:17-alpine",
+        "minio/minio:RELEASE.2025-03-12T18-04-18Z",
+        "minio/mc:RELEASE.2025-03-12T17-29-24Z"
+      ],
+      "reason": "No complete registry or global-dev digest evidence is available. Startup remains fail closed."
+    }
+  }
+}
