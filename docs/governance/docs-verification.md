@@ -17,24 +17,24 @@
 pnpm docs:verify
 ```
 
-该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它先运行 `governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查，再运行既有模型候选、contracts build 和 Markdown 校验。普通 CI 的安装步骤后运行同一命令；独立 `governance · traceability · release` required context 也运行 `pnpm governance:verify`。
+该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它先运行 `governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查，再运行既有模型候选、contracts build 和 Markdown 校验。独立 `governance · traceability · release` required context 运行同一 `pnpm docs:verify`，并另行运行 memory-control 与 decision-card 合同；构建/覆盖率 context 不重复执行文档治理。
 
 ## 2. 检查面与失败语义
 
-| 检查面 | 硬失败条件 | 不证明 |
-|---|---|---|
-| 结构 | 受控文档不是一个 H1、围栏不成对、缺结尾换行、受控表格列漂移 | 内容正确或用户可理解 |
-| Document ID | 受控文档缺 ID、任意文档 ID 重复 | Registry 已登记或 Owner 已接受 |
-| 状态 | 受控文档缺状态/生命周期、元数据未使用受控反引号格式、状态 token 不在政策词汇 | 产品或实现状态获得批准 |
-| 链接 | 仓内目标或 Markdown heading anchor 不存在，或使用会跳到 GitHub host root 的 `/docs/...` 根相对路径 | 外部网页当前可用、链接内容可信 |
-| Registry 引用 | Capability/Object/Page/Scenario/Fixture/Adoption/Owner ID 不在各自 Registry 的声明列 | 引用关系本身业务正确 |
-| 历史 banner | 已登记的 Site 历史稿缺少冻结、dated 或 superseded 前言 | 可以删除、移动或覆盖历史证据 |
-| Provider Registry | 机器清单与代码 seed 的 key/SourceClass/default enablement 漂移，test path 不存在，或生成页被手改 | Provider 当前启用、外部源健康或运行成功 |
-| Delivery traceability | Capability/Object/operationId/code/test/Scenario 任一不存在；`PILOT/GA` 无 fresh PASS RuntimeEvidence 或 Release Bundle | test 内容足以覆盖业务语义，或用户已经可用 |
-| RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
-| Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权 |
-| Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
-| 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
+| 检查面                      | 硬失败条件                                                                                                                                                                                         | 不证明                                                       |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| 结构                        | 受控文档不是一个 H1、围栏不成对、缺结尾换行、受控表格列漂移                                                                                                                                        | 内容正确或用户可理解                                         |
+| Document ID                 | 受控文档缺 ID、任意文档 ID 重复                                                                                                                                                                    | Registry 已登记或 Owner 已接受                               |
+| 状态                        | 受控文档缺状态/生命周期、元数据未使用受控反引号格式、状态 token 不在政策词汇                                                                                                                       | 产品或实现状态获得批准                                       |
+| 链接                        | 仓内目标或 Markdown heading anchor 不存在，或使用会跳到 GitHub host root 的 `/docs/...` 根相对路径                                                                                                 | 外部网页当前可用、链接内容可信                               |
+| Registry 引用               | Capability/Object/Page/Scenario/Fixture/Adoption/Owner ID 不在各自 Registry 的声明列                                                                                                               | 引用关系本身业务正确                                         |
+| 历史 banner                 | 已登记的 Site 历史稿缺少冻结、dated 或 superseded 前言                                                                                                                                             | 可以删除、移动或覆盖历史证据                                 |
+| Provider Registry           | 机器清单与代码 seed 的 key/SourceClass/default enablement 漂移，test path 不存在，或生成页被手改                                                                                                   | Provider 当前启用、外部源健康或运行成功                      |
+| Delivery traceability       | Capability/Object/operationId/code/test/Scenario 任一不存在；`PILOT/GA` 无 fresh PASS RuntimeEvidence 或 Release Bundle                                                                            | test 内容足以覆盖业务语义，或用户已经可用                    |
+| RuntimeEvidence             | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；过期记录自动失去晋级资格                                                                                                       | artifact 内容真实、环境代表生产或外部系统未变化              |
+| Release Bundle              | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权           |
+| Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失                                                                                       | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
+| 敏感模式                    | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式                                                                                                                                         | 已完成完整 DLP/secret scan                                   |
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。
 
@@ -54,10 +54,10 @@ pnpm docs:verify
 
 ## 4. 当前显式例外
 
-| 路径 | 例外 | 理由 | 处置 |
-|---|---|---|---|
-| `docs/templates/前端技术方案模板.md` | 不强制新元数据 | 历史模板不是当前前端方案或 Release schema | `REFERENCE_ONLY`；需要正式前端方案时基于当前规范另行产出 |
-| `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md` | 历史表格列错误只告警 | `DATED_PROPOSAL` 必须保持原始证据；错误不影响 current truth | 原位保留 banner；不在 Phase 8 修正文义或移动文件 |
+| 路径                                                                                  | 例外                 | 理由                                                        | 处置                                                     |
+| ------------------------------------------------------------------------------------- | -------------------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| `docs/templates/前端技术方案模板.md`                                                  | 不强制新元数据       | 历史模板不是当前前端方案或 Release schema                   | `REFERENCE_ONLY`；需要正式前端方案时基于当前规范另行产出 |
+| `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md` | 历史表格列错误只告警 | `DATED_PROPOSAL` 必须保持原始证据；错误不影响 current truth | 原位保留 banner；不在 Phase 8 修正文义或移动文件         |
 
 新增例外必须记录路径、规则、风险、Owner、到期/关闭条件和 successor。永久 wildcard、整目录关闭链接检查或“历史所以都不检查”不允许。
 
@@ -65,14 +65,14 @@ pnpm docs:verify
 
 机器校验只把唯一 Registry 表格的声明列视为定义，再验证所有受控文档中的稳定 ID 引用。Registry 其他列中的 Parent、Pages、Owner 或正文引用不会反向创造定义：
 
-| ID 族 | 唯一机器查找源 |
-|---|---|
-| `CAP-*` | [Capability Registry](capability-register.md) |
-| `OBJ-FE-*` | [Object Registry](core-object-register.md) |
-| `PAGE-FE-*` | [页面与能力目录](../frontend/04-page-and-capability-catalog.md) |
-| `SCN-FE-*`、`FX-FE-*` | [Scenario Catalog](scenario-catalog.md) |
-| `ADP-FE-*` | [OSS Registry](../backend/oss-registry.md) |
-| `OWN-*` | [责任词典](terminology-and-status.md#9-责任角色) |
+| ID 族                 | 唯一机器查找源                                                  |
+| --------------------- | --------------------------------------------------------------- |
+| `CAP-*`               | [Capability Registry](capability-register.md)                   |
+| `OBJ-FE-*`            | [Object Registry](core-object-register.md)                      |
+| `PAGE-FE-*`           | [页面与能力目录](../frontend/04-page-and-capability-catalog.md) |
+| `SCN-FE-*`、`FX-FE-*` | [Scenario Catalog](scenario-catalog.md)                         |
+| `ADP-FE-*`            | [OSS Registry](../backend/oss-registry.md)                      |
+| `OWN-*`               | [责任词典](terminology-and-status.md#9-责任角色)                |
 
 存在性检查不能判断“这个 Capability 是否真的应该引用这个 Page”。语义关系继续由 [Traceability Matrix](traceability-matrix.md)和对应 Owner 审核。
 

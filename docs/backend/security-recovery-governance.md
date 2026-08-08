@@ -33,21 +33,34 @@ policy status is `RATCHET_ACTIVE_TARGET_UNMET`, it must not be described as
 satisfying the 80% target. Auth, compliance, and outbox need a separate
 test-coverage wave.
 
-## Security required-context source
+## Security required-context source and inherited debt
 
-The Security workflow now has four stable, read-only job names:
+The Security workflow exposes four diagnostic lanes and one aggregate gate:
 
-- `gitleaks secret scan`
+- `gitleaks 密钥扫描`
 - `dependency audit`
 - `repository SAST`
 - `container and Compose IaC`
+- `security · required gate`
 
 All external Actions in every repository workflow are pinned to full commit
 SHAs. Security workflow permissions are `contents: read` and
 `pull-requests: read`; it cannot comment, auto-fix, publish, deploy, or change a
-third-party resource. Dependency audit reads advisory data from the package
-registry and fails on high-severity production dependency findings. The SAST
-lane is a transparent repository-local pattern gate for dynamic evaluation,
+third-party resource. The aggregate gate succeeds only when all four diagnostic
+lanes succeed; keeping one aggregate context avoids a ruleset that accidentally
+requires only the secret scanner while SAST or Compose fails.
+
+Dependency audit reads the exact PR base and proposed merge result during the
+same CI run from the same explicit npm advisory endpoint. A new high/critical advisory, a
+new vulnerable dependency path, a severity escalation, a malformed response,
+or an unavailable audit endpoint fails closed. High/critical findings already
+present on the base remain visible as inherited debt but are not falsely
+attributed to an unrelated PR. Removing inherited exposure is reported as a
+resolution. This regression gate does not waive the existing debt: dependency
+upgrades remain a separately reviewed remediation stream, and the full debt
+counts are printed on every comparison.
+
+The SAST lane is a transparent repository-local pattern gate for dynamic evaluation,
 unsafe Prisma raw SQL, shell execution, and disabled TLS verification. It is
 not a claim of complete semantic vulnerability analysis. The Compose/IaC lane
 checks the image/source lock, recovery admission artifact, and integration
@@ -56,6 +69,12 @@ matrix without connecting to Docker or a service.
 GitHub required-check/ruleset configuration is external state and was not read
 or changed. The workflow files define candidate contexts; repository
 administrators still have to configure the ruleset explicitly.
+
+Every job has a finite timeout. Scheduled and push workflows use different
+concurrency groups so a scheduled diagnostic cannot cancel a required main
+push check. Build/typecheck/coverage, governance/docs, API contracts, and
+security remain separate stable contexts; one context cannot turn another
+green by duplication.
 
 ## Image provenance and startup admission
 
