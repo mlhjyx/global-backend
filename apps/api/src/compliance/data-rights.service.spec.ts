@@ -29,7 +29,11 @@ class FakePrisma {
 }
 
 function svc(fake: FakePrisma): DataRightsService {
-  return new DataRightsService(fake as never);
+  return new DataRightsService(fake as never, {
+    getProcessSnapshot: () => ({
+      safety: { processorJurisdiction: 'EU' },
+    }),
+  } as never);
 }
 
 const WS = '00000000-0000-0000-0000-000000000001';

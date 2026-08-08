@@ -6,6 +6,10 @@ import {
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { loadSiteBuilderModelSettlement } from '../site-builder/site-builder-model-settlement';
 import type { PaidModelSettlementController } from './paid-model-settlement';
+import type {
+  RuntimeEnvironment,
+  RuntimeProcessSnapshot,
+} from '../runtime/runtime-admission';
 
 export interface GatewayEvaluationConfig {
   /**
@@ -17,10 +21,10 @@ export interface GatewayEvaluationConfig {
 }
 
 function loadPaidModelSettlementFailClosed(
-  env: NodeJS.ProcessEnv,
+  env: RuntimeEnvironment,
 ): PaidModelSettlementController | undefined {
   try {
-    return loadSiteBuilderModelSettlement(env);
+    return loadSiteBuilderModelSettlement(env as NodeJS.ProcessEnv);
   } catch {
     // A stale, unreadable, or otherwise invalid operational attestation must
     // deny paid calls without taking the API or worker process down. The
@@ -37,7 +41,7 @@ function loadPaidModelSettlementFailClosed(
  * Swapping the 中转站 later touches only this file (ADR-007).
  */
 export function buildGatewayProvider(
-  env: NodeJS.ProcessEnv = process.env,
+  env: RuntimeEnvironment,
   evaluation: GatewayEvaluationConfig = {},
 ): ModelProvider | null {
   const baseUrl = env.MODEL_GATEWAY_URL;
@@ -60,6 +64,6 @@ export function buildGatewayProvider(
  * Stub 只允许在非生产使用：生产环境模型不可用时必须失败并告警，
  * 绝不能静默合成假数据（数据真实性 P-04）。
  */
-export function stubAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NODE_ENV !== 'production' || env.MODEL_ALLOW_STUB === 'true';
+export function stubAllowed(runtime: RuntimeProcessSnapshot): boolean {
+  return runtime.safety.model.allowStub;
 }
