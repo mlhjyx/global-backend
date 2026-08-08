@@ -14,6 +14,7 @@ import type {
   NativeModelAdapterResult,
 } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type { ModelProtocol } from "../../model-runtime/types";
+import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
   validateCopyCapabilityAdmissionEnvelope,
   type CopyCapabilityAdmissionInput,
@@ -353,6 +354,21 @@ export function createCopyPilotTrustedGatewayBindings(
     ({ executionKey }) => executionKey === state.admission.selectedExecutionKey,
   );
   if (!selected) fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+  const sourceExecutionKey =
+    "sourcePilotExecutionKey" in selected
+      ? selected.sourcePilotExecutionKey
+      : selected.executionKey;
+  const sourceExecution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+    ({ executionKey }) => executionKey === sourceExecutionKey,
+  );
+  if (
+    sourceExecution == null ||
+    sourceExecution.alias !== selected.alias ||
+    sourceExecution.protocol !== selected.protocol ||
+    sourceExecution.reasoning !== selected.reasoning
+  ) {
+    fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+  }
   return Object.freeze({
     execute: <Output>(
       protocol:
@@ -362,7 +378,8 @@ export function createCopyPilotTrustedGatewayBindings(
       if (
         protocol !== selected.protocol ||
         request.alias !== selected.alias ||
-        request.reasoning?.effort !== selected.reasoning
+        request.reasoning?.effort !== selected.reasoning ||
+        request.maxOutputTokens !== sourceExecution.maximumOutputTokens
       ) {
         return fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
       }
