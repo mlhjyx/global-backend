@@ -281,7 +281,7 @@ export function renderDecisionCard(result) {
 
 > 本评论由默认分支上的受信脚本根据当前 PR 事件与 PR 正文生成。它只检查绑定、完整性和过期状态，**不会批准或合并 PR**。
 > PR 正文由作者控制，因此其中的技术门、独立审查和 Codex 建议一律按**未验证声明**展示；本机器人永远不会仅凭正文输出“已准备合并”。
-> \`nontechnical decision card integrity\` 只证明声明完整性：Draft 可非阻断展示；非 Draft merge-candidate 在没有可信外部 provenance 时必须阻断。
+> \`nontechnical decision card freshness\` 保留既有 ruleset context 名称，但同时验证声明新鲜度与完整性：Draft 可非阻断展示；非 Draft merge-candidate 在没有可信外部 provenance 时必须阻断。
 
 - 卡片状态：\`${result.status}\`
 - PR 类型：\`${result.draft ? "DRAFT" : "READY"}\`

@@ -11,7 +11,7 @@
 | **L3 用户授权**      | 产品负责人对当次 merge/release 作最终确认      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
 | **L4 合并/发布回执** | 合并执行者与 Release Owner                     | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
 
-四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人会把用户授权门固定显示为 `NOT_AUTHORIZED`，直到外部授权流程提供独立 provenance。`nontechnical decision card integrity` 只证明决策卡声明的绑定和完整性，不是授权或合并建议：Draft 可非阻断展示 `CURRENT_UNVERIFIED`，非 Draft 的完整 `PASS / RECOMMEND_MERGE / MERGE` 声明必须失败，直到可信外部 provenance 另行取证。
+四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人会把用户授权门固定显示为 `NOT_AUTHORIZED`，直到外部授权流程提供独立 provenance。`nontechnical decision card freshness` 保留已配置的稳定 context 名称，但实现同时验证声明的新鲜度、exact head 绑定和完整性；它不是授权或合并建议：Draft 可非阻断展示 `CURRENT_UNVERIFIED`，非 Draft 的完整 `PASS / RECOMMEND_MERGE / MERGE` 声明必须失败，直到可信外部 provenance 另行取证。
 
 ## 仓内 required contexts 与外部 ruleset
 
@@ -34,6 +34,27 @@ PostgreSQL/Temporal 仍不在 required contexts 中：当前 `integration-contra
 
 若外部配置未完成或无法回读，状态必须写 `EXTERNAL_RULESET_NOT_VERIFIED`，不能因为仓内 JSON 存在就称保护已启用。
 
+### 2026-08-09 只读 ruleset 回读
+
+GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` ruleset 为
+`active`，并已禁止删除和 non-fast-forward，要求分支与 main 保持严格同步、
+解决 review threads 且 push 后撤销旧 review。其余状态仍不满足目标治理：
+
+- approving review 数为 0，未要求 CODEOWNERS review；
+- required checks 只有 `build · typecheck · test`、`gitleaks 密钥扫描` 和
+  `nontechnical decision card freshness`；contracts、governance 与 security
+  聚合门尚未受 ruleset 强制；
+- RepositoryRole 5 仍有 `always` bypass；
+- classic branch-protection API 返回未配置；当前保护来自 repository ruleset。
+
+本次只做回读，没有修改 GitHub 外部状态。安全迁移顺序是：先让产生稳定
+context 的工作流进入 main，在目标 main 的 canary PR 上观察 exact context；再
+单独把 contracts、governance 和 `security · required gate` 加入 ruleset，并把
+批准数升为 1、启用 CODEOWNERS、移除常态 bypass；最后重新回读完整 ruleset
+和真实 PR checks。`pull_request_target` 的 decision-card context 名称保持
+`freshness`，只强化内部 integrity 语义，避免 base workflow 尚未合并时出现
+required-context bootstrap 死锁。
+
 Action SHA 升级只能通过官方 Git 仓库的 tag 做只读解析；不以 marketplace 显示文字、moving major tag 或非官方 mirror 作为 revision 真值。仓内当前精确 pin 以 required-context 清单为唯一机器真值。
 
 ## Release Bundle 的外部 provenance
@@ -44,7 +65,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 
 1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `/global/backend/.codex/worktrees/<topic>` 与 `codex/<topic>`，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
-3. 开 PR 后等待 required-context 清单中的 CI、Security、Governance 与 decision-card integrity，触发独立 review，逐条处置 inline comment 并 resolve。
+3. 开 PR 后等待 required-context 清单中的 CI、Security、Governance 与 decision-card freshness/integrity 语义门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；只在用户对当次 PR 明确授权后合并。
 5. 合并后确认 `main` 跟随 `origin/main`；功能分支与本地 worktree 默认保留用于复查。删除仅是可选空间清理，须满足 `CONTRIBUTING.md` 的提交已入主线、工作区干净、未跟踪文件归属已核清条件，并取得用户明确授权。
 
