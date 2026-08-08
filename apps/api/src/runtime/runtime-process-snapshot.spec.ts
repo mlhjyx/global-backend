@@ -7,6 +7,7 @@ const SAFE_NON_DEVELOPMENT_ENV = Object.freeze({
   CORS_ORIGINS: 'https://app.example.test',
   AUTH_JWKS_URI: 'https://identity.example.test/.well-known/jwks.json',
   AUTH_ISSUER: 'https://identity.example.test',
+  AUTH_AUDIENCE: 'global-api',
   MODEL_GATEWAY_URL: 'https://models.example.test/v1',
   MODEL_GATEWAY_KEY: 'test-scoped-key',
   S3_ACCESS_KEY: 'test-access-key',
@@ -127,6 +128,7 @@ describe('canonical runtime process safety snapshot', () => {
       NODE_ENV: 'development',
       AUTH_JWKS_URI: 'https://identity.example.test/jwks.json',
       AUTH_ISSUER: 'https://identity.example.test',
+      AUTH_AUDIENCE: 'global-api',
     });
 
     expect(snapshot.safety.auth.mode).toBe('jwks');
