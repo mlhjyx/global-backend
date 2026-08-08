@@ -9,8 +9,10 @@ import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
 import {
+  assertCopyPilotVerifiedSourceCurrent,
   createCopyPilotVerifiedSource,
   getCopyPilotVerifiedSourceBinding,
+  requireCopyPilotVerifiedSourceBinding,
 } from "./copy-pilot-source-verifier";
 
 const directories: string[] = [];
@@ -135,6 +137,26 @@ describe("Copy pilot fixed-source verifier", () => {
           fixture.artifact.compiledRuntimeExpectation.artifactTreeDigest,
       },
     });
+  });
+
+  it("requires a branded source handle and revalidates its current bytes", async () => {
+    const fixture = await repository();
+    const verified = await createCopyPilotVerifiedSource({
+      repositoryRoot: fixture.root,
+      manifestArtifactPath: fixture.manifestPath,
+    });
+
+    expect(() => requireCopyPilotVerifiedSourceBinding({} as never)).toThrow(
+      "COPY_PILOT_VERIFIED_SOURCE_REQUIRED",
+    );
+    await expect(
+      assertCopyPilotVerifiedSourceCurrent(verified),
+    ).resolves.toBeUndefined();
+
+    await writeFile(join(fixture.root, "dist", "runtime.js"), "drift\n");
+    await expect(
+      assertCopyPilotVerifiedSourceCurrent(verified),
+    ).rejects.toThrow("COPY_PILOT_COMPILED_RUNTIME_MISMATCH");
   });
 
   it("rejects working-tree drift and an untracked manifest", async () => {
