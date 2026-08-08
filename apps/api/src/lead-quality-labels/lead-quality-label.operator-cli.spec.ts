@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -700,10 +706,11 @@ describe("FileLeadQualityLabelOperatorStateStore", () => {
   });
 
   it("never chmods an arbitrary existing parent directory and rejects non-0700 parents", () => {
-    const parent = tmpdir();
+    const parent = mkdtempSync(join(tmpdir(), "lead-label-unsafe-parent-"));
+    chmodSync(parent, 0o755);
     const modeBefore = statSync(parent).mode & 0o777;
     const store = new FileLeadQualityLabelOperatorStateStore(
-      join(parent, `lead-label-unsafe-parent-${process.pid}.json`),
+      join(parent, "state.json"),
     );
     expect(() =>
       store.set({
