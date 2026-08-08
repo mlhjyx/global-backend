@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "site-builder-copy-capability-pilot-partial-evidence/2026-08-08-v1",
+  "artifactDigest": "fe4f215a19ea22916dadf1a14b6fd34f7dc5bf74d0fcc49099200b8a96bff652",
+  "artifactDigestAlgorithm": "sha256(canonical_json_without_artifactDigest)",
+  "classification": "partial_capability_diagnostic",
+  "promotionEligible": false,
+  "taskId": "site_builder.copy",
+  "campaignId": "copy-capability-v11-user-auth-20260808T134140Z",
+  "executionHead": "616f2360c956db448f368618864e6eff39a0a723",
+  "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+  "preparationHeadCommit": "892c18a9da005020ed2665c42ee1a7bedb078b35",
+  "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+  "manifestArtifactDigest": "80f6a95979eb3c0fff880038d501043241f057f5fe4f35980409525ace1e8172",
+  "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+  "planDigest": "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+  "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+  "privateExecutionRecordSha256": "c820a13faa22eb93c4d867bb871903bf2898a38a6edb4d32ca2859acb0b35122",
+  "privateOperatorScriptSha256": "2376fbcb99a443e49b329d1d7a47e2adcefdcc07cb896c3fe6e162aaa50be6b3",
+  "authorizationScope": {
+    "plannedExecutions": 3,
+    "maximumWireCalls": 6,
+    "maximumRepairCallsPerExecution": 1,
+    "maximumQuotaPointsPerWire": 500000,
+    "totalQuotaCapPoints": 3000000,
+    "purposeSpecificTokenOperationsAuthorized": true,
+    "excluded": [
+      "copy_quality_matrix_36_executions_72_wires",
+      "model_promotion",
+      "production_route_adoption"
+    ]
+  },
+  "startedAt": "2026-08-08T13:45:50.353Z",
+  "stoppedAt": "2026-08-08T13:46:23.188Z",
+  "result": "PARTIAL_SUCCESS_STOPPED_FAIL_CLOSED",
+  "stopReason": "anthropic_cache_usage_semantic_not_reconciled_by_request_bound_settlement",
+  "campaignTotals": {
+    "executionClaims": 3,
+    "wireClaims": 3,
+    "knownWireSettlements": 2,
+    "unknownWireSettlements": 1,
+    "repairPlans": 0,
+    "completedExecutions": 2,
+    "frozenChildCampaigns": 1,
+    "usedQuotaPoints": 92052,
+    "authorizationScopeExceeded": false
+  },
+  "candidateResults": [
+    {
+      "executionId": "copy-capability-1-gpt-5.6-terra",
+      "alias": "gpt-5.6-terra",
+      "protocol": "openai_chat_completions",
+      "reasoning": "medium",
+      "status": "GIT_REVIEWED_CREATE_ONLY_ACCEPTANCE_CANDIDATE",
+      "wireClaims": 1,
+      "repairPlans": 0,
+      "settlement": "known",
+      "usage": {
+        "inputTokens": 5305,
+        "outputTokens": 101
+      },
+      "quotaPoints": 7389,
+      "outputSchemaValidated": true,
+      "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+      "ledgerDigest": "276b9994ddd910b76392d0cc444d6ecb6076ce3df3b50d15e7d3527bd183fd7d",
+      "knownSettlementDigest": "523bdefcd1ba7eff2623df283aeed46a86560e3c254b7b4726a62c38ae13f507",
+      "acceptanceArtifact": {
+        "path": "docs/evidence/site-builder/m1-g-copy-capability-v11-terra-acceptance.json",
+        "fileSha256": "5d0d0860a30889119e63bdda0b3f561756d928d0ed6e4c0f7927c8c85242a16b",
+        "artifactDigest": "91f06c42d5b314ed6f722e6cf3733d8394ee0ed0c95d11c6252fbbe56024b0df"
+      }
+    },
+    {
+      "executionId": "copy-capability-2-gpt-5.6-sol",
+      "alias": "gpt-5.6-sol",
+      "protocol": "openai_chat_completions",
+      "reasoning": "high",
+      "status": "GIT_REVIEWED_CREATE_ONLY_ACCEPTANCE_CANDIDATE",
+      "wireClaims": 1,
+      "repairPlans": 0,
+      "settlement": "known",
+      "usage": {
+        "inputTokens": 5305,
+        "outputTokens": 100
+      },
+      "quotaPoints": 14763,
+      "outputSchemaValidated": true,
+      "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+      "ledgerDigest": "9ddd0cd10978b4c991eb90a9686cbb92740ac9a6f94aece9d58f46e28616b86f",
+      "knownSettlementDigest": "b1a895b15a6ef9e4a92d3ad161e3f62b923585ec84000107ef6cbe7899c5f201",
+      "acceptanceArtifact": {
+        "path": "docs/evidence/site-builder/m1-g-copy-capability-v11-sol-acceptance.json",
+        "fileSha256": "f3b3ff91fec28611c822cbcf8613af0d1e65882ee3ae5ee633e7483aff461d41",
+        "artifactDigest": "c4afda144365b6b802609cdafd327a6174fae307d90dc5c4dbbfabc20866c23c"
+      }
+    },
+    {
+      "executionId": "copy-capability-3-claude-sonnet-5",
+      "alias": "claude-sonnet-5",
+      "protocol": "anthropic_messages",
+      "reasoning": "medium",
+      "status": "FROZEN_UNKNOWN_SETTLEMENT",
+      "wireClaims": 1,
+      "repairPlans": 0,
+      "settlement": "unknown",
+      "requestIdPreservedInRunner": true,
+      "requestIdSha256": "5a893964d0b99ce8c2171a195273ab389c13c032a9c11d2872354a30e9df8a1b",
+      "gatewayHttpCompleted": true,
+      "gatewayUseTimeSeconds": 4,
+      "gatewayUsage": {
+        "ordinaryInputTokens": 77,
+        "cacheCreationTokens": 1424,
+        "cacheReadTokens": 0,
+        "effectiveInputTokens": 1501,
+        "outputTokens": 7
+      },
+      "gatewayQuotaPoints": 69900,
+      "candidateReceiptProduced": false,
+      "acceptanceArtifactProduced": false,
+      "ledgerDigest": "f41d410ee2fde6c46c9927a2c7d3077d45ceb595bb89e54982e5e7fc1fae14c6",
+      "frozen": true,
+      "freezeReason": "observation_or_settlement_incomplete"
+    }
+  ],
+  "postRunGatewayObservation": {
+    "provenanceClass": "operator_observed_local_new_api_sqlite_snapshot",
+    "settlementAuthority": false,
+    "requestPath": "/v1/messages",
+    "channelId": 19,
+    "requestIdMatchedFrozenWire": true,
+    "consumeLogType": 2,
+    "usageSemantic": "anthropic",
+    "cacheCreationTokens": 1424,
+    "cacheReadTokens": 0,
+    "quotaPoints": 69900,
+    "diagnosis": "the AI SDK normalized input usage to 1501 tokens while the resolver compared it directly with new-api prompt_tokens=77 and ignored cache usage stored in log metadata",
+    "frozenLedgerReclassified": false
+  },
+  "tokenLifecycle": {
+    "tokenId": 20,
+    "purpose": "site_builder_copy_capability_pilot",
+    "finiteExactScope": true,
+    "disabledInDatabase": true,
+    "disabledStatus": 3,
+    "remainingQuotaPointsAfterDisable": 0,
+    "finalUsedQuotaPoints": 92052,
+    "rejectedByGatewayAfterDisable": true,
+    "disableVerificationStatus": 401,
+    "rawBearerPersistedInEvidence": false,
+    "bearerFingerprintPersistedInEvidence": false,
+    "rawRequestOrResponsePersistedInEvidence": false
+  },
+  "qualityConclusion": "NOT_RUN",
+  "candidateRanking": null,
+  "promotionDecision": "NOT_AUTHORIZED",
+  "routeChange": false,
+  "requiredRecovery": [
+    "preserve the v11 Sonnet child ledger as frozen and never retry it under the consumed v11 authorization",
+    "review and merge the exact Terra and Sol create-only acceptance artifacts before consuming them as capability evidence",
+    "merge the zero-call Anthropic cache-usage settlement fix before preparing any recovery dispatch",
+    "prepare a fixed-source Sonnet-only recovery contract so the successful Terra and Sol wires are not repeated",
+    "obtain a new exact authorization before any recovery model wire",
+    "after capability acceptance, implement and merge the still-missing real 36/72 quality-matrix dispatch runner before requesting matrix authorization",
+    "keep quality matrix, promotion, and production route adoption as separate decisions"
+  ]
+}

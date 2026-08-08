@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "git-reviewed-evidence-acceptance/2026-08-07-v1",
+  "artifactId": "site-builder-copy-capability-v11-2-gpt-5.6-sol",
+  "classification": "GIT_REVIEWED_CREATE_ONLY_ACCEPTANCE",
+  "createOnly": true,
+  "decision": "ACCEPT",
+  "acceptedEvidenceClass": "git_reviewed_gateway_settlement_accepted",
+  "taskId": "site_builder.copy",
+  "evidenceKind": "capability_pilot",
+  "candidateReceipt": {
+    "classification": "DISPATCH_PREFLIGHT_RECEIPT_ONLY",
+    "evidenceClass": "copy_gateway_settlement_candidate",
+    "evidenceKind": "capability_pilot",
+    "taskId": "site_builder.copy",
+    "campaignId": "copy-capability-v11-user-auth-20260808T134140Z-child-2",
+    "executionId": "copy-capability-2-gpt-5.6-sol",
+    "alias": "gpt-5.6-sol",
+    "protocol": "openai_chat_completions",
+    "reasoning": "high",
+    "wireCount": 1,
+    "repaired": false,
+    "fixtureId": "copy-factual-claims",
+    "repeatIndex": null,
+    "planDigest": "747c48d6d7855d9ec8334a0a47976d9635694c5d6387f542e01bd09c0501a732",
+    "inputDigest": "2cbc5dae8a6a082c138dbe8240e31269aa0da327c9ce341fff2987aea26831c0",
+    "contextDigest": "c8ff2b31b214cc7098a8571fddbeaf717fad6faf45611daf760320b7988c81df",
+    "promptDigest": "931163495ab4b454febaaecd528a32babe8fc0768c28648568ded6cb5a3b421a",
+    "ledgerDigest": "9ddd0cd10978b4c991eb90a9686cbb92740ac9a6f94aece9d58f46e28616b86f",
+    "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+    "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+    "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+    "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+    "admissionDigest": "5313a74e82adc1d4018e86d70218dfcb6fa7263dd536e73e85a3ce72566ca8f0",
+    "credentialAttestationDigest": "4dec2f2ea31a8d21649a0528d825c15737406c5cdb627756172bf6bbff56c0bd",
+    "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+    "knownSettlementDigest": "b1a895b15a6ef9e4a92d3ad161e3f62b923585ec84000107ef6cbe7899c5f201",
+    "settlementChain": {
+      "schemaVersion": "real-model-known-settlement-evidence/2026-08-07-v1",
+      "executionId": "copy-capability-2-gpt-5.6-sol",
+      "executionClaim": {
+        "planDigest": "747c48d6d7855d9ec8334a0a47976d9635694c5d6387f542e01bd09c0501a732"
+      },
+      "wires": [
+        {
+          "wireIndex": 1,
+          "claim": {
+            "wireId": "copy-capability-2-gpt-5.6-sol:wire:1",
+            "requestDigest": "b06f84f2dbd1bf424ce59ea2be692b4637df7932331a4a3e67ed39713bf8f64a"
+          },
+          "observation": {
+            "settlement": "known",
+            "requestIdDigest": "8fee1df127c4ff6d973c9efaeff989fd2d64454da6a49addc1011a4a3cd670da",
+            "requestedAlias": "gpt-5.6-sol",
+            "resolvedAlias": "gpt-5.6-sol",
+            "reportedModel": "gpt-5.6-sol",
+            "protocol": "openai_chat_completions",
+            "usage": {
+              "inputTokens": 5305,
+              "outputTokens": 100
+            },
+            "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+            "receiptDigest": "9776609dd322c03b077ab01d48cda8cecd8e9ee26f0efb8bf00b2397aa505825",
+            "quota": 14763,
+            "resolverId": "copy-capability-v11-user-auth-20260808T134140Z-settlement",
+            "channelId": 17
+          }
+        }
+      ],
+      "completion": {
+        "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84"
+      },
+      "digest": "b1a895b15a6ef9e4a92d3ad161e3f62b923585ec84000107ef6cbe7899c5f201"
+    },
+    "authorizationId": "copy-capability-v11-user-auth-20260808T134140Z-child-auth-2",
+    "reservationId": "copy-capability-v11-user-auth-20260808T134140Z-reservation-2",
+    "globalAuthorizationDigest": "375bbc1277a6c304225745efd8a56462b4b303654aa19e879389a9f8a7c36a4d",
+    "childAuthorizationDigest": "fc34d99ab31bf9993bd1c03a8620948c7de0a06b62f28926dfcb21744451a60a",
+    "childSlotId": "copy-capability-child-2-gpt-5.6-sol",
+    "ledgerCampaign": {
+      "campaignId": "copy-capability-v11-user-auth-20260808T134140Z-child-2",
+      "taskId": "site_builder.copy",
+      "planDigest": "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+      "maximumExecutions": 1,
+      "maximumWireCalls": 2
+    },
+    "ledgerAuthorization": {
+      "authorizationId": "copy-capability-v11-user-auth-20260808T134140Z-child-auth-2",
+      "reservationId": "copy-capability-v11-user-auth-20260808T134140Z-reservation-2",
+      "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+      "credentialAttestationDigest": "4dec2f2ea31a8d21649a0528d825c15737406c5cdb627756172bf6bbff56c0bd",
+      "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+      "ledgerIdentityDigest": "e6ada9a2f3956341a90ce87e1f6d79746e2462a79b36223d589350849c52df09",
+      "reservationDigest": "edcd5a86dff7ba759d97d0a4036996f44a87dd4cfef668effe91c5145e6a5ab0",
+      "maximumExecutions": 1,
+      "maximumWireCalls": 2,
+      "maximumRepairCallsPerExecution": 1,
+      "evidenceBinding": {
+        "schemaVersion": "real-model-execution-evidence-binding/2026-08-07-v1",
+        "executionId": "copy-capability-2-gpt-5.6-sol",
+        "childSlotId": "copy-capability-child-2-gpt-5.6-sol",
+        "alias": "gpt-5.6-sol",
+        "protocol": "openai_chat_completions",
+        "reasoning": "high",
+        "fixtureId": "copy-factual-claims",
+        "executionPlanDigest": "747c48d6d7855d9ec8334a0a47976d9635694c5d6387f542e01bd09c0501a732",
+        "inputDigest": "2cbc5dae8a6a082c138dbe8240e31269aa0da327c9ce341fff2987aea26831c0",
+        "contextDigest": "c8ff2b31b214cc7098a8571fddbeaf717fad6faf45611daf760320b7988c81df",
+        "promptDigest": "931163495ab4b454febaaecd528a32babe8fc0768c28648568ded6cb5a3b421a",
+        "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+        "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+        "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+        "admissionDigest": "5313a74e82adc1d4018e86d70218dfcb6fa7263dd536e73e85a3ce72566ca8f0",
+        "globalAuthorizationDigest": "375bbc1277a6c304225745efd8a56462b4b303654aa19e879389a9f8a7c36a4d",
+        "childAuthorizationDigest": "fc34d99ab31bf9993bd1c03a8620948c7de0a06b62f28926dfcb21744451a60a",
+        "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+        "compiledBindingDigest": "d0542c3319b662f6f52d3d977dc63d93e1a713b8c101d8b636b94b8b67f60e97"
+      }
+    },
+    "runtimeBinding": {
+      "schemaVersion": "copy-real-capability-runtime-binding/2026-08-08-v4",
+      "taskId": "site_builder.copy",
+      "planDigest": "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+      "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+      "preparationHeadCommit": "892c18a9da005020ed2665c42ee1a7bedb078b35",
+      "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+      "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+      "manifestArtifactDigest": "80f6a95979eb3c0fff880038d501043241f057f5fe4f35980409525ace1e8172",
+      "expectedCompiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+      "credentialAttestationDigest": "4dec2f2ea31a8d21649a0528d825c15737406c5cdb627756172bf6bbff56c0bd",
+      "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+      "globalAuthorizationDigest": "375bbc1277a6c304225745efd8a56462b4b303654aa19e879389a9f8a7c36a4d",
+      "childAuthorizationDigest": "fc34d99ab31bf9993bd1c03a8620948c7de0a06b62f28926dfcb21744451a60a",
+      "selectedExecutionKey": "copy-capability-2-gpt-5.6-sol",
+      "childCampaignId": "copy-capability-v11-user-auth-20260808T134140Z-child-2",
+      "gitReviewedEvidenceAcceptanceSchemaVersion": "git-reviewed-evidence-acceptance/2026-08-07-v1",
+      "artifactPathsDigest": "27c5486863f90b2d5ab88accec3e245aaeb1cf389638c88e6facc7d0ded504ad"
+    },
+    "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+    "compiledBindingDigest": "d0542c3319b662f6f52d3d977dc63d93e1a713b8c101d8b636b94b8b67f60e97"
+  },
+  "candidateReceiptDigest": "aadc22ee4cf3e37aeb4f4696fba9ac9608795b81e6032660cd3ec31100355d7c",
+  "subject": {
+    "executionId": "copy-capability-2-gpt-5.6-sol",
+    "outputDigest": "0579e5a3ed25bac50b081adbfb4c342a59319fdd3f72ca3176d329e234974f84",
+    "candidateLedgerDigest": "9ddd0cd10978b4c991eb90a9686cbb92740ac9a6f94aece9d58f46e28616b86f",
+    "fixedSourceCommit": "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
+    "sourceBundleDigest": "d79e06517f32fb3f6d650834f97c67282c3358480306b8c0db30ded5a4bf1b6c",
+    "manifestDigest": "f79ef3acb0503dcf98aba909cbf4af0e92918d93220edf5791281692df1cbec8",
+    "compiledRuntimeDigest": "68ecb3366d3138c1c623fc8c4d3bbaddb295b3d125373965f0f70e1e443370f8",
+    "compiledBindingDigest": "d0542c3319b662f6f52d3d977dc63d93e1a713b8c101d8b636b94b8b67f60e97",
+    "settlementObserverDigest": "46002c71ae193c561b0b9d9d046886fd6752a84dd3aa6147306b34be14aac415",
+    "knownSettlementDigest": "b1a895b15a6ef9e4a92d3ad161e3f62b923585ec84000107ef6cbe7899c5f201",
+    "alias": "gpt-5.6-sol",
+    "protocol": "openai_chat_completions",
+    "reasoning": "high"
+  },
+  "artifactDigest": "c4afda144365b6b802609cdafd327a6174fae307d90dc5c4dbbfabc20866c23c"
+}

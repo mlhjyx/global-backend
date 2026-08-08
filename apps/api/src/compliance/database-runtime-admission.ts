@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+
 export type DeploymentStage = "development" | "pilot" | "production";
 
 export interface ApplicationDatabaseRoleFacts {
@@ -9,10 +11,10 @@ export interface ApplicationDatabaseRoleFacts {
 }
 
 export interface ApplicationDatabaseRoleProbe {
-  $queryRawUnsafe<T>(query: string): Promise<T>;
+  $queryRaw<T>(query: Prisma.Sql): Promise<T>;
 }
 
-const DATABASE_ROLE_QUERY = `
+const DATABASE_ROLE_QUERY = Prisma.sql`
   SELECT
     current_user::text AS "roleName",
     r.rolsuper AS "superuser",
@@ -174,7 +176,7 @@ export async function verifyApplicationDatabaseRole(
   client: ApplicationDatabaseRoleProbe,
 ): Promise<ApplicationDatabaseRoleFacts> {
   const rows =
-    await client.$queryRawUnsafe<ApplicationDatabaseRoleFacts[]>(
+    await client.$queryRaw<ApplicationDatabaseRoleFacts[]>(
       DATABASE_ROLE_QUERY,
     );
   if (!Array.isArray(rows) || rows.length !== 1) {
@@ -191,7 +193,7 @@ export async function verifyPlatformOwnerDatabaseRole(
   client: ApplicationDatabaseRoleProbe,
 ): Promise<ApplicationDatabaseRoleFacts> {
   const rows =
-    await client.$queryRawUnsafe<ApplicationDatabaseRoleFacts[]>(
+    await client.$queryRaw<ApplicationDatabaseRoleFacts[]>(
       DATABASE_ROLE_QUERY,
     );
   if (!Array.isArray(rows) || rows.length !== 1) {
