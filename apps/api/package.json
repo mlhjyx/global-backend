@@ -15,6 +15,8 @@
     "verify:acquisition-compliance:postgres": "node --import tsx scripts/verify-acquisition-compliance-postgres.mts",
     "verify:site-builder:m1": "node --import tsx scripts/verify-site-builder-m1.mts",
     "verify:acquisition-ops:postgres": "node --import tsx scripts/verify-acquisition-ops-durability-postgres.mts",
+    "lead-quality-labels:operator": "node --import tsx scripts/lead-quality-label-operator.mts",
+    "verify:lead-quality-labels:postgres": "node --import tsx scripts/verify-lead-quality-label-postgres.mts",
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {

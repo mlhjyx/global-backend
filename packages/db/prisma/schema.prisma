@@ -189,9 +189,11 @@ model OutboxEvent {
   /// 无注册 handler 的事件停靠位（收口③）：不假发布、不毒化轮询。人工/后续版本处置。
   parkedAt              DateTime? @map("parked_at")
 
-  workspace  Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  deliveries OutboxDelivery[]
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries        OutboxDelivery[]
+  leadQualityLabels LeadQualityLabel[] @relation("LeadQualityLabelQualifiedEvent")
 
+  @@unique([eventId, workspaceId], map: "outbox_event_event_id_workspace_id_key")
   @@index([publishedAt])
   @@index([workspaceId])
   @@map("outbox_event")
@@ -1225,7 +1227,8 @@ model DeletionReceipt {
 // ── Lead & 验证评分 (PRD 7.5 LED-006..009 / 5.6) ───────────────────────────
 
 /// Lead 状态机（PRD 11.9）：DISCOVERED → ENRICHING → REVIEW →
-/// QUALIFIED/REJECTED/SUPPRESSED → CONTACTED → CONVERTED
+/// QUALIFIED/REJECTED/SUPPRESSED。CONTACTED/CONVERTED 是历史兼容的 SaaS 回写位，
+/// 本仓按 ADR-001 边界只读，不得由质量标签或获客流程推进。
 enum LeadStatus {
   DISCOVERED
   ENRICHING
@@ -1233,10 +1236,58 @@ enum LeadStatus {
   QUALIFIED
   REJECTED
   SUPPRESSED
-  CONTACTED
-  CONVERTED
+  CONTACTED // legacy read-only SaaS return value
+  CONVERTED // legacy read-only SaaS return value
 
   @@map("lead_status")
+}
+
+enum LeadQualityLabelType {
+  QGO_CREATED
+  SALES_ACCEPTED
+  COMMERCIAL_OUTCOME_VERIFIED
+  LEAD_OUTCOME_REJECTED
+
+  @@map("lead_quality_label_type")
+}
+
+enum LeadQualityReasonCode {
+  NOT_ICP
+  BAD_TIMING
+  UNREACHABLE
+  DUPLICATE
+  INSUFFICIENT_EVIDENCE
+  COMPLIANCE_BLOCKED
+  OTHER
+
+  @@map("lead_quality_reason_code")
+}
+
+enum LeadQualityCommercialResult {
+  WON
+  LOST
+
+  @@map("lead_quality_commercial_result")
+}
+
+enum LeadQualityLabelDisposition {
+  ACCEPTED
+  HELD
+
+  @@map("lead_quality_label_disposition")
+}
+
+enum LeadQualityLabelHeldReason {
+  OCCURRED_BEFORE_HANDOFF
+  OCCURRED_AT_IN_FUTURE
+  OUT_OF_ORDER_ARRIVAL
+  MISSING_QGO_CREATED
+  MISSING_PREREQUISITE
+  CONTRADICTORY_POSITIVE_LABEL
+  CONTRADICTORY_REJECTION
+  CONTRADICTORY_COMMERCIAL_RESULT
+
+  @@map("lead_quality_label_held_reason")
 }
 
 /// Lead = 「这家公司 × 这个 ICP」的可跟进机会。评分是确定性计算
@@ -1264,10 +1315,12 @@ model Lead {
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
-  canonicalCompany CanonicalCompany @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade)
+  canonicalCompany CanonicalCompany   @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade)
   decisions        LeadDecision[]
+  qualityLabels    LeadQualityLabel[] @relation("LeadQualityLabelLead")
 
   @@unique([workspaceId, icpId, canonicalCompanyId])
+  @@unique([id, workspaceId], map: "lead_id_workspace_id_key")
   @@index([workspaceId])
   @@index([workspaceId, queue])
   // 下游阶段按「本 ICP 的 match」关联过滤 canonical（leads.some）+ qualify 查询「已判 Lead」。
@@ -1290,6 +1343,35 @@ model LeadDecision {
   @@index([workspaceId])
   @@index([leadId])
   @@map("lead_decision")
+}
+
+/// SaaS/QGO side returns immutable quality facts against the exact LeadQualified
+/// handoff. Rows are append-only; HELD facts remain evidence but are excluded
+/// from the learning consumer. This table does not model Opportunity/QGO state.
+model LeadQualityLabel {
+  id                   String                       @id @default(uuid()) @db.Uuid
+  workspaceId          String                       @map("workspace_id") @db.Uuid
+  sourceEventId        String                       @map("source_event_id") @db.VarChar(128)
+  leadId               String                       @map("lead_id") @db.Uuid
+  leadQualifiedEventId String                       @map("lead_qualified_event_id") @db.Uuid
+  label                LeadQualityLabelType
+  occurredAt           DateTime                     @map("occurred_at")
+  sourceSystem         String                       @map("source_system") @db.VarChar(64)
+  externalObjectRef    String?                      @map("external_object_ref") @db.VarChar(256)
+  reasonCode           LeadQualityReasonCode?       @map("reason_code")
+  commercialResult     LeadQualityCommercialResult? @map("commercial_result")
+  disposition          LeadQualityLabelDisposition
+  heldReason           LeadQualityLabelHeldReason?  @map("held_reason")
+  actorId              String                       @map("actor_id") @db.VarChar(255)
+  ingestedAt           DateTime                     @default(now()) @map("ingested_at")
+
+  lead               Lead        @relation("LeadQualityLabelLead", fields: [leadId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "lead_quality_label_lead_scope_fkey")
+  leadQualifiedEvent OutboxEvent @relation("LeadQualityLabelQualifiedEvent", fields: [leadQualifiedEventId, workspaceId], references: [eventId, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "lead_quality_label_event_scope_fkey")
+
+  @@unique([workspaceId, sourceSystem, sourceEventId], map: "lead_quality_label_source_event_key")
+  @@index([workspaceId, leadId, disposition, occurredAt], map: "lead_quality_label_learning_idx")
+  @@index([workspaceId, leadQualifiedEventId], map: "lead_quality_label_event_idx")
+  @@map("lead_quality_label")
 }
 
 // ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────

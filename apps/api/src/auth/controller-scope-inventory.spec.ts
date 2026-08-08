@@ -13,6 +13,7 @@ import { EventsController } from '../events/events.controller';
 import { HealthController } from '../health/health.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { LeadQualityLabelsController } from '../lead-quality-labels/lead-quality-label.controller';
 import { resolveRuntimeAdmission } from '../runtime/runtime-admission';
 import {
   ACQUISITION_CONTROLLER_SCOPE_INVENTORY,
@@ -30,6 +31,7 @@ const CONTROLLERS = {
   HealthController,
   IcpController,
   LeadController,
+  LeadQualityLabelsController,
 } as const;
 
 const REGISTERED_PRODUCTION_CONTROLLERS = Object.freeze([
@@ -45,6 +47,7 @@ const REGISTERED_PRODUCTION_CONTROLLERS = Object.freeze([
   'IntakeController',
   'KbController',
   'LeadController',
+  'LeadQualityLabelsController',
   'SitePreviewController',
   'SitesController',
   'WhoamiController',
@@ -158,13 +161,13 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
     ]);
   });
 
-  it('keeps quality-label write and identity-review scopes unbound until their separate endpoints exist', () => {
+  it('binds quality-label write while keeping identity review for its separate endpoint', () => {
     const used = new Set(
       Object.values(ACQUISITION_CONTROLLER_SCOPE_INVENTORY).flatMap(({ operations }) =>
         Object.values(operations).flat(),
       ),
     );
-    expect(used.has('acquisition:label:write')).toBe(false);
+    expect(used.has('acquisition:label:write')).toBe(true);
     expect(used.has('acquisition:identity:review')).toBe(false);
   });
 

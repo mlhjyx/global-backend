@@ -94,6 +94,19 @@
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 
+### 阶段 4：质量标签回流（append-only seam）
+
+SaaS/QGO 侧消费 `LeadQualified` 后，以 `POST /api/v1/lead-quality-labels` 回传不可变事实。请求必须包含 `source_event_id`、`source_system`、`lead_id`、精确的 `lead_qualified_event_id`、`label` 与 `occurred_at`；`workspace_id` 和 `actor_id` 只能来自 bearer token 的 `RequestContext`，请求伪造会返回 400。
+
+- `label` 是封闭枚举：`QGO_CREATED`、`SALES_ACCEPTED`、`COMMERCIAL_OUTCOME_VERIFIED`、`LEAD_OUTCOME_REJECTED`。
+- `LEAD_OUTCOME_REJECTED` 必须且只能携带 `reason_code`：`NOT_ICP | BAD_TIMING | UNREACHABLE | DUPLICATE | INSUFFICIENT_EVIDENCE | COMPLIANCE_BLOCKED | OTHER`。
+- `COMMERCIAL_OUTCOME_VERIFIED` 必须且只能携带 `commercial_result: WON | LOST`。
+- 幂等键为 `(workspace, source_system, source_event_id)`：相同内容重放返回原行并标记 `replayed:true`；同 key 异内容返回 `409 SOURCE_EVENT_CONFLICT`。
+- 后端先锁定同 workspace 的 Lead，并要求事件精确匹配 `LeadQualified + aggregate_type=Lead + aggregate_id=lead_id`。分类顺序固定：QGO 可接受；Sales 缺已接受 QGO 则 `HELD/MISSING_QGO_CREATED`；商业结果缺 QGO/Sales 则 `HELD/MISSING_PREREQUISITE`；正反事实冲突与 WON/LOST 冲突同样 append 为 `HELD`。HELD 永不静默翻转，且不进入 learning batch。
+- 只有累计至少 50 条已接受 `QGO_CREATED` 后，后端 reference consumer 才允许返回可调参 batch；不足 50 仅作离线观察。
+
+该端点**不**创建 Opportunity/QGO 主状态，也不把 Lead 推进到 `CONTACTED/CONVERTED`；这两态仍是历史兼容的 SaaS 回写位。仓内 operator 仅用于安全参考消费/人工演练，不代表正式 SaaS 集成，见 [operator runbook](../../docs/backend/lead-quality-label-operator.md)。
+
 ## 4. 事件（服务端集成用）
 
 领域事件经 Transactional Outbox 发布，信封结构见 `events/envelope.schema.json`。关键事件：

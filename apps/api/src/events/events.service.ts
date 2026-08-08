@@ -1,7 +1,13 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { RequestContext } from '../auth/request-context';
-import { INTEGRATION_EVENTS, PULL_SINK, toEnvelope, DomainEventEnvelope, OutboxEventRow } from '../relay/event-registry';
+import { BadRequestException, Injectable } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { RequestContext } from "../auth/request-context";
+import {
+  INTEGRATION_EVENTS,
+  PULL_SINK,
+  toEnvelope,
+  DomainEventEnvelope,
+  OutboxEventRow,
+} from "../relay/event-registry";
 
 /**
  * 集成事件拉取 + ACK（收口③ pull sink）。SaaS 侧消费真值在 outbox_delivery（sink='saas'）。
@@ -20,7 +26,11 @@ export class EventsService {
   async list(
     ctx: RequestContext,
     opts: { cursor?: string; limit: number; type?: string },
-  ): Promise<{ data: DomainEventEnvelope[]; nextCursor: string | null; hasMore: boolean }> {
+  ): Promise<{
+    data: DomainEventEnvelope[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> {
     // 游标 = outbox_delivery 的 BigInt 行 id 字符串；非数字 → 400（fail fast）。
     let cursorId: bigint | undefined;
     if (opts.cursor !== undefined) {
@@ -28,7 +38,10 @@ export class EventsService {
         cursorId = BigInt(opts.cursor);
       } catch {
         throw new BadRequestException({
-          error: { code: 'INVALID_CURSOR', message: 'cursor must be a numeric event stream position' },
+          error: {
+            code: "INVALID_CURSOR",
+            message: "cursor must be a numeric event stream position",
+          },
         });
       }
     }
@@ -47,32 +60,86 @@ export class EventsService {
           event: { eventType: { in: typeFilter } },
         },
         include: { event: true },
-        orderBy: { id: 'asc' },
+        orderBy: { id: "asc" },
         take: opts.limit + 1,
       })) as Array<{ id: bigint; event: OutboxEventRow }>;
       const hasMore = rows.length > opts.limit;
       const data = hasMore ? rows.slice(0, opts.limit) : rows;
       return {
         data: data.map((d) => toEnvelope(d.event)), // envelope 不含 BigInt 行 id
-        nextCursor: hasMore && data.length ? String(data[data.length - 1].id) : null,
+        // Every non-empty page advances the durable checkpoint, including a
+        // terminal page. A later poll can therefore resume after its last
+        // ledger row instead of replaying the terminal page from an older
+        // cursor. Only a genuinely empty page has no new checkpoint.
+        nextCursor: data.length ? String(data[data.length - 1].id) : null,
         hasMore,
       };
     });
   }
 
   /**
-   * ACK：只翻 PENDING → ACKED（幂等，重复 ACK 计 0）；RLS 保证只 ACK 本 workspace。
+   * ACK only moves PENDING to ACKED. Every requested event receives an
+   * auditable outcome, so acked:0 never conflates idempotent replay, a missing
+   * pull delivery, and an unknown event. RLS still provides the hard tenant
+   * boundary; explicit workspace predicates are retained as defense in depth.
    * sink 缺省锁死 pull sink（'saas'）——webhook sink 的 ACKED 只能由 relay 收到 2xx 写，
    * 对外 API（events.controller）不暴露 sink 参数。
    */
-  ack(ctx: RequestContext, eventIds: string[], sink: string = PULL_SINK): Promise<{ acked: number }> {
+  ack(
+    ctx: RequestContext,
+    eventIds: string[],
+    sink: string = PULL_SINK,
+  ): Promise<{
+    acked: number;
+    results: Array<{
+      event_id: string;
+      outcome: "ACKED_NOW" | "ALREADY_ACKED" | "NOT_DELIVERED" | "NOT_FOUND";
+    }>;
+  }> {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const now = new Date();
-      const r = await tx.outboxDelivery.updateMany({
-        where: { eventId: { in: eventIds }, sink, status: 'PENDING' },
-        data: { status: 'ACKED', ackedAt: now, deliveredAt: now },
-      });
-      return { acked: r.count };
+      const results: Array<{
+        event_id: string;
+        outcome: "ACKED_NOW" | "ALREADY_ACKED" | "NOT_DELIVERED" | "NOT_FOUND";
+      }> = [];
+      let acked = 0;
+      for (const eventId of [...new Set(eventIds)]) {
+        const now = new Date();
+        const updated = await tx.outboxDelivery.updateMany({
+          where: {
+            workspaceId: ctx.workspaceId,
+            eventId: { in: [eventId] },
+            sink,
+            status: "PENDING",
+          },
+          // deliveredAt is relay transport evidence. Consumer acknowledgement
+          // has its own timestamp and must never manufacture a delivery time.
+          data: { status: "ACKED", ackedAt: now },
+        });
+        if (updated.count === 1) {
+          acked += 1;
+          results.push({ event_id: eventId, outcome: "ACKED_NOW" });
+          continue;
+        }
+
+        const event = await tx.outboxEvent.findFirst({
+          where: { eventId, workspaceId: ctx.workspaceId },
+          select: { eventId: true },
+        });
+        if (!event) {
+          results.push({ event_id: eventId, outcome: "NOT_FOUND" });
+          continue;
+        }
+        const delivery = await tx.outboxDelivery.findFirst({
+          where: { eventId, workspaceId: ctx.workspaceId, sink },
+          select: { status: true },
+        });
+        results.push({
+          event_id: eventId,
+          outcome:
+            delivery?.status === "ACKED" ? "ALREADY_ACKED" : "NOT_DELIVERED",
+        });
+      }
+      return { acked, results };
     });
   }
 }
