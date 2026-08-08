@@ -5,6 +5,7 @@
  */
 
 import type { CompanyIdentifier } from './identity';
+import type { ToolContext } from '../tools/tool-contract';
 
 export type SourceClass =
   | 'trade_data'
@@ -33,6 +34,8 @@ export interface ExecutionContext {
   workspaceId: string;
   runId?: string;
   correlationId?: string;
+  /** Present only for a provider wired to the durable acquisition broker. */
+  acquisitionBudget?: NonNullable<ToolContext['acquisitionBudget']>;
 }
 
 /** 平台级执行的 ToolContext 哨兵（对齐 email-verify 先例）；只用于工具 Trace/预算归属，禁止流入 AiContext。 */

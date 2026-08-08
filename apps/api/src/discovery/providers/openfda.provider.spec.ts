@@ -5,9 +5,29 @@ import { companyIdentity } from '../identity';
 import { ExecutionContext } from '../provider-contract';
 import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import type { OpenFdaSearchOutput } from '../../tools/source-tools';
+import { AcquisitionBudgetError } from '../../tools/acquisition-budget-ledger';
 
 const NOW = '2026-07-09T00:00:00Z';
 const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
+const DURABLE_CTX: ExecutionContext = {
+  workspaceId: '11111111-1111-4111-8111-111111111111',
+  runId: 'run-1',
+  acquisitionBudget: {
+    accountId: 'account-1',
+    purpose: 'discovery',
+    targetKind: 'TOOL',
+    targetId: 'openfda.search',
+    executionId: 'exec-1',
+    attempt: 1,
+    maximum: {
+      requestCount: 1n,
+      callCount: 1n,
+      recordCount: 250n,
+      modelCallCount: 0n,
+      costMinor: 0n,
+    },
+  },
+};
 
 /** 假 Broker：记录 invoke；impl 抛错=闸门拒绝/工具失败。 */
 function fakeBroker(impl: () => Promise<OpenFdaSearchOutput>): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
@@ -37,6 +57,22 @@ describe('OpenFdaDiscoveryProvider.discoverCompanies —— fail-safe + §8.8 �
     expect(res.records).toEqual([]);
   });
 
+  it('durable binding without its broker is an observable configuration failure', async () => {
+    const p = new OpenFdaDiscoveryProvider();
+
+    await expect(
+      p.discoverCompanies(
+        {
+          sourceClass: 'public_intelligence',
+          filters: { product_code: 'LLZ' },
+          keywords: [],
+          limit: 50,
+        },
+        DURABLE_CTX,
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_RESERVATION' });
+  });
+
   it('Broker 拒绝（SUSPENDED/未登记/用途门 → invoke 抛错）→ fail-safe 空结果', async () => {
     const broker = fakeBroker(async () => {
       throw new Error('tool openfda.search denied: source_policy SUSPENDED: api.fda.gov');
@@ -45,6 +81,24 @@ describe('OpenFdaDiscoveryProvider.discoverCompanies —— fail-safe + §8.8 �
     const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 }, CTX);
     expect(res.records).toEqual([]);
     expect(broker.invokeMock).toHaveBeenCalledOnce();
+  });
+
+  it('durable acquisition failure is not hidden as a successful empty result', async () => {
+    const broker = fakeBroker(async () => {
+      throw new AcquisitionBudgetError('ACCOUNT_FROZEN', 'durable settlement unknown');
+    });
+    const p = new OpenFdaDiscoveryProvider({ broker });
+    await expect(
+      p.discoverCompanies(
+        {
+          sourceClass: 'public_intelligence',
+          filters: { product_code: 'LLZ' },
+          keywords: [],
+          limit: 50,
+        },
+        DURABLE_CTX,
+      ),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_FROZEN' });
   });
 
   it('Broker 放行 → 经 openfda.search 工具（kind=registration）拉取，透传真 workspace/run', async () => {

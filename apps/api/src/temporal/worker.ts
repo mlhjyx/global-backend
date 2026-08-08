@@ -56,6 +56,7 @@ import { QualityCandidateService } from "../site-builder/quality/quality-candida
 import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
 import { resolveRuntimeProcessSnapshot } from "../runtime/runtime-admission";
+import { PrismaAcquisitionBudgetLedger } from "../tools/prisma-acquisition-budget-ledger";
 import { installSensitiveLogger } from "../common/sensitive-logger";
 import { diagnosticErrorToken } from "../common/sensitive-data-scrubber";
 import {
@@ -160,12 +161,18 @@ async function main(): Promise<void> {
     address: runtime.safety.temporal.address,
   });
 
-  // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
-  // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
+  // 收口②：全部原始出网仍经 ToolBroker 的同一政策面。openFDA discovery 先迁入
+  // required durable-acquisition 实例；其余调用暂留 legacy 实例，禁止静默回退 openFDA。
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
   const broker = buildToolBroker({
     sourcePolicyReader,
     paidLedger: costLedger,
+  });
+  const acquisitionBudget = new PrismaAcquisitionBudgetLedger(prisma);
+  const acquisitionBroker = buildToolBroker({
+    sourcePolicyReader,
+    acquisitionBudget,
+    acquisitionBudgetMode: 'required',
   });
   const taxonomy = new TaxonomyResolver(
     prisma,
@@ -186,6 +193,7 @@ async function main(): Promise<void> {
   const providers = new DiscoveryProviderRegistry({
     gateway,
     broker,
+    acquisitionBroker,
     prisma,
     runtimeTelemetry: runtimeTelemetry.telemetry,
   });
@@ -208,6 +216,7 @@ async function main(): Promise<void> {
         gateway,
         taxonomy,
         broker,
+        acquisitionBudget,
         runtimeTelemetry: runtimeTelemetry.telemetry,
       }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
