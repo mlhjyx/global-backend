@@ -17,6 +17,7 @@ import {
 import type { OpenFdaSearchInput, OpenFdaSearchOutput } from '../../tools/source-tools';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { companyIdentity } from '../identity';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
 
 const PARSER_VERSION = 'openfda/v1';
 const REG_QUERY_BASE = 'https://api.fda.gov/device/registrationlisting.json?search=registration.registration_number:';
@@ -78,7 +79,7 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
        
-      console.warn(`[openfda] discover failed: ${String(err).slice(0, 150)}`);
+      console.warn(`[openfda] discover failed: ${diagnosticErrorToken(err)}`);
       return { records: [], costCents: 0 };
     }
 

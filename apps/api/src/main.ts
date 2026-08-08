@@ -16,6 +16,7 @@ import {
   type RuntimeBootstrapSnapshot,
 } from './runtime/runtime-admission';
 import { unverifiedBuildIdentity } from './runtime/build-identity';
+import { installSensitiveLogger } from "./common/sensitive-logger";
 
 /**
  * Documentation-only metadata carrier. Nest preview mode never instantiates
@@ -96,6 +97,7 @@ async function exportOpenApi(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  installSensitiveLogger();
   // Documentation is a metadata-only command, not an admitted API runtime.
   // Branch before environment/build admission and before provider construction.
   if (process.argv.includes('--export-openapi')) {

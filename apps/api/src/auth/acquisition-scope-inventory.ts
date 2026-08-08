@@ -59,6 +59,7 @@ export const ACQUISITION_CONTROLLER_SCOPE_INVENTORY = Object.freeze({
     addSuppression: scopes('compliance:manage'),
     listSuppressions: scopes('compliance:manage'),
     removeSuppression: scopes('compliance:manage'),
+    requestSuppressionRelease: scopes('compliance:manage'),
     listProviders: scopes('ops:read'),
   }),
   LeadController: controllerInventory('lead/lead.controller.ts', {

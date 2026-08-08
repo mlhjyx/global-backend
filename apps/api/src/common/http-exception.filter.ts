@@ -1,5 +1,16 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
-import { Response } from 'express';
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from "@nestjs/common";
+import { Response } from "express";
+import {
+  diagnosticErrorSummary,
+  scrubSensitiveData,
+} from "./sensitive-data-scrubber";
 
 /**
  * 统一错误模型（PRD 11.15 / packages/contracts README）：
@@ -23,25 +34,36 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
         body !== null &&
         typeof (body as Record<string, unknown>).error === 'object'
       ) {
-        res.status(status).json(body);
+        res.status(status).json(scrubSensitiveData(body));
         return;
       }
       // class-validator: { statusCode, message: string[] | string, error }
       const raw = body as { message?: string | string[]; error?: string };
-      const messages = Array.isArray(raw.message) ? raw.message : [raw.message ?? exception.message];
-      res.status(status).json({
-        error: {
-          code: status === 400 ? 'VALIDATION_ERROR' : (raw.error ?? 'HTTP_ERROR').toUpperCase().replace(/\s+/g, '_'),
-          message: messages[0] ?? 'request failed',
-          ...(messages.length > 1 ? { details: { messages } } : {}),
-        },
-      });
+      const messages = Array.isArray(raw.message)
+        ? raw.message
+        : [raw.message ?? exception.message];
+      res.status(status).json(
+        scrubSensitiveData({
+          error: {
+            code:
+              status === 400
+                ? "VALIDATION_ERROR"
+                : (raw.error ?? "HTTP_ERROR")
+                    .toUpperCase()
+                    .replace(/\s+/g, "_"),
+            message: messages[0] ?? "request failed",
+            ...(messages.length > 1 ? { details: { messages } } : {}),
+          },
+        }),
+      );
       return;
     }
 
-    this.logger.error(String(exception instanceof Error ? exception.stack : exception));
-    res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-      error: { code: 'INTERNAL', message: 'internal server error' },
-    });
+    this.logger.error(diagnosticErrorSummary(exception));
+    res.status(HttpStatus.INTERNAL_SERVER_ERROR).json(
+      scrubSensitiveData({
+        error: { code: "INTERNAL", message: "internal server error" },
+      }),
+    );
   }
 }

@@ -12,6 +12,7 @@ import type { TedAwardNotice } from '../../adapters/ted-api';
 import type { TedSearchInput, TedSearchOutput } from '../../tools/source-tools';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { companyIdentity, normalizeDomain } from '../identity';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
 
 const PARSER_VERSION = 'ted/v1';
 const NOTICE_DETAIL_BASE = 'https://ted.europa.eu/en/notice/-/detail/';
@@ -71,7 +72,7 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
        
-      console.warn(`[ted] discover failed: ${String(err).slice(0, 150)}`);
+      console.warn(`[ted] discover failed: ${diagnosticErrorToken(err)}`);
       return { records: [], costCents: 0 };
     }
 

@@ -15,6 +15,7 @@ import {
   LocatedErasureTargets,
   SuppressionEntry,
 } from '../compliance/deletion.types';
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
 
 /**
  * 收口⑥ PR-B 删除编排（GDPR Art.17）的 Temporal 活动。deletionWorkflow 四步：
@@ -291,7 +292,10 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
       await prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.deletionRequest.updateMany({
           where: { id: args.deletionRequestId, status: { notIn: ['COMPLETED', 'FAILED'] } },
-          data: { status: 'FAILED', error: args.error.slice(0, 500) },
+          data: {
+            status: 'FAILED',
+            error: diagnosticErrorToken(args.error),
+          },
         }),
       );
     },
@@ -300,19 +304,22 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
 export type DeletionActivities = ReturnType<typeof createDeletionActivities>;
 
-/** suppression_record 幂等 upsert（冻结与擦除两阶段共用）：已存在则保留更早的禁联时间/原因，不覆盖。 */
+/** suppression_record append-only insert（冻结与擦除两阶段共用）：冲突时保留更早事实。 */
 async function upsertSuppressionEntries(
   tx: Prisma.TransactionClient,
   workspaceId: string,
   entries: SuppressionEntry[],
 ): Promise<void> {
-  for (const s of entries) {
-    await tx.suppressionRecord.upsert({
-      where: { workspaceId_type_value: { workspaceId, type: s.type, value: s.value } },
-      update: {}, // 已存在则保留（更早的禁联时间/原因不覆盖）
-      create: { workspaceId, type: s.type, value: s.value, reason: s.reason },
-    });
-  }
+  if (entries.length === 0) return;
+  await tx.suppressionRecord.createMany({
+    data: entries.map((entry) => ({
+      workspaceId,
+      type: entry.type,
+      value: entry.value,
+      reason: entry.reason,
+    })),
+    skipDuplicates: true,
+  });
 }
 
 /**

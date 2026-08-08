@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SourceAdapterRegistry } from './source-adapter';
 import { cleanEntity, CleanedEntity } from './clean';
 import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
 
 const PARSER_VERSION = 'acquisition/v1';
 const CHUNK = 50;
@@ -60,11 +61,12 @@ export class AcquisitionService {
       }
       cleaned = [...byExt.values()];
     } catch (err) {
+      const errorToken = diagnosticErrorToken(err);
       await prisma.sourceFetch.update({
         where: { id: fetch.id },
-        data: { status: 'FAILED', error: String(err).slice(0, 300), finishedAt: new Date() },
+        data: { status: 'FAILED', error: errorToken, finishedAt: new Date() },
       });
-      return { sourceId, status: 'FAILED', total: 0, added: 0, updated: 0, removed: 0, unchanged: 0, reason: String(err).slice(0, 200) };
+      return { sourceId, status: 'FAILED', total: 0, added: 0, updated: 0, removed: 0, unchanged: 0, reason: errorToken };
     }
 
     // ── diff vs 现有快照 ──

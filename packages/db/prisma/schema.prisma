@@ -877,16 +877,37 @@ model FieldEvidence {
 
 /// Suppression（PRD 7.4 / 12.6）：禁联名单，任何对外动作前的第一道检查。
 model SuppressionRecord {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  type        String // email | domain | company_name
-  value       String
-  reason      String? // unsubscribe | bounce | complaint | manual | legal
-  createdAt   DateTime @default(now()) @map("created_at")
+  id               String                       @id @default(uuid()) @db.Uuid
+  workspaceId      String                       @map("workspace_id") @db.Uuid
+  type             String // email | domain | company_name
+  value            String
+  reason           String? // unsubscribe | bounce | complaint | manual | legal
+  createdAt        DateTime                     @default(now()) @map("created_at")
+  releaseDecisions SuppressionReleaseDecision[]
 
   @@unique([workspaceId, type, value])
+  @@unique([id, workspaceId], map: "suppression_record_id_workspace_key")
   @@index([workspaceId])
   @@map("suppression_record")
+}
+
+/// Append-only request/review fact. It never makes a suppression ineffective;
+/// an approved release executor is intentionally outside the ordinary app API.
+model SuppressionReleaseDecision {
+  id                  String   @id @default(uuid()) @db.Uuid
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  suppressionRecordId String   @map("suppression_record_id") @db.Uuid
+  requestKind         String   @map("request_kind") // USER_PREFERENCE | IDENTITY_CORRECTION
+  status              String // PENDING_REVIEW | PENDING_LEGAL_REVIEW
+  justification       String
+  evidenceRef         String?  @map("evidence_ref")
+  actorId             String   @map("actor_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  suppressionRecord SuppressionRecord @relation(fields: [suppressionRecordId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "suppression_release_decision_record_scope_fkey")
+
+  @@index([workspaceId, suppressionRecordId, createdAt], map: "suppression_release_decision_record_idx")
+  @@map("suppression_release_decision")
 }
 
 // ── 存储侧合规（收口⑥ · ADR-010 COMPLIANCE-SCORING / ADR-003 PII-rights zone） ──

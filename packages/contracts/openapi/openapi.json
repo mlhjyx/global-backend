@@ -2525,6 +2525,7 @@
     },
     "/api/v1/suppressions": {
       "post": {
+        "description": "Suppression records are append-only. Release requests create auditable review facts and never delete the minimum do-not-contact record.",
         "operationId": "DiscoveryController_addSuppression_v1",
         "parameters": [],
         "requestBody": {
@@ -2579,6 +2580,7 @@
         ]
       },
       "get": {
+        "description": "Suppression records are append-only. Release requests create auditable review facts and never delete the minimum do-not-contact record.",
         "operationId": "DiscoveryController_listSuppressions_v1",
         "parameters": [],
         "responses": {
@@ -2628,6 +2630,8 @@
     },
     "/api/v1/suppressions/{id}": {
       "delete": {
+        "deprecated": true,
+        "description": "Suppression records are append-only. Release requests create auditable review facts and never delete the minimum do-not-contact record.",
         "operationId": "DiscoveryController_removeSuppression_v1",
         "parameters": [
           {
@@ -2678,7 +2682,73 @@
             "bearer": []
           }
         ],
-        "summary": "移除禁联记录",
+        "summary": "已弃用：禁联记录不可物理删除；改用 release review request",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
+    "/api/v1/suppressions/{id}/release-requests": {
+      "post": {
+        "description": "只创建 PENDING review fact，不会解除禁联。退订、投诉、Art.17/Art.21 等不得通过普通偏好请求释放。 Suppression records are append-only. Release requests create auditable review facts and never delete the minimum do-not-contact record.",
+        "operationId": "DiscoveryController_requestSuppressionRelease_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestSuppressionReleaseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "append-only suppression release review request"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AuthForbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "提交 append-only suppression release/correction 人工复核请求",
         "tags": [
           "Discovery"
         ],
@@ -8862,6 +8932,10 @@
               "bounce",
               "complaint",
               "manual",
+              "preference",
+              "user_preference",
+              "art17",
+              "art21",
               "legal"
             ]
           }
@@ -8869,6 +8943,32 @@
         "required": [
           "type",
           "value"
+        ]
+      },
+      "RequestSuppressionReleaseDto": {
+        "type": "object",
+        "properties": {
+          "requestKind": {
+            "type": "string",
+            "enum": [
+              "USER_PREFERENCE",
+              "IDENTITY_CORRECTION"
+            ]
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "审核理由；不得包含联系人值或其他个人数据"
+          },
+          "evidenceRef": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "非 PII 的 case/evidence 引用；身份纠错时必填"
+          }
+        },
+        "required": [
+          "requestKind",
+          "justification"
         ]
       },
       "AcceptLeadDto": {

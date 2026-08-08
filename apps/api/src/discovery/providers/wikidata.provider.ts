@@ -10,6 +10,7 @@ import {
 import type { WikidataCompany } from '../../adapters/wikidata';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { mapIndustryToQids, mapCountryToQid } from '../vocab';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
 
 /**
  * Wikidata 结构化发现 Provider（零爬取，CC0 开放数据）。
@@ -53,7 +54,7 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
        
-      console.warn(`[wikidata] discover failed: ${String(err).slice(0, 150)}`);
+      console.warn(`[wikidata] discover failed: ${diagnosticErrorToken(err)}`);
       return { records: [], costCents: 0 };
     }
 

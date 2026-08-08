@@ -58,6 +58,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
     expect(upsert.mock.calls[0][0].update).toMatchObject({ status: 'VALID', verifiedAt: NOW }); // 重 upsert 也置 verifiedAt
     expect(create.mock.calls[0][0].data.allowedActions).toContain('outreach');
     expect(create.mock.calls[0][0].data.value.personal_data).toBe(true);
+    expect(create.mock.calls[0][0].data.value.email).toBe('h.herold@acme.de');
   });
 
   it('unverified：contact_point status=RISKY 无 verifiedAt，证据不含 outreach', async () => {

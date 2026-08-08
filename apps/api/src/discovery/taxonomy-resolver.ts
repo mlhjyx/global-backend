@@ -4,6 +4,7 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 
@@ -133,10 +134,10 @@ export class TaxonomyResolver {
       // 沉淀：下次该词确定性命中
       await this.prisma.termAlias
         .upsert({ where: { kind_term: { kind, term: norm(term) } }, update: { code, source: 'llm' }, create: { kind, term: norm(term), code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`alias sediment failed: ${String(e).slice(0, 120)}`));
+        .catch((e) => this.logger.warn(`alias sediment failed: ${diagnosticErrorToken(e)}`));
       return node;
     } catch (e) {
-      this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
+      this.logger.warn(`llm normalize failed for "${term}": ${diagnosticErrorToken(e)}`);
       return null;
     }
   }
@@ -207,10 +208,10 @@ export class TaxonomyResolver {
           update: { code, source: 'llm' },
           create: { kind: 'cpv', term, code, source: 'llm' },
         })
-        .catch((e) => this.logger.warn(`cpv alias sediment failed: ${String(e).slice(0, 120)}`));
+        .catch((e) => this.logger.warn(`cpv alias sediment failed: ${diagnosticErrorToken(e)}`));
       return code;
     } catch (e) {
-      this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
+      this.logger.warn(`cpv refine failed for "${product}": ${diagnosticErrorToken(e)}`);
       return null;
     }
   }
@@ -273,10 +274,10 @@ export class TaxonomyResolver {
       if (!node) return null;
       await this.prisma.termAlias
         .upsert({ where: { kind_term: { kind: 'naics', term } }, update: { code, source: 'llm' }, create: { kind: 'naics', term, code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`naics alias sediment failed: ${String(e).slice(0, 120)}`));
+        .catch((e) => this.logger.warn(`naics alias sediment failed: ${diagnosticErrorToken(e)}`));
       return code;
     } catch (e) {
-      this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
+      this.logger.warn(`naics refine failed for "${product}": ${diagnosticErrorToken(e)}`);
       return null;
     }
   }
@@ -343,10 +344,10 @@ export class TaxonomyResolver {
       if (!node) return null;
       await this.prisma.termAlias
         .upsert({ where: { kind_term: { kind: 'fda_product_code', term } }, update: { code, source: 'llm' }, create: { kind: 'fda_product_code', term, code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`fda alias sediment failed: ${String(e).slice(0, 120)}`));
+        .catch((e) => this.logger.warn(`fda alias sediment failed: ${diagnosticErrorToken(e)}`));
       return code;
     } catch (e) {
-      this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
+      this.logger.warn(`fda refine failed for "${product}": ${diagnosticErrorToken(e)}`);
       return null;
     }
   }
