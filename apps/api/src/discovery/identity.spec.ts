@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
+  automaticCanonicalKey,
+  COMPANY_IDENTITY_RULE_VERSION,
   companyIdentity,
+  contactEmailKind,
   contactIdentity,
   contactSuppressionKeys,
+  createCompanyIdentityDecision,
   declinedContactIdentity,
+  IdentityReviewRequiredError,
   normalizeCompanyName,
   normalizeDomain,
+  normalizeRegistrableDomain,
+  provisionalReviewCanonicalKey,
+  resolveCompanyIdentity,
 } from './identity';
+
+const decisionContext = {
+  ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+  actor: { type: 'SYSTEM' as const, id: 'identity-pilot-test' },
+  decidedAt: '2026-08-07T00:00:00.000Z',
+  evidence: [{ type: 'RAW_RECORD' as const, id: 'raw-test-1' }],
+};
 
 describe('identity resolution（PRD 8.8 确定性规则）', () => {
   it('域名规范化：协议/www/路径剥离', () => {
@@ -34,6 +49,336 @@ describe('identity resolution（PRD 8.8 确定性规则）', () => {
     const a = companyIdentity({ name: 'Acme', domain: 'www.acme.com' });
     const b = companyIdentity({ name: 'ACME Inc.', domain: 'https://acme.com' });
     expect(a.dedupeKey).toBe(b.dedupeKey);
+  });
+});
+
+describe('controlled pilot company identity decisions', () => {
+  it('normalizes a host to its registrable domain without changing the legacy host normalizer', () => {
+    expect(normalizeDomain('https://sales.eu.pumpenwerk.de/catalog')).toBe('sales.eu.pumpenwerk.de');
+    expect(normalizeRegistrableDomain('https://sales.eu.pumpenwerk.de/catalog')).toBe('pumpenwerk.de');
+    expect(normalizeRegistrableDomain('https://branch.example.co.uk')).toBe('example.co.uk');
+  });
+
+  it.each([
+    ['IPv4', 'https://127.0.0.1/path'],
+    ['IPv6', 'http://[::1]/path'],
+    ['localhost', 'http://localhost:3000'],
+    ['bare public suffix', 'de'],
+    ['multi-label public suffix', 'co.uk'],
+    ['invalid host', 'https://exa mple.de'],
+  ])('rejects %s as a registrable company domain', (_label, value) => {
+    expect(normalizeRegistrableDomain(value)).toBeNull();
+  });
+
+  it('normalizes an IDN through the maintained suffix parser', () => {
+    expect(normalizeRegistrableDomain('https://www.bücher.de/produkte')).toBe('xn--bcher-kva.de');
+  });
+
+  it('AUTO_LINKs an exact authoritative country-qualified identifier', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        identifier: { scheme: 'ted-natid:de', value: 'DE 991 002' },
+      },
+      candidates: [
+        {
+          dedupeKey: 'id:ted-natid:de:de991002',
+          name: 'Nordstern Pumpenhandel GmbH',
+          country: 'DE',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'AUTO_LINK',
+      action: 'LINK_EXISTING',
+      identity: { dedupeKey: 'id:ted-natid:de:de991002', matchRule: 'identifier_exact' },
+      ambiguous: false,
+      recommendationEligible: true,
+      ruleVersion: COMPANY_IDENTITY_RULE_VERSION,
+      actor: decisionContext.actor,
+      decidedAt: decisionContext.decidedAt,
+      evidence: decisionContext.evidence,
+    });
+    expect(automaticCanonicalKey(decision)).toBe('id:ted-natid:de:de991002');
+  });
+
+  it('AUTO_LINKs a registrable domain only with compatible country and legal-name evidence', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        domain: 'procurement.rheinland-pumpen.de',
+      },
+      candidates: [
+        {
+          dedupeKey: 'd:rheinland-pumpen.de',
+          name: 'Rheinland Pumpensysteme GmbH',
+          legalName: 'Rheinland Pumpensysteme GmbH',
+          country: 'DE',
+          domain: 'www.rheinland-pumpen.de',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'AUTO_LINK',
+      action: 'LINK_EXISTING',
+      identity: { dedupeKey: 'd:rheinland-pumpen.de', matchRule: 'domain_exact' },
+      ambiguous: false,
+      recommendationEligible: true,
+    });
+  });
+
+  it('links a compatible domain to an existing identifier-key canonical instead of creating a duplicate', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        domain: 'rheinland-pumpen.de',
+      },
+      candidates: [{
+        dedupeKey: 'id:ted-natid:de:991002',
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        domain: 'www.rheinland-pumpen.de',
+      }],
+    });
+    expect(decision).toMatchObject({
+      decision: 'AUTO_LINK',
+      action: 'LINK_EXISTING',
+      identity: { dedupeKey: 'id:ted-natid:de:991002', matchRule: 'domain_exact' },
+    });
+  });
+
+  it.each([
+    {
+      label: 'country conflict',
+      incoming: { name: 'Rheinland Pumpensysteme GmbH', legalName: 'Rheinland Pumpensysteme GmbH', country: 'AT' },
+      candidate: { name: 'Rheinland Pumpensysteme GmbH', legalName: 'Rheinland Pumpensysteme GmbH', country: 'DE' },
+      reason: 'COUNTRY_CONFLICT',
+    },
+    {
+      label: 'legal-name conflict',
+      incoming: { name: 'Rheinland Pumpen Service GmbH', legalName: 'Rheinland Pumpen Service GmbH', country: 'DE' },
+      candidate: { name: 'Rheinland Pumpen Holding GmbH', legalName: 'Rheinland Pumpen Holding GmbH', country: 'DE' },
+      reason: 'LEGAL_NAME_CONFLICT',
+    },
+    {
+      label: 'shared group ambiguity',
+      incoming: {
+        name: 'Rheinland Pumpensysteme GmbH',
+        legalName: 'Rheinland Pumpensysteme GmbH',
+        country: 'DE',
+        sharedGroupAmbiguity: true,
+      },
+      candidate: { name: 'Rheinland Pumpensysteme GmbH', legalName: 'Rheinland Pumpensysteme GmbH', country: 'DE' },
+      reason: 'SHARED_GROUP_DOMAIN',
+    },
+  ])('keeps a domain match in REVIEW_LINK on $label', ({ incoming, candidate, reason }) => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: { ...incoming, domain: 'rheinland-pumpen.de' },
+      candidates: [
+        {
+          ...candidate,
+          dedupeKey: 'd:rheinland-pumpen.de',
+          domain: 'rheinland-pumpen.de',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'REVIEW_LINK',
+      ambiguous: true,
+      recommendationEligible: false,
+    });
+    expect(decision.reasons).toContain(reason);
+    expect(() => automaticCanonicalKey(decision)).toThrow(IdentityReviewRequiredError);
+  });
+
+  it('never automatically canonicalizes name_country evidence', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: { name: 'Muster Pumpenhandel GmbH', country: 'DE' },
+      candidates: [
+        {
+          dedupeKey: 'n:muster pumpenhandel:de',
+          name: 'Muster Pumpenhandel GmbH',
+          country: 'DE',
+        },
+      ],
+    });
+
+    expect(decision).toMatchObject({
+      decision: 'REVIEW_LINK',
+      identity: { matchRule: 'name_country' },
+      recommendationEligible: false,
+    });
+    expect(() => automaticCanonicalKey(decision)).toThrow(IdentityReviewRequiredError);
+  });
+
+  it('keeps name_country review-only even with no existing candidate and derives a stable provisional key', () => {
+    const rawStableContext = {
+      ...decisionContext,
+      evidence: [{ type: 'RAW_RECORD' as const, id: 'raw-stable-1' }],
+    };
+    const decision = resolveCompanyIdentity({
+      context: rawStableContext,
+      incoming: { name: 'Unmatched Muster Pumpen GmbH', country: 'DE' },
+      candidates: [],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(provisionalReviewCanonicalKey('raw-stable-1')).toBe(provisionalReviewCanonicalKey('raw-stable-1'));
+    expect(provisionalReviewCanonicalKey('raw-stable-1')).toBe(decision.identity.dedupeKey);
+    expect(provisionalReviewCanonicalKey('raw-stable-1')).not.toMatch(/^n:/);
+  });
+
+  it('requires explicit legal-name evidence before a domain can AUTO_LINK', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: { name: 'Rheinland Pumpensysteme GmbH', country: 'DE', domain: 'rheinland-pumpen.de' },
+      candidates: [
+        {
+          dedupeKey: 'd:rheinland-pumpen.de',
+          name: 'Rheinland Pumpensysteme GmbH',
+          country: 'DE',
+          domain: 'rheinland-pumpen.de',
+        },
+      ],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toContain('LEGAL_NAME_EVIDENCE_MISSING');
+  });
+
+  it('rejects AUTO_LINK when the identifier country encoded in the scheme conflicts with incoming country', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'AT',
+        identifier: { scheme: 'ted-natid:de', value: 'DE 991 002' },
+      },
+      candidates: [
+        { dedupeKey: 'id:ted-natid:de:de991002', name: 'Nordstern Pumpenhandel GmbH', country: 'DE' },
+      ],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toContain('IDENTIFIER_COUNTRY_CONFLICT');
+  });
+
+  it('does not cross-link the same identifier value across schemes', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        identifier: { scheme: 'ted-natid:de', value: '991002' },
+      },
+      candidates: [
+        { dedupeKey: 'id:lei:de:991002', name: 'Nordstern Pumpenhandel GmbH', country: 'DE' },
+      ],
+    });
+    expect(decision.decision).toBe('AUTO_LINK');
+    expect(decision.action).toBe('CREATE_CANONICAL');
+    expect(decision.identity.dedupeKey).toBe('id:ted-natid:de:991002');
+    expect(decision.reasons).toContain('NEW_AUTHORITATIVE_IDENTIFIER');
+  });
+
+  it('requires review when authoritative identifier and domain evidence point to different canonicals', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        legalName: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        domain: 'nordstern-pumpen.de',
+        identifier: { scheme: 'ted-natid:de', value: '991002' },
+      },
+      candidates: [
+        {
+          dedupeKey: 'id:ted-natid:de:991002',
+          name: 'Nordstern Pumpenhandel GmbH',
+          legalName: 'Nordstern Pumpenhandel GmbH',
+          country: 'DE',
+          domain: 'different-pumpen.de',
+        },
+        {
+          dedupeKey: 'd:nordstern-pumpen.de',
+          name: 'Nordstern Pumpen Service GmbH',
+          legalName: 'Nordstern Pumpen Service GmbH',
+          country: 'DE',
+          domain: 'nordstern-pumpen.de',
+        },
+      ],
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toContain('IDENTIFIER_DOMAIN_CONFLICT');
+  });
+});
+
+describe('immutable identity decision vocabulary', () => {
+  it.each(['REJECT_LINK', 'SPLIT'] as const)('creates a frozen %s decision with provenance', (decision) => {
+    const value = createCompanyIdentityDecision({
+      decision,
+      identity: { dedupeKey: 'n:muster pumpenhandel:de', matchRule: 'name_country' },
+      reasons: [decision === 'SPLIT' ? 'HUMAN_SPLIT_REQUIRED' : 'HUMAN_LINK_REJECTED'],
+      ...decisionContext,
+    });
+    expect(value).toMatchObject({
+      decision,
+      action: 'HOLD_FOR_REVIEW',
+      ruleVersion: COMPANY_IDENTITY_RULE_VERSION,
+      recommendationEligible: false,
+      actor: decisionContext.actor,
+      decidedAt: decisionContext.decidedAt,
+      evidence: decisionContext.evidence,
+    });
+    expect(Object.isFrozen(value)).toBe(true);
+    expect(Object.isFrozen(value.actor)).toBe(true);
+    expect(Object.isFrozen(value.evidence)).toBe(true);
+    expect(Object.isFrozen(value.reasons)).toBe(true);
+  });
+
+  it.each([
+    ['rule version', { ...decisionContext, ruleVersion: 'wrong-version' }],
+    ['actor', { ...decisionContext, actor: { type: 'SYSTEM' as const, id: '' } }],
+    ['decision time', { ...decisionContext, decidedAt: 'not-a-date' }],
+    ['evidence', { ...decisionContext, evidence: [] }],
+  ])('fails closed on invalid %s provenance', (_label, context) => {
+    expect(() => createCompanyIdentityDecision({
+      decision: 'REVIEW_LINK',
+      identity: { dedupeKey: 'review:raw-test', matchRule: 'name_country' },
+      reasons: ['NAME_COUNTRY_REQUIRES_REVIEW'],
+      ...context,
+    } as Parameters<typeof createCompanyIdentityDecision>[0])).toThrow();
+  });
+});
+
+describe('role mailbox identity scope', () => {
+  it('classifies common role mailboxes with the same conservative policy as acquisition cleaning', () => {
+    expect(contactEmailKind('info@pumpen.example')).toBe('role');
+    expect(contactEmailKind('sales2@pumpen.example')).toBe('role');
+    expect(contactEmailKind('max@pumpen.example')).toBe('personal');
+  });
+
+  it('includes company scope for role mailboxes but retains personal-email compatibility', () => {
+    const roleA = contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, 'd:company-a.example');
+    const roleB = contactIdentity({ fullName: 'Sales Desk', email: 'info@shared.example' }, 'd:company-b.example');
+    expect(roleA).toBe('re:d:company-a.example:info@shared.example');
+    expect(roleB).toBe('re:d:company-b.example:info@shared.example');
+    expect(roleA).not.toBe(roleB);
+
+    expect(contactIdentity({ fullName: 'Max Muster', email: 'max@shared.example' }, 'd:company-a.example')).toBe(
+      contactIdentity({ fullName: 'Max Muster', email: 'max@shared.example' }, 'd:company-b.example'),
+    );
   });
 });
 

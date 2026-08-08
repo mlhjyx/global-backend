@@ -106,6 +106,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
 
             const result = scoreLead(
               {
+                dedupeKey: c.dedupeKey,
                 name: c.name,
                 domain: c.domain,
                 country: c.country,

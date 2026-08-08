@@ -945,8 +945,11 @@ model CanonicalCompany {
 
   contacts CanonicalContact[]
   leads    Lead[]
+  identityResolutionDecisions       IdentityResolutionDecision[] @relation("IdentityResolutionDecisionSource")
+  linkedIdentityResolutionDecisions IdentityResolutionDecision[] @relation("IdentityResolutionDecisionTarget")
 
   @@unique([workspaceId, dedupeKey])
+  @@unique([id, workspaceId], map: "canonical_company_id_workspace_key")
   @@index([workspaceId])
   // 下游阶段收缩集扫描：workspace + 水位列 null/过期范围（防 900+ 行 seq-scan）。
   // fit=match 现由 `leads: { some: { fitVerdict:'match' } }` 关联子查询过滤（fit 退出本表索引）。
@@ -956,6 +959,38 @@ model CanonicalCompany {
   @@index([workspaceId, contactDiscoveryAttemptedAt])
   @@index([workspaceId, emailGuessAttemptedAt])
   @@map("canonical_company")
+}
+
+enum IdentityResolutionDecisionKind {
+  AUTO_LINK
+  REVIEW_LINK
+  REJECT_LINK
+  SPLIT
+
+  @@map("identity_resolution_decision_kind")
+}
+
+/// Immutable identity resolution audit fact. It records decisions and evidence
+/// only; it never rewrites CanonicalCompany or historical FieldEvidence rows.
+model IdentityResolutionDecision {
+  id                       String                         @id @default(uuid()) @db.Uuid
+  workspaceId              String                         @map("workspace_id") @db.Uuid
+  canonicalCompanyId       String                         @map("canonical_company_id") @db.Uuid
+  linkedCanonicalCompanyId String?                        @map("linked_canonical_company_id") @db.Uuid
+  decision                 IdentityResolutionDecisionKind
+  ruleVersion              String                         @map("rule_version") @db.VarChar(128)
+  evidenceRefs             Json                           @map("evidence_refs")
+  actorType                String                         @map("actor_type") @db.VarChar(16)
+  actorId                  String                         @map("actor_id") @db.VarChar(255)
+  decidedAt                DateTime                       @map("decided_at")
+  createdAt                DateTime                       @default(now()) @map("created_at")
+
+  canonicalCompany       CanonicalCompany  @relation("IdentityResolutionDecisionSource", fields: [canonicalCompanyId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "identity_resolution_decision_source_scope_fkey")
+  linkedCanonicalCompany CanonicalCompany? @relation("IdentityResolutionDecisionTarget", fields: [linkedCanonicalCompanyId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: NoAction, map: "identity_resolution_decision_target_scope_fkey")
+
+  @@index([workspaceId, canonicalCompanyId, decidedAt, id], map: "identity_resolution_decision_company_history_idx")
+  @@index([workspaceId, linkedCanonicalCompanyId], map: "identity_resolution_decision_target_idx")
+  @@map("identity_resolution_decision")
 }
 
 /// Canonical 联系人（PRD 8.9 个人分层：按需、最小化、可验证）。

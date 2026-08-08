@@ -52,6 +52,7 @@
     "integration:verify": "node scripts/security-recovery-governance.mjs integration --matrix=config/integration-context-matrix.json",
     "integration:require-ready": "node scripts/security-recovery-governance.mjs integration --matrix=config/integration-context-matrix.json --require-ready",
     "security:source": "pnpm security:governance:test && pnpm security:workflow && pnpm security:sast && pnpm security:compose && pnpm recovery:verify && pnpm integration:verify",
+    "docs:acquisition-identity-pilot-prep": "pnpm --filter @global/api prepare:acquisition-identity-pilot",
     "format": "prettier --write ."
   },
   "devDependencies": {

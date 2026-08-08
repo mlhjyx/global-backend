@@ -116,6 +116,32 @@ function fixture(over?: Partial<Fixture>): Fixture {
 }
 
 describe('IntentRecomputeService —— 收口⑤「信号可复算」（surfaces=与增量投影同过滤面）', () => {
+  it('rebuilds a review-only provisional canonical from its guarded source subject key', async () => {
+    const f = fixture({
+      companies: new Map([
+        ['co-1', {
+          id: 'co-1',
+          domain: null,
+          dedupeKey: 'review:h0123456789abcdef',
+          attributes: {
+            identity_resolution: {
+              decision: 'REVIEW_LINK',
+              action: 'HOLD_FOR_REVIEW',
+              candidate_dedupe_key: buyerKey,
+              recommendation_eligible: false,
+              ambiguous: true,
+            },
+          },
+          status: 'NEW',
+          version: 1,
+        }],
+      ]),
+    });
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+    expect(await svc.recomputeCompany(WS, 'co-1', { surfaces: SURFACES })).toBe('rebuilt');
+    expect((f.companies.get('co-1')!.attributes.intent as IntentAttr).events).toHaveLength(1);
+  });
+
   it('投影被清空后可从 ACTIVE 一等信号确定性重建（可复算核心断言）', async () => {
     const f = fixture();
     const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });

@@ -2,6 +2,14 @@ import { Prisma } from '@prisma/client';
 import type { SourceSignal } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
+import {
+  createCompanyIdentityDecision,
+  provisionalReviewCanonicalKey,
+} from '../discovery/identity';
+import {
+  appendCompanyIdentityDecisionEvidence,
+  companyIdentityResolutionProjection,
+} from '../discovery/company-identity-persistence';
 import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
@@ -23,6 +31,7 @@ export interface ProjectTendersResult {
 }
 
 interface BuyerDemand {
+  sourceSignalId: string;
   name: string;
   country: string; // alpha-2（摄取层已保证）
   publicationDateIso: string; // 事件时间（source_signal.occurredAt 的 UTC ISO）
@@ -102,6 +111,7 @@ export class TedIntentProjectionService {
       if (byKey.size >= maxCompanies) { overflow.add(s.subjectKey); continue; }
       const payload = (s.payload ?? {}) as Record<string, unknown>;
       byKey.set(s.subjectKey, {
+        sourceSignalId: s.id,
         name: s.subjectName,
         country: s.subjectCountry,
         publicationDateIso: s.occurredAt.toISOString(),
@@ -131,11 +141,25 @@ export class TedIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, demand: BuyerDemand): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
+      const reviewKey = provisionalReviewCanonicalKey(`ted:${dedupeKey}`);
+      const decision = createCompanyIdentityDecision({
+        decision: 'REVIEW_LINK',
+        identity: { dedupeKey: reviewKey, matchRule: 'name_country' },
+        reasons: ['NAME_COUNTRY_REQUIRES_REVIEW'],
+        ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+        actor: { type: 'SYSTEM', id: 'intent.tedProjection' },
+        decidedAt: demand.publicationDateIso,
+        evidence: [{ type: 'SOURCE_SIGNAL', id: demand.sourceSignalId }],
+      });
       const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: reviewKey } },
         select: { id: true, attributes: true, status: true },
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      const legacy = await tx.canonicalCompany.findUnique({
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        select: { id: true, status: true },
+      });
+      if (prior?.status === 'SUPPRESSED' || legacy?.status === 'SUPPRESSED') return false;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
@@ -150,17 +174,26 @@ export class TedIntentProjectionService {
       if (prior && priorIntent && sameIntent(priorIntent, intent)) return false;
 
       const saved = await tx.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: reviewKey } },
         create: {
           workspaceId,
           name: demand.name,
           country: demand.country,
-          dedupeKey,
+          dedupeKey: reviewKey,
           status: 'NEW',
-          attributes: { ted_buyer: true, intent } as unknown as Prisma.InputJsonValue, // 标记来源=招标买方
+          attributes: {
+            ted_buyer: true,
+            intent,
+            identity_resolution: companyIdentityResolutionProjection(decision, dedupeKey),
+          } as unknown as Prisma.InputJsonValue, // 标记来源=招标买方
         },
         update: {
-          attributes: { ...priorAttrs, ted_buyer: true, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...priorAttrs,
+            ted_buyer: true,
+            intent,
+            identity_resolution: companyIdentityResolutionProjection(decision, dedupeKey),
+          } as unknown as Prisma.InputJsonValue,
           version: { increment: 1 },
         },
         select: { id: true },
@@ -182,6 +215,13 @@ export class TedIntentProjectionService {
       });
       // 🟢 买方身份事实署名（CC BY 4.0）——仅新建时写一次（幂等，避免每 sweep 堆行）。
       if (!prior) {
+        await appendCompanyIdentityDecisionEvidence(tx, {
+          workspaceId,
+          entityId: saved.id,
+          providerKey: 'ted',
+          license: 'CC BY 4.0',
+          decision,
+        });
         await tx.fieldEvidence.create({
           data: {
             workspaceId,

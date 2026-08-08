@@ -12,6 +12,7 @@ import { DiscoveryController } from '../discovery/discovery.controller';
 import { EventsController } from '../events/events.controller';
 import { HealthController } from '../health/health.controller';
 import { IcpController } from '../icp/icp.controller';
+import { IdentityReviewController } from '../identity-review/identity-review.controller';
 import { LeadController } from '../lead/lead.controller';
 import { LeadQualityLabelsController } from '../lead-quality-labels/lead-quality-label.controller';
 import { resolveRuntimeAdmission } from '../runtime/runtime-admission';
@@ -30,6 +31,7 @@ const CONTROLLERS = {
   EventsController,
   HealthController,
   IcpController,
+  IdentityReviewController,
   LeadController,
   LeadQualityLabelsController,
 } as const;
@@ -44,6 +46,7 @@ const REGISTERED_PRODUCTION_CONTROLLERS = Object.freeze([
   'EventsController',
   'HealthController',
   'IcpController',
+  'IdentityReviewController',
   'IntakeController',
   'KbController',
   'LeadController',
@@ -161,14 +164,14 @@ describe('acquisition/compliance controller operation -> scope inventory', () =>
     ]);
   });
 
-  it('binds quality-label write while keeping identity review for its separate endpoint', () => {
+  it('binds quality-label write and the separate identity-review endpoint', () => {
     const used = new Set(
       Object.values(ACQUISITION_CONTROLLER_SCOPE_INVENTORY).flatMap(({ operations }) =>
         Object.values(operations).flat(),
       ),
     );
     expect(used.has('acquisition:label:write')).toBe(true);
-    expect(used.has('acquisition:identity:review')).toBe(false);
+    expect(used.has('acquisition:identity:review')).toBe(true);
   });
 
   it('keeps public health probes unauthenticated while inventorying only the restricted ops route', () => {

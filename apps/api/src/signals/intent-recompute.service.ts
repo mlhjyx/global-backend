@@ -78,12 +78,14 @@ export class IntentRecomputeService {
 
     const events: IntentEvent[] = [];
     const now = Date.now();
+    const attrs = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+    const signalSubjectKey = sourceSignalSubjectKey(company.dedupeKey, attrs);
 
     // ① 平台一等信号：ACTIVE + 投影面过滤（与增量投影同一谓词），全部匹配信号入事件集。
     const surfaces = opts?.surfaces ?? [];
     if (surfaces.length) {
       const signals = await prisma.sourceSignal.findMany({
-        where: { subjectKey: company.dedupeKey, status: 'ACTIVE' },
+        where: { subjectKey: signalSubjectKey, status: 'ACTIVE' },
         orderBy: { occurredAt: 'desc' },
       });
       for (const s of signals) {
@@ -119,7 +121,6 @@ export class IntentRecomputeService {
       }
     }
 
-    const attrs = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
     const priorIntent = attrs.intent as IntentAttr | undefined;
     const nextIntent = events.length ? mergeIntent(undefined, events) : undefined;
 
@@ -172,6 +173,20 @@ export class IntentRecomputeService {
       }),
     );
   }
+}
+
+function sourceSignalSubjectKey(dedupeKey: string, attributes: Record<string, unknown>): string {
+  const resolution = attributes.identity_resolution;
+  if (!resolution || typeof resolution !== 'object') return dedupeKey;
+  const value = resolution as Record<string, unknown>;
+  return value.decision === 'REVIEW_LINK' &&
+    value.action === 'HOLD_FOR_REVIEW' &&
+    value.recommendation_eligible === false &&
+    value.ambiguous === true &&
+    typeof value.candidate_dedupe_key === 'string' &&
+    value.candidate_dedupe_key.startsWith('n:')
+    ? value.candidate_dedupe_key
+    : dedupeKey;
 }
 
 /** 投影面谓词（与 ted/openfda 投影 service 的过滤语义逐条对齐——改那边必须同步改这里）。 */

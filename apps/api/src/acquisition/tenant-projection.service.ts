@@ -1,6 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { companyIdentity } from '../discovery/identity';
+import {
+  appendCompanyIdentityDecisionEvidence,
+  companyIdentityResolutionProjection,
+  resolveCompanyIdentityForWriter,
+} from '../discovery/company-identity-persistence';
 
 const CHUNK = 100;
 
@@ -60,7 +64,24 @@ export class TenantProjectionService {
       await prisma.withWorkspace(workspaceId, async (tx) => {
         for (const e of chunk) {
           const cleaned = (e.cleaned ?? {}) as Record<string, unknown>;
-          const identity = companyIdentity({ name: e.name, domain: e.domain, country: e.country });
+          const resolution = await resolveCompanyIdentityForWriter(tx, {
+            workspaceId,
+            context: {
+              ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+              actor: { type: 'SYSTEM', id: 'acquisition.tenantProjection' },
+              decidedAt: e.lastSeenAt.toISOString(),
+              evidence: [{ type: 'RAW_RECORD', id: e.id }],
+            },
+            incoming: {
+              name: e.name,
+              legalName: typeof cleaned.legal_name === 'string' ? cleaned.legal_name : undefined,
+              domain: e.domain,
+              country: e.country,
+              sharedGroupAmbiguity: cleaned.shared_group_domain === true,
+            },
+          });
+          const { decision, candidateDedupeKey, targetExisting: prior } = resolution;
+          const priorAttributes = (prior?.attributes as Record<string, unknown> | null) ?? {};
           const isSuppressed =
             (!!e.domain && suppressedDomains.has(e.domain.toLowerCase())) || suppressedNames.has(e.name.toLowerCase());
 
@@ -70,6 +91,14 @@ export class TenantProjectionService {
 
           const attributes = pruneUndefined({
             products: Array.isArray(cleaned.products) ? cleaned.products : undefined,
+            legal_name:
+              typeof priorAttributes.legal_name === 'string'
+                ? priorAttributes.legal_name
+                : cleaned.legal_name,
+            shared_group_domain:
+              priorAttributes.shared_group_domain === true || cleaned.shared_group_domain === true
+                ? true
+                : undefined,
             contact_email: roleEmail,
             source_fair: cleaned.source_fair,
             source_kind: cleaned.source_kind,
@@ -77,14 +106,14 @@ export class TenantProjectionService {
             hall: cleaned.hall,
             acquired_via: source.providerKey,
             source_key: source.sourceKey,
+            identity_resolution: companyIdentityResolutionProjection(
+              decision,
+              candidateDedupeKey,
+            ),
           });
 
           // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
           // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
-          const prior = await tx.canonicalCompany.findUnique({
-            where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: identity.dedupeKey } },
-            select: { id: true, attributes: true },
-          });
           const canonical = prior
             ? await tx.canonicalCompany.update({
                 where: { id: prior.id },
@@ -92,7 +121,7 @@ export class TenantProjectionService {
                   // 后到的源只补缺（domain/country），不覆盖已有
                   ...(e.domain ? { domain: { set: e.domain } } : {}),
                   ...(e.country ? { country: { set: e.country } } : {}),
-                  attributes: mergeAttributes((prior.attributes ?? {}) as Record<string, unknown>, attributes) as Prisma.InputJsonValue,
+                  attributes: mergeAttributes(priorAttributes, attributes) as Prisma.InputJsonValue,
                   status: isSuppressed ? 'SUPPRESSED' : undefined,
                   version: { increment: 1 },
                 },
@@ -105,7 +134,7 @@ export class TenantProjectionService {
                   country: e.country ?? null,
                   attributes: attributes as Prisma.InputJsonValue,
                   status: isSuppressed ? 'SUPPRESSED' : 'NEW',
-                  dedupeKey: identity.dedupeKey,
+                  dedupeKey: decision.identity.dedupeKey,
                 },
               });
           if (isSuppressed) suppressed += 1;
@@ -123,9 +152,17 @@ export class TenantProjectionService {
               canonicalType: 'company',
               canonicalId: canonical.id,
               rawRecordId: e.id,
-              matchRule: identity.matchRule,
-              confidence: identity.matchRule === 'domain_exact' ? 1 : 0.8,
+              matchRule: decision.identity.matchRule,
+              confidence: decision.decision === 'AUTO_LINK' ? 1 : 0,
             },
+          });
+          await appendCompanyIdentityDecisionEvidence(tx, {
+            workspaceId,
+            entityId: canonical.id,
+            providerKey: source.providerKey,
+            rawRecordId: e.id,
+            license: 'public',
+            decision,
           });
           // 字段级 Evidence：展会公开名录 = public license
           const fields: [string, unknown][] = [

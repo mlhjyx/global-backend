@@ -1,0 +1,76 @@
+{
+  "contractVersion": "acquisition-identity-pilot-prep-manifest/2026-08-07-v1",
+  "artifactKind": "IDENTITY_PILOT_PREP_CREATE_ONLY_MANIFEST",
+  "purpose": "identity/pilot-prep create-only manifest",
+  "realExecutionManifest": false,
+  "mode": "CREATE_ONLY",
+  "dispatchAuthorization": "NOT_AUTHORIZED",
+  "dispatchCapable": false,
+  "actualNetworkCalls": 0,
+  "actualModelCalls": 0,
+  "containsCredentials": false,
+  "containsPersonalData": false,
+  "sourceCommit": "500d92a5df8d6a51accecfc1829efff8465c2320",
+  "expiresAt": "2026-08-14T00:00:00.000Z",
+  "fixture": {
+    "path": "docs/evidence/acquisition/german-industrial-pump-pilot-fixture-v1.json",
+    "contractVersion": "acquisition-identity-pilot-fixture/2026-08-07-v1",
+    "sha256": "bda6f1c5e2f7fb8f1bdfa01d2747693111d24b13df24d2e6f7f2210d97517bf0"
+  },
+  "scope": {
+    "workspaceIds": [
+      "00000000-0000-4000-8000-000000000701"
+    ],
+    "companyOfferingIds": [
+      "00000000-0000-4000-8000-000000000703"
+    ],
+    "icpIds": [
+      "00000000-0000-4000-8000-000000000702"
+    ],
+    "icpVersions": [
+      1
+    ],
+    "countries": [
+      "DE"
+    ],
+    "regions": [
+      "EU"
+    ],
+    "allowedSources": [
+      "ted",
+      "gleif",
+      "public_web"
+    ],
+    "forbiddenSources": [
+      "trade_fair",
+      "google_patents",
+      "samgov",
+      "email_guess",
+      "named_person",
+      "customs",
+      "trade_data",
+      "campaign",
+      "outreach",
+      "publish",
+      "openfda"
+    ]
+  },
+  "caps": {
+    "rawRecords": 50,
+    "canonicalCompanies": 30,
+    "enrichedCompanies": 10,
+    "humanReviewedCompanies": 5,
+    "leadQualifiedPackages": 3,
+    "externalRequests": 0,
+    "modelCalls": 0,
+    "repairs": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "maxCostCents": 0
+  },
+  "nextStage": {
+    "requiresCurrentTaskGraphManifest": true,
+    "requiresSeparateCostAuthorization": true,
+    "dispatchAuthorization": "NOT_AUTHORIZED"
+  }
+}

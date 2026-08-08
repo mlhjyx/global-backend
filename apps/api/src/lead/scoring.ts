@@ -1,4 +1,5 @@
 import { qualify, QualifyResult, RuleLike } from '../icp/rule-engine';
+import { COMPANY_IDENTITY_RULE_VERSION } from '../discovery/identity';
 import { TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT } from '../signals/signal-mappers';
 
 /**
@@ -13,6 +14,8 @@ import { TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT } from '../signals/signal-mappe
  */
 
 export interface CompanyForScoring {
+  /** Persisted identity key. Legacy name-country and provisional review keys are never recommendation-eligible. */
+  dedupeKey?: string;
   name: string;
   domain: string | null;
   country: string | null;
@@ -212,6 +215,11 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
     }
   }
 
+  if (queue === 'recommended' && companyIdentityNeedsReview(company)) {
+    queue = 'needs_review';
+    notes.push('公司身份仍需人工复核 —— 禁止进入推荐队列');
+  }
+
   return {
     queue,
     totalScore,
@@ -225,6 +233,24 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
       notes,
     },
   };
+}
+
+function companyIdentityNeedsReview(company: CompanyForScoring): boolean {
+  if (company.dedupeKey?.startsWith('n:') || company.dedupeKey?.startsWith('review:')) return true;
+  const resolution = company.attributes?.identity_resolution;
+  // Pure unit callers may not carry a persisted key. Every persisted canonical scored by
+  // scoreCandidates does; unknown provenance on such a row fails closed for recommendation.
+  if (!company.dedupeKey) return false;
+  if (!resolution || typeof resolution !== 'object') return true;
+  const value = resolution as Record<string, unknown>;
+  const automaticAction = value.action === 'CREATE_CANONICAL' || value.action === 'LINK_EXISTING';
+  return (
+    value.decision !== 'AUTO_LINK' ||
+    !automaticAction ||
+    value.rule_version !== COMPANY_IDENTITY_RULE_VERSION ||
+    value.ambiguous !== false ||
+    value.recommendation_eligible !== true
+  );
 }
 
 interface IntentEventLike {
