@@ -17,8 +17,10 @@ function exactReceipt() {
   const contextDigest = '3'.repeat(64);
   const promptDigest = '4'.repeat(64);
   const fixedSourceCommit = '5'.repeat(40);
+  const preparationHeadCommit = '6'.repeat(40);
   const sourceBundleDigest = '6'.repeat(64);
   const manifestDigest = '7'.repeat(64);
+  const manifestArtifactDigest = '8'.repeat(64);
   const admissionDigest = '8'.repeat(64);
   const credentialAttestationDigest = '9'.repeat(64);
   const settlementObserverDigest = 'a'.repeat(64);
@@ -32,12 +34,15 @@ function exactReceipt() {
   const fixtureId = 'fixture-1';
   const outputDigest = 'e'.repeat(64);
   const runtimeBinding = {
-    schemaVersion: 'copy-real-capability-runtime-binding/2026-08-07-v3',
+    schemaVersion: 'copy-real-capability-runtime-binding/2026-08-08-v4',
     taskId: 'site_builder.copy',
     planDigest,
     fixedSourceCommit,
+    preparationHeadCommit,
     sourceBundleDigest,
     manifestDigest,
+    manifestArtifactDigest,
+    expectedCompiledRuntimeDigest: compiledRuntimeDigest,
     credentialAttestationDigest,
     settlementObserverDigest,
     globalAuthorizationDigest,
@@ -314,8 +319,11 @@ describe('copy real capability receipt validators', () => {
       'runtimeBinding.schemaVersion',
       'runtimeBinding.taskId',
       'runtimeBinding.fixedSourceCommit',
+      'runtimeBinding.preparationHeadCommit',
       'runtimeBinding.sourceBundleDigest',
       'runtimeBinding.manifestDigest',
+      'runtimeBinding.manifestArtifactDigest',
+      'runtimeBinding.expectedCompiledRuntimeDigest',
       'runtimeBinding.credentialAttestationDigest',
       'runtimeBinding.settlementObserverDigest',
       'runtimeBinding.globalAuthorizationDigest',
