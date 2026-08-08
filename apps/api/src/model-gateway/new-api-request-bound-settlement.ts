@@ -13,6 +13,7 @@ interface LogRow {
   completion_tokens?: unknown;
   model_name?: unknown;
   channel?: unknown;
+  other?: unknown;
 }
 
 interface ResolverDependencies {
@@ -87,6 +88,48 @@ function canonicalOrigin(value: string): string {
 
 function safeInteger(value: unknown, minimum: number): value is number {
   return Number.isSafeInteger(value) && Number(value) >= minimum;
+}
+
+function logMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return parsed != null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function effectiveInputTokens(
+  row: LogRow,
+  protocol: string,
+): number | undefined {
+  if (!safeInteger(row.prompt_tokens, 1)) return undefined;
+  const metadata = logMetadata(row.other);
+  const anthropicProtocol = /^anthropic(?:_|-)messages$/u.test(protocol);
+  if (!anthropicProtocol) {
+    if (metadata?.usage_semantic === "anthropic") return undefined;
+    return row.prompt_tokens;
+  }
+  if (metadata?.usage_semantic !== "anthropic") return undefined;
+  const cacheCreationTokens = metadata.cache_creation_tokens ?? 0;
+  const cacheReadTokens = metadata.cache_tokens ?? 0;
+  if (
+    !safeInteger(cacheCreationTokens, 0) ||
+    !safeInteger(cacheReadTokens, 0)
+  ) {
+    return undefined;
+  }
+  const total = row.prompt_tokens + cacheCreationTokens + cacheReadTokens;
+  return Number.isSafeInteger(total) ? total : undefined;
 }
 
 function canonicalJson(value: unknown): string {
@@ -258,14 +301,15 @@ export class NewApiRequestBoundSettlementResolver {
       if (row.channel !== input.expectedChannelId) {
         return this.unknown(input.requestId, "channel_mismatch");
       }
+      const inputTokens = effectiveInputTokens(row, input.protocol);
       if (
         !safeInteger(row.quota, 0) ||
         row.quota > input.maximumQuotaPoints ||
-        !safeInteger(row.prompt_tokens, 1) ||
+        inputTokens === undefined ||
         !safeInteger(row.completion_tokens, 0) ||
         row.completion_tokens > input.maxOutputTokens ||
         (input.usage?.inputTokens !== undefined &&
-          input.usage.inputTokens !== row.prompt_tokens) ||
+          input.usage.inputTokens !== inputTokens) ||
         (input.usage?.outputTokens !== undefined &&
           input.usage.outputTokens !== row.completion_tokens)
       ) {
@@ -278,7 +322,7 @@ export class NewApiRequestBoundSettlementResolver {
         protocol: input.protocol,
         channelId: row.channel,
         quota: row.quota,
-        inputTokens: row.prompt_tokens,
+        inputTokens,
         outputTokens: row.completion_tokens,
       });
       const settled = Object.freeze({
