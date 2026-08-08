@@ -104,7 +104,7 @@ test("a future timestamp cannot enter a nonblocking MERGE state", () => {
 });
 
 test("pull_request_target execution is restricted to the default branch", () => {
-  assert.match(WORKFLOW, /name:\s*nontechnical decision card integrity/);
+  assert.match(WORKFLOW, /name:\s*nontechnical decision card freshness/);
   assert.match(
     WORKFLOW,
     /if:\s*github\.event\.pull_request\.base\.ref\s*==\s*github\.event\.repository\.default_branch/,
