@@ -17,6 +17,11 @@ import {
   getCopyPilotTrustedCredentialAttestation,
 } from "./copy-pilot-trusted-gateway";
 
+interface ObservedModelRequest {
+  path: string;
+  body: Record<string, unknown>;
+}
+
 const AUTHORIZATION_VALUE = createHash("sha256")
   .update(import.meta.url)
   .digest("hex");
@@ -44,6 +49,54 @@ function sendJson(response: ServerResponse, body: unknown): void {
   response.end(JSON.stringify(body));
 }
 
+function sendOpenAiChatCompletionsStream(
+  response: ServerResponse,
+  input: { model: string; output: unknown },
+): void {
+  const id = "chatcmpl-copy-trusted-gateway";
+  const chunks = [
+    {
+      id,
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            content: JSON.stringify(input.output),
+          },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      id,
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 50,
+        completion_tokens: 10,
+        total_tokens: 60,
+        prompt_tokens_details: { cached_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: 5 },
+      },
+    },
+  ];
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    "x-oneapi-request-id": "req-copy-terra-001",
+  });
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+}
+
 async function gateway(input?: {
   unlimited?: boolean;
   allowlist?: readonly string[];
@@ -52,10 +105,11 @@ async function gateway(input?: {
   totalAvailable?: number;
 }) {
   const observed: string[] = [];
+  const modelRequests: ObservedModelRequest[] = [];
   const aliases =
     input?.allowlist ??
     COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions.map(({ alias }) => alias);
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     observed.push(request.url ?? "");
     if (request.headers.authorization !== `Bearer ${AUTHORIZATION_VALUE}`) {
       response.writeHead(401).end();
@@ -98,12 +152,34 @@ async function gateway(input?: {
       });
       return;
     }
+    if (request.url === "/v1/chat/completions") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+        string,
+        unknown
+      >;
+      modelRequests.push({ path: request.url, body });
+      if (body.stream !== true) {
+        response.writeHead(400).end();
+        return;
+      }
+      sendOpenAiChatCompletionsStream(response, {
+        model: String(body.model),
+        output: { ok: true },
+      });
+      return;
+    }
     response.writeHead(404).end();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   servers.push(server);
   const address = server.address() as AddressInfo;
-  return { origin: `http://127.0.0.1:${address.port}`, observed };
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    observed,
+    modelRequests,
+  };
 }
 
 function admission(origin: string): CopyRealCapabilityAdmissionInput {
@@ -247,13 +323,62 @@ describe("Copy pilot trusted gateway", () => {
       envelope.credential,
     );
     const bindings = createCopyPilotTrustedGatewayBindings(handle);
-    expect(bindings.channelIdFor("gpt-5.6-terra", "openai_responses")).toBe(20);
+    expect(
+      bindings.channelIdFor("gpt-5.6-terra", "openai_chat_completions"),
+    ).toBe(20);
     expect(() =>
-      bindings.channelIdFor("gpt-5.6-sol", "openai_responses"),
+      bindings.channelIdFor("gpt-5.6-sol", "openai_chat_completions"),
     ).toThrow("COPY_PILOT_CHILD_SCOPE_MISMATCH");
     expect(bindings.execute).toBeTypeOf("function");
     expect(bindings.resolve).toBeTypeOf("function");
     expect(JSON.stringify(bindings)).toBe("{}");
+
+    const outputSchema = Object.freeze({
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+      additionalProperties: false,
+    });
+    const request = {
+      alias: "gpt-5.6-terra",
+      system: "Return the schema only.",
+      prompt: "Confirm the trusted Chat Completions path.",
+      outputSchema,
+      outputSchemaName: "copy_trusted_gateway_output",
+      reasoning: { effort: "medium" as const },
+      maxOutputTokens: 1200,
+      abortSignal: AbortSignal.timeout(2_000),
+    };
+    expect(() => bindings.execute("openai_responses", request)).toThrow(
+      "COPY_PILOT_CHILD_SCOPE_MISMATCH",
+    );
+    const result = await bindings.execute("openai_chat_completions", request);
+
+    expect(result).toMatchObject({
+      protocol: "openai-chat-completions",
+      requestedModel: "gpt-5.6-terra",
+      reportedModel: "gpt-5.6-terra",
+      requestId: "req-copy-terra-001",
+      output: { ok: true },
+    });
+    expect(live.modelRequests).toEqual([
+      {
+        path: "/v1/chat/completions",
+        body: expect.objectContaining({
+          model: "gpt-5.6-terra",
+          stream: true,
+          reasoning_effort: "medium",
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "copy_trusted_gateway_output",
+              strict: true,
+              schema: outputSchema,
+            },
+          },
+        }),
+      },
+    ]);
   });
 
   it("rejects token digest mismatch before any network request", async () => {
@@ -277,7 +402,7 @@ describe("Copy pilot trusted gateway", () => {
     const settlement = await bindings.resolve({
       requestId: "req-copy-terra-001",
       alias: "gpt-5.6-terra",
-      protocol: "openai_responses",
+      protocol: "openai_chat_completions",
       expectedChannelId: 20,
       usage: { inputTokens: 50, outputTokens: 10 },
       maxOutputTokens: 4_000,

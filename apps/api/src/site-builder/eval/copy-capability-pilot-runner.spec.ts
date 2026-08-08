@@ -12,7 +12,7 @@ import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDurableModelExecutionAttestation } from "../../model-runtime";
-import type { CopyTaskOutput } from "../agents/copy";
+import { COPY_TASK, type CopyTaskOutput } from "../agents/copy";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
   createCopyCapabilityPilotFakeGatewayRunner,
@@ -87,7 +87,7 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
-function sendOpenAiResponsesStream(
+function sendOpenAiChatCompletionsStream(
   response: ServerResponse,
   input: {
     requestId?: string;
@@ -97,40 +97,36 @@ function sendOpenAiResponsesStream(
     outputTokens: number;
   },
 ): void {
-  const messageId = `message-${input.requestId ?? "missing-request-id"}`;
-  const events = [
+  const id = `chatcmpl-${input.requestId ?? "missing-request-id"}`;
+  const chunks = [
     {
-      type: "response.created",
-      response: {
-        id: `response-${input.requestId ?? "missing-request-id"}`,
-        created_at: 1_786_000_000,
-        model: input.model,
-      },
-    },
-    {
-      type: "response.output_item.added",
-      output_index: 0,
-      item: { type: "message", id: messageId },
-    },
-    {
-      type: "response.output_text.delta",
-      item_id: messageId,
-      delta: JSON.stringify(input.output),
-    },
-    {
-      type: "response.output_item.done",
-      output_index: 0,
-      item: { type: "message", id: messageId },
-    },
-    {
-      type: "response.completed",
-      response: {
-        usage: {
-          input_tokens: input.inputTokens,
-          input_tokens_details: { cached_tokens: 0 },
-          output_tokens: input.outputTokens,
-          output_tokens_details: { reasoning_tokens: 10 },
+      id,
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            content: JSON.stringify(input.output),
+          },
+          finish_reason: null,
         },
+      ],
+    },
+    {
+      id,
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: input.inputTokens,
+        completion_tokens: input.outputTokens,
+        total_tokens: input.inputTokens + input.outputTokens,
+        prompt_tokens_details: { cached_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: 10 },
       },
     },
   ];
@@ -141,8 +137,8 @@ function sendOpenAiResponsesStream(
       ? {}
       : { "x-oneapi-request-id": input.requestId }),
   });
-  for (const event of events) {
-    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
   }
   response.end("data: [DONE]\n\n");
 }
@@ -172,8 +168,12 @@ async function fakeGateway(
       requestIds === "present"
         ? `request-${observed.length}-${model}`
         : undefined;
-    if (request.url === "/v1/responses") {
-      sendOpenAiResponsesStream(response, {
+    if (request.url === "/v1/chat/completions") {
+      if (body.stream !== true) {
+        response.writeHead(400).end();
+        return;
+      }
+      sendOpenAiChatCompletionsStream(response, {
         requestId,
         model,
         output,
@@ -229,21 +229,35 @@ describe("Copy capability pilot fake-gateway runner", () => {
     const sonnet = await runner.execute("copy-capability-3-claude-sonnet-5");
 
     expect(gateway.observed.map(({ path }) => path)).toEqual([
-      "/v1/responses",
-      "/v1/responses",
+      "/v1/chat/completions",
+      "/v1/chat/completions",
       "/v1/messages",
     ]);
     expect(gateway.observed[0]!.body).toMatchObject({
       model: "gpt-5.6-terra",
-      reasoning: { effort: "medium" },
-      max_output_tokens: 1200,
       stream: true,
+      reasoning_effort: "medium",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "copy_capability_output",
+          strict: true,
+          schema: COPY_TASK.outputSchema,
+        },
+      },
     });
     expect(gateway.observed[1]!.body).toMatchObject({
       model: "gpt-5.6-sol",
-      reasoning: { effort: "high" },
-      max_output_tokens: 1200,
       stream: true,
+      reasoning_effort: "high",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "copy_capability_output",
+          strict: true,
+          schema: COPY_TASK.outputSchema,
+        },
+      },
     });
     expect(gateway.observed[2]!.body).toMatchObject({
       model: "claude-sonnet-5",

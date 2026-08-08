@@ -1,4 +1,5 @@
-export type NativeModelProtocol = "openai-responses" | "anthropic-messages";
+export type NativeModelProtocol =
+  "openai-responses" | "openai-chat-completions" | "anthropic-messages";
 
 export type NativeReasoningEffort =
   "none" | "minimal" | "low" | "medium" | "high" | "xhigh";

@@ -21,7 +21,7 @@ const aliasesFor = (profile: string) =>
 describe('Site Builder model candidate baseline', () => {
   it('uses a candidateBaselineId independent from execution policy v3', () => {
     expect(SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID).toBe(
-      'site-builder-model-candidate-baseline/2026-08-04-v2',
+      'site-builder-model-candidate-baseline/2026-08-07-v3',
     );
     expect(modelPolicyRegistry.getCandidateBaselineId()).toBe(
       SITE_BUILDER_MODEL_CANDIDATE_BASELINE_ID,
@@ -96,6 +96,42 @@ describe('Site Builder model candidate baseline', () => {
           candidate.preflight === 'capability_probe',
       ),
     ).toBe(true);
+  });
+
+  it('keeps OpenOx Chat as Copy-only for GPT 5.6 text candidates while preserving existing Responses profiles', () => {
+    expect(getModelCandidateCatalogEntry('gpt-5.6-terra')).toMatchObject({
+      status: 'runnable',
+      expectedProtocols: ['openai-responses', 'openai-chat-completions'],
+    });
+    expect(getModelCandidateCatalogEntry('gpt-5.6-sol')).toMatchObject({
+      status: 'runnable',
+      expectedProtocols: ['openai-responses', 'openai-chat-completions'],
+    });
+
+    const protocolFor = (profile: string, alias: string) =>
+      SITE_BUILDER_MODEL_CANDIDATE_BASELINE.profileCandidatePools
+        .find((pool) => pool.profile === profile)
+        ?.candidates.find((candidate) => candidate.alias === alias)
+        ?.expectedProtocol;
+
+    expect(protocolFor('copy.premium', 'gpt-5.6-terra')).toBe(
+      'openai-chat-completions',
+    );
+    expect(protocolFor('copy.premium', 'gpt-5.6-sol')).toBe(
+      'openai-chat-completions',
+    );
+    expect(protocolFor('structured.default', 'gpt-5.6-terra')).toBe(
+      'openai-responses',
+    );
+    expect(protocolFor('reasoning.high', 'gpt-5.6-sol')).toBe(
+      'openai-responses',
+    );
+    expect(protocolFor('multimodal.review', 'gpt-5.6-terra')).toBe(
+      'openai-responses',
+    );
+    expect(protocolFor('multimodal.review', 'gpt-5.6-sol')).toBe(
+      'openai-responses',
+    );
   });
 
   it('freezes precise media aliases, preview/deferred states, and expected protocols', () => {

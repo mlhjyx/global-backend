@@ -746,10 +746,15 @@ function completeUsage(usage: {
   );
 }
 
-function runtimeProtocol(value: "openai-responses" | "anthropic-messages") {
-  return value === "openai-responses"
-    ? ("openai_responses" as const)
-    : ("anthropic_messages" as const);
+function runtimeProtocol(
+  value: "openai-responses" | "openai-chat-completions" | "anthropic-messages",
+): ModelProtocol {
+  if (value === "openai-responses") return "openai_responses";
+  if (value === "openai-chat-completions") {
+    return "openai_chat_completions";
+  }
+  if (value === "anthropic-messages") return "anthropic_messages";
+  return fail("COPY_REAL_CAPABILITY_NATIVE_PROTOCOL_NOT_SUPPORTED");
 }
 
 function invalidOutput(error: NativeModelOutputError): CopyTaskOutput {

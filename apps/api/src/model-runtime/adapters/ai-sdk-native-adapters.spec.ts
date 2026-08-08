@@ -6,6 +6,7 @@ import {
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { AiSdkAnthropicMessagesAdapter } from "./ai-sdk-anthropic-messages.adapter";
+import { AiSdkOpenAiChatCompletionsAdapter } from "./ai-sdk-openai-chat-completions.adapter";
 import {
   NativeModelApiError,
   NativeModelOutputError,
@@ -23,6 +24,15 @@ interface ObservedRequest {
 const openServers: Array<ReturnType<typeof createServer>> = [];
 const FIXTURE_API_KEY = ["fixture", "not", "a", "credential"].join("-");
 const OPENAI_REQUEST_ID = ["openai", "request", "fixture"].join("-");
+const OPENAI_CHAT_REQUEST_ID = ["openai", "chat", "request", "fixture"].join(
+  "-",
+);
+const OPENAI_CHAT_ERROR_REQUEST_ID = [
+  "openai",
+  "chat",
+  "error",
+  "fixture",
+].join("-");
 const ANTHROPIC_REQUEST_ID = ["anthropic", "request", "fixture"].join("-");
 const INVALID_REQUEST_ID = ["invalid", "request", "fixture"].join("-");
 
@@ -137,6 +147,83 @@ function sendOpenAiResponsesStream(
   response.end("data: [DONE]\n\n");
 }
 
+function sendOpenAiChatStream(
+  response: ServerResponse,
+  input: {
+    model: string;
+    text: string;
+    inputTokens: number;
+    cachedInputTokens?: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+  },
+  headers: Record<string, string> = {},
+): void {
+  const chunks = [
+    {
+      id: "chatcmpl_stream_fixture",
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [
+        {
+          index: 0,
+          delta: { role: "assistant" },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      id: "chatcmpl_stream_fixture",
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [
+        {
+          index: 0,
+          delta: { content: input.text },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      id: "chatcmpl_stream_fixture",
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    },
+    {
+      id: "chatcmpl_stream_fixture",
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.model,
+      choices: [],
+      usage: {
+        prompt_tokens: input.inputTokens,
+        completion_tokens: input.outputTokens,
+        total_tokens: input.inputTokens + input.outputTokens,
+        prompt_tokens_details: {
+          cached_tokens: input.cachedInputTokens ?? 0,
+        },
+        completion_tokens_details: {
+          reasoning_tokens: input.reasoningTokens ?? 0,
+        },
+      },
+    },
+  ];
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    ...headers,
+  });
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+}
+
 afterEach(async () => {
   await Promise.all(
     openServers
@@ -228,6 +315,174 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it("streams native OpenAI Chat while preserving schema, reasoning, usage, warnings and response metadata", async () => {
+    const gateway = await startFakeGateway((_request, response, observed) => {
+      if (observed.body.stream !== true) {
+        sendJson(response, 400, { error: { message: "stream required" } });
+        return;
+      }
+      sendOpenAiChatStream(
+        response,
+        {
+          model: "gpt-5.6-terra-resolved",
+          text: '{"name":"Acme"}',
+          inputTokens: 23,
+          cachedInputTokens: 6,
+          outputTokens: 10,
+          reasoningTokens: 4,
+        },
+        { "x-oneapi-request-id": OPENAI_CHAT_REQUEST_ID },
+      );
+    });
+
+    const adapter = new AiSdkOpenAiChatCompletionsAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+    const result = await adapter.execute<{ name: string }>({
+      alias: "gpt-5.6-terra",
+      system: "Return only the requested object.",
+      prompt: "Name the company.",
+      outputSchema: companySchema,
+      outputSchemaName: "company",
+      reasoning: { effort: "high" },
+      temperature: 0.2,
+      maxOutputTokens: 128,
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+
+    expect(gateway.observed).toHaveLength(1);
+    const [request] = gateway.observed;
+    expect(request).toMatchObject({
+      method: "POST",
+      path: "/v1/chat/completions",
+    });
+    expect(request.headers.authorization).toBe(`Bearer ${FIXTURE_API_KEY}`);
+    expect(request.body).toMatchObject({
+      model: "gpt-5.6-terra",
+      stream: true,
+      stream_options: { include_usage: true },
+      max_completion_tokens: 128,
+      reasoning_effort: "high",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "company",
+          strict: true,
+          schema: companySchema,
+        },
+      },
+    });
+    expect(request.body).toHaveProperty("messages");
+    expect(request.body).not.toHaveProperty("input");
+    expect(request.body).not.toHaveProperty("temperature");
+    expect(result).toMatchObject({
+      protocol: "openai-chat-completions",
+      requestedModel: "gpt-5.6-terra",
+      reportedModel: "gpt-5.6-terra-resolved",
+      requestId: OPENAI_CHAT_REQUEST_ID,
+      output: { name: "Acme" },
+      usage: {
+        inputTokens: 23,
+        uncachedInputTokens: 17,
+        outputTokens: 10,
+        reasoningTokens: 4,
+        cacheReadTokens: 6,
+      },
+    });
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "unsupported",
+          feature: "temperature",
+        }),
+      ]),
+    );
+  });
+
+  it("preserves a bounded native 524 Chat failure without retrying or leaking its body", async () => {
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        524,
+        { error: { message: "upstream timed out" } },
+        { "x-oneapi-request-id": OPENAI_CHAT_ERROR_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkOpenAiChatCompletionsAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const error = await adapter
+      .execute({
+        alias: "gpt-5.6-terra",
+        prompt: "hello",
+        maxOutputTokens: 32,
+        abortSignal: AbortSignal.timeout(5_000),
+      })
+      .then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+
+    expect(error).toBeInstanceOf(NativeModelApiError);
+    expect(error).toMatchObject({
+      protocol: "openai-chat-completions",
+      requestedModel: "gpt-5.6-terra",
+      requestId: OPENAI_CHAT_ERROR_REQUEST_ID,
+      statusCode: 524,
+      retryable: true,
+      responseBodyDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      responseBodyBytes: expect.any(Number),
+    });
+    expect(error).not.toHaveProperty("responseBody");
+    expect(gateway.observed).toHaveLength(1);
+  });
+
+  it("honors the AbortSignal when native Chat receives no early SSE event", async () => {
+    let clientClosedBeforeServerEnd = false;
+    let resolveStreamOpened: () => void = () => undefined;
+    let resolveCloseObserved: () => void = () => undefined;
+    const streamOpened = new Promise<void>((resolve) => {
+      resolveStreamOpened = resolve;
+    });
+    const closeObserved = new Promise<void>((resolve) => {
+      resolveCloseObserved = resolve;
+    });
+    const gateway = await startFakeGateway(async (_request, response) => {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      response.flushHeaders();
+      resolveStreamOpened();
+      response.on("close", () => {
+        clientClosedBeforeServerEnd = !response.writableEnded;
+        resolveCloseObserved();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (!response.destroyed) response.end();
+    });
+    const adapter = new AiSdkOpenAiChatCompletionsAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+    const controller = new AbortController();
+    const execution = adapter.execute({
+      alias: "gpt-5.6-terra",
+      prompt: "hello",
+      maxOutputTokens: 32,
+      abortSignal: controller.signal,
+    });
+
+    await streamOpened;
+    controller.abort(new Error("no early SSE deadline reached"));
+    await expect(execution).rejects.toThrow();
+
+    await closeObserved;
+    expect(clientClosedBeforeServerEnd).toBe(true);
+    expect(gateway.observed).toHaveLength(1);
+  });
+
   it("preserves Anthropic Messages path, native auth, schema, reasoning and warnings", async () => {
     const gateway = await startFakeGateway((_request, response) => {
       sendJson(
@@ -308,9 +563,10 @@ describe("AI SDK 7 native provider adapters", () => {
   });
 
   it.each([
-    ["openai", AiSdkOpenAiResponsesAdapter],
-    ["anthropic", AiSdkAnthropicMessagesAdapter],
-  ] as const)("disables SDK retries for %s", async (_name, Adapter) => {
+    ["openai-responses", AiSdkOpenAiResponsesAdapter, "gpt-5.6-terra"],
+    ["openai-chat", AiSdkOpenAiChatCompletionsAdapter, "gpt-5.6-terra"],
+    ["anthropic", AiSdkAnthropicMessagesAdapter, "claude-sonnet-5"],
+  ] as const)("disables SDK retries for %s", async (_name, Adapter, alias) => {
     const gateway = await startFakeGateway((_request, response) => {
       sendJson(response, 500, { error: { message: "temporary failure" } });
     });
@@ -318,7 +574,7 @@ describe("AI SDK 7 native provider adapters", () => {
 
     await expect(
       adapter.execute({
-        alias: _name === "openai" ? "gpt-5.6-terra" : "claude-sonnet-5",
+        alias,
         prompt: "hello",
         maxOutputTokens: 32,
         abortSignal: AbortSignal.timeout(5_000),
@@ -328,11 +584,27 @@ describe("AI SDK 7 native provider adapters", () => {
   });
 
   it.each([
-    ["openai", AiSdkOpenAiResponsesAdapter, "gpt-5.6-terra"],
-    ["anthropic", AiSdkAnthropicMessagesAdapter, "claude-sonnet-5"],
+    [
+      "openai",
+      AiSdkOpenAiResponsesAdapter,
+      "gpt-5.6-terra",
+      "openai-responses",
+    ],
+    [
+      "openai-chat",
+      AiSdkOpenAiChatCompletionsAdapter,
+      "gpt-5.6-terra",
+      "openai-chat-completions",
+    ],
+    [
+      "anthropic",
+      AiSdkAnthropicMessagesAdapter,
+      "claude-sonnet-5",
+      "anthropic-messages",
+    ],
   ] as const)(
     "preserves bounded settlement diagnostics for %s API failures",
-    async (_name, Adapter, alias) => {
+    async (_name, Adapter, alias, protocol) => {
       const requestId = `${_name}-failed-request`;
       const gateway = await startFakeGateway((_request, response) => {
         sendJson(
@@ -358,8 +630,7 @@ describe("AI SDK 7 native provider adapters", () => {
 
       expect(error).toBeInstanceOf(NativeModelApiError);
       expect(error).toMatchObject({
-        protocol:
-          _name === "openai" ? "openai-responses" : "anthropic-messages",
+        protocol,
         requestedModel: alias,
         requestId,
         statusCode: 400,
@@ -489,22 +760,29 @@ describe("AI SDK 7 native provider adapters", () => {
   });
 
   it.each([
-    ["openai", AiSdkOpenAiResponsesAdapter],
-    ["anthropic", AiSdkAnthropicMessagesAdapter],
-  ] as const)("forwards AbortSignal for %s", async (_name, Adapter) => {
+    ["openai-responses", AiSdkOpenAiResponsesAdapter, "gpt-5.6-terra"],
+    ["openai-chat", AiSdkOpenAiChatCompletionsAdapter, "gpt-5.6-terra"],
+    ["anthropic", AiSdkAnthropicMessagesAdapter, "claude-sonnet-5"],
+  ] as const)("forwards AbortSignal for %s", async (_name, Adapter, alias) => {
+    let resolveRequestObserved: () => void = () => undefined;
+    const requestObserved = new Promise<void>((resolve) => {
+      resolveRequestObserved = resolve;
+    });
     const gateway = await startFakeGateway(async (_request, response) => {
+      resolveRequestObserved();
       await new Promise((resolve) => setTimeout(resolve, 250));
       if (!response.destroyed) sendJson(response, 200, {});
     });
     const adapter = new Adapter(adapterSettings(gateway.baseUrl));
     const controller = new AbortController();
     const execution = adapter.execute({
-      alias: _name === "openai" ? "gpt-5.6-terra" : "claude-sonnet-5",
+      alias,
       prompt: "hello",
       maxOutputTokens: 32,
       abortSignal: controller.signal,
     });
-    setTimeout(() => controller.abort(new Error("runtime timeout")), 20);
+    await requestObserved;
+    controller.abort(new Error("runtime timeout"));
 
     await expect(execution).rejects.toThrow();
     expect(gateway.observed).toHaveLength(1);

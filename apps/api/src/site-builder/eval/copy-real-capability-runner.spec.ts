@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import { COPY_TASK } from "../agents/copy";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
   COPY_REAL_CAPABILITY_ADMISSION_SOURCE,
@@ -82,7 +83,7 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
-function sendOpenAiResponsesStream(
+function sendOpenAiChatCompletionsStream(
   response: ServerResponse,
   input: {
     requestId: string;
@@ -92,40 +93,36 @@ function sendOpenAiResponsesStream(
     outputTokens: number;
   },
 ): void {
-  const messageId = `message-${input.requestId}`;
-  const events = [
+  const id = `chatcmpl-${input.requestId}`;
+  const chunks = [
     {
-      type: "response.created",
-      response: {
-        id: `response-${input.requestId}`,
-        created_at: 1_786_000_000,
-        model: input.alias,
-      },
-    },
-    {
-      type: "response.output_item.added",
-      output_index: 0,
-      item: { type: "message", id: messageId },
-    },
-    {
-      type: "response.output_text.delta",
-      item_id: messageId,
-      delta: JSON.stringify(input.output),
-    },
-    {
-      type: "response.output_item.done",
-      output_index: 0,
-      item: { type: "message", id: messageId },
-    },
-    {
-      type: "response.completed",
-      response: {
-        usage: {
-          input_tokens: input.inputTokens,
-          input_tokens_details: { cached_tokens: 0 },
-          output_tokens: input.outputTokens,
-          output_tokens_details: { reasoning_tokens: 10 },
+      id,
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.alias,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            content: JSON.stringify(input.output),
+          },
+          finish_reason: null,
         },
+      ],
+    },
+    {
+      id,
+      object: "chat.completion.chunk",
+      created: 1_786_000_000,
+      model: input.alias,
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: input.inputTokens,
+        completion_tokens: input.outputTokens,
+        total_tokens: input.inputTokens + input.outputTokens,
+        prompt_tokens_details: { cached_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: 10 },
       },
     },
   ];
@@ -134,8 +131,8 @@ function sendOpenAiResponsesStream(
     "cache-control": "no-cache",
     "x-oneapi-request-id": input.requestId,
   });
-  for (const event of events) {
-    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
   }
   response.end("data: [DONE]\n\n");
 }
@@ -153,6 +150,10 @@ async function realRunnerGateway() {
   const callsByAlias = new Map<string, number>();
   const logs: Record<string, unknown>[] = [];
   const observedModelBodies: Record<string, unknown>[] = [];
+  const observedModelRequests: Array<{
+    path: string;
+    body: Record<string, unknown>;
+  }> = [];
   const control = { sharedDrift: false };
   const channelByAlias = new Map([
     ["gpt-5.6-terra", 20],
@@ -203,7 +204,10 @@ async function realRunnerGateway() {
       sendJson(response, { data: logs });
       return;
     }
-    if (request.url !== "/v1/responses" && request.url !== "/v1/messages") {
+    if (
+      request.url !== "/v1/chat/completions" &&
+      request.url !== "/v1/messages"
+    ) {
       response.writeHead(404).end();
       return;
     }
@@ -214,6 +218,7 @@ async function realRunnerGateway() {
       unknown
     >;
     observedModelBodies.push(body);
+    observedModelRequests.push({ path: request.url, body });
     const alias = String(body.model);
     const ordinal = (callsByAlias.get(alias) ?? 0) + 1;
     callsByAlias.set(alias, ordinal);
@@ -239,46 +244,18 @@ async function realRunnerGateway() {
         completion_tokens: 40,
       });
     }
-    if (request.url === "/v1/responses") {
-      if (body.stream === true) {
-        sendOpenAiResponsesStream(response, {
-          requestId,
-          alias,
-          output,
-          inputTokens: 120,
-          outputTokens: 40,
-        });
+    if (request.url === "/v1/chat/completions") {
+      if (body.stream !== true) {
+        response.writeHead(400).end();
         return;
       }
-      sendJson(
-        response,
-        {
-          id: `response-${ordinal}`,
-          created_at: 1_786_000_000,
-          model: alias,
-          output: [
-            {
-              type: "message",
-              id: `message-${ordinal}`,
-              role: "assistant",
-              content: [
-                {
-                  type: "output_text",
-                  text: JSON.stringify(output),
-                  annotations: [],
-                },
-              ],
-            },
-          ],
-          usage: {
-            input_tokens: 120,
-            input_tokens_details: { cached_tokens: 0 },
-            output_tokens: 40,
-            output_tokens_details: { reasoning_tokens: 10 },
-          },
-        },
+      sendOpenAiChatCompletionsStream(response, {
         requestId,
-      );
+        alias,
+        output,
+        inputTokens: 120,
+        outputTokens: 40,
+      });
       return;
     }
     sendJson(
@@ -304,6 +281,7 @@ async function realRunnerGateway() {
     origin: `http://127.0.0.1:${address.port}`,
     authorizationValue,
     observedModelBodies,
+    observedModelRequests,
   };
 }
 
@@ -1512,7 +1490,25 @@ describe("Copy real capability runner admission", () => {
       ),
     });
     expect(result.terraWireObservation.reason.length).toBeLessThanOrEqual(160);
-    expect(result.terraWireObservation.reason).not.toContain("upstream timeout");
+    expect(result.terraWireObservation.reason).not.toContain(
+      "upstream timeout",
+    );
+    expect(gateway.observedModelRequests[0]).toEqual({
+      path: "/v1/chat/completions",
+      body: expect.objectContaining({
+        model: "gpt-5.6-terra",
+        stream: true,
+        reasoning_effort: "medium",
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "copy_capability_output",
+            strict: true,
+            schema: COPY_TASK.outputSchema,
+          },
+        },
+      }),
+    });
     expect(result.forgedAcceptanceError).toBe(
       "COPY_GIT_EVIDENCE_ACCEPTANCE_REQUIRED",
     );
@@ -1711,6 +1707,12 @@ describe("Copy real capability runner admission", () => {
       true,
     );
     expect(gateway.observedModelBodies).toHaveLength(4);
+    expect(gateway.observedModelRequests.map(({ path }) => path)).toEqual([
+      "/v1/chat/completions",
+      "/v1/chat/completions",
+      "/v1/chat/completions",
+      "/v1/messages",
+    ]);
     expect(JSON.stringify(result)).not.toContain("real_gateway_settled");
     expect(JSON.stringify(gateway.observedModelBodies[2])).toContain(
       "Invented unsupported performance claim",

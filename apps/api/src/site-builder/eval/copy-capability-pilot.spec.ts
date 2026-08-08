@@ -8,9 +8,9 @@ import {
 describe("Copy capability pilot preparation contract", () => {
   it("freezes one zero-call probe plan per current Copy candidate", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN).toMatchObject({
-      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-07-v9",
-      planId: "site-builder-copy-capability-pilot/2026-08-07-v9",
-      executionStatus: "REAL_RUNTIME_READY_POST_MERGE_V9_MANIFEST_REQUIRED",
+      schemaVersion: "site-builder-copy-capability-pilot-plan/2026-08-07-v10",
+      planId: "site-builder-copy-capability-pilot/2026-08-07-v10",
+      executionStatus: "REAL_RUNTIME_READY_POST_MERGE_V10_MANIFEST_REQUIRED",
       dispatchAuthorization: "NOT_AUTHORIZED",
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
@@ -62,12 +62,12 @@ describe("Copy capability pilot preparation contract", () => {
     expect(COPY_CAPABILITY_PILOT_PLAN.executions).toEqual([
       expect.objectContaining({
         alias: "gpt-5.6-terra",
-        protocol: "openai_responses",
+        protocol: "openai_chat_completions",
         reasoning: "medium",
       }),
       expect.objectContaining({
         alias: "gpt-5.6-sol",
-        protocol: "openai_responses",
+        protocol: "openai_chat_completions",
         reasoning: "high",
       }),
       expect.objectContaining({
@@ -81,7 +81,7 @@ describe("Copy capability pilot preparation contract", () => {
         childSlotId: "copy-capability-child-1-gpt-5.6-terra",
         executionKey: "copy-capability-1-gpt-5.6-terra",
         alias: "gpt-5.6-terra",
-        protocol: "openai_responses",
+        protocol: "openai_chat_completions",
         reasoning: "medium",
         maximumExecutions: 1,
         maximumWireCalls: 2,
@@ -93,7 +93,7 @@ describe("Copy capability pilot preparation contract", () => {
         childSlotId: "copy-capability-child-2-gpt-5.6-sol",
         executionKey: "copy-capability-2-gpt-5.6-sol",
         alias: "gpt-5.6-sol",
-        protocol: "openai_responses",
+        protocol: "openai_chat_completions",
         reasoning: "high",
         maximumExecutions: 1,
         maximumWireCalls: 2,
