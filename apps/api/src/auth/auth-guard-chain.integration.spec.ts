@@ -82,7 +82,7 @@ describe('real Nest AuthGuard -> ScopesGuard request chain', () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({
-      error: { code: 'TOKEN_MISSING', message: 'missing bearer token' },
+      error: { code: 'TOKEN_MISSING', message: 'missing bearer [redacted]' },
     });
     expect(verify).not.toHaveBeenCalled();
     expect(permits).not.toHaveBeenCalled();
