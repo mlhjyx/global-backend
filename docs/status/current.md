@@ -12,8 +12,8 @@
 
 | 项目 | 当前事实 |
 |---|---|
-| 当前远端主线 | `origin/main@4f75a66925b71fa218395934a5722035e7ba0112`；2026-08-08 live fetch 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`，其后 4 个主线提交仅涉及 Site Builder Copy stopped evidence 与 Chat transport 重基。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。 |
-| 产品阶段 | Site Builder M1 收口属于已完成历史；Copy 当前仅完成 zero-call Chat transport 重基，仍无新的 capability/quality evidence、promotion 或 route adoption。获客侧处于“受控 pilot 前的治理、授权、运行身份与可观测性补齐”，尚未进入真实 pilot。 |
+| 当前远端主线 | `origin/main@616f2360c956db448f368618864e6eff39a0a723`；2026-08-08 live fetch 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`；其后主线新增 Site Builder Copy stopped evidence、Chat transport 重基与 v11 fixed-source create-only manifest，不改变获客实现边界。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。 |
+| 产品阶段 | Site Builder M1 收口属于已完成历史；Copy v11 当前只是 zero-call、`NOT_AUTHORIZED` 的 fixed-source create-only manifest，仍无新的 capability/quality evidence、promotion 或 route adoption。获客侧处于“受控 pilot 前的治理、授权、运行身份与可观测性补齐”，尚未进入真实 pilot。 |
 | 当前交付状态 | Buyer/Intent 的机器追踪链均为 `INTERNAL_ONLY`。当前不存在可用于晋级的 RuntimeEvidence，也不存在真实 Release Bundle。 |
 | Source-only 质量/安全门 | 2026-08-08 干净集成树的全范围 V8 结果为 statements 85.20%、branches 80.00%、functions 86.79%、lines 86.63%；auth、compliance、event handoff、budget、identity 与 Outbox 关键 cohort 的分支门均达到 80%，coverage 状态为 `TARGET_MET`。Actions 固定、source-only SAST、Compose lock 和恢复/集成声明验证已纳入本地门；PostgreSQL/Temporal 集成、恢复演练、GitHub ruleset 与镜像外部 provenance 仍是 `BLOCKED/NOT_RUN/UNVERIFIED`，不得把 source-only 结果解释为运行证明。 |
 | Provider 真值 | 只认 [机器 Provider Registry](../governance/provider-registry.json) 与其[生成页](../backend/provider-registry.md)；实现、默认 enablement、当前 runtime health 与 pilot 授权是不同维度。 |

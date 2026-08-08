@@ -9,8 +9,10 @@ import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
 import {
+  assertCopyPilotVerifiedSourceCurrent,
   createCopyPilotVerifiedSource,
   getCopyPilotVerifiedSourceBinding,
+  requireCopyPilotVerifiedSourceBinding,
 } from "./copy-pilot-source-verifier";
 
 const directories: string[] = [];
@@ -31,8 +33,11 @@ async function repository() {
   const root = await mkdtemp(join(tmpdir(), "copy-pilot-source-"));
   directories.push(root);
   await mkdir(join(root, "src"));
+  await mkdir(join(root, "dist"));
   await mkdir(join(root, "docs", "evidence"), { recursive: true });
   await writeFile(join(root, "src", "runtime.ts"), "export const value = 1;\n");
+  const compiledBytes = Buffer.from("export const value = 1;\n");
+  await writeFile(join(root, "dist", "runtime.js"), compiledBytes);
   git(root, "init", "-q");
   git(root, "config", "user.email", "copy-pilot@example.test");
   git(root, "config", "user.name", "Copy Pilot Test");
@@ -60,12 +65,19 @@ async function repository() {
     maximumRepairCallsPerExecution: 1,
     executions: COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions,
   };
+  const compiledArtifacts = [
+    {
+      path: "dist/runtime.js",
+      sha256: createHash("sha256").update(compiledBytes).digest("hex"),
+    },
+  ];
   const withoutDigest = {
     schemaVersion:
       "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1",
     artifactId: "site-builder-copy-real-capability-manifest-prep/test-v3",
     classification: "FIXED_SOURCE_CREATE_ONLY",
     fixedSourceCommit,
+    preparationHeadCommit: fixedSourceCommit,
     createOnly: true,
     dispatchAuthorization: "NOT_AUTHORIZED",
     dispatchCapable: false,
@@ -79,6 +91,19 @@ async function repository() {
       files,
       digest: canonicalDigest(files),
     },
+    compiledRuntimeExpectation: {
+      schemaVersion: "compiled-runtime-expectation/2026-08-08-v1",
+      buildSourceCommit: fixedSourceCommit,
+      sourceBundleDigest: canonicalDigest(files),
+      buildCommands: [
+        "pnpm --filter @global/db generate",
+        "pnpm --filter @global/contracts build",
+        "pnpm --filter @global/api build",
+      ],
+      artifactCount: compiledArtifacts.length,
+      artifacts: compiledArtifacts,
+      artifactTreeDigest: canonicalDigest(compiledArtifacts),
+    },
   };
   const artifact = {
     ...withoutDigest,
@@ -89,7 +114,7 @@ async function repository() {
   git(root, "add", "docs/evidence/manifest.json");
   git(root, "commit", "-qm", "manifest");
   git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
-  return { root, manifestPath, fixedSourceCommit, manifest };
+  return { root, manifestPath, fixedSourceCommit, manifest, artifact };
 }
 
 describe("Copy pilot fixed-source verifier", () => {
@@ -106,7 +131,32 @@ describe("Copy pilot fixed-source verifier", () => {
       sourceBundleDigest: fixture.manifest.sourceBundleDigest,
       manifestDigest: canonicalDigest(fixture.manifest),
       repositoryRoot: fixture.root,
+      preparationHeadCommit: fixture.fixedSourceCommit,
+      compiledRuntimeExpectation: {
+        artifactTreeDigest:
+          fixture.artifact.compiledRuntimeExpectation.artifactTreeDigest,
+      },
     });
+  });
+
+  it("requires a branded source handle and revalidates its current bytes", async () => {
+    const fixture = await repository();
+    const verified = await createCopyPilotVerifiedSource({
+      repositoryRoot: fixture.root,
+      manifestArtifactPath: fixture.manifestPath,
+    });
+
+    expect(() => requireCopyPilotVerifiedSourceBinding({} as never)).toThrow(
+      "COPY_PILOT_VERIFIED_SOURCE_REQUIRED",
+    );
+    await expect(
+      assertCopyPilotVerifiedSourceCurrent(verified),
+    ).resolves.toBeUndefined();
+
+    await writeFile(join(fixture.root, "dist", "runtime.js"), "drift\n");
+    await expect(
+      assertCopyPilotVerifiedSourceCurrent(verified),
+    ).rejects.toThrow("COPY_PILOT_COMPILED_RUNTIME_MISMATCH");
   });
 
   it("rejects working-tree drift and an untracked manifest", async () => {
@@ -127,5 +177,45 @@ describe("Copy pilot fixed-source verifier", () => {
         manifestArtifactPath: untracked,
       }),
     ).rejects.toThrow("COPY_PILOT_MANIFEST_NOT_TRACKED");
+  });
+
+  it("rejects stale compiled bytes and unreachable preparation provenance", async () => {
+    const fixture = await repository();
+    await writeFile(join(fixture.root, "dist", "runtime.js"), "stale\n");
+    await expect(
+      createCopyPilotVerifiedSource({
+        repositoryRoot: fixture.root,
+        manifestArtifactPath: fixture.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_COMPILED_RUNTIME_MISMATCH");
+
+    await writeFile(
+      join(fixture.root, "dist", "runtime.js"),
+      "export const value = 1;\n",
+    );
+    const { artifactDigest: _artifactDigest, ...artifactWithoutDigest } =
+      fixture.artifact;
+    const unreachableWithoutDigest = {
+      ...artifactWithoutDigest,
+      preparationHeadCommit: "f".repeat(40),
+    };
+    const unreachableArtifact = {
+      ...unreachableWithoutDigest,
+      artifactDigest: canonicalDigest(unreachableWithoutDigest),
+    };
+    await writeFile(
+      fixture.manifestPath,
+      `${JSON.stringify(unreachableArtifact)}\n`,
+    );
+    git(fixture.root, "add", "docs/evidence/manifest.json");
+    git(fixture.root, "commit", "-qm", "unreachable preparation");
+    git(fixture.root, "update-ref", "refs/remotes/origin/main", "HEAD");
+
+    await expect(
+      createCopyPilotVerifiedSource({
+        repositoryRoot: fixture.root,
+        manifestArtifactPath: fixture.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_PREPARATION_SOURCE_UNREACHABLE");
   });
 });
