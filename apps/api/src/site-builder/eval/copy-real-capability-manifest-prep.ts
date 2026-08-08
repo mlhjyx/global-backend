@@ -24,7 +24,7 @@ const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 /** Merge-bound source; dispatch remains blocked until this SHA is on origin/main. */
 export const COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT =
-  "0c5213e6ef1a4d8b7ea527b7522021d487bc5934" as const;
+  "a22756ab16e2c61f82c38cfa97c7543bef531ea3" as const;
 export const COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json" as const;
 

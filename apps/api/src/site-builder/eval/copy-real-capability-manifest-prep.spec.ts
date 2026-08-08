@@ -80,7 +80,7 @@ function compiledRuntimeExpectation(
 describe("Copy real capability create-only manifest preparation", () => {
   it("binds Chat v11 to the exact post-merge main without dispatch", () => {
     expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
-      "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
+      "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
     );
     expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
       CURRENT_MANIFEST_V11_PATH,
@@ -247,7 +247,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-07-v11",
-      fixedSourceCommit: "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
+      fixedSourceCommit: "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
       preparationHeadCommit: "7d6e9fe977b0c1be9161c1aea00f9eb16d193a4a",
       requiredMergeMethod: "merge_commit",
       createOnly: true,
@@ -258,7 +258,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       observedModelCost: { CNY: 0, USD: 0 },
       manifest: {
         manifestId: "site-builder-copy-real-capability/2026-08-07-v11",
-        fixedSourceCommit: "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
+        fixedSourceCommit: "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
         plannedExecutions: 3,
         maximumWireCalls: 6,
         maximumRepairCallsPerExecution: 1,
@@ -273,7 +273,7 @@ describe("Copy real capability create-only manifest preparation", () => {
           "5690f5dc8e335d811f5d8dd0b1993589112e231737b2c973ea722564a0063d32",
       },
       compiledRuntimeExpectation: {
-        buildSourceCommit: "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
+        buildSourceCommit: "a22756ab16e2c61f82c38cfa97c7543bef531ea3",
         sourceBundleDigest:
           "c4b811233de9d0acd91d27b29a882b0cfeaec57d3a765a57986e281078c63470",
         artifactCount: 49,
