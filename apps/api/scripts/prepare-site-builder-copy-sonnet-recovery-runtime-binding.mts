@@ -1,15 +1,13 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
-const repositoryRoot = realpathSync(resolve(import.meta.dirname, "../../.."));
-
-const {
+import {
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
   prepareCopySonnetRecoveryRuntimeBindingFromRepository,
   writeCopySonnetRecoveryRuntimeBindingCreateOnly,
-} = await import(
-  "../src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep"
-);
+} from "../src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep";
+
+const repositoryRoot = realpathSync(resolve(import.meta.dirname, "../../.."));
 
 const artifact =
   await prepareCopySonnetRecoveryRuntimeBindingFromRepository(repositoryRoot);
