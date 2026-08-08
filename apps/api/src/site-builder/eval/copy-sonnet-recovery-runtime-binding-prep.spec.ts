@@ -35,7 +35,10 @@ function fixture() {
     ({ role, path }, index) => ({
       role,
       path,
-      sha256: index.toString(16).padStart(64, "0"),
+      sha256:
+        path === RECOVERY_MANIFEST_PATH
+          ? sha256(recoveryBytes)
+          : index.toString(16).padStart(64, "0"),
     }),
   );
   const sourceBundleDigest = canonicalDigest(sourceFiles);
