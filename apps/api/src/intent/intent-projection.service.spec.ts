@@ -7,6 +7,8 @@ import {
   IntentAttr,
   IntentEvent,
   IntentProjectionService,
+  discoverWatchPages,
+  toIntentEvent,
 } from './intent-projection.service';
 
 // 这三个纯函数是 TED P3 / openFDA P3 / web_watch 共享的**幂等基石**——每 sweep 复现同一信号时靠它们判「实质未变」
@@ -219,5 +221,213 @@ describe('IntentProjectionService.projectIntent', () => {
       },
     });
     expect(JSON.stringify(h.evidence[0])).not.toContain('TENDER_PUBLISHED');
+  });
+});
+
+describe('IntentProjectionService.registerWatch', () => {
+  function registerHarness(args?: {
+    company?: { name: string; domain: string | null; region: string | null } | null;
+    prior?: { id: string; config: unknown } | null;
+  }) {
+    const company = args && 'company' in args
+      ? args.company
+      : { name: 'Acme Pumps', domain: 'www.acme.example', region: 'DE' };
+    const prior = args && 'prior' in args ? args.prior : null;
+    const update = vi.fn(async () => ({ id: prior?.id }));
+    const create = vi.fn(async () => ({ id: 'source-new' }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({ canonicalCompany: { findUnique: vi.fn(async () => company) } }),
+      ),
+      monitoredSource: {
+        findUnique: vi.fn(async () => prior),
+        update,
+        create,
+      },
+    } as unknown as PrismaService;
+    return { service: new IntentProjectionService({ prisma }), update, create };
+  }
+
+  it('rejects a missing company or a company without a usable domain', async () => {
+    await expect(registerHarness({ company: null }).service.registerWatch('ws-1', 'missing')).rejects.toThrow(
+      'not found in workspace',
+    );
+    await expect(
+      registerHarness({ company: { name: 'No Web', domain: null, region: null } }).service.registerWatch('ws-1', 'co-1'),
+    ).rejects.toThrow('has no domain');
+  });
+
+  it('creates a bounded explicit watch with the requested cadence and normalized domain', async () => {
+    const h = registerHarness();
+    const pages = Array.from({ length: 15 }, (_, index) => ({
+      url: `https://acme.example/page-${index}`,
+      kind: 'generic' as const,
+    }));
+
+    await expect(h.service.registerWatch('ws-1', 'co-1', { pages, cadenceMs: 1234 })).resolves.toEqual({
+      sourceId: 'source-new',
+      sourceKey: 'web_watch:acme.example',
+      created: true,
+      pages: 12,
+    });
+    expect(h.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        sourceKey: 'web_watch:acme.example',
+        cadence: { kind: 'fixed', everyMs: 1234 },
+        region: 'DE',
+        status: 'ACTIVE',
+      }),
+    });
+  });
+
+  it('merges existing pages by URL and keeps the existing source identity', async () => {
+    const h = registerHarness({
+      prior: {
+        id: 'source-old',
+        config: { pages: [{ url: 'https://acme.example/products', kind: 'products' }, null, { nope: true }] },
+      },
+    });
+    await expect(
+      h.service.registerWatch('ws-1', 'co-1', {
+        pages: [
+          { url: 'https://acme.example/products', kind: 'generic' },
+          { url: 'https://acme.example/news', kind: 'news' },
+        ],
+      }),
+    ).resolves.toEqual({
+      sourceId: 'source-old',
+      sourceKey: 'web_watch:acme.example',
+      created: false,
+      pages: 2,
+    });
+    expect(h.update).toHaveBeenCalledWith({
+      where: { id: 'source-old' },
+      data: {
+        config: {
+          company: { name: 'Acme Pumps', domain: 'acme.example' },
+          pages: [
+            { url: 'https://acme.example/products', kind: 'generic' },
+            { url: 'https://acme.example/news', kind: 'news' },
+          ],
+        },
+      },
+    });
+  });
+
+  it('uses the broker boundary for automatic sitemap discovery', async () => {
+    const invoke = vi.fn(async (_tool: string, input: { url: string }) => ({
+      data: {
+        status: 200,
+        ok: true,
+        text: input.url.endsWith('/sitemap.xml')
+          ? '<urlset><url><loc>https://acme.example/products/pumps</loc></url></urlset>'
+          : '',
+      },
+    }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({ canonicalCompany: { findUnique: vi.fn(async () => ({ name: 'Acme', domain: 'acme.example', region: null })) } }),
+      ),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'source-auto' })),
+      },
+    } as unknown as PrismaService;
+    const brokerService = new IntentProjectionService({ prisma, broker: { invoke } as never });
+
+    await expect(brokerService.registerWatch('ws-1', 'co-1')).resolves.toMatchObject({
+      created: true,
+      pages: 2,
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      'http.get',
+      expect.objectContaining({ url: expect.stringContaining('acme.example') }),
+      { workspaceId: 'platform', correlationId: 'register-watch' },
+    );
+  });
+});
+
+describe('intent projection edge cases and page discovery', () => {
+  it('maps explicit and default detail fields without trusting malformed values', () => {
+    expect(
+      toIntentEvent({
+        changeType: 'HIRING_UP',
+        createdAt: new Date('2026-08-08T00:00:00.000Z'),
+        detail: { strength: 'high', page_kind: 5, url: false, evidence: { delta: 2 } },
+      }),
+    ).toEqual({
+      type: 'HIRING_UP',
+      at: '2026-08-08T00:00:00.000Z',
+      strength: 0.6,
+      page_kind: undefined,
+      page_url: undefined,
+      evidence: { delta: 2 },
+    });
+    expect(
+      toIntentEvent({ changeType: 'UNKNOWN', createdAt: new Date('2026-08-08T00:00:00.000Z'), detail: null }),
+    ).toMatchObject({ strength: 0.3 });
+  });
+
+  it('discovers one shortest page per intent class, deduplicates, and survives fetch failure', async () => {
+    const urls = [
+      'https://acme.example/company/suppliers/register',
+      'https://acme.example/supplier',
+      'https://acme.example/company/careers/jobs',
+      'https://acme.example/jobs',
+      'https://acme.example/products/pumps',
+      'https://acme.example/news/releases/one',
+    ];
+    const httpGet = vi.fn(async ({ url }: { url: string }) => ({
+      status: 200,
+      ok: true,
+      text: url.endsWith('/sitemap.xml')
+        ? `<urlset>${urls.map((value) => `<url><loc>${value}</loc></url>`).join('')}</urlset>`
+        : '',
+    }));
+
+    await expect(discoverWatchPages('acme.example', httpGet)).resolves.toEqual([
+      { url: 'https://acme.example/', kind: 'generic' },
+      { url: 'https://acme.example/supplier', kind: 'sourcing' },
+      { url: 'https://acme.example/jobs', kind: 'careers' },
+      { url: 'https://acme.example/products/pumps', kind: 'products' },
+      { url: 'https://acme.example/news/releases/one', kind: 'news' },
+    ]);
+    await expect(discoverWatchPages('acme.example', async () => Promise.reject(new Error('offline')))).resolves.toEqual([
+      { url: 'https://acme.example/', kind: 'generic' },
+    ]);
+    await expect(discoverWatchPages('acme.example')).resolves.toHaveLength(1);
+  });
+
+  it('skips empty, malformed, missing, and suppressed projections without writes', async () => {
+    const update = vi.fn();
+    const evidenceCreate = vi.fn();
+    const run = async (changes: unknown[], company: unknown) => {
+      const tx = {
+        canonicalCompany: { findUnique: vi.fn(async () => company), update },
+        fieldEvidence: { create: evidenceCreate },
+      };
+      const prisma = {
+        sourceEntityChange: { findMany: vi.fn(async () => changes) },
+        withWorkspace: vi.fn(async (_workspaceId: string, fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
+      } as unknown as PrismaService;
+      return new IntentProjectionService({ prisma }).projectIntent('ws-1', { sinceMs: 1, limit: 3 });
+    };
+
+    await expect(run([], null)).resolves.toEqual({ companiesTouched: 0, eventsProjected: 0 });
+    await expect(
+      run([{ source: { config: { company: { name: 'No Domain' } } } }], null),
+    ).resolves.toEqual({ companiesTouched: 0, eventsProjected: 0 });
+    const change = {
+      changeType: 'PAGE_CHANGED',
+      createdAt: new Date('2026-08-08T00:00:00.000Z'),
+      detail: {},
+      source: { config: { company: { name: 'Acme', domain: 'acme.example' } } },
+    };
+    await expect(run([change], null)).resolves.toEqual({ companiesTouched: 0, eventsProjected: 0 });
+    await expect(
+      run([change], { id: 'co-1', status: 'SUPPRESSED', attributes: null }),
+    ).resolves.toEqual({ companiesTouched: 0, eventsProjected: 0 });
+    expect(update).not.toHaveBeenCalled();
+    expect(evidenceCreate).not.toHaveBeenCalled();
   });
 });

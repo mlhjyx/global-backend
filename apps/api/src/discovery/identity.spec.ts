@@ -53,6 +53,11 @@ describe('identity resolution（PRD 8.8 确定性规则）', () => {
 });
 
 describe('controlled pilot company identity decisions', () => {
+  it('normalizes empty legacy hosts and rejects blank registrable-domain input', () => {
+    expect(normalizeDomain('https://')).toBeNull();
+    expect(normalizeRegistrableDomain('   ')).toBeNull();
+  });
+
   it('normalizes a host to its registrable domain without changing the legacy host normalizer', () => {
     expect(normalizeDomain('https://sales.eu.pumpenwerk.de/catalog')).toBe('sales.eu.pumpenwerk.de');
     expect(normalizeRegistrableDomain('https://sales.eu.pumpenwerk.de/catalog')).toBe('pumpenwerk.de');
@@ -322,9 +327,97 @@ describe('controlled pilot company identity decisions', () => {
     expect(decision.decision).toBe('REVIEW_LINK');
     expect(decision.reasons).toContain('IDENTIFIER_DOMAIN_CONFLICT');
   });
+
+  it('holds duplicate authoritative identifier candidates for review', () => {
+    const candidate = {
+      dedupeKey: 'id:ted-natid:de:991002',
+      name: 'Nordstern Pumpenhandel GmbH',
+      country: 'DE',
+    };
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: candidate.name,
+        country: 'DE',
+        identifier: { scheme: 'ted-natid:de', value: '991002' },
+      },
+      candidates: [candidate, { ...candidate, name: 'Duplicate source row' }],
+    });
+    expect(decision).toMatchObject({
+      decision: 'REVIEW_LINK',
+      reasons: ['MULTIPLE_IDENTIFIER_CANDIDATES'],
+    });
+  });
+
+  it('holds an exact identifier when candidate country evidence is absent', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: 'DE',
+        identifier: { scheme: 'ted-natid:de', value: '991002' },
+      },
+      candidates: [{
+        dedupeKey: 'id:ted-natid:de:991002',
+        name: 'Nordstern Pumpenhandel GmbH',
+        country: null,
+      }],
+    });
+    expect(decision.reasons).toContain('COUNTRY_EVIDENCE_MISSING');
+  });
+
+  it('holds duplicate registrable-domain candidates for review', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Pump GmbH',
+        legalName: 'Pump GmbH',
+        country: 'DE',
+        domain: 'sales.pump.example.de',
+      },
+      candidates: [
+        { dedupeKey: 'd:pump.example.de', name: 'Pump GmbH', domain: 'pump.example.de' },
+        { dedupeKey: 'id:legacy:1', name: 'Pump Holding', domain: 'www.pump.example.de' },
+      ],
+    });
+    expect(decision.reasons).toContain('MULTIPLE_DOMAIN_CANDIDATES');
+  });
+
+  it('keeps unqualified identifiers and incomplete new domains in review', () => {
+    const decision = resolveCompanyIdentity({
+      context: decisionContext,
+      incoming: {
+        name: 'Pump GmbH',
+        country: null,
+        domain: 'pump.example.de',
+        identifier: { scheme: 'lei', value: 'LEI-1' },
+      },
+    });
+    expect(decision.decision).toBe('REVIEW_LINK');
+    expect(decision.reasons).toEqual(expect.arrayContaining([
+      'IDENTIFIER_NOT_AUTHORITATIVE_OR_COUNTRY_QUALIFIED',
+      'COUNTRY_EVIDENCE_MISSING',
+      'LEGAL_NAME_EVIDENCE_MISSING',
+    ]));
+  });
 });
 
 describe('immutable identity decision vocabulary', () => {
+  it('fails closed when the identity key or reason set is empty', () => {
+    expect(() => createCompanyIdentityDecision({
+      decision: 'REVIEW_LINK',
+      identity: { dedupeKey: ' ', matchRule: 'name_country' },
+      reasons: ['NAME_COUNTRY_REQUIRES_REVIEW'],
+      ...decisionContext,
+    })).toThrow('identity and reasons are required');
+    expect(() => createCompanyIdentityDecision({
+      decision: 'REVIEW_LINK',
+      identity: { dedupeKey: 'review:raw-test', matchRule: 'name_country' },
+      reasons: [],
+      ...decisionContext,
+    })).toThrow('identity and reasons are required');
+  });
+
   it.each(['REJECT_LINK', 'SPLIT'] as const)('creates a frozen %s decision with provenance', (decision) => {
     const value = createCompanyIdentityDecision({
       decision,

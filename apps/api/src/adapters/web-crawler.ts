@@ -9,6 +9,7 @@
  * fallback; the broad allow-internal switch is forbidden.
  */
 import { resolvePublicHttpUrl } from './url-guard';
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
 export interface CrawlResult {
   url: string;
   text: string;
@@ -28,7 +29,9 @@ export async function crawlUrl(url: string): Promise<CrawlResult> {
     signal: AbortSignal.timeout(75_000),
   });
   if (!res.ok) {
-    throw new Error(`crawler ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(
+      `crawler ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+    );
   }
   const json = (await res.json()) as { markdown?: string; success?: boolean };
   return { url: target.url.toString(), text: json.markdown ?? '' };
@@ -66,7 +69,9 @@ export async function crawlHtml(url: string): Promise<CrawlHtmlResult> {
     signal: AbortSignal.timeout(75_000),
   });
   if (!res.ok) {
-    throw new Error(`crawler ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(
+      `crawler ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+    );
   }
   const data = (await res.json()) as {
     results?: { html?: string; response_headers?: Record<string, string> }[];

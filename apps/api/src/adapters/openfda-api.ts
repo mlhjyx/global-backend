@@ -363,7 +363,11 @@ async function openFdaGet(path: string, params: Record<string, string | number>,
         continue;
       }
       // 200 与 404(NOT_FOUND) 都是合法 JSON（404 带 error 体）；非 JSON/其它 → 抛。
-      if (!res.ok && res.status !== 404) throw new Error(`openfda ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (!res.ok && res.status !== 404) {
+        throw new Error(
+          `openfda ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+        );
+      }
       return (await res.json()) as OpenFdaResponse;
     } catch (err) {
       lastErr = err;

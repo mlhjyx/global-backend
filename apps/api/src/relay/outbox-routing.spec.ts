@@ -548,6 +548,28 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
 });
 
 describe('tick — 轮询条件（parked 不毒化轮询）', () => {
+  it('本进程已有 tick 在途时立即返回，不再争抢数据库单写者锁', async () => {
+    const { db } = makeDb([]);
+    const lock = { runExclusive: vi.fn() };
+    const svc = makeService(db, makeTemporal(), undefined, lock);
+    svc['running'] = true;
+
+    await svc.tick();
+
+    expect(lock.runExclusive).not.toHaveBeenCalled();
+    expect(db.outboxEvent.findMany).not.toHaveBeenCalled();
+  });
+
+  it('tick 截止时间在边界前放行、到期后 fail-closed', () => {
+    const { db } = makeDb([]);
+    const svc = makeService(db, makeTemporal());
+
+    expect(() => svc['assertTickDeadline'](Date.now() + 60_000)).not.toThrow();
+    expect(() => svc['assertTickDeadline'](Date.now())).toThrow(
+      'outbox relay tick deadline exceeded',
+    );
+  });
+
   it('轮询 where 必须是 publishedAt IS NULL AND parkedAt IS NULL', async () => {
     const { db } = makeDb([]);
     const svc = makeService(db, makeTemporal());
@@ -876,6 +898,19 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     expect(second.db.claim.findMany).toHaveBeenCalledTimes(1);
   });
 
+  it('同一实例 60 秒内不重复扫描，首次扫描仍校验逐条 deadline', async () => {
+    const { db } = makeDb([]);
+    db.claim.findMany = vi.fn(async () => CLAIMS.slice(0, 1));
+    const svc = makeService(db, makeTemporal());
+    const deadlineSpy = vi.spyOn(svc, 'assertTickDeadline');
+
+    await svc['expireDueClaims'](Date.now() + 60_000);
+    await svc['expireDueClaims'](Date.now() + 60_000);
+
+    expect(db.claim.findMany).toHaveBeenCalledTimes(1);
+    expect(deadlineSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('每条 claim 的 CAS + 事件 create 走同一个 interactive transaction', async () => {
     const { db } = makeDb([]);
     db.claim.findMany = vi.fn(async () => CLAIMS.slice(0, 1));
@@ -951,5 +986,61 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
         }),
       }),
     );
+  });
+});
+
+describe('dispatch — GDPR deletion command defaults', () => {
+  it('DeletionRequested 缺少可选 subject 字段时传递闭合空值且仍保持幂等 workflowId', async () => {
+    const ev = makeEvent({
+      eventType: 'DeletionRequested',
+      aggregateType: 'DeletionRequest',
+      aggregateId: 'deletion-1',
+      payload: null as unknown as Record<string, unknown>,
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      'deletionWorkflow',
+      expect.objectContaining({
+        taskQueue: MAINTENANCE_TASK_QUEUE,
+        workflowId: 'deletion-deletion-1',
+        args: [
+          {
+            workspaceId: WS,
+            deletionRequestId: 'deletion-1',
+            subjectType: '',
+            subjectId: '',
+          },
+        ],
+      }),
+    );
+    expect(ev.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it('cleanup payload getter 抛出非 Error 值时也转换为不可重试命令并停靠', async () => {
+    const ev = makeEvent({
+      eventType: 'AssetObjectCleanupRequested',
+      aggregateType: 'Asset',
+      aggregateId: 'asset-1',
+      payload: new Proxy<Record<string, unknown>>(
+        {},
+        {
+          get() {
+            throw 'invalid-cleanup-payload';
+          },
+        },
+      ),
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).not.toHaveBeenCalled();
+    expect(ev.publishedAt).toBeNull();
+    expect(ev.parkedAt).toBeInstanceOf(Date);
   });
 });

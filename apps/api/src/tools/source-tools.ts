@@ -27,6 +27,7 @@ import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapt
 import { searchCompaniesWithDirigeants, FrCompanyHit } from '../adapters/inpi-rne';
 import { bigqueryPatents, PatentRecord } from '../adapters/bigquery-patents';
 import { fetchSourcesSought, SamSourcesSought, SamSearchParams } from '../adapters/sam-api';
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -435,7 +436,11 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
       },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) throw new Error(`mapyourshow ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    if (!res.ok) {
+      throw new Error(
+        `mapyourshow ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+      );
+    }
     const json = (await res.json()) as { DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } } };
     return { data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] }, costCents: 0 };
   },

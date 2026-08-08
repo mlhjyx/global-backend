@@ -12,6 +12,8 @@
  * capture_network_requests 抓 *.algolianet.com 请求的 app-id/api-key/index/filter）。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 export interface AlgoliaFairConfig {
   appId: string;
   apiKey: string; // public search-only key
@@ -78,7 +80,11 @@ export async function queryAlgoliaExhibitors(
       body: JSON.stringify({ params }),
       signal: AbortSignal.timeout(25_000),
     });
-    if (!res.ok) throw new Error(`algolia ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    if (!res.ok) {
+      throw new Error(
+        `algolia ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+      );
+    }
     const json = (await res.json()) as { hits?: AlgoliaHit[]; nbPages?: number };
     const hits = json.hits ?? [];
     for (const h of hits) {

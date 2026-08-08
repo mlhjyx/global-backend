@@ -9,6 +9,17 @@ function source(path: string): string {
   return readFileSync(resolve(srcRoot, path), "utf8");
 }
 
+function productionTypescriptFiles(directory = srcRoot): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = resolve(directory, entry.name);
+    if (entry.isDirectory()) return productionTypescriptFiles(absolute);
+    if (!entry.isFile() || !entry.name.endsWith(".ts") || entry.name.endsWith(".spec.ts")) {
+      return [];
+    }
+    return [absolute];
+  });
+}
+
 interface RawCatchLogFlow {
   file: string;
   line: number;
@@ -380,6 +391,22 @@ describe("sensitive data boundary integration", () => {
     );
     expect(sink).toMatch(/trace write failed:[^`]*\$\{diagnosticErrorToken\(/s);
     expect(sink).not.toMatch(/String\(err\)\.slice\(/);
+  });
+
+  it("never retains a raw upstream response-text excerpt in production source", () => {
+    const rawExcerptPattern =
+      /\(\s*await\s+[A-Za-z_$][\w$]*\.text\(\)\s*\)\.slice\s*\(|await\s+[A-Za-z_$][\w$]*\.text\(\)[\s\S]{0,40}\.slice\s*\(/;
+    const offenders = productionTypescriptFiles()
+      // These are bounded successful robots.txt/sitemap payloads used for
+      // deterministic validation, not diagnostic excerpts or exception text.
+      .filter(
+        (file) =>
+          !file.endsWith("site-builder/quality/browser-quality-runner.ts"),
+      )
+      .filter((file) => rawExcerptPattern.test(readFileSync(file, "utf8")))
+      .map((file) => file.slice(srcRoot.length + 1));
+
+    expect(offenders).toEqual([]);
   });
 
   it("scrubs contract-shaped HttpException bodies before returning them", () => {

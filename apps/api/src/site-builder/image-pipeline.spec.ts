@@ -282,4 +282,41 @@ describe('M1-c deterministic image policy', () => {
       await rm(scratch, { recursive: true, force: true });
     }
   });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    'rejects an invalid child timeout before creating scratch (%s)',
+    (timeoutMs) => {
+      expect(() => new IsolatedImagePipelineRunner(timeoutMs)).toThrow(
+        'timeoutMs must be positive',
+      );
+    },
+  );
+
+  it('returns an empty result without starting a child for an empty render plan', async () => {
+    const result = await new IsolatedImagePipelineRunner().render(Buffer.alloc(0), []);
+
+    expect(result).toEqual(new Map());
+  });
+
+  it('rejects excessive, duplicate and malformed plans before starting a child', async () => {
+    const input = await opaqueJpeg(640, 360);
+    const inspection = await inspectImageInput(input, 'image/jpeg');
+    const [validPlan] = planImageVariants({
+      assetKind: 'product_image',
+      assetContentHash: sha256(input),
+      inspection,
+      focalPoint: { x: 0.5, y: 0.5 },
+    });
+    const runner = new IsolatedImagePipelineRunner();
+
+    await expect(runner.render(input, Array.from({ length: 61 }, () => validPlan))).rejects.toThrow(
+      'plan count exceeds the hard limit',
+    );
+    await expect(runner.render(input, [validPlan, validPlan])).rejects.toThrow(
+      'invalid or duplicate hashes',
+    );
+    await expect(
+      runner.render(input, [{ ...validPlan, recipeHash: 'not-a-sha256' }]),
+    ).rejects.toThrow('invalid or duplicate hashes');
+  });
 });

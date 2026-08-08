@@ -15,6 +15,8 @@
  *  - CH 免费数据 = OGL v3.0（Crown copyright），可商用但**署名是 license 义务**（见 COMPANIES_HOUSE_ATTRIBUTION）。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 const BASE_URL = process.env.CH_API_URL ?? 'https://api.company-information.service.gov.uk';
 const THROTTLE_MS = 500; // 自限（600 req/5min ≈ 2/s，留余量）
 const MAX_RETRIES = 2; // 429/5xx/网络抖动退避
@@ -148,7 +150,11 @@ async function chGet(
         continue;
       }
       if (res.status === 404) return {}; // 无此公司/无高管 → 空（不抛）
-      if (!res.ok) throw new Error(`companies-house ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (!res.ok) {
+        throw new Error(
+          `companies-house ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+        );
+      }
       return (await res.json()) as ChResponse;
     } catch (err) {
       lastErr = err;

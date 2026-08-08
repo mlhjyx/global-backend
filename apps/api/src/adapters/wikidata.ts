@@ -6,6 +6,8 @@
  * 合规：Wikidata 是 CC0 公开数据，官方 SPARQL 端点，遵守其 UA 与限流约定。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 const ENDPOINT = process.env.WIKIDATA_SPARQL_URL ?? 'https://query.wikidata.org/sparql';
 const WD_API = process.env.WIKIDATA_API_URL ?? 'https://www.wikidata.org/w/api.php';
 const USER_AGENT = process.env.WIKIDATA_UA ?? 'GlobalDiscoveryBot/1.0 (b2b discovery; contact ops)';
@@ -63,7 +65,11 @@ export async function runSparql(query: string, timeoutMs = 40_000): Promise<Spar
     headers: { Accept: 'application/sparql-results+json', 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`wikidata ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    throw new Error(
+      `wikidata ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+    );
+  }
   const json = (await res.json()) as { results?: { bindings?: SparqlBinding[] } };
   return json.results?.bindings ?? [];
 }
@@ -83,7 +89,11 @@ export async function wikidataSearchEntity(name: string, limit = 7): Promise<Wik
     `${WD_API}?action=wbsearchentities&search=${encodeURIComponent(name)}` +
     `&language=en&uselang=en&type=item&format=json&origin=*&limit=${Math.min(limit, 20)}`;
   const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`wikidata search ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  if (!res.ok) {
+    throw new Error(
+      `wikidata search ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+    );
+  }
   const json = (await res.json()) as { search?: { id: string; label?: string; description?: string }[] };
   return (json.search ?? [])
     .filter((r) => r.id && r.label)
@@ -105,7 +115,11 @@ export async function wikidataGetEntities(
     `${WD_API}?action=wbgetentities&ids=${qids.slice(0, 50).join('|')}` +
     `&props=${encodeURIComponent(props)}&languages=en&format=json&origin=*`;
   const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(25_000) });
-  if (!res.ok) throw new Error(`wikidata getentities ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  if (!res.ok) {
+    throw new Error(
+      `wikidata getentities ${res.status}: ${diagnosticErrorToken(await res.text())}`,
+    );
+  }
   const json = (await res.json()) as { entities?: Record<string, RawEntity> };
   return json.entities ?? {};
 }

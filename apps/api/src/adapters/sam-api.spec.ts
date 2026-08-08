@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { samDateToIso, mapSamRow } from './sam-api';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchSourcesSought, samDateToIso, mapSamRow } from './sam-api';
 
 describe('samDateToIso —— SAM 日期归一 ISO（§8.6 防 NaN 静默）', () => {
   // 🔴 精确 UTC 断言（非仅前缀/年）——无时区字面量一律当 UTC，绝不经运行时本地时区。
@@ -82,5 +82,46 @@ describe('mapSamRow —— CSV 行 → 绿字段（🔴 PII 结构性剔除）',
   it('🔴 输出键层面无 contact/email/phone/awardee 字段', () => {
     const out = mapSamRow(row);
     expect(Object.keys(out).some((k) => /contact|email|phone|awardee/i.test(k))).toBe(false);
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('fetchSourcesSought bounded CSV ingestion', () => {
+  it('filters type/window, preserves unknown dates, sorts newest first and applies maxRecords', async () => {
+    const csv = [
+      'NoticeId,Title,Department/Ind.Agency,Sub-Tier,Office,PostedDate,Type,NaicsCode,ResponseDeadLine,PopCountry,Link,PrimaryContactEmail',
+      'old,Old,D,S,O,01/01/2020,Sources Sought,333914,,,,secret@example.test',
+      'other,Other,D,S,O,08/01/2026,Solicitation,333914,,,,secret@example.test',
+      'unknown,Unknown,D,S,O,not-a-date,Sources Sought,333914,,,,secret@example.test',
+      'new,New,D,S,O,08/07/2026,Sources Sought,333914,,USA,https://sam.gov/new,secret@example.test',
+    ].join('\n');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(csv, { status: 200 })));
+
+    await expect(fetchSourcesSought({ sinceDays: 120, maxRecords: 1 })).resolves.toEqual([
+      expect.objectContaining({ noticeId: 'new', postedDateIso: '2026-08-07T00:00:00.000Z' }),
+    ]);
+    const all = await fetchSourcesSought({ sinceDays: 120, maxRecords: 10 });
+    expect(all.map(({ noticeId }) => noticeId)).toEqual(['new', 'unknown']);
+    expect(JSON.stringify(all)).not.toContain('secret@example.test');
+  });
+
+  it('uses default limits and rejects non-success or missing bodies', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('denied', { status: 503 }))
+      .mockResolvedValueOnce({ ok: true, status: 200, body: null });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchSourcesSought()).rejects.toThrow('sam.gov CSV 503');
+    await expect(fetchSourcesSought()).rejects.toThrow('sam.gov CSV 200');
+  });
+
+  it('converts source-stream failures into an ordinary caller-visible parsing error', async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.error('stream-reset');
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, body })));
+    await expect(fetchSourcesSought({ maxRecords: 2 })).rejects.toThrow('sam.gov CSV');
   });
 });
