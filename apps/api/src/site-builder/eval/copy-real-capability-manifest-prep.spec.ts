@@ -41,6 +41,8 @@ const HISTORICAL_MANIFEST_V9_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v9.json";
 const HISTORICAL_MANIFEST_V10_PATH =
   "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v10.json";
+const CURRENT_MANIFEST_V11_PATH =
+  "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -50,29 +52,62 @@ function sourceFiles(): CopyRealCapabilitySourceFile[] {
 }
 
 describe("Copy real capability create-only manifest preparation", () => {
-  it("stays fail-closed until a post-merge Chat v11 fixed source exists", () => {
-    expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBeNull();
-    expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-real-capability-manifest-v11.json",
+  it("binds Chat v11 to the exact post-merge main without dispatch", () => {
+    expect(COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT).toBe(
+      "4f75a66925b71fa218395934a5722035e7ba0112",
     );
-    expect(() =>
-      buildCopyRealCapabilityManifestArtifact({
-        preparationHeadCommit: PREPARATION_HEAD,
-        sourceFiles: sourceFiles(),
-      }),
-    ).toThrow("COPY_REAL_CAPABILITY_V11_FIXED_SOURCE_REQUIRED");
-    expect(() =>
-      prepareCopyRealCapabilityManifestFromRepository(REPOSITORY_ROOT),
-    ).toThrow("COPY_REAL_CAPABILITY_V11_FIXED_SOURCE_REQUIRED");
+    expect(COPY_REAL_CAPABILITY_MANIFEST_OUTPUT_PATH).toBe(
+      CURRENT_MANIFEST_V11_PATH,
+    );
+    const artifact = buildCopyRealCapabilityManifestArtifact({
+      preparationHeadCommit: PREPARATION_HEAD,
+      sourceFiles: sourceFiles(),
+    });
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-07-v11",
+      fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: PREPARATION_HEAD,
+      createOnly: true,
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-07-v11",
+        fixedSourceCommit: COPY_REAL_CAPABILITY_FIXED_SOURCE_COMMIT,
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+        executions: [
+          {
+            alias: "gpt-5.6-terra",
+            protocol: "openai_chat_completions",
+            reasoning: "medium",
+          },
+          {
+            alias: "gpt-5.6-sol",
+            protocol: "openai_chat_completions",
+            reasoning: "high",
+          },
+          {
+            alias: "claude-sonnet-5",
+            protocol: "anthropic_messages",
+            reasoning: "medium",
+          },
+        ],
+      },
+    });
   });
 
-  it("rejects all synthetic v11 artifacts while the fixed source is unset", () => {
+  it("rejects malformed synthetic v11 source bundles", () => {
     expect(() =>
       buildCopyRealCapabilityManifestArtifact({
         preparationHeadCommit: PREPARATION_HEAD,
         sourceFiles: sourceFiles().reverse(),
       }),
-    ).toThrow("COPY_REAL_CAPABILITY_V11_FIXED_SOURCE_REQUIRED");
+    ).toThrow("COPY_REAL_CAPABILITY_SOURCE_BUNDLE_INVALID");
     expect(() => validateCopyRealCapabilityManifestArtifact({})).toThrow(
       "COPY_REAL_CAPABILITY_MANIFEST_ARTIFACT_INVALID",
     );
