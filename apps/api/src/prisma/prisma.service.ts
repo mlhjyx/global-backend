@@ -1,6 +1,7 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaClient, Prisma } from '@prisma/client';
-import { piiExtension } from '../compliance/pii-crypto.extension';
+import { Injectable, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
+import { PrismaClient, Prisma } from "@prisma/client";
+import { piiExtension } from "../compliance/pii-crypto.extension";
+import { resolveApplicationDatabaseUrl } from "../compliance/database-runtime-admission";
 
 /**
  * Connects as the non-superuser app_user (APP_DATABASE_URL) so RLS is enforced.
@@ -16,7 +17,7 @@ import { piiExtension } from '../compliance/pii-crypto.extension';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     super({
-      datasourceUrl: process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL,
+      datasourceUrl: resolveApplicationDatabaseUrl(process.env),
     });
     return this.$extends(piiExtension) as unknown as PrismaService;
   }

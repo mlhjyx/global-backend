@@ -1,7 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
-import type { ModelExecutionTrace } from '@global/contracts';
-import type { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable, Logger } from "@nestjs/common";
+import type { ModelExecutionTrace } from "@global/contracts";
+import type { Prisma } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import {
+  diagnosticErrorToken,
+  scrubSensitiveData,
+} from "../common/sensitive-data-scrubber";
 
 export interface TraceEntry {
   workspaceId: string;
@@ -41,16 +45,18 @@ export class AiTraceSink {
             provider: entry.provider,
             model: entry.model,
             status: entry.status,
-            errorMessage: entry.errorMessage?.slice(0, 500) ?? null,
+            errorMessage: entry.errorMessage
+              ? diagnosticErrorToken(entry.errorMessage)
+              : null,
             latencyMs: entry.latencyMs,
             inputTokens: entry.inputTokens ?? null,
             outputTokens: entry.outputTokens ?? null,
             costUsd: entry.costUsd ?? null,
             correlationId: entry.correlationId ?? null,
             meta: entry.modelPolicy
-              ? ({
+              ? (scrubSensitiveData({
                   modelPolicy: entry.modelPolicy,
-                } as unknown as Prisma.InputJsonObject)
+                }) as Prisma.InputJsonObject)
               : undefined,
           },
         });
@@ -69,6 +75,10 @@ export class AiTraceSink {
           });
         }
       })
-      .catch((err) => this.logger.warn(`trace write failed: ${String(err).slice(0, 200)}`));
+      .catch((err) =>
+        this.logger.warn(
+          `trace write failed: ${diagnosticErrorToken(err)}`,
+        ),
+      );
   }
 }

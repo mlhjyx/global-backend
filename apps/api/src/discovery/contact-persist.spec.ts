@@ -152,9 +152,13 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
       suppressedEmails: new Set(),
     });
     const emailEvidence = fieldEvidenceCreate.mock.calls
-      .map((c) => c[0] as { data: { field: string; license: string } })
+      .map((c) => c[0] as { data: { field: string; license: string; value: unknown } })
       .find((e) => e.data.field === 'email');
     expect(emailEvidence?.data.license).toBe('licensed');
+    // The central Prisma FieldEvidence writer owns encryption. Producers pass
+    // the semantic value once; pre-encrypting here would create a nested
+    // ciphertext that cannot transparently round-trip.
+    expect(emailEvidence?.data.value).toBe('anna@x.test');
   });
 
   it('🔴 name-merge 身份源（inpi_rne，无联系点）新建 → person.profile 证据带该源 license（不再硬编码 public）', async () => {

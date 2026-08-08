@@ -1,7 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { GuessResult } from './email-guesser';
 import { LawfulBasis } from './provider-contract';
-import { encryptPii } from '../compliance/pii-crypto';
 
 /**
  * 邮箱猜测结果的落库（选项 B · P0.3）——把 {@link EmailGuesser} 猜到的决策人邮箱写进
@@ -97,8 +96,9 @@ export async function persistGuessedEmail(
       entityId: args.contactId,
       field: 'email.guess',
       value: {
-        // 收口⑥：证据里的人名邮箱=第二份 PII → 加密落库（确定性，与 contact_point 密文一致）。
-        email: encryptPii(plan.email),
+        // 统一 Prisma FieldEvidence writer 会把整份 red value 包成版本化密文 envelope；
+        // 这里保留单一语义值，避免先加密字段、再加密外层造成不可透明往返。
+        email: plan.email,
         pattern: plan.pattern,
         confidence: plan.confidence,
         status: plan.pointStatus,

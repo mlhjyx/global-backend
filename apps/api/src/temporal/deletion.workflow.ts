@@ -21,7 +21,7 @@ export async function deletionWorkflow(input: DeletionWorkflowInput): Promise<Er
     await acts.failDeletion({
       workspaceId: input.workspaceId,
       deletionRequestId: input.deletionRequestId,
-      error: String(err),
+      error: "DELETION_WORKFLOW_FAILED",
     });
     throw err;
   }

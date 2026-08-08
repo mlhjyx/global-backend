@@ -97,6 +97,27 @@ describe('ToolBroker — Trace + source_policy', () => {
     expect(traces[0]).toMatchObject({ toolId: 'searxng.search', status: 'OK' });
   });
 
+  it('执行失败的 Trace 只保留不可逆诊断 token', async () => {
+    const traces: { status: string; reason?: string }[] = [];
+    const failing = fakeTool('crawl.subject');
+    failing.execute = async () => {
+      throw new Error('provider echoed Jane Doe and a restricted response');
+    };
+    const { broker } = makeBroker(failing, {
+      traceRecorder: (trace) => traces.push(trace),
+    });
+
+    await expect(
+      broker.invoke('crawl.subject', {}, { workspaceId: 'w' }),
+    ).rejects.toThrow();
+
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({ status: 'ERROR' });
+    expect(traces[0].reason).toMatch(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect(traces[0].reason).not.toContain('Jane Doe');
+    expect(traces[0].reason).not.toContain('restricted response');
+  });
+
   it('SUSPENDED 域名 → denied（合规门）', async () => {
     const tool = fakeTool('crawl4ai.fetch');
     tool.compliance.sourcePolicy = 'advisory';

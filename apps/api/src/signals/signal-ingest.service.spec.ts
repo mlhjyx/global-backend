@@ -177,8 +177,12 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     const svc = new SignalIngestService({ prisma, broker });
 
     const r1 = await svc.ingestTed(tedParams, { nowMs: NOW });
-    expect(r1.error).toContain('ted 500');
-    expect([...prisma.ledger.values()][0].status).toBe('ERROR');
+    expect(r1.error).toMatch(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect(r1.error).not.toContain('ted 500');
+    expect([...prisma.ledger.values()][0]).toMatchObject({
+      status: 'ERROR',
+      error: r1.error,
+    });
 
     fail = false;
     const r2 = await svc.ingestTed(tedParams, { nowMs: NOW });
@@ -312,7 +316,8 @@ describe('TOCTOU 护栏（对抗复审 MEDIUM）：失败方 ERROR 绝不覆盖�
     expect(r2.signalsUpserted).toBe(1);
     releaseFirst();
     const r1 = await p1;
-    expect(r1.error).toContain('slow zombie');
+    expect(r1.error).toMatch(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect(r1.error).not.toContain('slow zombie');
     const row = [...prisma.ledger.values()][0];
     expect(row.status).toBe('OK'); // ERROR 条件写（status≠OK 才更新）保住成功方账本行
     expect(row.signalsUpserted).toBe(1);

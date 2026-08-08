@@ -1,15 +1,33 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { RequestContext } from '../auth/request-context';
-import { DiscoveryProviderRegistry } from './provider.registry';
-import { persistDiscoveredContacts } from './contact-persist';
-import { EmailGuesser, GuessResult } from './email-guesser';
-import { persistGuessedEmail } from './email-guess-persist';
-import { buildGuessTargets } from './email-guess-targets';
-import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
-import { cleanEmail } from '../acquisition/clean';
-import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { RequestContext } from "../auth/request-context";
+import { DiscoveryProviderRegistry } from "./provider.registry";
+import { persistDiscoveredContacts } from "./contact-persist";
+import { EmailGuesser, GuessResult } from "./email-guesser";
+import { persistGuessedEmail } from "./email-guess-persist";
+import { buildGuessTargets } from "./email-guess-targets";
+import {
+  EmailVerdict,
+  EmailVerifyContext,
+  LawfulBasis,
+  ProviderContactRecord,
+} from "./provider-contract";
+import { cleanEmail } from "../acquisition/clean";
+import {
+  evaluateEmailGate,
+  resolveEmailVerificationPolicy,
+  stampLawfulBasis,
+} from "./compliance/email-verification-gate";
+import {
+  evaluateSuppressionReleaseRequest,
+  type SuppressionReleaseRequestKind,
+} from "../compliance/suppression-release-policy";
+import { diagnosticErrorToken } from "../common/sensitive-data-scrubber";
 
 @Injectable()
 export class DiscoveryService {
@@ -127,7 +145,9 @@ export class DiscoveryService {
         perAdapter.push({ key: adapter.key, contacts: result.contacts, costCents: result.costCents });
       } catch (err) {
         // 单 adapter fail-safe：不阻断其余源——但**留痕**（交互端点不静默退化为 0 联系人）
-        console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
+        console.warn(
+          `[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${diagnosticErrorToken(err)}`,
+        );
       }
     }
 
@@ -384,27 +404,33 @@ export class DiscoveryService {
 
   async addSuppression(ctx: RequestContext, entry: { type: string; value: string; reason?: string }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const rec = await tx.suppressionRecord.upsert({
+      const value = entry.value.trim().toLowerCase();
+      await tx.suppressionRecord.createMany({
+        data: [
+          {
+            workspaceId: ctx.workspaceId,
+            type: entry.type,
+            value,
+            reason: entry.reason ?? "manual",
+          },
+        ],
+        skipDuplicates: true,
+      });
+      const rec = await tx.suppressionRecord.findUnique({
         where: {
           workspaceId_type_value: {
             workspaceId: ctx.workspaceId,
             type: entry.type,
-            value: entry.value.toLowerCase(),
+            value,
           },
         },
-        update: { reason: entry.reason ?? null },
-        create: {
-          workspaceId: ctx.workspaceId,
-          type: entry.type,
-          value: entry.value.toLowerCase(),
-          reason: entry.reason ?? null,
-        },
       });
+      if (!rec) throw new Error("SUPPRESSION_WRITE_UNVERIFIED");
       // 立刻生效：命中的 canonical 公司标记 SUPPRESSED
       if (entry.type === 'domain') {
         await tx.canonicalCompany.updateMany({
-          where: { domain: entry.value.toLowerCase() },
-          data: { status: 'SUPPRESSED' },
+          where: { domain: value },
+          data: { status: "SUPPRESSED" },
         });
       }
       return rec;
@@ -420,9 +446,67 @@ export class DiscoveryService {
   async removeSuppression(ctx: RequestContext, id: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rec = await tx.suppressionRecord.findUnique({ where: { id } });
-      if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
-      await tx.suppressionRecord.delete({ where: { id } });
-      return { deleted: true };
+      if (!rec)
+        throw new NotFoundException({
+          error: { code: "NOT_FOUND", message: "suppression not found" },
+        });
+      throw new ConflictException({
+        error: {
+          code: "SUPPRESSION_DELETE_DEPRECATED",
+          message:
+            "suppression records are append-only; submit a release review request",
+        },
+      });
+    });
+  }
+
+  async requestSuppressionRelease(
+    ctx: RequestContext,
+    id: string,
+    input: {
+      requestKind: SuppressionReleaseRequestKind;
+      justification: string;
+      evidenceRef: string | null;
+    },
+  ) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const record = await tx.suppressionRecord.findUnique({ where: { id } });
+      if (!record) {
+        throw new NotFoundException({
+          error: { code: "NOT_FOUND", message: "suppression not found" },
+        });
+      }
+      let policy;
+      try {
+        policy = evaluateSuppressionReleaseRequest({
+          storedReason: record.reason,
+          requestKind: input.requestKind,
+          justification: input.justification,
+          evidenceRef: input.evidenceRef,
+        });
+      } catch (error) {
+        const code =
+          error instanceof Error
+            ? error.message
+            : "SUPPRESSION_RELEASE_REJECTED";
+        throw new ConflictException({
+          error: {
+            code,
+            message: "suppression release request rejected by policy",
+          },
+        });
+      }
+      return tx.suppressionReleaseDecision.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          suppressionRecordId: record.id,
+          requestKind: input.requestKind,
+          status: policy.decisionStatus,
+          justification: input.justification,
+          evidenceRef: input.evidenceRef,
+          actorId: ctx.userId,
+        },
+      });
     });
   }
 

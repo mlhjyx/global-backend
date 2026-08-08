@@ -13,6 +13,7 @@ import {
 } from '../provider-contract';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -236,7 +237,7 @@ export class DecisionMakerProvider {
       );
       return result.data?.people ?? [];
     } catch (err) {
-      this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
+      this.log(`extract failed ${url}: ${diagnosticErrorToken(err)}`);
       return [];
     }
   }

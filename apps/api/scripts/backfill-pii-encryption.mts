@@ -17,14 +17,36 @@
  *
  * ⚠️ 未跑此回填则：新 upsert 的 where.value/dedupe_key 被加密/盲化后匹配不到旧明文行 → 造重复行 +
  * 旧明文 PII 永留库。故须与新代码上线同步跑（与既有 contact_point 回填同一运维步）。
- * 运行：cd /global/backend/apps/api && node --import tsx scripts/backfill-pii-encryption.mts
+ * 默认零写入：必须显式 `--verify-only` 或 `--apply`，并提供独立
+ * PII_BACKFILL_* 授权环境变量；不读取 .env，也不回退 DATABASE_URL。
  */
-import 'dotenv/config';
-import { fileURLToPath } from 'node:url';
-import { PrismaClient } from '@prisma/client';
-import { encryptPii, isEncryptedPii, blindContactKey, isBlindedContactKey } from '../src/compliance/pii-crypto';
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { Prisma, PrismaClient } from "@prisma/client";
+import {
+  encryptPii,
+  isEncryptedPii,
+  blindContactKey,
+  isBlindedContactKey,
+} from "../src/compliance/pii-crypto";
+import {
+  encryptFieldEvidenceValue,
+  isEncryptedFieldEvidenceValue,
+} from "../src/compliance/pii-crypto.extension";
+import {
+  resolvePiiBackfillAuthorization,
+  type PiiBackfillAuthorization,
+} from "../src/compliance/pii-backfill-admission";
+import { scrubSensitiveText } from "../src/common/sensitive-data-scrubber";
+import { verifyPiiBackfillSourceIdentity } from "../src/compliance/pii-backfill-source-identity";
 
 const PII_TYPES = ['email', 'phone', 'linkedin'];
+export const PII_BACKFILL_TRANSACTION_TIMEOUT_MS = 15 * 60 * 1_000;
+const REPOSITORY_ROOT = realpathSync(
+  fileURLToPath(new URL('../../../', import.meta.url)),
+);
+type BackfillDatabase = PrismaClient | Prisma.TransactionClient;
 
 /** 验证态强弱序：VALID（可达）> RISKY（探测存疑）> INVALID（探测为坏）> UNVERIFIED（从未探测）。 */
 const STATUS_RANK: Record<string, number> = { VALID: 3, RISKY: 2, INVALID: 1, UNVERIFIED: 0 };
@@ -36,6 +58,126 @@ export interface BackfillCounts {
   points: number;
   dedup: number;
   evidence: number;
+  suppressions: number;
+}
+
+export interface PlaintextResidueCounts {
+  names: number;
+  dedupeKeys: number;
+  points: number;
+  evidence: number;
+  suppressions: number;
+}
+
+export interface BackfillOutcome extends BackfillCounts {
+  residue: PlaintextResidueCounts;
+  actualBuildSha: string;
+}
+
+async function assertBackfillTarget(
+  owner: BackfillDatabase,
+  authorization: PiiBackfillAuthorization,
+): Promise<void> {
+  const databaseRows = await owner.$queryRawUnsafe<
+    Array<{ databaseName: string }>
+  >('SELECT current_database()::text AS "databaseName"');
+  if (
+    databaseRows.length !== 1 ||
+    databaseRows[0].databaseName !== authorization.expectedDatabaseName
+  ) {
+    throw new Error("PII_BACKFILL_DATABASE_IDENTITY_MISMATCH");
+  }
+  const [contacts, points, evidence, suppressions] = await Promise.all([
+    owner.canonicalContact.count(),
+    owner.contactPoint.count({ where: { type: { in: PII_TYPES } } }),
+    owner.fieldEvidence.count({
+      where: { dataClass: { in: ["amber", "red"] } },
+    }),
+    owner.suppressionRecord.count({ where: { type: "email" } }),
+  ]);
+  if (contacts + points + evidence + suppressions > authorization.maxRows) {
+    throw new Error("PII_BACKFILL_ROW_CAP_EXCEEDED");
+  }
+}
+
+export async function scanPlaintextResidue(
+  owner: BackfillDatabase,
+): Promise<PlaintextResidueCounts> {
+  const rows = await owner.$queryRawUnsafe<
+    Array<{
+      names: bigint;
+      dedupeKeys: bigint;
+      points: bigint;
+      evidence: bigint;
+      suppressions: bigint;
+    }>
+  >(`
+    SELECT
+      (SELECT count(*) FROM "canonical_contact"
+        WHERE "full_name" NOT LIKE 'enc:v1:%')::bigint AS "names",
+      (SELECT count(*) FROM "canonical_contact"
+        WHERE "dedupe_key" NOT LIKE 'bi:v1:%')::bigint AS "dedupeKeys",
+      (SELECT count(*) FROM "contact_point"
+        WHERE "type" IN ('email', 'phone', 'linkedin')
+          AND "value" NOT LIKE 'enc:v1:%')::bigint AS "points",
+      (SELECT count(*) FROM "field_evidence"
+        WHERE "data_class" IN ('amber', 'red')
+          AND NOT (
+            jsonb_typeof("value") = 'object'
+            AND "value"->>'schemaVersion' = 'field-evidence-pii/v1'
+            AND "value"->>'ciphertext' LIKE 'enc:v1:%'
+          ))::bigint AS "evidence",
+      (SELECT count(*) FROM "suppression_record"
+        WHERE "type" = 'email'
+          AND "value" NOT LIKE 'enc:v1:%')::bigint AS "suppressions"
+  `);
+  if (rows.length !== 1) throw new Error("PII_BACKFILL_RESIDUE_UNVERIFIED");
+  const result = Object.fromEntries(
+    Object.entries(rows[0]).map(([key, value]) => {
+      const count = Number(value);
+      if (!Number.isSafeInteger(count) || count < 0) {
+        throw new Error("PII_BACKFILL_RESIDUE_UNVERIFIED");
+      }
+      return [key, count];
+    }),
+  ) as unknown as PlaintextResidueCounts;
+  return result;
+}
+
+async function verifyOnly(
+  authorization: PiiBackfillAuthorization,
+): Promise<{
+  residue: PlaintextResidueCounts;
+  actualBuildSha: string;
+}> {
+  const sourceIdentity = verifyPiiBackfillSourceIdentity({
+    expectedBuildSha: authorization.expectedBuildSha,
+    expectedRepositoryRoot: REPOSITORY_ROOT,
+  });
+  const owner = new PrismaClient({ datasourceUrl: authorization.databaseUrl });
+  try {
+    const residue = await owner.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(
+          "SET LOCAL statement_timeout = '14min'",
+        );
+        await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '5s'");
+        await tx.$queryRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtextextended('global:pii-backfill:v1', 0))",
+        );
+        await assertBackfillTarget(tx, authorization);
+        return scanPlaintextResidue(tx);
+      },
+      {
+        maxWait: 5_000,
+        timeout: PII_BACKFILL_TRANSACTION_TIMEOUT_MS,
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      },
+    );
+    return { residue, actualBuildSha: sourceIdentity.actualBuildSha };
+  } finally {
+    await owner.$disconnect();
+  }
 }
 
 /**
@@ -75,7 +217,7 @@ function pointNormKey(pt: { type: string; value: string }): string {
  *  - 无 contact 型 identity_link（写路径仅建 company 型）⟹ 无需迁移。
  *  - 最后硬删 fromId（其 contact_point 已全部移走/删除）。
  */
-async function mergeContactInto(owner: PrismaClient, fromId: string, toId: string): Promise<void> {
+async function mergeContactInto(owner: BackfillDatabase, fromId: string, toId: string): Promise<void> {
   const [fromPoints, toPoints, from, to] = await Promise.all([
     owner.contactPoint.findMany({ where: { contactId: fromId } }),
     owner.contactPoint.findMany({ where: { contactId: toId } }),
@@ -112,18 +254,19 @@ async function mergeContactInto(owner: PrismaClient, fromId: string, toId: strin
   await owner.canonicalContact.delete({ where: { id: fromId } });
 }
 
-export async function runBackfill(): Promise<BackfillCounts> {
-  if (!process.env.PII_ENCRYPTION_KEY) throw new Error('PII_ENCRYPTION_KEY 未配置——无法回填');
-  // owner 裸 client（无扩展）：直接读写存储值，精确控制密文，避免透明层双重处理。
-  const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+async function executeBackfill(
+  owner: Prisma.TransactionClient,
+  authorization: PiiBackfillAuthorization,
+): Promise<Omit<BackfillOutcome, 'actualBuildSha'>> {
   let names = 0;
   let dedupeKeys = 0;
   let merges = 0;
   let points = 0;
   let dedup = 0;
   let evidence = 0;
+  let suppressions = 0;
 
-  try {
+  await assertBackfillTarget(owner, authorization);
     // 1. canonical_contact：full_name 加密 + dedupe_key 盲化（一次遍历，各自幂等）。
     //    盲化前探撞键：命中既有另一（盲化）行 → 合并本 legacy 行进去（不 update 崩迁移，见文件头）。
     const contacts = await owner.canonicalContact.findMany({
@@ -180,41 +323,141 @@ export async function runBackfill(): Promise<BackfillCounts> {
       }
     }
 
-    // 3. field_evidence PII 副本：email/phone/linkedin（标量字符串 value）+ email.guess（嵌套 email）。
-    const scalars = await owner.fieldEvidence.findMany({ where: { field: { in: PII_TYPES } }, select: { id: true, value: true } });
-    for (const e of scalars) {
-      if (typeof e.value === 'string' && !isEncryptedPii(e.value)) {
-        await owner.fieldEvidence.update({ where: { id: e.id }, data: { value: encryptPii(e.value) } });
-        evidence++;
-      }
+    // 3. All amber/red FieldEvidence values use the same versioned envelope as
+    // the runtime writer. Existing manually encrypted nested values are wrapped
+    // as-is; no plaintext JSON remains after the final residue scan.
+    const sensitiveEvidence = await owner.fieldEvidence.findMany({
+      where: { dataClass: { in: ["amber", "red"] } },
+      select: { id: true, value: true },
+    });
+    for (const row of sensitiveEvidence) {
+      if (isEncryptedFieldEvidenceValue(row.value)) continue;
+      await owner.fieldEvidence.update({
+        where: { id: row.id },
+        data: { value: encryptFieldEvidenceValue(row.value) },
+      });
+      evidence++;
     }
-    const guesses = await owner.fieldEvidence.findMany({ where: { field: 'email.guess' }, select: { id: true, value: true } });
-    for (const g of guesses) {
-      const v = g.value as { email?: unknown } | null;
-      if (v && typeof v.email === 'string' && !isEncryptedPii(v.email)) {
-        await owner.fieldEvidence.update({ where: { id: g.id }, data: { value: { ...v, email: encryptPii(v.email) } } });
-        evidence++;
+
+    // 4. Suppression email values remain queryable through deterministic
+    // encryption while no longer persisting the address in plaintext. A
+    // ciphertext collision is not auto-merged because the two append-only
+    // records may encode different legal reasons or review histories.
+    const emailSuppressions = await owner.suppressionRecord.findMany({
+      where: { type: "email" },
+      select: { id: true, workspaceId: true, value: true },
+    });
+    for (const row of emailSuppressions) {
+      if (isEncryptedPii(row.value)) continue;
+      const encryptedValue = encryptPii(row.value);
+      const collision = await owner.suppressionRecord.findUnique({
+        where: {
+          workspaceId_type_value: {
+            workspaceId: row.workspaceId,
+            type: "email",
+            value: encryptedValue,
+          },
+        },
+        select: { id: true },
+      });
+      if (collision && collision.id !== row.id) {
+        throw new Error("PII_BACKFILL_SUPPRESSION_COLLISION");
       }
+      await owner.suppressionRecord.update({
+        where: { id: row.id },
+        data: { value: encryptedValue },
+      });
+      suppressions++;
     }
+
+  const residue = await scanPlaintextResidue(owner);
+  return {
+    names,
+    dedupeKeys,
+    merges,
+    points,
+    dedup,
+    evidence,
+    suppressions,
+    residue,
+  };
+}
+
+export async function runBackfill(
+  authorization: PiiBackfillAuthorization,
+): Promise<BackfillOutcome> {
+  if (authorization.mode !== "APPLY") {
+    throw new Error("PII_BACKFILL_APPLY_AUTHORIZATION_REQUIRED");
+  }
+  if (!process.env.PII_ENCRYPTION_KEY) {
+    throw new Error("PII_ENCRYPTION_KEY 未配置——无法回填");
+  }
+  const sourceIdentity = verifyPiiBackfillSourceIdentity({
+    expectedBuildSha: authorization.expectedBuildSha,
+    expectedRepositoryRoot: REPOSITORY_ROOT,
+  });
+  // Raw owner client (no PII extension). The exact clean source identity is
+  // verified before this client is constructed or any network connection can
+  // begin.
+  const owner = new PrismaClient({ datasourceUrl: authorization.databaseUrl });
+  try {
+    const result = await owner.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(
+          "SET LOCAL statement_timeout = '14min'",
+        );
+        await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '5s'");
+        await tx.$queryRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtextextended('global:pii-backfill:v1', 0))",
+        );
+        return executeBackfill(tx, authorization);
+      },
+      {
+        maxWait: 5_000,
+        timeout: PII_BACKFILL_TRANSACTION_TIMEOUT_MS,
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      },
+    );
+    return { ...result, actualBuildSha: sourceIdentity.actualBuildSha };
   } finally {
     await owner.$disconnect();
   }
-
-  return { names, dedupeKeys, merges, points, dedup, evidence };
 }
 
 async function main(): Promise<void> {
-  const c = await runBackfill();
-  console.log(
-    `✅ 回填完成：full_name ${c.names} 行加密 + dedupe_key ${c.dedupeKeys} 行盲化 + ${c.merges} 行合并、` +
-      `contact_point ${c.points} 行加密 + ${c.dedup} 行去重、field_evidence ${c.evidence} 行`,
+  const authorization = resolvePiiBackfillAuthorization(
+    process.argv.slice(2),
+    process.env,
   );
+  const completed =
+    authorization.mode === "APPLY"
+      ? await runBackfill(authorization)
+      : await verifyOnly(authorization);
+  const { actualBuildSha, ...result } = completed;
+  const report = {
+    schemaVersion: "pii-backfill-receipt/v1",
+    authorizationId: authorization.authorizationId,
+    mode: authorization.mode,
+    expectedDatabaseName: authorization.expectedDatabaseName,
+    expectedBuildSha: authorization.expectedBuildSha,
+    actualBuildSha,
+    verifiedAt: new Date().toISOString(),
+    result,
+  };
+  const artifactDigest = createHash("sha256")
+    .update(JSON.stringify(report))
+    .digest("hex");
+  console.log(JSON.stringify({ ...report, artifactDigest }));
+  const residue = result.residue;
+  if (Object.values(residue).some((count) => count !== 0)) {
+    throw new Error("PII_BACKFILL_PLAINTEXT_RESIDUE_REMAINS");
+  }
 }
 
 // 直接执行才跑（被 verify 脚本 import 时不自动触发全表迁移）。
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((e) => {
-    console.error(e);
+    console.error(scrubSensitiveText(String(e), { maxLength: 500 }));
     process.exit(1);
   });
 }

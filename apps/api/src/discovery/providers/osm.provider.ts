@@ -10,6 +10,7 @@ import {
 import type { OsmPlace } from '../../adapters/openstreetmap';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
+import { diagnosticErrorToken } from '../../common/sensitive-data-scrubber';
 
 /**
  * OpenStreetMap 地理发现 Provider（Overpass API，ODbL 开放数据，零爬取）。
@@ -53,7 +54,7 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
        
-      console.warn(`[openstreetmap] discover failed: ${String(err).slice(0, 150)}`);
+      console.warn(`[openstreetmap] discover failed: ${diagnosticErrorToken(err)}`);
       return { records: [], costCents: 0 };
     }
 

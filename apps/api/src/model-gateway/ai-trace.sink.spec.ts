@@ -86,6 +86,7 @@ describe('AiTraceSink', () => {
     expect(aiTraceCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         status: 'ERROR',
+        errorMessage: expect.stringMatching(/^ERROR_TEXT_SHA256:[0-9a-f]{64}$/),
         inputTokens: 7,
         outputTokens: 3,
       }),

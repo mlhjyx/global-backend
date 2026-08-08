@@ -11,7 +11,17 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { ApiHideProperty } from '@nestjs/swagger';
+import {
+  IsEmpty,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { ACQUISITION_CONTROLLER_SCOPE_INVENTORY } from '../auth/acquisition-scope-inventory';
 import { Ctx } from '../auth/ctx.decorator';
@@ -32,12 +42,68 @@ class CreateSuppressionDto {
 
   @ApiProperty({ example: 'noreply@example.com' })
   @IsString()
+  @MaxLength(500)
+  @Matches(/^\P{Cc}+$/u)
   value!: string;
 
-  @ApiPropertyOptional({ enum: ['unsubscribe', 'bounce', 'complaint', 'manual', 'legal'] })
+  @ApiPropertyOptional({
+    enum: [
+      "unsubscribe",
+      "bounce",
+      "complaint",
+      "manual",
+      "preference",
+      "user_preference",
+      "art17",
+      "art21",
+      "legal",
+    ],
+  })
+  @IsOptional()
+  @IsIn([
+    "unsubscribe",
+    "bounce",
+    "complaint",
+    "manual",
+    "preference",
+    "user_preference",
+    "art17",
+    "art21",
+    "legal",
+  ])
+  reason?: string;
+}
+
+class RequestSuppressionReleaseDto {
+  @ApiProperty({ enum: ["USER_PREFERENCE", "IDENTITY_CORRECTION"] })
+  @IsIn(["USER_PREFERENCE", "IDENTITY_CORRECTION"])
+  requestKind!: "USER_PREFERENCE" | "IDENTITY_CORRECTION";
+
+  @ApiProperty({
+    maxLength: 500,
+    description: "审核理由；不得包含联系人值或其他个人数据",
+  })
+  @IsString()
+  @MaxLength(500)
+  @Matches(/^\P{Cc}+$/u)
+  justification!: string;
+
+  @ApiPropertyOptional({
+    maxLength: 200,
+    description: "非 PII 的 case/evidence 引用；身份纠错时必填",
+  })
   @IsOptional()
   @IsString()
-  reason?: string;
+  @Matches(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/)
+  evidenceRef?: string;
+
+  @ApiHideProperty()
+  @IsEmpty()
+  workspaceId?: never;
+
+  @ApiHideProperty()
+  @IsEmpty()
+  actorId?: never;
 }
 
 /**
@@ -101,6 +167,9 @@ const CANONICAL_COMPANY_SCHEMA = {
   additionalProperties: true,
   description: 'CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）',
 };
+
+const SUPPRESSION_GOVERNANCE_DESCRIPTION =
+  'Suppression records are append-only. Release requests create auditable review facts and never delete the minimum do-not-contact record.';
 
 @ApiTags('Discovery')
 @ApiBearerAuth()
@@ -250,7 +319,10 @@ export class DiscoveryController {
   @Post('suppressions')
   @RequireScopes(...DISCOVERY_SCOPES.addSuppression)
   @HttpCode(201)
-  @ApiOperation({ summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED' })
+  @ApiOperation({
+    summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED',
+    description: SUPPRESSION_GOVERNANCE_DESCRIPTION,
+  })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' }, { status: 201 })
   async addSuppression(@Ctx() ctx: RequestContext, @Body() dto: CreateSuppressionDto) {
     return envelope(await this.discovery.addSuppression(ctx, dto));
@@ -258,24 +330,75 @@ export class DiscoveryController {
 
   @Get('suppressions')
   @RequireScopes(...DISCOVERY_SCOPES.listSuppressions)
-  @ApiOperation({ summary: '禁联名单' })
+  @ApiOperation({
+    summary: '禁联名单',
+    description: SUPPRESSION_GOVERNANCE_DESCRIPTION,
+  })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
   async listSuppressions(@Ctx() ctx: RequestContext) {
     return envelope(await this.discovery.listSuppressions(ctx));
   }
 
-  @Delete('suppressions/:id')
+  @Delete("suppressions/:id")
   @RequireScopes(...DISCOVERY_SCOPES.removeSuppression)
-  @ApiOperation({ summary: '移除禁联记录' })
-  @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
-  async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
+  @ApiOperation({
+    summary: "已弃用：禁联记录不可物理删除；改用 release review request",
+    description: SUPPRESSION_GOVERNANCE_DESCRIPTION,
+    deprecated: true,
+  })
+  @ApiEnvelope({
+    type: "object",
+    required: ["deleted"],
+    properties: { deleted: { type: "boolean" } },
+  })
+  async removeSuppression(
+    @Ctx() ctx: RequestContext,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
     return envelope(await this.discovery.removeSuppression(ctx, id));
   }
 
-  @Get('data-providers')
+  @Post("suppressions/:id/release-requests")
+  @RequireScopes(...DISCOVERY_SCOPES.requestSuppressionRelease)
+  @HttpCode(202)
+  @ApiOperation({
+    summary: "提交 append-only suppression release/correction 人工复核请求",
+    description:
+      "只创建 PENDING review fact，不会解除禁联。退订、投诉、Art.17/Art.21 等不得通过普通偏好请求释放。 " +
+      SUPPRESSION_GOVERNANCE_DESCRIPTION,
+  })
+  @ApiEnvelope(
+    {
+      type: "object",
+      additionalProperties: true,
+      description: "append-only suppression release review request",
+    },
+    { status: 202 },
+  )
+  async requestSuppressionRelease(
+    @Ctx() ctx: RequestContext,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: RequestSuppressionReleaseDto,
+  ) {
+    return envelope(
+      await this.discovery.requestSuppressionRelease(ctx, id, {
+        requestKind: dto.requestKind,
+        justification: dto.justification,
+        evidenceRef: dto.evidenceRef ?? null,
+      }),
+    );
+  }
+
+  @Get("data-providers")
   @RequireScopes(...DISCOVERY_SCOPES.listProviders)
-  @ApiOperation({ summary: 'Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）' })
-  @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'DataProvider（源/状态/成本）' })
+  @ApiOperation({
+    summary: "Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）",
+  })
+  @ApiListEnvelope({
+    type: "object",
+    additionalProperties: true,
+    description: "DataProvider（源/状态/成本）",
+  })
   async listProviders(@Ctx() ctx: RequestContext) {
     return envelope(await this.discovery.listProviders(ctx));
   }
