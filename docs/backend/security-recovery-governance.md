@@ -10,13 +10,13 @@ or a restore succeeded. No `.env` file or service was read while preparing it.
 The fixed-base measurement included every non-test TypeScript file below
 `apps/api/src`, including the API and worker process entrypoints; only test
 files and the test-only Temporal mock directory are excluded. After building
-the API, all 367 test files and all 5,412 tests passed. The latest full source-only
+the API, all 367 test files and all 5,419 tests passed. The latest full source-only
 measurement on this stack was:
 was:
 
 | Scope               | Statements | Branches | Functions |  Lines | 80% status |
 | ------------------- | ---------: | -------: | --------: | -----: | ---------- |
-| API global          |     85.25% |   80.12% |    86.87% | 86.68% | met        |
+| API global          |     85.25% |   80.12% |    86.90% | 86.69% | met        |
 | auth branches       |          — |   93.49% |         — |      — | met        |
 | compliance branches |          — |   93.10% |         — |      — | met        |
 | events branches     |          — |   96.29% |         — |      — | met        |
