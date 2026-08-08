@@ -189,6 +189,38 @@ function checkoutSteps(workflowText) {
   return steps;
 }
 
+function workflowJobBlocks(workflowText) {
+  const jobs = new Map();
+  const lines = workflowText.split(/\r?\n/);
+  let inJobs = false;
+  let currentId = null;
+  let currentLines = [];
+  const saveCurrent = () => {
+    if (currentId) jobs.set(currentId, currentLines.join("\n"));
+  };
+  for (const line of lines) {
+    if (/^jobs:\s*$/.test(line)) {
+      inJobs = true;
+      continue;
+    }
+    if (inJobs && /^\S/.test(line) && line.trim() !== "") {
+      saveCurrent();
+      break;
+    }
+    if (!inJobs) continue;
+    const job = /^  ([a-zA-Z0-9_-]+):\s*$/.exec(line);
+    if (job) {
+      saveCurrent();
+      currentId = job[1];
+      currentLines = [line];
+      continue;
+    }
+    if (currentId) currentLines = [...currentLines, line];
+  }
+  if (inJobs) saveCurrent();
+  return jobs;
+}
+
 export function validateWorkflowPolicy(workflows) {
   const errors = [];
   for (const [path, workflowText] of Object.entries(workflows)) {
@@ -235,6 +267,11 @@ export function validateWorkflowPolicy(workflows) {
       `${securityPath}: source-only security CI cannot have write permission`,
     );
   }
+  if (/^\s*continue-on-error:\s*true\s*(?:#.*)?$/m.test(securityText)) {
+    errors.push(
+      `${securityPath}: required source-only security lanes cannot continue on error`,
+    );
+  }
 
   const requiredLanes = [
     ["dependency audit", /name:\s*dependency audit\b/i, /pnpm audit\b/],
@@ -254,8 +291,230 @@ export function validateWorkflowPolicy(workflows) {
       errors.push(`${securityPath}: required lane ${label} is missing`);
     }
   }
+  if (
+    !/security-recovery-governance\.mjs\s+dependency-regression\b/.test(
+      securityText,
+    )
+  ) {
+    errors.push(
+      `${securityPath}: dependency audit must use the base/head dependency regression comparator`,
+    );
+  }
+  const securityGate = [...workflowJobBlocks(securityText).entries()].find(
+    ([, block]) => /name:\s*security\s*·\s*required gate\b/i.test(block),
+  );
+  if (!securityGate) {
+    errors.push(`${securityPath}: security required gate is missing`);
+  } else {
+    const [, gateBlock] = securityGate;
+    if (!/^\s+if:\s*always\(\)\s*(?:#.*)?$/m.test(gateBlock)) {
+      errors.push(
+        `${securityPath}: security required gate must run with if: always()`,
+      );
+    }
+    for (const requiredJob of [
+      "secret-scan",
+      "dependency-audit",
+      "source-sast",
+      "compose-iac",
+    ]) {
+      if (!new RegExp(`\\b${requiredJob}\\b`).test(gateBlock)) {
+        errors.push(
+          `${securityPath}: security required gate must depend on ${requiredJob}`,
+        );
+      }
+      if (
+        !new RegExp(
+          `needs\\.${requiredJob.replaceAll("-", "\\-")}\\.result`,
+        ).test(gateBlock)
+      ) {
+        errors.push(
+          `${securityPath}: security required gate must inspect ${requiredJob} result`,
+        );
+      }
+    }
+    if (!/["']?\$result["']?\s*!=\s*["']success["']/.test(gateBlock)) {
+      errors.push(
+        `${securityPath}: security required gate must reject every non-success result`,
+      );
+    }
+  }
 
   return { ok: errors.length === 0, errors };
+}
+
+const AUDIT_SEVERITY = Object.freeze({
+  info: 0,
+  low: 1,
+  moderate: 2,
+  high: 3,
+  critical: 4,
+});
+
+function auditSnapshot(report, label) {
+  if (!report || typeof report !== "object" || Array.isArray(report)) {
+    return {
+      errors: [`${label} audit response must be a JSON object`],
+      summary: {},
+      exposures: [],
+    };
+  }
+  if (report.error) {
+    const code = report.error.code ?? "UNKNOWN_AUDIT_ERROR";
+    return {
+      errors: [`${label} audit response contains ${code}`],
+      summary: {},
+      exposures: [],
+    };
+  }
+  if (!report.advisories || typeof report.advisories !== "object") {
+    return {
+      errors: [`${label} audit response is missing advisories`],
+      summary: {},
+      exposures: [],
+    };
+  }
+
+  const advisoryEntries = Object.entries(report.advisories);
+  const advisoryPaths = (advisory) =>
+    (advisory?.findings ?? []).flatMap((finding) =>
+      Array.isArray(finding?.paths) ? finding.paths.map(String) : [],
+    );
+  const missingPaths = advisoryEntries
+    .filter(([, advisory]) => {
+      const severity = String(advisory?.severity ?? "").toLowerCase();
+      return (
+        AUDIT_SEVERITY[severity] !== undefined &&
+        advisoryPaths(advisory).length === 0
+      );
+    })
+    .map(([fallbackId, advisory]) =>
+      String(
+        advisory.github_advisory_id ??
+          advisory.npm_advisory_id ??
+          advisory.id ??
+          fallbackId,
+      ),
+    );
+  if (missingPaths.length > 0) {
+    return {
+      errors: [
+        `${label} audit response is missing dependency paths for ${missingPaths.join(", ")}`,
+      ],
+      summary: {},
+      exposures: [],
+    };
+  }
+
+  const summary = Object.fromEntries(
+    Object.keys(AUDIT_SEVERITY).map((severity) => [
+      severity,
+      Number(report.metadata?.vulnerabilities?.[severity] ?? 0),
+    ]),
+  );
+  const exposures = advisoryEntries.flatMap(([fallbackId, advisory]) => {
+    const severity = String(advisory?.severity ?? "").toLowerCase();
+    const severityRank = AUDIT_SEVERITY[severity];
+    if (severityRank === undefined) return [];
+    const advisoryId = String(
+      advisory.github_advisory_id ??
+        advisory.npm_advisory_id ??
+        advisory.id ??
+        fallbackId,
+    );
+    const moduleName = String(advisory.module_name ?? "unknown-module");
+    return advisoryPaths(advisory).map((path) => ({
+      key: `${advisoryId}\0${moduleName}\0${path}`,
+      advisoryId,
+      moduleName,
+      path,
+      severity,
+      severityRank,
+    }));
+  });
+  return { errors: [], summary, exposures };
+}
+
+export function evaluateDependencyAuditRegression(baseReport, headReport) {
+  const base = auditSnapshot(baseReport, "base");
+  const head = auditSnapshot(headReport, "head");
+  const errors = [...base.errors, ...head.errors];
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      threshold: "high",
+      base: { summary: base.summary },
+      head: { summary: head.summary },
+      inherited: [],
+      inheritedExposureCount: 0,
+      regressions: [],
+      resolved: [],
+      resolvedExposureCount: 0,
+      errors,
+    };
+  }
+
+  const baseByKey = new Map(base.exposures.map((entry) => [entry.key, entry]));
+  const headByKey = new Map(head.exposures.map((entry) => [entry.key, entry]));
+  const publicEntry = ({ key: _key, severityRank: _rank, ...entry }) => entry;
+  const summarizeGroups = (entries) =>
+    [
+      ...entries
+        .reduce((groups, entry) => {
+          const key = `${entry.advisoryId}\0${entry.moduleName}\0${entry.severity}`;
+          const previous = groups.get(key);
+          return new Map(groups).set(key, {
+            advisoryId: entry.advisoryId,
+            moduleName: entry.moduleName,
+            severity: entry.severity,
+            pathCount: (previous?.pathCount ?? 0) + 1,
+          });
+        }, new Map())
+        .values(),
+    ].toSorted((left, right) =>
+      `${left.advisoryId}\0${left.moduleName}`.localeCompare(
+        `${right.advisoryId}\0${right.moduleName}`,
+      ),
+    );
+  const blockingHead = head.exposures.filter(
+    ({ severityRank }) => severityRank >= AUDIT_SEVERITY.high,
+  );
+  const regressions = blockingHead
+    .filter((entry) => {
+      const previous = baseByKey.get(entry.key);
+      return !previous || previous.severityRank < entry.severityRank;
+    })
+    .map(publicEntry)
+    .toSorted((left, right) =>
+      `${left.advisoryId}\0${left.path}`.localeCompare(
+        `${right.advisoryId}\0${right.path}`,
+      ),
+    );
+  const inheritedEntries = blockingHead
+    .filter((entry) => {
+      const previous = baseByKey.get(entry.key);
+      return previous && previous.severityRank >= entry.severityRank;
+    })
+    .map(publicEntry);
+  const resolvedEntries = base.exposures
+    .filter(
+      (entry) =>
+        entry.severityRank >= AUDIT_SEVERITY.high && !headByKey.has(entry.key),
+    )
+    .map(publicEntry);
+
+  return {
+    ok: regressions.length === 0,
+    threshold: "high",
+    base: { summary: base.summary },
+    head: { summary: head.summary },
+    inherited: summarizeGroups(inheritedEntries),
+    inheritedExposureCount: inheritedEntries.length,
+    regressions,
+    resolved: summarizeGroups(resolvedEntries),
+    resolvedExposureCount: resolvedEntries.length,
+    errors,
+  };
 }
 
 const SAST_RULES = [
@@ -669,6 +928,12 @@ async function main() {
       })
     ).map((path) => relative(apiRoot, path).replaceAll("\\", "/"));
     emit(evaluateCoverage(policy, summary, expectedSourceFiles));
+    return;
+  }
+  if (command === "dependency-regression") {
+    const base = await jsonFile(resolve(repositoryRoot, option("base")));
+    const head = await jsonFile(resolve(repositoryRoot, option("head")));
+    emit(evaluateDependencyAuditRegression(base, head));
     return;
   }
   if (command === "workflow") {

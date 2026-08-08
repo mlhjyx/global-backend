@@ -4,18 +4,26 @@
 
 ## 合并模型
 
-| 层 | 责任 | 硬门 |
-|---|---|---|
-| **L1 机械闸** | GitHub ruleset + required checks | 所有仓内声明的 context 真实通过；PR 正文的 `PASS` 不是 check provenance |
-| **L2 独立审查** | 非作者 reviewer 审 diff、契约、安全/合规和证据 | 独立 GitHub review；发现问题先修复并重验，不以 CI 绿替代判断 |
-| **L3 用户授权** | 产品负责人对当次 merge/release 作最终确认 | 必须是独立授权 provenance；PR 正文或机器人建议不能提供 |
-| **L4 合并/发布回执** | 合并执行者与 Release Owner | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
+| 层                   | 责任                                           | 硬门                                                                                                     |
+| -------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **L1 机械闸**        | GitHub ruleset + required checks               | 所有仓内声明的 context 真实通过；PR 正文的 `PASS` 不是 check provenance                                  |
+| **L2 独立审查**      | 非作者 reviewer 审 diff、契约、安全/合规和证据 | 独立 GitHub review；发现问题先修复并重验，不以 CI 绿替代判断                                             |
+| **L3 用户授权**      | 产品负责人对当次 merge/release 作最终确认      | 必须是独立授权 provenance；PR 正文或机器人建议不能提供                                                   |
+| **L4 合并/发布回执** | 合并执行者与 Release Owner                     | 按实际 `MERGE_COMMIT / SQUASH / REBASE` 记录 source、result、parents/mapping；pilot/GA 写 Release Bundle |
 
 四层分别取证，任一层不能推导另一层。非技术决策卡只展示作者声明和解释；受信机器人会把用户授权门固定显示为 `NOT_AUTHORIZED`，直到外部授权流程提供独立 provenance。`nontechnical decision card integrity` 只证明决策卡声明的绑定和完整性，不是授权或合并建议：Draft 可非阻断展示 `CURRENT_UNVERIFIED`，非 Draft 的完整 `PASS / RECOMMEND_MERGE / MERGE` 声明必须失败，直到可信外部 provenance 另行取证。
 
 ## 仓内 required contexts 与外部 ruleset
 
 唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会确认每个 context 在声明的 workflow 中以 job 名存在、该 workflow 订阅预期 PR event，并拒绝放宽 CODEOWNERS/review/history 保护的仓内政策。它还扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence 或 Release Bundle。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
+
+Security 必须以 `security · required gate` 聚合 secret scan、依赖回归、仓内 SAST 和 Compose/IaC；只要任一子 job 失败、取消或跳过，聚合门就失败。依赖门在同一次 CI 中对 exact base 和待合并结果分别执行只读 `pnpm audit`：新增 high/critical advisory、新增受影响路径或审计端点不可用都硬失败；base 已有的高危债务继续完整展示，但不冒充为当前 PR 引入。
+
+`build · typecheck · test` 只承担构建、ContractGraph、单元/纯合同测试、API 覆盖率与 renderer；`governance · traceability · release` 承担 `docs:verify`、memory-control 和 decision-card 合同。两者分开取证，避免文档漂移被 build 重复执行或一个绿色 job 隐藏另一个失败。`coverage:api` 是本地完整入口；CI 在同一 job 已 build/generate 后调用 `coverage:api:verify`，不重复构建。`code-intelligence:verify` 始终先跑 extractor tests 再检查全仓图，禁止只用一份看似 fresh 的派生图代替 extractor 测试。
+
+PostgreSQL/Temporal 仍不在 required contexts 中：当前 `integration-contracts.yml` 只是手动 fail-closed 模板，不执行真的可丢弃数据库或官方 Temporal test environment。在 allowlisted runner、隔离资源和真实命令全部实现前，不得把这两个名字加入外部 ruleset 或声称集成测试已覆盖。
+
+`nontechnical decision card integrity` 故意使用 `pull_request_target`、只 checkout 受信 default-branch base，并且只对目标为 default branch 的 PR 生成。堆叠 Draft PR 以前一层功能分支为 base 时，该 context 预期不存在；这不是通过，也不是可合并证据。每一层在改为直接目标 main 或进入 `merge-candidate` 后，必须针对当时 exact head 重跑决策卡、全部 required contexts 与独立 review。
 
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 
@@ -42,14 +50,14 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 
 ## 风险分级（决定验证深度，不授予自动合并）
 
-| 触发 | 必要复核 |
-|---|---|
-| `schema.prisma` / migrations / RLS | 真 PostgreSQL 迁移、回退/兼容性、租户隔离与 owner/app_user 权限 |
-| JWKS / token / role / workspace | 鉴权负向用例、跨租户与权限边界 |
-| `personalData` / GDPR / LIA / suppression / Art.17 | 数据分级、lawful basis、删除/抑制时序与审计证据 |
+| 触发                                                  | 必要复核                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| `schema.prisma` / migrations / RLS                    | 真 PostgreSQL 迁移、回退/兼容性、租户隔离与 owner/app_user 权限          |
+| JWKS / token / role / workspace                       | 鉴权负向用例、跨租户与权限边界                                           |
+| `personalData` / GDPR / LIA / suppression / Art.17    | 数据分级、lawful basis、删除/抑制时序与审计证据                          |
 | source_policy / ToolBroker / SSRF / robots / 对外抓取 | 真源正例 + SUSPENDED/private/metadata/redirect 反例，不把 robots 当 SSRF |
-| `packages/contracts/**` | 生产者/消费者同步、OpenAPI drift/lint/breaking 门 |
-| 大量删除或删/禁测试 | 逐文件说明去留理由，验证覆盖未倒退 |
+| `packages/contracts/**`                               | 生产者/消费者同步、OpenAPI drift/lint/breaking 门                        |
+| 大量删除或删/禁测试                                   | 逐文件说明去留理由，验证覆盖未倒退                                       |
 
 ## 退役记录
 
