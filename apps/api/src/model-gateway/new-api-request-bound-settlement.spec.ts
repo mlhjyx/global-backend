@@ -61,6 +61,34 @@ function resolveInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function resolverForRow(row: Record<string, unknown>) {
+  return resolver(
+    vi.fn(async () => jsonResponse({ data: [row] })) as typeof fetch,
+  );
+}
+
+function anthropicLogRow(other: unknown) {
+  return logRow({
+    model_name: "claude-sonnet-5",
+    channel: 19,
+    quota: 69_900,
+    prompt_tokens: 77,
+    completion_tokens: 7,
+    other,
+  });
+}
+
+function anthropicResolveInput() {
+  return resolveInput({
+    alias: "claude-sonnet-5",
+    protocol: "anthropic_messages",
+    expectedChannelId: 19,
+    usage: { inputTokens: 1_501, outputTokens: 7 },
+    maxOutputTokens: 1_200,
+    maximumQuotaPoints: 500_000,
+  });
+}
+
 describe("NewApiRequestBoundSettlementResolver", () => {
   it("settles exactly one request-bound row and emits a deterministic receipt digest", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ data: [logRow()] }));
@@ -97,6 +125,101 @@ describe("NewApiRequestBoundSettlementResolver", () => {
         }),
       );
     }
+  });
+
+  it.each([
+    [
+      "object",
+      {
+        usage_semantic: "anthropic",
+        cache_creation_tokens: 1_424,
+        cache_creation_tokens_5m: 1_424,
+        cache_write_tokens: 1_424,
+        cache_tokens: 0,
+      },
+    ],
+    [
+      "JSON string",
+      JSON.stringify({
+        usage_semantic: "anthropic",
+        cache_creation_tokens: 1_424,
+        cache_creation_tokens_5m: 1_424,
+        cache_write_tokens: 1_424,
+        cache_tokens: 0,
+      }),
+    ],
+    [
+      "cache read",
+      {
+        usage_semantic: "anthropic",
+        cache_creation_tokens: 0,
+        cache_tokens: 1_424,
+      },
+    ],
+  ] as const)(
+    "reconciles Anthropic %s cache usage without double-counting duplicate cache fields",
+    async (_representation, other) => {
+      const settlement = resolverForRow(anthropicLogRow(other));
+
+      await expect(
+        settlement.resolve(anthropicResolveInput()),
+      ).resolves.toMatchObject({
+        status: "settled",
+        alias: "claude-sonnet-5",
+        protocol: "anthropic_messages",
+        channelId: 19,
+        quota: 69_900,
+        inputTokens: 1_501,
+        outputTokens: 7,
+      });
+    },
+  );
+
+  it("does not add generic new-api cache tokens to OpenAI prompt usage", async () => {
+    const settlement = resolverForRow(
+      logRow({
+        prompt_tokens: 5_305,
+        completion_tokens: 101,
+        other: {
+          cache_tokens: 3_840,
+          request_conversion: ["OpenAI Compatible"],
+        },
+      }),
+    );
+
+    await expect(
+      settlement.resolve(
+        resolveInput({
+          usage: { inputTokens: 5_305, outputTokens: 101 },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      status: "settled",
+      inputTokens: 5_305,
+      outputTokens: 101,
+    });
+  });
+
+  it.each([
+    ["missing metadata", undefined],
+    ["wrong semantic", { usage_semantic: "openai" }],
+    [
+      "malformed cache usage",
+      {
+        usage_semantic: "anthropic",
+        cache_creation_tokens: "1424",
+        cache_tokens: 0,
+      },
+    ],
+  ] as const)("fails closed for Anthropic %s", async (_case, other) => {
+    const settlement = resolverForRow(anthropicLogRow(other));
+
+    await expect(
+      settlement.resolve(anthropicResolveInput()),
+    ).resolves.toMatchObject({
+      status: "unknown",
+      reason: "log_invalid",
+    });
   });
 
   it("does not query the gateway when the request id is absent", async () => {
