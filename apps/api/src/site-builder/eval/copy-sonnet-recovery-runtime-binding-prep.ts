@@ -42,6 +42,10 @@ export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH =
 
 const RECOVERY_SOURCE_FILE_SPECS = Object.freeze([
   Object.freeze({
+    role: "shared_capability_admission",
+    path: "apps/api/src/site-builder/eval/copy-capability-admission.ts",
+  }),
+  Object.freeze({
     role: "recovery_contract",
     path: "apps/api/src/site-builder/eval/copy-sonnet-recovery-contract.ts",
   }),

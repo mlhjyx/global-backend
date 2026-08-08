@@ -15,15 +15,15 @@ import type {
 } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type { ModelProtocol } from "../../model-runtime/types";
 import {
-  validateCopyRealCapabilityAdmissionEnvelope,
-  type CopyPilotCredentialAttestation,
-  type CopyRealCapabilityAdmissionInput,
-} from "./copy-real-capability-admission";
+  validateCopyCapabilityAdmissionEnvelope,
+  type CopyCapabilityAdmissionInput,
+  type CopyCapabilityCredentialAttestation,
+} from "./copy-capability-admission";
 
 const MAXIMUM_CONTROL_PLANE_BYTES = 1024 * 1024;
 
 interface TrustedGatewayState {
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   bearerToken: string;
   settlements: WeakMap<object, CopyPilotTrustedSettlementProof>;
 }
@@ -257,10 +257,10 @@ async function verifyLiveScopeAndQuota(
 }
 
 export async function createCopyPilotTrustedGateway(input: {
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   bearerToken: string;
 }): Promise<CopyPilotTrustedGateway> {
-  validateCopyRealCapabilityAdmissionEnvelope(input.admission);
+  validateCopyCapabilityAdmissionEnvelope(input.admission);
   if (
     input.bearerToken.length < 16 ||
     sha256(input.bearerToken) !== input.admission.credential.bearerTokenSha256
@@ -282,7 +282,7 @@ export async function createCopyPilotTrustedGateway(input: {
 
 export function getCopyPilotTrustedCredentialAttestation(
   handle: CopyPilotTrustedGateway,
-): CopyPilotCredentialAttestation | undefined {
+): CopyCapabilityCredentialAttestation | undefined {
   return TRUSTED_GATEWAYS.get(handle)?.admission.credential;
 }
 
@@ -311,7 +311,7 @@ export async function assertCopyPilotTrustedGatewayCurrent(
   handle: CopyPilotTrustedGateway,
 ): Promise<void> {
   const state = stateFor(handle);
-  validateCopyRealCapabilityAdmissionEnvelope(state.admission);
+  validateCopyCapabilityAdmissionEnvelope(state.admission);
   if (
     sha256(state.bearerToken) !== state.admission.credential.bearerTokenSha256
   ) {
