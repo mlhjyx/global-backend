@@ -197,6 +197,91 @@ describe("Copy real capability create-only manifest preparation", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_PREPARATION_NOT_VERIFIED");
   });
 
+  it("freezes repository v11 as the current Chat fixed-source create-only manifest", () => {
+    const artifactPath = resolve(REPOSITORY_ROOT, CURRENT_MANIFEST_V11_PATH);
+    const artifactBytes = readFileSync(artifactPath);
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "b6ec4ad5b216ba6464d6d3f228db77ce18450c3bb3e0a713fa3262fb7ee1fdec",
+    );
+    expect(() =>
+      validateCopyRealCapabilityManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-real-capability-manifest-prep/2026-08-07-v11",
+      fixedSourceCommit: "4f75a66925b71fa218395934a5722035e7ba0112",
+      preparationHeadCommit: "82d7010777b81ae8d0f7b5a3059d90471cc29391",
+      createOnly: true,
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-real-capability/2026-08-07-v11",
+        fixedSourceCommit: "4f75a66925b71fa218395934a5722035e7ba0112",
+        plannedExecutions: 3,
+        maximumWireCalls: 6,
+        maximumRepairCallsPerExecution: 1,
+      },
+      contractSnapshot: {
+        planId: "site-builder-copy-capability-pilot/2026-08-07-v10",
+        planDigest:
+          "a78fc94b38507a51cfd6e7423494f7c7af6968b23cc132ca662e647ea2ddb99f",
+        executionScopeDigest:
+          "8317ac7af4e87e9c070cf84c823b335c00250e3d37a2b1a1391048054f6b0aa2",
+        admissionSourceDigest:
+          "5690f5dc8e335d811f5d8dd0b1993589112e231737b2c973ea722564a0063d32",
+      },
+    });
+    expect(artifact.manifest.executions).toEqual([
+      {
+        alias: "gpt-5.6-terra",
+        protocol: "openai_chat_completions",
+        reasoning: "medium",
+      },
+      {
+        alias: "gpt-5.6-sol",
+        protocol: "openai_chat_completions",
+        reasoning: "high",
+      },
+      {
+        alias: "claude-sonnet-5",
+        protocol: "anthropic_messages",
+        reasoning: "medium",
+      },
+    ]);
+    expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.sourceBundle.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "runtime_adapter",
+          path: "apps/api/src/model-runtime/adapters/ai-sdk-openai-chat-completions.adapter.ts",
+        }),
+        expect.objectContaining({
+          role: "real_dispatch_runner",
+          path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+        }),
+      ]),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      canonicalDigest(artifact.sourceBundle.files),
+    );
+    expect(artifact.sourceBundle.digest).toBe(
+      "27d9cc8b6c30b289c84bde9e28f9f3202d572b898784ad8151fbaf54536a00a9",
+    );
+    expect(artifact.manifest.sourceBundleDigest).toBe(
+      artifact.sourceBundle.digest,
+    );
+    const { artifactDigest, ...withoutDigest } = artifact;
+    expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
+    expect(artifactDigest).toBe(
+      "1b3462e1adf5a543d1dfbc6e2c0a2df73ac02903bac1fcd0186c44d368180347",
+    );
+  });
+
   it("keeps repository v10 as immutable superseded history after Chat source drift", () => {
     const artifactPath = resolve(REPOSITORY_ROOT, HISTORICAL_MANIFEST_V10_PATH);
     const artifactBytes = readFileSync(artifactPath);
