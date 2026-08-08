@@ -1,6 +1,11 @@
 import { Prisma } from '@prisma/client';
 import type { SourceSignal } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { createCompanyIdentityDecision, provisionalReviewCanonicalKey } from '../discovery/identity';
+import {
+  appendCompanyIdentityDecisionEvidence,
+  companyIdentityResolutionProjection,
+} from '../discovery/company-identity-persistence';
 import { US_FED_SOURCES_SOUGHT, SOURCES_SOUGHT_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
@@ -26,6 +31,7 @@ export interface ProjectSourcesSoughtResult {
 }
 
 interface FederalDemand {
+  sourceSignalId: string;
   name: string;
   publicationDateIso: string; // 事件时间（source_signal.occurredAt 的 UTC ISO）
   naicsCodes: string[];
@@ -107,6 +113,7 @@ export class SamIntentProjectionService {
       }
       const payload = (s.payload ?? {}) as Record<string, unknown>;
       byKey.set(s.subjectKey, {
+        sourceSignalId: s.id,
         name: s.subjectName,
         publicationDateIso: s.occurredAt.toISOString(),
         naicsCodes: Array.isArray(payload.naics) ? (payload.naics as string[]) : [],
@@ -135,11 +142,25 @@ export class SamIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, demand: FederalDemand): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
+      const reviewKey = provisionalReviewCanonicalKey(`samgov:${dedupeKey}`);
+      const decision = createCompanyIdentityDecision({
+        decision: 'REVIEW_LINK',
+        identity: { dedupeKey: reviewKey, matchRule: 'name_country' },
+        reasons: ['NAME_COUNTRY_REQUIRES_REVIEW'],
+        ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+        actor: { type: 'SYSTEM', id: 'intent.samProjection' },
+        decidedAt: demand.publicationDateIso,
+        evidence: [{ type: 'SOURCE_SIGNAL', id: demand.sourceSignalId }],
+      });
       const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: reviewKey } },
         select: { id: true, attributes: true, status: true },
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      const legacy = await tx.canonicalCompany.findUnique({
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        select: { id: true, status: true },
+      });
+      if (prior?.status === 'SUPPRESSED' || legacy?.status === 'SUPPRESSED') return false;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
@@ -155,17 +176,26 @@ export class SamIntentProjectionService {
 
       const marker = { government_buyer: true, sam_market_signal: true, sam_disclaimer: SAM_DISCLAIMER };
       const saved = await tx.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: reviewKey } },
         create: {
           workspaceId,
           name: demand.name,
           country: 'US', // 联邦机构恒美国
-          dedupeKey,
+          dedupeKey: reviewKey,
           status: 'NEW',
-          attributes: { ...marker, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...marker,
+            intent,
+            identity_resolution: companyIdentityResolutionProjection(decision, dedupeKey),
+          } as unknown as Prisma.InputJsonValue,
         },
         update: {
-          attributes: { ...priorAttrs, ...marker, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...priorAttrs,
+            ...marker,
+            intent,
+            identity_resolution: companyIdentityResolutionProjection(decision, dedupeKey),
+          } as unknown as Prisma.InputJsonValue,
           version: { increment: 1 },
         },
         select: { id: true },
@@ -190,6 +220,13 @@ export class SamIntentProjectionService {
       });
       // 🟢 机构买方身份事实——仅新建时写一次（幂等，避免每 sweep 堆行）。
       if (!prior) {
+        await appendCompanyIdentityDecisionEvidence(tx, {
+          workspaceId,
+          entityId: saved.id,
+          providerKey: 'samgov',
+          license: SAM_LICENSE,
+          decision,
+        });
         await tx.fieldEvidence.create({
           data: {
             workspaceId,

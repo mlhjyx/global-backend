@@ -6,7 +6,11 @@ import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
-import { companyIdentity } from '../discovery/identity';
+import {
+  appendCompanyIdentityDecisionEvidence,
+  companyIdentityResolutionProjection,
+  resolveCompanyIdentityForWriter,
+} from '../discovery/company-identity-persistence';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
@@ -334,7 +338,7 @@ export function createDiscoveryActivities(deps: {
     async canonicalizeRun(args: {
       workspaceId: string;
       runId: string;
-    }): Promise<{ companies: number; suppressed: number }> {
+    }): Promise<{ companies: number; suppressed: number; reviewRequired: number }> {
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const raws = await tx.rawSourceRecord.findMany({ where: { runId: args.runId } });
         const suppressions = await tx.suppressionRecord.findMany({
@@ -349,9 +353,11 @@ export function createDiscoveryActivities(deps: {
 
         let companies = 0;
         let suppressed = 0;
+        let reviewRequired = 0;
         for (const raw of raws) {
           const rec = raw.payload as unknown as {
             name?: string;
+            legalName?: string;
             domain?: string;
             country?: string;
             region?: string;
@@ -360,25 +366,54 @@ export function createDiscoveryActivities(deps: {
             revenueUsd?: number;
             attributes?: Record<string, unknown>;
             identifier?: { scheme: string; value: string }; // §8.4 provider 标识（税号/注册号）
+            sharedGroupAmbiguity?: boolean;
             license?: string; // §8.5 记录声明许可（绿事实源署名义务，如 TED CC BY 4.0）
           };
           if (!rec.name) continue;
-          const identity = companyIdentity({
-            name: rec.name,
-            domain: rec.domain,
-            country: rec.country,
-            identifier: rec.identifier, // §8.4：无域名时按税号消歧，防同名同国不同实体误并
+          const resolution = await resolveCompanyIdentityForWriter(tx, {
+            workspaceId: args.workspaceId,
+            context: {
+              ruleVersion: 'company-identity-resolution/2026-08-07-v1',
+              actor: { type: 'SYSTEM', id: 'discovery.canonicalizeRun' },
+              decidedAt: raw.fetchedAt?.toISOString() ?? new Date().toISOString(),
+              evidence: [{ type: 'RAW_RECORD', id: raw.id }],
+            },
+            incoming: {
+              name: rec.name,
+              legalName: rec.legalName,
+              domain: rec.domain,
+              country: rec.country,
+              identifier: rec.identifier,
+              sharedGroupAmbiguity: rec.sharedGroupAmbiguity,
+            },
           });
+          const { decision, candidateDedupeKey, targetExisting } = resolution;
+          if (decision.decision !== 'AUTO_LINK') reviewRequired += 1;
+          const existingAttributes = (targetExisting?.attributes as Record<string, unknown> | null) ?? {};
+          const legalName =
+            typeof existingAttributes.legal_name === 'string'
+              ? existingAttributes.legal_name
+              : rec.legalName;
+          const sharedGroupDomain =
+            existingAttributes.shared_group_domain === true || rec.sharedGroupAmbiguity === true;
+          const attributes = {
+            ...(rec.attributes ?? {}),
+            ...existingAttributes,
+            ...(legalName ? { legal_name: legalName } : {}),
+            ...(sharedGroupDomain ? { shared_group_domain: true } : {}),
+            identity_resolution: companyIdentityResolutionProjection(decision, candidateDedupeKey),
+          };
           const isSuppressed =
             (rec.domain && suppressedDomains.has(rec.domain.toLowerCase())) ||
             suppressedNames.has(rec.name.toLowerCase());
 
           const canonical = await tx.canonicalCompany.upsert({
-            where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: identity.dedupeKey } },
+            where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: decision.identity.dedupeKey } },
             update: {
               // 后到的源只补缺，不覆盖已有值（冲突留在 field_evidence 里可见）
               ...(rec.region ? { region: { set: rec.region } } : {}),
               status: isSuppressed ? 'SUPPRESSED' : undefined,
+              attributes: attributes as Prisma.InputJsonValue,
               version: { increment: 1 },
             },
             create: {
@@ -390,9 +425,9 @@ export function createDiscoveryActivities(deps: {
               industry: rec.industry ?? null,
               employeeCount: rec.employeeCount ?? null,
               revenueUsd: rec.revenueUsd ?? null,
-              attributes: (rec.attributes ?? undefined) as never,
+              attributes: attributes as Prisma.InputJsonValue,
               status: isSuppressed ? 'SUPPRESSED' : 'NEW',
-              dedupeKey: identity.dedupeKey,
+              dedupeKey: decision.identity.dedupeKey,
             },
           });
           if (isSuppressed) suppressed += 1;
@@ -409,13 +444,23 @@ export function createDiscoveryActivities(deps: {
                 canonicalType: 'company',
                 canonicalId: canonical.id,
                 rawRecordId: raw.id,
-                matchRule: identity.matchRule,
-                confidence: identity.matchRule === 'name_country' ? 0.8 : 1, // §8.4：identifier_exact 同 domain_exact=1
+                matchRule: decision.identity.matchRule,
+                confidence: decision.decision === 'AUTO_LINK' ? 1 : 0,
               },
+            });
+            const evidenceLicense = resolveEvidenceLicense(rec.license, raw.providerKey);
+            await appendCompanyIdentityDecisionEvidence(tx, {
+              workspaceId: args.workspaceId,
+              entityId: canonical.id,
+              providerKey: raw.providerKey,
+              rawRecordId: raw.id,
+              license: evidenceLicense,
+              decision,
             });
             // 字段级 Evidence：该 raw 记录贡献的每个非空字段留痕
             const fields: [string, unknown][] = [
               ['name', rec.name],
+              ['legal_name', rec.legalName],
               ['domain', rec.domain],
               ['country', rec.country],
               ['region', rec.region],
@@ -435,14 +480,14 @@ export function createDiscoveryActivities(deps: {
                   value: value as Prisma.InputJsonValue,
                   providerKey: raw.providerKey,
                   rawRecordId: raw.id,
-                  license: resolveEvidenceLicense(rec.license, raw.providerKey), // §8.5：记录声明许可优先（TED CC BY 4.0），否则回退不变
+                  license: evidenceLicense, // §8.5：记录声明许可优先（TED CC BY 4.0），否则回退不变
                   allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
                 },
               });
             }
           }
         }
-        return { companies, suppressed };
+        return { companies, suppressed, reviewRequired };
       });
     },
 

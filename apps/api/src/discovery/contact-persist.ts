@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
+import { contactEmailKind, contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
 import { blindContactKey } from '../compliance/pii-crypto';
@@ -78,14 +78,16 @@ export async function persistDiscoveredContacts(
     }
     // 解析前置：本公司是否已有同一人（同 companyId 内分层匹配）？
     // externalIds（待办 3：CH officer id…）→ Tier 0 精确并（同一董事跨源/跨时间稳定命中）。
-    const { hit, ambiguous } = await resolvePersonIdentity(tx, {
-      workspaceId: args.workspaceId,
-      companyId: args.company.id,
-      companyKey: args.company.dedupeKey,
-      fullName: c.fullName,
-      email,
-      externalIds: c.externalIds,
-    });
+    const { hit, ambiguous } = email && contactEmailKind(email) === 'role'
+      ? { hit: null, ambiguous: false }
+      : await resolvePersonIdentity(tx, {
+          workspaceId: args.workspaceId,
+          companyId: args.company.id,
+          companyKey: args.company.dedupeKey,
+          fullName: c.fullName,
+          email,
+          externalIds: c.externalIds,
+        });
     const contactId = hit
       ? await mergeIntoContact(tx, args, c, hit)
       : await createContact(tx, args, c, email, ambiguous);
@@ -183,17 +185,33 @@ async function createContact(
   email: string | undefined,
   ambiguous: boolean,
 ): Promise<string> {
+  const roleMailbox = email ? contactEmailKind(email) === 'role' : false;
   const plainKey = blindContactKey(contactIdentity({ fullName: c.fullName, email }, args.company.dedupeKey));
+  const scopedExisting = await tx.canonicalContact.findUnique({
+    where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: plainKey } },
+    select: { id: true, companyId: true },
+  });
+  // Legacy role-mailbox rows used workspace-global `e:<email>` keys. They are evidence of a
+  // migration/split decision only: never reuse them as the target for a different company.
+  const legacyRoleMailbox = roleMailbox && email
+    ? await tx.canonicalContact.findUnique({
+        where: {
+          workspaceId_dedupeKey: {
+            workspaceId: args.workspaceId,
+            dedupeKey: blindContactKey(`e:${email}`),
+          },
+        },
+        select: { id: true, companyId: true },
+      })
+    : null;
   // 探测明文键是否已被既有**不同**联系人占用。用途有二：① 非歧义时决定是否走拒并键；
   // ② 决定 email 能否作拒并判别符（占用 = catch-all/RISKY 共享 → 不可信，退回人名）。
-  const plainCollides =
-    (await tx.canonicalContact.findUnique({
-      where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: plainKey } },
-      select: { id: true },
-    })) != null;
+  const plainCollides = scopedExisting != null;
   const usableEmail = email && !plainCollides ? email : undefined; // 未占用的 email 才可信作判别符
   const dedupeKey =
-    ambiguous || plainCollides
+    roleMailbox
+      ? plainKey
+      : ambiguous || plainCollides
       ? blindContactKey(
           declinedContactIdentity({ fullName: c.fullName, email: usableEmail, externalIds: c.externalIds }, args.company.dedupeKey),
         )
@@ -215,6 +233,26 @@ async function createContact(
       dedupeKey,
     },
   });
+  if (roleMailbox && legacyRoleMailbox && !scopedExisting) {
+    await tx.fieldEvidence.create({
+      data: {
+        workspaceId: args.workspaceId,
+        entityType: 'contact',
+        entityId: contact.id,
+        field: 'identity.role_mailbox_legacy_review',
+        value: {
+          decision: 'REVIEW_LINK',
+          required_action: 'SPLIT_REQUIRED',
+          legacy_contact_id: legacyRoleMailbox.id,
+          legacy_company_id: legacyRoleMailbox.companyId,
+          target_company_id: args.company.id,
+        } as unknown as Prisma.InputJsonValue,
+        providerKey: args.adapterKey,
+        license: c.license ?? (args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed'),
+        allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
+      },
+    });
+  }
   return contact.id;
 }
 

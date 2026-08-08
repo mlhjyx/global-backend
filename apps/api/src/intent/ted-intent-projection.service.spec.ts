@@ -165,7 +165,11 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
       strength: 0.9,
     });
     // CC BY 4.0 署名义务：intent.tender 证据 + 新建时 identity 署名行
-    expect(prisma.evidence.map((e) => e.field).sort()).toEqual(['identity', 'intent.tender']);
+    expect(prisma.evidence.map((e) => e.field).sort()).toEqual([
+      'identity',
+      'identity.resolution_decision',
+      'intent.tender',
+    ]);
   });
 
   it('同买方多招标 → 归并取最新发布日（单事件，不灌满 events[≤20]）', async () => {
