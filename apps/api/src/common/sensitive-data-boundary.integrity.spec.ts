@@ -307,8 +307,8 @@ describe("sensitive data boundary integration", () => {
     const worker = source("temporal/worker.ts");
     expect(main).toMatch(/installSensitiveLogger\s*\(\s*\)/);
     expect(worker).toMatch(/installSensitiveLogger\s*\(\s*\)/);
-    expect(main.indexOf("installSensitiveLogger()")).toBeLessThan(
-      main.indexOf("NestFactory.create"),
+    expect(main).toMatch(
+      /async function bootstrap[\s\S]*?installSensitiveLogger\(\);[\s\S]*?if \(process\.argv\.includes\(['"]--export-openapi['"]\)\)/,
     );
     expect(worker.indexOf("installSensitiveLogger()")).toBeLessThan(
       worker.indexOf(
@@ -363,13 +363,13 @@ describe("sensitive data boundary integration", () => {
   it("exports OpenAPI in Nest preview mode without instantiating runtime providers", () => {
     const main = source("main.ts");
     expect(main).toMatch(
-      /const exportOpenApi = process\.argv\.includes\(["']--export-openapi["']\)/,
+      /async function exportOpenApi[\s\S]*?NestFactory\.create\([\s\S]*?AppModule\.register\(OPENAPI_DOCUMENTATION_RUNTIME\)[\s\S]*?preview:\s*true/,
     );
     expect(main).toMatch(
-      /NestFactory\.create\(AppModule,\s*\{\s*preview:\s*exportOpenApi\s*\}\)/,
+      /if \(process\.argv\.includes\(['"]--export-openapi['"]\)\)\s*\{\s*await exportOpenApi\(\);\s*return;/,
     );
-    expect(main.indexOf("const exportOpenApi")).toBeLessThan(
-      main.indexOf("NestFactory.create"),
+    expect(main.indexOf("process.argv.includes('--export-openapi')")).toBeLessThan(
+      main.indexOf("resolveRuntimeAdmission(process.env)"),
     );
   });
 
@@ -396,9 +396,13 @@ describe("sensitive data boundary integration", () => {
     const deletionActivities = source("temporal/deletion.activities.ts");
     const toolBroker = source("tools/tool-broker.ts");
 
-    for (const runtimeSource of [signalIngest, acquisition, toolBroker]) {
+    for (const runtimeSource of [acquisition, toolBroker]) {
       expect(runtimeSource).toMatch(/diagnosticErrorToken\(/);
     }
+    // Signal ingestion persists a closed machine code instead of any exception-
+    // derived text, which is stricter than retaining a one-way diagnostic token.
+    expect(signalIngest).toContain("'SIGNAL_FETCH_FAILED'");
+    expect(signalIngest).not.toMatch(/diagnosticErrorToken\(err\)/);
     expect(signalIngest).not.toMatch(/const msg = String\(err\)/);
     expect(acquisition).not.toMatch(/error:\s*String\(err\)/);
     expect(toolBroker).not.toMatch(/this\.trace\([^;]+String\(err\)\.slice/s);
