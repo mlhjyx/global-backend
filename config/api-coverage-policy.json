@@ -1,7 +1,7 @@
 {
   "schemaVersion": "api-coverage-policy/v1",
-  "baseCommit": "e16e1f2ffa91e640c5b450c9e42bed27801bef62",
-  "measuredAt": "2026-08-08T23:40:03+08:00",
+  "baseCommit": "ab62cbf75e7712d7a02037e210febd1089d28624",
+  "measuredAt": "2026-08-09T00:11:16+08:00",
   "targetPercent": 80,
   "status": "TARGET_MET",
   "scope": {
@@ -9,10 +9,10 @@
     "exclude": ["src/**/*.spec.ts", "src/**/testing/**"]
   },
   "baseline": {
-    "statements": { "covered": 23726, "total": 27829, "percent": 85.25 },
-    "branches": { "covered": 18451, "total": 23028, "percent": 80.12 },
-    "functions": { "covered": 4690, "total": 5397, "percent": 86.9 },
-    "lines": { "covered": 21858, "total": 25213, "percent": 86.69 }
+    "statements": { "covered": 23819, "total": 27994, "percent": 85.08 },
+    "branches": { "covered": 18536, "total": 23168, "percent": 80 },
+    "functions": { "covered": 4711, "total": 5424, "percent": 86.85 },
+    "lines": { "covered": 21949, "total": 25376, "percent": 86.49 }
   },
   "critical": {
     "auth": {
