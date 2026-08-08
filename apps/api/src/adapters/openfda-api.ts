@@ -15,6 +15,8 @@
  * 「注册/收录 ≠ FDA 核准」——记录只承载自报事实，绝不标「FDA 认证/批准」（§3.3.2 文案红线）。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 const BASE_URL = process.env.OPENFDA_API_URL ?? 'https://api.fda.gov';
 const API_KEY = process.env.OPENFDA_API_KEY; // 免费 key（可选）→ 提配额到 120k/天
 const MAX_LIMIT = 1000; // 每调硬上限
@@ -342,7 +344,7 @@ function isNotFoundOrThrow(json: OpenFdaResponse): boolean {
   if (json.error.code === 'NOT_FOUND') return true;
   const code = json.error.code ?? 'UNKNOWN_ERROR';
   const message = json.error.message ?? 'request failed';
-  throw new Error(`openfda ${code}: ${message}`);
+  throw new Error(`openfda request failed: ${diagnosticErrorToken(`${code}:${message}`)}`);
 }
 
 /** 带退避的 GET（api-umbrella 无限流头 → 429 感知 + 退避；其余错误状态原样解析交调用方判 error）。 */

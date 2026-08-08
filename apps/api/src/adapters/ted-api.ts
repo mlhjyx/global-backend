@@ -13,6 +13,8 @@
  * 本客户端只请求 🟢 绿字段，**绝不请求 winner-email 等 🔴 具名联系点**（个人数据，走隔离路径）。
  */
 
+import { diagnosticErrorToken } from '../common/sensitive-data-scrubber';
+
 const SEARCH_URL = process.env.TED_API_URL ?? 'https://api.ted.europa.eu/v3/notices/search';
 const MAX_LIMIT = 250; // API 硬上限（500 报 "exceeds maximum allowed value (250)"）
 const THROTTLE_MS = 1100; // 自限 ~1 req/s（WAF 无限流头，spec §1.6）
@@ -266,7 +268,10 @@ interface TedSearchResponse {
 
 async function tedPost(body: Record<string, unknown>): Promise<TedSearchResponse> {
   const res = await tedFetch(body);
-  if (!res.ok) throw new Error(`ted ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  // Provider bodies are untrusted and can echo queries, identifiers, or personal
+  // data. Do not materialize them into errors; preserve only safe HTTP status and
+  // an irreversible diagnostic token.
+  if (!res.ok) throw new Error(`ted ${res.status}: ${diagnosticErrorToken(`HTTP_${res.status}`)}`);
   return (await res.json()) as TedSearchResponse;
 }
 

@@ -285,11 +285,17 @@ describe('TED HTTP 与 ITERATION 边界（仅 fake fetch）', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('400 语法错误不重试并保留有界错误摘要', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response('bad expert query', { status: 400 }));
+  it('400 语法错误不重试且只保留不可逆错误摘要', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response('bad expert query for jane@example.com', { status: 400 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(searchAwardNotices({ cpvCodes: ['42120000'] })).rejects.toThrow('ted 400: bad expert query');
+    const error = await searchAwardNotices({ cpvCodes: ['42120000'] }).catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^ted 400: ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect((error as Error).message).not.toContain('jane@example.com');
+    expect((error as Error).message).not.toContain('bad expert query');
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

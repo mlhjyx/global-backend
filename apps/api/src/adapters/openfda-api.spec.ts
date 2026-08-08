@@ -290,13 +290,17 @@ describe('openFDA HTTP 与分页边界（仅 fake fetch）', () => {
     expect(url.searchParams.get('skip')).toBe('0');
   });
 
-  it('非 NOT_FOUND 的结构化 API error 向上抛，不伪装成零结果', async () => {
+  it('非 NOT_FOUND 的结构化 API error 向上抛，但不回显不可信正文', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      jsonResponse({ error: { code: 'INVALID_QUERY', message: 'bad syntax' } }, 404),
+      jsonResponse({ error: { code: 'INVALID_QUERY', message: 'Contact jane@example.com about bad syntax' } }, 404),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(searchRegistrations({ productCodes: ['LLZ'] })).rejects.toThrow(/INVALID_QUERY.*bad syntax/);
+    const error = await searchRegistrations({ productCodes: ['LLZ'] }).catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^openfda request failed: ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect((error as Error).message).not.toContain('jane@example.com');
+    expect((error as Error).message).not.toContain('bad syntax');
   });
 
   it('429 按 retry-after 退避后重试，最终返回结果', async () => {
