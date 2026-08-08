@@ -7,6 +7,7 @@ import { canonicalDigest } from "./context-engine";
 import {
   assertCompiledRuntimeGuardCurrent,
   createCompiledRuntimeGuard,
+  createCompiledRuntimeExpectation,
   getCompiledRuntimeGuardAttestation,
 } from "./compiled-runtime-guard";
 
@@ -70,6 +71,28 @@ describe("CompiledRuntimeGuard", () => {
     await expect(assertCompiledRuntimeGuardCurrent(guard)).rejects.toThrow(
       "COMPILED_RUNTIME_DRIFT",
     );
+  });
+
+  it("rejects startup bytes that differ from the fixed-source build expectation", async () => {
+    const root = await fixture();
+    const expectation = await createCompiledRuntimeExpectation({
+      repositoryRoot: root,
+      artifactPaths: ["runtime.js"],
+      buildSourceCommit: "a".repeat(40),
+      sourceBundleDigest: "b".repeat(64),
+      buildCommands: ["pnpm --filter @global/api build"],
+    });
+
+    await writeFile(join(root, "runtime.js"), "export const runtime = 2;\n");
+
+    await expect(
+      createCompiledRuntimeGuard({
+        repositoryRoot: root,
+        artifactPaths: ["runtime.js"],
+        binding: { source: "copy" },
+        expectation,
+      }),
+    ).rejects.toThrow("COMPILED_RUNTIME_EXPECTATION_MISMATCH");
   });
 
   it("rejects path traversal, duplicate paths, and symlink artifacts", async () => {
