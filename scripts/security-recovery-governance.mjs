@@ -834,10 +834,11 @@ export function validateIntegrationMatrix(matrix) {
         `${name}: enabled context requires ${requirement.isolationMessage}`,
       );
     }
-    // The repository does not yet contain an allowlisted runner that executes
-    // either context. Merely placing a shell string in JSON must never make a
-    // required context green. Enabling a context therefore requires a code
-    // change that adds and tests the bounded runner first.
+    // PostgreSQL has a fail-closed verifier, but neither context has a reviewed
+    // CI provisioner that constructs its isolated environment and executes the
+    // bounded verifier. Merely placing a shell string in JSON must never make a
+    // required context green. Enabling a context therefore still requires a
+    // code change that wires and tests the hermetic CI job first.
     errors.push(
       `${name}: only BLOCKED is admissible until an allowlisted integration runner is wired`,
     );
