@@ -252,6 +252,15 @@ async function realRunnerGateway() {
         quota: 100,
         prompt_tokens: 120,
         completion_tokens: 40,
+        ...(alias === "claude-sonnet-5"
+          ? {
+              other: {
+                usage_semantic: "anthropic",
+                cache_creation_tokens: 0,
+                cache_tokens: 0,
+              },
+            }
+          : {}),
       });
     }
     if (request.url === "/v1/chat/completions") {
