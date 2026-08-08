@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdtempSync,
   readFileSync,
@@ -239,5 +240,36 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       ),
     ].join("\n");
     expect(sources).not.toMatch(/\bfetch\b|process\.env|apiKey|credentialRef/u);
+  });
+
+  it("matches the generated v12 create-only artifact exactly", () => {
+    const artifactBytes = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../../../../",
+        COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH,
+      ),
+    );
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "74a30d78e135851cc34fa5b3803e491c612d554dd13010de539a565179d67807",
+    );
+    expect(() =>
+      validateCopySonnetRecoveryManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
+      preparationHeadCommit: "3bf99b5d605225989bbf33dcffbca21fa88e6328",
+      artifactDigest:
+        "c2467ef639b2d773b6c0da0a5c9541c028d36274890d994edd07757d4a271e27",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      preparationVerification: {
+        compiledRuntimeBindingDeferred: true,
+      },
+    });
   });
 });
