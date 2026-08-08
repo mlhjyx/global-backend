@@ -239,7 +239,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
-      "b6ec4ad5b216ba6464d6d3f228db77ce18450c3bb3e0a713fa3262fb7ee1fdec",
+      "c9451b8e5c46236cf391adaeae1cf2f7ccd52e9a581b1eb4acfe1d6d8082f03f",
     );
     expect(() =>
       validateCopyRealCapabilityManifestArtifact(artifact),
@@ -247,8 +247,9 @@ describe("Copy real capability create-only manifest preparation", () => {
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-real-capability-manifest-prep/2026-08-07-v11",
-      fixedSourceCommit: "4f75a66925b71fa218395934a5722035e7ba0112",
-      preparationHeadCommit: "82d7010777b81ae8d0f7b5a3059d90471cc29391",
+      fixedSourceCommit: "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
+      preparationHeadCommit: "7d6e9fe977b0c1be9161c1aea00f9eb16d193a4a",
+      requiredMergeMethod: "merge_commit",
       createOnly: true,
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
@@ -257,7 +258,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       observedModelCost: { CNY: 0, USD: 0 },
       manifest: {
         manifestId: "site-builder-copy-real-capability/2026-08-07-v11",
-        fixedSourceCommit: "4f75a66925b71fa218395934a5722035e7ba0112",
+        fixedSourceCommit: "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
         plannedExecutions: 3,
         maximumWireCalls: 6,
         maximumRepairCallsPerExecution: 1,
@@ -270,6 +271,14 @@ describe("Copy real capability create-only manifest preparation", () => {
           "8317ac7af4e87e9c070cf84c823b335c00250e3d37a2b1a1391048054f6b0aa2",
         admissionSourceDigest:
           "5690f5dc8e335d811f5d8dd0b1993589112e231737b2c973ea722564a0063d32",
+      },
+      compiledRuntimeExpectation: {
+        buildSourceCommit: "0c5213e6ef1a4d8b7ea527b7522021d487bc5934",
+        sourceBundleDigest:
+          "c4b811233de9d0acd91d27b29a882b0cfeaec57d3a765a57986e281078c63470",
+        artifactCount: 49,
+        artifactTreeDigest:
+          "654cc033f48a1844acd9d5c7ddfe14ed943627a3b9ef04dc5a31027899011d01",
       },
     });
     expect(artifact.manifest.executions).toEqual([
@@ -289,7 +298,7 @@ describe("Copy real capability create-only manifest preparation", () => {
         reasoning: "medium",
       },
     ]);
-    expect(artifact.sourceBundle.files).toHaveLength(69);
+    expect(artifact.sourceBundle.files).toHaveLength(77);
     expect(artifact.sourceBundle.files).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -306,7 +315,7 @@ describe("Copy real capability create-only manifest preparation", () => {
       canonicalDigest(artifact.sourceBundle.files),
     );
     expect(artifact.sourceBundle.digest).toBe(
-      "27d9cc8b6c30b289c84bde9e28f9f3202d572b898784ad8151fbaf54536a00a9",
+      "c4b811233de9d0acd91d27b29a882b0cfeaec57d3a765a57986e281078c63470",
     );
     expect(artifact.manifest.sourceBundleDigest).toBe(
       artifact.sourceBundle.digest,
@@ -314,7 +323,7 @@ describe("Copy real capability create-only manifest preparation", () => {
     const { artifactDigest, ...withoutDigest } = artifact;
     expect(artifactDigest).toBe(canonicalDigest(withoutDigest));
     expect(artifactDigest).toBe(
-      "1b3462e1adf5a543d1dfbc6e2c0a2df73ac02903bac1fcd0186c44d368180347",
+      "ae289bccc3452e135bcf278102242e9ca2b69c50e533c2c2d4fe9598b67e526e",
     );
   });
 
