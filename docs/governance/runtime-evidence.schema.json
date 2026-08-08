@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://global.local/schemas/runtime-evidence-v1.json",
+  "title": "RuntimeEvidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_id",
+    "commit",
+    "environment",
+    "verified_at",
+    "valid_until",
+    "evidence_kind",
+    "result",
+    "artifact_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "runtime-evidence/v1" },
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]+$"
+    },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "environment": {
+      "enum": ["development", "test", "pilot", "production"]
+    },
+    "verified_at": { "type": "string", "format": "date-time" },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Exclusive validity end; governance verifier limits the window to 24 hours from verified_at."
+    },
+    "evidence_kind": { "type": "string", "minLength": 1 },
+    "result": { "enum": ["PASS", "FAIL", "UNKNOWN"] },
+    "artifact_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "artifact_path": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 }
+  }
+}

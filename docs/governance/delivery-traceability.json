@@ -1,0 +1,43 @@
+{
+  "schema_version": "delivery-traceability/v1",
+  "chains": [
+    {
+      "chain_id": "buyer-discovery-internal",
+      "capability_id": "CAP-BUYER-001",
+      "object_ids": ["OBJ-FE-009", "OBJ-FE-010", "OBJ-FE-011"],
+      "operation_ids": ["DiscoveryController_execute_v1", "DiscoveryController_listCompanies_v1"],
+      "code_paths": [
+        "apps/api/src/discovery/discovery.controller.ts",
+        "apps/api/src/temporal/discovery.activities.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/temporal/discovery.activities.spec.ts",
+        "apps/api/src/lead/lead-qualified-snapshot.spec.ts"
+      ],
+      "scenario_ids": ["SCN-FE-BUYER-001", "SCN-FE-BUYER-002"],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [],
+      "required_evidence_kinds": ["runtime_probe"],
+      "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
+    },
+    {
+      "chain_id": "buyer-intent-queue-internal",
+      "capability_id": "CAP-INTENT-001",
+      "object_ids": ["OBJ-FE-010", "OBJ-FE-011"],
+      "operation_ids": ["LeadController_queues_v1"],
+      "code_paths": [
+        "apps/api/src/lead/lead.controller.ts",
+        "apps/api/src/lead/scoring.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/lead/scoring.spec.ts",
+        "apps/api/src/signals/intent-recompute.service.spec.ts"
+      ],
+      "scenario_ids": ["SCN-FE-BUYER-001", "SCN-FE-BUYER-002"],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [],
+      "required_evidence_kinds": ["runtime_probe"],
+      "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
+    }
+  ]
+}

@@ -157,6 +157,7 @@ export function evaluateDecisionCard(event, now = new Date()) {
     "RECOMMEND_HOLD",
     "RECOMMEND_MERGE",
   ]);
+  const draft = event?.pull_request?.draft === true;
   if (!placeholder(card.codexRecommendation) && !recommendation) {
     reasons.push("Codex 建议必须以精确枚举值开头");
   }
@@ -207,12 +208,22 @@ export function evaluateDecisionCard(event, now = new Date()) {
   if (recommendation === "MERGE" && independentReview !== "RECOMMEND_MERGE") {
     reasons.push("Codex 建议 MERGE，但独立审查尚未建议合并");
   }
+  const mergeCandidate =
+    recommendation === "MERGE" &&
+    technicalGate === "PASS" &&
+    independentReview === "RECOMMEND_MERGE";
+  if (!draft && mergeCandidate) {
+    reasons.push(
+      "非 Draft merge-candidate 缺少可信外部 provenance；PR 正文声明不能使 required check 通过",
+    );
+  }
 
   return {
-    schemaVersion: "pr-decision-card-status/v2",
+    schemaVersion: "pr-decision-card-status/v3",
     status,
-    blocking:
-      recommendation === "MERGE" && !["CURRENT_UNVERIFIED"].includes(status),
+    blocking: !draft && mergeCandidate,
+    draft,
+    mergeCandidate,
     repository,
     prNumber,
     headSha,
@@ -228,6 +239,24 @@ export function evaluateDecisionCard(event, now = new Date()) {
     recommendation: recommendation ?? null,
     technicalGate: technicalGate ?? null,
     independentReview: independentReview ?? null,
+    gates: {
+      machine: {
+        status: technicalGate ?? "UNDECLARED",
+        trusted: false,
+        provenance: "PR_BODY_DECLARATION",
+      },
+      reviewer: {
+        status: independentReview ?? "UNDECLARED",
+        trusted: false,
+        provenance: "PR_BODY_DECLARATION",
+      },
+      userAuthorization: {
+        status: "NOT_AUTHORIZED",
+        trusted: false,
+        provenance: "PR_BODY_DECLARATION",
+        declared: card.productAuthorization || null,
+      },
+    },
     reasons: [...new Set(reasons)],
     card,
   };
@@ -252,8 +281,11 @@ export function renderDecisionCard(result) {
 
 > 本评论由默认分支上的受信脚本根据当前 PR 事件与 PR 正文生成。它只检查绑定、完整性和过期状态，**不会批准或合并 PR**。
 > PR 正文由作者控制，因此其中的技术门、独立审查和 Codex 建议一律按**未验证声明**展示；本机器人永远不会仅凭正文输出“已准备合并”。
+> \`nontechnical decision card integrity\` 只证明声明完整性：Draft 可非阻断展示；非 Draft merge-candidate 在没有可信外部 provenance 时必须阻断。
 
 - 卡片状态：\`${result.status}\`
+- PR 类型：\`${result.draft ? "DRAFT" : "READY"}\`
+- Merge-candidate 声明：\`${result.mergeCandidate ? "YES_UNVERIFIED" : "NO"}\`
 - 实时绑定：\`${result.repository}#${result.prNumber}@${result.headSha}\`
 - 自动检查时间：\`${result.generatedAt}\`
 - 用户/项目得到什么：${shown(card.userValue)}
@@ -261,11 +293,11 @@ export function renderDecisionCard(result) {
 - 明确没有改变什么：${shown(card.unchanged)}
 - 成功、失败与恢复：${shown(card.paths)}
 - 数据、权限、迁移、外部合同或生产影响：${shown(card.sensitiveImpact)}
-- 正文自报技术门（未验证）：${shown(card.technicalGate)}
-- 正文自报独立审查（未验证）：${shown(card.independentReview)}
+- 机器技术门：\`${result.gates.machine.status}\`（正文声明，未验证；真实门只认受信 check run）
+- 独立审查门：\`${result.gates.reviewer.status}\`（正文声明，未验证；真实门只认独立 review provenance）
+- 用户授权门：\`${result.gates.userAuthorization.status}\`（正文只展示：${shown(card.productAuthorization)}；机器人不把它当作自动合并输入）
 - 最大风险与回退：${shown(card.riskRollback)}
 - 正文自报 Codex 建议（未验证）：${shown(card.codexRecommendation)}
-- 产品负责人授权：${shown(card.productAuthorization)}（仅展示，机器人不把它当作自动合并输入）
 
 ### 自动检查发现
 

@@ -1,0 +1,40 @@
+# Minimal approval surface for repository governance and high-risk runtime changes.
+/docs/CODEX-NAVIGATION-GUIDE.md @mlhjyx
+/docs/roadmap/release-plan.md @mlhjyx
+/docs/product-scope.md @mlhjyx
+/docs/architecture/ @mlhjyx
+/docs/adr/ @mlhjyx
+
+/packages/contracts/ @mlhjyx
+/packages/db/prisma/ @mlhjyx
+
+/apps/api/src/main.ts @mlhjyx
+/apps/api/src/health/ @mlhjyx
+/apps/api/src/auth/ @mlhjyx
+/apps/api/src/compliance/ @mlhjyx
+/apps/api/src/tools/ @mlhjyx
+/apps/api/src/model-runtime/ @mlhjyx
+/apps/api/src/temporal/ @mlhjyx
+/apps/api/src/relay/ @mlhjyx
+
+/docker-compose.yml @mlhjyx
+/infra/*.compose.yml @mlhjyx
+/infra/systemd/ @mlhjyx
+
+# Terminal governance ownership block. Keep this last so broader later rules
+# cannot override the verifier, policy, schema, or required-context surfaces.
+/.github/ @mlhjyx
+/AGENTS.md @mlhjyx
+/docs/status/ @mlhjyx
+/docs/governance/ @mlhjyx
+/docs/backend/ci-merge-automation.md @mlhjyx
+/docs/backend/provider-registry.md @mlhjyx
+/docs/evidence/README.md @mlhjyx
+/docs/evidence/runtime/ @mlhjyx
+/docs/releases/ @mlhjyx
+/docs/templates/release-bundle.template.json @mlhjyx
+/package.json @mlhjyx
+/scripts/governance-*.mjs @mlhjyx
+/scripts/pr-decision-card*.mjs @mlhjyx
+/scripts/verify-docs.mjs @mlhjyx
+/scripts/worktree-inventory.mjs @mlhjyx

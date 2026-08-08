@@ -6,7 +6,7 @@
 > 评审状态：`APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-DOC-GOV`
 > 机器政策：[`docs-verification-policy/v1`](docs-verification-policy.json)
-> 最后核验：2026-07-23
+> 最后核验：2026-08-07
 > 批准边界：产品负责人条件批准机器门与例外治理；独立人工、真实 Release 和全部 blocker 仍保留
 
 本文定义文档如何进入持续集成、什么必须失败、什么只能告警，以及历史证据为什么不能为了“全绿”被无声重写。机器规则由 JSON 政策和 `scripts/verify-docs.mjs` 承重；本文解释其人类语义。
@@ -17,7 +17,7 @@
 pnpm docs:verify
 ```
 
-该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。普通 CI 的安装步骤后运行同一命令；本地与 CI 不维护两套规则。
+该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它先运行 `governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查，再运行既有模型候选、contracts build 和 Markdown 校验。普通 CI 的安装步骤后运行同一命令；独立 `governance · traceability · release` required context 也运行 `pnpm governance:verify`。
 
 ## 2. 检查面与失败语义
 
@@ -29,7 +29,11 @@ pnpm docs:verify
 | 链接 | 仓内目标或 Markdown heading anchor 不存在，或使用会跳到 GitHub host root 的 `/docs/...` 根相对路径 | 外部网页当前可用、链接内容可信 |
 | Registry 引用 | Capability/Object/Page/Scenario/Fixture/Adoption/Owner ID 不在各自 Registry 的声明列 | 引用关系本身业务正确 |
 | 历史 banner | 已登记的 Site 历史稿缺少冻结、dated 或 superseded 前言 | 可以删除、移动或覆盖历史证据 |
-| Release Bundle | 未来 `docs/releases/` 中真实 bundle 缺必需元数据或章节 | 各证据真实通过或发布成功 |
+| Provider Registry | 机器清单与代码 seed 的 key/SourceClass/default enablement 漂移，test path 不存在，或生成页被手改 | Provider 当前启用、外部源健康或运行成功 |
+| Delivery traceability | Capability/Object/operationId/code/test/Scenario 任一不存在；`PILOT/GA` 无 fresh PASS RuntimeEvidence 或 Release Bundle | test 内容足以覆盖业务语义，或用户已经可用 |
+| RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
+| Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权 |
+| Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。
@@ -77,9 +81,10 @@ pnpm docs:verify
 - `CURRENT` 说明该文档承担当前规范，不说明内容已实现。
 - `APPROVED_AT_GATE_*` 只来自真实批准记录；脚本不根据推荐语句自动升级。
 - `AS_BUILT` 声明必须在 Capability/Traceability/Release Bundle 中链接到代码或机器合同，并把 `TEST_ANCHOR` 与当前运行结果分开。
-- 只有真实用户可见发布才创建 Release Bundle；不预建空目录、索引或模板，Gate、文档提交或开发机探针不能伪造 release。
+- 只有真实用户可见的 candidate/pilot/GA 才在 `docs/releases/` 创建 Release Bundle。`docs/templates/release-bundle.template.json` 是带显式占位符的输入模板，不是 release；验证器拒绝把占位符、空目录、文档提交或开发机探针冒充发布。
+- Bundle 中的 provenance 字段和 refs 只是 documentary；当前没有可信外部 readback verifier，所以 `EXTERNAL_UNVERIFIED` 是唯一可证当前状态，任何自报 `VERIFIED` 或 URL 都不能满足 `PILOT/GA`。
 - 大体积日志、截图、扫描报告和含敏感字段的证据放受控 artifact store；Markdown 只保存脱敏索引、hash、环境、提交、时间、结果和 Owner。
-- “最后核验”日期仅是人工追溯信息，**不**作为自动过期门；模型、运行环境、阶段完成或发布事实必须由 PR 阶段回写清单和人工事实核验更新，不能让无关代码提交触发机械失败。
+- 普通文档的“最后核验”日期仅是人工追溯信息，不作为机械过期门。RuntimeEvidence 是例外：它必须显式绑定 `verified_at`/`valid_until`，到期后自动降为 `HISTORICAL`；模型、运行环境、阶段完成或发布事实不能靠延长文档日期续命。
 
 ## 7. 阶段完成回写清单
 
