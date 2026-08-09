@@ -33,7 +33,8 @@
 
 ## 验证边界
 
-- 聚焦 Vitest、API lint/build、OpenAPI drift、governance topology、Copy v14 fixed-source rebuild、`docs:verify` 与 `git diff --check` 必须在最终 exact head 重新运行。
+- 本地合成树已完成：API 285 files / 4410 passed / 2 skipped；runtime/health 聚焦 6 files / 34 tests；Copy v14 fixed-source rebuild 8/8；governance 50/50；contracts/API build；API lint 0 error（7 条既有 warning）；OpenAPI 重导出零漂移；`docs:verify` 118 Markdown、0 error、1 条既有 table warning；`git diff --check` PASS。
+- 上述仍是本地 source/deterministic evidence。hosted GitHub exact-head checks、独立复审、合并结果、批准 release checkout 构建与 live runtime readback 是后续独立门，不能由本段绿色推断。
 - CI 生成的 receipt 绑定 GitHub checkout 的 `github.sha` 与最终 API dist；它仍不是部署回执。部署阶段必须从干净 release checkout 重新构建、生成 receipt，并由 live `/health/build` 与部署 SHA 逐字回读。
 - descriptor-anchored artifact inventory 是 Ubuntu/Linux 部署合同，依赖 `/proc/self/fd`；非 Linux 环境不能据此宣称受控部署兼容。
 - worker heartbeat、Outbox advisory lock/lease、Schedule receipts、备份恢复和 `/health/ops` 属于后续 durable-ops PR，不在本切片伪造。
