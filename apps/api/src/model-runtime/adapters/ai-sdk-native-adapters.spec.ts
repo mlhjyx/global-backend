@@ -265,6 +265,24 @@ const dynamicCopySlotsSchema = {
   },
 } as const;
 
+function closedCompanySchemaWithDescriptionSize(targetBytes: number) {
+  const baseSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["name"],
+    properties: { name: { type: "string" } },
+    description: "",
+  } as const;
+  const fixedBytes = Buffer.byteLength(JSON.stringify(baseSchema), "utf8");
+  if (targetBytes < fixedBytes) {
+    throw new Error("Target schema size is smaller than its fixed fields");
+  }
+  return {
+    ...baseSchema,
+    description: "x".repeat(targetBytes - fixedBytes),
+  };
+}
+
 describe("AI SDK 7 native provider adapters", () => {
   it("streams OpenAI Responses while preserving schema, reasoning and response metadata", async () => {
     const gateway = await startFakeGateway((_request, response, observed) => {
@@ -665,7 +683,9 @@ describe("AI SDK 7 native provider adapters", () => {
         },
       },
     } as const;
-    const output = { metadata: { market: "industrial" } };
+    const output = {
+      metadata: { market: "industrial", segment: "enterprise" },
+    };
     const gateway = await startFakeGateway((_request, response, observed) => {
       const usesJsonTool = Array.isArray(observed.body.tools);
       sendJson(
@@ -727,14 +747,82 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(result.output).toEqual(output);
   });
 
+  it("keeps closed properties and $defs containers on Anthropic outputFormat", async () => {
+    const outputSchema = {
+      type: "object",
+      additionalProperties: false,
+      $defs: {
+        metadata: {
+          type: "object",
+          additionalProperties: false,
+          required: ["market"],
+          properties: { market: { type: "string" } },
+        },
+      },
+      required: ["metadata", "properties"],
+      properties: {
+        metadata: { $ref: "#/$defs/metadata" },
+        properties: { type: "string" },
+      },
+    } as const;
+    const output = {
+      metadata: { market: "industrial" },
+      properties: "literal field name",
+    };
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_closed_schema_containers",
+          model: "claude-sonnet-5",
+          role: "assistant",
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 21,
+            output_tokens: 13,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const result = await adapter.execute<typeof output>({
+      alias: "claude-sonnet-5",
+      prompt: "Return the closed object.",
+      outputSchema,
+      outputSchemaName: "closed_schema_containers",
+      reasoning: { effort: "medium" },
+      maxOutputTokens: 256,
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+
+    expect(gateway.observed).toHaveLength(1);
+    const [request] = gateway.observed;
+    expect(request.body).toMatchObject({
+      output_config: {
+        effort: "medium",
+        format: { type: "json_schema" },
+      },
+    });
+    expect(request.body).not.toHaveProperty("tools");
+    expect(result.output).toEqual(output);
+  });
+
   it.each([
     [
-      "description",
-      {
-        type: "object",
-        additionalProperties: false,
-        description: "界".repeat(22_000),
-      },
+      "description at the byte limit plus one",
+      closedCompanySchemaWithDescriptionSize(
+        MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST + 1,
+      ),
     ],
     [
       "property name",
@@ -749,6 +837,18 @@ describe("AI SDK 7 native provider adapters", () => {
   ])(
     "rejects an Anthropic schema with an oversized UTF-8 %s before dispatch",
     async (_case, outputSchema) => {
+      const serialized = JSON.stringify(outputSchema);
+      const serializedBytes = Buffer.byteLength(serialized, "utf8");
+      expect(serializedBytes).toBeGreaterThan(
+        MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST,
+      );
+      if (_case === "description at the byte limit plus one") {
+        expect(serializedBytes).toBe(MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST + 1);
+      } else {
+        expect(serialized.length).toBeLessThanOrEqual(
+          MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST,
+        );
+      }
       const gateway = await startFakeGateway((_request, response) => {
         sendJson(response, 500, { error: "must not dispatch" });
       });
@@ -774,23 +874,9 @@ describe("AI SDK 7 native provider adapters", () => {
 
   it("accepts an Anthropic schema exactly at the UTF-8 byte limit", async () => {
     const output = { name: "Acme" };
-    const schemaWithoutDescription = {
-      type: "object",
-      additionalProperties: false,
-      required: ["name"],
-      properties: { name: { type: "string" } },
-      description: "",
-    } as const;
-    const fixedBytes = Buffer.byteLength(
-      JSON.stringify(schemaWithoutDescription),
-      "utf8",
+    const outputSchema = closedCompanySchemaWithDescriptionSize(
+      MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST,
     );
-    const outputSchema = {
-      ...schemaWithoutDescription,
-      description: "x".repeat(
-        MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST - fixedBytes,
-      ),
-    };
     expect(Buffer.byteLength(JSON.stringify(outputSchema), "utf8")).toBe(
       MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST,
     );

@@ -21,6 +21,159 @@ type AnthropicEffort = "low" | "medium" | "high" | "xhigh";
 type AnthropicStructuredOutputMode = "outputFormat" | "jsonTool";
 
 const MAX_SCHEMA_NODES = 4_096;
+const MAX_SCHEMA_BYTES = 64 * 1024;
+const DIRECT_SUBSCHEMA_KEYS = [
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "items",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+] as const;
+const SUBSCHEMA_ARRAY_KEYS = [
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "prefixItems",
+] as const;
+const SUBSCHEMA_MAP_KEYS = [
+  "$defs",
+  "definitions",
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+] as const;
+const OBJECT_SCHEMA_KEYS = [
+  "additionalProperties",
+  "dependentRequired",
+  "dependentSchemas",
+  "maxProperties",
+  "minProperties",
+  "patternProperties",
+  "properties",
+  "propertyNames",
+  "required",
+  "unevaluatedProperties",
+] as const;
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function schemaTypeIncludesObject(type: unknown): boolean {
+  return (
+    type === "object" ||
+    (Array.isArray(type) && type.some((candidate) => candidate === "object"))
+  );
+}
+
+function isOpenObjectSchema(
+  schema: Readonly<Record<string, unknown>>,
+): boolean {
+  const isObjectSchema =
+    schemaTypeIncludesObject(schema.type) ||
+    OBJECT_SCHEMA_KEYS.some((key) => Object.hasOwn(schema, key));
+  if (!isObjectSchema) return false;
+  if (schema.additionalProperties !== false) return true;
+  if (
+    isRecord(schema.patternProperties) &&
+    Object.keys(schema.patternProperties).length > 0
+  ) {
+    return true;
+  }
+  return (
+    Object.hasOwn(schema, "unevaluatedProperties") &&
+    schema.unevaluatedProperties !== false
+  );
+}
+
+function enqueueSubschemas(
+  pending: unknown[],
+  schema: Readonly<Record<string, unknown>>,
+): void {
+  for (const key of DIRECT_SUBSCHEMA_KEYS) {
+    const value = schema[key];
+    if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (isRecord(value) || typeof value === "boolean") {
+      pending.push(value);
+    }
+  }
+  for (const key of SUBSCHEMA_ARRAY_KEYS) {
+    const value = schema[key];
+    if (Array.isArray(value)) pending.push(...value);
+  }
+  for (const key of SUBSCHEMA_MAP_KEYS) {
+    const value = schema[key];
+    if (isRecord(value)) pending.push(...Object.values(value));
+  }
+  const dependencies = schema.dependencies;
+  if (isRecord(dependencies)) {
+    pending.push(
+      ...Object.values(dependencies).filter(
+        (value) => isRecord(value) || typeof value === "boolean",
+      ),
+    );
+  }
+}
+
+function requiresJsonToolForSchema(
+  schema: Readonly<Record<string, unknown>>,
+): boolean {
+  const pending: unknown[] = [schema];
+  const seen = new WeakSet<object>();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!isRecord(current) || seen.has(current)) continue;
+    seen.add(current);
+    if (isOpenObjectSchema(current)) return true;
+    enqueueSubschemas(pending, current);
+  }
+  return false;
+}
+
+function prepareAnthropicSchema(
+  schema: Readonly<Record<string, unknown>> | undefined,
+): Readonly<{
+  schema: Readonly<Record<string, unknown>> | undefined;
+  structuredOutputMode: AnthropicStructuredOutputMode;
+}> {
+  if (schema == null) {
+    return Object.freeze({
+      schema: undefined,
+      structuredOutputMode: "outputFormat",
+    });
+  }
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(schema);
+  } catch {
+    throw new Error(
+      "Anthropic structured-output schema must be JSON serializable",
+    );
+  }
+  if (serialized == null) {
+    throw new Error(
+      "Anthropic structured-output schema must be JSON serializable",
+    );
+  }
+  const normalized = JSON.parse(serialized) as unknown;
+  if (!isRecord(normalized)) {
+    throw new Error("Anthropic structured-output schema must be a JSON object");
+  }
+  const structuredOutputMode = structuredOutputModeFor(normalized);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_SCHEMA_BYTES) {
+    throw new Error(
+      "Anthropic structured-output schema exceeds the byte limit",
+    );
+  }
+  return Object.freeze({ schema: normalized, structuredOutputMode });
+}
 
 function enqueueSchemaValues(
   pending: unknown[],
@@ -41,7 +194,6 @@ function structuredOutputModeFor(
   if (schema == null) return "outputFormat";
   const pending: unknown[] = [schema];
   const seen = new WeakSet<object>();
-  let requiresJsonTool = false;
   let visitedValues = 0;
   while (pending.length > 0) {
     const current = pending.pop();
@@ -56,17 +208,13 @@ function structuredOutputModeFor(
       enqueueSchemaValues(pending, current, visitedValues);
       continue;
     }
-    const object = current as Readonly<Record<string, unknown>>;
-    const additionalProperties = object.additionalProperties;
-    if (
-      additionalProperties === true ||
-      (additionalProperties != null && typeof additionalProperties === "object")
-    ) {
-      requiresJsonTool = true;
-    }
-    enqueueSchemaValues(pending, Object.values(object), visitedValues);
+    enqueueSchemaValues(
+      pending,
+      Object.values(current as Readonly<Record<string, unknown>>),
+      visitedValues,
+    );
   }
-  return requiresJsonTool ? "jsonTool" : "outputFormat";
+  return requiresJsonToolForSchema(schema) ? "jsonTool" : "outputFormat";
 }
 
 function toAnthropicOptions(reasoning: NativeReasoningEffort | undefined) {
@@ -105,9 +253,12 @@ export class AiSdkAnthropicMessagesAdapter implements NativeModelAdapter {
       throw new Error("Model adapter requires a bounded AbortSignal");
     }
     assertSafeRequestHeaders(request.headers);
-    const output = request.outputSchema
+    const preparedSchema = prepareAnthropicSchema(request.outputSchema);
+    const output = preparedSchema.schema
       ? Output.object<OutputValue>({
-          schema: createValidatedAiSdkSchema<OutputValue>(request.outputSchema),
+          schema: createValidatedAiSdkSchema<OutputValue>(
+            preparedSchema.schema,
+          ),
           name: request.outputSchemaName,
         })
       : Output.text();
@@ -125,7 +276,7 @@ export class AiSdkAnthropicMessagesAdapter implements NativeModelAdapter {
         headers: request.headers,
         providerOptions: {
           anthropic: {
-            structuredOutputMode: structuredOutputModeFor(request.outputSchema),
+            structuredOutputMode: preparedSchema.structuredOutputMode,
             ...toAnthropicOptions(request.reasoning?.effort),
           },
         },
