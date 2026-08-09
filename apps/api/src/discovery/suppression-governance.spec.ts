@@ -55,7 +55,17 @@ function makeHarness(record: SuppressionRow) {
       create: createDecision,
       findMany: vi.fn(async () => []),
     },
-    canonicalCompany: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    canonicalCompany: {
+      findMany: vi.fn(async ({ where }: { where?: { id?: { gt?: string } } }) =>
+        where?.id?.gt
+          ? []
+          : [{
+              id: '66666666-6666-4666-8666-666666666666',
+              domain: ' HTTPS://WWW.EXAMPLE.COM/path ',
+              name: '  ACME   GmbH ',
+            }]),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
   };
   const prisma = {
     withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
@@ -173,7 +183,10 @@ describe('Suppression governance', () => {
       create: expect.objectContaining({ type, value: canonicalValue }),
     }));
     if (type === 'domain' || type === 'company_name') {
-      expect(h.tx.canonicalCompany.updateMany).toHaveBeenCalled();
+      expect(h.tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['66666666-6666-4666-8666-666666666666'] } },
+        data: { status: 'SUPPRESSED' },
+      });
     }
   });
 
@@ -201,21 +214,23 @@ describe('Suppression governance', () => {
     const h = makeHarness(row('PREFERENCE'));
     const cursor = '55555555-5555-4555-8555-555555555555';
 
-    await h.service.listSuppressions(CTX, { cursor, limit: 999 });
-    await h.service.listSuppressionDecisions(CTX, SUPPRESSION_ID, { cursor, limit: 999 });
+    const suppressions = await h.service.listSuppressions(CTX, { cursor, limit: 999 });
+    const decisions = await h.service.listSuppressionDecisions(CTX, SUPPRESSION_ID, { cursor, limit: 999 });
 
     expect(h.tx.suppressionRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({
       cursor: { id: cursor },
       skip: 1,
-      take: 100,
+      take: 101,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     }));
     expect(h.tx.suppressionDecision.findMany).toHaveBeenCalledWith(expect.objectContaining({
       cursor: { id: cursor },
       skip: 1,
-      take: 100,
+      take: 101,
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     }));
+    expect(suppressions).toMatchObject({ rows: [expect.any(Object)], hasMore: false, nextCursor: null });
+    expect(decisions).toEqual({ rows: [], hasMore: false, nextCursor: null });
   });
 
   it('并发同 requestId 使用 INSERT ON CONFLICT 语义返回同一事实，不因唯一键竞争变成 500', async () => {

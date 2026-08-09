@@ -6,7 +6,12 @@ const root = resolve(__dirname, '../../../..');
 const schema = readFileSync(resolve(root, 'packages/db/prisma/schema.prisma'), 'utf8');
 const openApi = JSON.parse(
   readFileSync(resolve(root, 'packages/contracts/openapi/openapi.json'), 'utf8'),
-) as { paths: Record<string, Record<string, { responses?: Record<string, unknown> }>> };
+) as {
+  paths: Record<string, Record<string, {
+    parameters?: Array<{ name?: string; schema?: { type?: string } }>;
+    responses?: Record<string, { content?: { 'application/json'?: { schema?: { required?: string[] } } } }>;
+  }>>;
+};
 const readMigration = (): string =>
   readFileSync(
     resolve(root, 'packages/db/prisma/migrations/20260810010000_suppression_decision_governance/migration.sql'),
@@ -44,5 +49,8 @@ describe('suppression decision governance migration', () => {
   it('publishes the legal-release 409 as a machine-readable API response', () => {
     const operation = openApi.paths['/api/v1/suppressions/{id}/decisions']?.post;
     expect(operation?.responses).toHaveProperty('409');
+    expect(operation?.responses?.['409']?.content?.['application/json']?.schema?.required).toEqual(['error']);
+    const listOperation = openApi.paths['/api/v1/suppressions/{id}/decisions']?.get;
+    expect(listOperation?.parameters?.find((parameter) => parameter.name === 'limit')?.schema?.type).toBe('integer');
   });
 });
