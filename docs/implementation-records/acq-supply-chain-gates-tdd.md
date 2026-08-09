@@ -15,6 +15,7 @@
 5. 仍有遗留漏洞时，机器回执必须显示 `RATCHET_PASS_WITH_LEGACY_RISK`；只有零漏洞才能显示 `PASS_CLEAR`。
 6. Dependabot 将 patch/minor 维护按运行域拆分，协调式 major 继续单独迁移；CodeQL 与新供应链 job 先作为 non-required canary。
 7. `pnpm-workspace.yaml` 只接受覆盖全部 tracked workspace manifest 的 block-style 仓库内 glob；`pnpm-lock.yaml` 只接受当前 pnpm 生成的无转义/anchor/alias/tag/merge/block-scalar 子集与 registry integrity resolution。任何更宽 YAML 语义、catalog/configDependency、外部路径或非 registry 源都必须先扩展受信策略与 mutation 合同。
+8. 任一 tracked manifest 都不得用 `pnpm.auditConfig` 在 ratchet 前过滤 GHSA/CVE；候选配置不能把 advisory 消失冒充 remediation。
 
 ## RED → GREEN 证据
 
@@ -29,6 +30,8 @@
 | 7    | `1ca67ba2` / `69f4efaa`：direct URL/Git/tarball 与不可枚举的 archive base checkout 合同失败                  | `8ba9c2b8`：受信 source-policy 在 base/head install 前运行；base 改用可审计 detached Git worktree                  |
 | 8    | `ed34bd0b`：无显式协议、仅 `repo/commit/type: git` 的 lock resolution 仍能绕过                               | `8ba9c2b8`：隐式 Git/directory resolution、越界 importer/link 也 fail-closed；官方 registry 图通过                 |
 | 9    | `7ecda778`：workspace flow/越界 glob 与 YAML escape 合同失败；partial GREEN 的单引号保留键 mutation 再次变红 | `7e0230a1`：严格 workspace schema 与 lock YAML 子集 fail-closed；`\\x`/`\\u`/`\\U`、quoted key、flow path 均被阻断 |
+| 10   | `b4ecce59`：`!!binary` 可把 base64 解码为 Git resolution 并绕过 raw-text source marker                       | `de54ddd8`：全面拒绝 tag/anchor/alias 指示符；`!!`、`!<...>` 与 `*.alias` mutation 均被阻断                        |
+| 11   | `9d2214a8`：`pnpm.auditConfig.ignoreGhsas/ignoreCves` 可在 ratchet 前隐藏 advisory                           | `7102fe29`：所有 tracked manifest 的 `pnpm.auditConfig` 均 fail-closed，candidate 不能过滤 audit 事实              |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
