@@ -24,7 +24,10 @@
 # Terminal governance ownership block. Keep this last so broader later rules
 # cannot override the verifier, policy, schema, or required-context surfaces.
 /.github/ @mlhjyx
+/.gitleaks.toml @mlhjyx
+/.gitleaksignore @mlhjyx
 /AGENTS.md @mlhjyx
+/apps/api/src/discovery/provider-source-classes.json @mlhjyx
 /docs/status/ @mlhjyx
 /docs/governance/ @mlhjyx
 /docs/backend/ci-merge-automation.md @mlhjyx

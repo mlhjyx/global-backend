@@ -3,7 +3,6 @@
 import { createHash } from "node:crypto";
 import {
   access,
-  mkdir,
   readFile,
   readdir,
   writeFile,
@@ -21,9 +20,16 @@ import {
   validateRuntimeEvidence,
   validateTraceability,
 } from "./governance-contracts.mjs";
+import {
+  MAX_EVIDENCE_ARTIFACT_BYTES,
+  readRepoRegularFile,
+  resolveRepoOutputFile,
+} from "./governance-path-contracts.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROVIDER_REGISTRY = "docs/governance/provider-registry.json";
+const PROVIDER_SOURCE_CLASSES =
+  "apps/api/src/discovery/provider-source-classes.json";
 const PROVIDER_DOCUMENT = "docs/backend/provider-registry.md";
 const TRACEABILITY = "docs/governance/delivery-traceability.json";
 const RUNTIME_EVIDENCE_DIRECTORY = "docs/evidence/runtime";
@@ -138,20 +144,36 @@ async function loadRuntimeEvidence(now, issues) {
     } else if (validation.classification !== "INVALID") {
       evidenceById.set(evidence.evidence_id, evidence);
     }
-    if (evidence.artifact_path && (await exists(evidence.artifact_path))) {
-      const artifact = await readFile(absolute(evidence.artifact_path));
-      const digest = `sha256:${createHash("sha256").update(artifact).digest("hex")}`;
-      if (digest !== evidence.artifact_digest) {
+    if (evidence.artifact_path && validation.classification !== "INVALID") {
+      try {
+        const artifact = await readRepoRegularFile(
+          ROOT,
+          evidence.artifact_path,
+          { maxBytes: MAX_EVIDENCE_ARTIFACT_BYTES },
+        );
+        const digest = `sha256:${createHash("sha256").update(artifact).digest("hex")}`;
+        if (digest !== evidence.artifact_digest) {
+          issues.push({
+            code: "EVIDENCE_ARTIFACT_DIGEST_MISMATCH",
+            message: `${repoPath}: ${evidence.artifact_path} digest does not match`,
+          });
+        }
+      } catch (error) {
+        const code =
+          error?.code === "REPO_PATH_INVALID"
+            ? "EVIDENCE_ARTIFACT_PATH_INVALID"
+            : error?.code === "REPO_FILE_NOT_REGULAR"
+              ? "EVIDENCE_ARTIFACT_NOT_REGULAR"
+              : error?.code === "REPO_FILE_TOO_LARGE"
+                ? "EVIDENCE_ARTIFACT_TOO_LARGE"
+                : error?.code === "ENOENT"
+                  ? "EVIDENCE_ARTIFACT_MISSING"
+                  : "EVIDENCE_ARTIFACT_UNREADABLE";
         issues.push({
-          code: "EVIDENCE_ARTIFACT_DIGEST_MISMATCH",
-          message: `${repoPath}: ${evidence.artifact_path} digest does not match`,
+          code,
+          message: `${repoPath}: ${evidence.artifact_path} cannot be admitted (${error.message})`,
         });
       }
-    } else if (evidence.artifact_path) {
-      issues.push({
-        code: "EVIDENCE_ARTIFACT_MISSING",
-        message: `${repoPath}: ${evidence.artifact_path} does not exist`,
-      });
     }
   }
   return { evidenceById, classifications };
@@ -241,6 +263,7 @@ async function verifyRepository() {
   );
   const providerValidation = validateProviderRegistry(providerRegistry, {
     seed_providers: seedProviders,
+    source_class_manifest: await readJson(PROVIDER_SOURCE_CLASSES),
     existing_paths: existingPaths,
   });
   issues.push(...providerValidation.issues);
@@ -336,14 +359,14 @@ async function generateProviderDocument() {
 async function generateReleaseDocument(args) {
   const input = optionValue(args, "--input");
   if (!input) throw new Error("render-release requires --input <bundle.release.json>");
-  const bundle = await readJson(input);
+  const bundle = JSON.parse((await readRepoRegularFile(ROOT, input)).toString("utf8"));
   const output =
     optionValue(args, "--output") ?? input.replace(/\.release\.json$/, ".md");
   if (output === input) {
     throw new Error("render-release input must end with .release.json or provide --output");
   }
-  await mkdir(dirname(absolute(output)), { recursive: true });
-  await writeFile(absolute(output), renderReleaseBundle(bundle));
+  const outputFile = await resolveRepoOutputFile(ROOT, output);
+  await writeFile(outputFile, renderReleaseBundle(bundle));
   console.log(`Generated ${output} from ${input}.`);
 }
 

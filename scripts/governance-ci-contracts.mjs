@@ -8,12 +8,89 @@ import {
   uniqueStrings,
 } from "./governance-evidence-provider-contracts.mjs";
 
+function yamlScalar(value) {
+  const trimmed = String(value ?? "").trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function yamlJobNeeds(value) {
+  const scalar = yamlScalar(value);
+  if (!scalar) return [];
+  if (scalar.startsWith("[") && scalar.endsWith("]")) {
+    return scalar
+      .slice(1, -1)
+      .split(",")
+      .map(yamlScalar)
+      .filter(Boolean);
+  }
+  return [scalar];
+}
+
+/**
+ * Parse only the stable, indentation-delimited GitHub Actions job surface that
+ * governance needs. This deliberately ignores step-level `name`/`if` keys and
+ * fails closed later when a required context cannot be tied to one exact job.
+ */
+function workflowJobs(text) {
+  const lines = String(text).split(/\r?\n/);
+  const jobs = new Map();
+  const jobsIndex = lines.findIndex((line) => /^jobs:\s*(?:#.*)?$/.test(line));
+  if (jobsIndex < 0) return jobs;
+
+  let current = null;
+  let collectingNeeds = false;
+  for (let index = jobsIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line && !/^\s/.test(line)) break;
+    const jobMatch = line.match(/^ {2}([A-Za-z0-9_-]+):\s*(?:#.*)?$/);
+    if (jobMatch) {
+      current = {
+        id: jobMatch[1],
+        name: null,
+        condition: null,
+        continueOnError: null,
+        needs: [],
+      };
+      jobs.set(current.id, current);
+      collectingNeeds = false;
+      continue;
+    }
+    if (!current) continue;
+    const propertyMatch = line.match(/^ {4}([A-Za-z0-9_-]+):\s*(.*?)\s*$/);
+    if (propertyMatch) {
+      const [, key, value] = propertyMatch;
+      collectingNeeds = key === "needs" && !value;
+      if (key === "name") current.name = yamlScalar(value);
+      if (key === "if") current.condition = yamlScalar(value) || "<multiline>";
+      if (key === "continue-on-error") {
+        current.continueOnError = yamlScalar(value) || "<multiline>";
+      }
+      if (key === "needs" && value) current.needs = yamlJobNeeds(value);
+      continue;
+    }
+    if (collectingNeeds) {
+      const needMatch = line.match(/^ {6}-\s*(.+?)\s*$/);
+      if (needMatch) {
+        current.needs = [...current.needs, yamlScalar(needMatch[1])];
+        continue;
+      }
+    }
+    if (/^ {0,4}\S/.test(line)) collectingNeeds = false;
+  }
+  return jobs;
+}
+
 function workflowContextNames(workflows) {
   const names = new Set();
   for (const text of workflows.values()) {
-    for (const line of String(text).split(/\r?\n/)) {
-      const match = line.match(/^ {4}name:\s*["']?(.+?)["']?\s*$/);
-      if (match) names.add(match[1].trim());
+    for (const job of workflowJobs(text).values()) {
+      if (job.name) names.add(job.name);
     }
   }
   return names;
@@ -281,6 +358,50 @@ export function validateRequiredContexts(
           `${implementation.workflow} does not declare ${implementation.event} for ${contextName}`,
         ),
       );
+    }
+    if (workflow) {
+      const jobs = workflowJobs(workflow);
+      const matches = [...jobs.values()].filter(
+        (job) => job.name === contextName,
+      );
+      if (matches.length > 1) {
+        issues.push(
+          issue(
+            "REQUIRED_CONTEXT_JOB_AMBIGUOUS",
+            `${implementation.workflow} defines ${matches.length} jobs named ${contextName}`,
+          ),
+        );
+      }
+      if (matches.length === 1) {
+        const [job] = matches;
+        if (job.condition !== null) {
+          issues.push(
+            issue(
+              "REQUIRED_CONTEXT_JOB_CONDITIONAL",
+              `${implementation.workflow} job ${job.id} uses job-level if and can report a skipped required context`,
+            ),
+          );
+        }
+        if (job.continueOnError !== null) {
+          issues.push(
+            issue(
+              "REQUIRED_CONTEXT_CONTINUE_ON_ERROR",
+              `${implementation.workflow} job ${job.id} uses continue-on-error and cannot be a required context`,
+            ),
+          );
+        }
+        for (const dependencyId of job.needs) {
+          const dependency = jobs.get(dependencyId);
+          if (!dependency || !requiredContexts.includes(dependency.name)) {
+            issues.push(
+              issue(
+                "REQUIRED_CONTEXT_NEEDS_UNPROTECTED",
+                `${implementation.workflow} job ${job.id} depends on non-required job ${dependencyId}`,
+              ),
+            );
+          }
+        }
+      }
     }
   }
   const runtimeRequirements = asArray(policy?.workflow_runtime_requirements);

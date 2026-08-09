@@ -15,7 +15,7 @@
 
 ## 仓内 required contexts 与外部 ruleset
 
-唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会确认每个 context 在声明的 workflow 中以 job 名存在、该 workflow 订阅预期 PR event，并拒绝放宽 CODEOWNERS/review/history 保护的仓内政策。它还扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence 或 Release Bundle。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
+唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会把每个 context 绑定到声明 workflow 的一个唯一 job，确认 event 存在，并拒绝 required job 的 job-level `if` 与 `continue-on-error`；其 `needs` 只能指向另一个 required job，避免 GitHub 把条件跳过、容错失败或未受保护的前置依赖显示成绿色。验证器同时拒绝放宽 CODEOWNERS/review/history 保护的仓内政策，并扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence、Release Bundle、Gitleaks suppression 配置或 Provider SourceClass manifest。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
 
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 
@@ -41,6 +41,10 @@ GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` rulese
 - Gitleaks 的 PR job 扫描 action 计算的 first-parent PR commit range；完整
   checkout 只保证 range 可达，不代表每次 PR 都重扫仓库全历史。历史暴露面须
   另走显式审计、分诊与轮换流程；
+- PR 扫描使用 base SHA 中的 `.gitleaks.toml` 与 `.gitleaksignore`，同一个 PR
+  不能先放宽规则或新增 fingerprint 再隐藏本次提交；这两份 suppression 配置也
+  位于终结 CODEOWNERS 块。配置变更合入后，main push 才会使用新版本；因此仍
+  必须先完成外部 CODEOWNER/ruleset 配置和用户对 exact head 的授权；
 - RepositoryRole 5 仍有 `always` bypass；
 - classic branch-protection API 返回未配置；当前保护来自 repository ruleset。
 

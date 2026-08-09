@@ -123,7 +123,10 @@
     "owner": "@mlhjyx",
     "terminal_patterns": [
       "/.github/",
+      "/.gitleaks.toml",
+      "/.gitleaksignore",
       "/AGENTS.md",
+      "/apps/api/src/discovery/provider-source-classes.json",
       "/docs/status/",
       "/docs/governance/",
       "/docs/backend/ci-merge-automation.md",

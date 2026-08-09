@@ -250,6 +250,24 @@ test("runtime evidence rejects missing identity and non-SHA-256 artifacts", () =
   );
 });
 
+test("runtime evidence rejects artifact paths outside the repository", () => {
+  for (const artifactPath of [
+    "/etc/passwd",
+    "../outside.json",
+    "docs/evidence/../../outside.json",
+  ]) {
+    const result = validateRuntimeEvidence(
+      runtimeEvidence({ artifact_path: artifactPath }),
+      { now: NOW },
+    );
+    assert.ok(
+      issueCodes(result).includes("EVIDENCE_ARTIFACT_PATH_INVALID"),
+      artifactPath,
+    );
+    assert.equal(result.classification, "INVALID");
+  }
+});
+
 test("runtime evidence cannot self-authorize an unbounded freshness window", () => {
   const result = validateRuntimeEvidence(
     runtimeEvidence({ valid_until: "2026-08-08T01:00:00.001Z" }),
@@ -268,6 +286,9 @@ test("provider registry is bound to code-seeded key, SourceClass, and enablement
         default_enablement: "ENABLED",
       },
     ],
+    source_class_manifest: {
+      public_web: ["public_intelligence"],
+    },
     existing_paths: new Set([
       "apps/api/src/discovery/providers/public-web.provider.spec.ts",
     ]),
@@ -281,6 +302,31 @@ test("provider registry is bound to code-seeded key, SourceClass, and enablement
     issueCodes(validateProviderRegistry(mutant, context)).includes(
       "PROVIDER_SOURCE_CLASS_DRIFT",
     ),
+  );
+  const extraClassMutant = providerRegistry({
+    providers: [
+      provider({
+        source_classes: ["public_intelligence", "bogus_unrouted_class"],
+      }),
+    ],
+  });
+  assert.ok(
+    issueCodes(validateProviderRegistry(extraClassMutant, context)).includes(
+      "PROVIDER_SOURCE_CLASS_DRIFT",
+    ),
+  );
+  const missingClassMutant = providerRegistry({
+    providers: [provider({ source_classes: ["public_intelligence"] })],
+  });
+  assert.ok(
+    issueCodes(
+      validateProviderRegistry(missingClassMutant, {
+        ...context,
+        source_class_manifest: {
+          public_web: ["public_intelligence", "industry_data"],
+        },
+      }),
+    ).includes("PROVIDER_SOURCE_CLASS_DRIFT"),
   );
   const disabledMutant = providerRegistry({
     providers: [provider({ default_enablement: "DISABLED" })],
@@ -324,6 +370,9 @@ test("provider seed parsing tolerates formatting but fails closed when no seed c
   ]);
   const validation = validateProviderRegistry(providerRegistry(), {
     seed_providers: [],
+    source_class_manifest: {
+      public_web: ["public_intelligence"],
+    },
     existing_paths: new Set([
       "apps/api/src/discovery/providers/public-web.provider.spec.ts",
     ]),
@@ -628,6 +677,8 @@ test("required-context policy fails when a repository workflow drops a named con
     "/apps/api/src/auth/ @mlhjyx",
     "# terminal governance ownership block",
     "/.github/ @mlhjyx",
+    "/.gitleaks.toml @mlhjyx",
+    "/.gitleaksignore @mlhjyx",
     "/docs/governance/ @mlhjyx",
     "/package.json @mlhjyx",
     "/scripts/governance-*.mjs @mlhjyx",
@@ -665,6 +716,8 @@ test("required-context policy fails when a repository workflow drops a named con
       owner: "@mlhjyx",
       terminal_patterns: [
         "/.github/",
+        "/.gitleaks.toml",
+        "/.gitleaksignore",
         "/docs/governance/",
         "/package.json",
         "/scripts/governance-*.mjs",
@@ -695,6 +748,56 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.deepEqual(
     validateRequiredContexts(policy, workflows, repositoryContext).issues,
     [],
+  );
+
+  for (const condition of [
+    "false",
+    "contains(github.event.pull_request.labels.*.name, 'run-ci')",
+  ]) {
+    const conditional = new Map(workflows);
+    conditional.set(
+      ".github/workflows/ci.yml",
+      `on:\n  pull_request:\njobs:\n  build:\n    if: ${condition}\n    name: build · typecheck · test\n`,
+    );
+    assert.ok(
+      issueCodes(
+        validateRequiredContexts(policy, conditional, repositoryContext),
+      ).includes("REQUIRED_CONTEXT_JOB_CONDITIONAL"),
+      condition,
+    );
+  }
+
+  const conditionalDependency = new Map(workflows);
+  conditionalDependency.set(
+    ".github/workflows/ci.yml",
+    "on:\n  pull_request:\njobs:\n  optional:\n    if: false\n    name: optional\n  build:\n    needs: optional\n    name: build · typecheck · test\n",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, conditionalDependency, repositoryContext),
+    ).includes("REQUIRED_CONTEXT_NEEDS_UNPROTECTED"),
+  );
+
+  const continueOnError = new Map(workflows);
+  continueOnError.set(
+    ".github/workflows/ci.yml",
+    "on:\n  pull_request:\njobs:\n  build:\n    name: build · typecheck · test\n    continue-on-error: true\n",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, continueOnError, repositoryContext),
+    ).includes("REQUIRED_CONTEXT_CONTINUE_ON_ERROR"),
+  );
+
+  const duplicateContext = new Map(workflows);
+  duplicateContext.set(
+    ".github/workflows/ci.yml",
+    "on:\n  pull_request:\njobs:\n  build-a:\n    name: build · typecheck · test\n  build-b:\n    name: build · typecheck · test\n",
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(policy, duplicateContext, repositoryContext),
+    ).includes("REQUIRED_CONTEXT_JOB_AMBIGUOUS"),
   );
 
   workflows.delete(".github/workflows/governance.yml");
@@ -772,6 +875,21 @@ test("required-context policy fails when a repository workflow drops a named con
       }),
     ).includes("CODEOWNER_PROTECTION_MISSING"),
   );
+
+  for (const scannerConfig of ["/.gitleaks.toml", "/.gitleaksignore"]) {
+    const unprotectedScannerConfig = codeowners.replace(
+      `${scannerConfig} @mlhjyx`,
+      "",
+    );
+    assert.ok(
+      issueCodes(
+        validateRequiredContexts(policy, workflows, {
+          codeowners: unprotectedScannerConfig,
+        }),
+      ).includes("CODEOWNER_PROTECTION_MISSING"),
+      scannerConfig,
+    );
+  }
 
   const movingTag = new Map(workflows);
   movingTag.set(

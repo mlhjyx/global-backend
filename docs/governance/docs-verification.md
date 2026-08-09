@@ -29,9 +29,9 @@ pnpm docs:verify
 | 链接 | 仓内目标或 Markdown heading anchor 不存在，或使用会跳到 GitHub host root 的 `/docs/...` 根相对路径 | 外部网页当前可用、链接内容可信 |
 | Registry 引用 | Capability/Object/Page/Scenario/Fixture/Adoption/Owner ID 不在各自 Registry 的声明列 | 引用关系本身业务正确 |
 | 历史 banner | 已登记的 Site 历史稿缺少冻结、dated 或 superseded 前言 | 可以删除、移动或覆盖历史证据 |
-| Provider Registry | 机器清单与代码 seed 的 key/SourceClass/default enablement 漂移，test path 不存在，或生成页被手改 | Provider 当前启用、外部源健康或运行成功 |
+| Provider Registry | 机器清单与代码 seed 的 key/default enablement 漂移、SourceClass 不精确等于代码 manifest、test path 不存在，或生成页被手改 | Provider 当前启用、外部源健康或运行成功 |
 | Delivery traceability | Capability/Object/operationId/code/test/Scenario 任一不存在；`PILOT/GA` 无 fresh PASS RuntimeEvidence 或 Release Bundle | test 内容足以覆盖业务语义，或用户已经可用 |
-| RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
+| RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；artifact 路径逃逸、符号链接、非普通文件或超过 10 MiB；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
 | Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权 |
 | Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |

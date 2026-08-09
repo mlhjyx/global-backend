@@ -28,7 +28,8 @@ RuntimeEvidence 文件必须位于 `docs/evidence/runtime/`、使用 [RuntimeEvi
 - 完整 Git commit 与明确 environment；
 - `verified_at`、`valid_until` 与 `evidence_kind`；
 - 闭合的 `PASS | FAIL | UNKNOWN` result；
-- `sha256:` artifact digest；若声明仓内 artifact path，验证器会重算字节摘要。
+- `sha256:` artifact digest；若声明仓内 artifact path，路径必须是仓库内无
+  `..` 的普通文件、不得是符号链接且最大 10 MiB，验证器才会有界读取并重算摘要。
 
 时间到达 `valid_until` 后，记录自动成为 `HISTORICAL`：保留 provenance，但不能满足 `PILOT`/`GA` 门。TEST_ANCHOR、旧真机日志、手工日期和“命令曾通过”的叙述都不能替代这张记录。
 

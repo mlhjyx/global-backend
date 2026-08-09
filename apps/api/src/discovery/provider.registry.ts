@@ -27,6 +27,7 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { readPatentCache, enqueuePatentLookup } from '../adapters/patent-inventor-cache';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import providerSourceClassManifest from './provider-source-classes.json';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -138,6 +139,26 @@ export class DiscoveryProviderRegistry {
       this.discovery.push(sandbox);
       this.contacts.push(sandbox);
       this.emailVerifiers.push(sandbox);
+    }
+    this.assertDiscoverySourceClasses();
+  }
+
+  /** Keep the machine governance manifest bound to the classes used by routing. */
+  private assertDiscoverySourceClasses(): void {
+    for (const adapter of this.discovery) {
+      const expected = providerSourceClassManifest[
+        adapter.key as keyof typeof providerSourceClassManifest
+      ] as readonly SourceClass[] | undefined;
+      const actual = adapter.classes;
+      const exact =
+        expected !== undefined &&
+        expected.length === actual.length &&
+        expected.every((sourceClass) => actual.includes(sourceClass));
+      if (!exact) {
+        throw new Error(
+          `provider source-class manifest drift for ${adapter.key}`,
+        );
+      }
     }
   }
 
