@@ -13,7 +13,9 @@ import {
 import { ApiBearerAuth, ApiHeader, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { Enveloped, envelope, PageEnveloped, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { CompanyService } from './company.service';
@@ -23,11 +25,13 @@ import { CompanyDto, OfferingDto } from './dto/company.dto';
 @ApiTags('Companies')
 @ApiBearerAuth()
 @Controller('companies')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class CompanyController {
   constructor(private readonly companies: CompanyService) {}
 
   @Post()
+  @RequireScopes('acquisition:write')
   @HttpCode(202)
   @ApiOperation({
     summary: '提交官网，创建企业画像并触发理解（异步）',
@@ -91,6 +95,7 @@ export class CompanyController {
   }
 
   @Post(':companyId/confirm')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）' })
   @ApiEnvelope(CompanyDto)

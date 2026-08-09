@@ -17,7 +17,9 @@ import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec
 import { IsIn, IsInt, IsString, Length, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
 import { Enveloped, envelope } from '../common/envelope';
 import { ASSET_KINDS } from './object-key';
@@ -189,7 +191,8 @@ function publicAssetErrorMessage(code: string | null): string | null {
 @ApiTags('SiteBuilder')
 @ApiBearerAuth()
 @Controller('site-builder')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class AssetsController {
   private readonly log = new Logger(AssetsController.name);
 
@@ -199,6 +202,7 @@ export class AssetsController {
   ) {}
 
   @Post('sites/:id/assets/presign')
+  @RequireScopes('acquisition:write')
   @HttpCode(201)
   @ApiOperation({
     summary: '素材上传第 1 步：校验并签发直传 URL（15 分钟有效）',
@@ -233,6 +237,7 @@ export class AssetsController {
   }
 
   @Post('assets/:id/commit')
+  @RequireScopes('acquisition:write')
   @ApiOperation({
     summary: '素材上传第 3 步：魔数/大小/去重校验 → 归位；doc 类进 KB 队列',
   })
@@ -333,6 +338,7 @@ export class AssetsController {
   }
 
   @Delete('assets/:id')
+  @RequireScopes('acquisition:write')
   @HttpCode(204)
   @ApiOperation({ summary: '引用守卫通过后软删除素材；对象由异步清理回收' })
   @ApiResponse({ status: 204, description: 'Asset 已 tombstone' })

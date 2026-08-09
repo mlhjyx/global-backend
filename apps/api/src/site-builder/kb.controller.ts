@@ -2,7 +2,9 @@ import { Controller, Get, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { Enveloped, envelope } from '../common/envelope';
 import { KbService, KbStatus } from './kb.service';
@@ -10,7 +12,8 @@ import { KbService, KbStatus } from './kb.service';
 @ApiTags('SiteBuilder')
 @ApiBearerAuth()
 @Controller('site-builder')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class KbController {
   constructor(private readonly kb: KbService) {}
 

@@ -3,7 +3,9 @@ import { ApiBearerAuth, ApiOperation, ApiProperty, ApiQuery, ApiTags } from '@ne
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { EventsService } from './events.service';
@@ -74,7 +76,8 @@ class AckEventsDto {
 @ApiTags('Events')
 @ApiBearerAuth()
 @Controller('events')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
@@ -103,6 +106,7 @@ export class EventsController {
   }
 
   @Post('ack')
+  @RequireScopes('acquisition:event:ack')
   @HttpCode(200)
   @ApiOperation({ summary: 'ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）' })
   @ApiEnvelope({ type: 'object', required: ['acked'], properties: { acked: { type: 'integer' } } })

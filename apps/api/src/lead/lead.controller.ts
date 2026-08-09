@@ -13,7 +13,9 @@ import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
@@ -52,11 +54,13 @@ class SanctionsReviewDto {
 @ApiTags('Leads')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class LeadController {
   constructor(private readonly leads: LeadService) {}
 
   @Post('icps/:icpId/qualify')
+  @RequireScopes('acquisition:write')
   @HttpCode(202)
   @ApiOperation({ summary: '对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）' })
   @ApiEnvelope(
@@ -113,6 +117,7 @@ export class LeadController {
   }
 
   @Get('leads/:leadId')
+  @RequireScopes('acquisition:read', 'personal-data:read')
   @ApiOperation({ summary: 'Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史' })
   @ApiEnvelope(LEAD_SCHEMA)
   async get(@Ctx() ctx: RequestContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
@@ -120,6 +125,7 @@ export class LeadController {
   }
 
   @Post('leads/:leadId/accept')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）' })
   @ApiEnvelope(LEAD_SCHEMA)
@@ -132,6 +138,7 @@ export class LeadController {
   }
 
   @Post('leads/:leadId/reject')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '拒绝 Lead（→ REJECTED，原因留痕做质量反馈）' })
   @ApiEnvelope(LEAD_SCHEMA)
@@ -144,6 +151,10 @@ export class LeadController {
   }
 
   @Post('leads/:leadId/sanctions-review')
+  @RequireScopes(
+    'acquisition:review',
+    'compliance:manage',
+  )
   @HttpCode(200)
   @ApiOperation({
     summary: '制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付',

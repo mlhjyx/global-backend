@@ -15,7 +15,9 @@ import {
 } from "@nestjs/swagger";
 import { AuthGuard } from "../auth/auth.guard";
 import { Ctx } from "../auth/ctx.decorator";
+import { RequireScopes } from "../auth/require-scopes.decorator";
 import { RequestContext } from "../auth/request-context";
+import { ScopesGuard } from "../auth/scopes.guard";
 import { ApiEnvelope } from "../common/api-envelope.decorator";
 import { Enveloped, envelope } from "../common/envelope";
 import { IntakeDto, IntakeResultDto } from "./dto/intake.dto";
@@ -41,7 +43,8 @@ function intakeErrorSchema(codes: string[]) {
 @ApiTags("SiteBuilder")
 @ApiBearerAuth()
 @Controller("site-builder")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes("acquisition:write")
 export class IntakeController {
   constructor(private readonly intake: IntakeService) {}
 
