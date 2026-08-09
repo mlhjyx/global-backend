@@ -90,7 +90,7 @@ function pnpmAudit(advisories = [advisory()]) {
           vulnerable_versions: item.vulnerable_versions,
           patched_versions: item.patched_versions,
           url: item.url,
-          findings: [
+          findings: item.findings ?? [
             { version: "1.0.0", paths: [`api > ${item.package}@1.0.0`] },
           ],
         },
@@ -195,6 +195,54 @@ test("a resolved advisory cannot reappear relative to the PR base audit", async 
   assert.ok(
     issueCodes(malformedComparison).includes("AUDIT_COMPARISON_INVALID"),
   );
+});
+
+test("an admitted advisory cannot expand to a new version or dependency path", async () => {
+  const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
+  const existing = advisory();
+  const baseAudit = pnpmAudit([
+    {
+      ...existing,
+      findings: [{ version: "1.0.0", paths: ["api > example-runtime@1.0.0"] }],
+    },
+  ]);
+  const expandedAudit = pnpmAudit([
+    {
+      ...existing,
+      findings: [
+        {
+          version: "1.0.0",
+          paths: [
+            "api > example-runtime@1.0.0",
+            "worker > example-runtime@1.0.0",
+          ],
+        },
+        { version: "1.1.0", paths: [] },
+      ],
+    },
+  ]);
+
+  const result = evaluateProductionAudit(expandedAudit, baseline([existing]), {
+    now: NOW,
+    comparisonAudit: baseAudit,
+  });
+  assert.ok(issueCodes(result).includes("AUDIT_EXPOSURE_EXPANDED"));
+});
+
+test("admitted advisory version metadata cannot drift without review", async () => {
+  const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
+  const existing = advisory();
+  const drifted = advisory({
+    vulnerable_versions: "<3.0.0",
+    patched_versions: ">=3.0.0",
+  });
+
+  const result = evaluateProductionAudit(
+    pnpmAudit([drifted]),
+    baseline([existing]),
+    { now: NOW, comparisonAudit: pnpmAudit([existing]) },
+  );
+  assert.ok(issueCodes(result).includes("AUDIT_ADVISORY_METADATA_DRIFT"));
 });
 
 test("initial bootstrap is exact and cannot pre-admit future advisories", async () => {
@@ -419,7 +467,8 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
     "package.json | */package.json",
     "pnpm-lock.yaml | pnpm-workspace.yaml",
     ".npmrc | */.npmrc",
-    "pnpmfile.cjs | patches/*",
+    ".pnpmfile.cjs | */.pnpmfile.cjs",
+    "patches/*",
   ]) {
     assert.ok(
       workflow.includes(protectedBootstrapPath),
