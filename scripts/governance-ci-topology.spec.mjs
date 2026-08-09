@@ -167,3 +167,22 @@ test("the topology cleanup does not rename or expand required contexts", async (
     "nontechnical decision card freshness",
   ]);
 });
+
+test("the topology suite uses the established governance entry without changing the root command", async () => {
+  const [packageText, governanceContractsTest] = await Promise.all([
+    readRepositoryFile("package.json"),
+    readRepositoryFile("scripts/governance-contracts.spec.mjs"),
+  ]);
+  const repositoryPackage = JSON.parse(packageText);
+
+  assert.equal(
+    repositoryPackage.scripts["governance:test"],
+    "node --test scripts/governance-contracts.spec.mjs scripts/governance-path-contracts.spec.mjs",
+    "the Copy fixed-source-bound root package command must remain unchanged",
+  );
+  assert.match(
+    governanceContractsTest,
+    /^import "\.\/governance-ci-topology\.spec\.mjs";$/m,
+    "the existing governance test entry must load the topology suite",
+  );
+});
