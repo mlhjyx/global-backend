@@ -481,6 +481,125 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     );
   });
 
+  it("preserves the generated v15 runtime binding and complete post-#361 compiled tree", () => {
+    const recoveryManifestBytes = readFileSync(
+      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH),
+    );
+    const bindingBytes = readFileSync(
+      resolve(
+        REPOSITORY_ROOT,
+        COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+      ),
+    );
+    const artifact = JSON.parse(bindingBytes.toString("utf8"));
+
+    expect(() =>
+      validateCopySonnetRecoveryRuntimeBindingArtifact(
+        artifact,
+        recoveryManifestBytes,
+      ),
+    ).not.toThrow();
+    expect(sha256(bindingBytes)).toBe(
+      "838121ccf9649b05d9c04b05a1cec7ba094439a8a81a177462e5955a17c2ef7c",
+    );
+    expect(sha256(recoveryManifestBytes)).toBe(
+      "0ce90bf7f96b0012b85d410601079e9696305bfeb3e385e16358c5b9c9e4850e",
+    );
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1",
+      fixedSourceCommit: "64dcad8bb93dc96ad32f39aef2adc31dcc705f4c",
+      preparationHeadCommit: "64dcad8bb93dc96ad32f39aef2adc31dcc705f4c",
+      artifactDigest:
+        "1c898f79745d14fce431404c0196beb5a69f68286d74a8588bec66d71e432e44",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      recoveryManifestReference: {
+        path: COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+        fileSha256:
+          "0ce90bf7f96b0012b85d410601079e9696305bfeb3e385e16358c5b9c9e4850e",
+        artifactDigest:
+          "b671dbd416b4ff279fd75290f91492bb37e7d5d4d41c29e9f5c86897690d8317",
+        manifestDigest:
+          "789332c4542eadd5e6b534aa18698e7bb4dc0f312d9b081d50d7c1ececc368f5",
+      },
+      sourceBundle: {
+        digest:
+          "401414f6eda3e12aedf8c861772401b779ae82ddff132efd9eb550b6119a16e0",
+      },
+      compiledRuntimeExpectation: {
+        buildSourceCommit: "64dcad8bb93dc96ad32f39aef2adc31dcc705f4c",
+        artifactCount: COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS.length,
+        artifactTreeDigest:
+          "8cc2be5d0cc7a1ceeba94817e6fa9abea2c6602cc354bb38ecc487b5f349b30c",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/types.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-sonnet-recovery-admission.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-sonnet-recovery-contract.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-sonnet-recovery-manifest-prep.js",
+          }),
+        ]),
+      },
+      manifest: {
+        manifestId:
+          "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
+        executions: [
+          expect.objectContaining({
+            executionKey: "copy-sonnet-recovery-v15-claude-sonnet-5",
+            alias: "claude-sonnet-5",
+            protocol: "anthropic_messages",
+            reasoning: "medium",
+          }),
+        ],
+      },
+      preparationVerification: {
+        fixedCommitReachableFromOriginMainAtPreparation: false,
+        compiledRuntimeBuiltFromFixedSource: true,
+        futureExecutionMustReverify: true,
+      },
+    });
+    expect(
+      artifact.compiledRuntimeExpectation.artifacts.map(
+        ({ path }: { path: string }) => path,
+      ),
+    ).toEqual(COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS);
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(
+      "1c898f79745d14fce431404c0196beb5a69f68286d74a8588bec66d71e432e44",
+    );
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "b082527a430377a8ccb99401d5c17cc62b89a96500a8cb92222f8f5af6eca85b",
+    );
+    expect(canonicalDigest(artifact)).toBe(
+      "fac299c0322f03bf54d77739911bd8819572d135661c9c87487d985846f5677b",
+    );
+  });
+
   it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(
     "rebuilds the create-only binding from the clean current commit",
     async () => {
