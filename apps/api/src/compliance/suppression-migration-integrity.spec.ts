@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../../../..');
 const schema = readFileSync(resolve(root, 'packages/db/prisma/schema.prisma'), 'utf8');
+const openApi = JSON.parse(
+  readFileSync(resolve(root, 'packages/contracts/openapi/openapi.json'), 'utf8'),
+) as { paths: Record<string, Record<string, { responses?: Record<string, unknown> }>> };
 const readMigration = (): string =>
   readFileSync(
     resolve(root, 'packages/db/prisma/migrations/20260810010000_suppression_decision_governance/migration.sql'),
@@ -29,5 +32,17 @@ describe('suppression decision governance migration', () => {
     expect(migration).toContain('ALTER TABLE "suppression_decision" ENABLE ROW LEVEL SECURITY');
     expect(migration).toContain('ALTER TABLE "suppression_decision" FORCE ROW LEVEL SECURITY');
     expect(migration).toMatch(/FOREIGN KEY \("workspace_id", "suppression_id"\)/);
+  });
+
+  it('enforces protection/reason and decision/reason semantic pairs at the DB layer', () => {
+    const migration = readMigration();
+    expect(migration).toContain('suppression_record_preference_reason_check');
+    expect(migration).toContain('suppression_decision_semantic_pair_check');
+    expect(migration).toMatch(/"decision" = 'RELEASE_REQUEST_DENIED'[\s\S]+"reason_code" = 'LEGAL_SUPPRESSION_IMMUTABLE'/);
+  });
+
+  it('publishes the legal-release 409 as a machine-readable API response', () => {
+    const operation = openApi.paths['/api/v1/suppressions/{id}/decisions']?.post;
+    expect(operation?.responses).toHaveProperty('409');
   });
 });

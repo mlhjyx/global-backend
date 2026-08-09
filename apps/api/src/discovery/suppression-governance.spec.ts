@@ -36,6 +36,7 @@ function makeHarness(record: SuppressionRow) {
   const tx = {
     suppressionRecord: {
       findUnique: vi.fn(async () => current),
+      findMany: vi.fn(async () => [current]),
       delete: deleteRecord,
       upsert: vi.fn(async ({ update }: { update: Partial<SuppressionRow> }) => {
         current = { ...current, ...update };
@@ -194,6 +195,27 @@ describe('Suppression governance', () => {
     });
     expect(h.deleteRecord).not.toHaveBeenCalled();
     expect(h.current()).toMatchObject({ id: SUPPRESSION_ID, protectionClass: 'LEGAL' });
+  });
+
+  it('append-only suppression 与 decision 查询使用稳定 cursor 且服务端硬限制 100 行', async () => {
+    const h = makeHarness(row('PREFERENCE'));
+    const cursor = '55555555-5555-4555-8555-555555555555';
+
+    await h.service.listSuppressions(CTX, { cursor, limit: 999 });
+    await h.service.listSuppressionDecisions(CTX, SUPPRESSION_ID, { cursor, limit: 999 });
+
+    expect(h.tx.suppressionRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      cursor: { id: cursor },
+      skip: 1,
+      take: 100,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    }));
+    expect(h.tx.suppressionDecision.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      cursor: { id: cursor },
+      skip: 1,
+      take: 100,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    }));
   });
 
   it('并发同 requestId 使用 INSERT ON CONFLICT 语义返回同一事实，不因唯一键竞争变成 500', async () => {
