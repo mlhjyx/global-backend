@@ -1,0 +1,84 @@
+{
+  "schema_version": "release-bundle/v1",
+  "release_id": "REPLACE_WITH_STABLE_RELEASE_ID",
+  "release_status": "CANDIDATE",
+  "environment": "pilot",
+  "release_owner": "REPLACE_WITH_OWNER_ID",
+  "implementation_commit": "REPLACE_WITH_40_CHARACTER_GIT_SHA",
+  "released_at": "REPLACE_WITH_ISO_8601_INSTANT",
+  "capability_ids": ["REPLACE_WITH_CAPABILITY_ID"],
+  "external_provenance": {
+    "status": "EXTERNAL_UNVERIFIED",
+    "verifier": "NONE",
+    "verification_ref": "NONE"
+  },
+  "traceability_bindings": [
+    {
+      "chain_id": "REPLACE_WITH_TRACEABILITY_CHAIN_ID",
+      "capability_id": "REPLACE_WITH_CAPABILITY_ID",
+      "evidence_ids": ["REPLACE_WITH_CURRENT_RUNTIME_EVIDENCE_ID"]
+    }
+  ],
+  "scope": {
+    "included": ["REPLACE_WITH_USER_VISIBLE_SCOPE"],
+    "excluded": ["REPLACE_WITH_EXPLICIT_NON_SCOPE"]
+  },
+  "promise": {
+    "user_outcome": "REPLACE_WITH_PROMISED_OUTCOME",
+    "non_guarantees": ["REPLACE_WITH_NON_GUARANTEE"]
+  },
+  "source": {
+    "repository": "REPLACE_WITH_OWNER_REPOSITORY",
+    "base_commit": "REPLACE_WITH_40_CHARACTER_BASE_SHA",
+    "source_head": "REPLACE_WITH_40_CHARACTER_SOURCE_SHA"
+  },
+  "evidence_ids": ["REPLACE_WITH_CURRENT_RUNTIME_EVIDENCE_ID"],
+  "operations": {
+    "runbook": "REPLACE_WITH_RUNBOOK_PATH",
+    "observability": "REPLACE_WITH_OBSERVABILITY_PATH_OR_QUERY"
+  },
+  "data": {
+    "classification": "REPLACE_WITH_DATA_CLASSIFICATION",
+    "retention": "REPLACE_WITH_RETENTION_RULE"
+  },
+  "rollback_and_exit": {
+    "trigger": "REPLACE_WITH_ROLLBACK_TRIGGER",
+    "procedure": "REPLACE_WITH_ROLLBACK_PROCEDURE"
+  },
+  "guides": ["REPLACE_WITH_USER_OR_OPERATOR_GUIDE"],
+  "approval": {
+    "machine": {
+      "status": "NOT_VERIFIED",
+      "provenance": "NONE",
+      "evidence_ref": "REPLACE_WITH_CHECK_RUN_URL",
+      "verified_at": "REPLACE_WITH_ISO_8601_INSTANT"
+    },
+    "reviewer": {
+      "status": "NOT_REVIEWED",
+      "provenance": "NONE",
+      "evidence_ref": "REPLACE_WITH_REVIEW_URL",
+      "actor": "REPLACE_WITH_INDEPENDENT_REVIEWER",
+      "reviewed_at": "REPLACE_WITH_ISO_8601_INSTANT"
+    },
+    "user_authorization": {
+      "status": "NOT_AUTHORIZED",
+      "provenance": "NONE",
+      "evidence_ref": "REPLACE_WITH_SIGNED_AUTHORIZATION_REF",
+      "actor": "REPLACE_WITH_PRODUCT_OWNER",
+      "authorized_at": "REPLACE_WITH_ISO_8601_INSTANT"
+    }
+  },
+  "merge_evidence": {
+    "method": "PENDING",
+    "base_commit": "REPLACE_WITH_40_CHARACTER_BASE_SHA",
+    "source_head": "REPLACE_WITH_40_CHARACTER_SOURCE_SHA",
+    "result_commit": "REPLACE_AFTER_MERGE",
+    "parent_commits": [],
+    "merged_at": "REPLACE_AFTER_MERGE"
+  },
+  "learning": {
+    "owner": "REPLACE_WITH_LEARNING_OWNER",
+    "review_at": "REPLACE_WITH_REVIEW_INSTANT",
+    "success_measure": "REPLACE_WITH_MEASURABLE_OUTCOME"
+  }
+}

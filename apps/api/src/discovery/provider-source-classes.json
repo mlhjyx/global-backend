@@ -1,0 +1,27 @@
+{
+  "public_web": ["public_intelligence", "industry_data"],
+  "wikidata": ["company_registry", "industry_data"],
+  "openstreetmap": ["industry_data"],
+  "gleif": ["company_registry"],
+  "directory": ["industry_data"],
+  "trade_fair": ["industry_data"],
+  "ted": ["public_intelligence"],
+  "openfda": ["public_intelligence"],
+  "digital_footprint": ["public_intelligence"],
+  "structured_harvest": ["public_intelligence"],
+  "smtp_self": ["email_verification"],
+  "decision_maker": ["contact_discovery"],
+  "companies_house": ["contact_discovery"],
+  "inpi_rne": ["contact_discovery"],
+  "google_patents": ["contact_discovery"],
+  "samgov": ["public_intelligence"],
+  "web_watch": ["public_intelligence"],
+  "email_guess": ["email_verification"],
+  "sandbox": [
+    "trade_data",
+    "b2b_company_person",
+    "company_registry",
+    "public_intelligence",
+    "industry_data"
+  ]
+}

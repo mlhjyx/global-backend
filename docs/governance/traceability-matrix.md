@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 关系 Owner：`OWN-DOC-GOV`
 > 产品批准基线：Gate 2 + Gate 4 + Gate 5 + Gate 6 + Gate 7 + Gate 8，2026-07-20；Gate 8 为保留独立人工、真实 Release 和全部 blocker 的条件通过
-> 工程核验基线：`origin/main@73f08f9f6b474b16a92e139f2c83cffcc8a6fb92`
+> 工程核验基线：当前 main 见 [`status/current.md`](../status/current.md)；存在性硬门见 [`delivery-traceability/v1`](delivery-traceability.json)
 
 本表回答“一个用户结果如何追到页面、对象、机器合同、main 代码、测试和场景”。它不复制规范或测试内容；链接只证明关系存在，是否通过/部署仍看精确 Evidence/Release Bundle。
 
@@ -30,7 +30,8 @@ Segment/Actor/Problem/Job
 - 用户、旅程和 Page ID 的批准结论已收口到当前 Registry；阶段论证保留在 Git/PR。
 - “测试文件存在”只记 `TEST_ANCHOR`；除非有精确运行日期/提交/结果，不标 `TEST_PASSED_NOW`。
 - hidden preview controller 是内部输出边界，不进入 public OpenAPI operation 列。
-- 当前真实 Release Bundle 数为 0；不存在空索引或占位模板，不能从文档计划推出“用户可用”或“已发布”。
+- 当前真实 Release Bundle 数由 `governance:verify` 扫描 `docs/releases/*.release.json` 得出；模板明确位于 `docs/templates/` 且永远不计作 release，不能从文档计划推出“用户可用”或“已发布”。
+- 进入交付的机器链以 [`delivery-traceability.json`](delivery-traceability.json) 为准：Capability、Object、OpenAPI operationId、code path、test path 与 Scenario 都做真实存在性检查；`PILOT/GA` 另须满足链上全部 `required_evidence_kinds` 的 fresh PASS RuntimeEvidence，并由有效 Release Bundle 的 `traceability_bindings` 精确绑定同一 chain、capability 与 evidence set。Bundle 中的外部 refs 仅是待回读声明；当前独立 external verifier 不存在，所以所有 `PILOT/GA` 仍被 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED` 阻断。
 
 ## 2. 全 SaaS 产品地图追踪
 
@@ -133,6 +134,6 @@ Segment/Actor/Problem/Job
 - `OWN-SAAS-FE`、`OWN-DESIGN`、`OWN-SAAS-PLATFORM` 等实际人员/团队未指派；角色责任唯一但 operational assignee 缺失。
 - Claim public review、Workspace/Entitlement、Publish/Domain/Inquiry、指标事件等机器合同未建。
 - Fixture 仍为 `CATALOG_ONLY`；正式 frontend、E2E、受控视觉设计资产、面向真实用户的 Guide、真实 Release Bundle 和发布学习记录不存在。
-- `architecture/current.md` 的手写 OpenAPI 数字和 `INTEGRATION.md` 的 R3-B1 文案仍有已登记漂移。
+- `architecture/current.md` 的手写 OpenAPI 数字已删除并由 `governance:verify` 防回归；`INTEGRATION.md` 的 R3-B1 文案漂移仍按 Conflict Registry 管理。
 
-因此，本表证明“关系已登记”，不证明 Dev-Ready、实现、部署或用户可用。全局前端规则为 `APPROVED_AT_GATE_4`，Site 文档轴为 `APPROVED_AT_GATE_5 / SPEC_READY_WITH_BLOCKERS`，非 Site 域为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`；32 项外部候选保留各自已批准决定，但八项现用能力也仍只标 `*_HARDEN`。独立人工仍 `NOT_RUN / BLK-FE-006`，真实 Release Bundle 数仍为 0，Site 发布链继续 `TARGET_NOT_RUNNABLE`。
+因此，本表证明“关系已登记”，不证明 Dev-Ready、实现、部署或用户可用。全局前端规则为 `APPROVED_AT_GATE_4`，Site 文档轴为 `APPROVED_AT_GATE_5 / SPEC_READY_WITH_BLOCKERS`，非 Site 域为 `APPROVED_AT_GATE_6 / MAP_COMPLETE / NOT_DEV_READY`；32 项外部候选保留各自已批准决定，但八项现用能力也仍只标 `*_HARDEN`。独立人工仍 `NOT_RUN / BLK-FE-006`；当前 Release Bundle 数与获客机器链状态只见 [`status/current.md`](../status/current.md)，Site 发布链继续 `TARGET_NOT_RUNNABLE`。
