@@ -145,7 +145,11 @@ function baselineAdvisoryIssues(advisory, validUntil) {
 
 export function validateProductionAuditBaseline(
   baseline,
-  { now = new Date(), expectedBootstrapBase } = {},
+  {
+    now = new Date(),
+    expectedBootstrapBase,
+    expectedSourceLockfileDigest,
+  } = {},
 ) {
   const issues = [];
   if (!isObject(baseline) || baseline.schema_version !== BASELINE_SCHEMA) {
@@ -197,6 +201,17 @@ export function validateProductionAuditBaseline(
       issue(
         "BASELINE_BOOTSTRAP_BASE_MISMATCH",
         "candidate baseline is not bound to the pull request base commit",
+      ),
+    );
+  }
+  if (
+    expectedSourceLockfileDigest !== undefined &&
+    source?.lockfile_digest !== expectedSourceLockfileDigest
+  ) {
+    issues.push(
+      issue(
+        "BASELINE_SOURCE_LOCK_MISMATCH",
+        "candidate baseline lock digest does not match the trusted base lockfile",
       ),
     );
   }
@@ -312,6 +327,26 @@ function normalizePnpmAudit(audit) {
       ),
     );
   }
+  const metadataCounts = [
+    audit.metadata.dependencies,
+    audit.metadata.devDependencies,
+    audit.metadata.optionalDependencies,
+    audit.metadata.totalDependencies,
+  ];
+  if (
+    metadataCounts.some((count) => !Number.isInteger(count) || count < 0) ||
+    audit.metadata.totalDependencies !==
+      audit.metadata.dependencies +
+        audit.metadata.devDependencies +
+        audit.metadata.optionalDependencies
+  ) {
+    issues.push(
+      issue(
+        "AUDIT_METADATA_INVALID",
+        "pnpm audit dependency metadata must contain consistent non-negative integer counts",
+      ),
+    );
+  }
 
   const advisories = [];
   for (const raw of Object.values(audit.advisories)) {
@@ -376,11 +411,16 @@ function normalizePnpmAudit(audit) {
 export function evaluateProductionAudit(
   audit,
   baseline,
-  { now = new Date(), expectedBootstrapBase } = {},
+  {
+    now = new Date(),
+    expectedBootstrapBase,
+    expectedSourceLockfileDigest,
+  } = {},
 ) {
   const baselineValidation = validateProductionAuditBaseline(baseline, {
     now,
     expectedBootstrapBase,
+    expectedSourceLockfileDigest,
   });
   const normalizedAudit = normalizePnpmAudit(audit);
   const issues = [...baselineValidation.issues, ...normalizedAudit.issues];
@@ -390,6 +430,7 @@ export function evaluateProductionAudit(
       .map((item) => [advisoryIdentity(item), item]),
   );
   const currentIdentities = new Set();
+  const nowDate = now instanceof Date ? now : new Date(now);
 
   for (const current of normalizedAudit.advisories) {
     const identity = advisoryIdentity(current);
@@ -414,6 +455,47 @@ export function evaluateProductionAudit(
         issue(
           "AUDIT_SEVERITY_ESCALATED",
           `production advisory severity increased: ${identity}`,
+        ),
+      );
+    }
+    if (
+      Number.isFinite(nowDate.getTime()) &&
+      validDate(admitted.remediation?.due_at) &&
+      nowDate.getTime() >= Date.parse(admitted.remediation.due_at)
+    ) {
+      issues.push(
+        issue(
+          "AUDIT_REMEDIATION_OVERDUE",
+          `production advisory remediation is overdue: ${identity}`,
+        ),
+      );
+    }
+  }
+
+  if (expectedBootstrapBase !== undefined) {
+    const baselineIdentities = [...baselineByIdentity.keys()].sort();
+    const observedIdentities = [...currentIdentities].sort();
+    const exactIdentitySet =
+      baselineIdentities.length === observedIdentities.length &&
+      baselineIdentities.every(
+        (identity, index) => identity === observedIdentities[index],
+      );
+    const exactMetadata =
+      exactIdentitySet &&
+      normalizedAudit.advisories.every((current) => {
+        const admitted = baselineByIdentity.get(advisoryIdentity(current));
+        return (
+          admitted?.severity === current.severity &&
+          admitted?.vulnerable_versions === current.vulnerable_versions &&
+          admitted?.patched_versions === current.patched_versions &&
+          admitted?.url === current.url
+        );
+      });
+    if (!exactMetadata) {
+      issues.push(
+        issue(
+          "BASELINE_BOOTSTRAP_SET_MISMATCH",
+          "initial baseline must exactly equal the audited advisory identities and metadata",
         ),
       );
     }
@@ -471,6 +553,7 @@ function parseCliArguments(argv) {
     baseline: "docs/security/production-dependency-audit-baseline.json",
     auditFile: null,
     expectedBootstrapBase: undefined,
+    expectedSourceLockfileDigest: undefined,
   };
   for (let index = 0; index < tokens.length; index += 2) {
     const option = tokens[index];
@@ -480,6 +563,8 @@ function parseCliArguments(argv) {
     else if (option === "--audit-file") options.auditFile = value;
     else if (option === "--expected-bootstrap-base") {
       options.expectedBootstrapBase = value;
+    } else if (option === "--expected-source-lockfile-digest") {
+      options.expectedSourceLockfileDigest = value;
     } else throw new Error(`unsupported argument: ${option}`);
   }
   return Object.freeze(options);
@@ -493,6 +578,7 @@ async function main() {
     : runPnpmProductionAudit();
   const result = evaluateProductionAudit(audit, baseline, {
     expectedBootstrapBase: options.expectedBootstrapBase,
+    expectedSourceLockfileDigest: options.expectedSourceLockfileDigest,
   });
   if (!result.ok) {
     for (const item of result.issues) {

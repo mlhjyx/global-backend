@@ -52,9 +52,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_SHA: ${{ github.sha }}
           BASELINE_PATH: docs/security/production-dependency-audit-baseline.json
           TRUSTED_BASELINE: ${{ runner.temp }}/production-dependency-audit-baseline.json
           TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
+          BASE_LOCKFILE: ${{ runner.temp }}/base-pnpm-lock.yaml
+          BOOTSTRAP_DIFF: ${{ runner.temp }}/supply-chain-bootstrap-paths.txt
         run: |
           set -euo pipefail
           audit_args=(verify --baseline "$TRUSTED_BASELINE")
@@ -67,9 +70,30 @@ jobs:
               # One-time bootstrap: the candidate policy is usable only when it
               # binds itself to this exact PR base. After the first merge every
               # PR executes the verifier and baseline from its trusted base.
+              if ! git diff --no-renames --name-only -z "$PR_BASE_SHA...$GITHUB_SHA" > "$BOOTSTRAP_DIFF"; then
+                echo "::error::cannot prove the bootstrap dependency diff"
+                exit 1
+              fi
+              while IFS= read -r -d '' path; do
+                case "$path" in
+                  package.json | */package.json | \
+                  pnpm-lock.yaml | pnpm-workspace.yaml | \
+                  .npmrc | */.npmrc | \
+                  pnpmfile.cjs | patches/*)
+                    echo "::error::initial baseline cannot accompany dependency graph changes: $path"
+                    exit 1
+                    ;;
+                esac
+              done < "$BOOTSTRAP_DIFF"
+
+              git show "$PR_BASE_SHA:pnpm-lock.yaml" > "$BASE_LOCKFILE"
+              base_lock_digest="sha256:$(sha256sum "$BASE_LOCKFILE" | awk '{print $1}')"
               cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
               cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
-              audit_args+=(--expected-bootstrap-base "$PR_BASE_SHA")
+              audit_args+=(
+                --expected-bootstrap-base "$PR_BASE_SHA"
+                --expected-source-lockfile-digest "$base_lock_digest"
+              )
             fi
           else
             cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
