@@ -25,10 +25,10 @@ const MAX_SCHEMA_NODES = 4_096;
 function enqueueSchemaValues(
   pending: unknown[],
   values: readonly unknown[],
-  visited: number,
+  visitedValues: number,
 ): void {
   for (const value of values) {
-    if (visited + pending.length >= MAX_SCHEMA_NODES) {
+    if (visitedValues + pending.length >= MAX_SCHEMA_NODES) {
       throw new Error("Anthropic structured-output schema is too complex");
     }
     pending.push(value);
@@ -42,18 +42,18 @@ function structuredOutputModeFor(
   const pending: unknown[] = [schema];
   const seen = new WeakSet<object>();
   let requiresJsonTool = false;
-  let visited = 0;
+  let visitedValues = 0;
   while (pending.length > 0) {
     const current = pending.pop();
+    visitedValues += 1;
+    if (visitedValues > MAX_SCHEMA_NODES) {
+      throw new Error("Anthropic structured-output schema is too complex");
+    }
     if (current == null || typeof current !== "object") continue;
     if (seen.has(current)) continue;
     seen.add(current);
-    visited += 1;
-    if (visited > MAX_SCHEMA_NODES) {
-      throw new Error("Anthropic structured-output schema is too complex");
-    }
     if (Array.isArray(current)) {
-      enqueueSchemaValues(pending, current, visited);
+      enqueueSchemaValues(pending, current, visitedValues);
       continue;
     }
     const object = current as Readonly<Record<string, unknown>>;
@@ -64,7 +64,7 @@ function structuredOutputModeFor(
     ) {
       requiresJsonTool = true;
     }
-    enqueueSchemaValues(pending, Object.values(object), visited);
+    enqueueSchemaValues(pending, Object.values(object), visitedValues);
   }
   return requiresJsonTool ? "jsonTool" : "outputFormat";
 }
