@@ -24,8 +24,8 @@
 | 1    | `04f6e9b4`：4 个 suite 因 runtime/readiness 模块不存在而失败                       | `8ad3da81`：环境、回执、admission、readiness、Temporal probe 与 health controller 实现；24/24 聚焦测试、lint、build 通过 |
 | 2    | `8a0e9e90`：把 worker/relay 成功断言纠正为 `not_proven`，保持同一 RED 根因         | `8ad3da81`：development API-local ready；pilot/production 在 durable evidence 前 `not_ready`                             |
 | 3    | `270c7e6a`：listen wiring、generator、Temporal RPC 和三层 health 路由 8 项行为失败 | `8ad3da81`：真实 `app.listen(port, host)`、原子 generator、typed probe 与兼容端点通过                                    |
-| 4    | `b2d930f3`：governance test 精确报告 CI 缺 build-attestation step                  | 待最终 GREEN commit：required build 在 Copy final rebuild 后以 `${{ github.sha }}` 生成并自验回执                        |
-| 5    | `7ee28645`：生成 OpenAPI 的 build 为 open bag、ready 200/503 无 body schema        | 待最终 GREEN commit：build/readiness 200/503 使用相同 closed schema并重新导出机器合同                                    |
+| 4    | `b2d930f3`：governance test 精确报告 CI 缺 build-attestation step                  | `2181fdb9`：required build 在 Copy final rebuild 后以 `${{ github.sha }}` 生成并自验回执                                 |
+| 5    | `7ee28645`：生成 OpenAPI 的 build 为 open bag、ready 200/503 无 body schema        | `2181fdb9` + `1992f630`：build/readiness 使用 closed schema，机器生成格式重新导出且不经 Prettier 改写                    |
 
 ## 验证边界
 
