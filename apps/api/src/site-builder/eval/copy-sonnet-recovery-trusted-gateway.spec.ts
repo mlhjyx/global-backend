@@ -21,6 +21,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
   COPY_SONNET_RECOVERY_ADMISSION_SOURCE,
   copySonnetRecoveryReservationDigest,
@@ -39,7 +40,10 @@ import {
   COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
   createCopySonnetRecoveryRunner,
 } from "./copy-real-capability-runner";
-import { COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION } from "./copy-sonnet-recovery-contract";
+import {
+  COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+} from "./copy-sonnet-recovery-contract";
 
 const TOKEN = createHash("sha256")
   .update(import.meta.url)
@@ -98,9 +102,10 @@ async function readJson(
 
 async function recoveryGateway(
   catalog: readonly string[] = ["claude-sonnet-5"],
-  messagesMode: "valid" | "invalid_200" = "valid",
+  messagesMode: "valid" | "valid_copy" | "invalid_200" = "valid",
 ) {
   let liveCatalog = [...catalog];
+  const logs: Record<string, unknown>[] = [];
   const observed: Array<{ path: string; body?: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
     if (
@@ -133,7 +138,7 @@ async function recoveryGateway(
     }
     if (request.url === "/api/log/token") {
       observed.push({ path: request.url });
-      sendJson(response, { data: [] });
+      sendJson(response, { data: logs });
       return;
     }
     if (request.url === "/v1/messages") {
@@ -168,18 +173,39 @@ async function recoveryGateway(
         );
         return;
       }
+      const requestId = "request-copy-sonnet-recovery";
+      logs.push({
+        request_id: requestId,
+        type: 2,
+        model_name: "claude-sonnet-5",
+        channel: 22,
+        quota: 100,
+        prompt_tokens: 120,
+        completion_tokens: 40,
+        other: {
+          usage_semantic: "anthropic",
+          cache_creation_tokens: 0,
+          cache_tokens: 0,
+        },
+      });
+      const output =
+        messagesMode === "valid_copy"
+          ? COPY_ASSEMBLY_EVAL_FIXTURES.find(
+              ({ fixtureId }) => fixtureId === "copy-factual-claims",
+            )!.expectedOutput
+          : { ok: true };
       sendJson(
         response,
         {
           type: "message",
           id: "message-copy-sonnet-recovery",
           model: "claude-sonnet-5",
-          content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+          content: [{ type: "text", text: JSON.stringify(output) }],
           stop_reason: "end_turn",
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 120, output_tokens: 40 },
         },
-        "request-copy-sonnet-recovery",
+        requestId,
       );
       return;
     }
@@ -197,13 +223,21 @@ async function recoveryGateway(
   };
 }
 
-async function compiledRecoveryRepository() {
+async function compiledRecoveryRepository(
+  identity: {
+    artifactId?: string;
+    artifactRelativePath?: string;
+    manifestId?: string;
+  } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "copy-sonnet-recovery-repo-"));
   directories.push(root);
   await Promise.all([
     mkdir(join(root, "apps", "api"), { recursive: true }),
     mkdir(join(root, "packages", "contracts"), { recursive: true }),
-    mkdir(join(root, "docs", "evidence"), { recursive: true }),
+    mkdir(join(root, "docs", "evidence", "site-builder"), {
+      recursive: true,
+    }),
   ]);
   await Promise.all([
     cp(join(REPOSITORY_ROOT, "apps/api/dist"), join(root, "apps/api/dist"), {
@@ -240,7 +274,9 @@ async function compiledRecoveryRepository() {
   const manifest = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/integration-v1",
+    manifestId:
+      identity.manifestId ??
+      "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit,
@@ -271,7 +307,8 @@ async function compiledRecoveryRepository() {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1",
     artifactId:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/integration-v1",
+      identity.artifactId ??
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
     classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
     fixedSourceCommit,
     preparationHeadCommit: fixedSourceCommit,
@@ -283,6 +320,12 @@ async function compiledRecoveryRepository() {
     observedModelWireCalls: 0,
     observedModelCost: { CNY: 0, USD: 0 },
     duplicatePrevention: COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+    recoveryManifestReference: {
+      path: "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
+      fileSha256: "f".repeat(64),
+      artifactDigest: "e".repeat(64),
+      manifestDigest: "d".repeat(64),
+    },
     manifest,
     sourceBundle: {
       schemaVersion:
@@ -300,7 +343,11 @@ async function compiledRecoveryRepository() {
       artifactTreeDigest: canonicalDigest(compiledArtifacts),
     },
   };
-  const manifestPath = join(root, "docs", "evidence", "manifest.json");
+  const manifestPath = join(
+    root,
+    identity.artifactRelativePath ??
+      COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  );
   await writeFile(
     manifestPath,
     `${JSON.stringify({
@@ -308,7 +355,12 @@ async function compiledRecoveryRepository() {
       artifactDigest: canonicalDigest(withoutDigest),
     })}\n`,
   );
-  git(root, "add", "docs/evidence/manifest.json");
+  git(
+    root,
+    "add",
+    identity.artifactRelativePath ??
+      COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  );
   git(root, "commit", "-qm", "record recovery binding");
   git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
   return { root, manifestPath, manifest };
@@ -328,7 +380,7 @@ function admission(
   const manifest = options.manifest ?? {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/test-v1",
+    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit: "c".repeat(40),
@@ -380,16 +432,16 @@ function admission(
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: options.campaignId ?? "copy-sonnet-recovery-campaign-test",
-    authorizationId: "copy-sonnet-recovery-child-auth-test",
-    reservationId: "copy-sonnet-recovery-child-reservation-test",
+    campaignId: options.campaignId ?? "copy-sonnet-recovery-v14-campaign-test",
+    authorizationId: "copy-sonnet-recovery-v14-child-authorization-test",
+    reservationId: "copy-sonnet-recovery-v14-child-reservation-test",
     ledgerIdentityDigest: options.ledgerIdentityDigest ?? "e".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
-    authorizationId: "copy-sonnet-recovery-global-auth-test",
+    authorizationId: "copy-sonnet-recovery-v14-global-authorization-test",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
@@ -453,12 +505,54 @@ describe("Copy Sonnet recovery trusted gateway", () => {
         ledgerPath: "/not-read/ledger.jsonl",
         authorizationClaimPath: "/not-read/claim.jsonl",
         ledgerMarkerPath: "/not-read/marker.jsonl",
-        campaignId: "copy-sonnet-recovery-compiled-entrypoint-test",
+        campaignId:
+          "copy-sonnet-recovery-v14-campaign-compiled-entrypoint-test",
         admission: admission("http://127.0.0.1:3001"),
         verifiedSource: Object.freeze({}) as CopyPilotVerifiedSource,
         trustedGateway: Object.freeze({}) as CopyPilotTrustedGateway,
       }),
     ).rejects.toThrow("COPY_REAL_CAPABILITY_COMPILED_ENTRYPOINT_REQUIRED");
+  });
+
+  it("rejects a renamed v14 runtime artifact before ledger or gateway use", async () => {
+    const repository = await compiledRecoveryRepository({
+      artifactId:
+        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v13-v1",
+      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+    });
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+
+    await expect(
+      sourceModule.createCopyPilotVerifiedSource({
+        repositoryRoot: repository.root,
+        manifestArtifactPath: repository.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
+  });
+
+  it("rejects an exact v14 runtime artifact at a non-canonical tracked path", async () => {
+    const repository = await compiledRecoveryRepository({
+      artifactRelativePath:
+        "docs/evidence/site-builder/copied-recovery-runtime-binding-v14.json",
+    });
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+
+    await expect(
+      sourceModule.createCopyPilotVerifiedSource({
+        repositoryRoot: repository.root,
+        manifestArtifactPath: repository.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
   });
 
   it("admits an exact Sonnet-only token and preserves native Messages", async () => {
@@ -594,7 +688,8 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       join(tmpdir(), "copy-sonnet-recovery-pre-dispatch-drift-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-pre-dispatch-drift-test";
+    const campaignId =
+      "copy-sonnet-recovery-v14-campaign-pre-dispatch-drift-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
@@ -669,13 +764,143 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     );
   });
 
+  it("accepts Git-reviewed evidence for the v14 recovery execution identity", async () => {
+    const repository = await compiledRecoveryRepository();
+    const directory = await mkdtemp(
+      join(tmpdir(), "copy-sonnet-recovery-git-acceptance-"),
+    );
+    directories.push(directory);
+    const campaignId = "copy-sonnet-recovery-v14-campaign-git-acceptance-test";
+    const paths = {
+      ledgerPath: join(directory, "ledger.jsonl"),
+      authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
+      ledgerMarkerPath: join(directory, "ledger.marker.jsonl"),
+      campaignId,
+    };
+    const markerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
+      ),
+    ) as typeof import("./copy-pilot-ledger-identity");
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+    const gatewayModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+      ),
+    ) as typeof import("./copy-pilot-trusted-gateway");
+    const runnerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+      ),
+    ) as typeof import("./copy-real-capability-runner");
+    const acceptanceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/model-runtime/git-reviewed-evidence-acceptance.js",
+      ),
+    ) as typeof import("../../model-runtime/git-reviewed-evidence-acceptance");
+    const prepared = await markerModule.prepareCopyPilotLedgerIdentity({
+      ...paths,
+      markerPath: paths.ledgerMarkerPath,
+    });
+    const live = await recoveryGateway(["claude-sonnet-5"], "valid_copy");
+    const admitted = admission(live.origin, {
+      manifest: repository.manifest,
+      campaignId,
+      ledgerIdentityDigest: prepared.ledgerIdentityDigest,
+    });
+    const verifiedSource = await sourceModule.createCopyPilotVerifiedSource({
+      repositoryRoot: repository.root,
+      manifestArtifactPath: repository.manifestPath,
+    });
+    const trustedGateway = await gatewayModule.createCopyPilotTrustedGateway({
+      admission: admitted,
+      bearerToken: TOKEN,
+    });
+    const runner = await runnerModule.createCopySonnetRecoveryRunner({
+      ...paths,
+      admission: admitted,
+      verifiedSource,
+      trustedGateway,
+    });
+    const execution = await runner.execute(admitted.selectedExecutionKey);
+    const challenge =
+      runnerModule.createCopyGitEvidenceAcceptanceChallenge(execution);
+    const artifact = runnerModule.createCopyGitEvidenceAcceptanceArtifact({
+      artifactId: "copy-sonnet-recovery-v14-acceptance-514",
+      challenge,
+    });
+    const artifactPath = join(
+      repository.root,
+      "docs/evidence/copy-sonnet-recovery-v14-acceptance.json",
+    );
+    await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+      artifactPath,
+      artifact,
+    });
+    const mainBranch = git(
+      repository.root,
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    );
+    git(repository.root, "checkout", "-qb", "acceptance/copy-sonnet-v14");
+    git(
+      repository.root,
+      "add",
+      "docs/evidence/copy-sonnet-recovery-v14-acceptance.json",
+    );
+    git(repository.root, "commit", "-qm", "test: accept v14 recovery evidence");
+    git(repository.root, "checkout", "-q", mainBranch);
+    git(
+      repository.root,
+      "merge",
+      "--no-ff",
+      "acceptance/copy-sonnet-v14",
+      "-m",
+      "Merge pull request #514 from test/acceptance-copy-sonnet-v14",
+    );
+    git(repository.root, "update-ref", "refs/remotes/origin/main", "HEAD");
+    const acceptance =
+      await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+        repositoryRoot: repository.root,
+        artifactPath,
+      });
+    const accepted = await runner.acceptGitReviewedEvidence({ acceptance });
+
+    expect(
+      runnerModule.getCopyGitAcceptedExecutionAttestation(accepted),
+    ).toMatchObject({
+      classification: "GIT_REVIEWED_REAL_EVIDENCE",
+      executionId: "copy-sonnet-recovery-v14-claude-sonnet-5",
+      alias: "claude-sonnet-5",
+      protocol: "anthropic_messages",
+      reasoning: "medium",
+    });
+    expect(await runner.summary()).toMatchObject({
+      completedExecutions: 1,
+      knownWireSettlements: 1,
+      unknownWireSettlements: 0,
+      gitEvidenceAcceptances: 1,
+      frozen: false,
+    });
+  });
+
   it("persists only the redacted Messages response shape after an invalid HTTP 200", async () => {
     const repository = await compiledRecoveryRepository();
     const directory = await mkdtemp(
       join(tmpdir(), "copy-sonnet-recovery-invalid-200-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-invalid-200-test";
+    const campaignId = "copy-sonnet-recovery-v14-campaign-invalid-200-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
