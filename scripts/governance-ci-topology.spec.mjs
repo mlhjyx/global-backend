@@ -171,7 +171,10 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
     /- uses: actions\/checkout@[0-9a-f]{40} # v7\n        with:\n          fetch-depth: 0\n          persist-credentials: false/,
     "the fixed-source ancestry check requires a complete trusted checkout",
   );
-  assert.match(impactStep, /^      - name: Evaluate Copy fixed-source impact$/m);
+  assert.match(
+    impactStep,
+    /^      - name: Evaluate Copy fixed-source impact$/m,
+  );
   assert.match(impactStep, /^        id: copy-impact$/m);
   assert.match(
     impactStep,
@@ -185,10 +188,7 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
     rebuildStep,
     /^          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1$/m,
   );
-  assert.match(
-    rebuildStep,
-    /^          COPY_SONNET_RECOVERY_REBUILD_TEST=1$/m,
-  );
+  assert.match(rebuildStep, /^          COPY_SONNET_RECOVERY_REBUILD_TEST=1$/m);
   assert.match(
     rebuildStep,
     /^          src\/site-builder\/eval\/copy-sonnet-recovery-manifest-prep\.spec\.ts$/m,

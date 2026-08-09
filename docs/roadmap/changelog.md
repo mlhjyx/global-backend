@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-10 · Copy fixed-source 影响治理
+
+- 新增 [Copy source eligibility receipt](../evidence/site-builder/copy-runtime-eligibility.json) 和 required-build verifier。活跃 v15 binding 的路径、文件 SHA、artifact ID、82-file bundle digest、当前 source fingerprint 与 drift paths 都必须精确匹配。
+- 只有零漂移可执行 v15 双 fixed-source rebuild。与 Copy 无关的 Prisma schema 漂移必须显式降级为 `STALE_HOLD`，且 verifier/runner/model runtime/lockfile 等其他路径不允许进入例外；receipt 永远不能授权 dispatch 或 pilot。
+- 该治理避免未授权的 Site Builder 评测冻结获客数据库演进，同时保留 source mismatch 在 client/ledger/wire 前 fail-closed 的安全边界。完整设计见[实施记录](../implementation-records/copy-fixed-source-impact-governance.md)。
+
 ## 2026-08-09 · Copy Sonnet recovery v14 create-only preparation
 
 - #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定 canonical path 与后续身份绑定提交 `3da93486163404e3943711c6689a55c9a9e2c119`、82-file source digest `cbec88ad…`、53-file compiled tree `ce806d78…` 与 artifact digest `4f9fdf06…`。

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ACTIVE_COPY_RUNTIME_BINDING_PATH,
+  ACTIVE_COPY_RUNTIME_BINDING_SHA256,
   buildCopySourceFingerprint,
   evaluateCopyFixedSourceImpact,
 } from "./copy-fixed-source-impact.mjs";
@@ -44,11 +46,20 @@ function eligibility(overrides = {}) {
     dispatch_authorization: "NOT_AUTHORIZED",
     pilot_eligibility: "BLOCKED",
     required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
+    stale_scope: "NONE",
     ...overrides,
   };
 }
 
 test("Copy impact stays CURRENT only when every bound source byte matches", () => {
+  assert.equal(
+    ACTIVE_COPY_RUNTIME_BINDING_PATH,
+    "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json",
+  );
+  assert.equal(
+    ACTIVE_COPY_RUNTIME_BINDING_SHA256,
+    "838121ccf9649b05d9c04b05a1cec7ba094439a8a81a177462e5955a17c2ef7c",
+  );
   const result = evaluateCopyFixedSourceImpact({
     binding: binding(),
     eligibility: eligibility(),
@@ -75,7 +86,9 @@ test("Copy impact rejects source drift without an exact STALE/HOLD receipt", () 
     () =>
       evaluateCopyFixedSourceImpact({
         binding: binding(),
-        eligibility: eligibility(),
+        eligibility: eligibility({
+          current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
+        }),
         currentFiles,
       }),
     /COPY_FIXED_SOURCE_STATUS_INVALID/u,
@@ -106,6 +119,7 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
       status: "STALE_HOLD",
       current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
       drifted_paths: ["packages/db/prisma/schema.prisma"],
+      stale_scope: "PRISMA_SCHEMA_EVOLUTION",
     }),
     currentFiles,
   });
@@ -130,6 +144,7 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
             current_source_fingerprint:
               buildCopySourceFingerprint(currentFiles),
             drifted_paths: ["packages/db/prisma/schema.prisma"],
+            stale_scope: "PRISMA_SCHEMA_EVOLUTION",
             ...mutation,
           }),
           currentFiles,
@@ -167,6 +182,29 @@ test("Copy impact rejects stale fingerprints, binding substitutions, and unsafe 
         currentFiles: binding().sourceBundle.files,
       }),
     /COPY_FIXED_SOURCE_BINDING_MISMATCH/u,
+  );
+  assert.throws(
+    () =>
+      evaluateCopyFixedSourceImpact({
+        binding: binding(),
+        eligibility: eligibility({
+          status: "STALE_HOLD",
+          current_source_fingerprint: buildCopySourceFingerprint([
+            {
+              path: "apps/api/src/model-runtime/types.ts",
+              sha256: SHA_C,
+            },
+            { path: "packages/db/prisma/schema.prisma", sha256: SHA_B },
+          ]),
+          drifted_paths: ["apps/api/src/model-runtime/types.ts"],
+          stale_scope: "PRISMA_SCHEMA_EVOLUTION",
+        }),
+        currentFiles: [
+          { path: "apps/api/src/model-runtime/types.ts", sha256: SHA_C },
+          { path: "packages/db/prisma/schema.prisma", sha256: SHA_B },
+        ],
+      }),
+    /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
   );
   assert.throws(
     () =>
