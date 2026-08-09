@@ -390,6 +390,78 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     });
   });
 
+  it("matches the generated v14 create-only runtime binding exactly", () => {
+    const recoveryManifestBytes = readFileSync(
+      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH),
+    );
+    const bindingBytes = readFileSync(
+      resolve(
+        REPOSITORY_ROOT,
+        COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+      ),
+    );
+    const artifact = JSON.parse(bindingBytes.toString("utf8"));
+
+    expect(sha256(bindingBytes)).toBe(
+      "ed82500acd32dac4229c53db689b40582d1bf1f935bc224eaf93ebecaac51081",
+    );
+    expect(() =>
+      validateCopySonnetRecoveryRuntimeBindingArtifact(
+        artifact,
+        recoveryManifestBytes,
+      ),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
+      fixedSourceCommit: "81010e6dba6dcb0652bd8bfd42946678b5347e76",
+      preparationHeadCommit: "81010e6dba6dcb0652bd8bfd42946678b5347e76",
+      artifactDigest:
+        "be2b3a6d2d25a01579fd236d8174a71e92c9f9db763859fdefde9a69692cc732",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      recoveryManifestReference: {
+        path: COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+        fileSha256:
+          "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
+        artifactDigest:
+          "1371fdcafe87aac3ef3ed6dd6fe35230550d5fa68cf235604fcf63ccf8c11c13",
+      },
+      sourceBundle: {
+        digest:
+          "bc96878a6e67bfd214972bb4a34aac257e69755b3a9af5bd6695800366172e60",
+      },
+      compiledRuntimeExpectation: {
+        artifactCount: 53,
+        artifactTreeDigest:
+          "5e4bd17c96ffaf80eaa77b0d1401d86ee472ec4615f2022d5ca6dd6ece1acb27",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/types.js",
+          }),
+        ]),
+      },
+      manifest: {
+        manifestId:
+          "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+        executions: [
+          expect.objectContaining({
+            executionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
+          }),
+        ],
+      },
+      preparationVerification: {
+        fixedCommitReachableFromOriginMainAtPreparation: false,
+      },
+    });
+  });
+
   it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(
     "rebuilds the create-only binding from the clean current commit",
     async () => {
