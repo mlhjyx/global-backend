@@ -713,6 +713,42 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(gateway.observed).toHaveLength(0);
   });
 
+  it("counts scalar schema values cumulatively before dispatch", async () => {
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(response, 500, { error: "must not dispatch" });
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+    const firstEnum = Array.from(
+      { length: 3_000 },
+      (_, index) => `first_${index}`,
+    );
+    const secondEnum = Array.from(
+      { length: 3_000 },
+      (_, index) => `second_${index}`,
+    );
+
+    await expect(
+      adapter.execute({
+        alias: "claude-sonnet-5",
+        prompt: "Do not dispatch this cumulatively oversized schema.",
+        outputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            first: { type: "string", enum: firstEnum },
+            second: { type: "string", enum: secondEnum },
+          },
+        },
+        outputSchemaName: "cumulatively_oversized_output",
+        maxOutputTokens: 64,
+        abortSignal: AbortSignal.timeout(5_000),
+      }),
+    ).rejects.toThrow("Anthropic structured-output schema is too complex");
+    expect(gateway.observed).toHaveLength(0);
+  });
+
   it("preserves Anthropic cache-write-only usage", async () => {
     const gateway = await startFakeGateway((_request, response) => {
       sendJson(
