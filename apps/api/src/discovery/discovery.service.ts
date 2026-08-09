@@ -461,33 +461,37 @@ export class DiscoveryService {
       const denied = request.decision === 'RELEASE_REQUESTED' && rec.protectionClass === 'LEGAL';
       const decision = denied ? 'RELEASE_REQUEST_DENIED' : request.decision;
       const reasonCode = denied ? 'LEGAL_SUPPRESSION_IMMUTABLE' : request.reasonCode;
-      const existing = await tx.suppressionDecision.findUnique({
-        where: { workspaceId_requestId: { workspaceId: ctx.workspaceId, requestId: request.requestId } },
-      });
-      if (existing) {
-        const same =
-          existing.suppressionId === id &&
-          existing.decision === decision &&
-          existing.reasonCode === reasonCode &&
-          existing.actorId === ctx.userId;
-        if (!same) {
-          throw new ConflictException({
-            error: { code: 'IDEMPOTENCY_CONFLICT', message: 'requestId was already used with a different decision' },
-          });
-        }
-        return { denied, record: existing };
-      }
-
-      const record = await tx.suppressionDecision.create({
-        data: {
+      // createMany(skipDuplicates) maps to INSERT ... ON CONFLICT DO NOTHING. Unlike catching P2002 after
+      // create(), it leaves the PostgreSQL transaction usable so a concurrent winner can be read safely.
+      await tx.suppressionDecision.createMany({
+        data: [{
           workspaceId: ctx.workspaceId,
           suppressionId: id,
           requestId: request.requestId,
           decision,
           reasonCode,
           actorId: ctx.userId,
-        },
+        }],
+        skipDuplicates: true,
       });
+      const record = await tx.suppressionDecision.findUnique({
+        where: { workspaceId_requestId: { workspaceId: ctx.workspaceId, requestId: request.requestId } },
+      });
+      if (!record) {
+        throw new ConflictException({
+          error: { code: 'DECISION_NOT_PERSISTED', message: 'suppression decision could not be persisted' },
+        });
+      }
+      const same =
+        record.suppressionId === id &&
+        record.decision === decision &&
+        record.reasonCode === reasonCode &&
+        record.actorId === ctx.userId;
+      if (!same) {
+        throw new ConflictException({
+          error: { code: 'IDEMPOTENCY_CONFLICT', message: 'requestId was already used with a different decision' },
+        });
+      }
       return { denied, record };
     });
 

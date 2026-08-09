@@ -23,6 +23,7 @@ type SuppressionRow = {
 
 function makeHarness(record: SuppressionRow) {
   let current = { ...record };
+  const decisions: Array<Record<string, unknown>> = [];
   const deleteRecord = vi.fn(async () => {
     current = null as unknown as SuppressionRow;
     return record;
@@ -42,7 +43,14 @@ function makeHarness(record: SuppressionRow) {
       }),
     },
     suppressionDecision: {
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async ({ where }: { where: { workspaceId_requestId: { requestId: string } } }) =>
+        decisions.find((decision) => decision.requestId === where.workspaceId_requestId.requestId) ?? null),
+      createMany: vi.fn(async ({ data }: { data: Array<Record<string, unknown>> }) => {
+        const candidate = await createDecision({ data: data[0] });
+        if (decisions.some((decision) => decision.requestId === candidate.requestId)) return { count: 0 };
+        decisions.push(candidate);
+        return { count: 1 };
+      }),
       create: createDecision,
       findMany: vi.fn(async () => []),
     },
@@ -146,9 +154,7 @@ describe('Suppression governance', () => {
       actorId: CTX.userId,
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
     };
-    const findDecision = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue(existing);
+    const findDecision = vi.fn().mockResolvedValue(existing);
     const createMany = vi.fn(async () => ({ count: 0 }));
     const create = vi.fn(async () => {
       throw Object.assign(new Error('unique constraint'), { code: 'P2002' });
