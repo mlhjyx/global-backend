@@ -10,7 +10,7 @@ const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const REGISTRY_VERSION_SPECIFIER = /^[a-z0-9*.+<>=~^| -]+$/i;
 const WORKSPACE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 const EXTERNAL_SOURCE_MARKER =
-  /(?:^|[\s'"{,\[])(?:https?:\/\/|git\+|git:\/\/|ssh:\/\/|github:|git@|file:|portal:|tarball\s*:|repo\s*:|commit\s*:|directory\s*:|type\s*:\s*(?:git|directory))/i;
+  /(?:^|[\s'"{,\[])(?:https?:\/\/|git\+|git:\/\/|ssh:\/\/|github:|git@|(?:[a-z0-9._-]+@)?[a-z0-9.-]+\.[a-z]{2,}:[^\s'"},\]]+|file:|portal:|tarball\s*:|repo\s*:|commit\s*:|directory\s*:|type\s*:\s*(?:git|directory))/i;
 const DEPENDENCY_FIELDS = Object.freeze([
   "dependencies",
   "devDependencies",
@@ -257,9 +257,10 @@ function lockfileSyntaxIssues(lockfileText) {
     /["\\]/u,
     /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u,
     /(?:^|\n)\s*(?:---|\.\.\.|%YAML|%TAG)(?:\s|$)/u,
-    /(?:^|\n)\s*\?\s+/u,
+    /\?/u,
     /[!&]/u,
     /(?:^|[\s[{,:-])\*[^\s,[\]{}]+/u,
+    /(?:^|[\n{,])\s*\[[^\]\r\n]*\]\s*:/u,
     /(?:^|[\s{,])'(?:resolution|repo|commit|type|tarball|directory)'\s*:/iu,
     /(?:^|\n)\s*<<\s*:/u,
     /:\s*[>|][+-]?[0-9]*\s*(?:#.*)?(?:\n|$)/u,
