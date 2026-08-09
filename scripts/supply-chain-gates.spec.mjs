@@ -127,12 +127,58 @@ test("production audit ratchet accepts the legacy set and improvements", async (
   const improved = evaluateProductionAudit(
     pnpmAudit([existing]),
     legacyBaseline,
-    { now: NOW, expectedBootstrapBase: BASE_COMMIT },
+    { now: NOW },
   );
   assert.deepEqual(improved.issues, []);
   assert.deepEqual(improved.resolved_advisories, [
     "GHSA-dddd-eeee-ffff|second-runtime",
   ]);
+});
+
+test("initial bootstrap is exact and cannot pre-admit future advisories", async () => {
+  const { evaluateProductionAudit, validateProductionAuditBaseline } =
+    await import("./supply-chain-audit.mjs");
+  const existing = advisory();
+  const preAdmitted = advisory({
+    ghsa_id: "GHSA-futr-vuln-0001",
+    package: "future-runtime",
+    url: "https://github.com/advisories/GHSA-futr-vuln-0001",
+  });
+  const result = evaluateProductionAudit(
+    pnpmAudit([existing]),
+    baseline([existing, preAdmitted]),
+    {
+      now: NOW,
+      expectedBootstrapBase: BASE_COMMIT,
+      expectedSourceLockfileDigest: LOCKFILE_DIGEST,
+    },
+  );
+  assert.ok(issueCodes(result).includes("BASELINE_BOOTSTRAP_SET_MISMATCH"));
+
+  const wrongLockDigest = validateProductionAuditBaseline(baseline(), {
+    now: NOW,
+    expectedBootstrapBase: BASE_COMMIT,
+    expectedSourceLockfileDigest: `sha256:${"b".repeat(64)}`,
+  });
+  assert.ok(
+    issueCodes(wrongLockDigest).includes("BASELINE_SOURCE_LOCK_MISMATCH"),
+  );
+});
+
+test("unresolved advisories fail after their remediation due date", async () => {
+  const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
+  const existing = advisory({
+    remediation: {
+      ...advisory().remediation,
+      due_at: "2026-08-10T00:00:00.000Z",
+    },
+  });
+  const result = evaluateProductionAudit(
+    pnpmAudit([existing]),
+    baseline([existing]),
+    { now: new Date("2026-08-10T00:00:00.000Z") },
+  );
+  assert.ok(issueCodes(result).includes("AUDIT_REMEDIATION_OVERDUE"));
 });
 
 test("production audit ratchet rejects new, escalated, and critical findings", async () => {
@@ -230,6 +276,7 @@ test("production audit input must be a complete production-only pnpm report", as
     ...original,
     metadata: {
       ...original.metadata,
+      dependencies: "unknown",
       devDependencies: 3,
       vulnerabilities: {
         ...original.metadata.vulnerabilities,
@@ -242,6 +289,7 @@ test("production audit input must be a complete production-only pnpm report", as
     expectedBootstrapBase: BASE_COMMIT,
   });
   assert.ok(issueCodes(result).includes("AUDIT_NOT_PRODUCTION_ONLY"));
+  assert.ok(issueCodes(result).includes("AUDIT_METADATA_INVALID"));
   assert.ok(issueCodes(result).includes("AUDIT_SUMMARY_MISMATCH"));
 });
 
@@ -294,6 +342,25 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
     /git show "\$PR_BASE_SHA:\$BASELINE_PATH" > "\$TRUSTED_BASELINE"/,
   );
   assert.match(workflow, /--expected-bootstrap-base "\$PR_BASE_SHA"/);
+  assert.match(
+    workflow,
+    /--expected-source-lockfile-digest "\$base_lock_digest"/,
+  );
+  assert.match(
+    workflow,
+    /git diff --no-renames --name-only -z "\$PR_BASE_SHA\.\.\.\$GITHUB_SHA"/,
+  );
+  for (const protectedBootstrapPath of [
+    "package.json | */package.json",
+    "pnpm-lock.yaml | pnpm-workspace.yaml",
+    ".npmrc | */.npmrc",
+    "pnpmfile.cjs | patches/*",
+  ]) {
+    assert.ok(
+      workflow.includes(protectedBootstrapPath),
+      `bootstrap dependency scope must include ${protectedBootstrapPath}`,
+    );
+  }
   assert.match(
     auditScript,
     /pnpm audit --prod --registry=https:\/\/registry\.npmjs\.org --json/,
