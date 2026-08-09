@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
-import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 
 const CHUNK = 100;
 
@@ -49,8 +49,8 @@ export class TenantProjectionService {
     const { domains: suppressedDomains, names: suppressedNames } = await prisma.withWorkspace(workspaceId, async (tx) => {
       const s = await tx.suppressionRecord.findMany({ where: { type: { in: ['domain', 'company_name'] } } });
       return {
-        domains: new Set(s.filter((x) => x.type === 'domain').map((x) => x.value.toLowerCase())),
-        names: new Set(s.filter((x) => x.type === 'company_name').map((x) => x.value.toLowerCase())),
+        domains: canonicalizeSuppressionValues('domain', s.filter((x) => x.type === 'domain').map((x) => x.value)),
+        names: canonicalizeSuppressionValues('company_name', s.filter((x) => x.type === 'company_name').map((x) => x.value)),
       };
     });
 

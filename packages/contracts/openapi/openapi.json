@@ -2523,7 +2523,7 @@
               "minimum": 1,
               "maximum": 100,
               "default": 50,
-              "type": "number"
+              "type": "integer"
             }
           }
         ],
@@ -2535,7 +2535,8 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "data"
+                    "data",
+                    "page"
                   ],
                   "properties": {
                     "data": {
@@ -2544,6 +2545,23 @@
                         "type": "object",
                         "additionalProperties": true,
                         "description": "Suppression 记录"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
                       }
                     }
                   }
@@ -2619,16 +2637,9 @@
                   "type": "object",
                   "additionalProperties": false,
                   "required": [
-                    "success",
                     "error"
                   ],
                   "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        false
-                      ]
-                    },
                     "error": {
                       "type": "object",
                       "additionalProperties": false,
@@ -2702,7 +2713,7 @@
               "minimum": 1,
               "maximum": 100,
               "default": 50,
-              "type": "number"
+              "type": "integer"
             }
           }
         ],
@@ -2714,7 +2725,8 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "data"
+                    "data",
+                    "page"
                   ],
                   "properties": {
                     "data": {
@@ -2723,6 +2735,23 @@
                         "type": "object",
                         "additionalProperties": true,
                         "description": "SuppressionDecision"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
                       }
                     }
                   }

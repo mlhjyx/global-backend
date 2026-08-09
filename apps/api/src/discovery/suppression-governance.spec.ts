@@ -308,4 +308,50 @@ describe('Suppression governance', () => {
     })).rejects.toMatchObject({ status: 400, response: { error: { code: 'INVALID_REASON' } } });
     expect(withWorkspace).not.toHaveBeenCalled();
   });
+
+  it('company-name suppression 在 SMTP/provider 路由前阻断既有 contact point 验证', async () => {
+    const verifyEmail = vi.fn();
+    const routeEmailVerification = vi.fn(async () => [{ key: 'smtp_self', verifyEmail }]);
+    const company = {
+      id: '77777777-7777-4777-8777-777777777777',
+      name: 'Acme Pumpen GmbH',
+      domain: 'acme-pumpen.de',
+      status: 'ENRICHED',
+    };
+    const point = {
+      id: '88888888-8888-4888-8888-888888888888',
+      workspaceId: WORKSPACE_ID,
+      contactId: '99999999-9999-4999-8999-999999999999',
+      type: 'email',
+      value: 'info@acme-pumpen.de',
+      status: 'UNVERIFIED',
+      verifiedAt: null,
+      contact: { company },
+    };
+    const tx = {
+      contactPoint: {
+        findUnique: vi.fn(async () => point),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...point, ...data })),
+      },
+      canonicalCompany: { update: vi.fn(async () => ({ ...company, status: 'SUPPRESSED' })) },
+      suppressionRecord: {
+        findMany: vi.fn(async () => [{ type: 'company_name', value: ' ACME   PUMPEN GmbH ' }]),
+      },
+      fieldEvidence: { create: vi.fn(async () => ({})) },
+    };
+    const prisma = {
+      withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
+    };
+    const service = new DiscoveryService(prisma as never, { routeEmailVerification } as never);
+
+    const result = await service.verifyContactPoint(CTX, point.id);
+
+    expect(result).toMatchObject({ status: 'BLOCKED' });
+    expect(routeEmailVerification).not.toHaveBeenCalled();
+    expect(verifyEmail).not.toHaveBeenCalled();
+    expect(tx.canonicalCompany.update).toHaveBeenCalledWith({
+      where: { id: company.id },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+  });
 });

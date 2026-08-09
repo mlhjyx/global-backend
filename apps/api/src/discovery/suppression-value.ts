@@ -11,6 +11,19 @@ const MAX_DOMAIN_INPUT_LENGTH = 2048;
 const MAX_DOMAIN_LENGTH = 253;
 const MAX_COMPANY_NAME_LENGTH = 256;
 
+function hasForbiddenCompanyControl(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return (
+      codePoint <= 0x08 ||
+      codePoint === 0x0b ||
+      codePoint === 0x0c ||
+      (codePoint >= 0x0e && codePoint <= 0x1f) ||
+      codePoint === 0x7f
+    );
+  });
+}
+
 function canonicalDomain(raw: string): string | null {
   if (!raw.trim() || raw.length > MAX_DOMAIN_INPUT_LENGTH) return null;
   const normalized = normalizeDomain(raw);
@@ -34,14 +47,43 @@ export function canonicalizeSuppressionValue(type: string, raw: string): string 
     const email = cleanEmail(raw)?.value ?? null;
     if (!email || email.length > MAX_EMAIL_LENGTH) return null;
     const separator = email.lastIndexOf('@');
+    const local = email.slice(0, separator);
+    if (!local || local.length > 64 || local.startsWith('.') || local.endsWith('.') || local.includes('..')) return null;
     const domain = canonicalDomain(email.slice(separator + 1));
-    return domain ? `${email.slice(0, separator)}@${domain}` : null;
+    return domain ? `${local}@${domain}` : null;
   }
   if (type === 'domain') return canonicalDomain(raw);
   if (type === 'company_name') {
-    if (raw.length > MAX_DOMAIN_INPUT_LENGTH || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(raw)) return null;
+    if (raw.length > MAX_DOMAIN_INPUT_LENGTH || hasForbiddenCompanyControl(raw)) return null;
     const name = cleanName(raw.normalize('NFC')).toLowerCase();
     return name && name.length <= MAX_COMPANY_NAME_LENGTH ? name : null;
   }
   return null;
+}
+
+/** Canonicalize legacy stored values at each read boundary; invalid rows stay visible for manual governance. */
+export function canonicalizeSuppressionValues(type: string, values: Iterable<string>): Set<string> {
+  const canonical = new Set<string>();
+  for (const value of values) {
+    const normalized = canonicalizeSuppressionValue(type, value);
+    if (normalized) canonical.add(normalized);
+  }
+  return canonical;
+}
+
+export function companyMatchesSuppression(
+  rows: ReadonlyArray<{ type: string; value: string }>,
+  company: { domain?: string | null; name: string },
+): boolean {
+  const domain = company.domain ? canonicalizeSuppressionValue('domain', company.domain) : null;
+  const name = canonicalizeSuppressionValue('company_name', company.name);
+  const domains = canonicalizeSuppressionValues(
+    'domain',
+    rows.filter((row) => row.type === 'domain').map((row) => row.value),
+  );
+  const names = canonicalizeSuppressionValues(
+    'company_name',
+    rows.filter((row) => row.type === 'company_name').map((row) => row.value),
+  );
+  return (!!domain && domains.has(domain)) || (!!name && names.has(name));
 }

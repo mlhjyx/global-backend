@@ -10,7 +10,11 @@ import { buildGuessTargets } from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
-import { canonicalizeSuppressionValue } from './suppression-value';
+import {
+  canonicalizeSuppressionValue,
+  canonicalizeSuppressionValues,
+  companyMatchesSuppression,
+} from './suppression-value';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -114,7 +118,11 @@ export class DiscoveryService {
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.canonicalCompany.findUnique({ where: { id: companyId } });
       if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
-      if (company.status === 'SUPPRESSED') {
+      const companySuppressions = await tx.suppressionRecord.findMany({
+        where: { type: { in: ['domain', 'company_name'] } },
+        select: { type: true, value: true },
+      });
+      if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
         throw new ConflictException({
           error: { code: 'SUPPRESSED', message: 'company is suppressed; contact discovery blocked' },
         });
@@ -123,8 +131,9 @@ export class DiscoveryService {
       if (!adapters.length) {
         throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no contact discovery provider enabled' } });
       }
-      const suppressedEmails = new Set(
-        (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+      const suppressedEmails = canonicalizeSuppressionValues(
+        'email',
+        (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
       );
       return { company, adapters, suppressedEmails };
     });
@@ -201,7 +210,11 @@ export class DiscoveryService {
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.canonicalCompany.findUnique({ where: { id: companyId } });
       if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
-      if (company.status === 'SUPPRESSED') {
+      const companySuppressions = await tx.suppressionRecord.findMany({
+        where: { type: { in: ['domain', 'company_name'] } },
+        select: { type: true, value: true },
+      });
+      if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
         throw new ConflictException({ error: { code: 'SUPPRESSED', message: 'company suppressed; email guessing blocked' } });
       }
       if (!company.domain) {
@@ -212,8 +225,9 @@ export class DiscoveryService {
         throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
       }
       const contacts = await tx.canonicalContact.findMany({ where: { companyId }, include: { contactPoints: true } });
-      const suppressedEmails = new Set(
-        (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+      const suppressedEmails = canonicalizeSuppressionValues(
+        'email',
+        (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
       );
       return { company, domain: company.domain, adapter: adapters[0], contacts, suppressedEmails };
     });
@@ -301,26 +315,57 @@ export class DiscoveryService {
     // 短事务①：载入 point + 分级 + 禁联命中 + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经
     // ToolBroker 走 SMTP 出网（含限流等待 + 最长 8s 探测），持 DB 连接跨这段会拖垮连接池/触发事务超时。
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const point = await tx.contactPoint.findUnique({ where: { id: pointId } });
+      const point = await tx.contactPoint.findUnique({
+        where: { id: pointId },
+        select: {
+          value: true,
+          type: true,
+          contactId: true,
+          contact: {
+            select: {
+              company: { select: { id: true, name: true, domain: true, status: true } },
+            },
+          },
+        },
+      });
       if (!point) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'contact point not found' } });
       if (point.type !== 'email') {
         throw new ConflictException({ error: { code: 'INVALID_TYPE', message: 'only email points can be verified' } });
       }
-      const domain = point.value.split('@')[1]?.toLowerCase();
-      const suppressed = await tx.suppressionRecord.findFirst({
-        where: {
-          OR: [
-            { type: 'email', value: point.value.toLowerCase() },
-            ...(domain ? [{ type: 'domain', value: domain }] : []),
-          ],
-        },
+      const emailKey = canonicalizeSuppressionValue('email', point.value);
+      const domainKey = emailKey ? canonicalizeSuppressionValue('domain', emailKey.split('@')[1]) : null;
+      const suppressionRows = await tx.suppressionRecord.findMany({
+        where: { type: { in: ['email', 'domain', 'company_name'] } },
+        select: { type: true, value: true },
       });
-      const adapters = await this.providers.routeEmailVerification(tx as never);
+      const suppressedEmails = canonicalizeSuppressionValues(
+        'email',
+        suppressionRows.filter((row) => row.type === 'email').map((row) => row.value),
+      );
+      const suppressedDomains = canonicalizeSuppressionValues(
+        'domain',
+        suppressionRows.filter((row) => row.type === 'domain').map((row) => row.value),
+      );
+      const company = point.contact.company;
+      const matchedCompanySuppression = companyMatchesSuppression(suppressionRows, company);
+      if (matchedCompanySuppression && company.status !== 'SUPPRESSED') {
+        await tx.canonicalCompany.update({
+          where: { id: company.id },
+          data: { status: 'SUPPRESSED', version: { increment: 1 } },
+        });
+      }
+      const suppressed =
+        company.status === 'SUPPRESSED' ||
+        matchedCompanySuppression ||
+        (!!emailKey && suppressedEmails.has(emailKey)) ||
+        (!!domainKey && suppressedDomains.has(domainKey));
+      // 禁联先于 provider 路由和任何外部处理；BLOCKED 路径不需要发现/选择 SMTP adapter。
+      const adapters = suppressed ? [] : await this.providers.routeEmailVerification(tx as never);
       return {
         pointValue: point.value,
         contactId: point.contactId,
         kind: cleanEmail(point.value)?.kind,
-        suppressed: !!suppressed,
+        suppressed,
         adapter: adapters[0] as (typeof adapters)[number] | undefined,
       };
     });
@@ -432,16 +477,8 @@ export class DiscoveryService {
         },
       });
       // 立刻生效：命中的 canonical 公司标记 SUPPRESSED
-      if (entry.type === 'domain') {
-        await tx.canonicalCompany.updateMany({
-          where: { domain: canonicalValue },
-          data: { status: 'SUPPRESSED' },
-        });
-      } else if (entry.type === 'company_name') {
-        await tx.canonicalCompany.updateMany({
-          where: { name: { equals: canonicalValue, mode: 'insensitive' } },
-          data: { status: 'SUPPRESSED' },
-        });
+      if (entry.type === 'domain' || entry.type === 'company_name') {
+        await this.suppressCanonicalCompanies(tx, entry.type, canonicalValue);
       }
       return rec;
     });
@@ -452,9 +489,9 @@ export class DiscoveryService {
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.suppressionRecord.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: pagination.limit,
+        take: pagination.limit + 1,
         ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
-      }),
+      }).then((rows) => suppressionPage(rows, pagination.limit)),
     );
   }
 
@@ -463,13 +500,43 @@ export class DiscoveryService {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rec = await tx.suppressionRecord.findUnique({ where: { id } });
       if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
-      return tx.suppressionDecision.findMany({
+      const rows = await tx.suppressionDecision.findMany({
         where: { suppressionId: id },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        take: pagination.limit,
+        take: pagination.limit + 1,
         ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
       });
+      return suppressionPage(rows, pagination.limit);
     });
+  }
+
+  private async suppressCanonicalCompanies(
+    tx: Prisma.TransactionClient,
+    type: 'domain' | 'company_name',
+    canonicalValue: string,
+  ): Promise<void> {
+    const batchSize = 250;
+    let afterId: string | undefined;
+    for (;;) {
+      const rows = await tx.canonicalCompany.findMany({
+        ...(afterId ? { where: { id: { gt: afterId } } } : {}),
+        orderBy: { id: 'asc' },
+        take: batchSize,
+        select: { id: true, domain: true, name: true },
+      });
+      const ids = rows
+        .filter((row) =>
+          canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue)
+        .map((row) => row.id);
+      if (ids.length) {
+        await tx.canonicalCompany.updateMany({
+          where: { id: { in: ids } },
+          data: { status: 'SUPPRESSED' },
+        });
+      }
+      if (rows.length < batchSize) return;
+      afterId = rows[rows.length - 1].id;
+    }
   }
 
   async requestSuppressionDecision(
@@ -578,6 +645,16 @@ function suppressionPagination(page?: SuppressionPageRequest): { cursor?: string
   return {
     ...(page?.cursor ? { cursor: page.cursor } : {}),
     limit: Math.min(100, Math.max(1, requested)),
+  };
+}
+
+function suppressionPage<T extends { id: string }>(rows: T[], limit: number) {
+  const hasMore = rows.length > limit;
+  const visible = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    rows: visible,
+    hasMore,
+    nextCursor: hasMore ? (visible[visible.length - 1]?.id ?? null) : null,
   };
 }
 

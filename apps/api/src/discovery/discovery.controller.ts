@@ -67,7 +67,7 @@ class SuppressionPageDto {
   @IsUUID()
   cursor?: string;
 
-  @ApiPropertyOptional({ type: Number, minimum: 1, maximum: 100, default: 50 })
+  @ApiPropertyOptional({ type: 'integer', minimum: 1, maximum: 100, default: 50 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -317,9 +317,10 @@ export class DiscoveryController {
   @Get('suppressions')
   @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '禁联名单' })
-  @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
+  @ApiPageEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
   async listSuppressions(@Ctx() ctx: RequestContext, @Query() page: SuppressionPageDto) {
-    return envelope(await this.discovery.listSuppressions(ctx, page));
+    const result = await this.discovery.listSuppressions(ctx, page);
+    return pageEnvelope(result.rows, result);
   }
 
   @Post('suppressions/:id/decisions')
@@ -336,9 +337,8 @@ export class DiscoveryController {
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['success', 'error'],
+      required: ['error'],
       properties: {
-        success: { type: 'boolean', enum: [false] },
         error: {
           type: 'object',
           additionalProperties: false,
@@ -366,13 +366,14 @@ export class DiscoveryController {
   @Get('suppressions/:id/decisions')
   @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '列出 suppression 的 append-only release/correction 决策' })
-  @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'SuppressionDecision' })
+  @ApiPageEnvelope({ type: 'object', additionalProperties: true, description: 'SuppressionDecision' })
   async listSuppressionDecisions(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Query() page: SuppressionPageDto,
   ) {
-    return envelope(await this.discovery.listSuppressionDecisions(ctx, id, page));
+    const result = await this.discovery.listSuppressionDecisions(ctx, id, page);
+    return pageEnvelope(result.rows, result);
   }
 
   @Delete('suppressions/:id')

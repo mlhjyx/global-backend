@@ -6,7 +6,7 @@ import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-j
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
-import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
@@ -215,11 +215,13 @@ export function createDiscoveryActivities(deps: {
         const suppressions = await tx.suppressionRecord.findMany({
           where: { type: { in: ['domain', 'company_name'] } },
         });
-        const suppressedDomains = new Set(
-          suppressions.filter((s) => s.type === 'domain').map((s) => s.value.toLowerCase()),
+        const suppressedDomains = canonicalizeSuppressionValues(
+          'domain',
+          suppressions.filter((s) => s.type === 'domain').map((s) => s.value),
         );
-        const suppressedNames = new Set(
-          suppressions.filter((s) => s.type === 'company_name').map((s) => s.value.toLowerCase()),
+        const suppressedNames = canonicalizeSuppressionValues(
+          'company_name',
+          suppressions.filter((s) => s.type === 'company_name').map((s) => s.value),
         );
 
         let companies = 0;

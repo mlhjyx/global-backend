@@ -15,6 +15,7 @@ import { LAWFUL_BASIS_KINDS } from '../discovery/compliance/email-verification-g
 import { KnownEmailSample } from '../discovery/email-format-learning';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
+import { canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
 
@@ -500,8 +501,9 @@ export function createBacklogActivities(deps: {
                 offering: icp.company?.summary ?? undefined,
               }
             : undefined;
-          const suppressedEmails = new Set(
-            (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+          const suppressedEmails = canonicalizeSuppressionValues(
+            'email',
+            (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
           );
           const companies = await tx.canonicalCompany.findMany({
             where: backlogEligibleWhere({
@@ -655,8 +657,9 @@ export function createBacklogActivities(deps: {
           take: limit,
           select: { id: true, domain: true }, // country/dedupeKey/name 未用（猜测走 buildGuessTargets 派生）
         });
-        const suppressedEmails = new Set(
-          (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+        const suppressedEmails = canonicalizeSuppressionValues(
+          'email',
+          (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
         );
         const contacts = await tx.canonicalContact.findMany({
           where: { companyId: { in: companies.map((c) => c.id) } },

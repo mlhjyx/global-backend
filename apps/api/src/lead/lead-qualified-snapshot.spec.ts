@@ -293,7 +293,11 @@ function makeDecideTx(
   };
 }
 
-function makeDecideService(tx: unknown, rights: { effect: string; allowed: boolean } = { effect: 'ALLOW', allowed: true }): LeadService {
+function makeDecideService(
+  tx: unknown,
+  rights: { effect: string; allowed: boolean } = { effect: 'ALLOW', allowed: true },
+  sanctionsOverride?: { screen: ReturnType<typeof vi.fn> },
+): LeadService {
   const prisma = { withWorkspace: async (_ws: string, fn: (t: unknown) => Promise<unknown>) => fn(tx) };
   // DataRights 桩：decide 用 evaluate().effect（快照）+ .allowed（强制门）；真判定由 data-rights.context.spec 覆盖。
   // logDecision（#72 P2）：decide 交棒事务内写审计——桩为 spy 记录调用供断言（同 tx / subject / 顺序）。
@@ -309,7 +313,9 @@ function makeDecideService(tx: unknown, rights: { effect: string; allowed: boole
     logDecision: vi.fn(async () => {}),
   };
   // 制裁筛查桩：这些用例不测第五门 → 返回 not_screened（fail-open，decide 正常交棒；快照标 not_screened）。
-  const sanctions = { screen: () => ({ status: 'not_screened' as const, matches: [], listVersions: {} }) };
+  const sanctions = sanctionsOverride ?? {
+    screen: vi.fn(() => ({ status: 'not_screened' as const, matches: [], listVersions: {} })),
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = new LeadService(prisma as any, dataRights as any, sanctions as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -451,6 +457,59 @@ describe('LeadService.decide — 幂等短路 + 并发 CAS（C）', () => {
     expect(outboxCreate).toHaveBeenCalledTimes(1);
     expect(decisionCreate).toHaveBeenCalledTimes(1);
     expect(second.status).toBe('QUALIFIED'); // 幂等返回现状
+  });
+
+  it('重复 accept 仍复核新出现的 suppression，写 DENY 审计且不产生第二次交棒', async () => {
+    const lead = makeLead({ status: 'QUALIFIED' });
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const tx = makeDecideTx(lead, makeCompany(), outboxCreate, decisionCreate);
+    tx.suppressionRecord.findMany = vi.fn(async () => [{
+      type: 'company_name',
+      value: ' ACME   PUMPEN GmbH ',
+    }]);
+    const svc = makeDecideService(tx);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'STORAGE_RIGHTS_NOT_GRANTED' } },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const logDecision = (svc as any).__logDecision as ReturnType<typeof vi.fn>;
+    expect(logDecision).toHaveBeenCalledTimes(1);
+    expect(tx.canonicalCompany.update).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(decisionCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('suppression DENY 在制裁筛查前短路，确保状态修复与 DENY 审计不会被后续异常回滚', async () => {
+    const outboxCreate = vi.fn();
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn());
+    tx.suppressionRecord.findMany = vi.fn(async () => [{
+      type: 'domain',
+      value: 'acme-pumpen.de',
+    }]);
+    const sanctions = {
+      screen: vi.fn(() => ({
+        status: 'potential_match' as const,
+        matches: [{ list: 'test', name: 'Acme' }],
+        listVersions: { test: 'v1' },
+      })),
+    };
+    const svc = makeDecideService(tx, { effect: 'ALLOW', allowed: true }, sanctions);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'STORAGE_RIGHTS_NOT_GRANTED' } },
+    });
+    // Suppression 已决定 DENY；不得再进入一个会抛错并回滚同事务修复的下游门。
+    expect(sanctions.screen).not.toHaveBeenCalled();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((svc as any).__logDecision).toHaveBeenCalledTimes(1);
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 
   it('C 回归：version 不匹配（并发 decide）→ ConflictException CONFLICT，不建 decision、不发事件', async () => {

@@ -8,6 +8,7 @@ import {
   LEAD_QUALIFIED_SCHEMA_VERSION,
 } from './lead-qualified-snapshot';
 import { DataRightsService } from '../compliance/data-rights.service';
+import { companyMatchesSuppression } from '../discovery/suppression-value';
 import { storageRightsContextForLead } from '../compliance/data-rights.context';
 import { SanctionsScreeningService, reconcileReviewState, matchesFromJson } from '../sanctions/sanctions-screening.service';
 
@@ -104,10 +105,11 @@ export class LeadService {
         });
       }
       const status = action === 'accept' ? 'QUALIFIED' : 'REJECTED';
-      // 幂等短路（C）：已是目标状态（双击/HTTP 重试）→ 返回现状，不建第二条 decision、
-      // 不发第二条 LeadQualified——重发的 event_id 不同，消费端按 event_id 的去重会失效
-      // （SaaS 收到两次 handoff）。QUALIFIED→reject 的人工改判仍允许（不落在此分支）。
-      if (lead.status === status) return lead;
+      const alreadyAtTarget = lead.status === status;
+      // reject 重试没有外部交棒，仍可立即幂等返回。accept 重试必须重新经过 suppression、
+      // DataRights 与 sanctions 终极闸，避免首次 QUALIFIED 后新增的禁联事实被早返回绕过；
+      // 通过复核后仍不建第二条 decision/outbox。
+      if (alreadyAtTarget && action === 'reject') return lead;
       const persistDecision = async (): Promise<void> => {
         // CAS 乐观锁（C）：accept 必须先通过 sanctions/DataRights 预检；DENY 不得留下业务状态变化。
         const cas = await tx.lead.updateMany({
@@ -154,14 +156,44 @@ export class LeadService {
         if (!company) {
           throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'canonical company not found' } });
         }
+        const companySuppressionRows = await tx.suppressionRecord.findMany({
+          where: { type: { in: ['domain', 'company_name'] } },
+          select: { type: true, value: true },
+        });
+        const matchedSuppression = companyMatchesSuppression(companySuppressionRows, company);
+        if (matchedSuppression && company.status !== 'SUPPRESSED') {
+          await tx.canonicalCompany.update({
+            where: { id: company.id },
+            data: { status: 'SUPPRESSED', version: { increment: 1 } },
+          });
+        }
+        const effectiveCompany = matchedSuppression ? { ...company, status: 'SUPPRESSED' } : company;
+
+        // Suppression/DataRights 必须先于任何会抛错的下游门。命中禁联时先提交公司派生状态与
+        // append-only DENY 审计，再由事务外转换为 409；否则 sanctions 异常会回滚禁联状态修复和审计。
+        const rightsCtx = storageRightsContextForLead({
+          country: effectiveCompany.country,
+          status: effectiveCompany.status,
+          hasNamedContacts: effectiveCompany.contacts.length > 0,
+        });
+        const rights = this.dataRights.evaluate(rightsCtx);
+        if (!rights.allowed) {
+          await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
+            subjectType: 'lead',
+            subjectId: leadId,
+            actorId: ctx.userId,
+          });
+          return { storageRightsDenied: true as const, effect: rights.effect };
+        }
+
         // 🔴 第五门制裁筛查硬 re-check（decide 不可绕的终极安全网）：live 重筛（catch 名单自 qualify 后的更新）
         // + reconcile 既有复核态。命中且未被人工清（open/confirmed）→ 抛 SANCTIONS_HOLD_UNRESOLVED，
         // **回滚整个 decide、绝不建/发快照**（绝不把被制裁公司交付客户）。未启用(DISABLED)→ not_screened、不拦。
-        const screen = this.sanctions.screen(company.name, company.country);
+        const screen = this.sanctions.screen(effectiveCompany.name, effectiveCompany.country);
         // 🔴 持久化命中（qualify 写）**独立于 live 索引新鲜度**读取——闭合跨进程 fail-open 窗口（复审 #1）：
         // 即便 live screen 因 API 索引空/陈旧/构建失败返 not_screened，只要库里有未清的命中就硬拦。
         const prior = await tx.sanctionsScreeningResult.findFirst({
-          where: { canonicalCompanyId: company.id },
+          where: { canonicalCompanyId: effectiveCompany.id },
           orderBy: { screenedAt: 'desc' },
           select: { status: true, reviewState: true, matches: true, listVersions: true },
         });
@@ -193,6 +225,8 @@ export class LeadService {
               ? screen.listVersions
               : ((prior?.listVersions as Record<string, string> | null) ?? {}),
         };
+        // accept 重试已完成所有当前安全复核；保持原 event/decision 幂等，不产生第二份交棒事实。
+        if (alreadyAtTarget) return lead;
         const icp = await tx.icpDefinition.findUnique({
           where: { id: lead.icpId },
           select: { version: true },
@@ -202,35 +236,12 @@ export class LeadService {
         // 避免把一家公司累积的全部证据行拉进 decide 写事务。entity_id 全局唯一 uuid + withWorkspace(RLS) 双重作用域。
         const evidenceByClass = await tx.fieldEvidence.groupBy({
           by: ['dataClass'],
-          where: { entityId: { in: [company.id, ...company.contacts.map((c) => c.id)] } },
+          where: { entityId: { in: [effectiveCompany.id, ...effectiveCompany.contacts.map((c) => c.id)] } },
           _min: { fetchedAt: true },
         });
         const evidence = evidenceByClass
           .filter((g) => g._min.fetchedAt != null)
           .map((g) => ({ dataClass: g.dataClass, fetchedAt: g._min.fetchedAt as Date }));
-        // 收口⑥：存储权利判定 + **强制**（不只标注，确定性纯引擎、缓存规则同步无 await）。
-        // 具名决策人 → red；公司国别 → 主体法域；公司 SUPPRESSED → DENY。
-        const rightsCtx = storageRightsContextForLead({
-          country: company.country,
-          status: company.status,
-          hasNamedContacts: company.contacts.length > 0,
-        });
-        const rights = this.dataRights.evaluate(rightsCtx);
-        // 🔴 !allowed 一律**不交棒**——统一挡住：① 禁联/Art.17 冻结（freezeSubject 置
-        // company.status=SUPPRESSED，而 Lead 状态异步才更新，存在竞态窗口）② 跨境人审
-        // REQUIRE_APPROVAL（EU/UK 主体→CN 处理地）③ 无合法性基础 ALLOW_WITH_BASIS（如 PIPL CN 主体）。
-        // 防「storage_rights=DENY 却仍 handoff_to_campaign + 具名 refs」的自相矛盾输出流向 SaaS。
-        // 规则未加载时引擎对 red 数据 fail-closed（DENY）→ 同样挡下（安全）。
-        if (!rights.allowed) {
-          // DENY 审计必须提交，不能与随后抛出的业务异常在同一事务回滚。此事务只写 append-only
-          // policy_decision_log；外层在提交后把 sentinel 转为 409。Lead/decision/outbox 均尚未写。
-          await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
-            subjectType: 'lead',
-            subjectId: leadId,
-            actorId: ctx.userId,
-          });
-          return { storageRightsDenied: true as const, effect: rights.effect };
-        }
         await persistDecision();
         // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
         // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 已在上方写日志并返回
@@ -243,7 +254,7 @@ export class LeadService {
         });
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
-          company,
+          company: effectiveCompany,
           icpVersion: icp?.version ?? null,
           storageRightsDecision: rights.effect,
           evidence,

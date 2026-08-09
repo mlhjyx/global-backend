@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from './suppression-value';
+import {
+  canonicalizeSuppressionValue,
+  canonicalizeSuppressionValues,
+  companyMatchesSuppression,
+} from './suppression-value';
 
 describe('canonicalizeSuppressionValue', () => {
   it('canonicalizes safe equivalent values to one matching key', () => {
@@ -31,5 +35,9 @@ describe('canonicalizeSuppressionValue', () => {
     expect(canonicalizeSuppressionValues('company_name', ['  ACME   GmbH '])).toEqual(
       new Set(['acme gmbh']),
     );
+    expect(companyMatchesSuppression(
+      [{ type: 'domain', value: ' HTTPS://WWW.EXAMPLE.COM/path ' }],
+      { domain: 'example.com', name: 'Different Co' },
+    )).toBe(true);
   });
 });
