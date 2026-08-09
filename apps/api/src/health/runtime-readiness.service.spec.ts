@@ -5,29 +5,21 @@ function dependencies(overrides: Record<string, unknown> = {}) {
   return {
     prisma: { $queryRawUnsafe: vi.fn(async () => [{ ok: 1 }]) },
     temporal: {
-      readiness: vi.fn(async () => ({
-        server: true,
-        workflowPollers: 1,
-        activityPollers: 1,
-      })),
-    },
-    relay: {
-      readiness: vi.fn(() => ({ ready: true, state: 'running' })),
+      probe: vi.fn(async () => ({ connected: true })),
     },
     admission: {
-      current: vi.fn(() => ({ admitted: true, checks: {} })),
+      current: vi.fn(() => ({ mode: 'development', admitted: true, checks: {} })),
     },
     ...overrides,
   };
 }
 
 describe('RuntimeReadinessService', () => {
-  it('reports ready only when DB, Temporal, worker pollers, relay, and admission are ready', async () => {
+  it('keeps worker and relay explicitly not_proven instead of promoting local process state', async () => {
     const deps = dependencies();
     const service = new RuntimeReadinessService(
       deps.prisma as never,
       deps.temporal as never,
-      deps.relay as never,
       deps.admission as never,
     );
 
@@ -35,30 +27,32 @@ describe('RuntimeReadinessService', () => {
       status: 'ready',
       components: {
         database: { status: 'ok' },
-        temporal: { status: 'ok' },
-        worker: { status: 'ok', workflow_pollers: 1, activity_pollers: 1 },
-        outbox_relay: { status: 'ok' },
+        temporal_control_plane: { status: 'ok' },
+        worker: { status: 'not_proven', code: 'DURABLE_HEARTBEAT_NOT_IMPLEMENTED' },
+        outbox_relay: { status: 'not_proven', code: 'DURABLE_RELAY_EVIDENCE_NOT_IMPLEMENTED' },
         admission: { status: 'ok' },
       },
     });
   });
 
-  it('reports not_ready when no worker poller is visible', async () => {
+  it('keeps pilot readiness closed until durable worker and relay evidence exists', async () => {
     const deps = dependencies({
-      temporal: {
-        readiness: vi.fn(async () => ({ server: true, workflowPollers: 0, activityPollers: 1 })),
+      admission: {
+        current: vi.fn(() => ({ mode: 'pilot', admitted: true, checks: {} })),
       },
     });
     const service = new RuntimeReadinessService(
       deps.prisma as never,
       deps.temporal as never,
-      deps.relay as never,
       deps.admission as never,
     );
 
     await expect(service.check()).resolves.toMatchObject({
       status: 'not_ready',
-      components: { worker: { status: 'failed', code: 'WORKER_POLLER_MISSING' } },
+      components: {
+        worker: { status: 'not_proven' },
+        outbox_relay: { status: 'not_proven' },
+      },
     });
   });
 
@@ -73,7 +67,6 @@ describe('RuntimeReadinessService', () => {
     const service = new RuntimeReadinessService(
       deps.prisma as never,
       deps.temporal as never,
-      deps.relay as never,
       deps.admission as never,
     );
 

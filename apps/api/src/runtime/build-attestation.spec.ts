@@ -82,4 +82,24 @@ describe('build attestation', () => {
     await writeFile(join(directory, 'main.js'), 'changed');
     expect(await computeArtifactDigest(directory)).not.toBe(first);
   });
+
+  it('binds the loaded receipt to the emitted artifact bytes', async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, 'main.js'), 'emitted main');
+    const artifactDigest = await computeArtifactDigest(directory);
+    const path = join(directory, 'build-attestation.json');
+    await writeFile(
+      path,
+      JSON.stringify({ ...validAttestation, artifact_digest: artifactDigest }),
+    );
+
+    await expect(loadBuildIdentity({ mode: 'pilot', path })).resolves.toMatchObject({
+      attested: true,
+      artifact_digest: artifactDigest,
+    });
+    await writeFile(join(directory, 'main.js'), 'different emitted main');
+    await expect(loadBuildIdentity({ mode: 'pilot', path })).rejects.toThrow(
+      /artifact.*digest.*mismatch/i,
+    );
+  });
 });
