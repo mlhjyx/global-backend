@@ -254,7 +254,7 @@ function makeDecideTx(
     $queryRaw: async () => [] as unknown[],
     lead: {
       findUnique: async () => ({ ...lead }),
-      updateMany: async ({
+      updateMany: vi.fn(async ({
         where,
         data,
       }: {
@@ -266,7 +266,7 @@ function makeDecideTx(
         lead.queue = data.queue;
         lead.version = (lead.version as number) + 1;
         return { count: 1 };
-      },
+      }),
     },
     leadDecision: { create: decisionCreate },
     canonicalCompany: { findUnique: async () => company },

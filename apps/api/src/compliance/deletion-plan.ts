@@ -24,7 +24,7 @@ export function buildSuppressionEntries(args: {
     const key = `${type}:${value}`;
     if (seen.has(key)) return;
     seen.add(key);
-    entries.push({ type, value, reason: 'legal' });
+    entries.push({ type, value, reason: 'legal', protectionClass: 'LEGAL' });
   };
   for (const e of args.emails) push('email', e);
   // company 主体：额外冻结整域 + 公司名；contact 主体**只**冻结其本人邮箱（绝不误冻整公司）。

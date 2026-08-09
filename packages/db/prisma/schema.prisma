@@ -877,16 +877,39 @@ model FieldEvidence {
 
 /// Suppression（PRD 7.4 / 12.6）：禁联名单，任何对外动作前的第一道检查。
 model SuppressionRecord {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  type        String // email | domain | company_name
-  value       String
-  reason      String? // unsubscribe | bounce | complaint | manual | legal
-  createdAt   DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  type            String // email | domain | company_name | contact_key
+  value           String
+  reason          String? // unsubscribe | bounce | complaint | manual | legal
+  protectionClass String   @default("LEGAL") @map("protection_class") // PREFERENCE | LEGAL；只可向 LEGAL 提升
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  decisions SuppressionDecision[]
 
   @@unique([workspaceId, type, value])
+  @@unique([workspaceId, id], map: "suppression_record_workspace_id_id_key")
   @@index([workspaceId])
   @@map("suppression_record")
+}
+
+/// Suppression 释放/身份纠正决策：append-only。请求本身不解除 suppression；法定 suppression 的
+/// 普通释放请求只追加 RELEASE_REQUEST_DENIED。actor/request/reason/time 均为问责字段，不保存明文 PII。
+model SuppressionDecision {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  suppressionId String   @map("suppression_id") @db.Uuid
+  requestId     String   @map("request_id") @db.VarChar(128)
+  decision      String // RELEASE_REQUESTED | RELEASE_REQUEST_DENIED | IDENTITY_CORRECTION_REQUESTED
+  reasonCode    String   @map("reason_code")
+  actorId       String   @map("actor_id") @db.VarChar(256)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  suppression SuppressionRecord @relation(fields: [workspaceId, suppressionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "suppression_decision_workspace_record_fkey")
+
+  @@unique([workspaceId, requestId])
+  @@index([workspaceId, suppressionId, createdAt])
+  @@map("suppression_decision")
 }
 
 // ── 存储侧合规（收口⑥ · ADR-010 COMPLIANCE-SCORING / ADR-003 PII-rights zone） ──

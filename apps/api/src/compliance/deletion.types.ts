@@ -19,6 +19,7 @@ export interface SuppressionEntry {
   type: 'email' | 'domain' | 'company_name' | 'contact_key';
   value: string;
   reason: string; // 'legal'（Art.17 擦除/Art.21 反对 = 法定义务保留最小禁联项）
+  protectionClass: 'LEGAL';
 }
 
 /**

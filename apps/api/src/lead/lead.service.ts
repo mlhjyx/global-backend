@@ -92,7 +92,7 @@ export class LeadService {
    * reject → REJECTED。裁决记录留痕，重评分不覆盖人工终态。
    */
   async decide(ctx: RequestContext, leadId: string, action: 'accept' | 'reject', reason?: string) {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    const result = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const lead = await tx.lead.findUnique({ where: { id: leadId } });
       if (!lead) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'lead not found' } });
       if (lead.status === 'SUPPRESSED') {
@@ -108,30 +108,31 @@ export class LeadService {
       // 不发第二条 LeadQualified——重发的 event_id 不同，消费端按 event_id 的去重会失效
       // （SaaS 收到两次 handoff）。QUALIFIED→reject 的人工改判仍允许（不落在此分支）。
       if (lead.status === status) return lead;
-      // CAS 乐观锁（C）：带读时 version 条件更新。并发 decide 后者 count=0 → 409，
-      // 客户端重读再决定——防双写 decision + 双发事件。
-      const cas = await tx.lead.updateMany({
-        where: { id: leadId, version: lead.version },
-        data: {
-          status: status as never,
-          queue: action === 'accept' ? 'recommended' : 'rejected',
-          version: { increment: 1 },
-        },
-      });
-      if (cas.count === 0) {
-        throw new ConflictException({
-          error: { code: 'CONFLICT', message: 'lead was modified concurrently; retry' },
+      const persistDecision = async (): Promise<void> => {
+        // CAS 乐观锁（C）：accept 必须先通过 sanctions/DataRights 预检；DENY 不得留下业务状态变化。
+        const cas = await tx.lead.updateMany({
+          where: { id: leadId, version: lead.version },
+          data: {
+            status: status as never,
+            queue: action === 'accept' ? 'recommended' : 'rejected',
+            version: { increment: 1 },
+          },
         });
-      }
-      await tx.leadDecision.create({
-        data: {
-          workspaceId: ctx.workspaceId,
-          leadId,
-          action,
-          reason: reason ?? null,
-          decidedBy: ctx.userId,
-        },
-      });
+        if (cas.count === 0) {
+          throw new ConflictException({
+            error: { code: 'CONFLICT', message: 'lead was modified concurrently; retry' },
+          });
+        }
+        await tx.leadDecision.create({
+          data: {
+            workspaceId: ctx.workspaceId,
+            leadId,
+            action,
+            reason: reason ?? null,
+            decidedBy: ctx.userId,
+          },
+        });
+      };
       if (action === 'accept') {
         // 🔴 Art.17 竞态闸（Codex PR #72）：交棒前**先对公司行加行锁**（SELECT … FOR UPDATE），
         // 与 freezeSubject 的 `status=SUPPRESSED` updateMany 串行化。两种交错都被关死：
@@ -221,13 +222,16 @@ export class LeadService {
         // 防「storage_rights=DENY 却仍 handoff_to_campaign + 具名 refs」的自相矛盾输出流向 SaaS。
         // 规则未加载时引擎对 red 数据 fail-closed（DENY）→ 同样挡下（安全）。
         if (!rights.allowed) {
-          throw new ConflictException({
-            error: {
-              code: 'STORAGE_RIGHTS_NOT_GRANTED',
-              message: `storage rights ${rights.effect} — handoff blocked pending approval/lawful basis`,
-            },
+          // DENY 审计必须提交，不能与随后抛出的业务异常在同一事务回滚。此事务只写 append-only
+          // policy_decision_log；外层在提交后把 sentinel 转为 409。Lead/decision/outbox 均尚未写。
+          await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
+            subjectType: 'lead',
+            subjectId: leadId,
+            actorId: ctx.userId,
           });
+          return { storageRightsDenied: true as const, effect: rights.effect };
         }
+        await persistDecision();
         // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
         // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 路径上方已 throw 回滚，故此处只记**成功交棒**
         // 的 STORE 判定（含 effect/rule/actor/subject/Art.14 标记），补齐合规审计对"为何允许具名 refs 离开后端"的证据。
@@ -257,10 +261,20 @@ export class LeadService {
           },
         });
       }
+      if (action === 'reject') await persistDecision();
       // updateMany 不返回行 → 重取 CAS 后的 lead 作为响应（同事务内读，状态一致）。
       const updated = await tx.lead.findUnique({ where: { id: leadId } });
       return updated ?? lead;
     });
+    if (result && 'storageRightsDenied' in result && result.storageRightsDenied) {
+      throw new ConflictException({
+        error: {
+          code: 'STORAGE_RIGHTS_NOT_GRANTED',
+          message: `storage rights ${result.effect} — handoff blocked pending approval/lawful basis`,
+        },
+      });
+    }
+    return result;
   }
 
   /** 四队列计数（LED-008 的工作台视图数据）。 */

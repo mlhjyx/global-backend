@@ -11,6 +11,22 @@ import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } 
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
 
+const LEGAL_SUPPRESSION_REASONS = new Set(['unsubscribe', 'complaint', 'legal']);
+export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
+export const SUPPRESSION_DECISION_REASONS = [
+  'USER_PREFERENCE_CHANGED',
+  'BOUNCE_CLASSIFICATION_ERROR',
+  'IDENTITY_MISASSOCIATION',
+  'DUPLICATE_RECORD',
+  'OTHER',
+] as const;
+
+export type SuppressionDecisionRequest = {
+  requestId: string;
+  decision: (typeof SUPPRESSION_DECISIONS)[number];
+  reasonCode: (typeof SUPPRESSION_DECISION_REASONS)[number];
+};
+
 @Injectable()
 export class DiscoveryService {
   constructor(
@@ -384,6 +400,8 @@ export class DiscoveryService {
 
   async addSuppression(ctx: RequestContext, entry: { type: string; value: string; reason?: string }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const reason = entry.reason ?? 'manual';
+      const protectionClass = LEGAL_SUPPRESSION_REASONS.has(reason) ? 'LEGAL' : 'PREFERENCE';
       const rec = await tx.suppressionRecord.upsert({
         where: {
           workspaceId_type_value: {
@@ -392,12 +410,14 @@ export class DiscoveryService {
             value: entry.value.toLowerCase(),
           },
         },
-        update: { reason: entry.reason ?? null },
+        // suppression facts are immutable. A repeated write may only strengthen protection.
+        update: protectionClass === 'LEGAL' ? { protectionClass: 'LEGAL' } : {},
         create: {
           workspaceId: ctx.workspaceId,
           type: entry.type,
           value: entry.value.toLowerCase(),
-          reason: entry.reason ?? null,
+          reason,
+          protectionClass,
         },
       });
       // 立刻生效：命中的 canonical 公司标记 SUPPRESSED
@@ -417,17 +437,104 @@ export class DiscoveryService {
     );
   }
 
-  async removeSuppression(ctx: RequestContext, id: string) {
+  listSuppressionDecisions(ctx: RequestContext, id: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rec = await tx.suppressionRecord.findUnique({ where: { id } });
       if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
-      await tx.suppressionRecord.delete({ where: { id } });
-      return { deleted: true };
+      return tx.suppressionDecision.findMany({
+        where: { suppressionId: id },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
     });
+  }
+
+  async requestSuppressionDecision(
+    ctx: RequestContext,
+    id: string,
+    request: SuppressionDecisionRequest,
+  ) {
+    validateSuppressionDecisionRequest(request);
+    const outcome = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const rec = await tx.suppressionRecord.findUnique({ where: { id } });
+      if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
+
+      const denied = request.decision === 'RELEASE_REQUESTED' && rec.protectionClass === 'LEGAL';
+      const decision = denied ? 'RELEASE_REQUEST_DENIED' : request.decision;
+      const reasonCode = denied ? 'LEGAL_SUPPRESSION_IMMUTABLE' : request.reasonCode;
+      const existing = await tx.suppressionDecision.findUnique({
+        where: { workspaceId_requestId: { workspaceId: ctx.workspaceId, requestId: request.requestId } },
+      });
+      if (existing) {
+        const same =
+          existing.suppressionId === id &&
+          existing.decision === decision &&
+          existing.reasonCode === reasonCode &&
+          existing.actorId === ctx.userId;
+        if (!same) {
+          throw new ConflictException({
+            error: { code: 'IDEMPOTENCY_CONFLICT', message: 'requestId was already used with a different decision' },
+          });
+        }
+        return { denied, record: existing };
+      }
+
+      const record = await tx.suppressionDecision.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          suppressionId: id,
+          requestId: request.requestId,
+          decision,
+          reasonCode,
+          actorId: ctx.userId,
+        },
+      });
+      return { denied, record };
+    });
+
+    if (outcome.denied) {
+      throw new ConflictException({
+        error: {
+          code: 'LEGAL_SUPPRESSION_IMMUTABLE',
+          message: 'legal suppression cannot be released by the ordinary API',
+          decisionId: outcome.record.id,
+        },
+      });
+    }
+    return outcome.record;
+  }
+
+  /** Deprecated compatibility path: records a request and always reports deleted=false. */
+  async removeSuppression(ctx: RequestContext, id: string) {
+    const decision = await this.requestSuppressionDecision(ctx, id, {
+      requestId: `legacy-delete-v1:${id}`,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+    });
+    return { deleted: false, releaseRequested: true, decisionId: decision.id };
   }
 
   listProviders(ctx: RequestContext) {
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) => tx.dataProvider.findMany({ orderBy: { key: 'asc' } }));
+  }
+}
+
+function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest): void {
+  if (!request.requestId || request.requestId.length > 128 || /[\u0000-\u001f\u007f]/.test(request.requestId)) {
+    throw new ConflictException({ error: { code: 'INVALID_REQUEST_ID', message: 'requestId is invalid' } });
+  }
+  if (!(SUPPRESSION_DECISIONS as readonly string[]).includes(request.decision)) {
+    throw new ConflictException({ error: { code: 'INVALID_DECISION', message: 'unsupported suppression decision' } });
+  }
+  if (!(SUPPRESSION_DECISION_REASONS as readonly string[]).includes(request.reasonCode)) {
+    throw new ConflictException({ error: { code: 'INVALID_REASON', message: 'unsupported suppression reason' } });
+  }
+  const correctionReason = ['IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER'].includes(request.reasonCode);
+  const releaseReason = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER'].includes(request.reasonCode);
+  if (
+    (request.decision === 'IDENTITY_CORRECTION_REQUESTED' && !correctionReason) ||
+    (request.decision === 'RELEASE_REQUESTED' && !releaseReason)
+  ) {
+    throw new ConflictException({ error: { code: 'INVALID_REASON', message: 'reason is invalid for this decision' } });
   }
 }
 

@@ -309,8 +309,15 @@ async function upsertSuppressionEntries(
   for (const s of entries) {
     await tx.suppressionRecord.upsert({
       where: { workspaceId_type_value: { workspaceId, type: s.type, value: s.value } },
-      update: {}, // 已存在则保留（更早的禁联时间/原因不覆盖）
-      create: { workspaceId, type: s.type, value: s.value, reason: s.reason },
+      // 已存在则只允许把偏好类提升为法定保护；更早的时间、原因与主体键均不可改写。
+      update: { protectionClass: 'LEGAL' },
+      create: {
+        workspaceId,
+        type: s.type,
+        value: s.value,
+        reason: s.reason,
+        protectionClass: s.protectionClass,
+      },
     });
   }
 }

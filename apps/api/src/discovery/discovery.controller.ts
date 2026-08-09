@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -19,7 +19,12 @@ import { RequestContext } from '../auth/request-context';
 import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
-import { DiscoveryService } from './discovery.service';
+import {
+  DiscoveryService,
+  SUPPRESSION_DECISIONS,
+  SUPPRESSION_DECISION_REASONS,
+  SuppressionDecisionRequest,
+} from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { LawfulBasisKind } from './provider-contract';
 
@@ -34,8 +39,22 @@ class CreateSuppressionDto {
 
   @ApiPropertyOptional({ enum: ['unsubscribe', 'bounce', 'complaint', 'manual', 'legal'] })
   @IsOptional()
-  @IsString()
+  @IsIn(['unsubscribe', 'bounce', 'complaint', 'manual', 'legal'])
   reason?: string;
+}
+
+class SuppressionDecisionDto implements SuppressionDecisionRequest {
+  @ApiProperty({ format: 'uuid', description: '调用方生成的幂等请求 ID' })
+  @IsUUID('4')
+  requestId!: string;
+
+  @ApiProperty({ enum: SUPPRESSION_DECISIONS })
+  @IsIn(SUPPRESSION_DECISIONS)
+  decision!: SuppressionDecisionRequest['decision'];
+
+  @ApiProperty({ enum: SUPPRESSION_DECISION_REASONS })
+  @IsIn(SUPPRESSION_DECISION_REASONS)
+  reasonCode!: SuppressionDecisionRequest['reasonCode'];
 }
 
 /**
@@ -284,10 +303,45 @@ export class DiscoveryController {
     return envelope(await this.discovery.listSuppressions(ctx));
   }
 
+  @Post('suppressions/:id/decisions')
+  @RequireScopes('compliance:manage')
+  @HttpCode(201)
+  @ApiOperation({
+    summary: '追加 suppression release/correction 请求；请求本身不解除禁联',
+    description: '法定 suppression 的 release 请求会持久化拒绝审计并返回 409。',
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'append-only SuppressionDecision' }, { status: 201 })
+  async requestSuppressionDecision(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SuppressionDecisionDto,
+  ) {
+    return envelope(await this.discovery.requestSuppressionDecision(ctx, id, dto));
+  }
+
+  @Get('suppressions/:id/decisions')
+  @RequireScopes('compliance:manage')
+  @ApiOperation({ summary: '列出 suppression 的 append-only release/correction 决策' })
+  @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'SuppressionDecision' })
+  async listSuppressionDecisions(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
+    return envelope(await this.discovery.listSuppressionDecisions(ctx, id));
+  }
+
   @Delete('suppressions/:id')
   @RequireScopes('compliance:manage')
-  @ApiOperation({ summary: '移除禁联记录' })
-  @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
+  @ApiOperation({
+    summary: '已弃用：提交 preference release request，永不物理删除',
+    deprecated: true,
+  })
+  @ApiEnvelope({
+    type: 'object',
+    required: ['deleted', 'releaseRequested', 'decisionId'],
+    properties: {
+      deleted: { type: 'boolean', enum: [false] },
+      releaseRequested: { type: 'boolean', enum: [true] },
+      decisionId: { type: 'string', format: 'uuid' },
+    },
+  })
   async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
     return envelope(await this.discovery.removeSuppression(ctx, id));
   }
