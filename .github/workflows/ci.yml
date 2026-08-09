@@ -213,6 +213,9 @@ jobs:
         run: node apps/api/dist/main.js --export-openapi
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          APP_ENVIRONMENT: development
+          API_BIND_HOST: 127.0.0.1
+          AUTH_ALLOW_DEV_TOKENS: "true"
 
       # git status --porcelain 同时抓「有 diff」与「文件未被跟踪/被删除」（git diff 对 untracked 视而不见）
       - name: Drift check（提交的 openapi.json 必须与代码一致且被跟踪）

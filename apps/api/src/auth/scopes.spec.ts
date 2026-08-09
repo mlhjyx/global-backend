@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTHORIZATION_SCOPES,
   createRolesToScopesPolicy,
+  normalizeTokenRoles,
 } from './scopes';
 
 const EXPECTED_SCOPES = [
@@ -57,6 +58,13 @@ describe('roles to scopes policy', () => {
         'pilot',
       ),
     ).toThrow('scope list must be an array');
+
+    expect(() =>
+      createRolesToScopesPolicy(
+        { AUTH_ROLE_SCOPE_MAP_JSON: ' '.repeat(65_537) },
+        'pilot',
+      ),
+    ).toThrow('must not exceed 65536 UTF-8 bytes');
   });
 
   it('maps unknown token roles to no scopes without default access', () => {
@@ -105,5 +113,24 @@ describe('roles to scopes policy', () => {
       'ops:read',
     ]);
     expect(policy.resolve(['admin'])).toEqual(EXPECTED_SCOPES);
+  });
+
+  it('normalizes a bounded string-only roles claim and rejects malformed values', () => {
+    expect(normalizeTokenRoles(['operator', 'operator', 'unknown'])).toEqual([
+      'operator',
+      'unknown',
+    ]);
+    expect(() => normalizeTokenRoles('operator')).toThrow(
+      'roles claim must be an array',
+    );
+    expect(() => normalizeTokenRoles(['operator', 42])).toThrow(
+      'roles claim contains an invalid role',
+    );
+    expect(() => normalizeTokenRoles(['invalid role'])).toThrow(
+      'roles claim contains an invalid role',
+    );
+    expect(() =>
+      normalizeTokenRoles(Array.from({ length: 129 }, (_, index) => `role-${index}`)),
+    ).toThrow('roles claim must not contain more than 128 roles');
   });
 });

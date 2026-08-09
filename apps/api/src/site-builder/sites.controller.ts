@@ -20,7 +20,9 @@ import {
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
 import { Enveloped, envelope } from '../common/envelope';
 import { SiteDto } from './dto/site.dto';
@@ -68,7 +70,8 @@ const PROFILE_ERROR_SCHEMA = {
 @ApiTags('SiteBuilder')
 @ApiBearerAuth()
 @Controller('site-builder')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class SitesController {
   constructor(private readonly sites: SitesService) {}
 
@@ -92,6 +95,7 @@ export class SitesController {
   }
 
   @Get('sites/:id/profile')
+  @RequireScopes('acquisition:read', 'personal-data:read')
   @ApiOperation({ summary: '建站向导档案（五组）' })
   @ApiEnvelope(PROFILE_RESPONSE_SCHEMA, { headers: PROFILE_RESPONSE_HEADERS })
   @ApiResponse({
@@ -118,6 +122,7 @@ export class SitesController {
   }
 
   @Patch('sites/:id/profile')
+  @RequireScopes('acquisition:write')
   @ApiOperation({
     summary:
       '向导分步保存：组级替换（companyProfile/trustAssets/onlineAssets/brand/contact），可跳过',

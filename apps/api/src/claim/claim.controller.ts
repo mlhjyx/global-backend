@@ -3,7 +3,9 @@ import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
 import { ClaimService } from './claim.service';
@@ -43,7 +45,8 @@ const CONFLICT_SCHEMA = { type: 'object', additionalProperties: true, descriptio
 @ApiTags('Claims')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class ClaimController {
   constructor(private readonly claims: ClaimService) {}
 
@@ -61,6 +64,7 @@ export class ClaimController {
   }
 
   @Post('claims/:claimId/approve')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件' })
   @ApiEnvelope(ClaimDto)
@@ -72,6 +76,7 @@ export class ClaimController {
   }
 
   @Post('claims/:claimId/reject')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '驳回（NEEDS_REVIEW → REVOKED）' })
   @ApiEnvelope(ClaimDto)
@@ -83,6 +88,7 @@ export class ClaimController {
   }
 
   @Post('companies/:companyId/claims')
+  @RequireScopes('acquisition:review')
   @HttpCode(201)
   @ApiOperation({ summary: '手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）' })
   @ApiEnvelope(ClaimDto, { status: 201 })
@@ -95,6 +101,7 @@ export class ClaimController {
   }
 
   @Post('claims/:claimId/revoke')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）' })
   @ApiEnvelope(ClaimDto)
@@ -118,6 +125,7 @@ export class ClaimController {
   }
 
   @Post('conflicts/:conflictId/resolve')
+  @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '裁决冲突：保留一条，另一条 REVOKED' })
   @ApiEnvelope(CONFLICT_SCHEMA)

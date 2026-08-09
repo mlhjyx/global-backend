@@ -555,7 +555,8 @@
                       "required": [
                         "userId",
                         "workspaceId",
-                        "roles"
+                        "roles",
+                        "scopes"
                       ],
                       "properties": {
                         "userId": {
@@ -569,6 +570,23 @@
                           "type": "array",
                           "items": {
                             "type": "string"
+                          }
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "acquisition:read",
+                              "acquisition:write",
+                              "acquisition:review",
+                              "acquisition:event:ack",
+                              "acquisition:label:write",
+                              "acquisition:identity:review",
+                              "personal-data:read",
+                              "compliance:manage",
+                              "ops:read"
+                            ]
                           }
                         }
                       }
@@ -584,9 +602,12 @@
             "bearer": []
           }
         ],
-        "summary": "返回从 token 解出的调用上下文（user / workspace / roles）",
+        "summary": "返回已验证身份与服务端派生权限（user / workspace / roles / scopes）",
         "tags": [
           "System"
+        ],
+        "x-required-scopes": [
+          "ops:read"
         ]
       }
     },
@@ -643,6 +664,9 @@
         "summary": "提交官网，创建企业画像并触发理解（异步）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "get": {
@@ -716,6 +740,9 @@
         "summary": "列出当前 workspace 的企业画像（游标分页）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -760,6 +787,9 @@
         "summary": "按 id 获取企业画像（跨租户返回 404）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -828,6 +858,9 @@
         "summary": "企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -872,6 +905,9 @@
         "summary": "人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -919,6 +955,9 @@
         "summary": "企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）",
         "tags": [
           "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -974,6 +1013,9 @@
         "summary": "列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       },
       "post": {
@@ -1026,6 +1068,9 @@
         "summary": "手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1070,6 +1115,9 @@
         "summary": "审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1114,6 +1162,9 @@
         "summary": "驳回（NEEDS_REVIEW → REVOKED）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1158,6 +1209,9 @@
         "summary": "撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1215,6 +1269,9 @@
         "summary": "知识冲突列表（KNW-004；?status=OPEN）",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1271,6 +1328,9 @@
         "summary": "裁决冲突：保留一条，另一条 REVOKED",
         "tags": [
           "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1315,6 +1375,9 @@
         "summary": "基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1362,6 +1425,9 @@
         "summary": "列出 ICP（可用 ?companyId= 过滤）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1406,6 +1472,9 @@
         "summary": "获取 ICP 详情（含 Persona + 买家委员会）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       },
       "patch": {
@@ -1458,6 +1527,9 @@
         "summary": "人工修订 ICP（AI 产出是假设，可编辑；乐观锁）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1502,6 +1574,9 @@
         "summary": "激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1556,6 +1631,9 @@
         "summary": "新增验证规则（must_have / nice_to_have / exclusion，机器可评估）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1610,6 +1688,9 @@
         "summary": "修改验证规则",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "delete": {
@@ -1660,6 +1741,9 @@
         "summary": "删除验证规则",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -1714,6 +1798,9 @@
         "summary": "用已知客户/非客户样例回测 ICP 规则（确定性评估）；HYPOTHESIS → VALIDATING",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "get": {
@@ -1759,6 +1846,9 @@
         "summary": "回测历史",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1803,6 +1893,9 @@
         "summary": "从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       },
       "get": {
@@ -1848,6 +1941,9 @@
         "summary": "查询计划列表",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -1892,6 +1988,9 @@
         "summary": "人工确认查询计划（DRAFT → READY，Discover 可执行）",
         "tags": [
           "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -1949,6 +2048,9 @@
         "summary": "执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -2032,6 +2134,9 @@
         "summary": "发现执行状态与统计（每源计数/归一/Suppression）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -2117,6 +2222,9 @@
         "summary": "发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -2163,6 +2271,10 @@
         "summary": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -2209,6 +2321,11 @@
         "summary": "按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
@@ -2266,6 +2383,11 @@
         "summary": "邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
@@ -2323,6 +2445,11 @@
         "summary": "猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "personal-data:read",
+          "compliance:manage"
         ]
       }
     },
@@ -2370,6 +2497,10 @@
         "summary": "加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write",
+          "compliance:manage"
         ]
       },
       "get": {
@@ -2408,6 +2539,9 @@
         "summary": "禁联名单",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -2460,6 +2594,10 @@
         "summary": "移除禁联记录",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write",
+          "compliance:manage"
         ]
       }
     },
@@ -2500,6 +2638,9 @@
         "summary": "Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）",
         "tags": [
           "Discovery"
+        ],
+        "x-required-scopes": [
+          "ops:read"
         ]
       }
     },
@@ -2557,6 +2698,9 @@
         "summary": "对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -2658,6 +2802,9 @@
         "summary": "Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -2722,6 +2869,9 @@
         "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -2768,6 +2918,10 @@
         "summary": "Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -2824,6 +2978,9 @@
         "summary": "接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -2880,6 +3037,9 @@
         "summary": "拒绝 Lead（→ REJECTED，原因留痕做质量反馈）",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -2942,6 +3102,10 @@
         "summary": "制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付",
         "tags": [
           "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review",
+          "acquisition:identity:review"
         ]
       }
     },
@@ -3090,6 +3254,9 @@
         "summary": "拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）",
         "tags": [
           "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -3143,6 +3310,9 @@
         "summary": "ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）",
         "tags": [
           "Events"
+        ],
+        "x-required-scopes": [
+          "acquisition:event:ack"
         ]
       }
     },
@@ -3274,6 +3444,9 @@
         "summary": "受理数据主体删除请求（GDPR Art.17）——异步编排，返回 202 + 请求 id",
         "tags": [
           "Compliance"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -3404,6 +3577,9 @@
         "summary": "查询删除请求状态与擦除回执",
         "tags": [
           "Compliance"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
         ]
       }
     },
@@ -3563,6 +3739,9 @@
         "summary": "注册引导提交：无条件建站档案并秒级触发 demo v0",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -3601,6 +3780,9 @@
         "summary": "列出本 workspace 站点（含预览地址）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -3645,6 +3827,9 @@
         "summary": "站点详情",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -4226,6 +4411,10 @@
         "summary": "建站向导档案（五组）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "personal-data:read"
         ]
       },
       "patch": {
@@ -5512,6 +5701,9 @@
         "summary": "向导分步保存：组级替换（companyProfile/trustAssets/onlineAssets/brand/contact），可跳过",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -5746,6 +5938,9 @@
         "summary": "素材上传第 1 步：校验并签发直传 URL（15 分钟有效）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -6060,6 +6255,9 @@
         "summary": "素材上传第 3 步：魔数/大小/去重校验 → 归位；doc 类进 KB 队列",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -6258,6 +6456,9 @@
         "summary": "站点素材列表",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -6462,6 +6663,9 @@
         "summary": "引用守卫通过后软删除素材；对象由异步清理回收",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -6609,6 +6813,9 @@
         "summary": "知识库状态：文档/块计数 + 待补资料缺口（gaps 随 M1 brandProfile）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -7037,6 +7244,9 @@
         "summary": "触发精装修构建（07 §5；409=进行中，429=当日配额）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     },
@@ -7183,6 +7393,9 @@
         "summary": "构建进度（轮询；SSE 事件流按 07 §5 后置）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
         ]
       }
     },
@@ -7431,6 +7644,9 @@
         "summary": "取消构建（终态 409）",
         "tags": [
           "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
         ]
       }
     }

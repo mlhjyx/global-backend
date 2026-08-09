@@ -14,7 +14,9 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional,
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { DiscoveryService } from './discovery.service';
@@ -110,11 +112,13 @@ const CANONICAL_COMPANY_SCHEMA = {
 @ApiTags('Discovery')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('acquisition:read')
 export class DiscoveryController {
   constructor(private readonly discovery: DiscoveryService) {}
 
   @Post('query-plans/:planId/execute')
+  @RequireScopes('acquisition:write')
   @HttpCode(202)
   @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）' })
   @ApiEnvelope(
@@ -179,6 +183,7 @@ export class DiscoveryController {
   }
 
   @Get('canonical-companies/:id')
+  @RequireScopes('acquisition:read', 'personal-data:read')
   @ApiOperation({ summary: '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）' })
   @ApiEnvelope(CANONICAL_COMPANY_SCHEMA)
   async getCompany(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
@@ -186,6 +191,11 @@ export class DiscoveryController {
   }
 
   @Post('canonical-companies/:id/discover-contacts')
+  @RequireScopes(
+    'acquisition:write',
+    'personal-data:read',
+    'compliance:manage',
+  )
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）' })
   @ApiEnvelope(
@@ -197,6 +207,11 @@ export class DiscoveryController {
   }
 
   @Post('contact-points/:pointId/verify')
+  @RequireScopes(
+    'acquisition:write',
+    'personal-data:read',
+    'compliance:manage',
+  )
   @HttpCode(200)
   @ApiOperation({
     summary: '邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED',
@@ -222,6 +237,11 @@ export class DiscoveryController {
   }
 
   @Post('canonical-companies/:id/guess-emails')
+  @RequireScopes(
+    'acquisition:write',
+    'personal-data:read',
+    'compliance:manage',
+  )
   @HttpCode(200)
   @ApiOperation({
     summary: '猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）',
@@ -248,6 +268,7 @@ export class DiscoveryController {
   // ── Suppression ───────────────────────────────────────────────────────────
 
   @Post('suppressions')
+  @RequireScopes('acquisition:label:write', 'compliance:manage')
   @HttpCode(201)
   @ApiOperation({ summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED' })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' }, { status: 201 })
@@ -256,6 +277,7 @@ export class DiscoveryController {
   }
 
   @Get('suppressions')
+  @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '禁联名单' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
   async listSuppressions(@Ctx() ctx: RequestContext) {
@@ -263,6 +285,7 @@ export class DiscoveryController {
   }
 
   @Delete('suppressions/:id')
+  @RequireScopes('acquisition:label:write', 'compliance:manage')
   @ApiOperation({ summary: '移除禁联记录' })
   @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
   async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
@@ -270,6 +293,7 @@ export class DiscoveryController {
   }
 
   @Get('data-providers')
+  @RequireScopes('ops:read')
   @ApiOperation({ summary: 'Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'DataProvider（源/状态/成本）' })
   async listProviders(@Ctx() ctx: RequestContext) {

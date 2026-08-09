@@ -3,7 +3,9 @@ import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags 
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
+import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { DeletionRequestView, DeletionService } from './deletion.service';
@@ -70,7 +72,8 @@ const DELETION_REQUEST_SCHEMA = {
 @ApiTags('Compliance')
 @ApiBearerAuth()
 @Controller('deletion-requests')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes('compliance:manage')
 export class DeletionController {
   constructor(private readonly deletion: DeletionService) {}
 

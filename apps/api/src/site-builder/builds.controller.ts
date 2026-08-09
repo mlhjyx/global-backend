@@ -20,7 +20,9 @@ import {
 } from "@nestjs/swagger";
 import { AuthGuard } from "../auth/auth.guard";
 import { Ctx } from "../auth/ctx.decorator";
+import { RequireScopes } from "../auth/require-scopes.decorator";
 import { RequestContext } from "../auth/request-context";
+import { ScopesGuard } from "../auth/scopes.guard";
 import { ApiEnvelope } from "../common/api-envelope.decorator";
 import { Enveloped, envelope } from "../common/envelope";
 import { BuildsService } from "./builds.service";
@@ -219,11 +221,13 @@ const BUILD_ERROR_SCHEMA = {
 @ApiTags("SiteBuilder")
 @ApiBearerAuth()
 @Controller("site-builder")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ScopesGuard)
+@RequireScopes("acquisition:read")
 export class BuildsController {
   constructor(private readonly builds: BuildsService) {}
 
   @Post("sites/:id/builds")
+  @RequireScopes("acquisition:write")
   @HttpCode(201)
   @ApiOperation({
     summary: "触发精装修构建（07 §5；409=进行中，429=当日配额）",
@@ -364,6 +368,7 @@ export class BuildsController {
   }
 
   @Post("builds/:id/cancel")
+  @RequireScopes("acquisition:write")
   @HttpCode(200)
   @ApiOperation({ summary: "取消构建（终态 409）" })
   @ApiEnvelope(BuildActionResponseDto)

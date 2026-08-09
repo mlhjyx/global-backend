@@ -1,4 +1,5 @@
 import type { ExecutionContext } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthGuard } from './auth.guard';
 import type { RequestContext } from './request-context';
@@ -66,9 +67,14 @@ describe('AuthGuard authorization context', () => {
     const policy = createRolesToScopesPolicy({}, 'test');
     const guard = new AuthGuard(verifier, policy);
 
-    await expect(
-      guard.canActivate(executionContext({ headers: {} })),
-    ).rejects.toThrow('missing bearer token');
+    const error = await guard
+      .canActivate(executionContext({ headers: {} }))
+      .then(() => undefined)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect((error as UnauthorizedException).getResponse()).toEqual({
+      error: { code: 'TOKEN_MISSING', message: 'missing bearer token' },
+    });
     expect(verifier.verify).not.toHaveBeenCalled();
   });
 });

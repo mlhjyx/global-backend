@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
+import { normalizeTokenRoles } from './scopes';
 
 /**
  * DEV ONLY. Token is base64url(JSON { sub, workspace_id, roles }).
@@ -15,7 +16,7 @@ export class DevTokenVerifier extends TokenVerifier {
       return {
         userId: String(claims.sub),
         workspaceId: String(claims.workspace_id),
-        roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [],
+        roles: normalizeTokenRoles(claims.roles),
       };
     } catch {
       throw new UnauthorizedException({

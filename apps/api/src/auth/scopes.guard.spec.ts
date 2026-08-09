@@ -6,7 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { RequireScopes } from './require-scopes.decorator';
 import { ScopesGuard } from './scopes.guard';
 
-function testContext(handler: Function, controller: Function, request: object): ExecutionContext {
+function testContext(
+  handler: ReturnType<ExecutionContext['getHandler']>,
+  controller: ReturnType<ExecutionContext['getClass']>,
+  request: object,
+): ExecutionContext {
   return {
     getHandler: () => handler,
     getClass: () => controller,
@@ -62,26 +66,42 @@ describe('ScopesGuard', () => {
   });
 
   it('fails closed when AuthGuard did not attach a context', () => {
-    expect(() =>
-      guard.canActivate(
-        testContext(
-          ProtectedController.prototype.read,
-          ProtectedController,
-          {},
-        ),
-      ),
-    ).toThrow('authenticated request context is required');
+    const error = (() => {
+      try {
+        guard.canActivate(
+          testContext(
+            ProtectedController.prototype.read,
+            ProtectedController,
+            {},
+          ),
+        );
+      } catch (caught) {
+        return caught;
+      }
+    })();
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect((error as ForbiddenException).getResponse()).toMatchObject({
+      error: { code: 'AUTH_CONTEXT_MISSING' },
+    });
   });
 
   it('fails closed when a protected handler has no scope metadata', () => {
-    expect(() =>
-      guard.canActivate(
-        testContext(
-          MissingMetadataController.prototype.execute,
-          MissingMetadataController,
-          { requestContext: { scopes: [] } },
-        ),
-      ),
-    ).toThrow('required scope metadata is missing');
+    const error = (() => {
+      try {
+        guard.canActivate(
+          testContext(
+            MissingMetadataController.prototype.execute,
+            MissingMetadataController,
+            { requestContext: { scopes: [] } },
+          ),
+        );
+      } catch (caught) {
+        return caught;
+      }
+    })();
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect((error as ForbiddenException).getResponse()).toMatchObject({
+      error: { code: 'SCOPE_METADATA_MISSING' },
+    });
   });
 });
