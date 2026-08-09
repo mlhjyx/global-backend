@@ -154,6 +154,32 @@ test("the live required build fails when its scope dependency is not successful"
   assert.equal(buildPolicy.allowed_job_if, "always()");
 });
 
+test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const rebuildStep = namedStepBlock(
+    buildJob,
+    "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
+  );
+
+  assert.match(
+    rebuildStep,
+    /^          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1$/m,
+  );
+  assert.match(
+    rebuildStep,
+    /^          COPY_SONNET_RECOVERY_REBUILD_TEST=1$/m,
+  );
+  assert.match(
+    rebuildStep,
+    /^          src\/site-builder\/eval\/copy-sonnet-recovery-manifest-prep\.spec\.ts$/m,
+  );
+  assert.match(
+    rebuildStep,
+    /^          src\/site-builder\/eval\/copy-sonnet-recovery-runtime-binding-prep\.spec\.ts$/m,
+  );
+});
+
 test("the topology cleanup does not rename or expand required contexts", async () => {
   const policy = JSON.parse(
     await readRepositoryFile(".github/required-contexts.json"),
