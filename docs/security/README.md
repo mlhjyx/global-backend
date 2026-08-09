@@ -22,6 +22,7 @@ pnpm governance:verify
 - `production dependency audit · canary` 对整个 production lock graph 执行遗留债务 ratchet。
 - `CodeQL JavaScript/TypeScript · canary` 使用 `security-extended` 查询；本地只能验证 workflow 合同，真实扫描结果必须来自 exact-head GitHub Actions。
 - 三个 context 都未写入 `.github/required-contexts.json`，本轮也不修改 live ruleset 或 GitHub Security 设置。观察到稳定的真实 canary 后，是否升级 required context 必须另行审查和授权。
+- RED→GREEN checkpoint、验证矩阵和未证明边界见 [TDD 记录](../implementation-records/acq-supply-chain-gates-tdd.md)。
 
 ## 处置原则
 
