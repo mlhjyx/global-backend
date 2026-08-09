@@ -38,6 +38,9 @@ GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` rulese
   聚合门尚未受 ruleset 强制；
 - 当前 `Security` workflow 只执行 Gitleaks。它不执行依赖漏洞、source-only
   SAST、container image 或 Compose/IaC 扫描，不能被表述为完整 security gate；
+- Gitleaks 的 PR job 扫描 action 计算的 first-parent PR commit range；完整
+  checkout 只保证 range 可达，不代表每次 PR 都重扫仓库全历史。历史暴露面须
+  另走显式审计、分诊与轮换流程；
 - RepositoryRole 5 仍有 `always` bypass；
 - classic branch-protection API 返回未配置；当前保护来自 repository ruleset。
 
