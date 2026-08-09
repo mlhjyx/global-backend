@@ -287,7 +287,7 @@ async function compiledRecoveryRepository(
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
     manifestId:
       identity.manifestId ??
-      "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+      "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit,
@@ -319,7 +319,7 @@ async function compiledRecoveryRepository(
       "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1",
     artifactId:
       identity.artifactId ??
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1",
     classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
     fixedSourceCommit,
     preparationHeadCommit: fixedSourceCommit,
@@ -332,7 +332,7 @@ async function compiledRecoveryRepository(
     observedModelCost: { CNY: 0, USD: 0 },
     duplicatePrevention: COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
     recoveryManifestReference: {
-      path: "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
+      path: "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v15.json",
       fileSha256: "f".repeat(64),
       artifactDigest: "e".repeat(64),
       manifestDigest: "d".repeat(64),
@@ -391,7 +391,7 @@ function admission(
   const manifest = options.manifest ?? {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit: "c".repeat(40),
@@ -443,16 +443,16 @@ function admission(
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: options.campaignId ?? "copy-sonnet-recovery-v14-campaign-test",
-    authorizationId: "copy-sonnet-recovery-v14-child-authorization-test",
-    reservationId: "copy-sonnet-recovery-v14-child-reservation-test",
+    campaignId: options.campaignId ?? "copy-sonnet-recovery-v15-campaign-test",
+    authorizationId: "copy-sonnet-recovery-v15-child-authorization-test",
+    reservationId: "copy-sonnet-recovery-v15-child-reservation-test",
     ledgerIdentityDigest: options.ledgerIdentityDigest ?? "e".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
-    authorizationId: "copy-sonnet-recovery-v14-global-authorization-test",
+    authorizationId: "copy-sonnet-recovery-v15-global-authorization-test",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
@@ -517,7 +517,7 @@ describe("Copy Sonnet recovery trusted gateway", () => {
         authorizationClaimPath: "/not-read/claim.jsonl",
         ledgerMarkerPath: "/not-read/marker.jsonl",
         campaignId:
-          "copy-sonnet-recovery-v14-campaign-compiled-entrypoint-test",
+          "copy-sonnet-recovery-v15-campaign-compiled-entrypoint-test",
         admission: admission("http://127.0.0.1:3001"),
         verifiedSource: Object.freeze({}) as CopyPilotVerifiedSource,
         trustedGateway: Object.freeze({}) as CopyPilotTrustedGateway,
@@ -525,11 +525,11 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     ).rejects.toThrow("COPY_REAL_CAPABILITY_COMPILED_ENTRYPOINT_REQUIRED");
   });
 
-  it("rejects a renamed v14 runtime artifact before ledger or gateway use", async () => {
+  it("rejects a v14 runtime identity before ledger or gateway use", async () => {
     const repository = await compiledRecoveryRepository({
       artifactId:
-        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v13-v1",
-      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
+      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     });
     const sourceModule = REQUIRE(
       join(
@@ -546,10 +546,10 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
   });
 
-  it("rejects an exact v14 runtime artifact at a non-canonical tracked path", async () => {
+  it("rejects an exact v15 runtime artifact at a non-canonical tracked path", async () => {
     const repository = await compiledRecoveryRepository({
       artifactRelativePath:
-        "docs/evidence/site-builder/copied-recovery-runtime-binding-v14.json",
+        "docs/evidence/site-builder/copied-recovery-runtime-binding-v15.json",
     });
     const sourceModule = REQUIRE(
       join(
@@ -700,7 +700,7 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     );
     directories.push(directory);
     const campaignId =
-      "copy-sonnet-recovery-v14-campaign-pre-dispatch-drift-test";
+      "copy-sonnet-recovery-v15-campaign-pre-dispatch-drift-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
@@ -775,13 +775,13 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     );
   });
 
-  it("accepts Git-reviewed evidence for the v14 recovery execution identity", async () => {
+  it("accepts Git-reviewed evidence for the v15 recovery execution identity", async () => {
     const repository = await compiledRecoveryRepository();
     const directory = await mkdtemp(
       join(tmpdir(), "copy-sonnet-recovery-git-acceptance-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-v14-campaign-git-acceptance-test";
+    const campaignId = "copy-sonnet-recovery-v15-campaign-git-acceptance-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
@@ -860,12 +860,12 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     const challenge =
       runnerModule.createCopyGitEvidenceAcceptanceChallenge(execution);
     const artifact = runnerModule.createCopyGitEvidenceAcceptanceArtifact({
-      artifactId: "copy-sonnet-recovery-v14-acceptance-514",
+      artifactId: "copy-sonnet-recovery-v15-acceptance-514",
       challenge,
     });
     const artifactPath = join(
       repository.root,
-      "docs/evidence/copy-sonnet-recovery-v14-acceptance.json",
+      "docs/evidence/copy-sonnet-recovery-v15-acceptance.json",
     );
     await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
       artifactPath,
@@ -877,21 +877,21 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       "--abbrev-ref",
       "HEAD",
     );
-    git(repository.root, "checkout", "-qb", "acceptance/copy-sonnet-v14");
+    git(repository.root, "checkout", "-qb", "acceptance/copy-sonnet-v15");
     git(
       repository.root,
       "add",
-      "docs/evidence/copy-sonnet-recovery-v14-acceptance.json",
+      "docs/evidence/copy-sonnet-recovery-v15-acceptance.json",
     );
-    git(repository.root, "commit", "-qm", "test: accept v14 recovery evidence");
+    git(repository.root, "commit", "-qm", "test: accept v15 recovery evidence");
     git(repository.root, "checkout", "-q", mainBranch);
     git(
       repository.root,
       "merge",
       "--no-ff",
-      "acceptance/copy-sonnet-v14",
+      "acceptance/copy-sonnet-v15",
       "-m",
-      "Merge pull request #514 from test/acceptance-copy-sonnet-v14",
+      "Merge pull request #514 from test/acceptance-copy-sonnet-v15",
     );
     git(repository.root, "update-ref", "refs/remotes/origin/main", "HEAD");
     const acceptance =
@@ -905,7 +905,7 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       runnerModule.getCopyGitAcceptedExecutionAttestation(accepted),
     ).toMatchObject({
       classification: "GIT_REVIEWED_REAL_EVIDENCE",
-      executionId: "copy-sonnet-recovery-v14-claude-sonnet-5",
+      executionId: "copy-sonnet-recovery-v15-claude-sonnet-5",
       alias: "claude-sonnet-5",
       protocol: "anthropic_messages",
       reasoning: "medium",
@@ -925,7 +925,7 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       join(tmpdir(), "copy-sonnet-recovery-invalid-200-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-v14-campaign-invalid-200-test";
+    const campaignId = "copy-sonnet-recovery-v15-campaign-invalid-200-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
