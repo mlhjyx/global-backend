@@ -812,6 +812,8 @@ test("trusted source policy rejects direct dependency fetches before install", a
     "\nlockfileVersion: !!str '9.0'\n",
     "\nlockfileVersion: !<tag:yaml.org,2002:str> '9.0'\n",
     "\nfoo: *.v\n",
+    "\npackages:\n  runtime@1.0.0: {[resolution]: {[repo]: mirror.invalid:runtime, [commit]: deadbeef, [type]: git}}\n",
+    "\npackages:\n  runtime@1.0.0: {? [resolution]: {? [repo]: mirror.invalid:runtime, ? [commit]: deadbeef, ? [type]: git}}\n",
   ]) {
     const result = validateDependencySourcePolicy({
       ...safeInput,
