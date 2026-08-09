@@ -36,9 +36,9 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 export const COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v12.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json" as const;
 export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v12.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json" as const;
 
 const RECOVERY_SOURCE_FILE_SPECS = Object.freeze([
   Object.freeze({
@@ -84,7 +84,7 @@ export const COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS = Object.freeze(
 
 export interface CopySonnetRecoveryRuntimeBindingArtifact {
   schemaVersion: "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1";
-  artifactId: "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v12-v1";
+  artifactId: "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v13-v1";
   classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -125,6 +125,7 @@ export interface CopySonnetRecoveryRuntimeBindingArtifact {
     "GIT_REVIEWED_RECOVERY_RUNTIME_EVIDENCE",
     "KNOWN_SETTLEMENT_PER_PHYSICAL_CALL",
     "NEVER_REPEAT_TERRA_OR_SOL_V11_WIRES",
+    "NEVER_REUSE_STOPPED_V12_AUTHORIZATION_OR_WIRE",
   ];
   artifactDigest: string;
 }
@@ -292,7 +293,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
     manifestId:
-      "site-builder-copy-sonnet-recovery-runtime/2026-08-08-v12-v1",
+      "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
     recoveryManifestArtifactDigest: recoveryArtifact.artifactDigest,
     recoveryManifestDigest: recoveryManifestReference.manifestDigest,
     fixedSourceCommit: input.fixedSourceCommit,
@@ -309,7 +310,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1" as const,
     artifactId:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v12-v1" as const,
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v13-v1" as const,
     classification:
       "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME" as const,
     fixedSourceCommit: input.fixedSourceCommit,
@@ -344,6 +345,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
       "GIT_REVIEWED_RECOVERY_RUNTIME_EVIDENCE",
       "KNOWN_SETTLEMENT_PER_PHYSICAL_CALL",
       "NEVER_REPEAT_TERRA_OR_SOL_V11_WIRES",
+      "NEVER_REUSE_STOPPED_V12_AUTHORIZATION_OR_WIRE",
     ] as const),
   };
   return deepFreeze({
