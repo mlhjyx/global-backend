@@ -582,7 +582,7 @@ describe("AI SDK 7 native provider adapters", () => {
     );
   });
 
-  it("uses the Anthropic JSON tool for schema-valued additionalProperties", async () => {
+  it("uses the Anthropic JSON tool with adaptive reasoning for dynamic schemas", async () => {
     const output = {
       slots: {
         hero_headline: { content: "Precision systems", claimRefs: [] },
@@ -635,6 +635,7 @@ describe("AI SDK 7 native provider adapters", () => {
     const [request] = gateway.observed;
     expect(request.body).toMatchObject({
       model: "claude-sonnet-5",
+      thinking: { type: "adaptive" },
       output_config: { effort: "medium" },
       tools: [
         {
@@ -674,6 +675,37 @@ describe("AI SDK 7 native provider adapters", () => {
           properties,
         },
         outputSchemaName: "oversized_output",
+        maxOutputTokens: 64,
+        abortSignal: AbortSignal.timeout(5_000),
+      }),
+    ).rejects.toThrow("Anthropic structured-output schema is too complex");
+    expect(gateway.observed).toHaveLength(0);
+  });
+
+  it("fully bounds an oversized dynamic Anthropic schema before dispatch", async () => {
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(response, 500, { error: "must not dispatch" });
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+    const properties = Object.fromEntries(
+      Array.from({ length: 4_096 }, (_, index) => [
+        `field_${index}`,
+        { type: "string" },
+      ]),
+    );
+
+    await expect(
+      adapter.execute({
+        alias: "claude-sonnet-5",
+        prompt: "Do not dispatch this oversized dynamic schema.",
+        outputSchema: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          properties,
+        },
+        outputSchemaName: "oversized_dynamic_output",
         maxOutputTokens: 64,
         abortSignal: AbortSignal.timeout(5_000),
       }),

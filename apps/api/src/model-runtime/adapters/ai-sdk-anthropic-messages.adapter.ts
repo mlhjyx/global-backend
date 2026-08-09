@@ -41,6 +41,7 @@ function structuredOutputModeFor(
   if (schema == null) return "outputFormat";
   const pending: unknown[] = [schema];
   const seen = new WeakSet<object>();
+  let requiresJsonTool = false;
   let visited = 0;
   while (pending.length > 0) {
     const current = pending.pop();
@@ -61,11 +62,11 @@ function structuredOutputModeFor(
       additionalProperties === true ||
       (additionalProperties != null && typeof additionalProperties === "object")
     ) {
-      return "jsonTool";
+      requiresJsonTool = true;
     }
     enqueueSchemaValues(pending, Object.values(object), visited);
   }
-  return "outputFormat";
+  return requiresJsonTool ? "jsonTool" : "outputFormat";
 }
 
 function toAnthropicOptions(reasoning: NativeReasoningEffort | undefined) {
