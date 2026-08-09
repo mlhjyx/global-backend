@@ -1,0 +1,74 @@
+import type { ExecutionContext } from '@nestjs/common';
+import { describe, expect, it, vi } from 'vitest';
+import { AuthGuard } from './auth.guard';
+import type { RequestContext } from './request-context';
+import { createRolesToScopesPolicy } from './scopes';
+import { TokenVerifier } from './token-verifier';
+
+class FakeVerifier extends TokenVerifier {
+  constructor(private readonly context: RequestContext) {
+    super();
+  }
+
+  async verify(): Promise<RequestContext> {
+    return this.context;
+  }
+}
+
+function executionContext(request: object): ExecutionContext {
+  return {
+    switchToHttp: () => ({ getRequest: () => request }),
+  } as unknown as ExecutionContext;
+}
+
+describe('AuthGuard authorization context', () => {
+  it('derives immutable server scopes from signed token roles', async () => {
+    const identity: RequestContext = {
+      userId: 'user-1',
+      workspaceId: 'workspace-1',
+      roles: ['operator', 'unknown'],
+    };
+    const verifier = new FakeVerifier(identity);
+    const policy = createRolesToScopesPolicy(
+      {
+        AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({
+          operator: ['acquisition:read', 'acquisition:write'],
+        }),
+      },
+      'pilot',
+    );
+    const request = { headers: { authorization: 'Bearer signed-token' } };
+    const guard = new AuthGuard(verifier, policy);
+
+    await expect(guard.canActivate(executionContext(request))).resolves.toBe(true);
+    expect(request).toMatchObject({
+      requestContext: {
+        userId: 'user-1',
+        workspaceId: 'workspace-1',
+        roles: ['operator', 'unknown'],
+        scopes: ['acquisition:read', 'acquisition:write'],
+      },
+    });
+    expect(Object.isFrozen(request.requestContext)).toBe(true);
+    expect(Object.isFrozen(request.requestContext.roles)).toBe(true);
+    expect(Object.isFrozen(request.requestContext.scopes)).toBe(true);
+    expect(identity).toEqual({
+      userId: 'user-1',
+      workspaceId: 'workspace-1',
+      roles: ['operator', 'unknown'],
+    });
+  });
+
+  it('does not call the verifier when the bearer header is missing', async () => {
+    const verifier = {
+      verify: vi.fn(),
+    } as unknown as TokenVerifier;
+    const policy = createRolesToScopesPolicy({}, 'test');
+    const guard = new AuthGuard(verifier, policy);
+
+    await expect(
+      guard.canActivate(executionContext({ headers: {} })),
+    ).rejects.toThrow('missing bearer token');
+    expect(verifier.verify).not.toHaveBeenCalled();
+  });
+});
