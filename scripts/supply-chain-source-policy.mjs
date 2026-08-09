@@ -8,6 +8,7 @@ export const OFFICIAL_REGISTRY = "https://registry.npmjs.org/";
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const REGISTRY_VERSION_SPECIFIER = /^[a-z0-9*.+<>=~^| -]+$/i;
+const WORKSPACE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 const EXTERNAL_SOURCE_MARKER =
   /(?:^|[\s'"{,\[])(?:https?:\/\/|git\+|git:\/\/|ssh:\/\/|github:|git@|file:|portal:|tarball\s*:|repo\s*:|commit\s*:|directory\s*:|type\s*:\s*(?:git|directory))/i;
 const DEPENDENCY_FIELDS = Object.freeze([
@@ -164,6 +165,131 @@ function validateDependencyMap(
       );
     }
   }
+}
+
+function workspacePatternMatches(pattern, directory) {
+  const patternSegments = pattern.split("/");
+  const directorySegments = directory.split("/");
+  return (
+    patternSegments.length === directorySegments.length &&
+    patternSegments.every(
+      (segment, index) =>
+        segment === "*" || segment === directorySegments[index],
+    )
+  );
+}
+
+function workspaceSourceIssues(workspaceText, workspaceDirectories) {
+  const issues = [];
+  const patterns = [];
+  let packagesDeclarationSeen = false;
+
+  for (const line of workspaceText.split(/\r?\n/u)) {
+    if (line.trim().length === 0 || /^\s*#/u.test(line)) continue;
+    if (line === "packages:" && !packagesDeclarationSeen) {
+      packagesDeclarationSeen = true;
+      continue;
+    }
+
+    const entry = line.match(/^ {2}- (["'])([^"']+)\1$/u);
+    if (!packagesDeclarationSeen || entry === null) {
+      issues.push(
+        issue(
+          "WORKSPACE_SOURCE_NOT_TRUSTED",
+          "workspace configuration must use only one block-style packages list",
+        ),
+      );
+      continue;
+    }
+
+    const pattern = entry[2];
+    const segments = pattern.split("/");
+    if (
+      pattern.includes("\\") ||
+      pattern.includes("\0") ||
+      pattern.startsWith("/") ||
+      segments.some(
+        (segment) =>
+          segment.length === 0 ||
+          segment === "." ||
+          segment === ".." ||
+          (segment !== "*" && !WORKSPACE_PATH_SEGMENT.test(segment)),
+      ) ||
+      patterns.includes(pattern)
+    ) {
+      issues.push(
+        issue(
+          "WORKSPACE_SOURCE_NOT_TRUSTED",
+          "workspace package globs must be unique repository-relative path segments",
+        ),
+      );
+      continue;
+    }
+    patterns.push(pattern);
+  }
+
+  if (!packagesDeclarationSeen || patterns.length === 0) {
+    issues.push(
+      issue(
+        "WORKSPACE_SOURCE_NOT_TRUSTED",
+        "workspace configuration must declare at least one trusted package glob",
+      ),
+    );
+  }
+  for (const directory of workspaceDirectories) {
+    if (
+      directory !== "." &&
+      !patterns.some((pattern) => workspacePatternMatches(pattern, directory))
+    ) {
+      issues.push(
+        issue(
+          "WORKSPACE_SOURCE_NOT_TRUSTED",
+          "every tracked workspace package must be admitted by the packages list",
+        ),
+      );
+    }
+  }
+  return issues;
+}
+
+function lockfileSyntaxIssues(lockfileText) {
+  const ambiguousSyntax = [
+    /["\\]/u,
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u,
+    /(?:^|\n)\s*(?:---|\.\.\.|%YAML|%TAG)(?:\s|$)/u,
+    /(?:^|\n)\s*\?\s+/u,
+    /(?:^|[\s[{,:-])(?:&|!)[A-Za-z0-9_-]+/u,
+    /(?:^|[\s[{,:-])\*[A-Za-z0-9_-]+(?=$|[\s\]},])/u,
+    /(?:^|[\s{,])'(?:resolution|repo|commit|type|tarball|directory)'\s*:/iu,
+    /(?:^|\n)\s*<<\s*:/u,
+    /:\s*[>|][+-]?[0-9]*\s*(?:#.*)?(?:\n|$)/u,
+  ];
+  if (ambiguousSyntax.some((pattern) => pattern.test(lockfileText))) {
+    return [
+      issue(
+        "LOCKFILE_SYNTAX_NOT_TRUSTED",
+        "lockfile must use the generated YAML subset without escapes, tags, aliases, merges, or block scalars",
+      ),
+    ];
+  }
+
+  for (const line of lockfileText.split(/\r?\n/u)) {
+    if (/^\s+resolution\s*:/u.test(line)) {
+      if (
+        !/^ {4}resolution: \{integrity: sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}\}$/u.test(
+          line,
+        )
+      ) {
+        return [
+          issue(
+            "LOCKFILE_EXTERNAL_SOURCE_NOT_TRUSTED",
+            "lockfile resolution entries must be registry integrity records",
+          ),
+        ];
+      }
+    }
+  }
+  return [];
 }
 
 function lockfileLinkIssues(lockfileText, workspaceDirectories) {
@@ -353,20 +479,10 @@ export function validateDependencySourcePolicy(input) {
     }
   }
 
-  if (
-    EXTERNAL_SOURCE_MARKER.test(input.workspaceText) ||
-    /(?:^|\n)\s*(?:registry|registries|proxy|httpsProxy|strictSsl|ca|cafile|configDependencies|patchedDependencies)\s*:/u.test(
-      input.workspaceText,
-    ) ||
-    /(?:^|\n)\s*-\s*['"]?(?:\/|[^'"\n]*\.\.)/u.test(input.workspaceText)
-  ) {
-    issues.push(
-      issue(
-        "WORKSPACE_SOURCE_NOT_TRUSTED",
-        "workspace configuration cannot add network configuration or paths outside the repository",
-      ),
-    );
-  }
+  issues.push(
+    ...workspaceSourceIssues(input.workspaceText, workspaceDirectories),
+  );
+  issues.push(...lockfileSyntaxIssues(input.lockfileText));
   if (EXTERNAL_SOURCE_MARKER.test(input.lockfileText)) {
     issues.push(
       issue(

@@ -780,7 +780,10 @@ test("trusted source policy rejects direct dependency fetches before install", a
     '\npackages:\n  runtime:\n    resolution: {"re\\\\u0070o": attacker/runtime, "co\\\\u006dmit": deadbeef, "ty\\\\u0070e": git}\n',
     '\npackages:\n  runtime:\n    resolution:\n      "re\\\\u0070o": attacker/runtime\n      "co\\\\u006dmit": deadbeef\n      "ty\\\\u0070e": git\n',
     '\npackages:\n  runtime:\n    resolution: {"ta\\\\u0072ball": "htt\\\\u0070s://attacker.invalid/runtime.tgz"}\n',
+    '\npackages:\n  runtime:\n    resolution: {"ta\\\\x72ball": "htt\\\\x70s://attacker.invalid/runtime.tgz"}\n',
+    '\npackages:\n  runtime:\n    resolution: {"ta\\\\U00000072ball": "htt\\\\U00000070s://attacker.invalid/runtime.tgz"}\n',
     '\nimporters:\n  apps/api:\n    dependencies:\n      runtime:\n        version: "l\\\\u0069nk:../../outside"\n',
+    "\npackages:\n  runtime:\n    'resolution': {'repo': attacker/runtime, 'commit': deadbeef, 'type': git}\n",
   ]) {
     const result = validateDependencySourcePolicy({
       ...safeInput,
