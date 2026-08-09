@@ -576,7 +576,10 @@ export async function readBoundedRegularText(
 
   let handle;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
   } catch {
     throw new Error("input must be an openable no-follow regular file");
   }
