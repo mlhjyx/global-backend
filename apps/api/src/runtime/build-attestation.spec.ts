@@ -1,9 +1,10 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   computeArtifactDigest,
+  generateBuildAttestation,
   loadBuildIdentity,
   parseBuildAttestation,
 } from './build-attestation';
@@ -101,5 +102,46 @@ describe('build attestation', () => {
     await expect(loadBuildIdentity({ mode: 'pilot', path })).rejects.toThrow(
       /artifact.*digest.*mismatch/i,
     );
+  });
+
+  it('generates an atomic receipt only from explicit build inputs and current schema bytes', async () => {
+    const directory = await temporaryDirectory();
+    const distRoot = join(directory, 'dist');
+    const migrationsRoot = join(directory, 'migrations');
+    const schemaPath = join(directory, 'schema.prisma');
+    await mkdir(distRoot);
+    await mkdir(join(migrationsRoot, '20260809010101_runtime_receipts'), { recursive: true });
+    await writeFile(join(distRoot, 'main.js'), 'compiled application');
+    await writeFile(schemaPath, 'model RuntimeReceipt {}');
+    await writeFile(
+      join(migrationsRoot, '20260809010101_runtime_receipts', 'migration.sql'),
+      'SELECT 1;',
+    );
+
+    await expect(
+      generateBuildAttestation({
+        distRoot,
+        buildSha: '',
+        builtAt: validAttestation.built_at,
+        schemaPath,
+        migrationsRoot,
+      }),
+    ).rejects.toThrow(/build_sha/i);
+
+    const generated = await generateBuildAttestation({
+      distRoot,
+      buildSha: validAttestation.build_sha,
+      builtAt: validAttestation.built_at,
+      schemaPath,
+      migrationsRoot,
+    });
+    expect(generated).toMatchObject({
+      build_sha: validAttestation.build_sha,
+      migration_revision: '20260809010101_runtime_receipts',
+    });
+    await expect(
+      loadBuildIdentity({ mode: 'pilot', path: join(distRoot, 'build-attestation.json') }),
+    ).resolves.toMatchObject({ attested: true, build_sha: validAttestation.build_sha });
+    expect((await readdir(distRoot)).filter((name) => name.includes('.tmp-'))).toEqual([]);
   });
 });

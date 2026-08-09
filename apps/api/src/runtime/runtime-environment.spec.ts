@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveRuntimeSettings } from './runtime-environment';
 
@@ -57,5 +59,12 @@ describe('resolveRuntimeSettings', () => {
     expect(() =>
       resolveRuntimeSettings({ APP_ENVIRONMENT: 'development', PORT: 'not-a-number' }),
     ).toThrow(/PORT/i);
+  });
+
+  it('wires the resolved host into the real Nest listen call', () => {
+    const source = readFileSync(join(import.meta.dirname, '..', 'main.ts'), 'utf8');
+    expect(source).toContain('resolveRuntimeSettings(process.env)');
+    expect(source).toMatch(/app\.listen\(runtimeSettings\.port,\s*runtimeSettings\.bindHost\)/);
+    expect(source).not.toMatch(/app\.listen\(port\)/);
   });
 });
