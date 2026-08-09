@@ -13,7 +13,7 @@ if (
 }
 
 export const COPY_SONNET_RECOVERY_EXECUTION = Object.freeze({
-  executionKey: "copy-sonnet-recovery-v13-claude-sonnet-5" as const,
+  executionKey: "copy-sonnet-recovery-v14-claude-sonnet-5" as const,
   sourcePilotExecutionKey: SOURCE_SONNET_EXECUTION.executionKey,
   alias: "claude-sonnet-5" as const,
   protocol: "anthropic_messages" as const,
@@ -26,14 +26,15 @@ export const COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION = Object.freeze({
     "gpt-5.6-sol",
   ] as const),
   acceptedWireReplayPolicy:
-    "never_repeat_successful_v11_or_stopped_v12_wires" as const,
+    "never_repeat_successful_v11_or_stopped_v12_or_v13_wires" as const,
   consumedAuthorizationPolicy:
-    "never_reuse_v11_or_v12_authorization" as const,
+    "never_reuse_v11_v12_or_v13_authorization" as const,
 });
 
 export const COPY_SONNET_RECOVERY_PLAN = Object.freeze({
-  schemaVersion: "site-builder-copy-sonnet-recovery-plan/2026-08-08-v1" as const,
-  planId: "site-builder-copy-sonnet-recovery/2026-08-09-v13" as const,
+  schemaVersion:
+    "site-builder-copy-sonnet-recovery-plan/2026-08-08-v1" as const,
+  planId: "site-builder-copy-sonnet-recovery/2026-08-09-v14" as const,
   taskId: "site_builder.copy" as const,
   plannedExecutions: 1 as const,
   maximumWireCalls: 2 as const,
