@@ -76,6 +76,28 @@ export function assertNoRepositoryNpmrc(paths) {
   }
 }
 
+export function assertNoRepositoryNonRegularFiles(entries) {
+  if (
+    !Array.isArray(entries) ||
+    entries.some(
+      (entry) =>
+        !isObject(entry) ||
+        !/^[0-9]{6}$/u.test(entry.mode ?? "") ||
+        !isNonEmptyString(entry.path),
+    )
+  ) {
+    throw new Error("repository file-mode inventory is malformed");
+  }
+  const nonRegularEntries = entries.filter(
+    (entry) => entry.mode !== "100644" && entry.mode !== "100755",
+  );
+  if (nonRegularEntries.length > 0) {
+    throw new Error(
+      `repository symlinks and gitlinks are not admitted by the production audit trust boundary (${nonRegularEntries.length} path entries)`,
+    );
+  }
+}
+
 function buildTrustedGitEnvironment() {
   return Object.freeze({
     ...buildTrustedPnpmEnvironment(),
@@ -98,6 +120,29 @@ function listTrackedRepositoryFiles(cwd, pathspecs, description) {
     throw new Error(`cannot prove the repository ${description} inventory`);
   }
   return execution.stdout.split("\0").filter((path) => path.length > 0);
+}
+
+function listTrackedRepositoryIndexEntries(cwd) {
+  const execution = spawnSync("git", ["-C", cwd, "ls-files", "-s", "-z"], {
+    encoding: "utf8",
+    maxBuffer: MAX_INPUT_BYTES,
+    env: buildTrustedGitEnvironment(),
+  });
+  if (execution.error || execution.signal || execution.status !== 0) {
+    throw new Error("cannot prove the repository file-mode inventory");
+  }
+  return execution.stdout
+    .split("\0")
+    .filter((record) => record.length > 0)
+    .map((record) => {
+      const match = record.match(
+        /^([0-9]{6}) [0-9a-f]{40,64} [0-3]\t([\s\S]+)$/u,
+      );
+      if (match === null) {
+        throw new Error("repository file-mode inventory is malformed");
+      }
+      return Object.freeze({ mode: match[1], path: match[2] });
+    });
 }
 
 export function listTrackedRepositoryNpmrc(cwd) {
@@ -534,6 +579,7 @@ function resolveRepositoryInput(repositoryRoot, relativePath) {
 
 export async function validateRepositoryDependencySources(repositoryRoot) {
   const root = resolve(repositoryRoot);
+  assertNoRepositoryNonRegularFiles(listTrackedRepositoryIndexEntries(root));
   assertNoRepositoryNpmrc(listTrackedRepositoryNpmrc(root));
   const paths = listTrackedRepositoryFiles(
     root,
