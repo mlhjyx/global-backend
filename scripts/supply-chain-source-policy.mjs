@@ -437,6 +437,14 @@ export function validateDependencySourcePolicy(input) {
         issues,
       });
     }
+    if (manifest.document.pnpm?.auditConfig !== undefined) {
+      issues.push(
+        issue(
+          "DEPENDENCY_AUDIT_IGNORE_NOT_TRUSTED",
+          "dependency manifests cannot filter advisories before the production audit ratchet",
+        ),
+      );
+    }
     if (manifest.document.pnpm?.patchedDependencies !== undefined) {
       issues.push(
         issue(
