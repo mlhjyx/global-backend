@@ -14,19 +14,21 @@
 4. 后续 PR 必须使用 base commit 的 verifier/baseline，并比较受信 base 与 head 的实时 audit，candidate 不能修改 policy 后自证。
 5. 仍有遗留漏洞时，机器回执必须显示 `RATCHET_PASS_WITH_LEGACY_RISK`；只有零漏洞才能显示 `PASS_CLEAR`。
 6. Dependabot 将 patch/minor 维护按运行域拆分，协调式 major 继续单独迁移；CodeQL 与新供应链 job 先作为 non-required canary。
+7. `pnpm-workspace.yaml` 只接受覆盖全部 tracked workspace manifest 的 block-style 仓库内 glob；`pnpm-lock.yaml` 只接受当前 pnpm 生成的无转义/anchor/alias/tag/merge/block-scalar 子集与 registry integrity resolution。任何更宽 YAML 语义、catalog/configDependency、外部路径或非 registry 源都必须先扩展受信策略与 mutation 合同。
 
 ## RED → GREEN 证据
 
-| 周期 | RED checkpoint 与预期失败                                                                   | GREEN checkpoint 与结果                                                                            |
-| ---- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败                    | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过              |
-| 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败              | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过     |
-| 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败       | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执    |
-| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败         | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过        |
-| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败           | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝      |
-| 6    | `67df655e`：新增 dependency ownership 未同步机器治理清单时总门失败                          | `a39d4cbe`：CODEOWNERS 末尾承重块与 required-contexts 机器真值逐项一致，governance verifier 通过   |
-| 7    | `1ca67ba2` / `69f4efaa`：direct URL/Git/tarball 与不可枚举的 archive base checkout 合同失败 | `8ba9c2b8`：受信 source-policy 在 base/head install 前运行；base 改用可审计 detached Git worktree  |
-| 8    | `ed34bd0b`：无显式协议、仅 `repo/commit/type: git` 的 lock resolution 仍能绕过              | `8ba9c2b8`：隐式 Git/directory resolution、越界 importer/link 也 fail-closed；官方 registry 图通过 |
+| 周期 | RED checkpoint 与预期失败                                                                                    | GREEN checkpoint 与结果                                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败                                     | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过                              |
+| 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败                               | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过                     |
+| 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败                        | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执                    |
+| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败                          | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过                        |
+| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败                            | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝                      |
+| 6    | `67df655e`：新增 dependency ownership 未同步机器治理清单时总门失败                                           | `a39d4cbe`：CODEOWNERS 末尾承重块与 required-contexts 机器真值逐项一致，governance verifier 通过                   |
+| 7    | `1ca67ba2` / `69f4efaa`：direct URL/Git/tarball 与不可枚举的 archive base checkout 合同失败                  | `8ba9c2b8`：受信 source-policy 在 base/head install 前运行；base 改用可审计 detached Git worktree                  |
+| 8    | `ed34bd0b`：无显式协议、仅 `repo/commit/type: git` 的 lock resolution 仍能绕过                               | `8ba9c2b8`：隐式 Git/directory resolution、越界 importer/link 也 fail-closed；官方 registry 图通过                 |
+| 9    | `7ecda778`：workspace flow/越界 glob 与 YAML escape 合同失败；partial GREEN 的单引号保留键 mutation 再次变红 | `7e0230a1`：严格 workspace schema 与 lock YAML 子集 fail-closed；`\\x`/`\\u`/`\\U`、quoted key、flow path 均被阻断 |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
@@ -38,8 +40,8 @@
 | `pnpm governance:verify`                          | 47/47 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
 | 官方 registry installed base/head 模拟            | `RATCHET_PASS_WITH_LEGACY_RISK`；36 advisories；183 exposures | base 与 head 都禁 scripts/pnpm hooks 后物化路径；不代表漏洞已解决                          |
 | Prettier 与 `git diff --check`                    | PASS                                                          | 新增 YAML/JS/JSON/Markdown 格式与 whitespace 合同                                          |
-| Copy v13 fixed-source rebuild                     | `0a283dab`：7/7 PASS；Prisma/contracts/API build PASS         | 根 `package.json` 与受绑定 source 未因本切片漂移                                           |
-| `docs:verify`、memory、decision-card              | `0a283dab`：0 errors/1 既有 warning；15/15；13/13             | 文档与项目治理总门不回退                                                                   |
+| Copy v13 fixed-source rebuild                     | 本轮最终复验：7/7 PASS；Prisma/contracts/API build PASS       | 根 `package.json` 与受绑定 source 未因本切片漂移                                           |
+| `docs:verify`、memory、decision-card              | 本轮最终复验：0 errors/1 既有 warning；15/15；13/13           | 文档与项目治理总门不回退                                                                   |
 
 Node 内置 governance tests 没有单独的覆盖率采集器，因此本文不伪造百分比。测试直接覆盖所有新增判定分支，并用结构性 mutation 合同锁定 workflow 接线；GitHub-hosted Dependency Review、CodeQL 上传权限、Dependabot 实际分组以及 Actions 事件语义仍只能由未来 exact-head canary 证明。
 
