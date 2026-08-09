@@ -50,7 +50,7 @@
 | `CON-FE-009` | 独立站管理被原型放在 secondary | `RESOLVED` | `OWN-PRODUCT` | 一级产品区域；公开站是输出 |
 | `CON-FE-010` | 旧 Spring 默认秘密/管理员种子/JWT fallback 风险 | `OPEN_DECISION` 安全处置 | `OWN-SEC-COMMERCIAL` | 不探测、不复制；由有效 Owner 轮换/封存并审计历史 |
 | `CON-FE-011` | 原型只接旧 API，未接本仓 OpenAPI | `RESOLVED` 事实 / `INPUT_BLOCKED` 实施 | `OWN-SAAS-FE` | 机器 OpenAPI 是合同真值；正式前端未定位前不施工 |
-| `CON-FE-012` | architecture 手写 `40 paths` 与机器 OpenAPI 漂移 | `OPEN_DECISION` 文档整改 | `OWN-SITE-BE` | Phase 8 删除/生成数字；当前一律机器解析，不修改权威文档 |
+| `CON-FE-012` | architecture 曾手写 OpenAPI 总数并与机器合同漂移 | `RESOLVED` | `OWN-SITE-BE` | 权威文档已删除总数；`governance:verify` 拒绝重新手抄，当前只从机器 OpenAPI 即时解析 |
 | `CON-FE-013` | `INTEGRATION.md` 的 R3-B1 范围与当前 R3-B2/M1-d 合同漂移 | `OPEN_DECISION` 文档整改 | `OWN-SITE-BE` | Phase 4/5 按 operationId/生成类型写接入；当前以 OpenAPI+代码为真 |
 | `CON-FE-014` | 原型展示发布/域名/分析/询盘等超范围承诺 | `RESOLVED` | `OWN-PRODUCT` | `DEC-FE-P2-007`；对应 Capability 保持后置状态 |
 | `CON-FE-015` | 开发预览与生产 Release/Publish 混写 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | R1-min substrate 已合入；Preview/Release/Publish/Domain 术语仍严格分层 |

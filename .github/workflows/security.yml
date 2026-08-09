@@ -1,6 +1,8 @@
 name: Security
 
-# 后端命门：仓库有 .env（DB URL / 中转站 key / crawl4ai token）。每个 PR + main 推送扫密钥泄漏。
+# 后端命门：仓库可能在本地持有 DB URL / 网关 key / crawl token。每个 PR 与
+# main push 扫描本次事件的受控 Git 范围；这不是全历史清零证明，也不替代
+# dependency、SAST、container 或 IaC 扫描。历史清理须用独立、显式的审计流程。
 on:
   pull_request:
   push:
@@ -22,11 +24,32 @@ jobs:
     name: gitleaks 密钥扫描
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 0 # 全历史，扫到被后续提交"覆盖"的历史泄漏
+          # gitleaks-action 在 PR 上构造 first-parent PR commit range；完整 fetch
+          # 只确保该 range 可达，不能表述为每次重扫仓库全历史。
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare trusted scanner policy
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_CONFIG: ${{ runner.temp }}/trusted-gitleaks.toml
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            git show "$PR_BASE_SHA:.gitleaks.toml" > "$TRUSTED_CONFIG"
+            git show "$PR_BASE_SHA:.gitleaksignore" > .gitleaksignore
+          else
+            cp .gitleaks.toml "$TRUSTED_CONFIG"
+          fi
+          sha256sum "$TRUSTED_CONFIG" .gitleaksignore
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PR 必须使用 trusted base 的规则与 ignore 文件，避免同一个 PR 先
+          # 放宽扫描器、再把新增密钥藏进 allowlist/fingerprint。
+          GITLEAKS_CONFIG: ${{ runner.temp }}/trusted-gitleaks.toml
           # 个人账户仓库免费；若转组织私有库需在 secrets 配 GITLEAKS_LICENSE

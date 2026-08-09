@@ -80,7 +80,8 @@ export function createDiscoveryActivities(deps: {
     },
 
     /**
-     * Waterfall 步骤 3：调用（低成本优先的）发现源，raw 原样落地（幂等 by externalId）。
+     * Waterfall 步骤 3：fan-out 调用该 source_class 下全部 ENABLED 发现源（source_hint 可收窄），
+     * raw 原样落地（幂等 by externalId）。
      * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
      */
     async executeQuery(args: {
