@@ -5,7 +5,7 @@
 
 - 新增 [Copy source eligibility receipt](../evidence/site-builder/copy-runtime-eligibility.json) 和 required-build verifier。活跃 v15 binding 的路径、文件 SHA、artifact ID、82-file bundle digest、当前 source fingerprint 与 drift paths 都必须精确匹配。
 - 只有零漂移可执行 v15 双 fixed-source rebuild。与 Copy 无关的 Prisma schema 漂移必须显式降级为 `STALE_HOLD`，且 verifier/runner/model runtime/lockfile 等其他路径不允许进入例外；receipt 永远不能授权 dispatch 或 pilot。
-- 该治理避免未授权的 Site Builder 评测冻结获客数据库演进，同时保留 source mismatch 在 client/ledger/wire 前 fail-closed 的安全边界。完整设计见[实施记录](../implementation-records/copy-fixed-source-impact-governance.md)。
+- 该治理避免未授权的 Site Builder 评测冻结获客数据库演进；CI impact verifier 以描述符锚定、同句柄稳定读取和总量上限证明当前 source 状态。历史 dispatch verifier 的中间目录/并发读取与 ledger/claim 前置时序仍是明确 NO-GO，必须随下一次 Copy fixed-source rebase 关闭，不能由本 receipt 冒充已解决。完整设计见[实施记录](../implementation-records/copy-fixed-source-impact-governance.md)。
 
 ## 2026-08-09 · Copy Sonnet recovery v14 create-only preparation
 

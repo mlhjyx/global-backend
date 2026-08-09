@@ -233,13 +233,25 @@ test("the topology suite uses the established governance entry without changing 
 });
 
 test("the Copy impact verifier and receipt remain code-owner controlled", async () => {
-  const codeowners = await readRepositoryFile(".github/CODEOWNERS");
-  for (const rule of [
-    "/scripts/copy-fixed-source-impact*.mjs @mlhjyx",
-    "/docs/evidence/site-builder/copy-runtime-eligibility.json @mlhjyx",
-    "/docs/implementation-records/copy-fixed-source-impact-governance.md @mlhjyx",
-  ]) {
+  const [codeowners, requiredContextsText] = await Promise.all([
+    readRepositoryFile(".github/CODEOWNERS"),
+    readRepositoryFile(".github/required-contexts.json"),
+  ]);
+  const requiredContexts = JSON.parse(requiredContextsText);
+  const protectedPatterns = [
+    "/scripts/copy-fixed-source-impact*.mjs",
+    "/docs/evidence/site-builder/copy-runtime-eligibility.json",
+    "/docs/implementation-records/copy-fixed-source-impact-governance.md",
+  ];
+  for (const pattern of protectedPatterns) {
+    const rule = `${pattern} @mlhjyx`;
     assert.ok(codeowners.split(/\r?\n/u).includes(rule), `missing ${rule}`);
+    assert.ok(
+      requiredContexts.codeowner_requirements.terminal_patterns.includes(
+        pattern,
+      ),
+      `machine CODEOWNERS policy is missing ${pattern}`,
+    );
   }
 });
 

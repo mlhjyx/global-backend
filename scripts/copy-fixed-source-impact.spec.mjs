@@ -153,6 +153,7 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
   for (const mutation of [
     { dispatch_authorization: "AUTHORIZED" },
     { pilot_eligibility: "READY" },
+    { contradictory_dispatch_alias: "AUTHORIZED" },
   ]) {
     assert.throws(
       () =>
