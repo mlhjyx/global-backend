@@ -269,7 +269,11 @@ function makeDecideTx(
       }),
     },
     leadDecision: { create: decisionCreate },
-    canonicalCompany: { findUnique: async () => company },
+    canonicalCompany: {
+      findUnique: async () => company,
+      update: vi.fn(async ({ data }: { data: { status: string } }) => ({ ...company, ...data })),
+    },
+    suppressionRecord: { findMany: vi.fn(async () => []) },
     icpDefinition: { findUnique: async () => ({ version: 3 }) },
     // 鲜度模型 v2：decide 用 groupBy 取每分级最早 fetchedAt。mock 忠实按 dataClass 归组取 min。
     fieldEvidence: {
@@ -294,7 +298,14 @@ function makeDecideService(tx: unknown, rights: { effect: string; allowed: boole
   // DataRights 桩：decide 用 evaluate().effect（快照）+ .allowed（强制门）；真判定由 data-rights.context.spec 覆盖。
   // logDecision（#72 P2）：decide 交棒事务内写审计——桩为 spy 记录调用供断言（同 tx / subject / 顺序）。
   const dataRights = {
-    evaluate: () => ({ reason: 'test', ruleId: null, ruleVersion: 'v1', requiresLawfulBasis: false, article14NoticeRequired: false, ...rights }),
+    evaluate: (input: { suppressed?: boolean }) => ({
+      reason: 'test',
+      ruleId: null,
+      ruleVersion: 'v1',
+      requiresLawfulBasis: false,
+      article14NoticeRequired: false,
+      ...(input.suppressed ? { effect: 'DENY', allowed: false } : rights),
+    }),
     logDecision: vi.fn(async () => {}),
   };
   // 制裁筛查桩：这些用例不测第五门 → 返回 not_screened（fail-open，decide 正常交棒；快照标 not_screened）。
@@ -371,6 +382,26 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     });
     expect(tx.lead.updateMany).not.toHaveBeenCalled();
     expect(decisionCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('历史非规范 domain suppression 在 accept 终极闸命中并阻断 LeadQualified', async () => {
+    const outboxCreate = vi.fn();
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn());
+    tx.suppressionRecord.findMany = vi.fn(async () => [{
+      type: 'domain',
+      value: ' HTTPS://WWW.ACME-PUMPEN.DE/path ',
+    }]);
+    const svc = makeDecideService(tx);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'STORAGE_RIGHTS_NOT_GRANTED' } },
+    });
+    expect(tx.canonicalCompany.update).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
   });
 
