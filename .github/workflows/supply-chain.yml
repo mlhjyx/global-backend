@@ -1,0 +1,80 @@
+name: Supply Chain Canary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "43 4 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-canary-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: dependency review · canary
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Reject newly introduced vulnerable runtime dependencies
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: moderate
+          fail-on-scopes: runtime
+
+  production-audit:
+    name: production dependency audit · canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete history for trusted-base policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      - name: Audit production dependencies against the trusted ratchet
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASELINE_PATH: docs/security/production-dependency-audit-baseline.json
+          TRUSTED_BASELINE: ${{ runner.temp }}/production-dependency-audit-baseline.json
+          TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
+        run: |
+          set -euo pipefail
+          audit_args=(verify --baseline "$TRUSTED_BASELINE")
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if git cat-file -e "${PR_BASE_SHA}:${BASELINE_PATH}" 2>/dev/null; then
+              git show "$PR_BASE_SHA:$BASELINE_PATH" > "$TRUSTED_BASELINE"
+              git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
+            else
+              # One-time bootstrap: the candidate policy is usable only when it
+              # binds itself to this exact PR base. After the first merge every
+              # PR executes the verifier and baseline from its trusted base.
+              cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
+              cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
+              audit_args+=(--expected-bootstrap-base "$PR_BASE_SHA")
+            fi
+          else
+            cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
+            cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
+          fi
+
+          sha256sum "$TRUSTED_BASELINE" "$TRUSTED_VERIFIER"
+          node "$TRUSTED_VERIFIER" "${audit_args[@]}"

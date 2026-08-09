@@ -43,10 +43,7 @@ test("repository artifact reader rejects symlinks and oversized files", async (t
   await symlink(join(root, "large.bin"), join(root, "link.bin"));
   await mkdir(join(root, "real-directory"));
   await writeFile(join(root, "real-directory", "nested.bin"), "nested");
-  await symlink(
-    join(root, "real-directory"),
-    join(root, "linked-directory"),
-  );
+  await symlink(join(root, "real-directory"), join(root, "linked-directory"));
 
   await assert.rejects(
     readRepoRegularFile(root, "link.bin"),

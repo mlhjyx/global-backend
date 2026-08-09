@@ -34,10 +34,13 @@
 /docs/backend/provider-registry.md @mlhjyx
 /docs/evidence/README.md @mlhjyx
 /docs/evidence/runtime/ @mlhjyx
+/docs/security/ @mlhjyx
 /docs/releases/ @mlhjyx
 /docs/templates/release-bundle.template.json @mlhjyx
 /package.json @mlhjyx
 /scripts/governance-*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx
+/scripts/supply-chain-audit*.mjs @mlhjyx
+/scripts/supply-chain-gates.spec.mjs @mlhjyx
 /scripts/verify-docs.mjs @mlhjyx
 /scripts/worktree-inventory.mjs @mlhjyx

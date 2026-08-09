@@ -1,0 +1,536 @@
+{
+  "schema_version": "production-dependency-audit-baseline/v1",
+  "source": {
+    "base_commit": "362f88cac1656016bd5aba93032e0f1d90048cba",
+    "lockfile_digest": "sha256:d98a61553ffa6ea3bca177f47c7c2a82362f774697ffd4c89fa299465072e868",
+    "registry": "https://registry.npmjs.org/",
+    "package_manager": "pnpm@9.15.9",
+    "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
+    "captured_at": "2026-08-09T13:51:23.000Z"
+  },
+  "bootstrap": {
+    "mode": "INITIAL_BASELINE",
+    "base_commit": "362f88cac1656016bd5aba93032e0f1d90048cba"
+  },
+  "governance": {
+    "owner": "OWN-SECURITY",
+    "valid_until": "2026-09-08T13:51:23.000Z",
+    "policy": "Existing advisories may disappear; new advisories, severity increases, critical findings, and expired baselines fail closed."
+  },
+  "summary": {
+    "advisories": 36,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 4,
+      "moderate": 14,
+      "high": 18,
+      "critical": 0
+    }
+  },
+  "advisories": [
+    {
+      "ghsa_id": "GHSA-22jq-vg5j-6vgg",
+      "package": "ip-address",
+      "severity": "moderate",
+      "vulnerable_versions": ">=10.1.1 <=10.2.0",
+      "patched_versions": ">=10.2.1",
+      "url": "https://github.com/advisories/GHSA-22jq-vg5j-6vgg",
+      "remediation": {
+        "stream": "lighthouse-runtime-maintenance",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Lighthouse production dependency requires a bounded browser and observability dependency update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-28wg-ghj8-5hjv",
+      "package": "nanoid",
+      "severity": "high",
+      "vulnerable_versions": "<3.3.16",
+      "patched_versions": ">=3.3.16",
+      "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-2pvr-wf23-7pc7",
+      "package": "astro",
+      "severity": "high",
+      "vulnerable_versions": "<6.4.6",
+      "patched_versions": ">=6.4.6",
+      "url": "https://github.com/advisories/GHSA-2pvr-wf23-7pc7",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-2v37-7h3g-55p8",
+      "package": "nanoid",
+      "severity": "high",
+      "vulnerable_versions": "<3.3.17",
+      "patched_versions": ">=3.3.17",
+      "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-36xv-jgw5-4q75",
+      "package": "@nestjs/core",
+      "severity": "moderate",
+      "vulnerable_versions": "<=11.1.17",
+      "patched_versions": ">=11.1.18",
+      "url": "https://github.com/advisories/GHSA-36xv-jgw5-4q75",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-3p4h-7m6x-2hcm",
+      "package": "multer",
+      "severity": "moderate",
+      "vulnerable_versions": ">=2.0.0-alpha.1 <2.2.0",
+      "patched_versions": ">=2.2.0",
+      "url": "https://github.com/advisories/GHSA-3p4h-7m6x-2hcm",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-4g3v-8h47-v7g6",
+      "package": "astro",
+      "severity": "moderate",
+      "vulnerable_versions": ">=2.9.0 <=7.0.9",
+      "patched_versions": ">=7.1.0",
+      "url": "https://github.com/advisories/GHSA-4g3v-8h47-v7g6",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-4xrf-jv44-h6hh",
+      "package": "ip-address",
+      "severity": "moderate",
+      "vulnerable_versions": ">=10.1.1 <=10.2.1",
+      "patched_versions": ">=10.2.2",
+      "url": "https://github.com/advisories/GHSA-4xrf-jv44-h6hh",
+      "remediation": {
+        "stream": "lighthouse-runtime-maintenance",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Lighthouse production dependency requires a bounded browser and observability dependency update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-5528-5vmv-3xc2",
+      "package": "multer",
+      "severity": "high",
+      "vulnerable_versions": "<2.1.1",
+      "patched_versions": ">=2.1.1",
+      "url": "https://github.com/advisories/GHSA-5528-5vmv-3xc2",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-5p4m-2wfm-xmqj",
+      "package": "js-yaml",
+      "severity": "high",
+      "vulnerable_versions": ">=4.0.0 <4.3.1",
+      "patched_versions": ">=4.3.1",
+      "url": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-5v7r-6r5c-r473",
+      "package": "file-type",
+      "severity": "moderate",
+      "vulnerable_versions": ">=13.0.0 <21.3.1",
+      "patched_versions": ">=21.3.1",
+      "url": "https://github.com/advisories/GHSA-5v7r-6r5c-r473",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-72gw-mp4g-v24j",
+      "package": "multer",
+      "severity": "high",
+      "vulnerable_versions": ">=1.0.0 <2.2.0",
+      "patched_versions": ">=2.2.0",
+      "url": "https://github.com/advisories/GHSA-72gw-mp4g-v24j",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-7p8r-x3mc-p8w7",
+      "package": "fast-uri",
+      "severity": "high",
+      "vulnerable_versions": ">=3.0.0 <3.1.5",
+      "patched_versions": ">=3.1.5",
+      "url": "https://github.com/advisories/GHSA-7p8r-x3mc-p8w7",
+      "remediation": {
+        "stream": "temporal-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Temporal worker transitive dependency requires a compatibility-reviewed runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-7pw4-f3q4-r2p2",
+      "package": "astro",
+      "severity": "low",
+      "vulnerable_versions": ">=3.10.0 <7.0.4",
+      "patched_versions": ">=7.0.4",
+      "url": "https://github.com/advisories/GHSA-7pw4-f3q4-r2p2",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-8988-4f7v-96qf",
+      "package": "@opentelemetry/core",
+      "severity": "moderate",
+      "vulnerable_versions": "<2.8.0",
+      "patched_versions": ">=2.8.0",
+      "url": "https://github.com/advisories/GHSA-8988-4f7v-96qf",
+      "remediation": {
+        "stream": "lighthouse-runtime-maintenance",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Lighthouse production dependency requires a bounded browser and observability dependency update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-8hv8-536x-4wqp",
+      "package": "astro",
+      "severity": "high",
+      "vulnerable_versions": "<6.3.3",
+      "patched_versions": ">=6.3.3",
+      "url": "https://github.com/advisories/GHSA-8hv8-536x-4wqp",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-9wv6-86v2-598j",
+      "package": "path-to-regexp",
+      "severity": "high",
+      "vulnerable_versions": ">=0.2.0 <1.9.0",
+      "patched_versions": ">=1.9.0",
+      "url": "https://github.com/advisories/GHSA-9wv6-86v2-598j",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-f48w-9m4c-m7f5",
+      "package": "astro",
+      "severity": "moderate",
+      "vulnerable_versions": "<7.0.6",
+      "patched_versions": ">=7.0.6",
+      "url": "https://github.com/advisories/GHSA-f48w-9m4c-m7f5",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-f88m-g3jw-g9cj",
+      "package": "sharp",
+      "severity": "high",
+      "vulnerable_versions": "<0.35.0",
+      "patched_versions": ">=0.35.0",
+      "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-fxqj-rqcc-2cmp",
+      "package": "postcss",
+      "severity": "moderate",
+      "vulnerable_versions": "<=8.5.22",
+      "patched_versions": ">=8.5.23",
+      "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-g7r4-m6w7-qqqr",
+      "package": "esbuild",
+      "severity": "low",
+      "vulnerable_versions": ">=0.27.3 <0.28.1",
+      "patched_versions": ">=0.28.1",
+      "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-gh4j-gqv2-49f6",
+      "package": "fast-xml-parser",
+      "severity": "moderate",
+      "vulnerable_versions": "<5.7.0",
+      "patched_versions": ">=5.7.0",
+      "url": "https://github.com/advisories/GHSA-gh4j-gqv2-49f6",
+      "remediation": {
+        "stream": "provider-parser-migration",
+        "owner": "OWN-ACQUISITION-BE",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing provider parser major requires fixture-based compatibility review before replacement."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-j47w-4g3g-c36v",
+      "package": "file-type",
+      "severity": "moderate",
+      "vulnerable_versions": ">=20.0.0 <=21.3.1",
+      "patched_versions": ">=21.3.2",
+      "url": "https://github.com/advisories/GHSA-j47w-4g3g-c36v",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-j687-52p2-xcff",
+      "package": "astro",
+      "severity": "moderate",
+      "vulnerable_versions": "<6.1.6",
+      "patched_versions": ">=6.1.6",
+      "url": "https://github.com/advisories/GHSA-j687-52p2-xcff",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-jrpj-wcv7-9fh9",
+      "package": "astro",
+      "severity": "moderate",
+      "vulnerable_versions": "<6.4.6",
+      "patched_versions": ">=6.4.6",
+      "url": "https://github.com/advisories/GHSA-jrpj-wcv7-9fh9",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-mh99-v99m-4gvg",
+      "package": "brace-expansion",
+      "severity": "high",
+      "vulnerable_versions": ">=2.0.0 <2.1.3",
+      "patched_versions": ">=2.1.3",
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      "remediation": {
+        "stream": "lighthouse-runtime-maintenance",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Lighthouse production dependency requires a bounded browser and observability dependency update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-mwp4-54f8-5fhr",
+      "package": "ip-address",
+      "severity": "high",
+      "vulnerable_versions": "<=10.3.0",
+      "patched_versions": ">=10.3.1",
+      "url": "https://github.com/advisories/GHSA-mwp4-54f8-5fhr",
+      "remediation": {
+        "stream": "lighthouse-runtime-maintenance",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Lighthouse production dependency requires a bounded browser and observability dependency update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-pm4m-ph32-ghv5",
+      "package": "js-yaml",
+      "severity": "high",
+      "vulnerable_versions": ">=5.0.0 <=5.2.1",
+      "patched_versions": ">=5.2.2",
+      "url": "https://github.com/advisories/GHSA-pm4m-ph32-ghv5",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-q8mj-m7cp-5q26",
+      "package": "qs",
+      "severity": "moderate",
+      "vulnerable_versions": ">=6.11.1 <=6.15.1",
+      "patched_versions": ">=6.15.2",
+      "url": "https://github.com/advisories/GHSA-q8mj-m7cp-5q26",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-r28c-9q8g-f849",
+      "package": "postcss",
+      "severity": "high",
+      "vulnerable_versions": "<=8.5.17",
+      "patched_versions": ">=8.5.18",
+      "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-rgw5-rvv9-x895",
+      "package": "brace-expansion",
+      "severity": "high",
+      "vulnerable_versions": ">=2.0.0 <2.1.4",
+      "patched_versions": ">=2.1.4",
+      "url": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+      "remediation": {
+        "stream": "lighthouse-runtime-maintenance",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Lighthouse production dependency requires a bounded browser and observability dependency update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-v2hh-gcrm-f6hx",
+      "package": "fast-uri",
+      "severity": "high",
+      "vulnerable_versions": ">=3.0.0 <=3.1.3",
+      "patched_versions": ">=3.1.4",
+      "url": "https://github.com/advisories/GHSA-v2hh-gcrm-f6hx",
+      "remediation": {
+        "stream": "temporal-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-30T13:51:23.000Z",
+        "reason": "Existing Temporal worker transitive dependency requires a compatibility-reviewed runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-v422-hmwv-36x6",
+      "package": "body-parser",
+      "severity": "low",
+      "vulnerable_versions": "<1.20.6",
+      "patched_versions": ">=1.20.6",
+      "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-v52c-386h-88mc",
+      "package": "multer",
+      "severity": "high",
+      "vulnerable_versions": "<2.1.0",
+      "patched_versions": ">=2.1.0",
+      "url": "https://github.com/advisories/GHSA-v52c-386h-88mc",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-xf7r-hgr6-v32p",
+      "package": "multer",
+      "severity": "high",
+      "vulnerable_versions": "<2.1.0",
+      "patched_versions": ">=2.1.0",
+      "url": "https://github.com/advisories/GHSA-xf7r-hgr6-v32p",
+      "remediation": {
+        "stream": "nestjs-runtime-maintenance",
+        "owner": "OWN-PLATFORM",
+        "due_at": "2026-08-23T13:51:23.000Z",
+        "reason": "Existing NestJS and Express production dependency requires a coordinated runtime update."
+      }
+    },
+    {
+      "ghsa_id": "GHSA-xr5h-phrj-8vxv",
+      "package": "astro",
+      "severity": "low",
+      "vulnerable_versions": "<6.1.10",
+      "patched_versions": ">=6.1.10",
+      "url": "https://github.com/advisories/GHSA-xr5h-phrj-8vxv",
+      "remediation": {
+        "stream": "site-renderer-dependency-migration",
+        "owner": "OWN-SITE-BE",
+        "due_at": "2026-09-08T13:51:23.000Z",
+        "reason": "Existing Site Renderer production dependency requires the coordinated Astro and renderer migration."
+      }
+    }
+  ]
+}

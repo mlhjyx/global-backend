@@ -27,7 +27,8 @@ function advisory(overrides = {}) {
       stream: "runtime-maintenance",
       owner: "OWN-SECURITY",
       due_at: "2026-09-08T00:00:00.000Z",
-      reason: "Existing transitive production dependency pending coordinated upgrade.",
+      reason:
+        "Existing transitive production dependency pending coordinated upgrade.",
     },
     ...overrides,
   };
@@ -48,8 +49,7 @@ function baseline(advisories = [advisory()], overrides = {}) {
       lockfile_digest: LOCKFILE_DIGEST,
       registry: "https://registry.npmjs.org/",
       package_manager: "pnpm@9.15.9",
-      command:
-        "pnpm audit --prod --registry=https://registry.npmjs.org --json",
+      command: "pnpm audit --prod --registry=https://registry.npmjs.org --json",
       captured_at: "2026-08-09T12:00:00.000Z",
     },
     bootstrap: {
@@ -90,7 +90,9 @@ function pnpmAudit(advisories = [advisory()]) {
           vulnerable_versions: item.vulnerable_versions,
           patched_versions: item.patched_versions,
           url: item.url,
-          findings: [{ version: "1.0.0", paths: [`api > ${item.package}@1.0.0`] }],
+          findings: [
+            { version: "1.0.0", paths: [`api > ${item.package}@1.0.0`] },
+          ],
         },
       ]),
     ),
@@ -173,9 +175,8 @@ test("production audit ratchet rejects new, escalated, and critical findings", a
 });
 
 test("baseline validation fails closed on expiry, bootstrap drift, duplicates, and summary drift", async () => {
-  const { validateProductionAuditBaseline } = await import(
-    "./supply-chain-audit.mjs"
-  );
+  const { validateProductionAuditBaseline } =
+    await import("./supply-chain-audit.mjs");
   const existing = advisory();
 
   assert.ok(
@@ -224,9 +225,18 @@ test("baseline validation fails closed on expiry, bootstrap drift, duplicates, a
 
 test("production audit input must be a complete production-only pnpm report", async () => {
   const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
-  const malformed = pnpmAudit();
-  malformed.metadata.devDependencies = 3;
-  malformed.metadata.vulnerabilities.moderate = 0;
+  const original = pnpmAudit();
+  const malformed = {
+    ...original,
+    metadata: {
+      ...original.metadata,
+      devDependencies: 3,
+      vulnerabilities: {
+        ...original.metadata.vulnerabilities,
+        moderate: 0,
+      },
+    },
+  };
   const result = evaluateProductionAudit(malformed, baseline(), {
     now: NOW,
     expectedBootstrapBase: BASE_COMMIT,
@@ -236,9 +246,8 @@ test("production audit input must be a complete production-only pnpm report", as
 });
 
 test("repository baseline is a current, exact-main-bound 36-advisory snapshot", async () => {
-  const { validateProductionAuditBaseline } = await import(
-    "./supply-chain-audit.mjs"
-  );
+  const { validateProductionAuditBaseline } =
+    await import("./supply-chain-audit.mjs");
   const repositoryBaseline = JSON.parse(
     await readRepositoryFile(
       "docs/security/production-dependency-audit-baseline.json",
@@ -261,13 +270,12 @@ test("repository baseline is a current, exact-main-bound 36-advisory snapshot", 
 });
 
 test("dependency review and production audit are pinned, bounded canaries", async () => {
-  const [workflow, requiredContextsText, packageText] = await Promise.all([
+  const [workflow, requiredContextsText, auditScript] = await Promise.all([
     readRepositoryFile(".github/workflows/supply-chain.yml"),
     readRepositoryFile(".github/required-contexts.json"),
-    readRepositoryFile("package.json"),
+    readRepositoryFile("scripts/supply-chain-audit.mjs"),
   ]);
   const requiredContexts = JSON.parse(requiredContextsText);
-  const repositoryPackage = JSON.parse(packageText);
 
   assert.match(workflow, /^  pull_request:\s*$/m);
   assert.match(workflow, /^  push:\s*$/m);
@@ -285,18 +293,12 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
     workflow,
     /git show "\$PR_BASE_SHA:\$BASELINE_PATH" > "\$TRUSTED_BASELINE"/,
   );
+  assert.match(workflow, /--expected-bootstrap-base "\$PR_BASE_SHA"/);
   assert.match(
-    workflow,
-    /--expected-bootstrap-base "\$PR_BASE_SHA"/,
-  );
-  assert.match(
-    workflow,
+    auditScript,
     /pnpm audit --prod --registry=https:\/\/registry\.npmjs\.org --json/,
   );
-  assert.equal(
-    repositoryPackage.scripts["security:audit:prod"],
-    "node scripts/supply-chain-audit.mjs verify",
-  );
+  assert.match(workflow, /node "\$TRUSTED_VERIFIER" "\$\{audit_args\[@\]\}"/);
   for (const canaryContext of [
     "dependency review · canary",
     "production dependency audit · canary",
@@ -324,15 +326,21 @@ test("Dependabot keeps coordinated majors separate and groups maintenance by dom
   }
   assert.doesNotMatch(config, /^      minor-and-patch:$/m);
   for (const dependency of [
-    "astro",
+    '"astro"',
     '"@nestjs/*"',
     '"fast-xml-parser"',
     '"@types/node"',
   ]) {
     assert.ok(config.includes(`dependency-name: ${dependency}`), dependency);
   }
-  assert.match(config, /production-security:\n        applies-to: security-updates/);
-  assert.match(config, /development-security:\n        applies-to: security-updates/);
+  assert.match(
+    config,
+    /production-security:\n        applies-to: security-updates/,
+  );
+  assert.match(
+    config,
+    /development-security:\n        applies-to: security-updates/,
+  );
 });
 
 test("CodeQL is a non-required JavaScript and TypeScript canary with minimal permissions", async () => {

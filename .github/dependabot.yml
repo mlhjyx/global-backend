@@ -7,9 +7,90 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      # 次要/补丁版聚合成一个 PR，减少噪声；主要版单独 PR 便于评审破坏性变更
-      minor-and-patch:
+      # Domain groups are ordered from specific to fallback. Major updates stay
+      # outside these groups and therefore remain individually reviewable.
+      nestjs-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@nestjs/*"
+          - "class-transformer"
+          - "class-validator"
+          - "reflect-metadata"
+          - "rxjs"
         update-types: [minor, patch]
+      temporal-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@temporalio/*"
+        update-types: [minor, patch]
+      site-renderer:
+        applies-to: version-updates
+        patterns:
+          - "astro"
+          - "@astrojs/*"
+          - "@fontsource/*"
+          - "@fontsource-variable/*"
+          - "@playwright/*"
+          - "playwright"
+          - "axe-core"
+          - "chrome-launcher"
+          - "lighthouse"
+          - "sharp"
+          - "vite"
+          - "vitest"
+        update-types: [minor, patch]
+      observability-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@langfuse/*"
+          - "@opentelemetry/*"
+          - "@sentry/*"
+        update-types: [minor, patch]
+      data-infrastructure:
+        applies-to: version-updates
+        patterns:
+          - "@aws-sdk/*"
+          - "@google-cloud/*"
+          - "@prisma/*"
+          - "prisma"
+          - "ioredis"
+          - "minio"
+          - "pg"
+        update-types: [minor, patch]
+      ai-model-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@ai-sdk/*"
+          - "ai"
+        update-types: [minor, patch]
+      contracts-tooling:
+        applies-to: version-updates
+        patterns:
+          - "@redocly/*"
+          - "@stoplight/*"
+          - "ajv"
+          - "ajv-formats"
+          - "openapi-typescript"
+          - "zod"
+        update-types: [minor, patch]
+      development-tooling:
+        applies-to: version-updates
+        dependency-type: development
+        patterns: ["*"]
+        update-types: [minor, patch]
+      production-runtime:
+        applies-to: version-updates
+        dependency-type: production
+        patterns: ["*"]
+        update-types: [minor, patch]
+      production-security:
+        applies-to: security-updates
+        dependency-type: production
+        patterns: ["*"]
+      development-security:
+        applies-to: security-updates
+        dependency-type: development
+        patterns: ["*"]
     # 这些大版本必须按运行时/框架迁移项目处理，不能由单包 PR 直接推进。
     ignore:
       - dependency-name: "astro"

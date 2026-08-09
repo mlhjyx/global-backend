@@ -67,7 +67,9 @@ function provider(overrides = {}) {
     personal_data_class: "RESTRICTED_POSSIBLE",
     default_enablement: "ENABLED",
     call_gates: ["source_policy", "egress_guard", "tool_broker"],
-    test_paths: ["apps/api/src/discovery/providers/public-web.provider.spec.ts"],
+    test_paths: [
+      "apps/api/src/discovery/providers/public-web.provider.spec.ts",
+    ],
     evidence_refs: [
       {
         kind: "TEST_ANCHOR",
@@ -296,7 +298,10 @@ test("provider registry is bound to code-seeded key, SourceClass, and enablement
       "apps/api/src/discovery/providers/public-web.provider.spec.ts",
     ]),
   };
-  assert.deepEqual(validateProviderRegistry(providerRegistry(), context).issues, []);
+  assert.deepEqual(
+    validateProviderRegistry(providerRegistry(), context).issues,
+    [],
+  );
 
   const mutant = providerRegistry({
     providers: [provider({ source_classes: ["company_registry"] })],
@@ -380,9 +385,7 @@ test("provider seed parsing tolerates formatting but fails closed when no seed c
       "apps/api/src/discovery/providers/public-web.provider.spec.ts",
     ]),
   });
-  assert.ok(
-    issueCodes(validation).includes("PROVIDER_SEED_PARSE_EMPTY"),
-  );
+  assert.ok(issueCodes(validation).includes("PROVIDER_SEED_PARSE_EMPTY"));
 });
 
 test("provider human documentation is deterministic and exposes every governance field", () => {
@@ -412,7 +415,10 @@ test("traceability requires every registry, contract, code, test, scenario, evid
       { ...chain, operation_ids: ["Missing_operation"] },
       "TRACE_OPERATION_MISSING",
     ],
-    [{ ...chain, code_paths: ["apps/api/src/missing.ts"] }, "TRACE_CODE_MISSING"],
+    [
+      { ...chain, code_paths: ["apps/api/src/missing.ts"] },
+      "TRACE_CODE_MISSING",
+    ],
     [
       { ...chain, test_paths: ["apps/api/src/missing.spec.ts"] },
       "TRACE_TEST_MISSING",
@@ -593,7 +599,10 @@ test("Release Bundle rejects one artifact reused as all three decision gates", (
 });
 
 test("merge-method evidence proves the result shape instead of naming a method only", () => {
-  assert.deepEqual(validateMergeEvidence(releaseBundle().merge_evidence).issues, []);
+  assert.deepEqual(
+    validateMergeEvidence(releaseBundle().merge_evidence).issues,
+    [],
+  );
 
   const mutant = {
     ...releaseBundle().merge_evidence,
@@ -667,9 +676,9 @@ test("Release Bundle binds every capability to a traceability chain and the same
     ],
   });
   assert.ok(
-    issueCodes(
-      validateReleaseBundle(missingRegistryChain, context),
-    ).includes("RELEASE_TRACEABILITY_CHAIN_MISSING"),
+    issueCodes(validateReleaseBundle(missingRegistryChain, context)).includes(
+      "RELEASE_TRACEABILITY_CHAIN_MISSING",
+    ),
   );
 });
 
@@ -813,9 +822,7 @@ test("required-context policy fails when a repository workflow drops a named con
     driftedConditionalCodes.includes("REQUIRED_CONTEXT_JOB_CONDITIONAL"),
   );
   assert.ok(
-    driftedConditionalCodes.includes(
-      "REQUIRED_CONTEXT_JOB_CONDITION_DRIFT",
-    ),
+    driftedConditionalCodes.includes("REQUIRED_CONTEXT_JOB_CONDITION_DRIFT"),
   );
 
   const conditionalDependency = new Map(workflows);
@@ -825,7 +832,11 @@ test("required-context policy fails when a repository workflow drops a named con
   );
   assert.ok(
     issueCodes(
-      validateRequiredContexts(policy, conditionalDependency, repositoryContext),
+      validateRequiredContexts(
+        policy,
+        conditionalDependency,
+        repositoryContext,
+      ),
     ).includes("REQUIRED_CONTEXT_NEEDS_UNPROTECTED"),
   );
 
@@ -855,9 +866,7 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(policy, workflows, repositoryContext),
-    ).includes(
-      "REQUIRED_CONTEXT_NOT_IMPLEMENTED",
-    ),
+    ).includes("REQUIRED_CONTEXT_NOT_IMPLEMENTED"),
   );
 
   const stepOnly = new Map([
@@ -869,9 +878,7 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(policy, stepOnly, repositoryContext),
-    ).includes(
-      "REQUIRED_CONTEXT_NOT_IMPLEMENTED",
-    ),
+    ).includes("REQUIRED_CONTEXT_NOT_IMPLEMENTED"),
   );
 
   const noPullRequest = new Map(workflows);
@@ -882,9 +889,7 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(policy, noPullRequest, repositoryContext),
-    ).includes(
-      "REQUIRED_CONTEXT_EVENT_MISSING",
-    ),
+    ).includes("REQUIRED_CONTEXT_EVENT_MISSING"),
   );
 
   const unsafeRuleset = {
@@ -897,9 +902,7 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(unsafeRuleset, noPullRequest, repositoryContext),
-    ).includes(
-      "EXTERNAL_RULESET_REQUIREMENTS_UNSAFE",
-    ),
+    ).includes("EXTERNAL_RULESET_REQUIREMENTS_UNSAFE"),
   );
 
   const unpinnedNode = new Map(workflows);
@@ -910,9 +913,7 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(policy, unpinnedNode, repositoryContext),
-    ).includes(
-      "WORKFLOW_NODE_RUNTIME_UNPINNED",
-    ),
+    ).includes("WORKFLOW_NODE_RUNTIME_UNPINNED"),
   );
 
   const ownershipDeleted = codeowners.replace(
@@ -980,27 +981,38 @@ test("pilot Release Bundle rejects expired evidence even when every approval say
   const staleEvidence = releaseEvidence({
     valid_until: "2026-08-07T11:59:59.000Z",
   });
-  const result = validateReleaseBundle(releaseBundle(), releaseValidationContext({
-    evidence_by_id: new Map([[staleEvidence.evidence_id, staleEvidence]]),
-  }));
+  const result = validateReleaseBundle(
+    releaseBundle(),
+    releaseValidationContext({
+      evidence_by_id: new Map([[staleEvidence.evidence_id, staleEvidence]]),
+    }),
+  );
   assert.ok(issueCodes(result).includes("RELEASE_FRESH_EVIDENCE_REQUIRED"));
 });
 
 test("pilot evidence must bind the exact implementation commit and environment", () => {
   const wrongCommit = runtimeEvidence({ environment: "pilot" });
-  const wrongCommitResult = validateReleaseBundle(releaseBundle(), releaseValidationContext({
-    evidence_by_id: new Map([[wrongCommit.evidence_id, wrongCommit]]),
-  }));
+  const wrongCommitResult = validateReleaseBundle(
+    releaseBundle(),
+    releaseValidationContext({
+      evidence_by_id: new Map([[wrongCommit.evidence_id, wrongCommit]]),
+    }),
+  );
   assert.ok(
-    issueCodes(wrongCommitResult).includes("RELEASE_EVIDENCE_IDENTITY_MISMATCH"),
+    issueCodes(wrongCommitResult).includes(
+      "RELEASE_EVIDENCE_IDENTITY_MISMATCH",
+    ),
   );
 
   const wrongEnvironment = runtimeEvidence({ commit: SHA_D });
-  const wrongEnvironmentResult = validateReleaseBundle(releaseBundle(), releaseValidationContext({
-    evidence_by_id: new Map([
-      [wrongEnvironment.evidence_id, wrongEnvironment],
-    ]),
-  }));
+  const wrongEnvironmentResult = validateReleaseBundle(
+    releaseBundle(),
+    releaseValidationContext({
+      evidence_by_id: new Map([
+        [wrongEnvironment.evidence_id, wrongEnvironment],
+      ]),
+    }),
+  );
   assert.ok(
     issueCodes(wrongEnvironmentResult).includes(
       "RELEASE_EVIDENCE_IDENTITY_MISMATCH",
@@ -1010,11 +1022,17 @@ test("pilot evidence must bind the exact implementation commit and environment",
 
 test("Release Bundle implementation and source identity must match merge evidence", () => {
   const mutant = releaseBundle({ implementation_commit: SHA_C });
-  const validation = validateReleaseBundle(mutant, releaseValidationContext({
-    evidence_by_id: new Map([
-      ["runtime-api-development-20260807", releaseEvidence({ commit: SHA_C })],
-    ]),
-  }));
+  const validation = validateReleaseBundle(
+    mutant,
+    releaseValidationContext({
+      evidence_by_id: new Map([
+        [
+          "runtime-api-development-20260807",
+          releaseEvidence({ commit: SHA_C }),
+        ],
+      ]),
+    }),
+  );
   assert.ok(
     issueCodes(validation).includes("RELEASE_IMPLEMENTATION_MERGE_MISMATCH"),
   );
