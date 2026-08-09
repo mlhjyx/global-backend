@@ -64,7 +64,39 @@ function baseline(advisories = [advisory()], overrides = {}) {
     },
     summary: {
       advisories: advisories.length,
+      exposures: advisories.reduce(
+        (count, item) =>
+          count +
+          (
+            item.findings ?? [
+              { version: "1.0.0", paths: [`api > ${item.package}@1.0.0`] },
+            ]
+          ).reduce(
+            (findingCount, finding) =>
+              findingCount + Math.max(finding.paths.length, 1),
+            0,
+          ),
+        0,
+      ),
       vulnerabilities: vulnerabilityCounts,
+    },
+    exposure: {
+      schema_version: "production-dependency-exposure/v1",
+      path_evidence: "REQUIRED",
+      findings: advisories.flatMap((item) =>
+        (
+          item.findings ?? [
+            { version: "1.0.0", paths: [`api > ${item.package}@1.0.0`] },
+          ]
+        ).flatMap((finding) =>
+          (finding.paths.length === 0 ? [null] : finding.paths).map((path) => ({
+            ghsa_id: item.ghsa_id,
+            package: item.package,
+            version: finding.version,
+            path,
+          })),
+        ),
+      ),
     },
     advisories,
     ...overrides,
@@ -227,6 +259,15 @@ test("an admitted advisory cannot expand to a new version or dependency path", a
     comparisonAudit: baseAudit,
   });
   assert.ok(issueCodes(result).includes("AUDIT_EXPOSURE_EXPANDED"));
+
+  const scheduledResult = evaluateProductionAudit(
+    expandedAudit,
+    baseline([existing]),
+    { now: NOW },
+  );
+  assert.ok(
+    issueCodes(scheduledResult).includes("AUDIT_EXPOSURE_NOT_BASELINED"),
+  );
 });
 
 test("admitted advisory version metadata cannot drift without review", async () => {
@@ -272,6 +313,22 @@ test("initial bootstrap is exact and cannot pre-admit future advisories", async 
   });
   assert.ok(
     issueCodes(wrongLockDigest).includes("BASELINE_SOURCE_LOCK_MISMATCH"),
+  );
+
+  const wrongExposure = evaluateProductionAudit(
+    pnpmAudit([existing]),
+    {
+      ...baseline([existing]),
+      exposure: {
+        ...baseline([existing]).exposure,
+        findings: [],
+      },
+      summary: { ...baseline([existing]).summary, exposures: 0 },
+    },
+    { now: NOW, expectedBootstrapBase: BASE_COMMIT },
+  );
+  assert.ok(
+    issueCodes(wrongExposure).includes("BASELINE_BOOTSTRAP_EXPOSURE_MISMATCH"),
   );
 });
 
@@ -401,6 +458,33 @@ test("production audit input must be a complete production-only pnpm report", as
   assert.ok(issueCodes(result).includes("AUDIT_NOT_PRODUCTION_ONLY"));
   assert.ok(issueCodes(result).includes("AUDIT_METADATA_INVALID"));
   assert.ok(issueCodes(result).includes("AUDIT_SUMMARY_MISMATCH"));
+
+  const validFindings = pnpmAudit();
+  const malformedFindings = {
+    ...validFindings,
+    advisories: {
+      ...validFindings.advisories,
+      1: {
+        ...validFindings.advisories["1"],
+        findings: [{ version: "1.0.0", paths: [""] }],
+      },
+    },
+  };
+  const findingResult = evaluateProductionAudit(malformedFindings, baseline(), {
+    now: NOW,
+  });
+  assert.ok(issueCodes(findingResult).includes("AUDIT_FINDINGS_INVALID"));
+
+  const missingPaths = pnpmAudit([
+    { ...advisory(), findings: [{ version: "1.0.0", paths: [] }] },
+  ]);
+  const missingPathResult = evaluateProductionAudit(missingPaths, baseline(), {
+    now: NOW,
+    comparisonAudit: missingPaths,
+  });
+  assert.ok(
+    issueCodes(missingPathResult).includes("AUDIT_PATH_EVIDENCE_INCOMPLETE"),
+  );
 });
 
 test("repository baseline is a current, exact-main-bound 36-advisory snapshot", async () => {
@@ -463,6 +547,11 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
   assert.match(workflow, /pnpm audit --prod[^\n]+> "\$BASE_AUDIT"/);
   assert.match(workflow, /--comparison-audit-file "\$BASE_AUDIT"/);
   assert.match(workflow, /^          version: 9\.15\.9$/m);
+  assert.ok(
+    workflow.match(
+      /pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile/g,
+    )?.length >= 2,
+  );
   for (const protectedBootstrapPath of [
     "package.json | */package.json",
     "pnpm-lock.yaml | pnpm-workspace.yaml",

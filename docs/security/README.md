@@ -4,9 +4,9 @@
 
 ## 当前合同
 
-- `production-dependency-audit-baseline.json` 固定 `origin/main@362f88cac1656016bd5aba93032e0f1d90048cba` 的 `pnpm audit --prod` 结果：36 条 advisory，其中 high 18、moderate 14、low 4、critical 0。
-- ratchet 允许 advisory 消失；PR 还会使用受信 base 的依赖图生成独立 audit，已经消失的 advisory 再次出现会失败。新增 advisory、严重度提高、critical、畸形/非 production-only 报告和过期 baseline 全部失败。
-- PR 正常路径读取 base commit 中的 baseline 与 verifier，避免同一个 PR 放宽 policy 后自证通过。首次引入时只允许 candidate baseline 逐字绑定 PR exact base、base lockfile digest 和完全相等的 advisory 集；bootstrap PR 不得同时修改 manifest、lockfile、workspace、npmrc、pnpm hook 或 patch。合并后不再走 bootstrap。
+- `production-dependency-audit-baseline.json` 固定 `origin/main@362f88cac1656016bd5aba93032e0f1d90048cba` 的 `pnpm audit --prod` 结果与 canonical finding evidence：36 条 advisory，其中 high 18、moderate 14、low 4、critical 0。
+- ratchet 允许 advisory 消失；PR 还会使用受信 base 的依赖图生成独立 audit，已经消失的 advisory 再次出现、同一 advisory 新增 vulnerable version/path 或风险元数据漂移都会失败。新增 advisory、严重度提高、critical、畸形/非 production-only 报告和过期 baseline 全部失败。
+- PR 正常路径读取 base commit 中的 baseline 与 verifier，避免同一个 PR 放宽 policy 后自证通过。head 与 base 都以固定 pnpm、禁 lifecycle scripts、禁 `.pnpmfile.cjs` hooks 的方式物化依赖路径；缺路径证据直接失败。首次引入时只允许 candidate baseline 逐字绑定 PR exact base、base lockfile digest、advisory 集和 finding exposure；bootstrap PR 不得同时修改 manifest、lockfile、workspace、npmrc、pnpm hook 或 patch。合并后不再走 bootstrap。
 - 扫描器固定使用 `https://registry.npmjs.org/`，不把默认镜像、历史审计数字或 Dependency Review 当成等价证据。
 
 本地验证：

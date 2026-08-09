@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const BASELINE_SCHEMA = "production-dependency-audit-baseline/v1";
+const EXPOSURE_SCHEMA = "production-dependency-exposure/v1";
 const OFFICIAL_REGISTRY = "https://registry.npmjs.org/";
 const AUDIT_COMMAND =
   "pnpm audit --prod --registry=https://registry.npmjs.org --json";
@@ -41,6 +42,95 @@ function validDate(value) {
 
 function advisoryIdentity(advisory) {
   return `${advisory.ghsa_id}|${advisory.package}`;
+}
+
+function findingFingerprint(advisory, version, path) {
+  return JSON.stringify([advisory.ghsa_id, advisory.package, version, path]);
+}
+
+function normalizeBaselineExposure(exposure, admittedIdentities) {
+  const issues = [];
+  if (
+    !isObject(exposure) ||
+    exposure.schema_version !== EXPOSURE_SCHEMA ||
+    exposure.path_evidence !== "REQUIRED" ||
+    !Array.isArray(exposure.findings)
+  ) {
+    return {
+      evidence: [],
+      fingerprints: [],
+      issues: [
+        issue(
+          "BASELINE_EXPOSURE_INVALID",
+          "baseline exposure must require canonical finding path evidence",
+        ),
+      ],
+    };
+  }
+  const evidence = [];
+  const fingerprints = [];
+  for (const finding of exposure.findings) {
+    if (
+      !isObject(finding) ||
+      !GHSA_ID.test(finding.ghsa_id ?? "") ||
+      !isNonEmptyString(finding.package) ||
+      !isNonEmptyString(finding.version) ||
+      !isNonEmptyString(finding.path)
+    ) {
+      issues.push(
+        issue(
+          "BASELINE_EXPOSURE_INVALID",
+          "every baseline exposure needs GHSA, package, installed version, and dependency path",
+        ),
+      );
+      continue;
+    }
+    const identity = advisoryIdentity(finding);
+    if (!admittedIdentities.has(identity)) {
+      issues.push(
+        issue(
+          "BASELINE_EXPOSURE_UNKNOWN_ADVISORY",
+          `baseline exposure is not tied to an admitted advisory: ${identity}`,
+        ),
+      );
+    }
+    const normalized = Object.freeze({
+      ghsa_id: finding.ghsa_id,
+      package: finding.package,
+      version: finding.version,
+      path: finding.path,
+    });
+    evidence.push(normalized);
+    fingerprints.push(
+      findingFingerprint(normalized, normalized.version, normalized.path),
+    );
+  }
+  if (new Set(fingerprints).size !== fingerprints.length) {
+    issues.push(
+      issue(
+        "BASELINE_EXPOSURE_DUPLICATE",
+        "baseline exposure fingerprints must be unique",
+      ),
+    );
+  }
+  const sortedFingerprints = [...fingerprints].sort();
+  if (
+    fingerprints.some(
+      (fingerprint, index) => fingerprint !== sortedFingerprints[index],
+    )
+  ) {
+    issues.push(
+      issue(
+        "BASELINE_EXPOSURE_ORDER_INVALID",
+        "baseline exposure findings must use canonical fingerprint order",
+      ),
+    );
+  }
+  return {
+    evidence: Object.freeze(evidence),
+    fingerprints: Object.freeze(sortedFingerprints),
+    issues,
+  };
 }
 
 function countsFor(advisories) {
@@ -281,10 +371,17 @@ export function validateProductionAuditBaseline(
     );
   }
 
+  const normalizedExposure = normalizeBaselineExposure(
+    baseline?.exposure,
+    new Set(identities),
+  );
+  issues.push(...normalizedExposure.issues);
+
   const calculatedCounts = countsFor(advisories);
   if (
     !isObject(baseline?.summary) ||
     baseline.summary.advisories !== advisories.length ||
+    baseline.summary.exposures !== normalizedExposure.evidence.length ||
     !sameCounts(baseline.summary.vulnerabilities, calculatedCounts)
   ) {
     issues.push(
@@ -299,6 +396,7 @@ export function validateProductionAuditBaseline(
     ok: issues.length === 0,
     issues: Object.freeze(issues),
     advisory_count: advisories.length,
+    exposure_fingerprints: normalizedExposure.fingerprints,
   });
 }
 
@@ -349,6 +447,7 @@ function normalizePnpmAudit(audit) {
   }
 
   const advisories = [];
+  let pathEvidenceComplete = true;
   for (const raw of Object.values(audit.advisories)) {
     if (
       !isObject(raw) ||
@@ -370,6 +469,45 @@ function normalizePnpmAudit(audit) {
       );
       continue;
     }
+    const findingFingerprints = [];
+    let findingsValid = true;
+    for (const finding of raw.findings) {
+      if (
+        !isObject(finding) ||
+        !isNonEmptyString(finding.version) ||
+        !Array.isArray(finding.paths) ||
+        finding.paths.some((path) => !isNonEmptyString(path))
+      ) {
+        findingsValid = false;
+        break;
+      }
+      const paths = finding.paths.length === 0 ? [null] : finding.paths;
+      if (finding.paths.length === 0) pathEvidenceComplete = false;
+      for (const path of paths) {
+        findingFingerprints.push(
+          findingFingerprint(
+            {
+              ghsa_id: raw.github_advisory_id,
+              package: raw.module_name,
+            },
+            finding.version,
+            path,
+          ),
+        );
+      }
+    }
+    if (
+      !findingsValid ||
+      new Set(findingFingerprints).size !== findingFingerprints.length
+    ) {
+      issues.push(
+        issue(
+          "AUDIT_FINDINGS_INVALID",
+          "pnpm advisory findings must contain unique version and dependency-path evidence",
+        ),
+      );
+      continue;
+    }
     advisories.push(
       Object.freeze({
         ghsa_id: raw.github_advisory_id,
@@ -378,6 +516,19 @@ function normalizePnpmAudit(audit) {
         vulnerable_versions: raw.vulnerable_versions,
         patched_versions: raw.patched_versions,
         url: raw.url,
+        finding_fingerprints: Object.freeze([...findingFingerprints].sort()),
+        finding_evidence: Object.freeze(
+          raw.findings.flatMap((finding) =>
+            finding.paths.map((path) =>
+              Object.freeze({
+                ghsa_id: raw.github_advisory_id,
+                package: raw.module_name,
+                version: finding.version,
+                path,
+              }),
+            ),
+          ),
+        ),
       }),
     );
   }
@@ -405,7 +556,27 @@ function normalizePnpmAudit(audit) {
       ),
     ),
     issues,
+    path_evidence_complete: pathEvidenceComplete,
   };
+}
+
+export function buildProductionAuditExposure(audit) {
+  const normalized = normalizePnpmAudit(audit);
+  if (normalized.issues.length > 0 || !normalized.path_evidence_complete) {
+    throw new Error("cannot build baseline exposure without complete findings");
+  }
+  const evidence = normalized.advisories
+    .flatMap((advisory) => advisory.finding_evidence)
+    .sort((left, right) =>
+      findingFingerprint(left, left.version, left.path).localeCompare(
+        findingFingerprint(right, right.version, right.path),
+      ),
+    );
+  return Object.freeze({
+    schema_version: EXPOSURE_SCHEMA,
+    path_evidence: "REQUIRED",
+    findings: Object.freeze(evidence),
+  });
 }
 
 export function evaluateProductionAudit(
@@ -435,16 +606,34 @@ export function evaluateProductionAudit(
       ),
     );
   }
-  const comparisonIdentities =
+  if (
+    !normalizedAudit.path_evidence_complete ||
+    (normalizedComparison !== null &&
+      !normalizedComparison.path_evidence_complete)
+  ) {
+    issues.push(
+      issue(
+        "AUDIT_PATH_EVIDENCE_INCOMPLETE",
+        "production audit requires installed dependency paths for canonical comparison",
+      ),
+    );
+  }
+  const comparisonByIdentity =
     normalizedComparison === null || normalizedComparison.issues.length > 0
       ? null
-      : new Set(
-          normalizedComparison.advisories.map((item) => advisoryIdentity(item)),
+      : new Map(
+          normalizedComparison.advisories.map((item) => [
+            advisoryIdentity(item),
+            new Set(item.finding_fingerprints),
+          ]),
         );
   const baselineByIdentity = new Map(
     (Array.isArray(baseline?.advisories) ? baseline.advisories : [])
       .filter((item) => isObject(item))
       .map((item) => [advisoryIdentity(item), item]),
+  );
+  const baselineExposureFingerprints = new Set(
+    baselineValidation.exposure_fingerprints,
   );
   const currentIdentities = new Set();
   const nowDate = now instanceof Date ? now : new Date(now);
@@ -452,6 +641,18 @@ export function evaluateProductionAudit(
   for (const current of normalizedAudit.advisories) {
     const identity = advisoryIdentity(current);
     currentIdentities.add(identity);
+    if (
+      current.finding_fingerprints.some(
+        (fingerprint) => !baselineExposureFingerprints.has(fingerprint),
+      )
+    ) {
+      issues.push(
+        issue(
+          "AUDIT_EXPOSURE_NOT_BASELINED",
+          `production advisory exposure is outside the initial baseline: ${identity}`,
+        ),
+      );
+    }
     if (current.severity === "critical") {
       issues.push(
         issue(
@@ -467,19 +668,45 @@ export function evaluateProductionAudit(
       );
       continue;
     }
-    if (comparisonIdentities !== null && !comparisonIdentities.has(identity)) {
-      issues.push(
-        issue(
-          "AUDIT_REINTRODUCED_ADVISORY",
-          `production advisory reappeared relative to the PR base: ${identity}`,
-        ),
-      );
+    if (comparisonByIdentity !== null) {
+      const comparisonFindings = comparisonByIdentity.get(identity);
+      if (comparisonFindings === undefined) {
+        issues.push(
+          issue(
+            "AUDIT_REINTRODUCED_ADVISORY",
+            `production advisory reappeared relative to the PR base: ${identity}`,
+          ),
+        );
+      } else if (
+        current.finding_fingerprints.some(
+          (fingerprint) => !comparisonFindings.has(fingerprint),
+        )
+      ) {
+        issues.push(
+          issue(
+            "AUDIT_EXPOSURE_EXPANDED",
+            `production advisory gained a vulnerable version or dependency path: ${identity}`,
+          ),
+        );
+      }
     }
     if (SEVERITY_RANK[current.severity] > SEVERITY_RANK[admitted.severity]) {
       issues.push(
         issue(
           "AUDIT_SEVERITY_ESCALATED",
           `production advisory severity increased: ${identity}`,
+        ),
+      );
+    }
+    if (
+      current.vulnerable_versions !== admitted.vulnerable_versions ||
+      current.patched_versions !== admitted.patched_versions ||
+      current.url !== admitted.url
+    ) {
+      issues.push(
+        issue(
+          "AUDIT_ADVISORY_METADATA_DRIFT",
+          `production advisory risk metadata changed and needs review: ${identity}`,
         ),
       );
     }
@@ -521,6 +748,23 @@ export function evaluateProductionAudit(
         issue(
           "BASELINE_BOOTSTRAP_SET_MISMATCH",
           "initial baseline must exactly equal the audited advisory identities and metadata",
+        ),
+      );
+    }
+    const baselineExposure = [...baselineExposureFingerprints].sort();
+    const observedExposure = normalizedAudit.advisories
+      .flatMap((item) => item.finding_fingerprints)
+      .sort();
+    if (
+      baselineExposure.length !== observedExposure.length ||
+      baselineExposure.some(
+        (fingerprint, index) => fingerprint !== observedExposure[index],
+      )
+    ) {
+      issues.push(
+        issue(
+          "BASELINE_BOOTSTRAP_EXPOSURE_MISMATCH",
+          "initial baseline must exactly equal the audited finding exposure",
         ),
       );
     }
@@ -578,6 +822,10 @@ function runPnpmProductionAudit() {
         ...process.env,
         NPM_CONFIG_REGISTRY: OFFICIAL_REGISTRY,
         npm_config_registry: OFFICIAL_REGISTRY,
+        NPM_CONFIG_IGNORE_PNPMFILE: "true",
+        npm_config_ignore_pnpmfile: "true",
+        NPM_CONFIG_IGNORE_SCRIPTS: "true",
+        npm_config_ignore_scripts: "true",
       },
     },
   );

@@ -49,6 +49,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Materialize audited dependency paths without hooks
+        run: pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
+
       - name: Audit production dependencies against the trusted ratchet
         shell: bash
         env:
@@ -72,10 +75,15 @@ jobs:
               git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
               mkdir "$BASE_CHECKOUT"
               git archive "$PR_BASE_SHA" | tar -xf - -C "$BASE_CHECKOUT"
+              (
+                cd "$BASE_CHECKOUT"
+                pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
+              )
               set +e
               (
                 cd "$BASE_CHECKOUT"
-                pnpm audit --prod --registry=https://registry.npmjs.org --json > "$BASE_AUDIT"
+                NPM_CONFIG_IGNORE_PNPMFILE=true NPM_CONFIG_IGNORE_SCRIPTS=true \
+                  pnpm audit --prod --registry=https://registry.npmjs.org --json > "$BASE_AUDIT"
               )
               base_audit_status=$?
               set -e
@@ -97,7 +105,8 @@ jobs:
                   package.json | */package.json | \
                   pnpm-lock.yaml | pnpm-workspace.yaml | \
                   .npmrc | */.npmrc | \
-                  pnpmfile.cjs | patches/*)
+                  .pnpmfile.cjs | */.pnpmfile.cjs | \
+                  patches/*)
                     echo "::error::initial baseline cannot accompany dependency graph changes: $path"
                     exit 1
                     ;;
