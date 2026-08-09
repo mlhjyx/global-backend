@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -73,5 +80,18 @@ test("repository output resolver rejects escaping and symlink destinations", asy
   await assert.rejects(
     resolveRepoOutputFile(root, "releases/link.md"),
     (error) => error?.code === "REPO_FILE_NOT_REGULAR",
+  );
+});
+
+test("the explicit root governance entry loads the CI topology suite", async () => {
+  const governanceContractsTest = await readFile(
+    new URL("./governance-contracts.spec.mjs", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    governanceContractsTest,
+    /^import "\.\/governance-ci-topology\.spec\.mjs";$/m,
+    "the independently rooted governance path suite must reject removal of the CI topology suite import",
   );
 });
