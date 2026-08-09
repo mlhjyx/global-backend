@@ -38,6 +38,8 @@
 /docs/backend/provider-registry.md @mlhjyx
 /docs/evidence/README.md @mlhjyx
 /docs/evidence/runtime/ @mlhjyx
+/docs/evidence/site-builder/copy-runtime-eligibility.json @mlhjyx
+/docs/implementation-records/copy-fixed-source-impact-governance.md @mlhjyx
 /docs/security/ @mlhjyx
 /docs/releases/ @mlhjyx
 /docs/templates/release-bundle.template.json @mlhjyx
@@ -51,6 +53,7 @@
 /**/.pnpmfile.cjs @mlhjyx
 /patches/ @mlhjyx
 /scripts/governance-*.mjs @mlhjyx
+/scripts/copy-fixed-source-impact*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx
 /scripts/supply-chain-audit*.mjs @mlhjyx
 /scripts/supply-chain-source-policy*.mjs @mlhjyx
