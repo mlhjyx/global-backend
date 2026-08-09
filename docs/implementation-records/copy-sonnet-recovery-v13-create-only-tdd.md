@@ -53,6 +53,13 @@ Post-sync merge commit: `e361451a5601f1117c7391e85cb05f841b1fd6bf`
 Post-sync runtime-binding preparation commit:
 `874a8cc2aa637c35f8c78302006ffb370913fcb7`
 
+Post-sync runtime-binding artifact commit:
+`28f533df244347c54cf605cacde36b3b1a7a9db2`
+
+Post-sync source-drift verification commits:
+`17f04e50b05f03c61c31437982e149fe0b391c45`,
+`70b348b8c252423b0cfda2fa06019a9499746aaa`
+
 ## Generated artifacts
 
 ### Manifest
@@ -92,10 +99,15 @@ Both artifacts record:
 
 ## Deterministic verification
 
-- focused recovery, real-runner, and source-verifier tests: 35 passed and 1
-  opt-in rebuild test skipped in the normal run;
-- clean-HEAD manifest and runtime-binding rebuild with coverage: 17 passed;
-- full API suite: 275 files passed, with 4,337 tests passed, 1 skipped, and 0
+- post-sync focused recovery, real-runner, source-verifier, and clean-HEAD
+  runtime-binding rebuild with coverage: 6 files passed, 36 tests passed, 1
+  historical manifest rebuild skipped, and 0 failed;
+- the immutable v13 manifest remains byte- and digest-exact against #355. Its
+  opt-in preparer intentionally rejects rebuilding from the later governance
+  source because the raw root `package.json` changed; execution consumes the
+  post-sync runtime binding, whose 82 tracked sources now match its fixed
+  commit on the current head;
+- full API suite: 276 files passed, with 4,338 tests passed, 2 skipped, and 0
   failed;
 - API build, API lint, contracts lint, docs verification, and deterministic
   code-intelligence checks passed with zero errors;
