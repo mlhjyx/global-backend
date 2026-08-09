@@ -696,6 +696,11 @@ test("package-manager network trust is isolated before install and audit", async
     auditScript,
     /assertNoRepositoryNpmrc\(listTrackedRepositoryNpmrc\(process\.cwd\(\)\)\);[\s\S]+spawnSync\(/,
   );
+  assert.match(
+    auditScript,
+    /validateRepositoryDependencySources\(process\.cwd\(\)\)/,
+    "the verifier CLI must independently enforce source admission",
+  );
 });
 
 test("trusted source policy rejects direct dependency fetches before install", async () => {
