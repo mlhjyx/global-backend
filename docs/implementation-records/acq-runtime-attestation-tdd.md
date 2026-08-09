@@ -1,6 +1,6 @@
 # AI 获客阶段 0：API 运行身份与 layered health TDD 记录
 
-> 基线：`origin/main@a3c5c323e93ca398c12c96f89cf2967218862070`
+> 初始基线：`origin/main@a3c5c323e93ca398c12c96f89cf2967218862070`；最终合成树另以 merge commit 纳入 `origin/main@d6184ff8b83c2936ef286c706a2e2d1179aafef2` 的 Copy v15 post-merge 真值。
 >
 > 范围：API bind admission、build attestation、`live/build/ready`、Temporal control-plane probe 与 CI 构建回执。
 >
@@ -33,7 +33,7 @@
 
 ## 验证边界
 
-- 本地合成树已完成：API 285 files / 4410 passed / 2 skipped；runtime/health 聚焦 6 files / 34 tests；Copy v14 fixed-source rebuild 8/8；governance 50/50；contracts/API build；API lint 0 error（7 条既有 warning）；OpenAPI 重导出零漂移；`docs:verify` 118 Markdown、0 error、1 条既有 table warning；`git diff --check` PASS。
+- latest-main 本地合成树已完成：API 285 files / 4419 passed / 2 skipped；runtime/health 聚焦测试全绿；Copy v15 manifest + runtime binding fixed-source rebuild 19/19；governance、contracts/API build、API lint 0 error（7 条既有 warning）、OpenAPI drift、`docs:verify` 与 `git diff --check` 均须在最终文档提交后再作收尾复核。
 - 上述仍是本地 source/deterministic evidence。hosted GitHub exact-head checks、独立复审、合并结果、批准 release checkout 构建与 live runtime readback 是后续独立门，不能由本段绿色推断。
 - CI 生成的 receipt 绑定 GitHub checkout 的 `github.sha` 与最终 API dist；它仍不是部署回执。部署阶段必须从干净 release checkout 重新构建、生成 receipt，并由 live `/health/build` 与部署 SHA 逐字回读。
 - descriptor-anchored artifact inventory 是 Ubuntu/Linux 部署合同，依赖 `/proc/self/fd`；非 Linux 环境不能据此宣称受控部署兼容。
