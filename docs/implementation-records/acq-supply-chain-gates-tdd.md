@@ -16,6 +16,7 @@
 6. Dependabot 将 patch/minor 维护按运行域拆分，协调式 major 继续单独迁移；CodeQL 与新供应链 job 先作为 non-required canary。
 7. `pnpm-workspace.yaml` 只接受覆盖全部 tracked workspace manifest 的 block-style 仓库内 glob；`pnpm-lock.yaml` 只接受当前 pnpm 生成的无转义/anchor/alias/tag/merge/block-scalar 子集与 registry integrity resolution。任何更宽 YAML 语义、catalog/configDependency、外部路径或非 registry 源都必须先扩展受信策略与 mutation 合同。
 8. 任一 tracked manifest 都不得用 `pnpm.auditConfig` 在 ratchet 前过滤 GHSA/CVE；候选配置不能把 advisory 消失冒充 remediation。
+9. source-policy 在解析 workspace glob 前验证 Git index mode；tracked symlink/gitlink 不能把仓库内 pattern 间接解析到仓库外目录。
 
 ## RED → GREEN 证据
 
@@ -33,6 +34,7 @@
 | 10   | `b4ecce59`：`!!binary` 可把 base64 解码为 Git resolution 并绕过 raw-text source marker                       | `de54ddd8`：全面拒绝 tag/anchor/alias 指示符；`!!`、`!<...>` 与 `*.alias` mutation 均被阻断                        |
 | 11   | `9d2214a8`：`pnpm.auditConfig.ignoreGhsas/ignoreCves` 可在 ratchet 前隐藏 advisory                           | `7102fe29`：所有 tracked manifest 的 `pnpm.auditConfig` 均 fail-closed，candidate 不能过滤 audit 事实              |
 | 12   | `eee0026e`：flow singleton-sequence key 被 js-yaml 字符串化为 `resolution/repo/commit/type`                  | `3a80d502`：拒绝 complex-key `?` 与 collection mapping key，并补 scp-like Git source 防线                          |
+| 13   | `febf8f21`：workspace glob 尚未把 tracked symlink/gitlink 纳入 trust boundary                                | `d865d606`：联网安装前只接受 Git index 中的 100644/100755 regular files，其他 mode 全部 fail-closed                |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
