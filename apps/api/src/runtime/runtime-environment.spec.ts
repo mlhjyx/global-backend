@@ -97,6 +97,16 @@ describe('resolveRuntimeSettings', () => {
       'https://pilot.example',
       'https://ops.example',
     ]);
+    expect(() => resolveCorsOrigin('pilot', '*')).toThrow(/CORS_ORIGINS/i);
+    expect(() => resolveCorsOrigin('production', 'http://ops.example')).toThrow(
+      /HTTPS|secure/i,
+    );
+    expect(() => resolveCorsOrigin('pilot', 'https://ops.example/path')).toThrow(
+      /origin/i,
+    );
+    expect(resolveCorsOrigin('pilot', 'http://127.0.0.1:5173')).toEqual([
+      'http://127.0.0.1:5173',
+    ]);
 
     const source = readFileSync(join(import.meta.dirname, '..', 'main.ts'), 'utf8');
     expect(source).toContain('resolveCorsOrigin(runtimeSettings.mode, process.env.CORS_ORIGINS)');
