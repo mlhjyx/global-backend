@@ -1,6 +1,6 @@
 # Supply-chain canary 与 production audit ratchet TDD 记录
 
-> 基线：`origin/main@362f88cac1656016bd5aba93032e0f1d90048cba`
+> 基线：`origin/main@6b78901c2b4aee211e93ca11d5af13ea74398459`
 >
 > 范围：dependency review、production-only audit ratchet、机器可读遗留漏洞基线、Dependabot 分域、CodeQL canary。
 >
@@ -18,6 +18,7 @@
 8. 任一 tracked manifest 都不得用 `pnpm.auditConfig` 在 ratchet 前过滤 GHSA/CVE；候选配置不能把 advisory 消失冒充 remediation。
 9. source-policy 在解析 workspace glob 前验证 Git index mode；tracked symlink/gitlink 不能把仓库内 pattern 间接解析到仓库外目录。
 10. production audit CLI 即使脱离当前 workflow 单独执行，也必须在读取 audit 结果前自行执行仓库依赖源准入，不能依赖调用者维持安全顺序。
+11. 首次 PR bootstrap 的 baseline 必须随最终 PR base 重绑定；主线合成后，旧开发基线不得继续冒充 GitHub canary 的 exact base。
 
 ## RED → GREEN 证据
 
@@ -37,8 +38,11 @@
 | 12   | `eee0026e`：flow singleton-sequence key 被 js-yaml 字符串化为 `resolution/repo/commit/type`                  | `3a80d502`：拒绝 complex-key `?` 与 collection mapping key，并补 scp-like Git source 防线                          |
 | 13   | `febf8f21`：workspace glob 尚未把 tracked symlink/gitlink 纳入 trust boundary                                | `d865d606`：联网安装前只接受 Git index 中的 100644/100755 regular files，其他 mode 全部 fail-closed                |
 | 14   | `f09917cf`：审计 CLI 尚未独立调用 source-policy，脱离 workflow 时可遗漏依赖源准入                            | `aeed36b1`：CLI 在读取基线或运行 `pnpm audit` 前执行仓库依赖源准入，workflow 前置门继续作为第一层防护              |
+| 15   | `81eb0140`：合成到当前 main 后，机器测试精确报 `BASELINE_BOOTSTRAP_BASE_MISMATCH`                            | `3691304d`：baseline 重绑定 `6b78901c…`；36 advisories/183 exposures 与 lock digest 不变，bootstrap exact 参数通过 |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
+
+Cycle 15 的 exact-main 重采样只更新 source/base commit 与 `captured_at`；原有 remediation due date、baseline `valid_until`、36 条 advisory、183 条 exposure 和 lock digest 全部保持不变，不能借主线同步延长漏洞债务。
 
 ## 本地验证矩阵
 
@@ -48,7 +52,7 @@
 | `pnpm governance:verify`                          | 47/47 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
 | 官方 registry installed base/head 模拟            | `RATCHET_PASS_WITH_LEGACY_RISK`；36 advisories；183 exposures | base 与 head 都禁 scripts/pnpm hooks 后物化路径；不代表漏洞已解决                          |
 | Prettier 与 `git diff --check`                    | PASS                                                          | 新增 YAML/JS/JSON/Markdown 格式与 whitespace 合同                                          |
-| Copy v13 fixed-source rebuild                     | 本轮最终复验：7/7 PASS；Prisma/contracts/API build PASS       | 根 `package.json` 与受绑定 source 未因本切片漂移                                           |
+| Copy v14 fixed-source rebuild                     | 本轮最终复验：8/8 PASS；Prisma/contracts/API build PASS       | 当前 main 的 Copy v14 source/binding 与供应链合成树兼容                                    |
 | `docs:verify`、memory、decision-card              | 本轮最终复验：0 errors/1 既有 warning；15/15；13/13           | 文档与项目治理总门不回退                                                                   |
 
 Node 内置 governance tests 没有单独的覆盖率采集器，因此本文不伪造百分比。测试直接覆盖所有新增判定分支，并用结构性 mutation 合同锁定 workflow 接线；GitHub-hosted Dependency Review、CodeQL 上传权限、Dependabot 实际分组以及 Actions 事件语义仍只能由未来 exact-head canary 证明。
