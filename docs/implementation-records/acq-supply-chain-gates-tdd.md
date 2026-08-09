@@ -44,7 +44,7 @@
 | 17   | `ee6a141c`：GitHub CodeQL 在 `lstat(path)` 后按路径重新 `readFile` 的两处输入读取上报告 HIGH TOCTOU              | `968c9a30`：audit/source-policy 复用同一 no-follow handle 完成 fstat、有界 read、前后 identity/stability 复核      |
 | 18   | `8bc60e26`：独立安全复审要求 FIFO 不得在类型判断前阻塞，并新增最终组件 symlink 行为合同                          | `44ef4fcb`：secure open 增加 `O_NONBLOCK`；symlink 正例拒绝与全部 18 项供应链测试通过                              |
 
-实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
+实现阶段没有删除或放宽既定 RED 合同。早期测试修正只有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格；Cycle 17 GREEN 还把 `open`/import 的静态源码正则改为可匹配 Prettier 生成的多行结构。后者仍逐项要求 `O_RDONLY`、`O_NOFOLLOW`、同句柄 `stat/read/close`，并继续禁止 `lstat` 与按路径 `readFile`，没有降低安全行为合同；Cycle 18 再明确增加 `O_NONBLOCK` 和最终组件 symlink 行为测试。
 
 Cycle 15 与 16 的 exact-main 重采样都只更新 source/base commit 与 `captured_at`；原有 remediation due date、baseline `valid_until`、36 条 advisory、183 条 exposure 和 lock digest 全部保持不变，不能借主线同步延长漏洞债务。
 
