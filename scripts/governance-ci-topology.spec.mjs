@@ -157,6 +157,10 @@ test("the live required build fails when its scope dependency is not successful"
 test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const buildJob = jobBlock(ciWorkflow, "build-test");
+  const impactStep = namedStepBlock(
+    buildJob,
+    "Evaluate Copy fixed-source impact",
+  );
   const rebuildStep = namedStepBlock(
     buildJob,
     "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
@@ -166,6 +170,16 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
     buildJob,
     /- uses: actions\/checkout@[0-9a-f]{40} # v7\n        with:\n          fetch-depth: 0\n          persist-credentials: false/,
     "the fixed-source ancestry check requires a complete trusted checkout",
+  );
+  assert.match(impactStep, /^      - name: Evaluate Copy fixed-source impact$/m);
+  assert.match(impactStep, /^        id: copy-impact$/m);
+  assert.match(
+    impactStep,
+    /^        run: node scripts\/copy-fixed-source-impact\.mjs --github-output "\$GITHUB_OUTPUT"$/m,
+  );
+  assert.match(
+    rebuildStep,
+    /^        if: steps\.copy-impact\.outputs\.status == 'CURRENT'$/m,
   );
   assert.match(
     rebuildStep,
