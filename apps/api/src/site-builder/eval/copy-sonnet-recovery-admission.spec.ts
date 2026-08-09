@@ -314,4 +314,50 @@ describe("Copy Sonnet recovery admission", () => {
       ),
     ).toThrow("COPY_SONNET_RECOVERY_MANIFEST_INVALID");
   });
+
+  it.each(["v11", "v12", "v13"] as const)(
+    "rejects consumed %s campaign and authorization identities even when every dependent digest is rebuilt",
+    (version) => {
+      const base = admission();
+      const priorChild = {
+        ...base.authorization.children[0]!,
+        campaignId: `copy-sonnet-recovery-${version}-campaign-consumed`,
+        authorizationId: `copy-sonnet-recovery-${version}-child-authorization-consumed`,
+        reservationId: `copy-sonnet-recovery-${version}-child-reservation-consumed`,
+      };
+      const authorization = {
+        ...base.authorization,
+        authorizationId: `copy-sonnet-recovery-${version}-global-authorization-consumed`,
+        children: [priorChild] as const,
+      };
+      const {
+        reservationDigest: _reservationDigest,
+        ...currentChildAuthorization
+      } = base.childAuthorization;
+      const childWithoutDigest = {
+        ...currentChildAuthorization,
+        globalAuthorizationDigest: canonicalDigest(authorization),
+        campaignId: priorChild.campaignId,
+        authorizationId: priorChild.authorizationId,
+        reservationId: priorChild.reservationId,
+      };
+
+      expect(() =>
+        validateCopySonnetRecoveryAdmissionEnvelope(
+          {
+            ...base,
+            authorization,
+            childAuthorization: {
+              ...childWithoutDigest,
+              reservationDigest:
+                copySonnetRecoveryReservationDigest(childWithoutDigest),
+            },
+          },
+          new Date("2026-08-08T15:30:00.000Z"),
+        ),
+      ).toThrow(
+        /COPY_SONNET_RECOVERY_(AUTHORIZATION|CHILD_SCOPE|CHILD_AUTHORIZATION)_MISMATCH/u,
+      );
+    },
+  );
 });
