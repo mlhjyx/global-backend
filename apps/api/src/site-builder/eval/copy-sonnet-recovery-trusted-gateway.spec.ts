@@ -220,7 +220,12 @@ async function recoveryGateway(
   };
 }
 
-async function compiledRecoveryRepository() {
+async function compiledRecoveryRepository(
+  identity: {
+    artifactId?: string;
+    manifestId?: string;
+  } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "copy-sonnet-recovery-repo-"));
   directories.push(root);
   await Promise.all([
@@ -263,7 +268,9 @@ async function compiledRecoveryRepository() {
   const manifest = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/integration-v1",
+    manifestId:
+      identity.manifestId ??
+      "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit,
@@ -294,7 +301,8 @@ async function compiledRecoveryRepository() {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1",
     artifactId:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/integration-v1",
+      identity.artifactId ??
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
     classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
     fixedSourceCommit,
     preparationHeadCommit: fixedSourceCommit,
@@ -482,6 +490,27 @@ describe("Copy Sonnet recovery trusted gateway", () => {
         trustedGateway: Object.freeze({}) as CopyPilotTrustedGateway,
       }),
     ).rejects.toThrow("COPY_REAL_CAPABILITY_COMPILED_ENTRYPOINT_REQUIRED");
+  });
+
+  it("rejects a renamed v14 runtime artifact before ledger or gateway use", async () => {
+    const repository = await compiledRecoveryRepository({
+      artifactId:
+        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v13-v1",
+      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+    });
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+
+    await expect(
+      sourceModule.createCopyPilotVerifiedSource({
+        repositoryRoot: repository.root,
+        manifestArtifactPath: repository.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
   });
 
   it("admits an exact Sonnet-only token and preserves native Messages", async () => {

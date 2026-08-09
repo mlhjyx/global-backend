@@ -277,4 +277,41 @@ describe("Copy Sonnet recovery admission", () => {
       ),
     ).toThrow(/COPY_SONNET_RECOVERY_(AUTHORIZATION|CHILD_SCOPE)_MISMATCH/u);
   });
+
+  it("rejects a renamed runtime manifest even when every authorization digest is rebuilt", () => {
+    const base = admission();
+    const manifest = {
+      ...base.manifest,
+      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+    };
+    const authorization = {
+      ...base.authorization,
+      manifestDigest: canonicalDigest(manifest),
+    };
+    const {
+      reservationDigest: _reservationDigest,
+      ...currentChildAuthorization
+    } = base.childAuthorization;
+    const childWithoutDigest = {
+      ...currentChildAuthorization,
+      globalAuthorizationDigest: canonicalDigest(authorization),
+      manifestDigest: authorization.manifestDigest,
+    };
+
+    expect(() =>
+      validateCopySonnetRecoveryAdmissionEnvelope(
+        {
+          ...base,
+          manifest,
+          authorization,
+          childAuthorization: {
+            ...childWithoutDigest,
+            reservationDigest:
+              copySonnetRecoveryReservationDigest(childWithoutDigest),
+          },
+        },
+        new Date("2026-08-08T15:30:00.000Z"),
+      ),
+    ).toThrow("COPY_SONNET_RECOVERY_MANIFEST_INVALID");
+  });
 });
