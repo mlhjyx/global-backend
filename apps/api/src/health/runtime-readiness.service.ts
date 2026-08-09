@@ -69,7 +69,13 @@ export class RuntimeReadinessService {
 
   private async checkDatabase(): Promise<ComponentStatus> {
     try {
-      await this.prisma.$queryRawUnsafe('SELECT 1');
+      await this.prisma.$transaction(
+        async (transaction) => {
+          await transaction.$executeRawUnsafe('SET LOCAL statement_timeout = 2000');
+          await transaction.$queryRawUnsafe('SELECT 1');
+        },
+        { maxWait: 1_000, timeout: 2_500 },
+      );
       return { status: 'ok' };
     } catch {
       return { status: 'failed', code: 'DATABASE_UNAVAILABLE' };
