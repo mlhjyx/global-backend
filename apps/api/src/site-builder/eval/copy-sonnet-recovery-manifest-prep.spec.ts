@@ -29,6 +29,8 @@ import { describe, expect, it } from "vitest";
 
 const PREPARATION_HEAD = "f".repeat(40);
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../");
+const HISTORICAL_V13_MANIFEST_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -58,12 +60,12 @@ function provenance(): CopySonnetRecoveryProvenanceArtifactRef[] {
 }
 
 describe("Copy Sonnet-only recovery create-only manifest", () => {
-  it("binds one Sonnet execution to the post-v12-fix main and excludes successful wires", () => {
+  it("binds one fresh Sonnet execution to the post-#359 main and excludes every consumed wire", () => {
     expect(COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT).toBe(
-      "a29b222a45ae5fdb4868d5235cc94aeab1574ecd",
+      "2557b991e62ff171aeec60abff33de2ad8f2859f",
     );
     expect(COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
     );
     const files = sourceFiles();
     const artifact = buildCopySonnetRecoveryManifestArtifact({
@@ -77,7 +79,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       schemaVersion:
         "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v1",
       artifactId:
-        "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-09-v13",
+        "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-09-v14",
       classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY",
       fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD,
@@ -91,14 +93,14 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       manifest: {
         schemaVersion:
           "site-builder-copy-sonnet-recovery-manifest/2026-08-08-v1",
-        manifestId: "site-builder-copy-sonnet-recovery/2026-08-09-v13",
+        manifestId: "site-builder-copy-sonnet-recovery/2026-08-09-v14",
         taskId: "site_builder.copy",
         plannedExecutions: 1,
         maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
         executions: [
           {
-            executionKey: "copy-sonnet-recovery-v13-claude-sonnet-5",
+            executionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
             sourcePilotExecutionKey: "copy-capability-3-claude-sonnet-5",
             alias: "claude-sonnet-5",
             protocol: "anthropic_messages",
@@ -109,9 +111,8 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       duplicatePrevention: {
         acceptedAliasesExcludedFromDispatch: ["gpt-5.6-terra", "gpt-5.6-sol"],
         acceptedWireReplayPolicy:
-          "never_repeat_successful_v11_or_stopped_v12_wires",
-        consumedAuthorizationPolicy:
-          "never_reuse_v11_or_v12_authorization",
+          "never_repeat_successful_v11_or_stopped_v12_or_v13_wires",
+        consumedAuthorizationPolicy: "never_reuse_v11_v12_or_v13_authorization",
       },
     });
     expect(artifact.manifest.executions).toHaveLength(1);
@@ -128,7 +129,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       "FIXED_SOURCE_COMPILED_RUNTIME_EXPECTATION",
     );
     expect(artifact.requiredFollowup).toContain(
-      "NEVER_REUSE_STOPPED_V12_AUTHORIZATION_OR_WIRE",
+      "NEVER_REUSE_STOPPED_V12_OR_V13_AUTHORIZATION_OR_WIRE",
     );
     expect(artifact).not.toHaveProperty("compiledRuntimeExpectation");
     expect(Object.isFrozen(artifact)).toBe(true);
@@ -250,15 +251,14 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST === "1")(
-    "rebuilds the create-only manifest from a clean post-#355 commit",
+    "rebuilds the create-only manifest from a clean post-#359 commit",
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: REPOSITORY_ROOT,
         encoding: "utf8",
       }).trim();
-      const artifact = await prepareCopySonnetRecoveryManifestFromRepository(
-        REPOSITORY_ROOT,
-      );
+      const artifact =
+        await prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT);
 
       expect(artifact).toMatchObject({
         fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
@@ -276,6 +276,9 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
             path: "apps/api/src/model-runtime/types.ts",
           }),
           expect.objectContaining({
+            path: "apps/api/src/model-runtime/adapters/ai-sdk-adapter-result.ts",
+          }),
+          expect.objectContaining({
             path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
           }),
           expect.objectContaining({
@@ -287,12 +290,12 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     30_000,
   );
 
-  it("matches the generated v13 create-only artifact exactly", () => {
+  it("preserves the generated v13 create-only artifact as immutable history", () => {
     const artifactBytes = readFileSync(
       resolve(
         import.meta.dirname,
         "../../../../../",
-        COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH,
+        HISTORICAL_V13_MANIFEST_PATH,
       ),
     );
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
@@ -300,11 +303,12 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "99a1d51497b2112a83f5e18f8509baddd5f6486be13f92e08c3b5fec8dac0b47",
     );
-    expect(() =>
-      validateCopySonnetRecoveryManifestArtifact(artifact),
-    ).not.toThrow();
     expect(artifact).toMatchObject({
-      fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
+      schemaVersion:
+        "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v1",
+      artifactId:
+        "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-09-v13",
+      fixedSourceCommit: "a29b222a45ae5fdb4868d5235cc94aeab1574ecd",
       preparationHeadCommit: "b6e01204d0900be418ca44f594b03ac25df39738",
       artifactDigest:
         "476a8d68a0fae68a7ddeb28bd58ff3bc21956b505420586e81d6a08fef903152",
