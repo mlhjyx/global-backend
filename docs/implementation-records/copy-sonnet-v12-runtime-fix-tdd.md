@@ -20,19 +20,27 @@ is not reusable.
    to expose only bounded, allowlisted response structure and validation paths,
    so compatibility failures can be diagnosed without persisting Copy text,
    request bodies, or raw response bodies.
+3. As a Copy capability operator, I want that same redacted response shape in
+   the durable wire observation, so a paid schema failure remains diagnosable
+   after the process exits without retaining provider or customer content.
 
 ## RED and GREEN report
 
-| Task                                            | Test target                                                           | RED evidence                                                                                                                                                                                                                                                    | GREEN evidence                                    | Guarantee                                                                                                                                                            |
-| ----------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reconcile cache-write-only Anthropic settlement | `apps/api/src/model-gateway/new-api-request-bound-settlement.spec.ts` | `pnpm --filter @global/api test -- src/model-gateway/new-api-request-bound-settlement.spec.ts src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts` ran 42 tests: 2 failed and 40 passed. The new settlement case returned `unknown` instead of `settled`. | The same command ran 42 tests: 42 passed.         | `prompt_tokens=0`, `cache_creation_tokens=1199`, and `cache_tokens=0` settle as 1199 input tokens; a true zero-total input still fails closed.                       |
-| Preserve cache-write-only native Messages usage | `apps/api/src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts`  | The test passed during RED, proving that valid native Messages usage already normalized zero uncached plus positive cache-write input correctly.                                                                                                                | The same test remains green.                      | The adapter reports 1199 total input, 0 uncached input, and 1199 cache-write input without a real gateway call.                                                      |
-| Redact invalid HTTP 2xx response diagnostics    | `apps/api/src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts`  | The new diagnostic test failed because `NativeModelApiError` had no `responseShape`.                                                                                                                                                                            | The same command passed after the implementation. | Only allowlisted top-level keys, content block types, usage keys, and validation paths are exposed; sensitive values and unknown keys do not enter the error object. |
+| Task                                            | Test target                                                                   | RED evidence                                                                                                                                                                                                                                                    | GREEN evidence                                                            | Guarantee                                                                                                                                                            |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reconcile cache-write-only Anthropic settlement | `apps/api/src/model-gateway/new-api-request-bound-settlement.spec.ts`         | `pnpm --filter @global/api test -- src/model-gateway/new-api-request-bound-settlement.spec.ts src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts` ran 42 tests: 2 failed and 40 passed. The new settlement case returned `unknown` instead of `settled`. | The same command ran 42 tests: 42 passed.                                 | `prompt_tokens=0`, `cache_creation_tokens=1199`, and `cache_tokens=0` settle as 1199 input tokens; a true zero-total input still fails closed.                       |
+| Preserve cache-write-only native Messages usage | `apps/api/src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts`          | The test passed during RED, proving that valid native Messages usage already normalized zero uncached plus positive cache-write input correctly.                                                                                                                | The same test remains green.                                              | The adapter reports 1199 total input, 0 uncached input, and 1199 cache-write input without a real gateway call.                                                      |
+| Redact invalid HTTP 2xx response diagnostics    | `apps/api/src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts`          | The new diagnostic test failed because `NativeModelApiError` had no `responseShape`.                                                                                                                                                                            | The same command passed after the implementation.                         | Only allowlisted top-level keys, content block types, usage keys, and validation paths are exposed; sensitive values and unknown keys do not enter the error object. |
+| Persist the redacted shape end to end           | `apps/api/src/site-builder/eval/copy-sonnet-recovery-trusted-gateway.spec.ts` | The fixed-source Sonnet recovery test received the invalid HTTP 200 response and recorded the bounded failure reason, but the durable wire observation had no `responseShape`.                                                                                  | The same test passes and the ledger contains the exact allowlisted shape. | The real runner threads the shape through `ModelObservation` and both durable ledgers; customer text and unknown response fields remain absent.                      |
 
 The RED checkpoint is commit `41657230` (`test: reproduce Copy v12
 settlement gaps`). The GREEN checkpoint is commit `5893ee8d` (`fix: reconcile
 cache-only Anthropic settlement`). Both commits are reachable from the branch
 HEAD and belong only to this task.
+
+The P1 review follow-up RED checkpoint is commit `7c0ae0b6` (`test: reproduce
+lost Copy response shape`). Its GREEN checkpoint is commit `475fbc83` (`fix:
+persist redacted Copy response shape`).
 
 ## Coverage
 
@@ -42,32 +50,41 @@ Command:
 pnpm --filter @global/api exec vitest run \
   src/model-gateway/new-api-request-bound-settlement.spec.ts \
   src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts \
+  src/model-runtime/model-execution-ledger.spec.ts \
   --coverage \
   --coverage.include=src/model-gateway/new-api-request-bound-settlement.ts \
   --coverage.include=src/model-runtime/adapters/ai-sdk-adapter-result.ts \
   --coverage.include=src/model-runtime/adapters/ai-sdk-native-adapter.contract.ts \
+  --coverage.include=src/model-runtime/types.ts \
   --coverage.reporter=text
 ```
 
 Result:
 
-- Statements: 88.55%
-- Branches: 80.73%
-- Functions: 91.11%
-- Lines: 91.62%
+- Statements: 88.47%
+- Branches: 81.38%
+- Functions: 93.10%
+- Lines: 91.42%
+
+The compiled Sonnet recovery end-to-end test is intentionally reported as a
+separate behavioral gate because the 2,000-line runner contains a large
+pre-existing surface unrelated to this patch. The new runner mapping is
+executed by that test, while the response-shape creation and normalization
+core above remains above 80% on every metric.
 
 ## Verification
 
 | Gate           | Command                                                                                                                                                  | Result                                                             |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Targeted tests | `pnpm --filter @global/api test -- src/model-gateway/new-api-request-bound-settlement.spec.ts src/model-runtime/adapters/ai-sdk-native-adapters.spec.ts` | PASS — 42/42                                                       |
+| P1 follow-up   | Six settlement, adapter, ledger, durable-runtime, and fixed-source Sonnet test files                                                                     | PASS — 90/90                                                       |
 | API build      | `pnpm --filter @global/api build`                                                                                                                        | PASS                                                               |
 | API lint       | `pnpm --filter @global/api lint`                                                                                                                         | PASS — 0 errors, 7 pre-existing warnings outside the changed files |
 | Documentation  | `pnpm docs:verify`                                                                                                                                       | PASS — 0 errors, 1 pre-existing table warning                      |
-| Full API suite | `pnpm --filter @global/api test`                                                                                                                         | PASS — 275 files; 4,333 passed, 1 skipped                          |
+| Full API suite | `pnpm --filter @global/api test`                                                                                                                         | PASS — 275 files; 4,335 passed, 1 skipped                          |
 | Contract lint  | `pnpm contracts:lint`                                                                                                                                    | PASS — 0 errors, 15 pre-existing warnings                          |
 | Code graph     | `pnpm code-intelligence:check`                                                                                                                           | PASS — deterministic; 0 errors, 5 warnings                         |
-| Secret scan    | `gitleaks git --redact --no-banner --log-opts='origin/main..HEAD'`                                                                                       | PASS — no secret finding in either implementation commit           |
+| Secret scan    | `gitleaks git --redact --no-banner --log-opts='origin/main..HEAD'`                                                                                       | PASS — 6 branch commits scanned; no secret finding                 |
 
 The first full-suite attempt was incorrectly launched in parallel with
 `nest build`. Tests that require `apps/api/dist` observed the build's temporary
