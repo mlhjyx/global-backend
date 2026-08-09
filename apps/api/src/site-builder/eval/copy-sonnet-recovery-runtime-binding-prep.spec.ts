@@ -180,6 +180,8 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     );
     expect(COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS).toEqual(
       expect.arrayContaining([
+        "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
+        "apps/api/dist/model-runtime/types.js",
         "apps/api/dist/site-builder/eval/copy-sonnet-recovery-admission.js",
         "apps/api/dist/site-builder/eval/copy-sonnet-recovery-contract.js",
         "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
@@ -252,6 +254,24 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         preparationHeadCommit: input.fixedSourceCommit,
         sourceFiles: input.sourceFiles,
         recoveryManifestBytes: changedRecoveryBytes,
+        compiledRuntimeExpectation: input.compiledRuntimeExpectation,
+        fixedCommitReachableFromOriginMainAtPreparation: false,
+      }),
+    ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
+
+    const historicalV13Bytes = readFileSync(
+      resolve(REPOSITORY_ROOT, HISTORICAL_V13_MANIFEST_PATH),
+    );
+    expect(() =>
+      buildCopySonnetRecoveryRuntimeBindingArtifact({
+        fixedSourceCommit: input.fixedSourceCommit,
+        preparationHeadCommit: input.fixedSourceCommit,
+        sourceFiles: input.sourceFiles.map((entry) =>
+          entry.path === COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH
+            ? { ...entry, sha256: sha256(historicalV13Bytes) }
+            : entry,
+        ),
+        recoveryManifestBytes: historicalV13Bytes,
         compiledRuntimeExpectation: input.compiledRuntimeExpectation,
         fixedCommitReachableFromOriginMainAtPreparation: false,
       }),

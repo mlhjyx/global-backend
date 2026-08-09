@@ -21,6 +21,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
   COPY_SONNET_RECOVERY_ADMISSION_SOURCE,
   copySonnetRecoveryReservationDigest,
@@ -98,9 +99,10 @@ async function readJson(
 
 async function recoveryGateway(
   catalog: readonly string[] = ["claude-sonnet-5"],
-  messagesMode: "valid" | "invalid_200" = "valid",
+  messagesMode: "valid" | "valid_copy" | "invalid_200" = "valid",
 ) {
   let liveCatalog = [...catalog];
+  const logs: Record<string, unknown>[] = [];
   const observed: Array<{ path: string; body?: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {
     if (
@@ -133,7 +135,7 @@ async function recoveryGateway(
     }
     if (request.url === "/api/log/token") {
       observed.push({ path: request.url });
-      sendJson(response, { data: [] });
+      sendJson(response, { data: logs });
       return;
     }
     if (request.url === "/v1/messages") {
@@ -168,18 +170,39 @@ async function recoveryGateway(
         );
         return;
       }
+      const requestId = "request-copy-sonnet-recovery";
+      logs.push({
+        request_id: requestId,
+        type: 2,
+        model_name: "claude-sonnet-5",
+        channel: 22,
+        quota: 100,
+        prompt_tokens: 120,
+        completion_tokens: 40,
+        other: {
+          usage_semantic: "anthropic",
+          cache_creation_tokens: 0,
+          cache_tokens: 0,
+        },
+      });
+      const output =
+        messagesMode === "valid_copy"
+          ? COPY_ASSEMBLY_EVAL_FIXTURES.find(
+              ({ fixtureId }) => fixtureId === "copy-factual-claims",
+            )!.expectedOutput
+          : { ok: true };
       sendJson(
         response,
         {
           type: "message",
           id: "message-copy-sonnet-recovery",
           model: "claude-sonnet-5",
-          content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+          content: [{ type: "text", text: JSON.stringify(output) }],
           stop_reason: "end_turn",
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 120, output_tokens: 40 },
         },
-        "request-copy-sonnet-recovery",
+        requestId,
       );
       return;
     }
@@ -667,6 +690,142 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     expect(live.observed.some(({ path }) => path === "/v1/messages")).toBe(
       false,
     );
+  });
+
+  it("accepts Git-reviewed evidence for the v14 recovery execution identity", async () => {
+    const repository = await compiledRecoveryRepository();
+    const directory = await mkdtemp(
+      join(tmpdir(), "copy-sonnet-recovery-git-acceptance-"),
+    );
+    directories.push(directory);
+    const campaignId = "copy-sonnet-recovery-v14-git-acceptance-test";
+    const paths = {
+      ledgerPath: join(directory, "ledger.jsonl"),
+      authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
+      ledgerMarkerPath: join(directory, "ledger.marker.jsonl"),
+      campaignId,
+    };
+    const markerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
+      ),
+    ) as typeof import("./copy-pilot-ledger-identity");
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+    const gatewayModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+      ),
+    ) as typeof import("./copy-pilot-trusted-gateway");
+    const runnerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+      ),
+    ) as typeof import("./copy-real-capability-runner");
+    const acceptanceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/model-runtime/git-reviewed-evidence-acceptance.js",
+      ),
+    ) as typeof import("../../model-runtime/git-reviewed-evidence-acceptance");
+    const prepared = await markerModule.prepareCopyPilotLedgerIdentity({
+      ...paths,
+      markerPath: paths.ledgerMarkerPath,
+    });
+    const live = await recoveryGateway(["claude-sonnet-5"], "valid_copy");
+    const admitted = admission(live.origin, {
+      manifest: repository.manifest,
+      campaignId,
+      ledgerIdentityDigest: prepared.ledgerIdentityDigest,
+    });
+    const verifiedSource = await sourceModule.createCopyPilotVerifiedSource({
+      repositoryRoot: repository.root,
+      manifestArtifactPath: repository.manifestPath,
+    });
+    const trustedGateway = await gatewayModule.createCopyPilotTrustedGateway({
+      admission: admitted,
+      bearerToken: TOKEN,
+    });
+    const runner = await runnerModule.createCopySonnetRecoveryRunner({
+      ...paths,
+      admission: admitted,
+      verifiedSource,
+      trustedGateway,
+    });
+    const execution = await runner.execute(admitted.selectedExecutionKey);
+    const challenge =
+      runnerModule.createCopyGitEvidenceAcceptanceChallenge(execution);
+    const artifact = runnerModule.createCopyGitEvidenceAcceptanceArtifact({
+      artifactId: "copy-sonnet-recovery-v14-acceptance-514",
+      challenge,
+    });
+    const artifactPath = join(
+      repository.root,
+      "docs/evidence/copy-sonnet-recovery-v14-acceptance.json",
+    );
+    await acceptanceModule.writeGitReviewedEvidenceAcceptanceArtifact({
+      artifactPath,
+      artifact,
+    });
+    const mainBranch = git(
+      repository.root,
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    );
+    git(repository.root, "checkout", "-qb", "acceptance/copy-sonnet-v14");
+    git(
+      repository.root,
+      "add",
+      "docs/evidence/copy-sonnet-recovery-v14-acceptance.json",
+    );
+    git(repository.root, "commit", "-qm", "test: accept v14 recovery evidence");
+    git(repository.root, "checkout", "-q", mainBranch);
+    git(
+      repository.root,
+      "merge",
+      "--no-ff",
+      "acceptance/copy-sonnet-v14",
+      "-m",
+      "Merge pull request #514 from test/acceptance-copy-sonnet-v14",
+    );
+    git(repository.root, "update-ref", "refs/remotes/origin/main", "HEAD");
+    const acceptance =
+      await acceptanceModule.verifyGitReviewedEvidenceAcceptanceArtifact({
+        repositoryRoot: repository.root,
+        artifactPath,
+      });
+    const accepted = await (
+      runner as unknown as {
+        acceptGitReviewedEvidence(input: {
+          acceptance: typeof acceptance;
+        }): Promise<unknown>;
+      }
+    ).acceptGitReviewedEvidence({ acceptance });
+
+    expect(
+      runnerModule.getCopyGitAcceptedExecutionAttestation(accepted as never),
+    ).toMatchObject({
+      classification: "GIT_REVIEWED_REAL_EVIDENCE",
+      executionId: "copy-sonnet-recovery-v14-claude-sonnet-5",
+      alias: "claude-sonnet-5",
+      protocol: "anthropic_messages",
+      reasoning: "medium",
+    });
+    expect(await runner.summary()).toMatchObject({
+      completedExecutions: 1,
+      knownWireSettlements: 1,
+      unknownWireSettlements: 0,
+      gitEvidenceAcceptances: 1,
+      frozen: false,
+    });
   });
 
   it("persists only the redacted Messages response shape after an invalid HTTP 200", async () => {

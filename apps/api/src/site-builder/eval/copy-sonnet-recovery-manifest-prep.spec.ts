@@ -25,6 +25,7 @@ import {
   writeCopySonnetRecoveryManifestCreateOnly,
   type CopySonnetRecoveryProvenanceArtifactRef,
 } from "./copy-sonnet-recovery-manifest-prep";
+import { canonicalDigest } from "../../model-runtime/context-engine";
 import { describe, expect, it } from "vitest";
 
 const PREPARATION_HEAD = "f".repeat(40);
@@ -115,6 +116,12 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
         consumedAuthorizationPolicy: "never_reuse_v11_v12_or_v13_authorization",
       },
     });
+    expect(canonicalDigest(artifact.manifest)).not.toBe(
+      "6a3718287893fc119e8e83efabf6c8c990e0dd44ab36cf7c6f5372a7ac53e94c",
+    );
+    expect(artifact.manifest.recoveryPlanDigest).not.toBe(
+      "5bb611823285e171c30a81a1a92bcf6c727ac14d56ecfede80297269013718da",
+    );
     expect(artifact.manifest.executions).toHaveLength(1);
     expect(artifact.manifest.executions.map(({ alias }) => alias)).not.toEqual(
       expect.arrayContaining(["gpt-5.6-terra", "gpt-5.6-sol"]),
@@ -320,6 +327,14 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
         compiledRuntimeBindingDeferred: true,
       },
     });
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(artifact.artifactDigest);
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "6a3718287893fc119e8e83efabf6c8c990e0dd44ab36cf7c6f5372a7ac53e94c",
+    );
+    expect(artifact.manifest.recoveryPlanDigest).toBe(
+      "5bb611823285e171c30a81a1a92bcf6c727ac14d56ecfede80297269013718da",
+    );
   });
 
   it("matches the generated v14 create-only artifact exactly", () => {

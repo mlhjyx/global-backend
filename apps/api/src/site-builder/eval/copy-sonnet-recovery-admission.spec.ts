@@ -149,6 +149,9 @@ describe("Copy Sonnet recovery admission", () => {
         reasoning: "medium",
       },
     ]);
+    expect(
+      COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign.childSlotId,
+    ).toBe("copy-sonnet-recovery-v14-child-claude-sonnet-5");
     expect(JSON.stringify(input)).not.toMatch(/gpt-5\.6-(terra|sol)/u);
     expect(result).toMatchObject({
       classification: "SOURCE_CONTRACT_VALIDATION_ONLY",
