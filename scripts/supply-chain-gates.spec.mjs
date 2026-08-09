@@ -625,10 +625,10 @@ test("package-manager network trust is isolated before install and audit", async
   const configGuard = workflow.indexOf(
     "Reject repository package-manager network overrides",
   );
-  const firstInstall = workflow.indexOf(
-    "Materialize audited dependency paths without hooks",
+  const auditStep = workflow.indexOf(
+    "Audit production dependencies against the trusted ratchet",
   );
-  assert.ok(configGuard >= 0 && configGuard < firstInstall);
+  assert.ok(configGuard >= 0 && configGuard < auditStep);
   assert.match(workflow, /git ls-files -z[^\n]+\.npmrc/);
   assert.ok(
     workflow.match(
@@ -786,6 +786,14 @@ test("trusted source policy rejects direct dependency fetches before install", a
     baseSourceValidation > trustedVerifier &&
       baseInstall > baseSourceValidation,
     "trusted source policy must run before the base install",
+  );
+  assert.match(
+    workflow,
+    /git worktree add --detach "\$BASE_CHECKOUT" "\$PR_BASE_SHA"/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /git archive "\$PR_BASE_SHA" \| tar -xf - -C "\$BASE_CHECKOUT"/,
   );
 });
 
