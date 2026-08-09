@@ -785,6 +785,9 @@ test("trusted source policy rejects direct dependency fetches before install", a
     '\nimporters:\n  apps/api:\n    dependencies:\n      runtime:\n        version: "l\\\\u0069nk:../../outside"\n',
     "\npackages:\n  runtime:\n    'resolution': {'repo': attacker/runtime, 'commit': deadbeef, 'type': git}\n",
     "\npackages:\n  runtime@1.0.0: {!!binary cmVzb2x1dGlvbg== : {!!binary cmVwbw== : !!binary aHR0cHM6Ly9hdHRhY2tlci5pbnZhbGlkL3g=, !!binary Y29tbWl0 : deadbeef, !!binary dHlwZQ== : git}}\n",
+    "\nlockfileVersion: !!str '9.0'\n",
+    "\nlockfileVersion: !<tag:yaml.org,2002:str> '9.0'\n",
+    "\nfoo: *.v\n",
   ]) {
     const result = validateDependencySourcePolicy({
       ...safeInput,
