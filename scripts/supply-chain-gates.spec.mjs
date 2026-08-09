@@ -712,6 +712,30 @@ test("trusted source policy rejects direct dependency fetches before install", a
   };
   assert.deepEqual(validateDependencySourcePolicy(safeInput).issues, []);
 
+  for (const auditConfig of [
+    { ignoreGhsas: ["GHSA-aaaa-bbbb-cccc"] },
+    { ignoreCves: ["CVE-2026-0001"] },
+  ]) {
+    const result = validateDependencySourcePolicy({
+      ...safeInput,
+      manifests: safeInput.manifests.map((manifest) =>
+        manifest.path === "package.json"
+          ? {
+              ...manifest,
+              document: {
+                ...manifest.document,
+                pnpm: { auditConfig },
+              },
+            }
+          : manifest,
+      ),
+    });
+    assert.ok(
+      issueCodes(result).includes("DEPENDENCY_AUDIT_IGNORE_NOT_TRUSTED"),
+      JSON.stringify(auditConfig),
+    );
+  }
+
   for (const workspaceMutation of [
     'packages: ["../outside"]\n',
     'packages: ["/tmp/outside"]\n',
