@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_SONNET_RECOVERY_ADMISSION_SOURCE } from "./copy-sonnet-recovery-admission";
+import { buildCopyRealCapabilitySourceFileSpecs } from "./copy-real-capability-manifest-prep";
 import {
   COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS,
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
@@ -17,7 +18,7 @@ import {
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
 const RECOVERY_MANIFEST_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v12.json";
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json";
 
 function sha256(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
@@ -71,7 +72,7 @@ function fixture() {
 }
 
 describe("Copy Sonnet recovery fixed-source runtime binding", () => {
-  it("binds v12, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
+  it("binds v13, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
     const input = fixture();
     const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
       fixedSourceCommit: input.fixedSourceCommit,
@@ -83,7 +84,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     });
 
     expect(COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v12.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json",
     );
     expect(artifact).toMatchObject({
       classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
@@ -96,6 +97,8 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       observedNetworkCalls: 0,
       observedModelWireCalls: 0,
       manifest: {
+        manifestId:
+          "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
         plannedExecutions: 1,
         maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
@@ -124,6 +127,10 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
   });
 
   it("guards every recovery runtime module in the compiled expectation", () => {
+    const fixedSourceSpecs = buildCopyRealCapabilitySourceFileSpecs([
+      "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
+      "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+    ]);
     expect(COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS).toEqual(
       [...COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS].sort(),
     );
@@ -134,6 +141,38 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
         "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
         "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+      ]),
+    );
+    expect(fixedSourceSpecs).toEqual(
+      expect.arrayContaining([
+        {
+          role: "gateway_settlement",
+          path: "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+        },
+        {
+          role: "runtime_adapter",
+          path: "apps/api/src/model-runtime/adapters/ai-sdk-adapter-result.ts",
+        },
+        {
+          role: "runtime_execution",
+          path: "apps/api/src/model-runtime/durable-model-execution-runtime.ts",
+        },
+        {
+          role: "runtime_ledger",
+          path: "apps/api/src/model-runtime/model-execution-ledger.ts",
+        },
+        {
+          role: "runtime_transitive_source",
+          path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+        },
+        {
+          role: "runtime_types",
+          path: "apps/api/src/model-runtime/types.ts",
+        },
+        {
+          role: "real_dispatch_runner",
+          path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+        },
       ]),
     );
   });
