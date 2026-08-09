@@ -186,3 +186,28 @@ test("the topology suite uses the established governance entry without changing 
     "the existing governance test entry must load the topology suite",
   );
 });
+
+test("the required build emits an exact-SHA runtime attestation after the final API rebuild", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const copyStep = namedStepBlock(
+    buildJob,
+    "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
+  );
+  const attestationStep = namedStepBlock(
+    buildJob,
+    "Generate and verify API build attestation",
+  );
+
+  assert.ok(
+    buildJob.indexOf(attestationStep) > buildJob.indexOf(copyStep),
+    "attestation must bind the final API dist bytes after the Copy rebuild",
+  );
+  assert.match(attestationStep, /BUILD_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(attestationStep, /BUILT_AT="\$\(date -u/);
+  assert.match(
+    attestationStep,
+    /pnpm exec tsx apps\/api\/scripts\/generate-build-attestation\.mts/,
+  );
+  assert.doesNotMatch(attestationStep, /git rev-parse|git describe|git status/);
+});
