@@ -577,6 +577,95 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
   }
 });
 
+test("package-manager network trust is isolated before install and audit", async () => {
+  const {
+    assertNoRepositoryNpmrc,
+    buildTrustedPnpmEnvironment,
+  } = await import("./supply-chain-audit.mjs");
+  const hostileEnvironment = {
+    PATH: "/trusted/bin",
+    HTTPS_PROXY: "http://attacker.invalid:8080",
+    npm_config_https_proxy: "http://attacker.invalid:8080",
+    NPM_CONFIG_STRICT_SSL: "false",
+    NPM_CONFIG_CAFILE: "/tmp/attacker-ca.pem",
+    NODE_EXTRA_CA_CERTS: "/tmp/attacker-ca.pem",
+    NODE_TLS_REJECT_UNAUTHORIZED: "0",
+    NODE_OPTIONS: "--require=/tmp/attacker-hook.cjs",
+    SSL_CERT_FILE: "/tmp/attacker-ca.pem",
+  };
+  const trustedEnvironment = buildTrustedPnpmEnvironment(hostileEnvironment);
+
+  assert.equal(trustedEnvironment.PATH, "/trusted/bin");
+  assert.equal(
+    trustedEnvironment.NPM_CONFIG_REGISTRY,
+    "https://registry.npmjs.org/",
+  );
+  assert.equal(trustedEnvironment.NPM_CONFIG_USERCONFIG, "/dev/null");
+  assert.equal(trustedEnvironment.NPM_CONFIG_GLOBALCONFIG, "/dev/null");
+  assert.equal(trustedEnvironment.NPM_CONFIG_IGNORE_PNPMFILE, "true");
+  assert.equal(trustedEnvironment.NPM_CONFIG_IGNORE_SCRIPTS, "true");
+  for (const key of Object.keys(trustedEnvironment)) {
+    assert.doesNotMatch(
+      key,
+      /^(?:https?_proxy|all_proxy|no_proxy|node_extra_ca_certs|node_tls_reject_unauthorized|node_options|ssl_cert_(?:file|dir)|npm_config_(?:https?_proxy|proxy|strict_ssl|cafile|ca))$/i,
+    );
+  }
+  assert.doesNotThrow(() => assertNoRepositoryNpmrc([]));
+  assert.throws(
+    () => assertNoRepositoryNpmrc([".npmrc", "packages/api/.npmrc"]),
+    /repository \.npmrc is not admitted/,
+  );
+
+  const [workflow, codeowners, auditScript] = await Promise.all([
+    readRepositoryFile(".github/workflows/supply-chain.yml"),
+    readRepositoryFile(".github/CODEOWNERS"),
+    readRepositoryFile("scripts/supply-chain-audit.mjs"),
+  ]);
+  const configGuard = workflow.indexOf(
+    "Reject repository package-manager network overrides",
+  );
+  const firstInstall = workflow.indexOf(
+    "Materialize audited dependency paths without hooks",
+  );
+  assert.ok(configGuard >= 0 && configGuard < firstInstall);
+  assert.match(workflow, /git ls-files -z[^\n]+\.npmrc/);
+  assert.ok(
+    workflow.match(
+      /pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https:\/\/registry\.npmjs\.org/g,
+    )?.length >= 2,
+  );
+  assert.ok(
+    workflow.match(/^\s+env -i \\$/gm)?.length >= 2,
+    "both head and base installs must start from an environment allowlist",
+  );
+  for (const safeOverride of [
+    "NPM_CONFIG_REGISTRY=https://registry.npmjs.org/",
+    "NPM_CONFIG_USERCONFIG=/dev/null",
+    "NPM_CONFIG_GLOBALCONFIG=/dev/null",
+    "NPM_CONFIG_IGNORE_PNPMFILE=true",
+    "NPM_CONFIG_IGNORE_SCRIPTS=true",
+  ]) {
+    assert.ok(workflow.includes(safeOverride), safeOverride);
+  }
+  for (const protectedPath of [
+    "/package.json @mlhjyx",
+    "/**/package.json @mlhjyx",
+    "/pnpm-lock.yaml @mlhjyx",
+    "/pnpm-workspace.yaml @mlhjyx",
+    "/.npmrc @mlhjyx",
+    "/**/.npmrc @mlhjyx",
+    "/.pnpmfile.cjs @mlhjyx",
+    "/**/.pnpmfile.cjs @mlhjyx",
+    "/patches/ @mlhjyx",
+  ]) {
+    assert.ok(codeowners.includes(protectedPath), protectedPath);
+  }
+  assert.match(
+    auditScript,
+    /assertNoRepositoryNpmrc\(listTrackedRepositoryNpmrc\(process\.cwd\(\)\)\);[\s\S]+spawnSync\(/,
+  );
+});
+
 test("Dependabot keeps coordinated majors separate and groups maintenance by domain", async () => {
   const config = await readRepositoryFile(".github/dependabot.yml");
   for (const group of [
