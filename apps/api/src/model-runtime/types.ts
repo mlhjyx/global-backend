@@ -96,12 +96,21 @@ const SAFE_MODEL_RESPONSE_USAGE_KEYS = new Set([
 const SAFE_MODEL_RESPONSE_VALIDATION_PATH_SEGMENTS = new Set([
   ...SAFE_MODEL_RESPONSE_TOP_LEVEL_KEYS,
   ...SAFE_MODEL_RESPONSE_USAGE_KEYS,
+  "applied_edits",
   "caller",
+  "category",
   "citations",
+  "cleared_input_tokens",
+  "cleared_thinking_turns",
+  "cleared_tool_uses",
   "data",
+  "explanation",
   "input",
   "name",
+  "recommended_model",
   "signature",
+  "thinking",
+  "thinking_tokens",
 ]);
 const MODEL_RESPONSE_SHAPE_KEYS = Object.freeze([
   "contentBlockTypes",
@@ -132,6 +141,7 @@ function safeResponseKeys(
 function responseValidationIssues(error: unknown): readonly unknown[] {
   let current = error;
   for (let depth = 0; depth < 4; depth += 1) {
+    if (Array.isArray(current)) return current;
     const currentRecord = responseRecord(current);
     if (Array.isArray(currentRecord?.issues)) return currentRecord.issues;
     current = currentRecord?.cause;
