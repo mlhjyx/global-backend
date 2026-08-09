@@ -163,6 +163,11 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
   );
 
   assert.match(
+    buildJob,
+    /- uses: actions\/checkout@[0-9a-f]{40} # v7\n        with:\n          fetch-depth: 0\n          persist-credentials: false/,
+    "the fixed-source ancestry check requires a complete trusted checkout",
+  );
+  assert.match(
     rebuildStep,
     /^          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1$/m,
   );
