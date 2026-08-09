@@ -15,7 +15,7 @@
 | 当前远端主线            | `origin/main@9ec227e737388f35ec7c6f0f76cb89c209c518b0`；2026-08-09 live fetch 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`；其后主线新增 Site Builder Copy transport、manifest、capability evidence 与 Sonnet recovery runtime binding，不改变获客实现边界。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。 |
 | 产品阶段                | Site Builder Copy Sonnet recovery v12 runtime binding 已由 #354 以 merge commit 进入主线，固定源 `9cb02f10c24c536bd43372cdb9afdcc2755026b1` 已可从当前 main 到达；artifact 仍为 `NOT_AUTHORIZED`、`dispatchCapable=false`、零真实调用和零费用。下一门是零调用 post-merge source/compiled revalidation、有限 Sonnet-only 凭据、settlement/ledger 与 exact dispatch authorization。获客侧处于“受控 pilot 前的治理、授权、运行身份与可观测性补齐”，尚未进入真实 pilot。 |
 | 当前交付状态            | Buyer/Intent 的机器追踪链均为 `INTERNAL_ONLY`。当前不存在可用于晋级的 RuntimeEvidence，也不存在真实 Release Bundle。                                                                                                                                                                                                                             |
-| Source-only 质量/安全门 | 真实全范围 V8 基线为 statements 70.75%、branches 66.89%、functions 74.30%、lines 72.93%；ratchet 可防回退，但四项 80% 目标未完成。Actions 固定、source-only SAST、Compose lock 和恢复/集成声明验证已纳入本地门；PostgreSQL/Temporal 集成、恢复演练、GitHub ruleset 与镜像外部 provenance 仍是 `BLOCKED/NOT_RUN/UNVERIFIED`，不得解释为运行证明。 |
+| Source-only 质量/安全门 | 当前 main 的仓内 CI 包含 build/typecheck/test、OpenAPI drift/lint/breaking 与 Gitleaks；本治理切片固定 GitHub Actions revision 并增加 governance 合同，但 source-only SAST、依赖漏洞、container/Compose/IaC、PostgreSQL/Temporal 集成与恢复演练尚未形成完整 required gate。2026-08-09 对 `pnpm-lock.yaml`（SHA-256 `d98a61553ffa6ea3bca177f47c7c2a82362f774697ffd4c89fa299465072e868`）使用 npm 官方 audit endpoint 的只读审计返回 36 项（18 high、14 moderate、4 low、0 critical）；默认 `npmmirror` audit endpoint 不存在。该结果是有时间和 lock digest 的阻塞观测，不是会自动更新的漏洞清单；依赖变化后必须重跑。 |
 | Provider 真值           | 只认 [机器 Provider Registry](../governance/provider-registry.json) 与其[生成页](../backend/provider-registry.md)；实现、默认 enablement、当前 runtime health 与 pilot 授权是不同维度。                                                                                                                                                          |
 | 模型候选基线            | 当前非运行时候选合同为 `site-builder-model-candidate-baseline/2026-08-07-v3`；它不证明 active route、质量、dispatch 授权或运行健康。                                                                                                                                                                                                             |
 | 合并/发布授权           | `NOT_AUTHORIZED / EXTERNAL_UNVERIFIED`。机器检查、独立 reviewer、用户授权和 merge-method provenance 必须分别取证；当前没有可信的外部 readback verifier。                                                                                                                                                                                         |
@@ -47,7 +47,8 @@ pnpm code-intelligence:runtime:status
 2. **发布门**：当前真实 Release Bundle 数为零，且独立外部 readback verifier 尚未实现。Bundle 中的 `CHECK_RUN / GITHUB_REVIEW / SIGNED_AUTHORIZATION`、merge 形状和 URL 都只是 documentary declaration；即使自报 `VERIFIED`，`governance:verify` 仍会以 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED` 阻断任何 `PILOT`/`GA` 晋级。
 3. **集成门**：获客恢复切片尚需完成本地集成、全量验证、独立 review、主线合并授权，并在最终合入提交上重新生成运行证据。
 4. **仓库设置门**：仓内已声明 required contexts 与 review 规则，但 GitHub ruleset/branch protection 是外部状态，必须由有权限的人实际配置并回读验证。
-5. **产品门**：首个 pilot 的 capability、租户/数据范围、允许 provider、成功指标、退出条件、运行 Owner 与用户授权尚未形成有效 Release Bundle。
+5. **供应链安全门**：当前 Gitleaks 不能替代依赖、SAST、container/Compose/IaC 扫描；lockfile 审计仍有 18 项 high，且默认 registry 无 audit endpoint。需先完成可利用性/运行路径分流和有界升级，再把稳定、可复现、不会因 registry 静默跳过的安全聚合门加入 ruleset。
+6. **产品门**：首个 pilot 的 capability、租户/数据范围、允许 provider、成功指标、退出条件、运行 Owner 与用户授权尚未形成有效 Release Bundle。
 
 ## 5. 下一决策
 

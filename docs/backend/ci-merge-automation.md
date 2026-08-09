@@ -36,6 +36,8 @@ GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` rulese
 - required checks 只有 `build · typecheck · test`、`gitleaks 密钥扫描` 和
   `nontechnical decision card freshness`；contracts、governance 与 security
   聚合门尚未受 ruleset 强制；
+- 当前 `Security` workflow 只执行 Gitleaks。它不执行依赖漏洞、source-only
+  SAST、container image 或 Compose/IaC 扫描，不能被表述为完整 security gate；
 - RepositoryRole 5 仍有 `always` bypass；
 - classic branch-protection API 返回未配置；当前保护来自 repository ruleset。
 
@@ -46,6 +48,28 @@ context 的工作流进入 main，在目标 main 的 canary PR 上观察 exact c
 和真实 PR checks。`pull_request_target` 的 decision-card context 名称保持
 `freshness`，只强化内部 integrity 语义，避免 base workflow 尚未合并时出现
 required-context bootstrap 死锁。
+
+### 依赖与安全聚合门的启用顺序
+
+2026-08-09 对 `pnpm-lock.yaml`（SHA-256
+`d98a61553ffa6ea3bca177f47c7c2a82362f774697ffd4c89fa299465072e868`）执行
+只读生产依赖审计：仓库默认 `npmmirror` 不实现 npm audit endpoint；显式使用
+npm 官方 endpoint 后返回 36 项漏洞，其中 18 high、0 critical。这个结果只绑定
+上述 lock digest 和核验时间；依赖或 advisory 数据变化后必须重跑，不得手抄为
+长期基线。
+
+因此不能直接新增一个会被 registry 错误静默跳过的绿色 job，也不能在尚未处理
+既有 high findings 时把全量 audit 设成 required 后长期手工绕过。安全迁移采用：
+
+1. 先把 audit registry、超时、JSON 解析、零 advisory 数据/endpoint 不可用的
+   fail-closed 语义写成受测脚本；原始报告只存受控 artifact，PR 只显示计数和摘要；
+2. 对 high findings 按 runtime reachable、build-only、transitive 和需要 major
+   upgrade 分流，在独立依赖 PR 中修复并跑 API、renderer、SSRF/上传边界回归；
+3. 再加入稳定的 `security · required gate`，至少聚合 dependency audit、
+   source-only SAST、container image 与 Compose/IaC scan；Gitleaks 保持独立门；
+4. 先在 main push 和 canary PR 观察 context 名、权限、缓存、误报与运行时间，
+   再写入 required-context 清单并修改外部 ruleset；任何不可用 scanner 都必须
+   返回失败或明确 HOLD，不能成功跳过。
 
 Action SHA 升级只能通过官方 Git 仓库的 tag 做只读解析；不以 marketplace 显示文字、moving major tag 或非官方 mirror 作为 revision 真值。仓内当前精确 pin 以 required-context 清单为唯一机器真值。
 
