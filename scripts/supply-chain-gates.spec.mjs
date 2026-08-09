@@ -614,11 +614,14 @@ test("package-manager network trust is isolated before install and audit", async
     /repository \.npmrc is not admitted/,
   );
 
-  const [workflow, codeowners, auditScript] = await Promise.all([
-    readRepositoryFile(".github/workflows/supply-chain.yml"),
-    readRepositoryFile(".github/CODEOWNERS"),
-    readRepositoryFile("scripts/supply-chain-audit.mjs"),
-  ]);
+  const [workflow, codeowners, auditScript, requiredContextsText] =
+    await Promise.all([
+      readRepositoryFile(".github/workflows/supply-chain.yml"),
+      readRepositoryFile(".github/CODEOWNERS"),
+      readRepositoryFile("scripts/supply-chain-audit.mjs"),
+      readRepositoryFile(".github/required-contexts.json"),
+    ]);
+  const requiredContexts = JSON.parse(requiredContextsText);
   const configGuard = workflow.indexOf(
     "Reject repository package-manager network overrides",
   );
@@ -657,6 +660,23 @@ test("package-manager network trust is isolated before install and audit", async
     "/patches/ @mlhjyx",
   ]) {
     assert.ok(codeowners.includes(protectedPath), protectedPath);
+  }
+  for (const protectedPattern of [
+    "/**/package.json",
+    "/pnpm-lock.yaml",
+    "/pnpm-workspace.yaml",
+    "/.npmrc",
+    "/**/.npmrc",
+    "/.pnpmfile.cjs",
+    "/**/.pnpmfile.cjs",
+    "/patches/",
+  ]) {
+    assert.ok(
+      requiredContexts.codeowner_requirements.terminal_patterns.includes(
+        protectedPattern,
+      ),
+      `machine governance must bind ${protectedPattern}`,
+    );
   }
   assert.match(
     auditScript,
