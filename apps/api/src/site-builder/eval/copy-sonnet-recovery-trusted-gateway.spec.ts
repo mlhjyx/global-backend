@@ -98,6 +98,7 @@ async function readJson(
 
 async function recoveryGateway(
   catalog: readonly string[] = ["claude-sonnet-5"],
+  messagesMode: "valid" | "invalid_200" = "valid",
 ) {
   let liveCatalog = [...catalog];
   const observed: Array<{ path: string; body?: Record<string, unknown> }> = [];
@@ -130,9 +131,43 @@ async function recoveryGateway(
       });
       return;
     }
+    if (request.url === "/api/log/token") {
+      observed.push({ path: request.url });
+      sendJson(response, { data: [] });
+      return;
+    }
     if (request.url === "/v1/messages") {
       const body = await readJson(request);
       observed.push({ path: request.url, body });
+      if (messagesMode === "invalid_200") {
+        sendJson(
+          response,
+          {
+            type: "message",
+            id: "message-copy-sonnet-invalid-200",
+            model: "claude-sonnet-5",
+            content: [
+              {
+                type: "text",
+                text: { invalid: "sensitive-copy-must-not-enter-ledger" },
+                private_note: "sensitive-copy-must-not-enter-ledger",
+              },
+            ],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: {
+              input_tokens: 0,
+              output_tokens: 94,
+              cache_creation_input_tokens: 1_199,
+              cache_read_input_tokens: 0,
+              private_usage: "sensitive-copy-must-not-enter-ledger",
+            },
+            private_note: "sensitive-copy-must-not-enter-ledger",
+          },
+          "request-copy-sonnet-invalid-200",
+        );
+        return;
+      }
       sendJson(
         response,
         {
@@ -632,5 +667,123 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     expect(live.observed.some(({ path }) => path === "/v1/messages")).toBe(
       false,
     );
+  });
+
+  it("persists only the redacted Messages response shape after an invalid HTTP 200", async () => {
+    const repository = await compiledRecoveryRepository();
+    const directory = await mkdtemp(
+      join(tmpdir(), "copy-sonnet-recovery-invalid-200-"),
+    );
+    directories.push(directory);
+    const campaignId = "copy-sonnet-recovery-invalid-200-test";
+    const paths = {
+      ledgerPath: join(directory, "ledger.jsonl"),
+      authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
+      ledgerMarkerPath: join(directory, "ledger.marker.jsonl"),
+      campaignId,
+    };
+    const markerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
+      ),
+    ) as typeof import("./copy-pilot-ledger-identity");
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+    const gatewayModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+      ),
+    ) as typeof import("./copy-pilot-trusted-gateway");
+    const runnerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+      ),
+    ) as typeof import("./copy-real-capability-runner");
+    const prepared = await markerModule.prepareCopyPilotLedgerIdentity({
+      ...paths,
+      markerPath: paths.ledgerMarkerPath,
+    });
+    const live = await recoveryGateway(["claude-sonnet-5"], "invalid_200");
+    const admitted = admission(live.origin, {
+      manifest: repository.manifest,
+      campaignId,
+      ledgerIdentityDigest: prepared.ledgerIdentityDigest,
+    });
+    const verifiedSource = await sourceModule.createCopyPilotVerifiedSource({
+      repositoryRoot: repository.root,
+      manifestArtifactPath: repository.manifestPath,
+    });
+    const trustedGateway = await gatewayModule.createCopyPilotTrustedGateway({
+      admission: admitted,
+      bearerToken: TOKEN,
+    });
+    const runner = await runnerModule.createCopySonnetRecoveryRunner({
+      ...paths,
+      admission: admitted,
+      verifiedSource,
+      trustedGateway,
+    });
+
+    await expect(runner.execute(admitted.selectedExecutionKey)).rejects.toThrow(
+      /settlement is unknown/u,
+    );
+
+    const rawLedger = await readFile(paths.ledgerPath, "utf8");
+    const observation = rawLedger
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          (
+            JSON.parse(line) as {
+              event: Record<string, unknown>;
+            }
+          ).event,
+      )
+      .find(({ kind }) => kind === "wire_observed");
+    expect(observation).toMatchObject({
+      kind: "wire_observed",
+      settlement: "unknown",
+      requestId: "request-copy-sonnet-invalid-200",
+      reason: expect.stringMatching(
+        /native_api_failure_http_200:log_unavailable/u,
+      ),
+      responseShape: {
+        schemaVersion: "native-model-response-shape/2026-08-09-v1",
+        topLevelKeys: [
+          "content",
+          "id",
+          "model",
+          "stop_reason",
+          "stop_sequence",
+          "type",
+          "usage",
+        ],
+        contentBlockTypes: ["text"],
+        usageKeys: [
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens",
+          "input_tokens",
+          "output_tokens",
+        ],
+        validationPaths: ["content[0].text"],
+      },
+    });
+    expect(rawLedger).not.toContain("sensitive-copy-must-not-enter-ledger");
+    expect(rawLedger).not.toContain("private_note");
+    expect(rawLedger).not.toContain("private_usage");
+    expect(await runner.summary()).toMatchObject({
+      wireClaims: 1,
+      knownWireSettlements: 0,
+      unknownWireSettlements: 1,
+      frozen: true,
+    });
   });
 });

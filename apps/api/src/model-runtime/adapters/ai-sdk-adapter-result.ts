@@ -7,10 +7,12 @@ import {
 } from "ai";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
+import { createRedactedModelResponseShape } from "../types";
 import type {
   NativeAdapterUsage,
   NativeAdapterWarning,
   NativeModelProtocol,
+  NativeModelResponseShape,
 } from "./ai-sdk-native-adapter.contract";
 import {
   NativeModelApiError,
@@ -19,6 +21,27 @@ import {
 
 const schemaValidator = addFormats(new Ajv({ allErrors: true, strict: true }));
 const MAX_INVALID_OUTPUT_BYTES = 64 * 1024;
+const MAX_RESPONSE_SHAPE_BYTES = 64 * 1024;
+function redactedResponseShape(
+  error: APICallError,
+): NativeModelResponseShape | undefined {
+  if (
+    error.statusCode == null ||
+    error.statusCode < 200 ||
+    error.statusCode >= 300 ||
+    error.responseBody == null ||
+    Buffer.byteLength(error.responseBody, "utf8") > MAX_RESPONSE_SHAPE_BYTES
+  ) {
+    return undefined;
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(error.responseBody) as unknown;
+  } catch {
+    return undefined;
+  }
+  return createRedactedModelResponseShape(body, error.cause);
+}
 
 export function createValidatedAiSdkSchema<OutputValue>(
   schema: Readonly<Record<string, unknown>>,
@@ -117,6 +140,7 @@ export function throwNormalizedOutputError(input: {
 }): never {
   if (APICallError.isInstance(input.error)) {
     const responseBody = input.error.responseBody;
+    const responseShape = redactedResponseShape(input.error);
     throw new NativeModelApiError({
       protocol: input.protocol,
       requestedModel: input.requestedModel,
@@ -131,6 +155,7 @@ export function throwNormalizedOutputError(input: {
               .digest("hex"),
             responseBodyBytes: Buffer.byteLength(responseBody, "utf8"),
           }),
+      ...(responseShape == null ? {} : { responseShape }),
     });
   }
   if (!NoObjectGeneratedError.isInstance(input.error)) throw input.error;

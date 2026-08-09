@@ -34,7 +34,11 @@ import {
   type RealModelExecutionLedgerSummary,
   type OperatorEvidenceAuthorizationInput,
 } from "./real-model-execution-ledger-storage";
-import type { ModelProtocol } from "./types";
+import {
+  normalizeModelResponseShape,
+  type ModelProtocol,
+  type ModelResponseShape,
+} from "./types";
 
 const CREATE_HASH = createHash;
 const BUFFER_FROM = Buffer.from.bind(Buffer);
@@ -470,6 +474,7 @@ export class RealModelExecutionLedger {
           quota: number;
           resolverId?: string;
           channelId?: number;
+          responseShape?: ModelResponseShape;
         }
       | {
           executionId: string;
@@ -477,6 +482,7 @@ export class RealModelExecutionLedger {
           settlement: "unknown";
           requestId: string | null;
           reason: string;
+          responseShape?: ModelResponseShape;
         },
   ): Promise<void> {
     validateIdentifier(input.executionId, "REAL_MODEL_EXECUTION_ID_INVALID");
@@ -526,12 +532,37 @@ export class RealModelExecutionLedger {
         ) {
           fail("REAL_MODEL_EXECUTION_OBSERVATION_INVALID");
         }
-        return [{ kind: "wire_observed", ...input }];
+        const responseShape =
+          input.responseShape == null
+            ? undefined
+            : normalizeModelResponseShape(input.responseShape);
+        if (input.responseShape != null && responseShape == null) {
+          fail("REAL_MODEL_EXECUTION_RESPONSE_SHAPE_INVALID");
+        }
+        return [
+          {
+            kind: "wire_observed",
+            ...input,
+            ...(responseShape == null ? {} : { responseShape }),
+          },
+        ];
       }
       const reason = input.reason.trim().slice(0, 160);
       if (!reason) fail("REAL_MODEL_EXECUTION_UNKNOWN_REASON_INVALID");
+      const responseShape =
+        input.responseShape == null
+          ? undefined
+          : normalizeModelResponseShape(input.responseShape);
+      if (input.responseShape != null && responseShape == null) {
+        fail("REAL_MODEL_EXECUTION_RESPONSE_SHAPE_INVALID");
+      }
       return [
-        { kind: "wire_observed", ...input, reason },
+        {
+          kind: "wire_observed",
+          ...input,
+          reason,
+          ...(responseShape == null ? {} : { responseShape }),
+        },
         { kind: "campaign_frozen", executionId: input.executionId, reason },
       ];
     });

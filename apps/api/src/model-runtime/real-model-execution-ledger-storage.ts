@@ -5,7 +5,11 @@ import type {
   ModelExecutionCampaignContract,
   ModelExecutionLedgerSummary,
 } from "./model-execution-ledger";
-import type { ModelProtocol, ReasoningLevel } from "./types";
+import type {
+  ModelProtocol,
+  ModelResponseShape,
+  ReasoningLevel,
+} from "./types";
 
 export const REAL_MODEL_EXECUTION_LEDGER_SCHEMA_VERSION =
   "real-model-execution-ledger/2026-08-05-v1" as const;
@@ -202,6 +206,7 @@ export type RealLedgerEvent =
       quota: number;
       resolverId?: string;
       channelId?: number;
+      responseShape?: ModelResponseShape;
     }
   | {
       kind: "wire_observed";
@@ -210,6 +215,7 @@ export type RealLedgerEvent =
       settlement: "unknown";
       requestId: string | null;
       reason: string;
+      responseShape?: ModelResponseShape;
     }
   | {
       kind: "repair_planned";

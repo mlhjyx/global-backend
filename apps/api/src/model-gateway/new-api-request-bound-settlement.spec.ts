@@ -67,7 +67,10 @@ function resolverForRow(row: Record<string, unknown>) {
   );
 }
 
-function anthropicLogRow(other: unknown) {
+function anthropicLogRow(
+  other: unknown,
+  overrides: Record<string, unknown> = {},
+) {
   return logRow({
     model_name: "claude-sonnet-5",
     channel: 19,
@@ -75,10 +78,11 @@ function anthropicLogRow(other: unknown) {
     prompt_tokens: 77,
     completion_tokens: 7,
     other,
+    ...overrides,
   });
 }
 
-function anthropicResolveInput() {
+function anthropicResolveInput(overrides: Record<string, unknown> = {}) {
   return resolveInput({
     alias: "claude-sonnet-5",
     protocol: "anthropic_messages",
@@ -86,6 +90,7 @@ function anthropicResolveInput() {
     usage: { inputTokens: 1_501, outputTokens: 7 },
     maxOutputTokens: 1_200,
     maximumQuotaPoints: 500_000,
+    ...overrides,
   });
 }
 
@@ -174,6 +179,65 @@ describe("NewApiRequestBoundSettlementResolver", () => {
       });
     },
   );
+
+  it("settles Anthropic usage when every input token is a cache write", async () => {
+    const settlement = resolverForRow(
+      anthropicLogRow(
+        {
+          usage_semantic: "anthropic",
+          cache_creation_tokens: 1_199,
+          cache_creation_tokens_5m: 1_199,
+          cache_write_tokens: 1_199,
+          cache_tokens: 0,
+        },
+        {
+          quota: 59_728,
+          prompt_tokens: 0,
+          completion_tokens: 94,
+        },
+      ),
+    );
+
+    await expect(
+      settlement.resolve(
+        anthropicResolveInput({
+          usage: { inputTokens: 1_199, outputTokens: 94 },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      status: "settled",
+      alias: "claude-sonnet-5",
+      protocol: "anthropic_messages",
+      channelId: 19,
+      quota: 59_728,
+      inputTokens: 1_199,
+      outputTokens: 94,
+    });
+  });
+
+  it("fails closed when Anthropic reports zero uncached and zero cached input", async () => {
+    const settlement = resolverForRow(
+      anthropicLogRow(
+        {
+          usage_semantic: "anthropic",
+          cache_creation_tokens: 0,
+          cache_tokens: 0,
+        },
+        { prompt_tokens: 0 },
+      ),
+    );
+
+    await expect(
+      settlement.resolve(
+        anthropicResolveInput({
+          usage: { inputTokens: 0, outputTokens: 7 },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      status: "unknown",
+      reason: "log_invalid",
+    });
+  });
 
   it("does not add generic new-api cache tokens to OpenAI prompt usage", async () => {
     const settlement = resolverForRow(
