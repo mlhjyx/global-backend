@@ -72,6 +72,15 @@ describe('AuthModule token verifier admission', () => {
         }),
       ),
     ).toThrow(/AUTH_JWKS_URI.*AUTH_ISSUER|AUTH_ISSUER.*AUTH_JWKS_URI/);
+
+    expect(() =>
+      createTokenVerifier(
+        developmentEnv({
+          AUTH_JWKS_URI: 'https://identity.example.test/jwks',
+          AUTH_ISSUER: 'https://identity.example.test/',
+        }),
+      ),
+    ).toThrow(/AUTH_AUDIENCE/);
   });
 
   it('selects the JWKS verifier without enabling the dev stub', () => {

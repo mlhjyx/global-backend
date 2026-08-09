@@ -185,11 +185,22 @@ describe('JwksTokenVerifier contract', () => {
           new JwksTokenVerifier({
             AUTH_JWKS_URI: 'https://identity.example.test/jwks',
             AUTH_ISSUER: issuer,
+            AUTH_AUDIENCE: audience,
             AUTH_CLOCK_SKEW_S: clockSkew,
           }),
       ).toThrow(/AUTH_CLOCK_SKEW_S/);
     },
   );
+
+  it('requires an explicit audience at the verifier boundary', () => {
+    expect(
+      () =>
+        new JwksTokenVerifier({
+          AUTH_JWKS_URI: 'https://identity.example.test/jwks',
+          AUTH_ISSUER: issuer,
+        }),
+    ).toThrow(/AUTH_AUDIENCE/);
+  });
 
   it.each([
     ['workspace', { AUTH_WORKSPACE_CLAIM: '__proto__' }],
@@ -202,6 +213,7 @@ describe('JwksTokenVerifier contract', () => {
         new JwksTokenVerifier({
           AUTH_JWKS_URI: 'https://identity.example.test/jwks',
           AUTH_ISSUER: issuer,
+          AUTH_AUDIENCE: audience,
           ...override,
         }),
     ).toThrow(/claim name/);
