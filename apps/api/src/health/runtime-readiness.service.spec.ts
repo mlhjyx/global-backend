@@ -2,8 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { RuntimeReadinessService } from './runtime-readiness.service';
 
 function dependencies(overrides: Record<string, unknown> = {}) {
+  const transactionClient = {
+    $executeRawUnsafe: vi.fn(async () => 0),
+    $queryRawUnsafe: vi.fn(async () => [{ ok: 1 }]),
+  };
   return {
-    prisma: { $queryRawUnsafe: vi.fn(async () => [{ ok: 1 }]) },
+    prisma: {
+      $transaction: vi.fn(
+        async (operation: (client: typeof transactionClient) => Promise<unknown>) =>
+          operation(transactionClient),
+      ),
+    },
+    transactionClient,
     temporal: {
       probe: vi.fn(async () => ({ connected: true })),
     },
@@ -35,6 +45,27 @@ describe('RuntimeReadinessService', () => {
     });
   });
 
+  it('bounds both database connection acquisition and the statement itself', async () => {
+    const deps = dependencies();
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+    );
+
+    await expect(service.check()).resolves.toMatchObject({
+      components: { database: { status: 'ok' } },
+    });
+    expect(deps.prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 1_000,
+      timeout: 2_500,
+    });
+    expect(deps.transactionClient.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SET LOCAL statement_timeout = 2000',
+    );
+    expect(deps.transactionClient.$queryRawUnsafe).toHaveBeenCalledWith('SELECT 1');
+  });
+
   it('keeps pilot readiness closed until durable worker and relay evidence exists', async () => {
     const deps = dependencies({
       admission: {
@@ -59,7 +90,7 @@ describe('RuntimeReadinessService', () => {
   it('never exposes raw dependency errors in the probe response', async () => {
     const deps = dependencies({
       prisma: {
-        $queryRawUnsafe: vi.fn(async () => {
+        $transaction: vi.fn(async () => {
           throw new Error('postgresql://owner:password@db/customer');
         }),
       },
