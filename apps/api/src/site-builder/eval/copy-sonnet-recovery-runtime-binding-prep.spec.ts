@@ -281,6 +281,17 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         recoveryManifestBytes,
       ),
     ).not.toThrow();
+    for (const source of artifact.sourceBundle.files) {
+      const fixedBytes = execFileSync(
+        "git",
+        ["show", `${artifact.fixedSourceCommit}:${source.path}`],
+        { cwd: REPOSITORY_ROOT, encoding: "buffer" },
+      );
+      expect(sha256(fixedBytes)).toBe(source.sha256);
+      expect(readFileSync(resolve(REPOSITORY_ROOT, source.path))).toEqual(
+        fixedBytes,
+      );
+    }
     expect(artifact).toMatchObject({
       fixedSourceCommit: "874a8cc2aa637c35f8c78302006ffb370913fcb7",
       preparationHeadCommit: "874a8cc2aa637c35f8c78302006ffb370913fcb7",
