@@ -35,6 +35,7 @@ const OPENAI_CHAT_ERROR_REQUEST_ID = [
 ].join("-");
 const ANTHROPIC_REQUEST_ID = ["anthropic", "request", "fixture"].join("-");
 const INVALID_REQUEST_ID = ["invalid", "request", "fixture"].join("-");
+const MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST = 64 * 1024;
 
 function adapterSettings(baseUrl: string) {
   return { baseUrl, canonicalGatewayBaseUrl: baseUrl, apiKey: FIXTURE_API_KEY };
@@ -649,6 +650,187 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(request.body).not.toHaveProperty("output_config.format");
     expect(result.output).toEqual(output);
     expect(result.warnings).toEqual([]);
+  });
+
+  it("preserves dynamic keys when a nested object schema omits additionalProperties", async () => {
+    const outputSchema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["metadata"],
+      properties: {
+        metadata: {
+          type: "object",
+          required: ["market"],
+          properties: { market: { type: "string" } },
+        },
+      },
+    } as const;
+    const output = { metadata: { market: "industrial" } };
+    const gateway = await startFakeGateway((_request, response, observed) => {
+      const usesJsonTool = Array.isArray(observed.body.tools);
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_implicit_dynamic_object",
+          model: "claude-sonnet-5",
+          role: "assistant",
+          content: usesJsonTool
+            ? [
+                {
+                  type: "tool_use",
+                  id: "toolu_implicit_dynamic_object",
+                  name: "json",
+                  input: output,
+                },
+              ]
+            : [{ type: "text", text: JSON.stringify(output) }],
+          stop_reason: usesJsonTool ? "tool_use" : "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 21,
+            output_tokens: 13,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const result = await adapter.execute<typeof output>({
+      alias: "claude-sonnet-5",
+      prompt: "Return metadata while preserving dynamic keys.",
+      outputSchema,
+      outputSchemaName: "implicit_dynamic_output",
+      reasoning: { effort: "medium" },
+      maxOutputTokens: 256,
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+
+    expect(gateway.observed).toHaveLength(1);
+    const [request] = gateway.observed;
+    expect(request.body).toMatchObject({
+      tools: [
+        {
+          name: "json",
+          input_schema: outputSchema,
+        },
+      ],
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
+    });
+    expect(request.body).not.toHaveProperty("output_config.format");
+    expect(result.output).toEqual(output);
+  });
+
+  it.each([
+    [
+      "description",
+      {
+        type: "object",
+        additionalProperties: false,
+        description: "界".repeat(22_000),
+      },
+    ],
+    [
+      "property name",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          [`field_${"界".repeat(22_000)}`]: { type: "string" },
+        },
+      },
+    ],
+  ])(
+    "rejects an Anthropic schema with an oversized UTF-8 %s before dispatch",
+    async (_case, outputSchema) => {
+      const gateway = await startFakeGateway((_request, response) => {
+        sendJson(response, 500, { error: "must not dispatch" });
+      });
+      const adapter = new AiSdkAnthropicMessagesAdapter(
+        adapterSettings(gateway.baseUrl),
+      );
+
+      await expect(
+        adapter.execute({
+          alias: "claude-sonnet-5",
+          prompt: "Do not dispatch this byte-oversized schema.",
+          outputSchema,
+          outputSchemaName: "byte_oversized_output",
+          maxOutputTokens: 64,
+          abortSignal: AbortSignal.timeout(5_000),
+        }),
+      ).rejects.toThrow(
+        "Anthropic structured-output schema exceeds the byte limit",
+      );
+      expect(gateway.observed).toHaveLength(0);
+    },
+  );
+
+  it("accepts an Anthropic schema exactly at the UTF-8 byte limit", async () => {
+    const output = { name: "Acme" };
+    const schemaWithoutDescription = {
+      type: "object",
+      additionalProperties: false,
+      required: ["name"],
+      properties: { name: { type: "string" } },
+      description: "",
+    } as const;
+    const fixedBytes = Buffer.byteLength(
+      JSON.stringify(schemaWithoutDescription),
+      "utf8",
+    );
+    const outputSchema = {
+      ...schemaWithoutDescription,
+      description: "x".repeat(
+        MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST - fixedBytes,
+      ),
+    };
+    expect(Buffer.byteLength(JSON.stringify(outputSchema), "utf8")).toBe(
+      MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST,
+    );
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_schema_at_byte_limit",
+          model: "claude-sonnet-5",
+          role: "assistant",
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 21,
+            output_tokens: 13,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const result = await adapter.execute<typeof output>({
+      alias: "claude-sonnet-5",
+      prompt: "Return the company name.",
+      outputSchema,
+      outputSchemaName: "schema_at_byte_limit",
+      maxOutputTokens: 64,
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+
+    expect(result.output).toEqual(output);
+    expect(gateway.observed).toHaveLength(1);
   });
 
   it("rejects an oversized Anthropic output schema before dispatch", async () => {
