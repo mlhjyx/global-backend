@@ -189,8 +189,15 @@ async function fakeGateway(
           type: "message",
           id: `message-${observed.length}`,
           model,
-          content: [{ type: "text", text: JSON.stringify(output) }],
-          stop_reason: "end_turn",
+          content: [
+            {
+              type: "tool_use",
+              id: `toolu-${observed.length}`,
+              name: "json",
+              input: output,
+            },
+          ],
+          stop_reason: "tool_use",
           stop_sequence: null,
           usage:
             usageMode === "complete"
@@ -264,7 +271,17 @@ describe("Copy capability pilot fake-gateway runner", () => {
       max_tokens: 1200,
       thinking: { type: "adaptive" },
       output_config: { effort: "medium" },
+      tools: [
+        {
+          name: "json",
+          input_schema: COPY_TASK.outputSchema,
+        },
+      ],
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
     });
+    expect(gateway.observed[2]!.body).not.toHaveProperty(
+      "output_config.format",
+    );
     for (const result of [terra, sol, sonnet]) {
       expect(getDurableModelExecutionAttestation(result)).toMatchObject({
         evidenceClass: "fake_gateway_contract_only",
