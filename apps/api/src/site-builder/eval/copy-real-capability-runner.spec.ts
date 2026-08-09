@@ -283,8 +283,15 @@ async function realRunnerGateway() {
         type: "message",
         id: `message-${ordinal}`,
         model: alias,
-        content: [{ type: "text", text: JSON.stringify(output) }],
-        stop_reason: "end_turn",
+        content: [
+          {
+            type: "tool_use",
+            id: `toolu-${ordinal}`,
+            name: "json",
+            input: output,
+          },
+        ],
+        stop_reason: "tool_use",
         stop_sequence: null,
         usage: { input_tokens: 120, output_tokens: 40 },
       },
@@ -1750,6 +1757,18 @@ describe("Copy real capability runner admission", () => {
       "/v1/chat/completions",
       "/v1/messages",
     ]);
+    expect(gateway.observedModelRequests.at(-1)?.body).toMatchObject({
+      tools: [
+        {
+          name: "json",
+          input_schema: COPY_TASK.outputSchema,
+        },
+      ],
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
+    });
+    expect(gateway.observedModelRequests.at(-1)?.body).not.toHaveProperty(
+      "output_config.format",
+    );
     expect(JSON.stringify(result)).not.toContain("real_gateway_settled");
     expect(JSON.stringify(gateway.observedModelBodies[2])).toContain(
       "Invented unsupported performance claim",
