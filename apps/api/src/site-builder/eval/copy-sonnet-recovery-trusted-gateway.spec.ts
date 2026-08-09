@@ -40,7 +40,10 @@ import {
   COPY_REAL_CAPABILITY_ARTIFACT_PATHS,
   createCopySonnetRecoveryRunner,
 } from "./copy-real-capability-runner";
-import { COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION } from "./copy-sonnet-recovery-contract";
+import {
+  COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+} from "./copy-sonnet-recovery-contract";
 
 const TOKEN = createHash("sha256")
   .update(import.meta.url)
@@ -223,6 +226,7 @@ async function recoveryGateway(
 async function compiledRecoveryRepository(
   identity: {
     artifactId?: string;
+    artifactRelativePath?: string;
     manifestId?: string;
   } = {},
 ) {
@@ -231,7 +235,9 @@ async function compiledRecoveryRepository(
   await Promise.all([
     mkdir(join(root, "apps", "api"), { recursive: true }),
     mkdir(join(root, "packages", "contracts"), { recursive: true }),
-    mkdir(join(root, "docs", "evidence"), { recursive: true }),
+    mkdir(join(root, "docs", "evidence", "site-builder"), {
+      recursive: true,
+    }),
   ]);
   await Promise.all([
     cp(join(REPOSITORY_ROOT, "apps/api/dist"), join(root, "apps/api/dist"), {
@@ -337,7 +343,11 @@ async function compiledRecoveryRepository(
       artifactTreeDigest: canonicalDigest(compiledArtifacts),
     },
   };
-  const manifestPath = join(root, "docs", "evidence", "manifest.json");
+  const manifestPath = join(
+    root,
+    identity.artifactRelativePath ??
+      COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  );
   await writeFile(
     manifestPath,
     `${JSON.stringify({
@@ -345,7 +355,12 @@ async function compiledRecoveryRepository(
       artifactDigest: canonicalDigest(withoutDigest),
     })}\n`,
   );
-  git(root, "add", "docs/evidence/manifest.json");
+  git(
+    root,
+    "add",
+    identity.artifactRelativePath ??
+      COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  );
   git(root, "commit", "-qm", "record recovery binding");
   git(root, "update-ref", "refs/remotes/origin/main", "HEAD");
   return { root, manifestPath, manifest };
@@ -503,6 +518,26 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       artifactId:
         "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v13-v1",
       manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+    });
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+
+    await expect(
+      sourceModule.createCopyPilotVerifiedSource({
+        repositoryRoot: repository.root,
+        manifestArtifactPath: repository.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
+  });
+
+  it("rejects an exact v14 runtime artifact at a non-canonical tracked path", async () => {
+    const repository = await compiledRecoveryRepository({
+      artifactRelativePath:
+        "docs/evidence/site-builder/copied-recovery-runtime-binding-v14.json",
     });
     const sourceModule = REQUIRE(
       join(
