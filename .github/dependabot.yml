@@ -7,8 +7,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      # Domain groups are ordered from specific to fallback. Major updates stay
-      # outside these groups and therefore remain individually reviewable.
+      # Domain groups are ordered from specific to fallback. Non-ignored major
+      # updates stay outside these groups and remain individually reviewable;
+      # explicit major ignores below are tracked as manual migration projects.
       nestjs-runtime:
         applies-to: version-updates
         patterns:

@@ -1,7 +1,9 @@
 # Supply-chain canary 与 production audit ratchet TDD 记录
 
-> 基线：`origin/main@362f88cac1656016bd5aba93032e0f1d90048cba`  
-> 范围：dependency review、production-only audit ratchet、机器可读遗留漏洞基线、Dependabot 分域、CodeQL canary。  
+> 基线：`origin/main@362f88cac1656016bd5aba93032e0f1d90048cba`
+>
+> 范围：dependency review、production-only audit ratchet、机器可读遗留漏洞基线、Dependabot 分域、CodeQL canary。
+>
 > 边界：本文只记录本地源码与测试证据；没有 push、远端 PR、live ruleset/security setting、部署或真实试点证据。
 
 ## 用户旅程与失败面
@@ -20,19 +22,20 @@
 | 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败              | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过           |
 | 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败        | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过  |
 | 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败 | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执 |
+| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败   | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过     |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
 ## 本地验证矩阵
 
-| 验证                                              | 结果                                                       | 证明边界                                                                                   |
-| ------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `node --test scripts/supply-chain-gates.spec.mjs` | 12/12 PASS                                                 | ratchet、bootstrap、回归、回执、workflow/Dependabot/CodeQL 静态合同                        |
-| `pnpm governance:verify`                          | 43/43 PASS；governance verifier PASS                       | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
-| 官方 registry base/head 模拟                      | `RATCHET_PASS_WITH_LEGACY_RISK`；36 advisories；0 resolved | 当前 base 与 head 依赖图的本地实时比较可执行；不代表漏洞已解决                             |
-| Prettier 与 `git diff --check`                    | PASS                                                       | 新增 YAML/JS/Markdown 格式与 whitespace 合同                                               |
-| Copy v13 fixed-source rebuild                     | 最终 exact head 复验时记录                                 | 根 `package.json` 与受绑定 source 不得因本切片漂移                                         |
-| `docs:verify`、memory、decision-card              | 最终 exact head 复验时记录                                 | 文档与项目治理总门不回退                                                                   |
+| 验证                                              | 结果                                                          | 证明边界                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `node --test scripts/supply-chain-gates.spec.mjs` | 14/14 PASS                                                    | ratchet、bootstrap、回归、回执、workflow/Dependabot/CodeQL 静态合同                        |
+| `pnpm governance:verify`                          | 45/45 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
+| 官方 registry installed base/head 模拟            | `RATCHET_PASS_WITH_LEGACY_RISK`；36 advisories；183 exposures | base 与 head 都禁 scripts/pnpm hooks 后物化路径；不代表漏洞已解决                          |
+| Prettier 与 `git diff --check`                    | PASS                                                          | 新增 YAML/JS/JSON/Markdown 格式与 whitespace 合同                                          |
+| Copy v13 fixed-source rebuild                     | `0a283dab`：7/7 PASS；Prisma/contracts/API build PASS         | 根 `package.json` 与受绑定 source 未因本切片漂移                                           |
+| `docs:verify`、memory、decision-card              | `0a283dab`：0 errors/1 既有 warning；15/15；13/13             | 文档与项目治理总门不回退                                                                   |
 
 Node 内置 governance tests 没有单独的覆盖率采集器，因此本文不伪造百分比。测试直接覆盖所有新增判定分支，并用结构性 mutation 合同锁定 workflow 接线；GitHub-hosted Dependency Review、CodeQL 上传权限、Dependabot 实际分组以及 Actions 事件语义仍只能由未来 exact-head canary 证明。
 
