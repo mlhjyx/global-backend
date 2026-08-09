@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import "./governance-ci-topology.spec.mjs";
+
 import {
   renderProviderRegistry,
   renderReleaseBundle,

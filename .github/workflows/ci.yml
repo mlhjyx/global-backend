@@ -57,33 +57,47 @@ jobs:
             exit 0
           fi
 
-          while IFS= read -r path; do
+          scope_paths="$RUNNER_TEMP/renderer-visual-scope-paths.txt"
+          if ! git diff --no-renames --name-only -z "${BASE_SHA}...${HEAD_SHA}" > "$scope_paths"; then
+            echo "run_visual=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          while IFS= read -r -d '' path; do
             case "$path" in
               apps/site-renderer/* | \
               packages/contracts/src/index.ts | \
               packages/contracts/package.json | \
               packages/contracts/tsconfig*.json | \
-              packages/contracts/src/site-builder/site-spec.ts | \
-              packages/contracts/src/site-builder/copy-bundle.ts | \
-              packages/contracts/src/site-builder/locales.ts | \
-              packages/contracts/src/site-builder/component-schema.ts | \
-              packages/contracts/src/site-builder/component-content-budget.ts | \
-              packages/contracts/src/site-builder/component-qualification.ts | \
+              packages/contracts/src/site-builder/* | \
+              tsconfig.base.json | \
               package.json | pnpm-lock.yaml | pnpm-workspace.yaml | \
               .github/workflows/ci.yml)
                 echo "run_visual=true" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
             esac
-          done < <(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          done < "$scope_paths"
 
           echo "run_visual=false" >> "$GITHUB_OUTPUT"
 
   build-test:
     name: build · typecheck · test
     needs: renderer-visual-scope
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
@@ -134,14 +148,19 @@ jobs:
           pnpm --filter @global/api exec vitest run
           src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
 
-      - name: Renderer locale contract test
-        run: pnpm --filter @global/site-renderer test
+      - name: Renderer contract tests
+        run: pnpm --filter @global/site-renderer test:contracts
+
+      - name: Renderer fixture Astro build matrix
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
+        run: pnpm --filter @global/site-renderer test:fixtures
 
       - name: Renderer qualified component visual regression（375 · 768 · 1440）
         if: needs.renderer-visual-scope.outputs.run_visual == 'true'
         run: pnpm --filter @global/site-renderer test:visual
 
       - name: Renderer multilingual smoke build
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
         run: pnpm --filter @global/site-renderer build
         env:
           SITESPEC_PATH: ${{ github.workspace }}/apps/site-renderer/fixtures/multilingual-spec.json

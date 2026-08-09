@@ -86,6 +86,32 @@ Gitleaks workflow 保留最小的 `pull-requests: write`。CI 并发键同时包
 类型，防止 scheduled 全量视觉基线与 main push 验证因为共享 `refs/heads/main`
 而互相取消；同一 PR 的旧 synchronize run 仍会被新 head 取消。
 
+### CI 成本与有效保护面的迁移约束
+
+Renderer 的 Vitest 被拆成始终执行的 `test:contracts` 与真实 Astro fixture build
+`test:fixtures`。fixture build、三断点 byte-pinned visual gate 和多语言 smoke build
+共享 `renderer visual scope`：renderer、整个 Site Builder contracts 目录、根依赖/
+TypeScript 配置
+或 CI workflow 变化时全部执行；schedule、manual、缺失/不可达 diff base 时也
+fail-safe 全部执行；变更路径使用 NUL 分隔并禁用 rename folding（移动受控文件时
+旧路径仍进入判定），diff 自身失败时同样全跑，不能降级成 `false`。无关 PR 只
+跳过这三项重任务，不能跳过 renderer contract tests。
+该拓扑由 `scripts/governance-ci-topology.spec.mjs` 进行确定性结构合同校验。
+
+`build · typecheck · test` 是 live ruleset 已强制的 context，而它依赖的
+`renderer visual scope` 尚未被 live ruleset 强制。为防 upstream failure 让 build
+job 被 GitHub 标为 skipped，build job 固定以 policy 批准的 `always()` 启动，并在
+任何 checkout 或仓库代码执行前验证 `needs.renderer-visual-scope.result` 必须为
+`success`；failure、cancelled 或 skipped 一律显式失败。这个传播合同也受拓扑
+结构合同保护。
+
+当前 live ruleset 尚未强制 `governance · traceability · release`，所以
+`docs:verify`、`memory:test` 与 `decision-card:test` 暂时仍保留在已受外部 ruleset
+保护的 `build · typecheck · test` 内；不能为了减少重复执行而提前移走。只有在
+governance context 经 PR/main canary 稳定、被外部 ruleset 实际设为 required 并
+完成回读后，才可另开 PR 消除这部分重复。仓内 required-context 清单本身不能
+证明这个外部迁移已完成。
+
 ## Release Bundle 的外部 provenance
 
 Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、merge SHA/parent 和 `evidence_ref` 是待验证声明，不是自证。当前仓内尚无可信外部 readback verifier，所以 `external_provenance.status` 只能有效地表达 `EXTERNAL_UNVERIFIED`；对 `PILOT/GA`，验证器始终返回 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED`。仅把字段改为 `VERIFIED`或填入 URL 会追加 `RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED`，不能解锁 promotion。未来实现必须独立回读外部对象、绑定当次仓库/PR/head/actor/result 和 receipt，并另行审查；不开放由 bundle 调用者注入“已信任”的旁路。
