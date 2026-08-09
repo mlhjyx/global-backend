@@ -3,7 +3,7 @@
 
 ## 2026-08-09 · Copy Sonnet recovery v14 create-only preparation
 
-- #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定后续身份绑定提交 `e8680ef8b6bee17262e60208f742cbcca1e32f46`、82-file source digest `3f4c1afd…`、53-file compiled tree `62f48303…` 与 artifact digest `fcb17f31…`。
+- #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定 canonical path 与后续身份绑定提交 `914a3eedbae1214c9b31edbe527b7959fb52ad94`、82-file source digest `ce8546a3…`、53-file compiled tree `97a6a1ec…` 与 artifact digest `4f36a85c…`。
 - recovery execution 与 child slot 均版本化为 v14；runner 的 Git-reviewed evidence acceptance 复用 recovery-aware execution plan，不再把合法 v14 receipt 误当成旧 pilot ID。fake gateway 覆盖 1 wire known settlement、完成、PR-merge acceptance，全程零真实模型调用。
 - v13 后续私有 operator run 以 2 known-settlement wires、1 repair、0 completion 停止并冻结；它不是 tracked capability/质量 evidence。v14 明确禁止复用 Terra/Sol v11 及停止的 v12/v13 authorization、campaign 或 wire。
 - v14 artifact 继续是 create-only、`NOT_AUTHORIZED`、`dispatchCapable=false`、0 network/model wire、0 cost；本批次不包含凭据、真实调用、36/72、晋级或 route adoption。
