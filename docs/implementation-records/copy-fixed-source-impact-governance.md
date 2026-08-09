@@ -18,7 +18,7 @@ Copy v15 runtime binding 把完整 `packages/db/prisma/schema.prisma` 作为编�
 2. 对 binding 中全部 source path 重新读取有界 regular file 并计算 SHA-256；source fingerprint 与 drift path 集必须和 receipt 完全一致。
 3. 零漂移只能声明 `CURRENT`；有漂移只能声明 `STALE_HOLD`。
 4. `STALE_HOLD` 当前只允许 `packages/db/prisma/schema.prisma`，并要求 `stale_scope=PRISMA_SCHEMA_EVOLUTION`。runner、verifier、model runtime、lockfile、package manifest 或其他承重路径漂移一律失败。
-5. 两种状态都固定 `dispatch_authorization=NOT_AUTHORIZED`、`pilot_eligibility=BLOCKED` 与 `REBASE_FIXED_SOURCE_BEFORE_DISPATCH`。
+5. 两种状态都固定 `dispatch_authorization=NOT_AUTHORIZED` 与 `pilot_eligibility=BLOCKED`。`CURRENT` 的下一门是 `SEPARATE_DISPATCH_AUTHORIZATION`；`STALE_HOLD` 则必须 `REBASE_FIXED_SOURCE_BEFORE_DISPATCH`。
 6. 只有 `CURRENT` 才执行 manifest/runtime binding 双 fixed-source rebuild；`STALE_HOLD` 只表示允许无关 schema 演进进入常规 build/test，不会升级 Copy 的 capability、dispatch、promotion、route 或生产状态。
 
 ## 3. 安全边界

@@ -88,8 +88,7 @@ function validateEligibilityBoundary(eligibility) {
     eligibility.schema_version !== "site-builder-copy-runtime-eligibility/v1" ||
     eligibility.active_binding_path !== ACTIVE_COPY_RUNTIME_BINDING_PATH ||
     eligibility.dispatch_authorization !== "NOT_AUTHORIZED" ||
-    eligibility.pilot_eligibility !== "BLOCKED" ||
-    eligibility.required_followup !== "REBASE_FIXED_SOURCE_BEFORE_DISPATCH"
+    eligibility.pilot_eligibility !== "BLOCKED"
   ) {
     fail("COPY_FIXED_SOURCE_SAFETY_BOUNDARY_INVALID");
   }
@@ -149,6 +148,13 @@ export function evaluateCopyFixedSourceImpact({
     driftedPaths.some((path) => !ALLOWED_STALE_PATHS.includes(path))
   ) {
     fail("COPY_FIXED_SOURCE_STALE_SCOPE_INVALID");
+  }
+  const expectedFollowup =
+    expectedStatus === "CURRENT"
+      ? "SEPARATE_DISPATCH_AUTHORIZATION"
+      : "REBASE_FIXED_SOURCE_BEFORE_DISPATCH";
+  if (eligibility.required_followup !== expectedFollowup) {
+    fail("COPY_FIXED_SOURCE_FOLLOWUP_INVALID");
   }
 
   return Object.freeze({

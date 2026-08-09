@@ -8,6 +8,6 @@
   "drifted_paths": [],
   "dispatch_authorization": "NOT_AUTHORIZED",
   "pilot_eligibility": "BLOCKED",
-  "required_followup": "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
+  "required_followup": "SEPARATE_DISPATCH_AUTHORIZATION",
   "stale_scope": "NONE"
 }
