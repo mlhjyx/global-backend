@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = new URL("../", import.meta.url);
@@ -524,7 +526,7 @@ test("bounded dependency inputs are read through one no-follow file handle", asy
   );
   assert.match(
     sourcePolicySource,
-    /open\(path, constants\.O_RDONLY \| constants\.O_NOFOLLOW\)/u,
+    /open\([\s\S]*constants\.O_RDONLY \|[\s\S]*constants\.O_NOFOLLOW \|[\s\S]*constants\.O_NONBLOCK[\s\S]*\)/u,
   );
   assert.match(sourcePolicySource, /handle\.stat\(\{ bigint: true \}\)/u);
   assert.match(sourcePolicySource, /handle\.read\(/u);
@@ -536,6 +538,25 @@ test("bounded dependency inputs are read through one no-follow file handle", asy
   assert.doesNotMatch(auditSource, /from "node:fs\/promises"/u);
   assert.doesNotMatch(auditSource, /\blstat\(/u);
   assert.doesNotMatch(auditSource, /\breadFile\(path/u);
+});
+
+test("bounded dependency input reader rejects a final-component symlink", async () => {
+  const { readBoundedRegularText } =
+    await import("./supply-chain-source-policy.mjs");
+  const directory = await mkdtemp(join(tmpdir(), "supply-chain-reader-"));
+  const target = join(directory, "target.json");
+  const link = join(directory, "candidate.json");
+
+  try {
+    await writeFile(target, '{"trusted":true}\n', "utf8");
+    await symlink(target, link);
+    await assert.rejects(
+      readBoundedRegularText(link),
+      /openable no-follow regular file/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("dependency review and production audit are pinned, bounded canaries", async () => {
