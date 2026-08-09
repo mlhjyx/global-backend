@@ -15,7 +15,7 @@ function admission(): CopySonnetRecoveryAdmissionInput {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
     manifestId:
-      "site-builder-copy-sonnet-recovery-runtime/2026-08-08-v12-v1",
+      "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit: "c".repeat(40),
@@ -67,16 +67,16 @@ function admission(): CopySonnetRecoveryAdmissionInput {
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: "copy-sonnet-recovery-campaign-v12",
-    authorizationId: "copy-sonnet-recovery-child-authorization-v12",
-    reservationId: "copy-sonnet-recovery-child-reservation-v12",
+    campaignId: "copy-sonnet-recovery-campaign-v13",
+    authorizationId: "copy-sonnet-recovery-child-authorization-v13",
+    reservationId: "copy-sonnet-recovery-child-reservation-v13",
     ledgerIdentityDigest: "f".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
-    authorizationId: "copy-sonnet-recovery-global-authorization-v12",
+    authorizationId: "copy-sonnet-recovery-global-authorization-v13",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
@@ -143,7 +143,7 @@ describe("Copy Sonnet recovery admission", () => {
 
     expect(COPY_SONNET_RECOVERY_ADMISSION_SOURCE.executions).toEqual([
       {
-        executionKey: "copy-sonnet-recovery-v12-claude-sonnet-5",
+        executionKey: "copy-sonnet-recovery-v13-claude-sonnet-5",
         sourcePilotExecutionKey: "copy-capability-3-claude-sonnet-5",
         alias: "claude-sonnet-5",
         protocol: "anthropic_messages",
@@ -155,7 +155,7 @@ describe("Copy Sonnet recovery admission", () => {
       classification: "SOURCE_CONTRACT_VALIDATION_ONLY",
       dispatchCapable: false,
       selectedExecutionKey:
-        "copy-sonnet-recovery-v12-claude-sonnet-5",
+        "copy-sonnet-recovery-v13-claude-sonnet-5",
       maximumExecutions: 1,
       maximumWireCalls: 2,
       globalMaximumExecutions: 1,

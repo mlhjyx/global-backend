@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-09 · Copy Sonnet recovery v13 create-only preparation（#356）
+
+- [实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[v13 manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json) 与 [post-sync runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json) 固定 #355 后的唯一 Sonnet Messages/medium recovery：1 execution、最多 2 wires、最多 1 次 closed repair；Terra/Sol v11 成功 wire 及停止的 v12 wire/authorization 均不可复用。
+- 主线同步后的 binding 固定 source commit `874a8cc2aa637c35f8c78302006ffb370913fcb7`、82-file source digest `139c8661…`、53-file compiled tree `a7ac0ca8…` 与 artifact digest `caa42cbf…`。它仍为 create-only、`NOT_AUTHORIZED`、`dispatchCapable=false`、0 network/model wire、0 cost；#356 未合并前不构成 mainline evidence，合并后仍须 ancestry/compiled 重验与单独的凭据、settlement、真实调用授权。
+- 本交付不包含 capability evidence、36/72 质量矩阵、模型晋级或生产 route adoption；这些门继续独立决策。
+
 ## 2026-08-08 · Governance trust-boundary hardening
 
 - `nontechnical decision card integrity` 取代会误导为 freshness/授权的 context 名。Draft 可非阻断展示 `CURRENT_UNVERIFIED`；非 Draft 中完整的 `PASS / RECOMMEND_MERGE / MERGE` 作者声明在没有可信外部 provenance 时必须阻断，用户授权仍固定为 `NOT_AUTHORIZED`。
