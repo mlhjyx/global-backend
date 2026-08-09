@@ -17,7 +17,7 @@
 5. OpenAPI 的每个 bearer operation 都必须携带非空、闭合的 `x-required-scopes`；health probes 保持公开，未来新增非公开 controller 若遗漏双 guard 或 scope decorator，结构测试失败。
 6. JWKS 合同覆盖 issuer、audience、subject、workspace、roles、`exp`、`nbf`、`kid` 与 old/new key overlap；半配置 JWKS 不得回退到 dev token。
 7. DevTokenVerifier 仅允许显式 `APP_ENVIRONMENT=development`、显式 `AUTH_ALLOW_DEV_TOKENS=true` 与 loopback `API_BIND_HOST` 同时成立；test/pilot/production 和非 loopback 永远拒绝。
-8. bearer token 最大 16 KiB；subject 必须是有界无控制字符字符串，workspace 必须是 UUID；自定义 claim 名、clock tolerance 与 audience 在 verifier 构造阶段 fail-closed。
+8. bearer token 最大 16 KiB；subject 必须是有界无控制字符字符串，workspace 必须是 UUID；自定义 claim 名、clock tolerance 与 audience 在 verifier 构造阶段 fail-closed；`scope`/`scp` 也不能被服务端误配置成身份或 roles claim。
 
 ## RED → GREEN 检查点
 
@@ -29,6 +29,7 @@
 | 4 | `2093481a`：OpenAPI 精确报告制裁裁决误用 identity scope，Suppression 写入误用 quality-label scope | `92a3a76e`：制裁裁决改为 review + compliance，Suppression 改为 compliance-only；build→export→17/17 topology/contract tests 通过 |
 | 5 | `a159dbf5` + `94161465`：detached RED 重放 4 files / 13 failed，暴露超长 token、非 UUID workspace、unsafe claim name/clock 与 audience 可缺失 | `9347ec5c`：16 KiB/UUID/claim/clock/audience 门全部关闭，外部 JWT 错误统一脱敏；4 files / 29 tests、API build、lint 0 error |
 | 6 | `5c403cb8`：未知 role=`toString` 命中 Object prototype 并抛 500；workspace/roles claim 可与 `sub` 或彼此重名，2 files / 4 failed | `6d49d7d5`：role lookup 使用 own-property，标准 JWT claim 与 workspace/roles namespace 保持独立；2 files / 26 tests、API build、lint 0 error |
+| 7 | `143a0d40`：`AUTH_WORKSPACE_CLAIM=scp` 与 `AUTH_ROLES_CLAIM=scope` 两个误配置合同均意外通过，1 file / 2 failed | `e9152edd`：`scope`/`scp` 纳入保留 claim 名；同目标 1 file / 21 tests、authz 聚焦 8 files / 62 tests 通过 |
 
 ## 关键合同与实现位置
 
@@ -54,9 +55,9 @@
 
 | 验证 | 结果 | 证明边界 |
 | --- | --- | --- |
-| authz 聚焦行为合同 | 8 files / 60 tests PASS | role policy、双 guard、Dev/JWKS verifier、controller/OpenAPI 合同 |
-| authz 关键模块 coverage | 6 test files / 43 tests PASS；statements 96.47%、branches 93.93%、functions 96%、lines 97.51% | 仅本切片关键 auth 模块，不冒充 `apps/api/src` 全局覆盖率 |
-| 全 API Vitest | 293 files PASS；4479 passed / 2 skipped | 现有 API 单元/组件回归未退化；不等同 PostgreSQL/Temporal/live JWKS E2E |
+| authz 聚焦行为合同 | 8 files / 62 tests PASS | role policy、双 guard、Dev/JWKS verifier、controller/OpenAPI 合同 |
+| authz 关键模块 coverage | 6 test files / 45 tests PASS；statements 96.04%、branches 93.38%、functions 96.29%、lines 97.02% | 仅本切片关键 auth 模块，不冒充 `apps/api/src` 全局覆盖率 |
+| 全 API Vitest | 293 files PASS；4481 passed / 2 skipped | 现有 API 单元/组件回归未退化；不等同 PostgreSQL/Temporal/live JWKS E2E |
 | API build + code-first OpenAPI export | PASS；59 paths / 67 operations | 新源码可编译，显式 dev admission 下可确定性生成合同 |
 | API ESLint | 0 error；7 条主线既有 warning | 本切片无 lint error；既有 warning 未顺带改写 |
 | contracts Spectral | 0 error；15 条既有 operation-tag warning | scope extension 未破坏合同 lint；warning 债务仍在 |
