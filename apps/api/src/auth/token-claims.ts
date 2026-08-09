@@ -11,6 +11,8 @@ const RESERVED_CLAIM_NAMES = new Set([
   'jti',
   'nbf',
   'prototype',
+  'scope',
+  'scp',
   'sub',
 ]);
 function containsControlCharacter(value: string): boolean {
