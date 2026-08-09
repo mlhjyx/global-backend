@@ -76,6 +76,12 @@ npm 官方 endpoint 后返回 36 项漏洞，其中 18 high、0 critical。这�
 
 Action SHA 升级只能通过官方 Git 仓库的 tag 做只读解析；不以 marketplace 显示文字、moving major tag 或非官方 mirror 作为 revision 真值。仓内当前精确 pin 以 required-context 清单为唯一机器真值。
 
+CI workflow 显式把 `GITHUB_TOKEN` 收敛为 `contents: read`，checkout 不持久化
+凭据。只有确实需要回写 PR comment 的受信 `pull_request_target` decision-card 和
+Gitleaks workflow 保留最小的 `pull-requests: write`。CI 并发键同时包含 event
+类型，防止 scheduled 全量视觉基线与 main push 验证因为共享 `refs/heads/main`
+而互相取消；同一 PR 的旧 synchronize run 仍会被新 head 取消。
+
 ## Release Bundle 的外部 provenance
 
 Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、merge SHA/parent 和 `evidence_ref` 是待验证声明，不是自证。当前仓内尚无可信外部 readback verifier，所以 `external_provenance.status` 只能有效地表达 `EXTERNAL_UNVERIFIED`；对 `PILOT/GA`，验证器始终返回 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED`。仅把字段改为 `VERIFIED`或填入 URL 会追加 `RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED`，不能解锁 promotion。未来实现必须独立回读外部对象、绑定当次仓库/PR/head/actor/result 和 receipt，并另行审查；不开放由 bundle 调用者注入“已信任”的旁路。
