@@ -19,6 +19,7 @@ import {
   COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH,
   COPY_SONNET_RECOVERY_PROVENANCE_PATHS,
   buildCopySonnetRecoveryManifestArtifact,
+  prepareCopySonnetRecoveryManifestFromRepository,
   readCopySonnetRecoveryFixedTrackedFile,
   validateCopySonnetRecoveryManifestArtifact,
   writeCopySonnetRecoveryManifestCreateOnly,
@@ -27,6 +28,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 const PREPARATION_HEAD = "f".repeat(40);
+const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../");
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -246,6 +248,44 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     ].join("\n");
     expect(sources).not.toMatch(/\bfetch\b|process\.env|apiKey|credentialRef/u);
   });
+
+  it.runIf(process.env.COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST === "1")(
+    "rebuilds the create-only manifest from a clean post-#355 commit",
+    async () => {
+      const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: REPOSITORY_ROOT,
+        encoding: "utf8",
+      }).trim();
+      const artifact = await prepareCopySonnetRecoveryManifestFromRepository(
+        REPOSITORY_ROOT,
+      );
+
+      expect(artifact).toMatchObject({
+        fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
+        preparationHeadCommit: currentCommit,
+        dispatchAuthorization: "NOT_AUTHORIZED",
+        dispatchCapable: false,
+        observedNetworkCalls: 0,
+        observedModelWireCalls: 0,
+        observedModelCost: { CNY: 0, USD: 0 },
+      });
+      expect(artifact.sourceBundle.files).toHaveLength(77);
+      expect(artifact.sourceBundle.files).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: "apps/api/src/model-runtime/types.ts",
+          }),
+          expect.objectContaining({
+            path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+          }),
+          expect.objectContaining({
+            path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+          }),
+        ]),
+      );
+    },
+    30_000,
+  );
 
   it("matches the generated v13 create-only artifact exactly", () => {
     const artifactBytes = readFileSync(
