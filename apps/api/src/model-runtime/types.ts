@@ -98,18 +98,12 @@ const SAFE_MODEL_RESPONSE_VALIDATION_PATH_SEGMENTS = new Set([
   ...SAFE_MODEL_RESPONSE_USAGE_KEYS,
   "applied_edits",
   "caller",
-  "category",
   "citations",
-  "cleared_input_tokens",
-  "cleared_thinking_turns",
-  "cleared_tool_uses",
   "data",
-  "explanation",
   "input",
   "name",
   "recommended_model",
   "signature",
-  "thinking",
   "thinking_tokens",
 ]);
 const MODEL_RESPONSE_SHAPE_KEYS = Object.freeze([
