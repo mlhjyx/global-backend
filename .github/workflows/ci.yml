@@ -143,7 +143,12 @@ jobs:
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
 
+      - name: Evaluate Copy fixed-source impact
+        id: copy-impact
+        run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"
+
       - name: Copy Sonnet recovery fixed-source rebuild（顺序隔离）
+        if: steps.copy-impact.outputs.status == 'CURRENT'
         run: >-
           COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1
           COPY_SONNET_RECOVERY_REBUILD_TEST=1

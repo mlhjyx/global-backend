@@ -1,0 +1,13 @@
+{
+  "schema_version": "site-builder-copy-runtime-eligibility/v1",
+  "active_binding_path": "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json",
+  "active_binding_artifact_id": "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1",
+  "active_binding_source_bundle_digest": "401414f6eda3e12aedf8c861772401b779ae82ddff132efd9eb550b6119a16e0",
+  "status": "CURRENT",
+  "current_source_fingerprint": "fc4ebdc4afeffc7a0639e87533c8035402a7eda8cea44289928bbc7fd00e07bb",
+  "drifted_paths": [],
+  "dispatch_authorization": "NOT_AUTHORIZED",
+  "pilot_eligibility": "BLOCKED",
+  "required_followup": "SEPARATE_DISPATCH_AUTHORIZATION",
+  "stale_scope": "NONE"
+}
