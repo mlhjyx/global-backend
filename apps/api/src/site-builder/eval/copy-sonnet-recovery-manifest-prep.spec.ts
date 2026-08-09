@@ -321,4 +321,41 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       },
     });
   });
+
+  it("matches the generated v14 create-only artifact exactly", () => {
+    const artifactBytes = readFileSync(
+      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH),
+    );
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "96aaf9d088c845b559a233f26b16252c0eb166a1b418dc74569f82635166eb7c",
+    );
+    expect(() =>
+      validateCopySonnetRecoveryManifestArtifact(artifact),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      fixedSourceCommit: "2557b991e62ff171aeec60abff33de2ad8f2859f",
+      preparationHeadCommit: "d92b1bf70be781c18516fad8c8d76827521382b9",
+      artifactDigest:
+        "1371fdcafe87aac3ef3ed6dd6fe35230550d5fa68cf235604fcf63ccf8c11c13",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        recoveryPlanDigest:
+          "ece587ce71696de03f1a6c02de9516deb709dc88c133a458f6cbb20f7d56a00c",
+      },
+      sourceBundle: {
+        digest:
+          "3e32bb3426577637eeda95969066060c426cfd1ace9408bfc025772c26e7fa15",
+      },
+      preparationVerification: {
+        fixedCommitReachableFromOriginMainAtPreparation: true,
+        compiledRuntimeBindingDeferred: true,
+      },
+    });
+  });
 });
