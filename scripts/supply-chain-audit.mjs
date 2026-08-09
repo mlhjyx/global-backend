@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -8,6 +7,7 @@ import {
   assertNoRepositoryNpmrc,
   buildTrustedPnpmEnvironment,
   listTrackedRepositoryNpmrc,
+  readBoundedRegularText,
   validateRepositoryDependencySources,
 } from "./supply-chain-source-policy.mjs";
 
@@ -811,11 +811,7 @@ export function buildProductionAuditReceipt(result) {
 }
 
 async function readBoundedJson(path) {
-  const stat = await lstat(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_INPUT_BYTES) {
-    throw new Error("input must be a bounded regular file");
-  }
-  return JSON.parse(await readFile(path, "utf8"));
+  return JSON.parse(await readBoundedRegularText(path, MAX_INPUT_BYTES));
 }
 
 function runPnpmProductionAudit() {

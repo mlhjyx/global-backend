@@ -518,7 +518,10 @@ test("bounded dependency inputs are read through one no-follow file handle", asy
   ]);
 
   assert.match(sourcePolicySource, /import \{ constants \} from "node:fs"/u);
-  assert.match(sourcePolicySource, /import \{ open \} from "node:fs\/promises"/u);
+  assert.match(
+    sourcePolicySource,
+    /import \{ open \} from "node:fs\/promises"/u,
+  );
   assert.match(
     sourcePolicySource,
     /open\(path, constants\.O_RDONLY \| constants\.O_NOFOLLOW\)/u,

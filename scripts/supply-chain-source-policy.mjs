@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { posix, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -554,16 +555,64 @@ export function validateDependencySourcePolicy(input) {
   });
 }
 
-async function readBoundedText(path) {
-  const stat = await lstat(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_INPUT_BYTES) {
-    throw new Error("input must be a bounded regular file");
+function sameOpenedFile(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+export async function readBoundedRegularText(
+  path,
+  maximumBytes = MAX_INPUT_BYTES,
+) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0) {
+    throw new Error("input byte limit must be a non-negative safe integer");
   }
-  return readFile(path, "utf8");
+
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    throw new Error("input must be an openable no-follow regular file");
+  }
+
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || before.size > BigInt(maximumBytes)) {
+      throw new Error("input must be a bounded regular file");
+    }
+
+    const expectedBytes = Number(before.size);
+    const buffer = Buffer.alloc(expectedBytes + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+
+    const after = await handle.stat({ bigint: true });
+    if (offset !== expectedBytes || !sameOpenedFile(before, after)) {
+      throw new Error("input changed while it was being read");
+    }
+    return buffer.subarray(0, offset).toString("utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 async function readBoundedJson(path) {
-  return JSON.parse(await readBoundedText(path));
+  return JSON.parse(await readBoundedRegularText(path));
 }
 
 function resolveRepositoryInput(repositoryRoot, relativePath) {
@@ -596,10 +645,10 @@ export async function validateRepositoryDependencySources(repositoryRoot) {
   );
   return validateDependencySourcePolicy({
     manifests,
-    workspaceText: await readBoundedText(
+    workspaceText: await readBoundedRegularText(
       resolveRepositoryInput(root, "pnpm-workspace.yaml"),
     ),
-    lockfileText: await readBoundedText(
+    lockfileText: await readBoundedRegularText(
       resolveRepositoryInput(root, "pnpm-lock.yaml"),
     ),
   });
