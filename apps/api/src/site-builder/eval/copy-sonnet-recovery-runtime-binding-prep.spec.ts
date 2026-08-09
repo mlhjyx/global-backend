@@ -473,6 +473,12 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         JSON.parse(recoveryManifestBytes.toString("utf8")).manifest,
       ),
     ).toBe("8eaf961d39b9d6f2cf44d60702ee982433d15da4eb097c1ee1c1429a06a1314f");
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "0a3ddb1dc3d055a6aa60a2b0df1038b3b6de3509eb74fdb52bcc6c5d210799a5",
+    );
+    expect(canonicalDigest(artifact)).toBe(
+      "2e79f5f7a268e23ae2b4195b3f38d20cd5c20044cb02dec317cbc8d0fb0eaee1",
+    );
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(

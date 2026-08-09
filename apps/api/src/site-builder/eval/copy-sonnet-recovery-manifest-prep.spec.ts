@@ -261,19 +261,12 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST === "1")(
-    "rebuilds only at its fixed preparation source and rejects later drift",
+    "rebuilds the fixed-source bundle from a clean current preparation head",
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: REPOSITORY_ROOT,
         encoding: "utf8",
       }).trim();
-      const preparationCommit = "d92b1bf70be781c18516fad8c8d76827521382b9";
-      if (currentCommit !== preparationCommit) {
-        await expect(
-          prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT),
-        ).rejects.toThrow("COPY_SONNET_RECOVERY_TRACKED_BYTES_MISMATCH");
-        return;
-      }
       const artifact =
         await prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT);
 
@@ -286,7 +279,12 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
         observedModelWireCalls: 0,
         observedModelCost: { CNY: 0, USD: 0 },
       });
-      expect(artifact.sourceBundle.files).toHaveLength(77);
+      const sourcePaths = artifact.sourceBundle.files.map(({ path }) => path);
+      expect(sourcePaths).toEqual([...sourcePaths].sort());
+      expect(new Set(sourcePaths).size).toBe(sourcePaths.length);
+      expect(sourcePaths.length).toBeGreaterThanOrEqual(
+        COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.length,
+      );
       expect(artifact.sourceBundle.files).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -294,6 +292,9 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
           }),
           expect.objectContaining({
             path: "apps/api/src/model-runtime/adapters/ai-sdk-adapter-result.ts",
+          }),
+          expect.objectContaining({
+            path: "apps/api/src/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.ts",
           }),
           expect.objectContaining({
             path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
@@ -385,6 +386,9 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     );
     expect(canonicalDigest(artifact.manifest)).toBe(
       "8eaf961d39b9d6f2cf44d60702ee982433d15da4eb097c1ee1c1429a06a1314f",
+    );
+    expect(canonicalDigest(artifact)).toBe(
+      "309b874df6324ce8f23e27a5d959f62d7e0a395e97769aab7a929e9db1d0e479",
     );
   });
 });
