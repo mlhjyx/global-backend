@@ -31,6 +31,10 @@ const HISTORICAL_V13_MANIFEST_PATH =
   "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json";
 const HISTORICAL_V13_BINDING_PATH =
   "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json";
+const HISTORICAL_V14_MANIFEST_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json";
+const HISTORICAL_V14_BINDING_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json";
 
 function sha256(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
@@ -113,7 +117,7 @@ function fixture() {
 }
 
 describe("Copy Sonnet recovery fixed-source runtime binding", () => {
-  it("binds v14, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
+  it("binds v15, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
     const input = fixture();
     const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
       fixedSourceCommit: input.fixedSourceCommit,
@@ -125,10 +129,10 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     });
 
     expect(COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json",
     );
     expect(COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v15.json",
     );
     expect(artifact).toMatchObject({
       classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
@@ -142,7 +146,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       observedModelWireCalls: 0,
       manifest: {
         manifestId:
-          "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+          "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
         plannedExecutions: 1,
         maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
@@ -181,6 +185,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     expect(COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS).toEqual(
       expect.arrayContaining([
         "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
+        "apps/api/dist/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.js",
         "apps/api/dist/model-runtime/types.js",
         "apps/api/dist/site-builder/eval/copy-sonnet-recovery-admission.js",
         "apps/api/dist/site-builder/eval/copy-sonnet-recovery-contract.js",
@@ -259,23 +264,28 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       }),
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
 
-    const historicalV13Bytes = readFileSync(
-      resolve(REPOSITORY_ROOT, HISTORICAL_V13_MANIFEST_PATH),
-    );
-    expect(() =>
-      buildCopySonnetRecoveryRuntimeBindingArtifact({
-        fixedSourceCommit: input.fixedSourceCommit,
-        preparationHeadCommit: input.fixedSourceCommit,
-        sourceFiles: input.sourceFiles.map((entry) =>
-          entry.path === COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH
-            ? { ...entry, sha256: sha256(historicalV13Bytes) }
-            : entry,
-        ),
-        recoveryManifestBytes: historicalV13Bytes,
-        compiledRuntimeExpectation: input.compiledRuntimeExpectation,
-        fixedCommitReachableFromOriginMainAtPreparation: false,
-      }),
-    ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
+    for (const historicalPath of [
+      HISTORICAL_V13_MANIFEST_PATH,
+      HISTORICAL_V14_MANIFEST_PATH,
+    ]) {
+      const historicalBytes = readFileSync(
+        resolve(REPOSITORY_ROOT, historicalPath),
+      );
+      expect(() =>
+        buildCopySonnetRecoveryRuntimeBindingArtifact({
+          fixedSourceCommit: input.fixedSourceCommit,
+          preparationHeadCommit: input.fixedSourceCommit,
+          sourceFiles: input.sourceFiles.map((entry) =>
+            entry.path === COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH
+              ? { ...entry, sha256: sha256(historicalBytes) }
+              : entry,
+          ),
+          recoveryManifestBytes: historicalBytes,
+          compiledRuntimeExpectation: input.compiledRuntimeExpectation,
+          fixedCommitReachableFromOriginMainAtPreparation: false,
+        }),
+      ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
+    }
   });
 
   it("validates exact recovery bytes and rejects post-build mutation", () => {
@@ -390,27 +400,21 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     });
   });
 
-  it("matches the generated v14 create-only runtime binding exactly", () => {
+  it("preserves the generated v14 binding independently of the live v15 validator", () => {
     const recoveryManifestBytes = readFileSync(
-      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH),
+      resolve(REPOSITORY_ROOT, HISTORICAL_V14_MANIFEST_PATH),
     );
     const bindingBytes = readFileSync(
-      resolve(
-        REPOSITORY_ROOT,
-        COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
-      ),
+      resolve(REPOSITORY_ROOT, HISTORICAL_V14_BINDING_PATH),
     );
     const artifact = JSON.parse(bindingBytes.toString("utf8"));
 
     expect(sha256(bindingBytes)).toBe(
       "1ad6088afd6883adeae6824aa2a80ddd8d919b03cfcc90d35ecfe7172213b458",
     );
-    expect(() =>
-      validateCopySonnetRecoveryRuntimeBindingArtifact(
-        artifact,
-        recoveryManifestBytes,
-      ),
-    ).not.toThrow();
+    expect(sha256(recoveryManifestBytes)).toBe(
+      "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
@@ -424,7 +428,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
       recoveryManifestReference: {
-        path: COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+        path: HISTORICAL_V14_MANIFEST_PATH,
         fileSha256:
           "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
         artifactDigest:
@@ -460,6 +464,15 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         fixedCommitReachableFromOriginMainAtPreparation: false,
       },
     });
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(
+      "4f9fdf0623f854053e337c569760edfe82f643ab31e2034470fc18c26c04e475",
+    );
+    expect(
+      canonicalDigest(
+        JSON.parse(recoveryManifestBytes.toString("utf8")).manifest,
+      ),
+    ).toBe("8eaf961d39b9d6f2cf44d60702ee982433d15da4eb097c1ee1c1429a06a1314f");
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(

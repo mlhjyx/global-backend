@@ -220,15 +220,17 @@ describe("Copy pilot fixed-source verifier", () => {
     ).rejects.toThrow("COPY_PILOT_PREPARATION_SOURCE_UNREACHABLE");
   });
 
-  it("rejects the frozen v13 recovery binding as the current recovery source", async () => {
-    await expect(
-      createCopyPilotVerifiedSource({
-        repositoryRoot: REPOSITORY_ROOT,
-        manifestArtifactPath: resolve(
-          REPOSITORY_ROOT,
-          "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json",
-        ),
-      }),
-    ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
-  });
+  for (const version of ["v13", "v14"] as const) {
+    it(`rejects the frozen ${version} recovery binding as the live v15 source`, async () => {
+      await expect(
+        createCopyPilotVerifiedSource({
+          repositoryRoot: REPOSITORY_ROOT,
+          manifestArtifactPath: resolve(
+            REPOSITORY_ROOT,
+            `docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-${version}.json`,
+          ),
+        }),
+      ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
+    });
+  }
 });

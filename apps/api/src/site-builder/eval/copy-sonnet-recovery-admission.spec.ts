@@ -14,7 +14,7 @@ function admission(): CopySonnetRecoveryAdmissionInput {
   const manifest = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit: "c".repeat(40),
@@ -66,10 +66,10 @@ function admission(): CopySonnetRecoveryAdmissionInput {
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: "copy-sonnet-recovery-v14-campaign-admission-test",
+    campaignId: "copy-sonnet-recovery-v15-campaign-admission-test",
     authorizationId:
-      "copy-sonnet-recovery-v14-child-authorization-admission-test",
-    reservationId: "copy-sonnet-recovery-v14-child-reservation-admission-test",
+      "copy-sonnet-recovery-v15-child-authorization-admission-test",
+    reservationId: "copy-sonnet-recovery-v15-child-reservation-admission-test",
     ledgerIdentityDigest: "f".repeat(64),
     reservedQuotaPoints: 1_000,
   };
@@ -77,7 +77,7 @@ function admission(): CopySonnetRecoveryAdmissionInput {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
     authorizationId:
-      "copy-sonnet-recovery-v14-global-authorization-admission-test",
+      "copy-sonnet-recovery-v15-global-authorization-admission-test",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
@@ -144,7 +144,7 @@ describe("Copy Sonnet recovery admission", () => {
 
     expect(COPY_SONNET_RECOVERY_ADMISSION_SOURCE.executions).toEqual([
       {
-        executionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
+        executionKey: "copy-sonnet-recovery-v15-claude-sonnet-5",
         sourcePilotExecutionKey: "copy-capability-3-claude-sonnet-5",
         alias: "claude-sonnet-5",
         protocol: "anthropic_messages",
@@ -153,12 +153,12 @@ describe("Copy Sonnet recovery admission", () => {
     ]);
     expect(
       COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign.childSlotId,
-    ).toBe("copy-sonnet-recovery-v14-child-claude-sonnet-5");
+    ).toBe("copy-sonnet-recovery-v15-child-claude-sonnet-5");
     expect(JSON.stringify(input)).not.toMatch(/gpt-5\.6-(terra|sol)/u);
     expect(result).toMatchObject({
       classification: "SOURCE_CONTRACT_VALIDATION_ONLY",
       dispatchCapable: false,
-      selectedExecutionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
+      selectedExecutionKey: "copy-sonnet-recovery-v15-claude-sonnet-5",
       maximumExecutions: 1,
       maximumWireCalls: 2,
       globalMaximumExecutions: 1,
@@ -256,9 +256,9 @@ describe("Copy Sonnet recovery admission", () => {
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_BUNDLE_UNVERIFIED");
   });
 
-  it("rejects a v13 child slot even when its authorization digests are rebuilt", () => {
+  it("rejects a v14 child slot even when its authorization digests are rebuilt", () => {
     const base = admission();
-    const childSlotId = "copy-sonnet-recovery-child-claude-sonnet-5";
+    const childSlotId = "copy-sonnet-recovery-v14-child-claude-sonnet-5";
     const authorization = {
       ...base.authorization,
       children: base.authorization.children.map((child) => ({
@@ -296,7 +296,7 @@ describe("Copy Sonnet recovery admission", () => {
     const base = admission();
     const manifest = {
       ...base.manifest,
-      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     };
     const authorization = {
       ...base.authorization,
@@ -329,7 +329,7 @@ describe("Copy Sonnet recovery admission", () => {
     ).toThrow("COPY_SONNET_RECOVERY_MANIFEST_INVALID");
   });
 
-  for (const version of ["v11", "v12", "v13"] as const) {
+  for (const version of ["v11", "v12", "v13", "v14"] as const) {
     for (const field of [
       "globalAuthorization",
       "campaign",

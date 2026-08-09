@@ -32,6 +32,8 @@ const PREPARATION_HEAD = "f".repeat(40);
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../");
 const HISTORICAL_V13_MANIFEST_PATH =
   "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json";
+const HISTORICAL_V14_MANIFEST_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json";
 
 function sourceFiles(): CopyRealCapabilitySourceFile[] {
   return COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.map((entry, index) => ({
@@ -61,12 +63,12 @@ function provenance(): CopySonnetRecoveryProvenanceArtifactRef[] {
 }
 
 describe("Copy Sonnet-only recovery create-only manifest", () => {
-  it("binds one fresh Sonnet execution to the post-#359 main and excludes every consumed wire", () => {
+  it("binds one fresh Sonnet execution to the post-#361 main and excludes every prior recovery identity", () => {
     expect(COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT).toBe(
-      "2557b991e62ff171aeec60abff33de2ad8f2859f",
+      "fcb61e3060dd3289fec93bca11d02584f8080791",
     );
     expect(COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v15.json",
     );
     const files = sourceFiles();
     const artifact = buildCopySonnetRecoveryManifestArtifact({
@@ -80,7 +82,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       schemaVersion:
         "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v1",
       artifactId:
-        "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-09-v14",
+        "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-10-v15",
       classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY",
       fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
       preparationHeadCommit: PREPARATION_HEAD,
@@ -94,14 +96,14 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       manifest: {
         schemaVersion:
           "site-builder-copy-sonnet-recovery-manifest/2026-08-08-v1",
-        manifestId: "site-builder-copy-sonnet-recovery/2026-08-09-v14",
+        manifestId: "site-builder-copy-sonnet-recovery/2026-08-10-v15",
         taskId: "site_builder.copy",
         plannedExecutions: 1,
         maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
         executions: [
           {
-            executionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
+            executionKey: "copy-sonnet-recovery-v15-claude-sonnet-5",
             sourcePilotExecutionKey: "copy-capability-3-claude-sonnet-5",
             alias: "claude-sonnet-5",
             protocol: "anthropic_messages",
@@ -112,8 +114,9 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       duplicatePrevention: {
         acceptedAliasesExcludedFromDispatch: ["gpt-5.6-terra", "gpt-5.6-sol"],
         acceptedWireReplayPolicy:
-          "never_repeat_successful_v11_or_stopped_v12_or_v13_wires",
-        consumedAuthorizationPolicy: "never_reuse_v11_v12_or_v13_authorization",
+          "never_repeat_successful_v11_or_stopped_v12_or_v13_or_v14_wires",
+        consumedAuthorizationPolicy:
+          "never_reuse_v11_v12_v13_or_v14_authorization",
       },
     });
     expect(canonicalDigest(artifact.manifest)).not.toBe(
@@ -136,7 +139,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       "FIXED_SOURCE_COMPILED_RUNTIME_EXPECTATION",
     );
     expect(artifact.requiredFollowup).toContain(
-      "NEVER_REUSE_STOPPED_V12_OR_V13_AUTHORIZATION_OR_WIRE",
+      "NEVER_REUSE_V11_V12_V13_OR_V14_AUTHORIZATION_OR_WIRE",
     );
     expect(artifact).not.toHaveProperty("compiledRuntimeExpectation");
     expect(Object.isFrozen(artifact)).toBe(true);
@@ -344,18 +347,15 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     );
   });
 
-  it("matches the generated v14 create-only artifact exactly", () => {
+  it("preserves the generated v14 create-only artifact independently of the live v15 validator", () => {
     const artifactBytes = readFileSync(
-      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH),
+      resolve(REPOSITORY_ROOT, HISTORICAL_V14_MANIFEST_PATH),
     );
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
       "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
     );
-    expect(() =>
-      validateCopySonnetRecoveryManifestArtifact(artifact),
-    ).not.toThrow();
     expect(artifact).toMatchObject({
       fixedSourceCommit: "2557b991e62ff171aeec60abff33de2ad8f2859f",
       preparationHeadCommit: "d92b1bf70be781c18516fad8c8d76827521382b9",
@@ -379,5 +379,12 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
         compiledRuntimeBindingDeferred: true,
       },
     });
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(
+      "1371fdcafe87aac3ef3ed6dd6fe35230550d5fa68cf235604fcf63ccf8c11c13",
+    );
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "8eaf961d39b9d6f2cf44d60702ee982433d15da4eb097c1ee1c1429a06a1314f",
+    );
   });
 });
