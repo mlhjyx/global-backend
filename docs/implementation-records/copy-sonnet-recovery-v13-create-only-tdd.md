@@ -72,9 +72,17 @@ Both artifacts record:
 
 ## Deterministic verification
 
-- focused manifest, runtime-binding, and admission tests: 14 passed, 1 rebuild
-  test skipped in the normal run;
-- clean-HEAD runtime-binding rebuild: 6 passed with the rebuild test enabled;
+- focused recovery, real-runner, and source-verifier tests: 35 passed and 1
+  opt-in rebuild test skipped in the normal run;
+- clean-HEAD manifest and runtime-binding rebuild with coverage: 17 passed;
+- full API suite: 275 files passed, with 4,337 tests passed, 1 skipped, and 0
+  failed;
+- API build, API lint, contracts lint, docs verification, and deterministic
+  code-intelligence checks passed with zero errors;
+- changed executable production lines relative to `origin/main`: 4/4 covered
+  (100% diff line coverage); the complete pre-existing 500–700 line generator
+  files are 71.08% line covered, with the remaining gaps concentrated in
+  unchanged file-output failure branches;
 - generation paths statically reject `fetch`, environment reads, API keys, and
   credential references;
 - staged secret scans found no leaks.
