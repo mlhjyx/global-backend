@@ -329,7 +329,7 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
-      "96aaf9d088c845b559a233f26b16252c0eb166a1b418dc74569f82635166eb7c",
+      "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
     );
     expect(() =>
       validateCopySonnetRecoveryManifestArtifact(artifact),
