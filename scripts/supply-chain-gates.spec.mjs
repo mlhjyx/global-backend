@@ -578,8 +578,11 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
 });
 
 test("package-manager network trust is isolated before install and audit", async () => {
-  const { assertNoRepositoryNpmrc, buildTrustedPnpmEnvironment } =
-    await import("./supply-chain-source-policy.mjs");
+  const {
+    assertNoRepositoryNpmrc,
+    assertNoRepositoryNonRegularFiles,
+    buildTrustedPnpmEnvironment,
+  } = await import("./supply-chain-source-policy.mjs");
   const hostileEnvironment = {
     PATH: "/trusted/bin",
     HTTPS_PROXY: "http://attacker.invalid:8080",
@@ -612,6 +615,15 @@ test("package-manager network trust is isolated before install and audit", async
   assert.throws(
     () => assertNoRepositoryNpmrc([".npmrc", "packages/api/.npmrc"]),
     /repository \.npmrc is not admitted/,
+  );
+  assert.doesNotThrow(() => assertNoRepositoryNonRegularFiles([]));
+  assert.throws(
+    () =>
+      assertNoRepositoryNonRegularFiles([
+        { mode: "120000", path: "apps/external-workspace" },
+        { mode: "160000", path: "packages/external-submodule" },
+      ]),
+    /repository symlinks and gitlinks are not admitted/,
   );
 
   const [workflow, codeowners, auditScript, requiredContextsText] =
