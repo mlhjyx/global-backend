@@ -11,7 +11,7 @@ import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } 
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
 
-const LEGAL_SUPPRESSION_REASONS = new Set(['unsubscribe', 'complaint', 'legal']);
+const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
 export const SUPPRESSION_DECISION_REASONS = [
   'USER_PREFERENCE_CHANGED',
@@ -401,7 +401,9 @@ export class DiscoveryService {
   async addSuppression(ctx: RequestContext, entry: { type: string; value: string; reason?: string }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const reason = entry.reason ?? 'manual';
-      const protectionClass = LEGAL_SUPPRESSION_REASONS.has(reason) ? 'LEGAL' : 'PREFERENCE';
+      // Fail closed: only the explicitly reviewed preference reasons are releasable.
+      // Unknown/future reasons retain the stronger legal protection until policy is updated.
+      const protectionClass = PREFERENCE_SUPPRESSION_REASONS.has(reason) ? 'PREFERENCE' : 'LEGAL';
       const rec = await tx.suppressionRecord.upsert({
         where: {
           workspaceId_type_value: {

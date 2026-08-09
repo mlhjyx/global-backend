@@ -233,7 +233,8 @@ export class LeadService {
         }
         await persistDecision();
         // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
-        // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 路径上方已 throw 回滚，故此处只记**成功交棒**
+        // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 已在上方写日志并返回
+        // sentinel，由外层在事务提交后转为 409；此处只处理 ALLOW 的成功交棒。
         // 的 STORE 判定（含 effect/rule/actor/subject/Art.14 标记），补齐合规审计对"为何允许具名 refs 离开后端"的证据。
         await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
           subjectType: 'lead',
