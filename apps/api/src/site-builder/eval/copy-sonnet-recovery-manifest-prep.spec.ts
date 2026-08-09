@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -304,6 +306,28 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
           }),
         ]),
       );
+      const outputRoot = mkdtempSync(
+        join(tmpdir(), "copy-sonnet-recovery-manifest-write-"),
+      );
+      try {
+        mkdirSync(resolve(outputRoot, "docs/evidence/site-builder"), {
+          recursive: true,
+        });
+        await writeCopySonnetRecoveryManifestCreateOnly(outputRoot, artifact);
+        const outputPath = resolve(
+          outputRoot,
+          COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH,
+        );
+        expect(JSON.parse(readFileSync(outputPath, "utf8"))).toStrictEqual(
+          artifact,
+        );
+        expect(statSync(outputPath).mode & 0o777).toBe(0o600);
+        await expect(
+          writeCopySonnetRecoveryManifestCreateOnly(outputRoot, artifact),
+        ).rejects.toMatchObject({ code: "EEXIST" });
+      } finally {
+        rmSync(outputRoot, { recursive: true, force: true });
+      }
     },
     30_000,
   );

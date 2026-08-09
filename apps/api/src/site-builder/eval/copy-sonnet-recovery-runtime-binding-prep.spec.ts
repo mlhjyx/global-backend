@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
@@ -24,6 +31,7 @@ import {
   buildCopySonnetRecoveryRuntimeBindingArtifact,
   prepareCopySonnetRecoveryRuntimeBindingFromRepository,
   validateCopySonnetRecoveryRuntimeBindingArtifact,
+  writeCopySonnetRecoveryRuntimeBindingCreateOnly,
 } from "./copy-sonnet-recovery-runtime-binding-prep";
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
@@ -117,6 +125,12 @@ function fixture() {
 }
 
 describe("Copy Sonnet recovery fixed-source runtime binding", () => {
+  it("rejects unverified binding output before touching the repository", async () => {
+    await expect(
+      writeCopySonnetRecoveryRuntimeBindingCreateOnly("/tmp", {} as never),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_PREPARATION_NOT_VERIFIED");
+  });
+
   it("binds v15, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
     const input = fixture();
     const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
@@ -632,6 +646,31 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
           ),
         ),
       ).not.toThrow();
+      const outputRoot = mkdtempSync(
+        join(tmpdir(), "copy-sonnet-recovery-binding-write-"),
+      );
+      try {
+        mkdirSync(resolve(outputRoot, "docs/evidence/site-builder"), {
+          recursive: true,
+        });
+        await writeCopySonnetRecoveryRuntimeBindingCreateOnly(
+          outputRoot,
+          artifact,
+        );
+        const outputPath = resolve(
+          outputRoot,
+          COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+        );
+        expect(JSON.parse(readFileSync(outputPath, "utf8"))).toStrictEqual(
+          artifact,
+        );
+        expect(statSync(outputPath).mode & 0o777).toBe(0o600);
+        await expect(
+          writeCopySonnetRecoveryRuntimeBindingCreateOnly(outputRoot, artifact),
+        ).rejects.toMatchObject({ code: "EEXIST" });
+      } finally {
+        rmSync(outputRoot, { recursive: true, force: true });
+      }
     },
     90_000,
   );
