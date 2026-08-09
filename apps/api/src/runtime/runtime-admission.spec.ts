@@ -98,6 +98,46 @@ describe('inspectRuntimeAdmission', () => {
     expect(missingAudience.admitted).toBe(false);
     expect(missingAudience.checks.auth).toMatchObject({ status: 'failed', code: 'AUTH_CONFIG_INCOMPLETE' });
 
+    const blankConfiguration = inspectRuntimeAdmission(
+      { mode: 'pilot', bindHost: '127.0.0.1', port: 3000 },
+      {
+        NODE_ENV: 'production',
+        AUTH_JWKS_URI: 'https://identity.example.test/jwks',
+        AUTH_ISSUER: 'https://identity.example.test/',
+        AUTH_AUDIENCE: '   ',
+        MODEL_GATEWAY_URL: 'http://127.0.0.1:3001/v1',
+        MODEL_GATEWAY_KEY: '   ',
+      },
+      attestedBuild,
+    );
+    expect(blankConfiguration.admitted).toBe(false);
+    expect(blankConfiguration.checks.auth).toMatchObject({
+      status: 'failed',
+      code: 'AUTH_CONFIG_INCOMPLETE',
+    });
+    expect(blankConfiguration.checks.gateway).toMatchObject({
+      status: 'failed',
+      code: 'GATEWAY_CONFIG_INCOMPLETE',
+    });
+
+    const authUrlWithAmbientCredentials = inspectRuntimeAdmission(
+      { mode: 'pilot', bindHost: '127.0.0.1', port: 3000 },
+      {
+        NODE_ENV: 'production',
+        AUTH_JWKS_URI: 'https://user:password@identity.example.test/jwks?tenant=hidden',
+        AUTH_ISSUER: 'https://identity.example.test/#fragment',
+        AUTH_AUDIENCE: 'global-api',
+        MODEL_GATEWAY_URL: 'http://127.0.0.1:3001/v1',
+        MODEL_GATEWAY_KEY: 'secret',
+      },
+      attestedBuild,
+    );
+    expect(authUrlWithAmbientCredentials.admitted).toBe(false);
+    expect(authUrlWithAmbientCredentials.checks.auth).toMatchObject({
+      status: 'failed',
+      code: 'AUTH_CONFIG_INVALID',
+    });
+
     const remoteGateway = inspectRuntimeAdmission(
       { mode: 'pilot', bindHost: '127.0.0.1', port: 3000 },
       {
