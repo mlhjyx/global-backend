@@ -100,6 +100,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
