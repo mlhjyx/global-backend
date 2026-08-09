@@ -391,4 +391,53 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
       "309b874df6324ce8f23e27a5d959f62d7e0a395e97769aab7a929e9db1d0e479",
     );
   });
+
+  it("preserves the generated v15 create-only artifact with fixed source and zero dispatch", () => {
+    const artifactBytes = readFileSync(
+      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH),
+    );
+    const artifact = JSON.parse(artifactBytes.toString("utf8"));
+    expect(() =>
+      validateCopySonnetRecoveryManifestArtifact(artifact),
+    ).not.toThrow();
+
+    expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
+      "0ce90bf7f96b0012b85d410601079e9696305bfeb3e385e16358c5b9c9e4850e",
+    );
+    expect(artifact).toMatchObject({
+      fixedSourceCommit: "fcb61e3060dd3289fec93bca11d02584f8080791",
+      preparationHeadCommit: "83eefb54e79ee7579b8c56c18e46376e6d0f2236",
+      artifactDigest:
+        "b671dbd416b4ff279fd75290f91492bb37e7d5d4d41c29e9f5c86897690d8317",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      manifest: {
+        manifestId: "site-builder-copy-sonnet-recovery/2026-08-10-v15",
+        fixedSourceCommit: "fcb61e3060dd3289fec93bca11d02584f8080791",
+        recoveryPlanDigest:
+          "aacea106264ab5764b5bc434bf602208b6f6baf352ff443714674ffc1fa0f5be",
+      },
+      sourceBundle: {
+        digest:
+          "c3e96eddc300ed7898b60f6788f346c39fb27566832494b38dca81824813c608",
+      },
+      preparationVerification: {
+        fixedCommitReachableFromOriginMainAtPreparation: true,
+        compiledRuntimeBindingDeferred: true,
+      },
+    });
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(
+      "b671dbd416b4ff279fd75290f91492bb37e7d5d4d41c29e9f5c86897690d8317",
+    );
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "789332c4542eadd5e6b534aa18698e7bb4dc0f312d9b081d50d7c1ececc368f5",
+    );
+    expect(canonicalDigest(artifact)).toBe(
+      "2aca35f971647420fcd856273a8cbcaccb227f6954094caf5585b600e0d8b7e6",
+    );
+  });
 });
