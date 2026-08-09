@@ -1,3 +1,5 @@
+import type { ModelResponseShape } from "../types";
+
 export type NativeModelProtocol =
   "openai-responses" | "openai-chat-completions" | "anthropic-messages";
 
@@ -37,13 +39,7 @@ export interface NativeAdapterWarning {
   details?: string;
 }
 
-export interface NativeModelResponseShape {
-  readonly schemaVersion: "native-model-response-shape/2026-08-09-v1";
-  readonly topLevelKeys: readonly string[];
-  readonly contentBlockTypes: readonly string[];
-  readonly usageKeys: readonly string[];
-  readonly validationPaths: readonly string[];
-}
+export type NativeModelResponseShape = ModelResponseShape;
 
 export interface NativeModelAdapterResult<Output> {
   protocol: NativeModelProtocol;

@@ -2,7 +2,11 @@ import { constants } from "node:fs";
 import { lstat, open, unlink } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { canonicalDigest } from "./context-engine";
-import type { ModelProtocol } from "./types";
+import {
+  normalizeModelResponseShape,
+  type ModelProtocol,
+  type ModelResponseShape,
+} from "./types";
 
 export const MODEL_EXECUTION_LEDGER_SCHEMA_VERSION =
   "model-execution-ledger/2026-08-05-v1" as const;
@@ -46,6 +50,7 @@ type LedgerEvent =
       protocol: ModelProtocol;
       usage: { inputTokens: number; outputTokens: number };
       outputDigest: string;
+      responseShape?: ModelResponseShape;
     }
   | {
       kind: "wire_observed";
@@ -54,6 +59,7 @@ type LedgerEvent =
       settlement: "unknown";
       requestId: string | null;
       reason: string;
+      responseShape?: ModelResponseShape;
     }
   | { kind: "execution_completed"; executionId: string; outputDigest: string }
   | { kind: "campaign_frozen"; executionId: string; reason: string };
@@ -461,6 +467,7 @@ export class AppendOnlyModelExecutionLedger {
           protocol: ModelProtocol;
           usage: { inputTokens: number; outputTokens: number };
           outputDigest: string;
+          responseShape?: ModelResponseShape;
         }
       | {
           executionId: string;
@@ -468,6 +475,7 @@ export class AppendOnlyModelExecutionLedger {
           settlement: "unknown";
           requestId: string | null;
           reason: string;
+          responseShape?: ModelResponseShape;
         },
   ): Promise<void> {
     validateIdentifier(input.executionId, "MODEL_EXECUTION_ID_INVALID");
@@ -519,13 +527,38 @@ export class AppendOnlyModelExecutionLedger {
         ) {
           fail("MODEL_EXECUTION_USAGE_INVALID");
         }
-        return [{ kind: "wire_observed", ...input }];
+        const responseShape =
+          input.responseShape == null
+            ? undefined
+            : normalizeModelResponseShape(input.responseShape);
+        if (input.responseShape != null && responseShape == null) {
+          fail("MODEL_EXECUTION_RESPONSE_SHAPE_INVALID");
+        }
+        return [
+          {
+            kind: "wire_observed",
+            ...input,
+            ...(responseShape == null ? {} : { responseShape }),
+          },
+        ];
       }
       const reason = input.reason.trim();
       if (!reason || reason.length > 160)
         fail("MODEL_EXECUTION_UNKNOWN_REASON_INVALID");
+      const responseShape =
+        input.responseShape == null
+          ? undefined
+          : normalizeModelResponseShape(input.responseShape);
+      if (input.responseShape != null && responseShape == null) {
+        fail("MODEL_EXECUTION_RESPONSE_SHAPE_INVALID");
+      }
       return [
-        { kind: "wire_observed", ...input, reason },
+        {
+          kind: "wire_observed",
+          ...input,
+          reason,
+          ...(responseShape == null ? {} : { responseShape }),
+        },
         { kind: "campaign_frozen", executionId: input.executionId, reason },
       ];
     });
