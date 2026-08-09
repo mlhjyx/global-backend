@@ -14,16 +14,17 @@ import type {
   NativeModelAdapterResult,
 } from "../../model-runtime/adapters/ai-sdk-native-adapter.contract";
 import type { ModelProtocol } from "../../model-runtime/types";
+import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import {
-  validateCopyRealCapabilityAdmissionEnvelope,
-  type CopyPilotCredentialAttestation,
-  type CopyRealCapabilityAdmissionInput,
-} from "./copy-real-capability-admission";
+  validateCopyCapabilityAdmissionEnvelope,
+  type CopyCapabilityAdmissionInput,
+  type CopyCapabilityCredentialAttestation,
+} from "./copy-capability-admission";
 
 const MAXIMUM_CONTROL_PLANE_BYTES = 1024 * 1024;
 
 interface TrustedGatewayState {
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   bearerToken: string;
   settlements: WeakMap<object, CopyPilotTrustedSettlementProof>;
 }
@@ -257,10 +258,10 @@ async function verifyLiveScopeAndQuota(
 }
 
 export async function createCopyPilotTrustedGateway(input: {
-  admission: CopyRealCapabilityAdmissionInput;
+  admission: CopyCapabilityAdmissionInput;
   bearerToken: string;
 }): Promise<CopyPilotTrustedGateway> {
-  validateCopyRealCapabilityAdmissionEnvelope(input.admission);
+  validateCopyCapabilityAdmissionEnvelope(input.admission);
   if (
     input.bearerToken.length < 16 ||
     sha256(input.bearerToken) !== input.admission.credential.bearerTokenSha256
@@ -282,7 +283,7 @@ export async function createCopyPilotTrustedGateway(input: {
 
 export function getCopyPilotTrustedCredentialAttestation(
   handle: CopyPilotTrustedGateway,
-): CopyPilotCredentialAttestation | undefined {
+): CopyCapabilityCredentialAttestation | undefined {
   return TRUSTED_GATEWAYS.get(handle)?.admission.credential;
 }
 
@@ -311,7 +312,7 @@ export async function assertCopyPilotTrustedGatewayCurrent(
   handle: CopyPilotTrustedGateway,
 ): Promise<void> {
   const state = stateFor(handle);
-  validateCopyRealCapabilityAdmissionEnvelope(state.admission);
+  validateCopyCapabilityAdmissionEnvelope(state.admission);
   if (
     sha256(state.bearerToken) !== state.admission.credential.bearerTokenSha256
   ) {
@@ -353,13 +354,33 @@ export function createCopyPilotTrustedGatewayBindings(
     ({ executionKey }) => executionKey === state.admission.selectedExecutionKey,
   );
   if (!selected) fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+  const sourceExecutionKey =
+    "sourcePilotExecutionKey" in selected
+      ? selected.sourcePilotExecutionKey
+      : selected.executionKey;
+  const sourceExecution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
+    ({ executionKey }) => executionKey === sourceExecutionKey,
+  );
+  if (
+    sourceExecution == null ||
+    sourceExecution.alias !== selected.alias ||
+    sourceExecution.protocol !== selected.protocol ||
+    sourceExecution.reasoning !== selected.reasoning
+  ) {
+    fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
+  }
   return Object.freeze({
     execute: <Output>(
       protocol:
         "openai_responses" | "openai_chat_completions" | "anthropic_messages",
       request: NativeModelAdapterRequest,
     ) => {
-      if (protocol !== selected.protocol || request.alias !== selected.alias) {
+      if (
+        protocol !== selected.protocol ||
+        request.alias !== selected.alias ||
+        request.reasoning?.effort !== selected.reasoning ||
+        request.maxOutputTokens !== sourceExecution.maximumOutputTokens
+      ) {
         return fail("COPY_PILOT_CHILD_SCOPE_MISMATCH");
       }
       return adapters[protocol].execute<Output>(request);

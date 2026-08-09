@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：`origin/main`、本仓机器合同、live worktree 审计与 RuntimeEvidence 状态命令
-> 最后核验：2026-08-08
+> 最后核验：2026-08-09
 
 本页只保留当前 main、在途工作、阻塞、最新运行事实和下一次产品决策。完成史、旧验证数字、模型评测流水与 Site Builder 日期化实施细节已经迁到 [追加式 changelog](../roadmap/changelog.md) 和 [evidence 索引](../evidence/README.md)，不再在 current 页重复。
 
@@ -12,8 +12,8 @@
 
 | 项目                    | 当前事实                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 当前远端主线            | `origin/main@f48c5d249399cd03d888ba183124f27015099e2d`；2026-08-08 live fetch 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`；其后主线新增 Site Builder Copy transport、manifest 与 capability evidence，不改变获客实现边界。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。         |
-| 产品阶段                | Site Builder Copy Sonnet recovery v12 的 create-only manifest 已进入主线，但仍为 `NOT_AUTHORIZED`、`dispatchCapable=false`、零调用和零费用；下一门是独立 recovery admission/runner、fixed-source compiled binding、有限凭据与 exact spending authorization。获客侧处于“受控 pilot 前的治理、授权、运行身份与可观测性补齐”，尚未进入真实 pilot。  |
+| 当前远端主线            | `origin/main@9ec227e737388f35ec7c6f0f76cb89c209c518b0`；2026-08-09 live fetch 核验。获客接管的原始代码审计基线仍为 `4562eab1bae16cdd424ff90a7d3403b0fb30d535`；其后主线新增 Site Builder Copy transport、manifest、capability evidence 与 Sonnet recovery runtime binding，不改变获客实现边界。`/global/backend` 根工作区存在用户现场且不是远端主线真值，不得复位或清理。 |
+| 产品阶段                | Site Builder Copy Sonnet recovery v12 runtime binding 已由 #354 以 merge commit 进入主线，固定源 `9cb02f10c24c536bd43372cdb9afdcc2755026b1` 已可从当前 main 到达；artifact 仍为 `NOT_AUTHORIZED`、`dispatchCapable=false`、零真实调用和零费用。下一门是零调用 post-merge source/compiled revalidation、有限 Sonnet-only 凭据、settlement/ledger 与 exact dispatch authorization。获客侧处于“受控 pilot 前的治理、授权、运行身份与可观测性补齐”，尚未进入真实 pilot。 |
 | 当前交付状态            | Buyer/Intent 的机器追踪链均为 `INTERNAL_ONLY`。当前不存在可用于晋级的 RuntimeEvidence，也不存在真实 Release Bundle。                                                                                                                                                                                                                             |
 | Source-only 质量/安全门 | 真实全范围 V8 基线为 statements 70.75%、branches 66.89%、functions 74.30%、lines 72.93%；ratchet 可防回退，但四项 80% 目标未完成。Actions 固定、source-only SAST、Compose lock 和恢复/集成声明验证已纳入本地门；PostgreSQL/Temporal 集成、恢复演练、GitHub ruleset 与镜像外部 provenance 仍是 `BLOCKED/NOT_RUN/UNVERIFIED`，不得解释为运行证明。 |
 | Provider 真值           | 只认 [机器 Provider Registry](../governance/provider-registry.json) 与其[生成页](../backend/provider-registry.md)；实现、默认 enablement、当前 runtime health 与 pilot 授权是不同维度。                                                                                                                                                          |
