@@ -1,0 +1,178 @@
+name: Supply Chain Canary
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "43 4 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-canary-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: dependency review · canary
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Reject newly introduced vulnerable runtime dependencies
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: moderate
+          fail-on-scopes: runtime
+
+  production-audit:
+    name: production dependency audit · canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete history for trusted-base policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      - name: Reject repository package-manager network overrides
+        shell: bash
+        env:
+          TRACKED_NPMRC: ${{ runner.temp }}/tracked-repository-npmrc.bin
+        run: |
+          set -euo pipefail
+          if ! git ls-files -z -- '.npmrc' ':(glob)**/.npmrc' > "$TRACKED_NPMRC"; then
+            echo "::error::cannot prove the repository .npmrc inventory"
+            exit 1
+          fi
+          if [[ -s "$TRACKED_NPMRC" ]]; then
+            echo "::error::repository .npmrc is not admitted by the production audit trust boundary"
+            exit 1
+          fi
+
+      - name: Audit production dependencies against the trusted ratchet
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          BASELINE_PATH: docs/security/production-dependency-audit-baseline.json
+          TRUSTED_BASELINE: ${{ runner.temp }}/production-dependency-audit-baseline.json
+          TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
+          TRUSTED_SOURCE_POLICY: ${{ runner.temp }}/supply-chain-source-policy.mjs
+          BASE_LOCKFILE: ${{ runner.temp }}/base-pnpm-lock.yaml
+          BASE_CHECKOUT: ${{ runner.temp }}/supply-chain-base-checkout
+          BASE_AUDIT: ${{ runner.temp }}/base-production-audit.json
+          BOOTSTRAP_DIFF: ${{ runner.temp }}/supply-chain-bootstrap-paths.txt
+        run: |
+          set -euo pipefail
+          audit_args=(verify --baseline "$TRUSTED_BASELINE")
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if git cat-file -e "${PR_BASE_SHA}:${BASELINE_PATH}" 2>/dev/null; then
+              git show "$PR_BASE_SHA:$BASELINE_PATH" > "$TRUSTED_BASELINE"
+              git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
+              git show "$PR_BASE_SHA:scripts/supply-chain-source-policy.mjs" > "$TRUSTED_SOURCE_POLICY"
+              git worktree add --detach "$BASE_CHECKOUT" "$PR_BASE_SHA"
+              node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$BASE_CHECKOUT"
+              (
+                cd "$BASE_CHECKOUT"
+                env -i \
+                  HOME="$HOME" \
+                  PATH="$PATH" \
+                  CI=true \
+                  NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+                  NPM_CONFIG_USERCONFIG=/dev/null \
+                  NPM_CONFIG_GLOBALCONFIG=/dev/null \
+                  NPM_CONFIG_IGNORE_PNPMFILE=true \
+                  NPM_CONFIG_IGNORE_SCRIPTS=true \
+                  pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
+              )
+              set +e
+              (
+                cd "$BASE_CHECKOUT"
+                env -i \
+                  HOME="$HOME" \
+                  PATH="$PATH" \
+                  CI=true \
+                  NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+                  NPM_CONFIG_USERCONFIG=/dev/null \
+                  NPM_CONFIG_GLOBALCONFIG=/dev/null \
+                  NPM_CONFIG_IGNORE_PNPMFILE=true \
+                  NPM_CONFIG_IGNORE_SCRIPTS=true \
+                  pnpm audit --prod --registry=https://registry.npmjs.org --json > "$BASE_AUDIT"
+              )
+              base_audit_status=$?
+              set -e
+              if [[ "$base_audit_status" -ne 0 && "$base_audit_status" -ne 1 ]]; then
+                echo "::error::trusted PR base audit did not complete"
+                exit 1
+              fi
+              audit_args+=(--comparison-audit-file "$BASE_AUDIT")
+            else
+              # One-time bootstrap: the candidate policy is usable only when it
+              # binds itself to this exact PR base. After the first merge every
+              # PR executes the verifier and baseline from its trusted base.
+              if ! git diff --no-renames --name-only -z "$PR_BASE_SHA...$GITHUB_SHA" > "$BOOTSTRAP_DIFF"; then
+                echo "::error::cannot prove the bootstrap dependency diff"
+                exit 1
+              fi
+              while IFS= read -r -d '' path; do
+                case "$path" in
+                  package.json | */package.json | \
+                  pnpm-lock.yaml | pnpm-workspace.yaml | \
+                  .npmrc | */.npmrc | \
+                  .pnpmfile.cjs | */.pnpmfile.cjs | \
+                  patches/*)
+                    echo "::error::initial baseline cannot accompany dependency graph changes: $path"
+                    exit 1
+                    ;;
+                esac
+              done < "$BOOTSTRAP_DIFF"
+
+              git show "$PR_BASE_SHA:pnpm-lock.yaml" > "$BASE_LOCKFILE"
+              base_lock_digest="sha256:$(sha256sum "$BASE_LOCKFILE" | awk '{print $1}')"
+              cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
+              cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
+              cp scripts/supply-chain-source-policy.mjs "$TRUSTED_SOURCE_POLICY"
+              audit_args+=(
+                --expected-bootstrap-base "$PR_BASE_SHA"
+                --expected-source-lockfile-digest "$base_lock_digest"
+              )
+            fi
+          else
+            cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
+            cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
+            cp scripts/supply-chain-source-policy.mjs "$TRUSTED_SOURCE_POLICY"
+          fi
+
+          node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"
+          (
+            cd "$GITHUB_WORKSPACE"
+            env -i \
+              HOME="$HOME" \
+              PATH="$PATH" \
+              CI=true \
+              NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+              NPM_CONFIG_USERCONFIG=/dev/null \
+              NPM_CONFIG_GLOBALCONFIG=/dev/null \
+              NPM_CONFIG_IGNORE_PNPMFILE=true \
+              NPM_CONFIG_IGNORE_SCRIPTS=true \
+              pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
+          )
+          sha256sum "$TRUSTED_BASELINE" "$TRUSTED_VERIFIER" "$TRUSTED_SOURCE_POLICY"
+          node "$TRUSTED_VERIFIER" "${audit_args[@]}"
