@@ -255,6 +255,9 @@ export interface CopyRealCapabilityRunner {
 
 export interface CopySonnetRecoveryRunner {
   execute(executionKey: string): Promise<ModelExecutionResult<CopyTaskOutput>>;
+  acceptGitReviewedEvidence(input: {
+    acceptance: VerifiedGitReviewedEvidenceAcceptance;
+  }): Promise<CopyGitAcceptedExecution>;
   summary(): Promise<RealModelExecutionLedgerSummary>;
 }
 
@@ -1181,20 +1184,15 @@ async function acceptCopyGitReviewedEvidence(input: {
 }): Promise<CopyGitAcceptedExecution> {
   const { accepted, receipt, candidateReceiptDigest } =
     input.reviewed ?? reviewedCopyReceipt(input.acceptance);
-  let execution:
-    (typeof COPY_CAPABILITY_PILOT_PLAN.executions)[number] | undefined;
+  let execution: CopyCapabilitySelectedExecution | undefined;
   let plan: ReturnType<typeof createCopyCapabilityExecutionPlan> | undefined;
   if (input.liveDetail != null) {
-    execution = COPY_CAPABILITY_PILOT_PLAN.executions.find(
-      (candidate) => candidate.executionKey === receipt.executionId,
-    );
-    if (!execution) fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
-    plan = createCopyCapabilityExecutionPlan({
-      executionKey: execution.executionKey,
-      campaignId: input.detail.campaignId,
-      workspaceId: "copy-capability-real-gateway",
-    });
     validateCopyCapabilityAdmissionEnvelope(input.liveDetail.admission);
+    execution = selectedExecutionFor(input.liveDetail.admission);
+    if (execution?.executionKey !== receipt.executionId) {
+      fail("COPY_GIT_EVIDENCE_CANDIDATE_MISMATCH");
+    }
+    plan = executionPlanFor(execution, input.detail.campaignId);
     await assertCopyPilotTrustedGatewayCurrent(input.liveDetail.trustedGateway);
     await assertCopyPilotVerifiedSourceCurrent(input.liveDetail.verifiedSource);
     await ASSERT_COMPILED_CURRENT(input.liveDetail.compiledGuard);
@@ -1963,7 +1961,7 @@ export async function createCopySonnetRecoveryRunner(input: {
 }): Promise<CopySonnetRecoveryRunner> {
   const child = await createCopyCapabilityChildRunner(input);
   const executionKey = input.admission.selectedExecutionKey;
-  return FREEZE_OBJECT({
+  const runner = FREEZE_OBJECT({
     execute: async (requestedExecutionKey: string) => {
       if (requestedExecutionKey !== executionKey) {
         fail("COPY_SONNET_RECOVERY_EXECUTION_MISMATCH");
@@ -1985,8 +1983,16 @@ export async function createCopySonnetRecoveryRunner(input: {
         DELETE_BATCH_DISPATCH_AUTHORIZATION(child);
       }
     },
+    acceptGitReviewedEvidence: (acceptanceInput: {
+      acceptance: VerifiedGitReviewedEvidenceAcceptance;
+    }) => child.acceptGitReviewedEvidence(acceptanceInput),
     summary: () => child.summary(),
   });
+  const detail =
+    GET_REAL_CAPABILITY_RUNNER(child) ??
+    fail("COPY_REAL_CAPABILITY_TRUSTED_CHILD_RUNNER_REQUIRED");
+  SET_REAL_CAPABILITY_RUNNER(runner, detail);
+  return runner;
 }
 
 /**

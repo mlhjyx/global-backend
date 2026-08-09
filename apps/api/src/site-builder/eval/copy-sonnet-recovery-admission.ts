@@ -45,7 +45,7 @@ const EXECUTIONS = Object.freeze([
 ] as const);
 const CHILD_CAMPAIGN = Object.freeze({
   ...COPY_SONNET_RECOVERY_EXECUTION,
-  childSlotId: "copy-sonnet-recovery-child-claude-sonnet-5",
+  childSlotId: "copy-sonnet-recovery-v14-child-claude-sonnet-5",
   maximumExecutions: 1 as const,
   maximumWireCalls: 2 as const,
   maximumRepairCallsPerExecution: 1 as const,
@@ -373,8 +373,7 @@ function validateCredential(
     credential.purpose !== "site_builder_copy_sonnet_recovery" ||
     credential.quotaMode !== "limited" ||
     credential.scopeExact !== true ||
-    credential.repairPayloadPolicy !==
-      "bounded_structured_prior_output_64k" ||
+    credential.repairPayloadPolicy !== "bounded_structured_prior_output_64k" ||
     !safePositiveInteger(credential.quotaCapPoints) ||
     !safePositiveInteger(credential.remainingQuotaPoints) ||
     !safePositiveInteger(credential.maximumQuotaPointsPerWire) ||
@@ -465,8 +464,7 @@ function validChildShape(
       childSlotId: child.childSlotId,
       maximumExecutions: child.maximumExecutions,
       maximumWireCalls: child.maximumWireCalls,
-      maximumRepairCallsPerExecution:
-        child.maximumRepairCallsPerExecution,
+      maximumRepairCallsPerExecution: child.maximumRepairCallsPerExecution,
       unknownSettlementPolicy: child.unknownSettlementPolicy,
       sharedDriftPolicy: child.sharedDriftPolicy,
     }) === CANONICAL_DIGEST(expected) &&

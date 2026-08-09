@@ -802,16 +802,10 @@ describe("Copy Sonnet recovery trusted gateway", () => {
         repositoryRoot: repository.root,
         artifactPath,
       });
-    const accepted = await (
-      runner as unknown as {
-        acceptGitReviewedEvidence(input: {
-          acceptance: typeof acceptance;
-        }): Promise<unknown>;
-      }
-    ).acceptGitReviewedEvidence({ acceptance });
+    const accepted = await runner.acceptGitReviewedEvidence({ acceptance });
 
     expect(
-      runnerModule.getCopyGitAcceptedExecutionAttestation(accepted as never),
+      runnerModule.getCopyGitAcceptedExecutionAttestation(accepted),
     ).toMatchObject({
       classification: "GIT_REVIEWED_REAL_EVIDENCE",
       executionId: "copy-sonnet-recovery-v14-claude-sonnet-5",

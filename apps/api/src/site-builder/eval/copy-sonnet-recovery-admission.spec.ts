@@ -241,4 +241,40 @@ describe("Copy Sonnet recovery admission", () => {
       ),
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_BUNDLE_UNVERIFIED");
   });
+
+  it("rejects a v13 child slot even when its authorization digests are rebuilt", () => {
+    const base = admission();
+    const childSlotId = "copy-sonnet-recovery-child-claude-sonnet-5";
+    const authorization = {
+      ...base.authorization,
+      children: base.authorization.children.map((child) => ({
+        ...child,
+        childSlotId,
+      })),
+    };
+    const {
+      reservationDigest: _reservationDigest,
+      ...currentChildAuthorization
+    } = base.childAuthorization;
+    const childWithoutDigest = {
+      ...currentChildAuthorization,
+      globalAuthorizationDigest: canonicalDigest(authorization),
+      childSlotId,
+    };
+
+    expect(() =>
+      validateCopySonnetRecoveryAdmissionEnvelope(
+        {
+          ...base,
+          authorization,
+          childAuthorization: {
+            ...childWithoutDigest,
+            reservationDigest:
+              copySonnetRecoveryReservationDigest(childWithoutDigest),
+          },
+        },
+        new Date("2026-08-08T15:30:00.000Z"),
+      ),
+    ).toThrow(/COPY_SONNET_RECOVERY_(AUTHORIZATION|CHILD_SCOPE)_MISMATCH/u);
+  });
 });
