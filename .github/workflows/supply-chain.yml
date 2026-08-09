@@ -42,6 +42,8 @@ jobs:
           persist-credentials: false
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 9.15.9
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -57,6 +59,8 @@ jobs:
           TRUSTED_BASELINE: ${{ runner.temp }}/production-dependency-audit-baseline.json
           TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
           BASE_LOCKFILE: ${{ runner.temp }}/base-pnpm-lock.yaml
+          BASE_CHECKOUT: ${{ runner.temp }}/supply-chain-base-checkout
+          BASE_AUDIT: ${{ runner.temp }}/base-production-audit.json
           BOOTSTRAP_DIFF: ${{ runner.temp }}/supply-chain-bootstrap-paths.txt
         run: |
           set -euo pipefail
@@ -66,6 +70,20 @@ jobs:
             if git cat-file -e "${PR_BASE_SHA}:${BASELINE_PATH}" 2>/dev/null; then
               git show "$PR_BASE_SHA:$BASELINE_PATH" > "$TRUSTED_BASELINE"
               git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
+              mkdir "$BASE_CHECKOUT"
+              git archive "$PR_BASE_SHA" | tar -xf - -C "$BASE_CHECKOUT"
+              set +e
+              (
+                cd "$BASE_CHECKOUT"
+                pnpm audit --prod --registry=https://registry.npmjs.org --json > "$BASE_AUDIT"
+              )
+              base_audit_status=$?
+              set -e
+              if [[ "$base_audit_status" -ne 0 && "$base_audit_status" -ne 1 ]]; then
+                echo "::error::trusted PR base audit did not complete"
+                exit 1
+              fi
+              audit_args+=(--comparison-audit-file "$BASE_AUDIT")
             else
               # One-time bootstrap: the candidate policy is usable only when it
               # binds itself to this exact PR base. After the first merge every

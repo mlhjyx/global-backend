@@ -192,7 +192,9 @@ test("a resolved advisory cannot reappear relative to the PR base audit", async 
       comparisonAudit: { metadata: {}, advisories: {} },
     },
   );
-  assert.ok(issueCodes(malformedComparison).includes("AUDIT_COMPARISON_INVALID"));
+  assert.ok(
+    issueCodes(malformedComparison).includes("AUDIT_COMPARISON_INVALID"),
+  );
 });
 
 test("initial bootstrap is exact and cannot pre-admit future advisories", async () => {
@@ -412,7 +414,7 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
   );
   assert.match(workflow, /pnpm audit --prod[^\n]+> "\$BASE_AUDIT"/);
   assert.match(workflow, /--comparison-audit-file "\$BASE_AUDIT"/);
-  assert.match(workflow, /^        version: 9\.15\.9$/m);
+  assert.match(workflow, /^          version: 9\.15\.9$/m);
   for (const protectedBootstrapPath of [
     "package.json | */package.json",
     "pnpm-lock.yaml | pnpm-workspace.yaml",

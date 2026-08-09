@@ -415,6 +415,7 @@ export function evaluateProductionAudit(
     now = new Date(),
     expectedBootstrapBase,
     expectedSourceLockfileDigest,
+    comparisonAudit,
   } = {},
 ) {
   const baselineValidation = validateProductionAuditBaseline(baseline, {
@@ -424,6 +425,22 @@ export function evaluateProductionAudit(
   });
   const normalizedAudit = normalizePnpmAudit(audit);
   const issues = [...baselineValidation.issues, ...normalizedAudit.issues];
+  const normalizedComparison =
+    comparisonAudit === undefined ? null : normalizePnpmAudit(comparisonAudit);
+  if (normalizedComparison !== null && normalizedComparison.issues.length > 0) {
+    issues.push(
+      issue(
+        "AUDIT_COMPARISON_INVALID",
+        "trusted PR base audit is incomplete or malformed",
+      ),
+    );
+  }
+  const comparisonIdentities =
+    normalizedComparison === null || normalizedComparison.issues.length > 0
+      ? null
+      : new Set(
+          normalizedComparison.advisories.map((item) => advisoryIdentity(item)),
+        );
   const baselineByIdentity = new Map(
     (Array.isArray(baseline?.advisories) ? baseline.advisories : [])
       .filter((item) => isObject(item))
@@ -449,6 +466,14 @@ export function evaluateProductionAudit(
         issue("AUDIT_NEW_ADVISORY", `new production advisory: ${identity}`),
       );
       continue;
+    }
+    if (comparisonIdentities !== null && !comparisonIdentities.has(identity)) {
+      issues.push(
+        issue(
+          "AUDIT_REINTRODUCED_ADVISORY",
+          `production advisory reappeared relative to the PR base: ${identity}`,
+        ),
+      );
     }
     if (SEVERITY_RANK[current.severity] > SEVERITY_RANK[admitted.severity]) {
       issues.push(
@@ -512,6 +537,28 @@ export function evaluateProductionAudit(
   });
 }
 
+export function buildProductionAuditReceipt(result) {
+  if (
+    !isObject(result) ||
+    result.ok !== true ||
+    !Number.isInteger(result.current_advisories) ||
+    result.current_advisories < 0 ||
+    !Array.isArray(result.resolved_advisories)
+  ) {
+    throw new Error("cannot build a passing receipt from an invalid result");
+  }
+  return Object.freeze({
+    schema_version: "production-dependency-audit-result/v1",
+    result:
+      result.current_advisories === 0
+        ? "PASS_CLEAR"
+        : "RATCHET_PASS_WITH_LEGACY_RISK",
+    current_advisories: result.current_advisories,
+    resolved_advisories: Object.freeze([...result.resolved_advisories]),
+    registry: OFFICIAL_REGISTRY,
+  });
+}
+
 async function readBoundedJson(path) {
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_INPUT_BYTES) {
@@ -552,6 +599,7 @@ function parseCliArguments(argv) {
   const options = {
     baseline: "docs/security/production-dependency-audit-baseline.json",
     auditFile: null,
+    comparisonAuditFile: null,
     expectedBootstrapBase: undefined,
     expectedSourceLockfileDigest: undefined,
   };
@@ -561,7 +609,9 @@ function parseCliArguments(argv) {
     if (!value) throw new Error(`missing value for ${option ?? "argument"}`);
     if (option === "--baseline") options.baseline = value;
     else if (option === "--audit-file") options.auditFile = value;
-    else if (option === "--expected-bootstrap-base") {
+    else if (option === "--comparison-audit-file") {
+      options.comparisonAuditFile = value;
+    } else if (option === "--expected-bootstrap-base") {
       options.expectedBootstrapBase = value;
     } else if (option === "--expected-source-lockfile-digest") {
       options.expectedSourceLockfileDigest = value;
@@ -576,9 +626,13 @@ async function main() {
   const audit = options.auditFile
     ? await readBoundedJson(resolve(options.auditFile))
     : runPnpmProductionAudit();
+  const comparisonAudit = options.comparisonAuditFile
+    ? await readBoundedJson(resolve(options.comparisonAuditFile))
+    : undefined;
   const result = evaluateProductionAudit(audit, baseline, {
     expectedBootstrapBase: options.expectedBootstrapBase,
     expectedSourceLockfileDigest: options.expectedSourceLockfileDigest,
+    comparisonAudit,
   });
   if (!result.ok) {
     for (const item of result.issues) {
@@ -587,15 +641,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  console.log(
-    JSON.stringify({
-      schema_version: "production-dependency-audit-result/v1",
-      result: "PASS",
-      current_advisories: result.current_advisories,
-      resolved_advisories: result.resolved_advisories,
-      registry: OFFICIAL_REGISTRY,
-    }),
-  );
+  console.log(JSON.stringify(buildProductionAuditReceipt(result)));
 }
 
 const directExecution =
