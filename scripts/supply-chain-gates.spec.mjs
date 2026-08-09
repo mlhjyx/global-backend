@@ -511,6 +511,30 @@ test("repository baseline is a current, exact-main-bound 36-advisory snapshot", 
   assert.equal(repositoryBaseline.source.base_commit, BASE_COMMIT);
 });
 
+test("bounded dependency inputs are read through one no-follow file handle", async () => {
+  const [auditSource, sourcePolicySource] = await Promise.all([
+    readRepositoryFile("scripts/supply-chain-audit.mjs"),
+    readRepositoryFile("scripts/supply-chain-source-policy.mjs"),
+  ]);
+
+  assert.match(sourcePolicySource, /import \{ constants \} from "node:fs"/u);
+  assert.match(sourcePolicySource, /import \{ open \} from "node:fs\/promises"/u);
+  assert.match(
+    sourcePolicySource,
+    /open\(path, constants\.O_RDONLY \| constants\.O_NOFOLLOW\)/u,
+  );
+  assert.match(sourcePolicySource, /handle\.stat\(\{ bigint: true \}\)/u);
+  assert.match(sourcePolicySource, /handle\.read\(/u);
+  assert.match(sourcePolicySource, /await handle\.close\(\)/u);
+  assert.doesNotMatch(sourcePolicySource, /\blstat\(/u);
+  assert.doesNotMatch(sourcePolicySource, /\breadFile\(path/u);
+
+  assert.match(auditSource, /readBoundedRegularText/u);
+  assert.doesNotMatch(auditSource, /from "node:fs\/promises"/u);
+  assert.doesNotMatch(auditSource, /\blstat\(/u);
+  assert.doesNotMatch(auditSource, /\breadFile\(path/u);
+});
+
 test("dependency review and production audit are pinned, bounded canaries", async () => {
   const [workflow, requiredContextsText, auditScript] = await Promise.all([
     readRepositoryFile(".github/workflows/supply-chain.yml"),
