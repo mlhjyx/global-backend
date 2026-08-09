@@ -26,6 +26,7 @@ interface SigningKey {
 
 const issuer = 'https://identity.example.test/';
 const audience = 'global-api';
+const workspaceId = '11111111-1111-4111-8111-111111111111';
 let server: Server;
 let jwksUri: string;
 let oldKey: SigningKey;
@@ -52,7 +53,7 @@ async function signed(
     issuer?: string;
     audience?: string;
     subject?: string | null;
-    workspaceId?: string | null;
+    workspaceId?: unknown;
     roles?: unknown;
     expired?: boolean;
     notBeforeFuture?: boolean;
@@ -61,7 +62,7 @@ async function signed(
   let jwt = new SignJWT({
     ...(overrides.workspaceId === null
       ? {}
-      : { workspace_id: overrides.workspaceId ?? 'workspace-1' }),
+      : { workspace_id: overrides.workspaceId ?? workspaceId }),
     roles: overrides.roles ?? ['operator'],
     scope: 'compliance:manage',
     scp: ['compliance:manage'],
@@ -134,7 +135,7 @@ describe('JwksTokenVerifier contract', () => {
       verifier.verify(await signed(oldKey, { roles: ['operator', 'unknown'] })),
     ).resolves.toEqual({
       userId: 'user-1',
-      workspaceId: 'workspace-1',
+      workspaceId,
       roles: ['operator', 'unknown'],
     });
   });
@@ -168,5 +169,41 @@ describe('JwksTokenVerifier contract', () => {
   it('rejects a non-string roles claim even when the signature is valid', async () => {
     configure();
     await invalid(await signed(oldKey, { roles: ['operator', 42] }));
+  });
+
+  it('rejects non-string and non-UUID workspace claims', async () => {
+    configure();
+    await invalid(await signed(oldKey, { workspaceId: {} }));
+    await invalid(await signed(oldKey, { workspaceId: 'workspace-1' }));
+  });
+
+  it.each(['-1', '301', 'Infinity', 'not-a-number'])(
+    'rejects unsafe AUTH_CLOCK_SKEW_S=%s',
+    (clockSkew) => {
+      expect(
+        () =>
+          new JwksTokenVerifier({
+            AUTH_JWKS_URI: 'https://identity.example.test/jwks',
+            AUTH_ISSUER: issuer,
+            AUTH_CLOCK_SKEW_S: clockSkew,
+          }),
+      ).toThrow(/AUTH_CLOCK_SKEW_S/);
+    },
+  );
+
+  it.each([
+    ['workspace', { AUTH_WORKSPACE_CLAIM: '__proto__' }],
+    ['workspace', { AUTH_WORKSPACE_CLAIM: '' }],
+    ['roles', { AUTH_ROLES_CLAIM: 'constructor' }],
+    ['roles', { AUTH_ROLES_CLAIM: 'x'.repeat(129) }],
+  ])('rejects an unsafe custom %s claim name', (_kind, override) => {
+    expect(
+      () =>
+        new JwksTokenVerifier({
+          AUTH_JWKS_URI: 'https://identity.example.test/jwks',
+          AUTH_ISSUER: issuer,
+          ...override,
+        }),
+    ).toThrow(/claim name/);
   });
 });

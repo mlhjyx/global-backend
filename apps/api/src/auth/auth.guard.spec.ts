@@ -77,4 +77,23 @@ describe('AuthGuard authorization context', () => {
     });
     expect(verifier.verify).not.toHaveBeenCalled();
   });
+
+  it('rejects an oversized bearer token before invoking a verifier', async () => {
+    const verifier = {
+      verify: vi.fn(),
+    } as unknown as TokenVerifier;
+    const guard = new AuthGuard(
+      verifier,
+      createRolesToScopesPolicy({}, 'test'),
+    );
+
+    await expect(
+      guard.canActivate(
+        executionContext({
+          headers: { authorization: `Bearer ${'a'.repeat(16_385)}` },
+        }),
+      ),
+    ).rejects.toMatchObject({ response: { error: { code: 'TOKEN_INVALID' } } });
+    expect(verifier.verify).not.toHaveBeenCalled();
+  });
 });
