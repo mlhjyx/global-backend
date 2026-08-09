@@ -49,8 +49,35 @@ jobs:
         with:
           node-version: 22
 
+      - name: Reject repository package-manager network overrides
+        shell: bash
+        env:
+          TRACKED_NPMRC: ${{ runner.temp }}/tracked-repository-npmrc.bin
+        run: |
+          set -euo pipefail
+          if ! git ls-files -z -- '.npmrc' ':(glob)**/.npmrc' > "$TRACKED_NPMRC"; then
+            echo "::error::cannot prove the repository .npmrc inventory"
+            exit 1
+          fi
+          if [[ -s "$TRACKED_NPMRC" ]]; then
+            echo "::error::repository .npmrc is not admitted by the production audit trust boundary"
+            exit 1
+          fi
+
       - name: Materialize audited dependency paths without hooks
-        run: pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -i \
+            HOME="$HOME" \
+            PATH="$PATH" \
+            CI=true \
+            NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+            NPM_CONFIG_USERCONFIG=/dev/null \
+            NPM_CONFIG_GLOBALCONFIG=/dev/null \
+            NPM_CONFIG_IGNORE_PNPMFILE=true \
+            NPM_CONFIG_IGNORE_SCRIPTS=true \
+            pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
 
       - name: Audit production dependencies against the trusted ratchet
         shell: bash
@@ -63,6 +90,7 @@ jobs:
           TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
           BASE_LOCKFILE: ${{ runner.temp }}/base-pnpm-lock.yaml
           BASE_CHECKOUT: ${{ runner.temp }}/supply-chain-base-checkout
+          BASE_NPMRC: ${{ runner.temp }}/base-repository-npmrc.bin
           BASE_AUDIT: ${{ runner.temp }}/base-production-audit.json
           BOOTSTRAP_DIFF: ${{ runner.temp }}/supply-chain-bootstrap-paths.txt
         run: |
@@ -75,14 +103,36 @@ jobs:
               git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
               mkdir "$BASE_CHECKOUT"
               git archive "$PR_BASE_SHA" | tar -xf - -C "$BASE_CHECKOUT"
+              find "$BASE_CHECKOUT" -name .npmrc -print0 > "$BASE_NPMRC"
+              if [[ -s "$BASE_NPMRC" ]]; then
+                echo "::error::trusted PR base contains a repository .npmrc outside the audit trust boundary"
+                exit 1
+              fi
               (
                 cd "$BASE_CHECKOUT"
-                pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
+                env -i \
+                  HOME="$HOME" \
+                  PATH="$PATH" \
+                  CI=true \
+                  NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+                  NPM_CONFIG_USERCONFIG=/dev/null \
+                  NPM_CONFIG_GLOBALCONFIG=/dev/null \
+                  NPM_CONFIG_IGNORE_PNPMFILE=true \
+                  NPM_CONFIG_IGNORE_SCRIPTS=true \
+                  pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
               )
               set +e
               (
                 cd "$BASE_CHECKOUT"
-                NPM_CONFIG_IGNORE_PNPMFILE=true NPM_CONFIG_IGNORE_SCRIPTS=true \
+                env -i \
+                  HOME="$HOME" \
+                  PATH="$PATH" \
+                  CI=true \
+                  NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+                  NPM_CONFIG_USERCONFIG=/dev/null \
+                  NPM_CONFIG_GLOBALCONFIG=/dev/null \
+                  NPM_CONFIG_IGNORE_PNPMFILE=true \
+                  NPM_CONFIG_IGNORE_SCRIPTS=true \
                   pnpm audit --prod --registry=https://registry.npmjs.org --json > "$BASE_AUDIT"
               )
               base_audit_status=$?

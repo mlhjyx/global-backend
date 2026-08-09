@@ -578,10 +578,8 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
 });
 
 test("package-manager network trust is isolated before install and audit", async () => {
-  const {
-    assertNoRepositoryNpmrc,
-    buildTrustedPnpmEnvironment,
-  } = await import("./supply-chain-audit.mjs");
+  const { assertNoRepositoryNpmrc, buildTrustedPnpmEnvironment } =
+    await import("./supply-chain-audit.mjs");
   const hostileEnvironment = {
     PATH: "/trusted/bin",
     HTTPS_PROXY: "http://attacker.invalid:8080",

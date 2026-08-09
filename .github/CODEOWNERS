@@ -38,6 +38,14 @@
 /docs/releases/ @mlhjyx
 /docs/templates/release-bundle.template.json @mlhjyx
 /package.json @mlhjyx
+/**/package.json @mlhjyx
+/pnpm-lock.yaml @mlhjyx
+/pnpm-workspace.yaml @mlhjyx
+/.npmrc @mlhjyx
+/**/.npmrc @mlhjyx
+/.pnpmfile.cjs @mlhjyx
+/**/.pnpmfile.cjs @mlhjyx
+/patches/ @mlhjyx
 /scripts/governance-*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx
 /scripts/supply-chain-audit*.mjs @mlhjyx

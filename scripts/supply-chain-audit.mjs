@@ -13,6 +13,15 @@ const SHA_40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const GHSA_ID = /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/;
 const OWNER_ID = /^OWN-[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
+const TRUSTED_PROCESS_ENVIRONMENT_KEYS = Object.freeze([
+  "CI",
+  "HOME",
+  "PATH",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "SystemRoot",
+]);
 const SEVERITIES = Object.freeze([
   "info",
   "low",
@@ -26,6 +35,43 @@ const SEVERITY_RANK = Object.freeze(
 
 function issue(code, message) {
   return Object.freeze({ code, message });
+}
+
+export function buildTrustedPnpmEnvironment(
+  inheritedEnvironment = process.env,
+) {
+  if (!isObject(inheritedEnvironment)) {
+    throw new Error("pnpm environment must be an object");
+  }
+  const trustedEnvironment = {};
+  for (const key of TRUSTED_PROCESS_ENVIRONMENT_KEYS) {
+    const value = inheritedEnvironment[key];
+    if (typeof value === "string" && value.length > 0) {
+      trustedEnvironment[key] = value;
+    }
+  }
+  return Object.freeze({
+    ...trustedEnvironment,
+    NPM_CONFIG_REGISTRY: OFFICIAL_REGISTRY,
+    NPM_CONFIG_USERCONFIG: "/dev/null",
+    NPM_CONFIG_GLOBALCONFIG: "/dev/null",
+    NPM_CONFIG_IGNORE_PNPMFILE: "true",
+    NPM_CONFIG_IGNORE_SCRIPTS: "true",
+  });
+}
+
+export function assertNoRepositoryNpmrc(paths) {
+  if (
+    !Array.isArray(paths) ||
+    paths.some((path) => typeof path !== "string" || path.length === 0)
+  ) {
+    throw new Error("repository .npmrc inventory is malformed");
+  }
+  if (paths.length > 0) {
+    throw new Error(
+      `repository .npmrc is not admitted by the production audit trust boundary (${paths.length} path entries)`,
+    );
+  }
 }
 
 function isObject(value) {
@@ -811,22 +857,31 @@ async function readBoundedJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
 
+function listTrackedRepositoryNpmrc(cwd) {
+  const execution = spawnSync(
+    "git",
+    ["-C", cwd, "ls-files", "-z", "--", ".npmrc", ":(glob)**/.npmrc"],
+    {
+      encoding: "utf8",
+      maxBuffer: MAX_INPUT_BYTES,
+      env: buildTrustedPnpmEnvironment(),
+    },
+  );
+  if (execution.error || execution.signal || execution.status !== 0) {
+    throw new Error("cannot prove the repository .npmrc inventory");
+  }
+  return execution.stdout.split("\0").filter((path) => path.length > 0);
+}
+
 function runPnpmProductionAudit() {
+  assertNoRepositoryNpmrc(listTrackedRepositoryNpmrc(process.cwd()));
   const execution = spawnSync(
     "pnpm",
     ["audit", "--prod", "--registry=https://registry.npmjs.org", "--json"],
     {
       encoding: "utf8",
       maxBuffer: MAX_INPUT_BYTES,
-      env: {
-        ...process.env,
-        NPM_CONFIG_REGISTRY: OFFICIAL_REGISTRY,
-        npm_config_registry: OFFICIAL_REGISTRY,
-        NPM_CONFIG_IGNORE_PNPMFILE: "true",
-        npm_config_ignore_pnpmfile: "true",
-        NPM_CONFIG_IGNORE_SCRIPTS: "true",
-        npm_config_ignore_scripts: "true",
-      },
+      env: buildTrustedPnpmEnvironment(),
     },
   );
   if (
