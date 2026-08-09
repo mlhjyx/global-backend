@@ -17,14 +17,16 @@
 
 ## RED → GREEN 证据
 
-| 周期 | RED checkpoint 与预期失败                                                             | GREEN checkpoint 与结果                                                                          |
-| ---- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败              | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过            |
-| 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败        | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过   |
-| 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败 | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执  |
-| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败   | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过      |
-| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败     | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝    |
-| 6    | `67df655e`：新增 dependency ownership 未同步机器治理清单时总门失败                    | `a39d4cbe`：CODEOWNERS 末尾承重块与 required-contexts 机器真值逐项一致，governance verifier 通过 |
+| 周期 | RED checkpoint 与预期失败                                                                   | GREEN checkpoint 与结果                                                                            |
+| ---- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败                    | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过              |
+| 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败              | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过     |
+| 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败       | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执    |
+| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败         | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过        |
+| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败           | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝      |
+| 6    | `67df655e`：新增 dependency ownership 未同步机器治理清单时总门失败                          | `a39d4cbe`：CODEOWNERS 末尾承重块与 required-contexts 机器真值逐项一致，governance verifier 通过   |
+| 7    | `1ca67ba2` / `69f4efaa`：direct URL/Git/tarball 与不可枚举的 archive base checkout 合同失败 | `8ba9c2b8`：受信 source-policy 在 base/head install 前运行；base 改用可审计 detached Git worktree  |
+| 8    | `ed34bd0b`：无显式协议、仅 `repo/commit/type: git` 的 lock resolution 仍能绕过              | `8ba9c2b8`：隐式 Git/directory resolution、越界 importer/link 也 fail-closed；官方 registry 图通过 |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
@@ -32,8 +34,8 @@
 
 | 验证                                              | 结果                                                          | 证明边界                                                                                   |
 | ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `node --test scripts/supply-chain-gates.spec.mjs` | 15/15 PASS                                                    | ratchet、bootstrap、回归、网络信任边界、回执、workflow/Dependabot/CodeQL 静态合同          |
-| `pnpm governance:verify`                          | 46/46 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
+| `node --test scripts/supply-chain-gates.spec.mjs` | 16/16 PASS                                                    | ratchet、bootstrap、回归、source/网络信任边界、回执、workflow/Dependabot/CodeQL 静态合同   |
+| `pnpm governance:verify`                          | 47/47 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
 | 官方 registry installed base/head 模拟            | `RATCHET_PASS_WITH_LEGACY_RISK`；36 advisories；183 exposures | base 与 head 都禁 scripts/pnpm hooks 后物化路径；不代表漏洞已解决                          |
 | Prettier 与 `git diff --check`                    | PASS                                                          | 新增 YAML/JS/JSON/Markdown 格式与 whitespace 合同                                          |
 | Copy v13 fixed-source rebuild                     | `0a283dab`：7/7 PASS；Prisma/contracts/API build PASS         | 根 `package.json` 与受绑定 source 未因本切片漂移                                           |
@@ -46,5 +48,6 @@ Node 内置 governance tests 没有单独的覆盖率采集器，因此本文不
 - 当前 36 条 production advisory 是限时债务，不是漏洞豁免；其中 high 18、moderate 14、low 4、critical 0。真实修复仍是独立阻塞治理。
 - `OWN-SECURITY`、`OWN-PLATFORM` 等责任帽在权威治理表中仍存在 `UNASSIGNED` 或 `ROLE_EXISTS_ASSIGNEE_UNRECORDED`；本切片不伪造个人 assignee。周末处置前必须由用户/项目治理补齐实际责任人。
 - 新 job 未加入 required contexts；live ruleset、GitHub Code Security 可用性和 action canary 均未改动、未验证。
+- 既有 required `ci.yml` 仍执行普通 `pnpm install --frozen-lockfile`，尚未统一采用本切片的 source-policy、环境 allowlist 和 lifecycle-script 禁用；这是后续“全 CI 安装面硬化”阻塞治理，不因新 canary 变安全而被视为关闭。
 - CodeQL 与 Dependency Review 成功也不能证明部署安全、运行安全或 AI 获客真实试点就绪。
 - 真实试点继续 `NO-GO`；本切片不读取凭据、不调用付费模型、不触发外部业务副作用。
