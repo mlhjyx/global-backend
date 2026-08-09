@@ -281,19 +281,9 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         recoveryManifestBytes,
       ),
     ).not.toThrow();
-    expect(() =>
-      execFileSync(
-        "git",
-        [
-          "diff",
-          "--quiet",
-          artifact.fixedSourceCommit,
-          "--",
-          ...artifact.sourceBundle.files.map(({ path }) => path),
-        ],
-        { cwd: REPOSITORY_ROOT },
-      ),
-    ).not.toThrow();
+    // Verify the checked-out bytes directly instead of requiring the fixed
+    // commit object. GitHub Actions uses a shallow checkout, so the immutable
+    // commit can be absent even when every bound source byte is exact.
     for (const source of artifact.sourceBundle.files) {
       expect(sha256(readFileSync(resolve(REPOSITORY_ROOT, source.path)))).toBe(
         source.sha256,

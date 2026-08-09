@@ -102,6 +102,9 @@ Both artifacts record:
 - post-sync focused recovery, real-runner, source-verifier, and clean-HEAD
   runtime-binding rebuild with coverage: 6 files passed, 36 tests passed, 1
   historical manifest rebuild skipped, and 0 failed;
+- generated-binding verification validates the canonical artifact and every
+  current source byte against its frozen SHA-256 without requiring the fixed
+  commit object to exist in a shallow CI checkout;
 - the immutable v13 manifest remains byte- and digest-exact against #355. Its
   opt-in preparer intentionally rejects rebuilding from the later governance
   source because the raw root `package.json` changed; execution consumes the
