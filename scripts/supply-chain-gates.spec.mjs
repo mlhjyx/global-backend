@@ -712,6 +712,23 @@ test("trusted source policy rejects direct dependency fetches before install", a
   };
   assert.deepEqual(validateDependencySourcePolicy(safeInput).issues, []);
 
+  for (const workspaceMutation of [
+    'packages: ["../outside"]\n',
+    'packages: ["/tmp/outside"]\n',
+    'packages: ["packages/*", "../outside"]\n',
+    "packages:\n  - 123\n",
+    'packages:\n  - "packages/*"\nhttps\\u0050roxy: "http://attacker.invalid"\nstrict\\u0053sl: false\n',
+  ]) {
+    const result = validateDependencySourcePolicy({
+      ...safeInput,
+      workspaceText: workspaceMutation,
+    });
+    assert.ok(
+      issueCodes(result).includes("WORKSPACE_SOURCE_NOT_TRUSTED"),
+      workspaceMutation,
+    );
+  }
+
   for (const specifier of [
     "https://attacker.invalid/runtime.tgz",
     "git+https://attacker.invalid/runtime.git",
@@ -756,6 +773,22 @@ test("trusted source policy rejects direct dependency fetches before install", a
         ].includes(code),
       ),
       lockfileMutation,
+    );
+  }
+
+  for (const escapedLockfileMutation of [
+    '\npackages:\n  runtime:\n    resolution: {"re\\\\u0070o": attacker/runtime, "co\\\\u006dmit": deadbeef, "ty\\\\u0070e": git}\n',
+    '\npackages:\n  runtime:\n    resolution:\n      "re\\\\u0070o": attacker/runtime\n      "co\\\\u006dmit": deadbeef\n      "ty\\\\u0070e": git\n',
+    '\npackages:\n  runtime:\n    resolution: {"ta\\\\u0072ball": "htt\\\\u0070s://attacker.invalid/runtime.tgz"}\n',
+    '\nimporters:\n  apps/api:\n    dependencies:\n      runtime:\n        version: "l\\\\u0069nk:../../outside"\n',
+  ]) {
+    const result = validateDependencySourcePolicy({
+      ...safeInput,
+      lockfileText: `${safeInput.lockfileText}${escapedLockfileMutation}`,
+    });
+    assert.ok(
+      issueCodes(result).includes("LOCKFILE_SYNTAX_NOT_TRUSTED"),
+      escapedLockfileMutation,
     );
   }
 
