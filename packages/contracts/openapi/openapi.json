@@ -2504,7 +2504,29 @@
       },
       "get": {
         "operationId": "DiscoveryController_listSuppressions_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页最后一条记录的 id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -2588,6 +2610,54 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "法定 suppression 不可释放，或幂等 requestId 与首个事实冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "success",
+                    "error"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "LEGAL_SUPPRESSION_IMMUTABLE",
+                            "IDEMPOTENCY_CONFLICT",
+                            "DECISION_NOT_PERSISTED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2612,6 +2682,27 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页最后一条记录的 id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "type": "number"
             }
           }
         ],
@@ -8788,7 +8879,9 @@
           },
           "value": {
             "type": "string",
-            "example": "noreply@example.com"
+            "example": "noreply@example.com",
+            "minLength": 1,
+            "maxLength": 2048
           },
           "reason": {
             "type": "string",

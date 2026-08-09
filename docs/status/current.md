@@ -31,7 +31,7 @@ Site Builder Copy 的 v15 create-only 技术 PR 已完成收口：#372 的 RED �
 - 数据权利、质量标签、运行身份、worker/schedule/receipt 与运维证据；
 - 首个获客 pilot 的范围、验收与退出条件准备。
 
-运行身份 source slice 已由 #374 合入；roles→scopes slice 也已由 #375 合入，以九个闭合 scope、服务端 role map、未知 role 零权限、控制器双 guard、PII/合规复合门和 `x-required-scopes` OpenAPI 元数据为边界。当前合规变更集把 suppression 事实保留为不可物理删除、只可从 PREFERENCE 单向提升到 LEGAL，并把普通 release/identity-correction 操作改为带 request/actor/reason/time 的 append-only decision；法定 suppression 的 release 只写拒绝审计。Lead accept 的 DataRights DENY 同样先提交 append-only policy log，再返回 409，且不更新 Lead、不写 LeadDecision/Outbox。DevTokenVerifier 仍只允许显式 development、显式 `AUTH_ALLOW_DEV_TOKENS=true` 与 loopback bind；这些 source 状态不能替代 SaaS 真 token、live startup admission、跨 workspace 负例或部署回读。
+运行身份 source slice 已由 #374 合入；roles→scopes slice 也已由 #375 合入，以九个闭合 scope、服务端 role map、未知 role 零权限、控制器双 guard、PII/合规复合门和 `x-required-scopes` OpenAPI 元数据为边界。当前合规变更集把 suppression 事实保留为不可物理删除、只可从 PREFERENCE 单向提升到 LEGAL；类型化 canonicalizer 与发现匹配路径共享 email/domain/company-name 规范键，非法值在 DB 前拒绝。普通 release/identity-correction 操作改为带 request/actor/reason/time 的 append-only decision，DB 约束语义组合，含审计/PII 的列表有 cursor/100 行硬上限；法定 suppression 的 release 只写拒绝审计并返回合同化 409。Lead accept 的 DataRights DENY 同样先提交 append-only policy log，再返回 409，且不更新 Lead、不写 LeadDecision/Outbox。DevTokenVerifier 仍只允许显式 development、显式 `AUTH_ALLOW_DEV_TOKENS=true` 与 loopback bind；这些 source 状态不能替代 SaaS 真 token、live startup admission、跨 workspace 负例或部署回读。
 
 这些是工作主题，不是可自动清理的分支清单。实际 owner、worktree、dirty 状态与独有提交必须通过 `pnpm worktree:inventory` 和 live task 审计确认；不得从本页推断可以接管或删除其他 worktree。
 

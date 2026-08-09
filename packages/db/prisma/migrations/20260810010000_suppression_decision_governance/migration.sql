@@ -9,7 +9,13 @@ WHERE "reason" IS NULL OR "reason" IN ('manual', 'bounce');
 
 ALTER TABLE "suppression_record"
   ADD CONSTRAINT "suppression_record_protection_class_check"
-  CHECK ("protection_class" IN ('PREFERENCE', 'LEGAL'));
+  CHECK ("protection_class" IN ('PREFERENCE', 'LEGAL')),
+  ADD CONSTRAINT "suppression_record_preference_reason_check"
+  CHECK (
+    "protection_class" <> 'PREFERENCE'
+    OR "reason" IS NULL
+    OR lower("reason") IN ('manual', 'bounce')
+  );
 
 CREATE UNIQUE INDEX "suppression_record_workspace_id_id_key"
   ON "suppression_record"("workspace_id", "id");
@@ -36,6 +42,20 @@ CREATE TABLE "suppression_decision" (
       'DUPLICATE_RECORD',
       'LEGAL_SUPPRESSION_IMMUTABLE',
       'OTHER'
+    )
+  ),
+  CONSTRAINT "suppression_decision_semantic_pair_check" CHECK (
+    (
+      "decision" = 'RELEASE_REQUESTED'
+      AND "reason_code" IN ('USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER')
+    )
+    OR (
+      "decision" = 'IDENTITY_CORRECTION_REQUESTED'
+      AND "reason_code" IN ('IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER')
+    )
+    OR (
+      "decision" = 'RELEASE_REQUEST_DENIED'
+      AND "reason_code" = 'LEGAL_SUPPRESSION_IMMUTABLE'
     )
   ),
   CONSTRAINT "suppression_decision_workspace_record_fkey"

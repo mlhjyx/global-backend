@@ -28,6 +28,8 @@ export type SuppressionDecisionRequest = {
   reasonCode: (typeof SUPPRESSION_DECISION_REASONS)[number];
 };
 
+export type SuppressionPageRequest = { cursor?: string; limit?: number };
+
 @Injectable()
 export class DiscoveryService {
   constructor(
@@ -445,19 +447,27 @@ export class DiscoveryService {
     });
   }
 
-  listSuppressions(ctx: RequestContext) {
+  listSuppressions(ctx: RequestContext, page?: SuppressionPageRequest) {
+    const pagination = suppressionPagination(page);
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.suppressionRecord.findMany({ orderBy: { createdAt: 'desc' } }),
+      tx.suppressionRecord.findMany({
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: pagination.limit,
+        ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
+      }),
     );
   }
 
-  listSuppressionDecisions(ctx: RequestContext, id: string) {
+  listSuppressionDecisions(ctx: RequestContext, id: string, page?: SuppressionPageRequest) {
+    const pagination = suppressionPagination(page);
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rec = await tx.suppressionRecord.findUnique({ where: { id } });
       if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
       return tx.suppressionDecision.findMany({
         where: { suppressionId: id },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: pagination.limit,
+        ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
       });
     });
   }
@@ -561,6 +571,14 @@ function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest)
   ) {
     throw new BadRequestException({ error: { code: 'INVALID_REASON', message: 'reason is invalid for this decision' } });
   }
+}
+
+function suppressionPagination(page?: SuppressionPageRequest): { cursor?: string; limit: number } {
+  const requested = Number.isInteger(page?.limit) ? Number(page?.limit) : 50;
+  return {
+    ...(page?.cursor ? { cursor: page.cursor } : {}),
+    limit: Math.min(100, Math.max(1, requested)),
+  };
 }
 
 /** 验证裁决 → field_evidence.allowed_actions（诚实：BLOCKED 不授予任何动作；仅 VALID 授 outreach）。 */

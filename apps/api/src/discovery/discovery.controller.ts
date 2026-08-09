@@ -10,8 +10,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -58,6 +59,21 @@ class SuppressionDecisionDto implements SuppressionDecisionRequest {
   @ApiProperty({ enum: SUPPRESSION_DECISION_REASONS })
   @IsIn(SUPPRESSION_DECISION_REASONS)
   reasonCode!: SuppressionDecisionRequest['reasonCode'];
+}
+
+class SuppressionPageDto {
+  @ApiPropertyOptional({ format: 'uuid', description: '上一页最后一条记录的 id' })
+  @IsOptional()
+  @IsUUID()
+  cursor?: string;
+
+  @ApiPropertyOptional({ type: Number, minimum: 1, maximum: 100, default: 50 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }
 
 /**
@@ -302,8 +318,8 @@ export class DiscoveryController {
   @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '禁联名单' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
-  async listSuppressions(@Ctx() ctx: RequestContext) {
-    return envelope(await this.discovery.listSuppressions(ctx));
+  async listSuppressions(@Ctx() ctx: RequestContext, @Query() page: SuppressionPageDto) {
+    return envelope(await this.discovery.listSuppressions(ctx, page));
   }
 
   @Post('suppressions/:id/decisions')
@@ -314,6 +330,31 @@ export class DiscoveryController {
     description: '法定 suppression 的 release 请求会持久化拒绝审计并返回 409。',
   })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'append-only SuppressionDecision' }, { status: 201 })
+  @ApiResponse({
+    status: 409,
+    description: '法定 suppression 不可释放，或幂等 requestId 与首个事实冲突',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['success', 'error'],
+      properties: {
+        success: { type: 'boolean', enum: [false] },
+        error: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code', 'message'],
+          properties: {
+            code: {
+              type: 'string',
+              enum: ['LEGAL_SUPPRESSION_IMMUTABLE', 'IDEMPOTENCY_CONFLICT', 'DECISION_NOT_PERSISTED'],
+            },
+            message: { type: 'string' },
+            decisionId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+  })
   async requestSuppressionDecision(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
@@ -326,8 +367,12 @@ export class DiscoveryController {
   @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '列出 suppression 的 append-only release/correction 决策' })
   @ApiListEnvelope({ type: 'object', additionalProperties: true, description: 'SuppressionDecision' })
-  async listSuppressionDecisions(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
-    return envelope(await this.discovery.listSuppressionDecisions(ctx, id));
+  async listSuppressionDecisions(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() page: SuppressionPageDto,
+  ) {
+    return envelope(await this.discovery.listSuppressionDecisions(ctx, id, page));
   }
 
   @Delete('suppressions/:id')
