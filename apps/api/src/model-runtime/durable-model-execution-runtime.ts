@@ -260,6 +260,7 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
     settlement: "unknown";
     requestId: string | null;
     reason: string;
+    responseShape?: ModelObservation<unknown>["responseShape"];
   }): Promise<void> {
     const realLedger = this.realLedger();
     return realLedger != null
@@ -292,6 +293,9 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
         outputTokens: observation.usage.outputTokens,
       },
       outputDigest: canonicalDigest(observation.output),
+      ...(observation.responseShape == null
+        ? {}
+        : { responseShape: observation.responseShape }),
     };
     const realLedger = this.realLedger();
     if (realLedger != null) {
@@ -395,6 +399,9 @@ export class DurableModelExecutionRuntime<Input = unknown, Output = unknown> {
             settlement: "unknown",
             requestId: observation.requestId ?? null,
             reason: unknownSettlementReason(observation),
+            ...(observation.responseShape == null
+              ? {}
+              : { responseShape: observation.responseShape }),
           });
           try {
             await this.postWireGuard?.({ plan: currentPlan, observation });

@@ -181,6 +181,39 @@ describe("AppendOnlyModelExecutionLedger", () => {
     });
   });
 
+  it("rejects an unallowlisted response shape before persistence", async () => {
+    const ledger = await openLedger();
+    await ledger.claimExecution({
+      executionId: "copy-sonnet",
+      planDigest: "b".repeat(64),
+    });
+    await ledger.claimWire({
+      executionId: "copy-sonnet",
+      wireId: "copy-sonnet:1",
+      requestDigest: "c".repeat(64),
+    });
+
+    await expect(
+      ledger.observeWire({
+        executionId: "copy-sonnet",
+        wireId: "copy-sonnet:1",
+        settlement: "unknown",
+        requestId: "request-copy-sonnet",
+        reason: "observation_or_settlement_incomplete",
+        responseShape: {
+          schemaVersion: "native-model-response-shape/2026-08-09-v1",
+          topLevelKeys: ["private_note"],
+          contentBlockTypes: [],
+          usageKeys: [],
+          validationPaths: [],
+        },
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_RESPONSE_SHAPE_INVALID");
+    expect(await readFile(ledger.ledgerPath, "utf8")).not.toContain(
+      "private_note",
+    );
+  });
+
   it("detects ledger tampering and refuses symlink or busy lock targets", async () => {
     const ledger = await openLedger();
     await appendFile(ledger.ledgerPath, '{"forged":true}\n', "utf8");

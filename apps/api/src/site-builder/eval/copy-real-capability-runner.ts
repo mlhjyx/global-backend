@@ -1740,6 +1740,10 @@ async function createCopyCapabilityChildRunner(input: {
               ? { settlementUnknownReason: apiFailureReason }
               : {}),
             ...(settled ? { settlementProof: settlement } : {}),
+            ...(native instanceof NativeModelApiError &&
+            native.responseShape != null
+              ? { responseShape: native.responseShape }
+              : {}),
             warnings: FREEZE_OBJECT(
               native instanceof NativeModelOutputError
                 ? []

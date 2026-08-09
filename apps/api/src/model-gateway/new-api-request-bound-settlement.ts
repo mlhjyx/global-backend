@@ -112,9 +112,11 @@ function effectiveInputTokens(
   row: LogRow,
   protocol: string,
 ): number | undefined {
-  if (!safeInteger(row.prompt_tokens, 1)) return undefined;
-  const metadata = logMetadata(row.other);
   const anthropicProtocol = /^anthropic(?:_|-)messages$/u.test(protocol);
+  if (!safeInteger(row.prompt_tokens, anthropicProtocol ? 0 : 1)) {
+    return undefined;
+  }
+  const metadata = logMetadata(row.other);
   if (!anthropicProtocol) {
     if (metadata?.usage_semantic === "anthropic") return undefined;
     return row.prompt_tokens;
@@ -129,7 +131,7 @@ function effectiveInputTokens(
     return undefined;
   }
   const total = row.prompt_tokens + cacheCreationTokens + cacheReadTokens;
-  return Number.isSafeInteger(total) ? total : undefined;
+  return safeInteger(total, 1) ? total : undefined;
 }
 
 function canonicalJson(value: unknown): string {

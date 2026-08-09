@@ -1,3 +1,5 @@
+import type { ModelResponseShape } from "../types";
+
 export type NativeModelProtocol =
   "openai-responses" | "openai-chat-completions" | "anthropic-messages";
 
@@ -37,6 +39,8 @@ export interface NativeAdapterWarning {
   details?: string;
 }
 
+export type NativeModelResponseShape = ModelResponseShape;
+
 export interface NativeModelAdapterResult<Output> {
   protocol: NativeModelProtocol;
   requestedModel: string;
@@ -55,6 +59,7 @@ export class NativeModelApiError extends Error {
   readonly retryable: boolean;
   readonly responseBodyDigest?: string;
   readonly responseBodyBytes?: number;
+  readonly responseShape?: NativeModelResponseShape;
 
   constructor(input: {
     protocol: NativeModelProtocol;
@@ -64,6 +69,7 @@ export class NativeModelApiError extends Error {
     retryable: boolean;
     responseBodyDigest?: string;
     responseBodyBytes?: number;
+    responseShape?: NativeModelResponseShape;
   }) {
     super("Model provider API call failed");
     this.name = "NativeModelApiError";
@@ -74,6 +80,7 @@ export class NativeModelApiError extends Error {
     this.retryable = input.retryable;
     this.responseBodyDigest = input.responseBodyDigest;
     this.responseBodyBytes = input.responseBodyBytes;
+    this.responseShape = input.responseShape;
   }
 }
 
