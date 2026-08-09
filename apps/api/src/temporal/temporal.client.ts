@@ -19,5 +19,22 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.connection?.close();
+    this.connection = undefined;
+  }
+
+  async probe(): Promise<
+    | { connected: true }
+    | { connected: false; code: 'TEMPORAL_NOT_INITIALIZED' | 'TEMPORAL_CONTROL_PLANE_UNAVAILABLE' }
+  > {
+    const connection = this.connection;
+    if (!connection) return { connected: false, code: 'TEMPORAL_NOT_INITIALIZED' };
+    try {
+      await connection.withDeadline(Date.now() + 2_000, () =>
+        connection.workflowService.getSystemInfo({}),
+      );
+      return { connected: true };
+    } catch {
+      return { connected: false, code: 'TEMPORAL_CONTROL_PLANE_UNAVAILABLE' };
+    }
   }
 }

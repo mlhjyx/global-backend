@@ -37,6 +37,52 @@
         ]
       }
     },
+    "/api/v1/health/live": {
+      "get": {
+        "operationId": "HealthController_live_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "service",
+                    "ts"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "global-api"
+                      ]
+                    },
+                    "ts": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "进程存活检查（不探测任何依赖）",
+        "tags": [
+          "System"
+        ]
+      }
+    },
     "/api/v1/health/db": {
       "get": {
         "operationId": "HealthController_db_v1",
@@ -60,6 +106,430 @@
           }
         },
         "summary": "数据库连通性检查（以 app_user 连接）",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/health/build": {
+      "get": {
+        "operationId": "HealthController_build_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "service",
+                    "build"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "global-api"
+                      ]
+                    },
+                    "build": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "attested",
+                            "schema_version",
+                            "build_sha",
+                            "built_at",
+                            "artifact_digest",
+                            "migration_revision",
+                            "schema_digest"
+                          ],
+                          "properties": {
+                            "attested": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            },
+                            "schema_version": {
+                              "type": "string",
+                              "enum": [
+                                "global-runtime-build-attestation/v1"
+                              ]
+                            },
+                            "build_sha": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{40}$"
+                            },
+                            "built_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "artifact_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            },
+                            "migration_revision": {
+                              "type": "string"
+                            },
+                            "schema_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "attested",
+                            "schema_version"
+                          ],
+                          "properties": {
+                            "attested": {
+                              "type": "boolean",
+                              "enum": [
+                                false
+                              ]
+                            },
+                            "schema_version": {
+                              "type": "string",
+                              "enum": [
+                                "global-runtime-build-attestation/v1"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "非敏感构建身份回执",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "API-local readiness 通过",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "service",
+                    "ts",
+                    "components"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "not_ready"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "global-api"
+                      ]
+                    },
+                    "ts": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "components": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "database",
+                        "temporal_control_plane",
+                        "worker",
+                        "outbox_relay",
+                        "admission"
+                      ],
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "temporal_control_plane": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "worker": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "outbox_relay": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "admission": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "至少一项必需证据失败或尚未证明",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "service",
+                    "ts",
+                    "components"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "not_ready"
+                      ]
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "global-api"
+                      ]
+                    },
+                    "ts": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "components": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "database",
+                        "temporal_control_plane",
+                        "worker",
+                        "outbox_relay",
+                        "admission"
+                      ],
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "temporal_control_plane": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "worker": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "outbox_relay": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "admission": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "接流就绪检查（DB、Temporal control plane 与受控 admission）",
         "tags": [
           "System"
         ]

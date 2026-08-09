@@ -10,6 +10,8 @@
 
 /apps/api/src/main.ts @mlhjyx
 /apps/api/src/health/ @mlhjyx
+/apps/api/src/runtime/ @mlhjyx
+/apps/api/scripts/generate-build-attestation.mts @mlhjyx
 /apps/api/src/auth/ @mlhjyx
 /apps/api/src/compliance/ @mlhjyx
 /apps/api/src/tools/ @mlhjyx
@@ -28,6 +30,8 @@
 /.gitleaksignore @mlhjyx
 /AGENTS.md @mlhjyx
 /apps/api/src/discovery/provider-source-classes.json @mlhjyx
+/apps/api/src/runtime/ @mlhjyx
+/apps/api/scripts/generate-build-attestation.mts @mlhjyx
 /docs/status/ @mlhjyx
 /docs/governance/ @mlhjyx
 /docs/backend/ci-merge-automation.md @mlhjyx

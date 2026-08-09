@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { buildGatewayProvider } from './model-providers.config';
+import { buildGatewayProvider, stubAllowed } from './model-providers.config';
 
 function providerEnv(): NodeJS.ProcessEnv {
   return {
@@ -32,6 +32,18 @@ function request(): { url: string; headers: Record<string, string> } {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('buildGatewayProvider — verified production model transports', () => {
+  it('never allows a stub in pilot or production even when the legacy override is set', () => {
+    expect(stubAllowed({ APP_ENVIRONMENT: 'pilot', MODEL_ALLOW_STUB: 'true' })).toBe(false);
+    expect(
+      stubAllowed({
+        APP_ENVIRONMENT: 'production',
+        NODE_ENV: 'production',
+        MODEL_ALLOW_STUB: 'true',
+      }),
+    ).toBe(false);
+    expect(stubAllowed({ NODE_ENV: 'development' })).toBe(true);
+  });
+
   it('Terra uses the verified native Responses endpoint', async () => {
     mockResponse({
       status: 'completed',
