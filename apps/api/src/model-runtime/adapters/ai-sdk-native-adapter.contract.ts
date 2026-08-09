@@ -37,6 +37,14 @@ export interface NativeAdapterWarning {
   details?: string;
 }
 
+export interface NativeModelResponseShape {
+  readonly schemaVersion: "native-model-response-shape/2026-08-09-v1";
+  readonly topLevelKeys: readonly string[];
+  readonly contentBlockTypes: readonly string[];
+  readonly usageKeys: readonly string[];
+  readonly validationPaths: readonly string[];
+}
+
 export interface NativeModelAdapterResult<Output> {
   protocol: NativeModelProtocol;
   requestedModel: string;
@@ -55,6 +63,7 @@ export class NativeModelApiError extends Error {
   readonly retryable: boolean;
   readonly responseBodyDigest?: string;
   readonly responseBodyBytes?: number;
+  readonly responseShape?: NativeModelResponseShape;
 
   constructor(input: {
     protocol: NativeModelProtocol;
@@ -64,6 +73,7 @@ export class NativeModelApiError extends Error {
     retryable: boolean;
     responseBodyDigest?: string;
     responseBodyBytes?: number;
+    responseShape?: NativeModelResponseShape;
   }) {
     super("Model provider API call failed");
     this.name = "NativeModelApiError";
@@ -74,6 +84,7 @@ export class NativeModelApiError extends Error {
     this.retryable = input.retryable;
     this.responseBodyDigest = input.responseBodyDigest;
     this.responseBodyBytes = input.responseBodyBytes;
+    this.responseShape = input.responseShape;
   }
 }
 
