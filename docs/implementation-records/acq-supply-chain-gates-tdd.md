@@ -32,6 +32,7 @@
 | 9    | `7ecda778`：workspace flow/越界 glob 与 YAML escape 合同失败；partial GREEN 的单引号保留键 mutation 再次变红 | `7e0230a1`：严格 workspace schema 与 lock YAML 子集 fail-closed；`\\x`/`\\u`/`\\U`、quoted key、flow path 均被阻断 |
 | 10   | `b4ecce59`：`!!binary` 可把 base64 解码为 Git resolution 并绕过 raw-text source marker                       | `de54ddd8`：全面拒绝 tag/anchor/alias 指示符；`!!`、`!<...>` 与 `*.alias` mutation 均被阻断                        |
 | 11   | `9d2214a8`：`pnpm.auditConfig.ignoreGhsas/ignoreCves` 可在 ratchet 前隐藏 advisory                           | `7102fe29`：所有 tracked manifest 的 `pnpm.auditConfig` 均 fail-closed，candidate 不能过滤 audit 事实              |
+| 12   | `eee0026e`：flow singleton-sequence key 被 js-yaml 字符串化为 `resolution/repo/commit/type`                  | `3a80d502`：拒绝 complex-key `?` 与 collection mapping key，并补 scp-like Git source 防线                          |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
