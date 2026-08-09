@@ -15,7 +15,7 @@ const ALLOWED_MODES = new Set<RuntimeMode>([
   'production',
 ]);
 
-function resolveMode(env: NodeJS.ProcessEnv): RuntimeMode {
+export function resolveRuntimeMode(env: NodeJS.ProcessEnv): RuntimeMode {
   const declared = env.APP_ENVIRONMENT?.trim();
   if (declared && !ALLOWED_MODES.has(declared as RuntimeMode)) {
     throw new Error(`APP_ENVIRONMENT must be one of: ${[...ALLOWED_MODES].join(', ')}`);
@@ -23,10 +23,30 @@ function resolveMode(env: NodeJS.ProcessEnv): RuntimeMode {
   if (env.NODE_ENV === 'production' && declared && declared !== 'production' && declared !== 'pilot') {
     throw new Error('NODE_ENV=production cannot be downgraded by APP_ENVIRONMENT');
   }
+  if (
+    (declared === 'pilot' || declared === 'production') &&
+    env.NODE_ENV !== 'production'
+  ) {
+    throw new Error(`${declared} requires NODE_ENV=production`);
+  }
   if (declared) return declared as RuntimeMode;
   if (env.NODE_ENV === 'production') return 'production';
   if (env.NODE_ENV === 'test') return 'test';
   return 'development';
+}
+
+function canonicalIpLiteral(address: string): string {
+  if (isIP(address) === 4) return address;
+  return new URL(`http://[${address}]/`).hostname.slice(1, -1);
+}
+
+function isWildcardAddress(address: string): boolean {
+  const canonical = canonicalIpLiteral(address);
+  return (
+    canonical === '0.0.0.0' ||
+    canonical === '::' ||
+    canonical === '::ffff:0:0'
+  );
 }
 
 function resolvePort(value: string | undefined): number {
@@ -50,7 +70,7 @@ function resolveBindHost(mode: RuntimeMode, value: string | undefined): string {
   if (!isIP(bindHost)) {
     throw new Error('API_BIND_HOST must be an IP literal without a port');
   }
-  if (bindHost === '0.0.0.0' || bindHost === '::') {
+  if (isWildcardAddress(bindHost)) {
     const qualifier = mode === 'pilot' ? 'controlled pilot requires loopback' : 'wildcard binds are forbidden';
     throw new Error(`API_BIND_HOST rejected: ${qualifier}`);
   }
@@ -60,8 +80,20 @@ function resolveBindHost(mode: RuntimeMode, value: string | undefined): string {
   return bindHost;
 }
 
+export function resolveCorsOrigin(
+  mode: RuntimeMode,
+  configured: string | undefined,
+): true | false | string[] {
+  const origins = (configured ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (origins.length > 0) return origins;
+  return mode === 'development' || mode === 'test';
+}
+
 export function resolveRuntimeSettings(env: NodeJS.ProcessEnv = process.env): RuntimeSettings {
-  const mode = resolveMode(env);
+  const mode = resolveRuntimeMode(env);
   return Object.freeze({
     mode,
     bindHost: resolveBindHost(mode, env.API_BIND_HOST),

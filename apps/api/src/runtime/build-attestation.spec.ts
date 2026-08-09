@@ -50,7 +50,7 @@ describe('build attestation', () => {
 
   it('allows an explicitly unattested development process but never pilot', async () => {
     const directory = await temporaryDirectory();
-    const missing = join(directory, 'missing.json');
+    const missing = join(directory, 'build-attestation.json');
 
     await expect(
       loadBuildIdentity({ mode: 'development', path: missing, artifactRoot: directory }),
@@ -68,16 +68,17 @@ describe('build attestation', () => {
   it('fails closed on malformed files and final-component symlinks', async () => {
     const directory = await temporaryDirectory();
     const target = join(directory, 'target.json');
-    const link = join(directory, 'attestation.json');
+    const link = join(directory, 'build-attestation.json');
     await writeFile(target, JSON.stringify(validAttestation));
     await symlink(target, link);
 
     await expect(
       loadBuildIdentity({ mode: 'pilot', path: link, artifactRoot: directory }),
     ).rejects.toThrow(/symlink|nofollow/i);
-    await writeFile(target, '{broken');
+    await rm(link);
+    await writeFile(link, '{broken');
     await expect(
-      loadBuildIdentity({ mode: 'development', path: target, artifactRoot: directory }),
+      loadBuildIdentity({ mode: 'development', path: link, artifactRoot: directory }),
     ).rejects.toThrow(/JSON/i);
   });
 
@@ -92,7 +93,8 @@ describe('build attestation', () => {
     await expect(computeArtifactDigest(link)).rejects.toThrow(/symlink|nofollow/i);
     const source = readFileSync(join(import.meta.dirname, 'build-attestation.ts'), 'utf8');
     expect(source).toContain('/proc/self/fd/');
-    expect(source).toMatch(/O_DIRECTORY[\s\S]*O_NOFOLLOW/);
+    expect(source).toContain('fsConstants.O_RDONLY | fsConstants.O_DIRECTORY');
+    expect(source).toContain('flags | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK');
   });
 
   it('computes a deterministic artifact tree digest and excludes only the receipt itself', async () => {

@@ -24,13 +24,23 @@ export const BUILD_IDENTITY = Symbol('BUILD_IDENTITY');
     {
       provide: BUILD_IDENTITY,
       inject: [RUNTIME_SETTINGS],
-      useFactory: async (settings: RuntimeSettings): Promise<BuildIdentity> =>
-        loadBuildIdentity({
+      useFactory: async (settings: RuntimeSettings): Promise<BuildIdentity> => {
+        const artifactRoot = resolve(__dirname, '..');
+        const path = resolve(artifactRoot, 'build-attestation.json');
+        if (
+          process.env.BUILD_ATTESTATION_PATH &&
+          resolve(process.env.BUILD_ATTESTATION_PATH) !== path
+        ) {
+          throw new Error(
+            'BUILD_ATTESTATION_PATH must identify the current executable artifact root',
+          );
+        }
+        return loadBuildIdentity({
           mode: settings.mode,
-          path:
-            process.env.BUILD_ATTESTATION_PATH ??
-            resolve(__dirname, '..', 'build-attestation.json'),
-        }),
+          path,
+          artifactRoot,
+        });
+      },
     },
     {
       provide: BuildIdentityService,

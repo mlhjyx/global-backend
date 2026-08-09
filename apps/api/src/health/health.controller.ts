@@ -10,6 +10,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { BuildIdentityService } from "../runtime/build-attestation";
 import {
   BUILD_HEALTH_RESPONSE_SCHEMA,
+  LIVE_HEALTH_RESPONSE_SCHEMA,
   RUNTIME_READINESS_RESPONSE_SCHEMA,
 } from "./health-openapi.schemas";
 import { RuntimeReadinessService } from "./runtime-readiness.service";
@@ -47,15 +48,7 @@ export class HealthController {
   @Get("live")
   @ApiOperation({ summary: "进程存活检查（不探测任何依赖）" })
   @ApiOkResponse({
-    schema: {
-      type: "object",
-      required: ["status", "service", "ts"],
-      properties: {
-        status: { type: "string", enum: ["ok"] },
-        service: { type: "string", enum: ["global-api"] },
-        ts: { type: "string", format: "date-time" },
-      },
-    },
+    schema: LIVE_HEALTH_RESPONSE_SCHEMA,
   })
   live(): { status: string; service: string; ts: string } {
     return this.check();

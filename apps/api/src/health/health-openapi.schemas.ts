@@ -10,6 +10,17 @@ const COMPONENT_SCHEMA: SchemaObject = {
   },
 };
 
+export const LIVE_HEALTH_RESPONSE_SCHEMA: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "service", "ts"],
+  properties: {
+    status: { type: "string", enum: ["ok"] },
+    service: { type: "string", enum: ["global-api"] },
+    ts: { type: "string", format: "date-time" },
+  },
+};
+
 export const BUILD_HEALTH_RESPONSE_SCHEMA: SchemaObject = {
   type: "object",
   additionalProperties: false,

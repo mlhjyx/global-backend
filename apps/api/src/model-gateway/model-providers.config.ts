@@ -61,5 +61,7 @@ export function buildGatewayProvider(
  * 绝不能静默合成假数据（数据真实性 P-04）。
  */
 export function stubAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NODE_ENV !== 'production' || env.MODEL_ALLOW_STUB === 'true';
+  const declaredMode = env.APP_ENVIRONMENT?.trim();
+  if (declaredMode === 'pilot' || declaredMode === 'production') return false;
+  return env.NODE_ENV !== 'production';
 }

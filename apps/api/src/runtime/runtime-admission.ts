@@ -13,9 +13,24 @@ export interface RuntimeAdmissionResult {
   admitted: boolean;
   checks: {
     build: AdmissionCheck;
+    environment: AdmissionCheck;
     auth: AdmissionCheck;
     gateway: AdmissionCheck;
   };
+}
+
+function inspectEnvironment(
+  settings: RuntimeSettings,
+  env: NodeJS.ProcessEnv,
+): AdmissionCheck {
+  if (!controlled(settings.mode)) return { status: 'optional' };
+  return env.NODE_ENV === 'production'
+    ? { status: 'ok' }
+    : { status: 'failed', code: 'CONTROLLED_NODE_ENV_REQUIRED' };
+}
+
+function present(value: string | undefined): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function controlled(mode: RuntimeSettings['mode']): boolean {
@@ -24,7 +39,11 @@ function controlled(mode: RuntimeSettings['mode']): boolean {
 
 function inspectAuth(settings: RuntimeSettings, env: NodeJS.ProcessEnv): AdmissionCheck {
   if (!controlled(settings.mode)) return { status: 'optional' };
-  if (!env.AUTH_JWKS_URI || !env.AUTH_ISSUER || !env.AUTH_AUDIENCE) {
+  if (
+    !present(env.AUTH_JWKS_URI) ||
+    !present(env.AUTH_ISSUER) ||
+    !present(env.AUTH_AUDIENCE)
+  ) {
     return { status: 'failed', code: 'AUTH_CONFIG_INCOMPLETE' };
   }
   try {
@@ -45,7 +64,10 @@ function loopback(hostname: string): boolean {
 
 function inspectGateway(settings: RuntimeSettings, env: NodeJS.ProcessEnv): AdmissionCheck {
   if (!controlled(settings.mode)) return { status: 'optional' };
-  if (!env.MODEL_GATEWAY_URL || !env.MODEL_GATEWAY_KEY) {
+  if (env.MODEL_ALLOW_STUB === 'true') {
+    return { status: 'failed', code: 'MODEL_STUB_FORBIDDEN' };
+  }
+  if (!present(env.MODEL_GATEWAY_URL) || !present(env.MODEL_GATEWAY_KEY)) {
     return { status: 'failed', code: 'GATEWAY_CONFIG_INCOMPLETE' };
   }
   try {
@@ -77,6 +99,7 @@ export function inspectRuntimeAdmission(
       : { status: 'optional' };
   const checks = Object.freeze({
     build,
+    environment: inspectEnvironment(settings, env),
     auth: inspectAuth(settings, env),
     gateway: inspectGateway(settings, env),
   });

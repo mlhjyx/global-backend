@@ -21,6 +21,7 @@ const attestation = await generateBuildAttestation({
 const verified = await loadBuildIdentity({
   mode: "pilot",
   path: resolve(apiRoot, "dist", "build-attestation.json"),
+  artifactRoot: resolve(apiRoot, "dist"),
 });
 if (!verified.attested || verified.build_sha !== attestation.build_sha) {
   throw new Error(

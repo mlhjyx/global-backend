@@ -9,7 +9,10 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
-import { resolveRuntimeSettings } from './runtime/runtime-environment';
+import {
+  resolveCorsOrigin,
+  resolveRuntimeSettings,
+} from './runtime/runtime-environment';
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
@@ -51,9 +54,8 @@ async function bootstrap(): Promise<void> {
   // ── 面向前端的安全护栏 ──────────────────────────────────────────────
   app.use(helmet({ contentSecurityPolicy: false })); // API 无 HTML，关 CSP 免误伤 Swagger UI
   // CORS 白名单：逗号分隔的允许源；未配置时 dev 放行、prod 收紧。
-  const origins = (process.env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   app.enableCors({
-    origin: origins.length ? origins : process.env.NODE_ENV === 'production' ? false : true,
+    origin: resolveCorsOrigin(runtimeSettings.mode, process.env.CORS_ORIGINS),
     credentials: true,
     exposedHeaders: ['Location', 'X-Request-Id', 'ETag'],
   });
