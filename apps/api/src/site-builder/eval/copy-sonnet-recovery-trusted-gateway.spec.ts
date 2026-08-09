@@ -21,6 +21,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import { COPY_TASK } from "../agents/copy";
 import { COPY_ASSEMBLY_EVAL_FIXTURES } from "./copy-assembly-eval";
 import {
   COPY_SONNET_RECOVERY_ADMISSION_SOURCE,
@@ -194,14 +195,24 @@ async function recoveryGateway(
               ({ fixtureId }) => fixtureId === "copy-factual-claims",
             )!.expectedOutput
           : { ok: true };
+      const usesJsonTool = Array.isArray(body.tools);
       sendJson(
         response,
         {
           type: "message",
           id: "message-copy-sonnet-recovery",
           model: "claude-sonnet-5",
-          content: [{ type: "text", text: JSON.stringify(output) }],
-          stop_reason: "end_turn",
+          content: usesJsonTool
+            ? [
+                {
+                  type: "tool_use",
+                  id: "toolu-copy-sonnet-recovery",
+                  name: "json",
+                  input: output,
+                },
+              ]
+            : [{ type: "text", text: JSON.stringify(output) }],
+          stop_reason: usesJsonTool ? "tool_use" : "end_turn",
           stop_sequence: null,
           usage: { input_tokens: 120, output_tokens: 40 },
         },
@@ -832,6 +843,20 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       trustedGateway,
     });
     const execution = await runner.execute(admitted.selectedExecutionKey);
+    expect(
+      live.observed.find(({ path }) => path === "/v1/messages")?.body,
+    ).toMatchObject({
+      tools: [
+        {
+          name: "json",
+          input_schema: COPY_TASK.outputSchema,
+        },
+      ],
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
+    });
+    expect(
+      live.observed.find(({ path }) => path === "/v1/messages")?.body,
+    ).not.toHaveProperty("output_config.format");
     const challenge =
       runnerModule.createCopyGitEvidenceAcceptanceChallenge(execution);
     const artifact = runnerModule.createCopyGitEvidenceAcceptanceArtifact({

@@ -244,6 +244,26 @@ const companySchema = {
   properties: { name: { type: "string" } },
 } as const;
 
+const dynamicCopySlotsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["slots"],
+  properties: {
+    slots: {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        additionalProperties: false,
+        required: ["content", "claimRefs"],
+        properties: {
+          content: { type: "string" },
+          claimRefs: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+  },
+} as const;
+
 describe("AI SDK 7 native provider adapters", () => {
   it("streams OpenAI Responses while preserving schema, reasoning and response metadata", async () => {
     const gateway = await startFakeGateway((_request, response, observed) => {
@@ -560,6 +580,105 @@ describe("AI SDK 7 native provider adapters", () => {
         }),
       ]),
     );
+  });
+
+  it("uses the Anthropic JSON tool for schema-valued additionalProperties", async () => {
+    const output = {
+      slots: {
+        hero_headline: { content: "Precision systems", claimRefs: [] },
+      },
+    };
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_dynamic_slots",
+          model: "claude-sonnet-5",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_dynamic_slots",
+              name: "json",
+              input: output,
+            },
+          ],
+          stop_reason: "tool_use",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 21,
+            output_tokens: 13,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const result = await adapter.execute<typeof output>({
+      alias: "claude-sonnet-5",
+      prompt: "Write every requested copy slot.",
+      outputSchema: dynamicCopySlotsSchema,
+      outputSchemaName: "copy_capability_output",
+      reasoning: { effort: "medium" },
+      maxOutputTokens: 1_200,
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+
+    expect(gateway.observed).toHaveLength(1);
+    const [request] = gateway.observed;
+    expect(request.body).toMatchObject({
+      model: "claude-sonnet-5",
+      output_config: { effort: "medium" },
+      tools: [
+        {
+          name: "json",
+          description: "Respond with a JSON object.",
+          input_schema: dynamicCopySlotsSchema,
+        },
+      ],
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
+    });
+    expect(request.body).not.toHaveProperty("output_config.format");
+    expect(result.output).toEqual(output);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("rejects an oversized Anthropic output schema before dispatch", async () => {
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(response, 500, { error: "must not dispatch" });
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+    const properties = Object.fromEntries(
+      Array.from({ length: 4_096 }, (_, index) => [
+        `field_${index}`,
+        { type: "string" },
+      ]),
+    );
+
+    await expect(
+      adapter.execute({
+        alias: "claude-sonnet-5",
+        prompt: "Do not dispatch this oversized schema.",
+        outputSchema: {
+          type: "object",
+          additionalProperties: false,
+          properties,
+        },
+        outputSchemaName: "oversized_output",
+        maxOutputTokens: 64,
+        abortSignal: AbortSignal.timeout(5_000),
+      }),
+    ).rejects.toThrow("Anthropic structured-output schema is too complex");
+    expect(gateway.observed).toHaveLength(0);
   });
 
   it("preserves Anthropic cache-write-only usage", async () => {
