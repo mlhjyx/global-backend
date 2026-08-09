@@ -135,6 +135,66 @@ test("production audit ratchet accepts the legacy set and improvements", async (
   ]);
 });
 
+test("audit receipt distinguishes legacy-risk ratchet pass from a clear result", async () => {
+  const { buildProductionAuditReceipt } =
+    await import("./supply-chain-audit.mjs");
+
+  assert.deepEqual(
+    buildProductionAuditReceipt({
+      ok: true,
+      current_advisories: 2,
+      resolved_advisories: [],
+    }),
+    {
+      schema_version: "production-dependency-audit-result/v1",
+      result: "RATCHET_PASS_WITH_LEGACY_RISK",
+      current_advisories: 2,
+      resolved_advisories: [],
+      registry: "https://registry.npmjs.org/",
+    },
+  );
+  assert.equal(
+    buildProductionAuditReceipt({
+      ok: true,
+      current_advisories: 0,
+      resolved_advisories: ["GHSA-aaaa-bbbb-cccc|example-runtime"],
+    }).result,
+    "PASS_CLEAR",
+  );
+});
+
+test("a resolved advisory cannot reappear relative to the PR base audit", async () => {
+  const { evaluateProductionAudit } = await import("./supply-chain-audit.mjs");
+  const retained = advisory();
+  const resolvedAtBase = advisory({
+    ghsa_id: "GHSA-dddd-eeee-ffff",
+    package: "resolved-runtime",
+    severity: "low",
+    url: "https://github.com/advisories/GHSA-dddd-eeee-ffff",
+  });
+  const legacyBaseline = baseline([retained, resolvedAtBase]);
+
+  const result = evaluateProductionAudit(
+    pnpmAudit([retained, resolvedAtBase]),
+    legacyBaseline,
+    {
+      now: NOW,
+      comparisonAudit: pnpmAudit([retained]),
+    },
+  );
+  assert.ok(issueCodes(result).includes("AUDIT_REINTRODUCED_ADVISORY"));
+
+  const malformedComparison = evaluateProductionAudit(
+    pnpmAudit([retained]),
+    legacyBaseline,
+    {
+      now: NOW,
+      comparisonAudit: { metadata: {}, advisories: {} },
+    },
+  );
+  assert.ok(issueCodes(malformedComparison).includes("AUDIT_COMPARISON_INVALID"));
+});
+
 test("initial bootstrap is exact and cannot pre-admit future advisories", async () => {
   const { evaluateProductionAudit, validateProductionAuditBaseline } =
     await import("./supply-chain-audit.mjs");
@@ -350,6 +410,9 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
     workflow,
     /git diff --no-renames --name-only -z "\$PR_BASE_SHA\.\.\.\$GITHUB_SHA"/,
   );
+  assert.match(workflow, /pnpm audit --prod[^\n]+> "\$BASE_AUDIT"/);
+  assert.match(workflow, /--comparison-audit-file "\$BASE_AUDIT"/);
+  assert.match(workflow, /^        version: 9\.15\.9$/m);
   for (const protectedBootstrapPath of [
     "package.json | */package.json",
     "pnpm-lock.yaml | pnpm-workspace.yaml",
