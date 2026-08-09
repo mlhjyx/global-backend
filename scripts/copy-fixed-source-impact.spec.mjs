@@ -1,16 +1,35 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   ACTIVE_COPY_RUNTIME_BINDING_PATH,
   ACTIVE_COPY_RUNTIME_BINDING_SHA256,
+  accountCopySourceBytes,
   buildCopySourceFingerprint,
   evaluateCopyFixedSourceImpact,
+  readAnchoredRepositoryFile,
+  readStableRegularHandle,
 } from "./copy-fixed-source-impact.mjs";
 
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
 const SHA_C = "c".repeat(64);
+
+function regularStat(overrides = {}) {
+  return {
+    dev: 1n,
+    ino: 2n,
+    mode: 0o100644n,
+    size: 3n,
+    mtimeNs: 4n,
+    ctimeNs: 5n,
+    isFile: () => true,
+    ...overrides,
+  };
+}
 
 function binding() {
   return {
@@ -237,5 +256,73 @@ test("Copy impact rejects stale fingerprints, binding substitutions, and unsafe 
         currentFiles: [{ path: "../outside", sha256: SHA_A }],
       }),
     /COPY_FIXED_SOURCE_BINDING_INVALID/u,
+  );
+});
+
+test("Copy source reads reject a regular file replaced while the same handle is read", async () => {
+  const stats = [regularStat(), regularStat({ ino: 99n })];
+  const handle = {
+    async stat() {
+      return stats.shift();
+    },
+    async read(buffer, offset, length) {
+      Buffer.from("abc").copy(buffer, offset, 0, length);
+      return { bytesRead: 3 };
+    },
+  };
+
+  await assert.rejects(
+    readStableRegularHandle(handle, 1024, "bound source"),
+    /COPY_FIXED_SOURCE_FILE_CHANGED/u,
+  );
+});
+
+test("Copy source reads reject growth observed during a bounded read", async () => {
+  const stats = [regularStat(), regularStat()];
+  const handle = {
+    async stat() {
+      return stats.shift();
+    },
+    async read(buffer, offset, length) {
+      Buffer.from("abcd").copy(buffer, offset, 0, length);
+      return { bytesRead: 4 };
+    },
+  };
+
+  await assert.rejects(
+    readStableRegularHandle(handle, 1024, "bound source"),
+    /COPY_FIXED_SOURCE_FILE_CHANGED/u,
+  );
+});
+
+test("Copy source traversal rejects a symlinked intermediate directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "copy-impact-root-"));
+  const outside = await mkdtemp(join(tmpdir(), "copy-impact-outside-"));
+  try {
+    await mkdir(join(root, "safe"));
+    await writeFile(join(outside, "source.ts"), "outside");
+    await symlink(outside, join(root, "safe", "linked"));
+
+    await assert.rejects(
+      readAnchoredRepositoryFile(root, "safe/linked/source.ts", {
+        maxBytes: 1024,
+      }),
+      /COPY_FIXED_SOURCE_PATH_NOT_REGULAR/u,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("Copy source aggregate accounting fails before the bounded inventory can grow without limit", () => {
+  assert.equal(accountCopySourceBytes(0, 3), 3);
+  assert.throws(
+    () => accountCopySourceBytes(128 * 1024 * 1024, 1),
+    /COPY_FIXED_SOURCE_TOTAL_BYTES_EXCEEDED/u,
+  );
+  assert.throws(
+    () => accountCopySourceBytes(-1, 1),
+    /COPY_FIXED_SOURCE_TOTAL_BYTES_INVALID/u,
   );
 });
