@@ -41,4 +41,4 @@ Copy v15 runtime binding 把完整 `packages/db/prisma/schema.prisma` 作为编�
 ## 5. TDD 证据
 
 - RED `2449b038`：新增同句柄 inode 替换、读取增长、中间目录 symlink 与总量上限合同；旧实现因缺少安全读取器导出而在模块加载阶段按预期失败。
-- GREEN：由最终 clean exact head 绑定；实现完成描述符锚定、`O_NOFOLLOW | O_NONBLOCK`、同句柄稳定读取、目录前后身份复核和累计资源上限后记录。
+- GREEN `ccf400ff`：实现完成描述符锚定、`O_NOFOLLOW | O_NONBLOCK`、同句柄稳定读取、目录前后身份复核、累计资源上限、closed-shape receipt 与机器 CODEOWNERS policy 同步。
