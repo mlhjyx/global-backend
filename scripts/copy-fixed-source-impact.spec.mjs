@@ -45,7 +45,7 @@ function eligibility(overrides = {}) {
     drifted_paths: [],
     dispatch_authorization: "NOT_AUTHORIZED",
     pilot_eligibility: "BLOCKED",
-    required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
+    required_followup: "SEPARATE_DISPATCH_AUTHORIZATION",
     stale_scope: "NONE",
     ...overrides,
   };
@@ -120,6 +120,7 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
       current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
       drifted_paths: ["packages/db/prisma/schema.prisma"],
       stale_scope: "PRISMA_SCHEMA_EVOLUTION",
+      required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
     }),
     currentFiles,
   });
@@ -133,7 +134,6 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
   for (const mutation of [
     { dispatch_authorization: "AUTHORIZED" },
     { pilot_eligibility: "READY" },
-    { required_followup: "NONE" },
   ]) {
     assert.throws(
       () =>
@@ -145,6 +145,7 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
               buildCopySourceFingerprint(currentFiles),
             drifted_paths: ["packages/db/prisma/schema.prisma"],
             stale_scope: "PRISMA_SCHEMA_EVOLUTION",
+            required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
             ...mutation,
           }),
           currentFiles,
@@ -152,6 +153,21 @@ test("Copy impact admits exact STALE/HOLD while keeping dispatch and pilot block
       /COPY_FIXED_SOURCE_SAFETY_BOUNDARY_INVALID/u,
     );
   }
+  assert.throws(
+    () =>
+      evaluateCopyFixedSourceImpact({
+        binding: binding(),
+        eligibility: eligibility({
+          status: "STALE_HOLD",
+          current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
+          drifted_paths: ["packages/db/prisma/schema.prisma"],
+          stale_scope: "PRISMA_SCHEMA_EVOLUTION",
+          required_followup: "SEPARATE_DISPATCH_AUTHORIZATION",
+        }),
+        currentFiles,
+      }),
+    /COPY_FIXED_SOURCE_FOLLOWUP_INVALID/u,
+  );
 });
 
 test("Copy impact rejects stale fingerprints, binding substitutions, and unsafe paths", () => {
@@ -198,6 +214,7 @@ test("Copy impact rejects stale fingerprints, binding substitutions, and unsafe 
           ]),
           drifted_paths: ["apps/api/src/model-runtime/types.ts"],
           stale_scope: "PRISMA_SCHEMA_EVOLUTION",
+          required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
         }),
         currentFiles: [
           { path: "apps/api/src/model-runtime/types.ts", sha256: SHA_C },
