@@ -819,6 +819,105 @@ describe("AI SDK 7 native provider adapters", () => {
 
   it.each([
     [
+      "an object union with omitted additionalProperties",
+      {
+        type: ["object", "null"],
+        required: ["name"],
+        properties: { name: { type: "string" } },
+      },
+      { name: "Acme" },
+    ],
+    [
+      "a patternProperties object with additionalProperties disabled",
+      {
+        type: "object",
+        additionalProperties: false,
+        patternProperties: { "^slot_": { type: "string" } },
+      },
+      { slot_name: "Acme" },
+    ],
+  ])(
+    "uses the Anthropic JSON tool for %s",
+    async (_case, outputSchema, output) => {
+      const gateway = await startFakeGateway((_request, response) => {
+        sendJson(
+          response,
+          200,
+          {
+            type: "message",
+            id: "msg_anthropic_open_object_variant",
+            model: "claude-sonnet-5",
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_open_object_variant",
+                name: "json",
+                input: output,
+              },
+            ],
+            stop_reason: "tool_use",
+            stop_sequence: null,
+            usage: {
+              input_tokens: 21,
+              output_tokens: 13,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+            },
+          },
+          { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+        );
+      });
+      const adapter = new AiSdkAnthropicMessagesAdapter(
+        adapterSettings(gateway.baseUrl),
+      );
+
+      const result = await adapter.execute<Record<string, string>>({
+        alias: "claude-sonnet-5",
+        prompt: "Return the open object.",
+        outputSchema,
+        outputSchemaName: "open_object_variant",
+        reasoning: { effort: "medium" },
+        maxOutputTokens: 256,
+        abortSignal: AbortSignal.timeout(5_000),
+      });
+
+      expect(gateway.observed).toHaveLength(1);
+      const [request] = gateway.observed;
+      expect(request.body).toHaveProperty("tools.0.name", "json");
+      expect(request.body).not.toHaveProperty("output_config.format");
+      expect(result.output).toEqual(output);
+    },
+  );
+
+  it("rejects a non-JSON Anthropic schema before dispatch", async () => {
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(response, 500, { error: "must not dispatch" });
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    await expect(
+      adapter.execute({
+        alias: "claude-sonnet-5",
+        prompt: "Do not dispatch this non-JSON schema.",
+        outputSchema: {
+          type: "object",
+          const: BigInt(1),
+        },
+        outputSchemaName: "non_json_output",
+        maxOutputTokens: 64,
+        abortSignal: AbortSignal.timeout(5_000),
+      }),
+    ).rejects.toThrow(
+      "Anthropic structured-output schema must be JSON serializable",
+    );
+    expect(gateway.observed).toHaveLength(0);
+  });
+
+  it.each([
+    [
       "description at the byte limit plus one",
       closedCompanySchemaWithDescriptionSize(
         MAX_ANTHROPIC_SCHEMA_BYTES_FOR_TEST + 1,
