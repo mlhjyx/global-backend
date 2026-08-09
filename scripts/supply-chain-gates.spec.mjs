@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const repositoryRoot = new URL("../", import.meta.url);
-const BASE_COMMIT = "362f88cac1656016bd5aba93032e0f1d90048cba";
+const BASE_COMMIT = "6b78901c2b4aee211e93ca11d5af13ea74398459";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
 
