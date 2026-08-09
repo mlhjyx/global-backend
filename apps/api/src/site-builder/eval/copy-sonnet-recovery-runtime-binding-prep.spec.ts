@@ -239,6 +239,27 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     ).toThrow("COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_INVALID");
   });
 
+  it("keeps runtime-binding preparation free of clients, credentials, environment reads, and fetch", () => {
+    const sources = [
+      readFileSync(
+        resolve(
+          import.meta.dirname,
+          "copy-sonnet-recovery-runtime-binding-prep.ts",
+        ),
+        "utf8",
+      ),
+      readFileSync(
+        resolve(
+          import.meta.dirname,
+          "../../../scripts/prepare-site-builder-copy-sonnet-recovery-runtime-binding.mts",
+        ),
+        "utf8",
+      ),
+    ].join("\n");
+
+    expect(sources).not.toMatch(/\bfetch\b|process\.env|apiKey|credentialRef/u);
+  });
+
   it("matches the generated v13 create-only runtime binding exactly", () => {
     const recoveryManifestBytes = readFileSync(
       resolve(REPOSITORY_ROOT, RECOVERY_MANIFEST_PATH),
