@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
@@ -16,6 +16,7 @@ import {
 } from "./copy-pilot-source-verifier";
 
 const directories: string[] = [];
+const REPOSITORY_ROOT = resolve(import.meta.dirname, "../../../../../");
 
 afterEach(async () => {
   await Promise.all(
@@ -217,5 +218,17 @@ describe("Copy pilot fixed-source verifier", () => {
         manifestArtifactPath: fixture.manifestPath,
       }),
     ).rejects.toThrow("COPY_PILOT_PREPARATION_SOURCE_UNREACHABLE");
+  });
+
+  it("rejects the frozen v13 recovery binding as the current recovery source", async () => {
+    await expect(
+      createCopyPilotVerifiedSource({
+        repositoryRoot: REPOSITORY_ROOT,
+        manifestArtifactPath: resolve(
+          REPOSITORY_ROOT,
+          "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json",
+        ),
+      }),
+    ).rejects.toThrow("COPY_PILOT_MANIFEST_INVALID");
   });
 });

@@ -9,11 +9,11 @@
 
 ## 1. 分类
 
-| 位置 | 分类 | 可证明 | 不可证明 |
-|---|---|---|---|
-| [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE` | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
-| [`site-builder/`](site-builder/) | `HISTORICAL / FROZEN_EVIDENCE` | M1-f/M1-g 的 manifest、fee card、decision card、stopped run 与历史执行 provenance | 当前授权、当前 runtime、自动 promotion、生产部署或可合并 |
-| `runtime/`（仅在有记录时创建） | `CURRENT` 或 `HISTORICAL` | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定 | 超出 `valid_until` 的状态，或其他 commit/environment 的状态 |
+| 位置                               | 分类                           | 可证明                                                                            | 不可证明                                                         |
+| ---------------------------------- | ------------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE` | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance                | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
+| [`site-builder/`](site-builder/)   | `HISTORICAL / FROZEN_EVIDENCE` | M1-f/M1-g 的 manifest、fee card、decision card、stopped run 与历史执行 provenance | 当前授权、当前 runtime、自动 promotion、生产部署或可合并         |
+| `runtime/`（仅在有记录时创建）     | `CURRENT` 或 `HISTORICAL`      | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定 | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
 
 现有 model-routing 和 Site Builder 文件不会因被索引而升级为 current。判断当前运行证据只运行：
 
@@ -59,4 +59,5 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 - design_spec manifest 准备决策卡：[`m1-g-design-spec-evaluation-manifest-prep-decision-card.md`](site-builder/m1-g-design-spec-evaluation-manifest-prep-decision-card.md)
 - M1-g 阶段收口基线：[`m1-g-stage-closeout-baseline.json`](site-builder/m1-g-stage-closeout-baseline.json)
 - 文本评测历史 evidence：[`m1-g-text-evaluation-real-evidence-v1.json`](site-builder/m1-g-text-evaluation-real-evidence-v1.json)
-- Copy Sonnet recovery v13 create-only 交付：[实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json)与 [post-sync runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json)；三者只证明固定输入和零调用准备，不构成 capability、质量、晋级或生产路由证据。
+- Copy Sonnet recovery v14 当前 create-only 交付：[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json)与 [runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json)；两者固定 #359 后的 canonical binding path、全新 manifest/artifact/execution/child-slot 及 campaign/global/child/reservation 身份 namespace、response compatibility 与 Git acceptance runtime，仍为 `NOT_AUTHORIZED`、0 wire/0 cost，不构成 capability、质量、晋级或生产路由证据。
+- Copy Sonnet recovery v13 历史 create-only 交付：[实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json)与 [runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json)；tracked artifact 不回写后续私有 stopped run，且不能作为 v14 authorization 或执行输入。

@@ -14,8 +14,7 @@ function admission(): CopySonnetRecoveryAdmissionInput {
   const manifest = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId:
-      "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit: "c".repeat(40),
@@ -67,16 +66,18 @@ function admission(): CopySonnetRecoveryAdmissionInput {
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: "copy-sonnet-recovery-campaign-v13",
-    authorizationId: "copy-sonnet-recovery-child-authorization-v13",
-    reservationId: "copy-sonnet-recovery-child-reservation-v13",
+    campaignId: "copy-sonnet-recovery-v14-campaign-admission-test",
+    authorizationId:
+      "copy-sonnet-recovery-v14-child-authorization-admission-test",
+    reservationId: "copy-sonnet-recovery-v14-child-reservation-admission-test",
     ledgerIdentityDigest: "f".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
-    authorizationId: "copy-sonnet-recovery-global-authorization-v13",
+    authorizationId:
+      "copy-sonnet-recovery-v14-global-authorization-admission-test",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
@@ -143,24 +144,38 @@ describe("Copy Sonnet recovery admission", () => {
 
     expect(COPY_SONNET_RECOVERY_ADMISSION_SOURCE.executions).toEqual([
       {
-        executionKey: "copy-sonnet-recovery-v13-claude-sonnet-5",
+        executionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
         sourcePilotExecutionKey: "copy-capability-3-claude-sonnet-5",
         alias: "claude-sonnet-5",
         protocol: "anthropic_messages",
         reasoning: "medium",
       },
     ]);
+    expect(
+      COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign.childSlotId,
+    ).toBe("copy-sonnet-recovery-v14-child-claude-sonnet-5");
     expect(JSON.stringify(input)).not.toMatch(/gpt-5\.6-(terra|sol)/u);
     expect(result).toMatchObject({
       classification: "SOURCE_CONTRACT_VALIDATION_ONLY",
       dispatchCapable: false,
-      selectedExecutionKey:
-        "copy-sonnet-recovery-v13-claude-sonnet-5",
+      selectedExecutionKey: "copy-sonnet-recovery-v14-claude-sonnet-5",
       maximumExecutions: 1,
       maximumWireCalls: 2,
       globalMaximumExecutions: 1,
       globalMaximumWireCalls: 2,
     });
+    const { reservationDigest, ...withoutReservationDigest } =
+      input.childAuthorization;
+    expect(result.globalAuthorizationDigest).toBe(
+      canonicalDigest(input.authorization),
+    );
+    expect(result.childAuthorizationDigest).toBe(
+      canonicalDigest(input.childAuthorization),
+    );
+    expect(reservationDigest).toBe(
+      copySonnetRecoveryReservationDigest(withoutReservationDigest),
+    );
+    expect(result.reservationDigest).toBe(reservationDigest);
   });
 
   it("rejects any broadened model, protocol, channel, quota, or authorization scope", () => {
@@ -240,4 +255,144 @@ describe("Copy Sonnet recovery admission", () => {
       ),
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_BUNDLE_UNVERIFIED");
   });
+
+  it("rejects a v13 child slot even when its authorization digests are rebuilt", () => {
+    const base = admission();
+    const childSlotId = "copy-sonnet-recovery-child-claude-sonnet-5";
+    const authorization = {
+      ...base.authorization,
+      children: base.authorization.children.map((child) => ({
+        ...child,
+        childSlotId,
+      })),
+    };
+    const {
+      reservationDigest: _reservationDigest,
+      ...currentChildAuthorization
+    } = base.childAuthorization;
+    const childWithoutDigest = {
+      ...currentChildAuthorization,
+      globalAuthorizationDigest: canonicalDigest(authorization),
+      childSlotId,
+    };
+
+    expect(() =>
+      validateCopySonnetRecoveryAdmissionEnvelope(
+        {
+          ...base,
+          authorization,
+          childAuthorization: {
+            ...childWithoutDigest,
+            reservationDigest:
+              copySonnetRecoveryReservationDigest(childWithoutDigest),
+          },
+        },
+        new Date("2026-08-08T15:30:00.000Z"),
+      ),
+    ).toThrow(/COPY_SONNET_RECOVERY_(AUTHORIZATION|CHILD_SCOPE)_MISMATCH/u);
+  });
+
+  it("rejects a renamed runtime manifest even when every authorization digest is rebuilt", () => {
+    const base = admission();
+    const manifest = {
+      ...base.manifest,
+      manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v13-v1",
+    };
+    const authorization = {
+      ...base.authorization,
+      manifestDigest: canonicalDigest(manifest),
+    };
+    const {
+      reservationDigest: _reservationDigest,
+      ...currentChildAuthorization
+    } = base.childAuthorization;
+    const childWithoutDigest = {
+      ...currentChildAuthorization,
+      globalAuthorizationDigest: canonicalDigest(authorization),
+      manifestDigest: authorization.manifestDigest,
+    };
+
+    expect(() =>
+      validateCopySonnetRecoveryAdmissionEnvelope(
+        {
+          ...base,
+          manifest,
+          authorization,
+          childAuthorization: {
+            ...childWithoutDigest,
+            reservationDigest:
+              copySonnetRecoveryReservationDigest(childWithoutDigest),
+          },
+        },
+        new Date("2026-08-08T15:30:00.000Z"),
+      ),
+    ).toThrow("COPY_SONNET_RECOVERY_MANIFEST_INVALID");
+  });
+
+  for (const version of ["v11", "v12", "v13"] as const) {
+    for (const field of [
+      "globalAuthorization",
+      "campaign",
+      "childAuthorization",
+      "reservation",
+    ] as const) {
+      it(`rejects a consumed ${version} ${field} identity after rebuilding every dependent digest`, () => {
+        const base = admission();
+        const sourceChild = base.authorization.children[0]!;
+        const priorChild = {
+          ...sourceChild,
+          campaignId:
+            field === "campaign"
+              ? `copy-sonnet-recovery-${version}-campaign-consumed`
+              : sourceChild.campaignId,
+          authorizationId:
+            field === "childAuthorization"
+              ? `copy-sonnet-recovery-${version}-child-authorization-consumed`
+              : sourceChild.authorizationId,
+          reservationId:
+            field === "reservation"
+              ? `copy-sonnet-recovery-${version}-child-reservation-consumed`
+              : sourceChild.reservationId,
+        };
+        const authorization = {
+          ...base.authorization,
+          authorizationId:
+            field === "globalAuthorization"
+              ? `copy-sonnet-recovery-${version}-global-authorization-consumed`
+              : base.authorization.authorizationId,
+          children: [priorChild] as const,
+        };
+        const {
+          reservationDigest: _reservationDigest,
+          ...currentChildAuthorization
+        } = base.childAuthorization;
+        const childWithoutDigest = {
+          ...currentChildAuthorization,
+          globalAuthorizationDigest: canonicalDigest(authorization),
+          campaignId: priorChild.campaignId,
+          authorizationId: priorChild.authorizationId,
+          reservationId: priorChild.reservationId,
+        };
+
+        expect(() =>
+          validateCopySonnetRecoveryAdmissionEnvelope(
+            {
+              ...base,
+              authorization,
+              childAuthorization: {
+                ...childWithoutDigest,
+                reservationDigest:
+                  copySonnetRecoveryReservationDigest(childWithoutDigest),
+              },
+            },
+            new Date("2026-08-08T15:30:00.000Z"),
+          ),
+        ).toThrow(
+          field === "globalAuthorization"
+            ? "COPY_SONNET_RECOVERY_AUTHORIZATION_MISMATCH"
+            : "COPY_SONNET_RECOVERY_CHILD_SCOPE_MISMATCH",
+        );
+      });
+    }
+  }
 });

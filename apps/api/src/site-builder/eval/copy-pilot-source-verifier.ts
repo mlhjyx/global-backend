@@ -13,7 +13,13 @@ import {
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
 import { COPY_SONNET_RECOVERY_ADMISSION_SOURCE } from "./copy-sonnet-recovery-admission";
-import { COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION } from "./copy-sonnet-recovery-contract";
+import {
+  COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
+  COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+} from "./copy-sonnet-recovery-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
@@ -63,6 +69,7 @@ interface ManifestArtifact {
   };
   compiledRuntimeExpectation: CompiledRuntimeExpectation;
   duplicatePrevention?: unknown;
+  recoveryManifestReference?: { path?: unknown };
   requiredMergeMethod?: unknown;
   artifactDigest: string;
   [key: string]: unknown;
@@ -213,9 +220,15 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
     "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1"
       ? artifact.classification !==
           "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME" ||
+        artifact.artifactId !==
+          COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID ||
         artifact.requiredMergeMethod !== "merge_commit" ||
         artifact.manifest.schemaVersion !==
           "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" ||
+        artifact.manifest.manifestId !==
+          COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID ||
+        artifact.recoveryManifestReference?.path !==
+          COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH ||
         artifact.manifest.planDigest !==
           COPY_SONNET_RECOVERY_ADMISSION_SOURCE.planDigest ||
         artifact.manifest.plannedExecutions !== 1 ||
@@ -277,6 +290,13 @@ export async function createCopyPilotVerifiedSource(input: {
     fail("COPY_PILOT_MANIFEST_BYTES_MISMATCH");
   }
   const artifact = parseArtifact(manifestBytes);
+  if (
+    artifact.schemaVersion ===
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1" &&
+    manifestRelativePath !== COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH
+  ) {
+    fail("COPY_PILOT_MANIFEST_INVALID");
+  }
   if (
     spawnSync(
       "git",
