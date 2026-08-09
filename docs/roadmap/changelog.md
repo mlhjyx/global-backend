@@ -7,6 +7,12 @@
 - 当前独立变更集取消 suppression 裸 DELETE：`suppression_record` 保留事实、未知原因 fail-closed 为 LEGAL、只允许 PREFERENCE→LEGAL；类型化 canonicalizer 拒绝无效禁联值，并在新写入、旧值读取、发现匹配、即时公司分块更新、联系人/邮箱/既有 contact point 验证/Lead accept 终极闸共享规范键，避免“201 成功但永不命中”。邮箱验证在 company-name/domain/email 禁联命中时于 provider 路由和 SMTP 前阻断；已 QUALIFIED 的 accept 重试也复核禁联，但不重复写 LeadDecision/LeadQualified。释放和身份纠正只追加带 request/actor/reason/time 的 `suppression_decision`，DB 固定合法语义组合，普通 API 不执行真实 release，法定记录的 release request 持久化拒绝后返回机器合同明确且与统一 filter 一致的 409；审计/PII 列表使用 cursor page envelope 且每页最多 100。
 - DataRights DENY 从“throw 导致日志回滚”改为先在租户事务提交 `policy_decision_log`、再在事务外返回 409；在 DENY 前不执行 Lead CAS、不建 LeadDecision、不发 LeadQualified。隔离无卷 PostgreSQL 空库完成全部 82 migrations，并验证 app_user 禁止删除 suppression、禁止更新/删除 decision、禁止 LEGAL 降级与跨 workspace 关联；测试容器已删除。该证据只属于 source/migration 验证，不代表已部署或真实 pilot。
 
+## 2026-08-10 · Copy fixed-source 影响治理
+
+- 新增 [Copy source eligibility receipt](../evidence/site-builder/copy-runtime-eligibility.json) 和 required-build verifier。活跃 v15 binding 的路径、文件 SHA、artifact ID、82-file bundle digest、当前 source fingerprint 与 drift paths 都必须精确匹配。
+- 只有零漂移可执行 v15 双 fixed-source rebuild。与 Copy 无关的 Prisma schema 漂移必须显式降级为 `STALE_HOLD`，且 verifier/runner/model runtime/lockfile 等其他路径不允许进入例外；receipt 永远不能授权 dispatch 或 pilot。
+- 该治理避免未授权的 Site Builder 评测冻结获客数据库演进；CI impact verifier 以描述符锚定、同句柄稳定读取和总量上限证明当前 source 状态。历史 dispatch verifier 的中间目录/并发读取与 ledger/claim 前置时序仍是明确 NO-GO，必须随下一次 Copy fixed-source rebase 关闭，不能由本 receipt 冒充已解决。完整设计见[实施记录](../implementation-records/copy-fixed-source-impact-governance.md)。
+
 ## 2026-08-09 · Copy Sonnet recovery v14 create-only preparation
 
 - #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定 canonical path 与后续身份绑定提交 `3da93486163404e3943711c6689a55c9a9e2c119`、82-file source digest `cbec88ad…`、53-file compiled tree `ce806d78…` 与 artifact digest `4f9fdf06…`。

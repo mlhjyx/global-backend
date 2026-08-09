@@ -157,6 +157,10 @@ test("the live required build fails when its scope dependency is not successful"
 test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const buildJob = jobBlock(ciWorkflow, "build-test");
+  const impactStep = namedStepBlock(
+    buildJob,
+    "Evaluate Copy fixed-source impact",
+  );
   const rebuildStep = namedStepBlock(
     buildJob,
     "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
@@ -168,13 +172,23 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
     "the fixed-source ancestry check requires a complete trusted checkout",
   );
   assert.match(
-    rebuildStep,
-    /^          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1$/m,
+    impactStep,
+    /^      - name: Evaluate Copy fixed-source impact$/m,
+  );
+  assert.match(impactStep, /^        id: copy-impact$/m);
+  assert.match(
+    impactStep,
+    /^        run: node scripts\/copy-fixed-source-impact\.mjs --github-output "\$GITHUB_OUTPUT"$/m,
   );
   assert.match(
     rebuildStep,
-    /^          COPY_SONNET_RECOVERY_REBUILD_TEST=1$/m,
+    /^        if: steps\.copy-impact\.outputs\.status == 'CURRENT'$/m,
   );
+  assert.match(
+    rebuildStep,
+    /^          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1$/m,
+  );
+  assert.match(rebuildStep, /^          COPY_SONNET_RECOVERY_REBUILD_TEST=1$/m);
   assert.match(
     rebuildStep,
     /^          src\/site-builder\/eval\/copy-sonnet-recovery-manifest-prep\.spec\.ts$/m,
@@ -216,6 +230,29 @@ test("the topology suite uses the established governance entry without changing 
     /^import "\.\/governance-ci-topology\.spec\.mjs";$/m,
     "the existing governance test entry must load the topology suite",
   );
+});
+
+test("the Copy impact verifier and receipt remain code-owner controlled", async () => {
+  const [codeowners, requiredContextsText] = await Promise.all([
+    readRepositoryFile(".github/CODEOWNERS"),
+    readRepositoryFile(".github/required-contexts.json"),
+  ]);
+  const requiredContexts = JSON.parse(requiredContextsText);
+  const protectedPatterns = [
+    "/scripts/copy-fixed-source-impact*.mjs",
+    "/docs/evidence/site-builder/copy-runtime-eligibility.json",
+    "/docs/implementation-records/copy-fixed-source-impact-governance.md",
+  ];
+  for (const pattern of protectedPatterns) {
+    const rule = `${pattern} @mlhjyx`;
+    assert.ok(codeowners.split(/\r?\n/u).includes(rule), `missing ${rule}`);
+    assert.ok(
+      requiredContexts.codeowner_requirements.terminal_patterns.includes(
+        pattern,
+      ),
+      `machine CODEOWNERS policy is missing ${pattern}`,
+    );
+  }
 });
 
 test("the required build emits an exact-SHA runtime attestation after the final API rebuild", async () => {
