@@ -205,8 +205,10 @@ describe('JwksTokenVerifier contract', () => {
   it.each([
     ['workspace', { AUTH_WORKSPACE_CLAIM: '__proto__' }],
     ['workspace', { AUTH_WORKSPACE_CLAIM: '' }],
+    ['workspace', { AUTH_WORKSPACE_CLAIM: 'sub' }],
     ['roles', { AUTH_ROLES_CLAIM: 'constructor' }],
     ['roles', { AUTH_ROLES_CLAIM: 'x'.repeat(129) }],
+    ['roles', { AUTH_ROLES_CLAIM: 'sub' }],
   ])('rejects an unsafe custom %s claim name', (_kind, override) => {
     expect(
       () =>
@@ -215,6 +217,19 @@ describe('JwksTokenVerifier contract', () => {
           AUTH_ISSUER: issuer,
           AUTH_AUDIENCE: audience,
           ...override,
+        }),
+    ).toThrow(/claim name/);
+  });
+
+  it('rejects workspace and roles claims that use the same name', () => {
+    expect(
+      () =>
+        new JwksTokenVerifier({
+          AUTH_JWKS_URI: 'https://identity.example.test/jwks',
+          AUTH_ISSUER: issuer,
+          AUTH_AUDIENCE: audience,
+          AUTH_WORKSPACE_CLAIM: 'tenant_context',
+          AUTH_ROLES_CLAIM: 'tenant_context',
         }),
     ).toThrow(/claim name/);
   });

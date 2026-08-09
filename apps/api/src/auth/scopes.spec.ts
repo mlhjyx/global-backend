@@ -82,6 +82,10 @@ describe('roles to scopes policy', () => {
       'acquisition:read',
       'acquisition:write',
     ]);
+
+    const developmentPolicy = createRolesToScopesPolicy({}, 'development');
+    expect(developmentPolicy.resolve(['toString'])).toEqual([]);
+    expect(developmentPolicy.resolve(['hasOwnProperty'])).toEqual([]);
   });
 
   it('deduplicates roles and scopes without mutating caller claims', () => {
