@@ -206,8 +206,10 @@ describe('JwksTokenVerifier contract', () => {
     ['workspace', { AUTH_WORKSPACE_CLAIM: '__proto__' }],
     ['workspace', { AUTH_WORKSPACE_CLAIM: '' }],
     ['workspace', { AUTH_WORKSPACE_CLAIM: 'sub' }],
+    ['workspace', { AUTH_WORKSPACE_CLAIM: 'scp' }],
     ['roles', { AUTH_ROLES_CLAIM: 'constructor' }],
     ['roles', { AUTH_ROLES_CLAIM: 'x'.repeat(129) }],
+    ['roles', { AUTH_ROLES_CLAIM: 'scope' }],
     ['roles', { AUTH_ROLES_CLAIM: 'sub' }],
   ])('rejects an unsafe custom %s claim name', (_kind, override) => {
     expect(
