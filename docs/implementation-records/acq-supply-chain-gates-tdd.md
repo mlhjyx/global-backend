@@ -23,6 +23,7 @@
 | 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败        | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过  |
 | 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败 | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执 |
 | 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败   | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过     |
+| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败     | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝   |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
@@ -30,8 +31,8 @@
 
 | 验证                                              | 结果                                                          | 证明边界                                                                                   |
 | ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `node --test scripts/supply-chain-gates.spec.mjs` | 14/14 PASS                                                    | ratchet、bootstrap、回归、回执、workflow/Dependabot/CodeQL 静态合同                        |
-| `pnpm governance:verify`                          | 45/45 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
+| `node --test scripts/supply-chain-gates.spec.mjs` | 15/15 PASS                                                    | ratchet、bootstrap、回归、网络信任边界、回执、workflow/Dependabot/CodeQL 静态合同          |
+| `pnpm governance:verify`                          | 46/46 PASS；governance verifier PASS                          | 新 suite 已被 canonical root entry 独立锁定；现有 traceability/provider/release 合同未回退 |
 | 官方 registry installed base/head 模拟            | `RATCHET_PASS_WITH_LEGACY_RISK`；36 advisories；183 exposures | base 与 head 都禁 scripts/pnpm hooks 后物化路径；不代表漏洞已解决                          |
 | Prettier 与 `git diff --check`                    | PASS                                                          | 新增 YAML/JS/JSON/Markdown 格式与 whitespace 合同                                          |
 | Copy v13 fixed-source rebuild                     | `0a283dab`：7/7 PASS；Prisma/contracts/API build PASS         | 根 `package.json` 与受绑定 source 未因本切片漂移                                           |
