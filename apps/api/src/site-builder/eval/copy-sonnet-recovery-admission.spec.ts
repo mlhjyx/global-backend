@@ -164,6 +164,18 @@ describe("Copy Sonnet recovery admission", () => {
       globalMaximumExecutions: 1,
       globalMaximumWireCalls: 2,
     });
+    const { reservationDigest, ...withoutReservationDigest } =
+      input.childAuthorization;
+    expect(result.globalAuthorizationDigest).toBe(
+      canonicalDigest(input.authorization),
+    );
+    expect(result.childAuthorizationDigest).toBe(
+      canonicalDigest(input.childAuthorization),
+    );
+    expect(reservationDigest).toBe(
+      copySonnetRecoveryReservationDigest(withoutReservationDigest),
+    );
+    expect(result.reservationDigest).toBe(reservationDigest);
   });
 
   it("rejects any broadened model, protocol, channel, quota, or authorization scope", () => {
@@ -317,49 +329,70 @@ describe("Copy Sonnet recovery admission", () => {
     ).toThrow("COPY_SONNET_RECOVERY_MANIFEST_INVALID");
   });
 
-  it.each(["v11", "v12", "v13"] as const)(
-    "rejects consumed %s campaign and authorization identities even when every dependent digest is rebuilt",
-    (version) => {
-      const base = admission();
-      const priorChild = {
-        ...base.authorization.children[0]!,
-        campaignId: `copy-sonnet-recovery-${version}-campaign-consumed`,
-        authorizationId: `copy-sonnet-recovery-${version}-child-authorization-consumed`,
-        reservationId: `copy-sonnet-recovery-${version}-child-reservation-consumed`,
-      };
-      const authorization = {
-        ...base.authorization,
-        authorizationId: `copy-sonnet-recovery-${version}-global-authorization-consumed`,
-        children: [priorChild] as const,
-      };
-      const {
-        reservationDigest: _reservationDigest,
-        ...currentChildAuthorization
-      } = base.childAuthorization;
-      const childWithoutDigest = {
-        ...currentChildAuthorization,
-        globalAuthorizationDigest: canonicalDigest(authorization),
-        campaignId: priorChild.campaignId,
-        authorizationId: priorChild.authorizationId,
-        reservationId: priorChild.reservationId,
-      };
+  for (const version of ["v11", "v12", "v13"] as const) {
+    for (const field of [
+      "globalAuthorization",
+      "campaign",
+      "childAuthorization",
+      "reservation",
+    ] as const) {
+      it(`rejects a consumed ${version} ${field} identity after rebuilding every dependent digest`, () => {
+        const base = admission();
+        const sourceChild = base.authorization.children[0]!;
+        const priorChild = {
+          ...sourceChild,
+          campaignId:
+            field === "campaign"
+              ? `copy-sonnet-recovery-${version}-campaign-consumed`
+              : sourceChild.campaignId,
+          authorizationId:
+            field === "childAuthorization"
+              ? `copy-sonnet-recovery-${version}-child-authorization-consumed`
+              : sourceChild.authorizationId,
+          reservationId:
+            field === "reservation"
+              ? `copy-sonnet-recovery-${version}-child-reservation-consumed`
+              : sourceChild.reservationId,
+        };
+        const authorization = {
+          ...base.authorization,
+          authorizationId:
+            field === "globalAuthorization"
+              ? `copy-sonnet-recovery-${version}-global-authorization-consumed`
+              : base.authorization.authorizationId,
+          children: [priorChild] as const,
+        };
+        const {
+          reservationDigest: _reservationDigest,
+          ...currentChildAuthorization
+        } = base.childAuthorization;
+        const childWithoutDigest = {
+          ...currentChildAuthorization,
+          globalAuthorizationDigest: canonicalDigest(authorization),
+          campaignId: priorChild.campaignId,
+          authorizationId: priorChild.authorizationId,
+          reservationId: priorChild.reservationId,
+        };
 
-      expect(() =>
-        validateCopySonnetRecoveryAdmissionEnvelope(
-          {
-            ...base,
-            authorization,
-            childAuthorization: {
-              ...childWithoutDigest,
-              reservationDigest:
-                copySonnetRecoveryReservationDigest(childWithoutDigest),
+        expect(() =>
+          validateCopySonnetRecoveryAdmissionEnvelope(
+            {
+              ...base,
+              authorization,
+              childAuthorization: {
+                ...childWithoutDigest,
+                reservationDigest:
+                  copySonnetRecoveryReservationDigest(childWithoutDigest),
+              },
             },
-          },
-          new Date("2026-08-08T15:30:00.000Z"),
-        ),
-      ).toThrow(
-        /COPY_SONNET_RECOVERY_(AUTHORIZATION|CHILD_SCOPE|CHILD_AUTHORIZATION)_MISMATCH/u,
-      );
-    },
-  );
+            new Date("2026-08-08T15:30:00.000Z"),
+          ),
+        ).toThrow(
+          field === "globalAuthorization"
+            ? "COPY_SONNET_RECOVERY_AUTHORIZATION_MISMATCH"
+            : "COPY_SONNET_RECOVERY_CHILD_SCOPE_MISMATCH",
+        );
+      });
+    }
+  }
 });
