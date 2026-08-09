@@ -258,16 +258,16 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
     const artifact = JSON.parse(artifactBytes.toString("utf8"));
 
     expect(createHash("sha256").update(artifactBytes).digest("hex")).toBe(
-      "TO_BE_REPLACED_AFTER_CREATE_ONLY_GENERATION",
+      "99a1d51497b2112a83f5e18f8509baddd5f6486be13f92e08c3b5fec8dac0b47",
     );
     expect(() =>
       validateCopySonnetRecoveryManifestArtifact(artifact),
     ).not.toThrow();
     expect(artifact).toMatchObject({
       fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
-      preparationHeadCommit: "TO_BE_REPLACED_AFTER_PREPARATION_COMMIT",
+      preparationHeadCommit: "b6e01204d0900be418ca44f594b03ac25df39738",
       artifactDigest:
-        "TO_BE_REPLACED_AFTER_CREATE_ONLY_GENERATION",
+        "476a8d68a0fae68a7ddeb28bd58ff3bc21956b505420586e81d6a08fef903152",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedNetworkCalls: 0,
