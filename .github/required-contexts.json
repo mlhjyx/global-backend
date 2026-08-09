@@ -172,6 +172,8 @@
       "/.gitleaksignore",
       "/AGENTS.md",
       "/apps/api/src/discovery/provider-source-classes.json",
+      "/apps/api/src/runtime/",
+      "/apps/api/scripts/generate-build-attestation.mts",
       "/docs/status/",
       "/docs/governance/",
       "/docs/backend/ci-merge-automation.md",

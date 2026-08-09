@@ -148,6 +148,16 @@ jobs:
           pnpm --filter @global/api exec vitest run
           src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
 
+      - name: Generate and verify API build attestation
+        shell: bash
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          export BUILT_AT
+          pnpm exec tsx apps/api/scripts/generate-build-attestation.mts
+
       - name: Renderer contract tests
         run: pnpm --filter @global/site-renderer test:contracts
 
