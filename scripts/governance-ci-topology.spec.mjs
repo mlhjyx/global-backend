@@ -232,6 +232,17 @@ test("the topology suite uses the established governance entry without changing 
   );
 });
 
+test("the Copy impact verifier and receipt remain code-owner controlled", async () => {
+  const codeowners = await readRepositoryFile(".github/CODEOWNERS");
+  for (const rule of [
+    "/scripts/copy-fixed-source-impact*.mjs @mlhjyx",
+    "/docs/evidence/site-builder/copy-runtime-eligibility.json @mlhjyx",
+    "/docs/implementation-records/copy-fixed-source-impact-governance.md @mlhjyx",
+  ]) {
+    assert.ok(codeowners.split(/\r?\n/u).includes(rule), `missing ${rule}`);
+  }
+});
+
 test("the required build emits an exact-SHA runtime attestation after the final API rebuild", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const buildJob = jobBlock(ciWorkflow, "build-test");
