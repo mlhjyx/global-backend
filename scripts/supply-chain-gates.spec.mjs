@@ -579,7 +579,7 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
 
 test("package-manager network trust is isolated before install and audit", async () => {
   const { assertNoRepositoryNpmrc, buildTrustedPnpmEnvironment } =
-    await import("./supply-chain-audit.mjs");
+    await import("./supply-chain-source-policy.mjs");
   const hostileEnvironment = {
     PATH: "/trusted/bin",
     HTTPS_PROXY: "http://attacker.invalid:8080",
@@ -658,6 +658,7 @@ test("package-manager network trust is isolated before install and audit", async
     "/.pnpmfile.cjs @mlhjyx",
     "/**/.pnpmfile.cjs @mlhjyx",
     "/patches/ @mlhjyx",
+    "/scripts/supply-chain-source-policy*.mjs @mlhjyx",
   ]) {
     assert.ok(codeowners.includes(protectedPath), protectedPath);
   }
@@ -670,6 +671,7 @@ test("package-manager network trust is isolated before install and audit", async
     "/.pnpmfile.cjs",
     "/**/.pnpmfile.cjs",
     "/patches/",
+    "/scripts/supply-chain-source-policy*.mjs",
   ]) {
     assert.ok(
       requiredContexts.codeowner_requirements.terminal_patterns.includes(
@@ -686,7 +688,7 @@ test("package-manager network trust is isolated before install and audit", async
 
 test("trusted source policy rejects direct dependency fetches before install", async () => {
   const { validateDependencySourcePolicy } =
-    await import("./supply-chain-audit.mjs");
+    await import("./supply-chain-source-policy.mjs");
   const safeInput = {
     manifests: [
       {
@@ -739,6 +741,7 @@ test("trusted source policy rejects direct dependency fetches before install", a
   for (const lockfileMutation of [
     "\npackages:\n  runtime:\n    resolution: {tarball: https://attacker.invalid/runtime.tgz}\n",
     "\npackages:\n  runtime:\n    resolution: {repo: git@attacker.invalid:runtime.git}\n",
+    "\npackages:\n  runtime:\n    resolution: {repo: attacker/runtime, commit: deadbeef, type: git}\n",
     "\nimporters:\n  apps/api:\n    dependencies:\n      runtime:\n        version: link:../../../../outside\n",
   ]) {
     const result = validateDependencySourcePolicy({
@@ -759,31 +762,31 @@ test("trusted source policy rejects direct dependency fetches before install", a
   const workflow = await readRepositoryFile(
     ".github/workflows/supply-chain.yml",
   );
-  const trustedVerifier = workflow.indexOf(
-    'git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"',
+  const trustedSourcePolicy = workflow.indexOf(
+    'git show "$PR_BASE_SHA:scripts/supply-chain-source-policy.mjs" > "$TRUSTED_SOURCE_POLICY"',
   );
   const headSourceValidation = workflow.indexOf(
-    'node "$TRUSTED_VERIFIER" validate-sources --repository-root "$GITHUB_WORKSPACE"',
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"',
   );
   const headInstall = workflow.indexOf(
     "pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org",
     headSourceValidation,
   );
   assert.ok(
-    trustedVerifier >= 0 &&
-      headSourceValidation > trustedVerifier &&
+    trustedSourcePolicy >= 0 &&
+      headSourceValidation > trustedSourcePolicy &&
       headInstall > headSourceValidation,
     "trusted base source policy must run before the head install",
   );
   const baseSourceValidation = workflow.indexOf(
-    'node "$TRUSTED_VERIFIER" validate-sources --repository-root "$BASE_CHECKOUT"',
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$BASE_CHECKOUT"',
   );
   const baseInstall = workflow.indexOf(
     "pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org",
     baseSourceValidation,
   );
   assert.ok(
-    baseSourceValidation > trustedVerifier &&
+    baseSourceValidation > trustedSourcePolicy &&
       baseInstall > baseSourceValidation,
     "trusted source policy must run before the base install",
   );
