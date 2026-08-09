@@ -239,6 +239,59 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     ).toThrow("COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_INVALID");
   });
 
+  it("matches the generated v13 create-only runtime binding exactly", () => {
+    const recoveryManifestBytes = readFileSync(
+      resolve(REPOSITORY_ROOT, RECOVERY_MANIFEST_PATH),
+    );
+    const bindingBytes = readFileSync(
+      resolve(
+        REPOSITORY_ROOT,
+        COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+      ),
+    );
+    const artifact = JSON.parse(bindingBytes.toString("utf8"));
+
+    expect(sha256(bindingBytes)).toBe(
+      "30ff569a2ab2957c9bc31784d8d177ca9c41a9850b6a450b3c72106c93dd5561",
+    );
+    expect(() =>
+      validateCopySonnetRecoveryRuntimeBindingArtifact(
+        artifact,
+        recoveryManifestBytes,
+      ),
+    ).not.toThrow();
+    expect(artifact).toMatchObject({
+      fixedSourceCommit: "5d7c016f3934cd8cacaa4d37b6530285f82db158",
+      preparationHeadCommit: "5d7c016f3934cd8cacaa4d37b6530285f82db158",
+      artifactDigest:
+        "f4020ca1ade7e0d05b845f1fd362b23ab403ff4a0141e79c4871e9cc23357817",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      recoveryManifestReference: {
+        path: RECOVERY_MANIFEST_PATH,
+        fileSha256:
+          "99a1d51497b2112a83f5e18f8509baddd5f6486be13f92e08c3b5fec8dac0b47",
+        artifactDigest:
+          "476a8d68a0fae68a7ddeb28bd58ff3bc21956b505420586e81d6a08fef903152",
+      },
+      sourceBundle: {
+        digest:
+          "5081aa36a2c6f06f7049501ee64574037fdaf1d06313877e147545076243ec87",
+      },
+      compiledRuntimeExpectation: {
+        artifactCount: 53,
+        artifactTreeDigest:
+          "a7ac0ca8825dc4fdc802a58facae0b9fa42549e33adb03a4fdc1347d3b79bb6c",
+      },
+      preparationVerification: {
+        fixedCommitReachableFromOriginMainAtPreparation: false,
+      },
+    });
+  });
+
   it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(
     "rebuilds the create-only binding from the clean current commit",
     async () => {
