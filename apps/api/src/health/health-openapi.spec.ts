@@ -34,6 +34,14 @@ function schema(path: string, status: string): SchemaNode | undefined {
 }
 
 describe('layered health OpenAPI contract', () => {
+  it('publishes a closed dependency-free liveness response', () => {
+    expect(schema('/api/v1/health/live', '200')).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['status', 'service', 'ts'],
+    });
+  });
+
   it('publishes a closed attested or explicitly unattested build identity', () => {
     const response = schema('/api/v1/health/build', '200');
     expect(response).toMatchObject({

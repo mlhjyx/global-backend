@@ -30,6 +30,7 @@ describe('inspectRuntimeAdmission', () => {
     const result = inspectRuntimeAdmission(
       { mode: 'pilot', bindHost: '127.0.0.1', port: 3000 },
       {
+        NODE_ENV: 'production',
         AUTH_JWKS_URI: 'https://identity.example.test/.well-known/jwks.json',
         AUTH_ISSUER: 'https://identity.example.test/',
         AUTH_AUDIENCE: 'global-api',
@@ -49,10 +50,44 @@ describe('inspectRuntimeAdmission', () => {
     expect(JSON.stringify(result)).not.toContain('present-but-never-returned');
   });
 
+  it('fails controlled admission when production switches are misaligned or model stubs are enabled', () => {
+    const baseEnv = {
+      AUTH_JWKS_URI: 'https://identity.example.test/.well-known/jwks.json',
+      AUTH_ISSUER: 'https://identity.example.test/',
+      AUTH_AUDIENCE: 'global-api',
+      MODEL_GATEWAY_URL: 'http://127.0.0.1:3001/v1',
+      MODEL_GATEWAY_KEY: 'secret',
+    };
+    const settings = { mode: 'pilot' as const, bindHost: '127.0.0.1', port: 3000 };
+
+    const wrongNodeEnvironment = inspectRuntimeAdmission(
+      settings,
+      { ...baseEnv, NODE_ENV: 'development' },
+      attestedBuild,
+    );
+    expect(wrongNodeEnvironment.admitted).toBe(false);
+    expect(wrongNodeEnvironment.checks.environment).toMatchObject({
+      status: 'failed',
+      code: 'CONTROLLED_NODE_ENV_REQUIRED',
+    });
+
+    const stubEnabled = inspectRuntimeAdmission(
+      settings,
+      { ...baseEnv, NODE_ENV: 'production', MODEL_ALLOW_STUB: 'true' },
+      attestedBuild,
+    );
+    expect(stubEnabled.admitted).toBe(false);
+    expect(stubEnabled.checks.gateway).toMatchObject({
+      status: 'failed',
+      code: 'MODEL_STUB_FORBIDDEN',
+    });
+  });
+
   it('fails the pilot closed for missing audience or a non-loopback gateway', () => {
     const missingAudience = inspectRuntimeAdmission(
       { mode: 'pilot', bindHost: '127.0.0.1', port: 3000 },
       {
+        NODE_ENV: 'production',
         AUTH_JWKS_URI: 'https://identity.example.test/jwks',
         AUTH_ISSUER: 'https://identity.example.test/',
         MODEL_GATEWAY_URL: 'http://127.0.0.1:3001/v1',
@@ -66,6 +101,7 @@ describe('inspectRuntimeAdmission', () => {
     const remoteGateway = inspectRuntimeAdmission(
       { mode: 'pilot', bindHost: '127.0.0.1', port: 3000 },
       {
+        NODE_ENV: 'production',
         AUTH_JWKS_URI: 'https://identity.example.test/jwks',
         AUTH_ISSUER: 'https://identity.example.test/',
         AUTH_AUDIENCE: 'global-api',

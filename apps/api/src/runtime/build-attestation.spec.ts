@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,11 +52,15 @@ describe('build attestation', () => {
     const directory = await temporaryDirectory();
     const missing = join(directory, 'missing.json');
 
-    await expect(loadBuildIdentity({ mode: 'development', path: missing })).resolves.toEqual({
+    await expect(
+      loadBuildIdentity({ mode: 'development', path: missing, artifactRoot: directory }),
+    ).resolves.toEqual({
       attested: false,
       schema_version: 'global-runtime-build-attestation/v1',
     });
-    await expect(loadBuildIdentity({ mode: 'pilot', path: missing })).rejects.toThrow(
+    await expect(
+      loadBuildIdentity({ mode: 'pilot', path: missing, artifactRoot: directory }),
+    ).rejects.toThrow(
       /attestation.*required/i,
     );
   });
@@ -66,9 +72,27 @@ describe('build attestation', () => {
     await writeFile(target, JSON.stringify(validAttestation));
     await symlink(target, link);
 
-    await expect(loadBuildIdentity({ mode: 'pilot', path: link })).rejects.toThrow(/symlink|nofollow/i);
+    await expect(
+      loadBuildIdentity({ mode: 'pilot', path: link, artifactRoot: directory }),
+    ).rejects.toThrow(/symlink|nofollow/i);
     await writeFile(target, '{broken');
-    await expect(loadBuildIdentity({ mode: 'development', path: target })).rejects.toThrow(/JSON/i);
+    await expect(
+      loadBuildIdentity({ mode: 'development', path: target, artifactRoot: directory }),
+    ).rejects.toThrow(/JSON/i);
+  });
+
+  it('rejects a symlinked artifact root and uses descriptor-anchored directory traversal', async () => {
+    const directory = await temporaryDirectory();
+    const target = join(directory, 'target');
+    const link = join(directory, 'dist-link');
+    await mkdir(target);
+    await writeFile(join(target, 'main.js'), 'compiled application');
+    await symlink(target, link);
+
+    await expect(computeArtifactDigest(link)).rejects.toThrow(/symlink|nofollow/i);
+    const source = readFileSync(join(import.meta.dirname, 'build-attestation.ts'), 'utf8');
+    expect(source).toContain('/proc/self/fd/');
+    expect(source).toMatch(/O_DIRECTORY[\s\S]*O_NOFOLLOW/);
   });
 
   it('computes a deterministic artifact tree digest and excludes only the receipt itself', async () => {
@@ -94,14 +118,72 @@ describe('build attestation', () => {
       JSON.stringify({ ...validAttestation, artifact_digest: artifactDigest }),
     );
 
-    await expect(loadBuildIdentity({ mode: 'pilot', path })).resolves.toMatchObject({
+    await expect(
+      loadBuildIdentity({ mode: 'pilot', path, artifactRoot: directory }),
+    ).resolves.toMatchObject({
       attested: true,
       artifact_digest: artifactDigest,
     });
     await writeFile(join(directory, 'main.js'), 'different emitted main');
-    await expect(loadBuildIdentity({ mode: 'pilot', path })).rejects.toThrow(
+    await expect(
+      loadBuildIdentity({ mode: 'pilot', path, artifactRoot: directory }),
+    ).rejects.toThrow(
       /artifact.*digest.*mismatch/i,
     );
+  });
+
+  it('never lets a self-consistent side directory attest another executable root', async () => {
+    const directory = await temporaryDirectory();
+    const actualRoot = join(directory, 'actual-dist');
+    const sideRoot = join(directory, 'old-release');
+    await mkdir(actualRoot);
+    await mkdir(sideRoot);
+    await writeFile(join(actualRoot, 'main.js'), 'currently executing bytes');
+    await writeFile(join(sideRoot, 'main.js'), 'old release bytes');
+    const sideReceipt = join(sideRoot, 'build-attestation.json');
+    await writeFile(
+      sideReceipt,
+      JSON.stringify({
+        ...validAttestation,
+        artifact_digest: await computeArtifactDigest(sideRoot),
+      }),
+    );
+
+    await expect(
+      loadBuildIdentity({ mode: 'pilot', path: sideReceipt, artifactRoot: actualRoot }),
+    ).rejects.toThrow(/artifact root|receipt path/i);
+  });
+
+  it('reads schema provenance through the bounded no-follow regular-file guard', async () => {
+    const directory = await temporaryDirectory();
+    const distRoot = join(directory, 'dist');
+    const migrationsRoot = join(directory, 'migrations');
+    const schemaTarget = join(directory, 'schema-target.prisma');
+    const schemaLink = join(directory, 'schema-link.prisma');
+    const schemaFifo = join(directory, 'schema.fifo');
+    await mkdir(distRoot);
+    await mkdir(join(migrationsRoot, '20260809010101_runtime_receipts'), {
+      recursive: true,
+    });
+    await writeFile(join(distRoot, 'main.js'), 'compiled application');
+    await writeFile(schemaTarget, 'model RuntimeReceipt {}');
+    await symlink(schemaTarget, schemaLink);
+    execFileSync('mkfifo', [schemaFifo]);
+
+    const build = (schemaPath: string) =>
+      generateBuildAttestation({
+        distRoot,
+        buildSha: validAttestation.build_sha,
+        builtAt: validAttestation.built_at,
+        schemaPath,
+        migrationsRoot,
+      });
+
+    await expect(build(schemaLink)).rejects.toThrow(/symlink|nofollow/i);
+    await expect(build(schemaFifo)).rejects.toThrow(/regular file/i);
+    const oversizedSchema = join(directory, 'oversized-schema.prisma');
+    await writeFile(oversizedSchema, Buffer.alloc(16 * 1024 * 1024 + 1));
+    await expect(build(oversizedSchema)).rejects.toThrow(/byte limit/i);
   });
 
   it('generates an atomic receipt only from explicit build inputs and current schema bytes', async () => {
@@ -140,7 +222,11 @@ describe('build attestation', () => {
       migration_revision: '20260809010101_runtime_receipts',
     });
     await expect(
-      loadBuildIdentity({ mode: 'pilot', path: join(distRoot, 'build-attestation.json') }),
+      loadBuildIdentity({
+        mode: 'pilot',
+        path: join(distRoot, 'build-attestation.json'),
+        artifactRoot: distRoot,
+      }),
     ).resolves.toMatchObject({ attested: true, build_sha: validAttestation.build_sha });
     expect((await readdir(distRoot)).filter((name) => name.includes('.tmp-'))).toEqual([]);
   });

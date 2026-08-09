@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveRuntimeSettings } from './runtime-environment';
+import { resolveCorsOrigin, resolveRuntimeSettings } from './runtime-environment';
 
 describe('resolveRuntimeSettings', () => {
   it('defaults development to loopback without trusting a wildcard default', () => {
@@ -13,23 +13,50 @@ describe('resolveRuntimeSettings', () => {
   });
 
   it('requires an explicit loopback bind for the controlled pilot', () => {
-    expect(() => resolveRuntimeSettings({ APP_ENVIRONMENT: 'pilot' })).toThrow(
+    expect(() =>
+      resolveRuntimeSettings({ APP_ENVIRONMENT: 'pilot', NODE_ENV: 'production' }),
+    ).toThrow(
       /API_BIND_HOST.*pilot/i,
     );
     expect(() =>
-      resolveRuntimeSettings({ APP_ENVIRONMENT: 'pilot', API_BIND_HOST: '0.0.0.0' }),
+      resolveRuntimeSettings({
+        APP_ENVIRONMENT: 'pilot',
+        NODE_ENV: 'production',
+        API_BIND_HOST: '0.0.0.0',
+      }),
     ).toThrow(/loopback/i);
     expect(() =>
-      resolveRuntimeSettings({ APP_ENVIRONMENT: 'pilot', API_BIND_HOST: '::' }),
+      resolveRuntimeSettings({
+        APP_ENVIRONMENT: 'pilot',
+        NODE_ENV: 'production',
+        API_BIND_HOST: '::',
+      }),
     ).toThrow(/loopback/i);
 
     expect(
       resolveRuntimeSettings({
         APP_ENVIRONMENT: 'pilot',
+        NODE_ENV: 'production',
         API_BIND_HOST: '127.0.0.1',
         PORT: '3100',
       }),
     ).toEqual({ mode: 'pilot', bindHost: '127.0.0.1', port: 3100 });
+  });
+
+  it('refuses controlled modes unless every legacy production switch sees NODE_ENV=production', () => {
+    expect(() =>
+      resolveRuntimeSettings({
+        APP_ENVIRONMENT: 'pilot',
+        NODE_ENV: 'development',
+        API_BIND_HOST: '127.0.0.1',
+      }),
+    ).toThrow(/NODE_ENV.*production/i);
+    expect(() =>
+      resolveRuntimeSettings({
+        APP_ENVIRONMENT: 'production',
+        API_BIND_HOST: '127.0.0.1',
+      }),
+    ).toThrow(/NODE_ENV.*production/i);
   });
 
   it('requires production to declare a non-wildcard bind explicitly', () => {
@@ -39,6 +66,18 @@ describe('resolveRuntimeSettings', () => {
     expect(() =>
       resolveRuntimeSettings({ NODE_ENV: 'production', API_BIND_HOST: '0.0.0.0' }),
     ).toThrow(/wildcard/i);
+    expect(() =>
+      resolveRuntimeSettings({
+        NODE_ENV: 'production',
+        API_BIND_HOST: '0:0:0:0:0:0:0:0',
+      }),
+    ).toThrow(/wildcard/i);
+    expect(() =>
+      resolveRuntimeSettings({
+        NODE_ENV: 'production',
+        API_BIND_HOST: '::ffff:0.0.0.0',
+      }),
+    ).toThrow(/wildcard/i);
 
     expect(
       resolveRuntimeSettings({
@@ -47,6 +86,21 @@ describe('resolveRuntimeSettings', () => {
         PORT: '3000',
       }),
     ).toEqual({ mode: 'production', bindHost: '10.10.0.7', port: 3000 });
+  });
+
+  it('uses the resolved runtime mode as the CORS default security boundary', () => {
+    expect(resolveCorsOrigin('development', undefined)).toBe(true);
+    expect(resolveCorsOrigin('test', '')).toBe(true);
+    expect(resolveCorsOrigin('pilot', undefined)).toBe(false);
+    expect(resolveCorsOrigin('production', '')).toBe(false);
+    expect(resolveCorsOrigin('pilot', 'https://pilot.example, https://ops.example')).toEqual([
+      'https://pilot.example',
+      'https://ops.example',
+    ]);
+
+    const source = readFileSync(join(import.meta.dirname, '..', 'main.ts'), 'utf8');
+    expect(source).toContain('resolveCorsOrigin(runtimeSettings.mode, process.env.CORS_ORIGINS)');
+    expect(source).not.toContain("process.env.NODE_ENV === 'production' ? false : true");
   });
 
   it('rejects unknown modes and invalid ports before Nest starts', () => {
