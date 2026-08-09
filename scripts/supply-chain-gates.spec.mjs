@@ -684,6 +684,111 @@ test("package-manager network trust is isolated before install and audit", async
   );
 });
 
+test("trusted source policy rejects direct dependency fetches before install", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-audit.mjs");
+  const safeInput = {
+    manifests: [
+      {
+        path: "package.json",
+        document: {
+          name: "root",
+          dependencies: {
+            registry: "^1.2.3",
+            workspace: "workspace:*",
+          },
+        },
+      },
+      {
+        path: "packages/workspace/package.json",
+        document: { name: "workspace" },
+      },
+    ],
+    workspaceText: 'packages:\n  - "packages/*"\n',
+    lockfileText:
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      workspace:\n        specifier: workspace:*\n        version: link:packages/workspace\n",
+  };
+  assert.deepEqual(validateDependencySourcePolicy(safeInput).issues, []);
+
+  for (const specifier of [
+    "https://attacker.invalid/runtime.tgz",
+    "git+https://attacker.invalid/runtime.git",
+    "github:attacker/runtime",
+    "git@attacker.invalid:runtime.git",
+    "file:../../outside",
+    "link:../../outside",
+  ]) {
+    const result = validateDependencySourcePolicy({
+      ...safeInput,
+      manifests: [
+        {
+          path: "package.json",
+          document: {
+            name: "root",
+            dependencies: { runtime: specifier },
+          },
+        },
+      ],
+    });
+    assert.ok(
+      issueCodes(result).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      specifier,
+    );
+  }
+
+  for (const lockfileMutation of [
+    "\npackages:\n  runtime:\n    resolution: {tarball: https://attacker.invalid/runtime.tgz}\n",
+    "\npackages:\n  runtime:\n    resolution: {repo: git@attacker.invalid:runtime.git}\n",
+    "\nimporters:\n  apps/api:\n    dependencies:\n      runtime:\n        version: link:../../../../outside\n",
+  ]) {
+    const result = validateDependencySourcePolicy({
+      ...safeInput,
+      lockfileText: `${safeInput.lockfileText}${lockfileMutation}`,
+    });
+    assert.ok(
+      issueCodes(result).some((code) =>
+        [
+          "LOCKFILE_EXTERNAL_SOURCE_NOT_TRUSTED",
+          "LOCKFILE_LINK_NOT_TRUSTED",
+        ].includes(code),
+      ),
+      lockfileMutation,
+    );
+  }
+
+  const workflow = await readRepositoryFile(
+    ".github/workflows/supply-chain.yml",
+  );
+  const trustedVerifier = workflow.indexOf(
+    'git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"',
+  );
+  const headSourceValidation = workflow.indexOf(
+    'node "$TRUSTED_VERIFIER" validate-sources --repository-root "$GITHUB_WORKSPACE"',
+  );
+  const headInstall = workflow.indexOf(
+    "pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org",
+    headSourceValidation,
+  );
+  assert.ok(
+    trustedVerifier >= 0 &&
+      headSourceValidation > trustedVerifier &&
+      headInstall > headSourceValidation,
+    "trusted base source policy must run before the head install",
+  );
+  const baseSourceValidation = workflow.indexOf(
+    'node "$TRUSTED_VERIFIER" validate-sources --repository-root "$BASE_CHECKOUT"',
+  );
+  const baseInstall = workflow.indexOf(
+    "pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org",
+    baseSourceValidation,
+  );
+  assert.ok(
+    baseSourceValidation > trustedVerifier &&
+      baseInstall > baseSourceValidation,
+    "trusted source policy must run before the base install",
+  );
+});
+
 test("Dependabot keeps coordinated majors separate and groups maintenance by domain", async () => {
   const config = await readRepositoryFile(".github/dependabot.yml");
   for (const group of [
