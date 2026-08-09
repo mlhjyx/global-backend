@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-10 · 获客 Suppression/DataRights source 治理
+
+- #375 已以 merge commit `5b588353fba6cdbda3a7e0f5f171a3e2fabbc786` 合入 roles→scopes，并在该 main commit 上通过 CI、Governance、Security、Supply Chain 与 CodeQL push canary；Supply Chain 仍是带 36 项生产依赖遗留风险的 ratchet pass，不是漏洞清零。
+- 当前独立变更集取消 suppression 裸 DELETE：`suppression_record` 保留事实、未知原因 fail-closed 为 LEGAL、只允许 PREFERENCE→LEGAL；释放和身份纠正只追加带 request/actor/reason/time 的 `suppression_decision`，普通 API 不执行真实 release，法定记录的 release request 持久化拒绝后返回 409。
+- DataRights DENY 从“throw 导致日志回滚”改为先在租户事务提交 `policy_decision_log`、再在事务外返回 409；在 DENY 前不执行 Lead CAS、不建 LeadDecision、不发 LeadQualified。隔离无卷 PostgreSQL 空库完成全部 82 migrations，并验证 app_user 禁止删除 suppression、禁止更新/删除 decision、禁止 LEGAL 降级与跨 workspace 关联；测试容器已删除。该证据只属于 source/migration 验证，不代表已部署或真实 pilot。
+
 ## 2026-08-09 · Copy Sonnet recovery v14 create-only preparation
 
 - #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定 canonical path 与后续身份绑定提交 `3da93486163404e3943711c6689a55c9a9e2c119`、82-file source digest `cbec88ad…`、53-file compiled tree `ce806d78…` 与 artifact digest `4f9fdf06…`。

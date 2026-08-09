@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
@@ -523,14 +523,21 @@ export class DiscoveryService {
 }
 
 function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest): void {
-  if (!request.requestId || request.requestId.length > 128 || /[\u0000-\u001f\u007f]/.test(request.requestId)) {
-    throw new ConflictException({ error: { code: 'INVALID_REQUEST_ID', message: 'requestId is invalid' } });
+  const requestId = request.requestId;
+  const hasControlCharacter =
+    typeof requestId === 'string' &&
+    Array.from(requestId).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    });
+  if (typeof requestId !== 'string' || !requestId || requestId.length > 128 || hasControlCharacter) {
+    throw new BadRequestException({ error: { code: 'INVALID_REQUEST_ID', message: 'requestId is invalid' } });
   }
   if (!(SUPPRESSION_DECISIONS as readonly string[]).includes(request.decision)) {
-    throw new ConflictException({ error: { code: 'INVALID_DECISION', message: 'unsupported suppression decision' } });
+    throw new BadRequestException({ error: { code: 'INVALID_DECISION', message: 'unsupported suppression decision' } });
   }
   if (!(SUPPRESSION_DECISION_REASONS as readonly string[]).includes(request.reasonCode)) {
-    throw new ConflictException({ error: { code: 'INVALID_REASON', message: 'unsupported suppression reason' } });
+    throw new BadRequestException({ error: { code: 'INVALID_REASON', message: 'unsupported suppression reason' } });
   }
   const correctionReason = ['IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER'].includes(request.reasonCode);
   const releaseReason = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER'].includes(request.reasonCode);
@@ -538,7 +545,7 @@ function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest)
     (request.decision === 'IDENTITY_CORRECTION_REQUESTED' && !correctionReason) ||
     (request.decision === 'RELEASE_REQUESTED' && !releaseReason)
   ) {
-    throw new ConflictException({ error: { code: 'INVALID_REASON', message: 'reason is invalid for this decision' } });
+    throw new BadRequestException({ error: { code: 'INVALID_REASON', message: 'reason is invalid for this decision' } });
   }
 }
 

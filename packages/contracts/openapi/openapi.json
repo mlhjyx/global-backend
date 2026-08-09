@@ -2544,8 +2544,119 @@
         ]
       }
     },
+    "/api/v1/suppressions/{id}/decisions": {
+      "post": {
+        "description": "法定 suppression 的 release 请求会持久化拒绝审计并返回 409。",
+        "operationId": "DiscoveryController_requestSuppressionDecision_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuppressionDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "append-only SuppressionDecision"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "追加 suppression release/correction 请求；请求本身不解除禁联",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      },
+      "get": {
+        "operationId": "DiscoveryController_listSuppressionDecisions_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "SuppressionDecision"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出 suppression 的 append-only release/correction 决策",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
     "/api/v1/suppressions/{id}": {
       "delete": {
+        "deprecated": true,
         "operationId": "DiscoveryController_removeSuppression_v1",
         "parameters": [
           {
@@ -2571,11 +2682,26 @@
                     "data": {
                       "type": "object",
                       "required": [
-                        "deleted"
+                        "deleted",
+                        "releaseRequested",
+                        "decisionId"
                       ],
                       "properties": {
                         "deleted": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        },
+                        "releaseRequested": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid"
                         }
                       }
                     }
@@ -2590,7 +2716,7 @@
             "bearer": []
           }
         ],
-        "summary": "移除禁联记录",
+        "summary": "已弃用：提交 preference release request，永不物理删除",
         "tags": [
           "Discovery"
         ],
@@ -8678,6 +8804,38 @@
         "required": [
           "type",
           "value"
+        ]
+      },
+      "SuppressionDecisionDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "调用方生成的幂等请求 ID"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "RELEASE_REQUESTED",
+              "IDENTITY_CORRECTION_REQUESTED"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "USER_PREFERENCE_CHANGED",
+              "BOUNCE_CLASSIFICATION_ERROR",
+              "IDENTITY_MISASSOCIATION",
+              "DUPLICATE_RECORD",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "requestId",
+          "decision",
+          "reasonCode"
         ]
       },
       "AcceptLeadDto": {

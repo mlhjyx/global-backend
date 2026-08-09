@@ -176,4 +176,46 @@ describe('Suppression governance', () => {
     expect(createMany).toHaveBeenCalledTimes(1);
     expect(create).not.toHaveBeenCalled();
   });
+
+  it('同 requestId 的不同 payload/actor 以 409 fail-closed，不覆盖首个事实', async () => {
+    const existing = {
+      id: '55555555-5555-4555-8555-555555555555',
+      workspaceId: WORKSPACE_ID,
+      suppressionId: SUPPRESSION_ID,
+      requestId: REQUEST_ID,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+      actorId: 'different-actor',
+      createdAt: new Date('2026-08-10T00:00:00.000Z'),
+    };
+    const tx = {
+      suppressionRecord: { findUnique: vi.fn(async () => row('PREFERENCE')) },
+      suppressionDecision: {
+        createMany: vi.fn(async () => ({ count: 0 })),
+        findUnique: vi.fn(async () => existing),
+      },
+    };
+    const prisma = {
+      withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
+    };
+    const service = new DiscoveryService(prisma as never, {} as never);
+
+    await expect(service.requestSuppressionDecision(CTX, SUPPRESSION_ID, {
+      requestId: REQUEST_ID,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+    })).rejects.toMatchObject({ response: { error: { code: 'IDEMPOTENCY_CONFLICT' } } });
+  });
+
+  it('decision/reason 组合在任何 DB 调用前校验并返回 400', async () => {
+    const withWorkspace = vi.fn();
+    const service = new DiscoveryService({ withWorkspace } as never, {} as never);
+
+    await expect(service.requestSuppressionDecision(CTX, SUPPRESSION_ID, {
+      requestId: REQUEST_ID,
+      decision: 'IDENTITY_CORRECTION_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+    })).rejects.toMatchObject({ status: 400, response: { error: { code: 'INVALID_REASON' } } });
+    expect(withWorkspace).not.toHaveBeenCalled();
+  });
 });
