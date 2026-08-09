@@ -61,7 +61,7 @@
 | API ESLint | 0 error；7 条主线既有 warning | 本切片无 lint error；既有 warning 未顺带改写 |
 | contracts Spectral | 0 error；15 条既有 operation-tag warning | scope extension 未破坏合同 lint；warning 债务仍在 |
 | `pnpm docs:verify` | governance 51/51，docs PASS；0 error / 1 个既有 table warning | 权威入口、治理图与文档链接未退化 |
-| code-intelligence scan/check | clean `9bac8b58…`：967 files、8690 nodes、19973 edges、0 error、5 warnings；deterministic check PASS | exact source tree 的静态关系辅助；不替代 runtime evidence |
+| code-intelligence scan/check | clean evidence commit `773bda86…`：968 files、8701 nodes、19985 edges、0 error、5 warnings；deterministic check PASS | source + evidence document tree 的静态关系辅助；最终 PR head 仍须另行 readback，不替代 runtime evidence |
 
 仓库目前没有把 `apps/api/src` 全局 lines/statements/functions/branches 80% 变成真实 Vitest threshold/required context；本轮只证明 authz 关键模块四项均高于 80%。全局覆盖率门是计划中的独立 CI 治理债务，不能用本表局部结果声称关闭。
 
