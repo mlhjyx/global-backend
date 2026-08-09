@@ -59,3 +59,4 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 - design_spec manifest 准备决策卡：[`m1-g-design-spec-evaluation-manifest-prep-decision-card.md`](site-builder/m1-g-design-spec-evaluation-manifest-prep-decision-card.md)
 - M1-g 阶段收口基线：[`m1-g-stage-closeout-baseline.json`](site-builder/m1-g-stage-closeout-baseline.json)
 - 文本评测历史 evidence：[`m1-g-text-evaluation-real-evidence-v1.json`](site-builder/m1-g-text-evaluation-real-evidence-v1.json)
+- Copy Sonnet recovery v13 create-only 交付：[实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json)与 [post-sync runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json)；三者只证明固定输入和零调用准备，不构成 capability、质量、晋级或生产路由证据。
