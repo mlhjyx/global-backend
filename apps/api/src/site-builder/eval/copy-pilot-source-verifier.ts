@@ -16,6 +16,7 @@ import { COPY_SONNET_RECOVERY_ADMISSION_SOURCE } from "./copy-sonnet-recovery-ad
 import {
   COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
   COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
   COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
 } from "./copy-sonnet-recovery-contract";
@@ -289,6 +290,13 @@ export async function createCopyPilotVerifiedSource(input: {
     fail("COPY_PILOT_MANIFEST_BYTES_MISMATCH");
   }
   const artifact = parseArtifact(manifestBytes);
+  if (
+    artifact.schemaVersion ===
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1" &&
+    manifestRelativePath !== COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH
+  ) {
+    fail("COPY_PILOT_MANIFEST_INVALID");
+  }
   if (
     spawnSync(
       "git",
