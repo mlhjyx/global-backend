@@ -17,9 +17,9 @@ evidence.
 
 - #355 merge commit: `a29b222a45ae5fdb4868d5235cc94aeab1574ecd`
 - manifest preparation commit: `b6e01204d0900be418ca44f594b03ac25df39738`
-- runtime-binding fixed source: `5d7c016f3934cd8cacaa4d37b6530285f82db158`
+- runtime-binding fixed source after the authorized main sync: `874a8cc2aa637c35f8c78302006ffb370913fcb7`
 - manifest source bundle: 77 files, `c1269c2fd789eebe3a889beafb2a5d62f6a0a787df71b525270d391a5a99ba4a`
-- runtime source bundle: 82 files, `5081aa36a2c6f06f7049501ee64574037fdaf1d06313877e147545076243ec87`
+- runtime source bundle: 82 files, `139c8661b03ea74135d901ec5e0ce5d399f53a9267a73e8e9f2900724626e3ed`
 - compiled runtime: 53 files, `a7ac0ca8825dc4fdc802a58facae0b9fa42549e33adb03a4fdc1347d3b79bb6c`
 
 ## RED
@@ -48,6 +48,11 @@ The minimal implementation:
 
 Preparation commit: `b6e01204`
 
+Post-sync merge commit: `e361451a5601f1117c7391e85cb05f841b1fd6bf`
+
+Post-sync runtime-binding preparation commit:
+`874a8cc2aa637c35f8c78302006ffb370913fcb7`
+
 ## Generated artifacts
 
 ### Manifest
@@ -59,8 +64,23 @@ Preparation commit: `b6e01204`
 ### Runtime binding
 
 - path: `docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json`
-- file SHA-256: `30ff569a2ab2957c9bc31784d8d177ca9c41a9850b6a450b3c72106c93dd5561`
-- artifact digest: `f4020ca1ade7e0d05b845f1fd362b23ab403ff4a0141e79c4871e9cc23357817`
+- file SHA-256: `ce1ddef1d5a862817cc154f63fff05130e5ef462815e15b69421a1e828e4e6a6`
+- artifact digest: `caa42cbfd69c1fcad25c1bc5dc0b8c787098ca84fa6619270c882d41b7a901e5`
+
+## Post-sync binding refresh
+
+After PR #356 was opened, `origin/main` advanced to
+`2a54024512c0c7f5e373cd31c4e4e208e2fa1106`. The authorized merge preserved
+both histories but changed the root `package.json` by adding governance-only
+scripts. That file is intentionally part of the raw build source bundle, so
+the old runtime binding would have failed closed with a tracked-byte mismatch
+on the post-sync mainline even though the Copy implementation was unchanged.
+
+The refresh did not loosen the verifier or change the v13 manifest. It removed
+the old generated binding, committed a clean post-sync source snapshot, and
+used the existing create-only generator to bind that exact snapshot. The
+compiled runtime tree remained `a7ac0ca8…`; only the source-bundle and binding
+digests changed. No credential, gateway, or model path was accessed.
 
 Both artifacts record:
 

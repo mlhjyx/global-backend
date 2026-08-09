@@ -273,7 +273,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     const artifact = JSON.parse(bindingBytes.toString("utf8"));
 
     expect(sha256(bindingBytes)).toBe(
-      "30ff569a2ab2957c9bc31784d8d177ca9c41a9850b6a450b3c72106c93dd5561",
+      "ce1ddef1d5a862817cc154f63fff05130e5ef462815e15b69421a1e828e4e6a6",
     );
     expect(() =>
       validateCopySonnetRecoveryRuntimeBindingArtifact(
@@ -282,10 +282,10 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       ),
     ).not.toThrow();
     expect(artifact).toMatchObject({
-      fixedSourceCommit: "5d7c016f3934cd8cacaa4d37b6530285f82db158",
-      preparationHeadCommit: "5d7c016f3934cd8cacaa4d37b6530285f82db158",
+      fixedSourceCommit: "874a8cc2aa637c35f8c78302006ffb370913fcb7",
+      preparationHeadCommit: "874a8cc2aa637c35f8c78302006ffb370913fcb7",
       artifactDigest:
-        "f4020ca1ade7e0d05b845f1fd362b23ab403ff4a0141e79c4871e9cc23357817",
+        "caa42cbfd69c1fcad25c1bc5dc0b8c787098ca84fa6619270c882d41b7a901e5",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedNetworkCalls: 0,
@@ -300,7 +300,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       },
       sourceBundle: {
         digest:
-          "5081aa36a2c6f06f7049501ee64574037fdaf1d06313877e147545076243ec87",
+          "139c8661b03ea74135d901ec5e0ce5d399f53a9267a73e8e9f2900724626e3ed",
       },
       compiledRuntimeExpectation: {
         artifactCount: 53,
