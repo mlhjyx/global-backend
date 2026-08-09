@@ -52,6 +52,18 @@ function inspectAuth(settings: RuntimeSettings, env: NodeJS.ProcessEnv): Admissi
     if (jwks.protocol !== 'https:' || issuer.protocol !== 'https:') {
       return { status: 'failed', code: 'AUTH_ORIGIN_NOT_HTTPS' };
     }
+    if (
+      jwks.username ||
+      jwks.password ||
+      jwks.search ||
+      jwks.hash ||
+      issuer.username ||
+      issuer.password ||
+      issuer.search ||
+      issuer.hash
+    ) {
+      return { status: 'failed', code: 'AUTH_CONFIG_INVALID' };
+    }
   } catch {
     return { status: 'failed', code: 'AUTH_CONFIG_INVALID' };
   }

@@ -88,7 +88,40 @@ export function resolveCorsOrigin(
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  if (origins.length > 0) return origins;
+  if (origins.length > 0) {
+    for (const origin of origins) {
+      if (origin === '*') throw new Error('CORS_ORIGINS cannot contain a wildcard');
+      let parsed: URL;
+      try {
+        parsed = new URL(origin);
+      } catch {
+        throw new Error('CORS_ORIGINS entries must be canonical HTTP(S) origins');
+      }
+      if (
+        (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+        parsed.username ||
+        parsed.password ||
+        parsed.search ||
+        parsed.hash ||
+        parsed.pathname !== '/' ||
+        parsed.origin !== origin
+      ) {
+        throw new Error('CORS_ORIGINS entries must be canonical HTTP(S) origins');
+      }
+      const loopback =
+        parsed.hostname === '127.0.0.1' ||
+        parsed.hostname === 'localhost' ||
+        parsed.hostname === '[::1]';
+      if (
+        (mode === 'pilot' || mode === 'production') &&
+        parsed.protocol !== 'https:' &&
+        !loopback
+      ) {
+        throw new Error('controlled CORS_ORIGINS must use HTTPS or loopback');
+      }
+    }
+    return origins;
+  }
   return mode === 'development' || mode === 'test';
 }
 

@@ -97,6 +97,26 @@ describe('build attestation', () => {
     expect(source).toContain('flags | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK');
   });
 
+  it('rejects persistent intermediate symlinks and unbounded directory depth', async () => {
+    const directory = await temporaryDirectory();
+    const outside = join(directory, 'outside');
+    const distRoot = join(directory, 'dist');
+    await mkdir(outside);
+    await mkdir(distRoot);
+    await writeFile(join(outside, 'external.js'), 'must never enter the digest');
+    await symlink(outside, join(distRoot, 'linked-runtime'));
+    await expect(computeArtifactDigest(distRoot)).rejects.toThrow(/symlink|nofollow/i);
+
+    await rm(join(distRoot, 'linked-runtime'));
+    let nested = distRoot;
+    for (let depth = 0; depth <= 65; depth += 1) {
+      nested = join(nested, 'd');
+      await mkdir(nested);
+    }
+    await writeFile(join(nested, 'too-deep.js'), 'bounded traversal');
+    await expect(computeArtifactDigest(distRoot)).rejects.toThrow(/depth limit/i);
+  });
+
   it('computes a deterministic artifact tree digest and excludes only the receipt itself', async () => {
     const directory = await temporaryDirectory();
     await mkdir(join(directory, 'runtime'));
@@ -186,6 +206,18 @@ describe('build attestation', () => {
     const oversizedSchema = join(directory, 'oversized-schema.prisma');
     await writeFile(oversizedSchema, Buffer.alloc(16 * 1024 * 1024 + 1));
     await expect(build(oversizedSchema)).rejects.toThrow(/byte limit/i);
+
+    const migrationsLink = join(directory, 'migrations-link');
+    await symlink(migrationsRoot, migrationsLink);
+    await expect(
+      generateBuildAttestation({
+        distRoot,
+        buildSha: validAttestation.build_sha,
+        builtAt: validAttestation.built_at,
+        schemaPath: schemaTarget,
+        migrationsRoot: migrationsLink,
+      }),
+    ).rejects.toThrow(/symlink|nofollow/i);
   });
 
   it('generates an atomic receipt only from explicit build inputs and current schema bytes', async () => {
