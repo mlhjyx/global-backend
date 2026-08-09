@@ -2,6 +2,10 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
 import { normalizeTokenRoles } from './scopes';
+import {
+  normalizeSubjectClaim,
+  normalizeWorkspaceClaim,
+} from './token-claims';
 
 /**
  * DEV ONLY. Token is base64url(JSON { sub, workspace_id, roles }).
@@ -12,10 +16,9 @@ export class DevTokenVerifier extends TokenVerifier {
   async verify(token: string): Promise<RequestContext> {
     try {
       const claims = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
-      if (!claims.sub || !claims.workspace_id) throw new Error('missing claims');
       return {
-        userId: String(claims.sub),
-        workspaceId: String(claims.workspace_id),
+        userId: normalizeSubjectClaim(claims.sub),
+        workspaceId: normalizeWorkspaceClaim(claims.workspace_id),
         roles: normalizeTokenRoles(claims.roles),
       };
     } catch {

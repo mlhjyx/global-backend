@@ -35,12 +35,18 @@ export function createTokenVerifier(
 ): TokenVerifier {
   const hasJwksUri = Boolean(env.AUTH_JWKS_URI?.trim());
   const hasIssuer = Boolean(env.AUTH_ISSUER?.trim());
-  if (hasJwksUri !== hasIssuer) {
+  const hasAudience = Boolean(env.AUTH_AUDIENCE?.trim());
+  if (
+    !(
+      (hasJwksUri && hasIssuer && hasAudience) ||
+      (!hasJwksUri && !hasIssuer && !hasAudience)
+    )
+  ) {
     throw new Error(
-      'AUTH_JWKS_URI and AUTH_ISSUER must be configured together',
+      'AUTH_JWKS_URI, AUTH_ISSUER, and AUTH_AUDIENCE must be configured together',
     );
   }
-  if (hasJwksUri && hasIssuer) {
+  if (hasJwksUri && hasIssuer && hasAudience) {
     logger.log('using JwksTokenVerifier (verifies SaaS-platform signed tokens)');
     return new JwksTokenVerifier(env);
   }
@@ -54,7 +60,7 @@ export function createTokenVerifier(
     throw new Error(
       'DevTokenVerifier requires APP_ENVIRONMENT=development, ' +
         'AUTH_ALLOW_DEV_TOKENS=true, and a loopback API_BIND_HOST; ' +
-        'otherwise configure AUTH_JWKS_URI + AUTH_ISSUER.',
+        'otherwise configure AUTH_JWKS_URI + AUTH_ISSUER + AUTH_AUDIENCE.',
     );
   }
   logger.warn(
