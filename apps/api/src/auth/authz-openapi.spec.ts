@@ -76,13 +76,21 @@ describe('OpenAPI authorization scope contract', () => {
       ],
     ).toEqual([
       'acquisition:review',
-      'acquisition:identity:review',
+      'compliance:manage',
     ]);
     expect(
       operation(spec, 'post', '/api/v1/events/ack')['x-required-scopes'],
     ).toEqual(['acquisition:event:ack']);
     expect(
       operation(spec, 'post', '/api/v1/deletion-requests')[
+        'x-required-scopes'
+      ],
+    ).toEqual(['compliance:manage']);
+    expect(
+      operation(spec, 'post', '/api/v1/suppressions')['x-required-scopes'],
+    ).toEqual(['compliance:manage']);
+    expect(
+      operation(spec, 'delete', '/api/v1/suppressions/{id}')[
         'x-required-scopes'
       ],
     ).toEqual(['compliance:manage']);
