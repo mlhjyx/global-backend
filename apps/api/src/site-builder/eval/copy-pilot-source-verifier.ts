@@ -12,6 +12,8 @@ import {
 } from "../../model-runtime/compiled-runtime-guard";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 import { COPY_REAL_CAPABILITY_ADMISSION_SOURCE } from "./copy-real-capability-admission";
+import { COPY_SONNET_RECOVERY_ADMISSION_SOURCE } from "./copy-sonnet-recovery-admission";
+import { COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION } from "./copy-sonnet-recovery-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
@@ -60,6 +62,8 @@ interface ManifestArtifact {
     digest: string;
   };
   compiledRuntimeExpectation: CompiledRuntimeExpectation;
+  duplicatePrevention?: unknown;
+  requiredMergeMethod?: unknown;
   artifactDigest: string;
   [key: string]: unknown;
 }
@@ -161,10 +165,7 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
   } catch {
     return fail("COPY_PILOT_MANIFEST_INVALID");
   }
-  if (
-    artifact.schemaVersion !==
-      "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1" ||
-    artifact.classification !== "FIXED_SOURCE_CREATE_ONLY" ||
+  const sharedInvalid =
     artifact.createOnly !== true ||
     artifact.dispatchAuthorization !== "NOT_AUTHORIZED" ||
     artifact.dispatchCapable !== false ||
@@ -176,20 +177,10 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
     artifactDigest !== canonicalDigest(withoutDigest) ||
     !GIT_COMMIT.test(artifact.fixedSourceCommit) ||
     !GIT_COMMIT.test(artifact.preparationHeadCommit) ||
-    artifact.manifest?.schemaVersion !==
-      "site-builder-copy-real-capability-manifest/2026-08-05-v1" ||
+    !artifact.manifest ||
     artifact.manifest.fixedSourceCommit !== artifact.fixedSourceCommit ||
-    artifact.manifest.planDigest !==
-      canonicalDigest(COPY_CAPABILITY_PILOT_PLAN) ||
     artifact.manifest.dispatchAuthorization !== "NOT_AUTHORIZED" ||
     artifact.manifest.taskId !== "site_builder.copy" ||
-    artifact.manifest.plannedExecutions !== 3 ||
-    artifact.manifest.maximumWireCalls !== 6 ||
-    artifact.manifest.maximumRepairCallsPerExecution !== 1 ||
-    canonicalDigest(artifact.manifest.executions) !==
-      canonicalDigest(COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions) ||
-    artifact.sourceBundle?.schemaVersion !==
-      "site-builder-copy-real-capability-source-bundle/2026-08-05-v1" ||
     !Array.isArray(artifact.sourceBundle.files) ||
     artifact.sourceBundle.files.length === 0 ||
     artifact.sourceBundle.digest !==
@@ -200,7 +191,48 @@ function parseArtifact(bytes: Buffer): ManifestArtifact {
     artifact.compiledRuntimeExpectation.sourceBundleDigest !==
       artifact.sourceBundle.digest ||
     canonicalDigest(artifact.compiledRuntimeExpectation.buildCommands) !==
-      canonicalDigest(COPY_PILOT_COMPILED_BUILD_COMMANDS)
+      canonicalDigest(COPY_PILOT_COMPILED_BUILD_COMMANDS);
+  const legacyInvalid =
+    artifact.schemaVersion ===
+    "site-builder-copy-real-capability-manifest-prep/2026-08-05-v1"
+      ? artifact.classification !== "FIXED_SOURCE_CREATE_ONLY" ||
+        artifact.manifest.schemaVersion !==
+          "site-builder-copy-real-capability-manifest/2026-08-05-v1" ||
+        artifact.manifest.planDigest !==
+          canonicalDigest(COPY_CAPABILITY_PILOT_PLAN) ||
+        artifact.manifest.plannedExecutions !== 3 ||
+        artifact.manifest.maximumWireCalls !== 6 ||
+        artifact.manifest.maximumRepairCallsPerExecution !== 1 ||
+        canonicalDigest(artifact.manifest.executions) !==
+          canonicalDigest(COPY_REAL_CAPABILITY_ADMISSION_SOURCE.executions) ||
+        artifact.sourceBundle.schemaVersion !==
+          "site-builder-copy-real-capability-source-bundle/2026-08-05-v1"
+      : null;
+  const recoveryInvalid =
+    artifact.schemaVersion ===
+    "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1"
+      ? artifact.classification !==
+          "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME" ||
+        artifact.requiredMergeMethod !== "merge_commit" ||
+        artifact.manifest.schemaVersion !==
+          "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" ||
+        artifact.manifest.planDigest !==
+          COPY_SONNET_RECOVERY_ADMISSION_SOURCE.planDigest ||
+        artifact.manifest.plannedExecutions !== 1 ||
+        artifact.manifest.maximumWireCalls !== 2 ||
+        artifact.manifest.maximumRepairCallsPerExecution !== 1 ||
+        canonicalDigest(artifact.manifest.executions) !==
+          canonicalDigest(COPY_SONNET_RECOVERY_ADMISSION_SOURCE.executions) ||
+        artifact.sourceBundle.schemaVersion !==
+          "site-builder-copy-sonnet-recovery-runtime-source-bundle/2026-08-08-v1" ||
+        canonicalDigest(artifact.duplicatePrevention) !==
+          canonicalDigest(COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION)
+      : null;
+  if (
+    sharedInvalid ||
+    (legacyInvalid == null && recoveryInvalid == null) ||
+    legacyInvalid === true ||
+    recoveryInvalid === true
   ) {
     fail("COPY_PILOT_MANIFEST_INVALID");
   }
