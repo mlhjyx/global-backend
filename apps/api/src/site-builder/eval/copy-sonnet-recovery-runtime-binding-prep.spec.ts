@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
@@ -24,6 +31,7 @@ import {
   buildCopySonnetRecoveryRuntimeBindingArtifact,
   prepareCopySonnetRecoveryRuntimeBindingFromRepository,
   validateCopySonnetRecoveryRuntimeBindingArtifact,
+  writeCopySonnetRecoveryRuntimeBindingCreateOnly,
 } from "./copy-sonnet-recovery-runtime-binding-prep";
 
 const REPOSITORY_ROOT = resolve(__dirname, "../../../../..");
@@ -31,6 +39,10 @@ const HISTORICAL_V13_MANIFEST_PATH =
   "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json";
 const HISTORICAL_V13_BINDING_PATH =
   "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json";
+const HISTORICAL_V14_MANIFEST_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json";
+const HISTORICAL_V14_BINDING_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json";
 
 function sha256(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
@@ -113,7 +125,13 @@ function fixture() {
 }
 
 describe("Copy Sonnet recovery fixed-source runtime binding", () => {
-  it("binds v14, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
+  it("rejects unverified binding output before touching the repository", async () => {
+    await expect(
+      writeCopySonnetRecoveryRuntimeBindingCreateOnly("/tmp", {} as never),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_PREPARATION_NOT_VERIFIED");
+  });
+
+  it("binds v15, the Sonnet-only runtime, and compiled bytes without dispatch", () => {
     const input = fixture();
     const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
       fixedSourceCommit: input.fixedSourceCommit,
@@ -125,10 +143,10 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     });
 
     expect(COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json",
     );
     expect(COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v15.json",
     );
     expect(artifact).toMatchObject({
       classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME",
@@ -142,7 +160,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       observedModelWireCalls: 0,
       manifest: {
         manifestId:
-          "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+          "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
         plannedExecutions: 1,
         maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
@@ -181,6 +199,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     expect(COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS).toEqual(
       expect.arrayContaining([
         "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
+        "apps/api/dist/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.js",
         "apps/api/dist/model-runtime/types.js",
         "apps/api/dist/site-builder/eval/copy-sonnet-recovery-admission.js",
         "apps/api/dist/site-builder/eval/copy-sonnet-recovery-contract.js",
@@ -259,23 +278,28 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       }),
     ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
 
-    const historicalV13Bytes = readFileSync(
-      resolve(REPOSITORY_ROOT, HISTORICAL_V13_MANIFEST_PATH),
-    );
-    expect(() =>
-      buildCopySonnetRecoveryRuntimeBindingArtifact({
-        fixedSourceCommit: input.fixedSourceCommit,
-        preparationHeadCommit: input.fixedSourceCommit,
-        sourceFiles: input.sourceFiles.map((entry) =>
-          entry.path === COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH
-            ? { ...entry, sha256: sha256(historicalV13Bytes) }
-            : entry,
-        ),
-        recoveryManifestBytes: historicalV13Bytes,
-        compiledRuntimeExpectation: input.compiledRuntimeExpectation,
-        fixedCommitReachableFromOriginMainAtPreparation: false,
-      }),
-    ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
+    for (const historicalPath of [
+      HISTORICAL_V13_MANIFEST_PATH,
+      HISTORICAL_V14_MANIFEST_PATH,
+    ]) {
+      const historicalBytes = readFileSync(
+        resolve(REPOSITORY_ROOT, historicalPath),
+      );
+      expect(() =>
+        buildCopySonnetRecoveryRuntimeBindingArtifact({
+          fixedSourceCommit: input.fixedSourceCommit,
+          preparationHeadCommit: input.fixedSourceCommit,
+          sourceFiles: input.sourceFiles.map((entry) =>
+            entry.path === COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH
+              ? { ...entry, sha256: sha256(historicalBytes) }
+              : entry,
+          ),
+          recoveryManifestBytes: historicalBytes,
+          compiledRuntimeExpectation: input.compiledRuntimeExpectation,
+          fixedCommitReachableFromOriginMainAtPreparation: false,
+        }),
+      ).toThrow("COPY_SONNET_RECOVERY_SOURCE_MANIFEST_INVALID");
+    }
   });
 
   it("validates exact recovery bytes and rejects post-build mutation", () => {
@@ -390,27 +414,21 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     });
   });
 
-  it("matches the generated v14 create-only runtime binding exactly", () => {
+  it("preserves the generated v14 binding independently of the live v15 validator", () => {
     const recoveryManifestBytes = readFileSync(
-      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH),
+      resolve(REPOSITORY_ROOT, HISTORICAL_V14_MANIFEST_PATH),
     );
     const bindingBytes = readFileSync(
-      resolve(
-        REPOSITORY_ROOT,
-        COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
-      ),
+      resolve(REPOSITORY_ROOT, HISTORICAL_V14_BINDING_PATH),
     );
     const artifact = JSON.parse(bindingBytes.toString("utf8"));
 
     expect(sha256(bindingBytes)).toBe(
       "1ad6088afd6883adeae6824aa2a80ddd8d919b03cfcc90d35ecfe7172213b458",
     );
-    expect(() =>
-      validateCopySonnetRecoveryRuntimeBindingArtifact(
-        artifact,
-        recoveryManifestBytes,
-      ),
-    ).not.toThrow();
+    expect(sha256(recoveryManifestBytes)).toBe(
+      "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
+    );
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
@@ -424,7 +442,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       observedModelWireCalls: 0,
       observedModelCost: { CNY: 0, USD: 0 },
       recoveryManifestReference: {
-        path: COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+        path: HISTORICAL_V14_MANIFEST_PATH,
         fileSha256:
           "e86f5d17539632f03df008bf9225998c80358ece58f804114bdbe9b593e7cf6f",
         artifactDigest:
@@ -460,6 +478,140 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         fixedCommitReachableFromOriginMainAtPreparation: false,
       },
     });
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(
+      "4f9fdf0623f854053e337c569760edfe82f643ab31e2034470fc18c26c04e475",
+    );
+    expect(
+      canonicalDigest(
+        JSON.parse(recoveryManifestBytes.toString("utf8")).manifest,
+      ),
+    ).toBe("8eaf961d39b9d6f2cf44d60702ee982433d15da4eb097c1ee1c1429a06a1314f");
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "0a3ddb1dc3d055a6aa60a2b0df1038b3b6de3509eb74fdb52bcc6c5d210799a5",
+    );
+    expect(canonicalDigest(artifact)).toBe(
+      "2e79f5f7a268e23ae2b4195b3f38d20cd5c20044cb02dec317cbc8d0fb0eaee1",
+    );
+  });
+
+  it("preserves the generated v15 runtime binding and complete post-#361 compiled tree", () => {
+    const recoveryManifestBytes = readFileSync(
+      resolve(REPOSITORY_ROOT, COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH),
+    );
+    const bindingBytes = readFileSync(
+      resolve(
+        REPOSITORY_ROOT,
+        COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+      ),
+    );
+    const artifact = JSON.parse(bindingBytes.toString("utf8"));
+
+    expect(() =>
+      validateCopySonnetRecoveryRuntimeBindingArtifact(
+        artifact,
+        recoveryManifestBytes,
+      ),
+    ).not.toThrow();
+    expect(sha256(bindingBytes)).toBe(
+      "838121ccf9649b05d9c04b05a1cec7ba094439a8a81a177462e5955a17c2ef7c",
+    );
+    expect(sha256(recoveryManifestBytes)).toBe(
+      "0ce90bf7f96b0012b85d410601079e9696305bfeb3e385e16358c5b9c9e4850e",
+    );
+    expect(artifact).toMatchObject({
+      artifactId:
+        "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1",
+      fixedSourceCommit: "64dcad8bb93dc96ad32f39aef2adc31dcc705f4c",
+      preparationHeadCommit: "64dcad8bb93dc96ad32f39aef2adc31dcc705f4c",
+      artifactDigest:
+        "1c898f79745d14fce431404c0196beb5a69f68286d74a8588bec66d71e432e44",
+      dispatchAuthorization: "NOT_AUTHORIZED",
+      dispatchCapable: false,
+      observedNetworkCalls: 0,
+      observedModelWireCalls: 0,
+      observedModelCost: { CNY: 0, USD: 0 },
+      recoveryManifestReference: {
+        path: COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+        fileSha256:
+          "0ce90bf7f96b0012b85d410601079e9696305bfeb3e385e16358c5b9c9e4850e",
+        artifactDigest:
+          "b671dbd416b4ff279fd75290f91492bb37e7d5d4d41c29e9f5c86897690d8317",
+        manifestDigest:
+          "789332c4542eadd5e6b534aa18698e7bb4dc0f312d9b081d50d7c1ececc368f5",
+      },
+      sourceBundle: {
+        digest:
+          "401414f6eda3e12aedf8c861772401b779ae82ddff132efd9eb550b6119a16e0",
+      },
+      compiledRuntimeExpectation: {
+        buildSourceCommit: "64dcad8bb93dc96ad32f39aef2adc31dcc705f4c",
+        artifactCount: COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS.length,
+        artifactTreeDigest:
+          "8cc2be5d0cc7a1ceeba94817e6fa9abea2c6602cc354bb38ecc487b5f349b30c",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/model-runtime/types.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-sonnet-recovery-admission.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-sonnet-recovery-contract.js",
+          }),
+          expect.objectContaining({
+            path: "apps/api/dist/site-builder/eval/copy-sonnet-recovery-manifest-prep.js",
+          }),
+        ]),
+      },
+      manifest: {
+        manifestId:
+          "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1",
+        executions: [
+          expect.objectContaining({
+            executionKey: "copy-sonnet-recovery-v15-claude-sonnet-5",
+            alias: "claude-sonnet-5",
+            protocol: "anthropic_messages",
+            reasoning: "medium",
+          }),
+        ],
+      },
+      preparationVerification: {
+        fixedCommitReachableFromOriginMainAtPreparation: false,
+        compiledRuntimeBuiltFromFixedSource: true,
+        futureExecutionMustReverify: true,
+      },
+    });
+    expect(
+      artifact.compiledRuntimeExpectation.artifacts.map(
+        ({ path }: { path: string }) => path,
+      ),
+    ).toEqual(COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS);
+    const { artifactDigest: _artifactDigest, ...withoutDigest } = artifact;
+    expect(canonicalDigest(withoutDigest)).toBe(
+      "1c898f79745d14fce431404c0196beb5a69f68286d74a8588bec66d71e432e44",
+    );
+    expect(canonicalDigest(artifact.manifest)).toBe(
+      "b082527a430377a8ccb99401d5c17cc62b89a96500a8cb92222f8f5af6eca85b",
+    );
+    expect(canonicalDigest(artifact)).toBe(
+      "fac299c0322f03bf54d77739911bd8819572d135661c9c87487d985846f5677b",
+    );
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_REBUILD_TEST === "1")(
@@ -494,6 +646,31 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
           ),
         ),
       ).not.toThrow();
+      const outputRoot = mkdtempSync(
+        join(tmpdir(), "copy-sonnet-recovery-binding-write-"),
+      );
+      try {
+        mkdirSync(resolve(outputRoot, "docs/evidence/site-builder"), {
+          recursive: true,
+        });
+        await writeCopySonnetRecoveryRuntimeBindingCreateOnly(
+          outputRoot,
+          artifact,
+        );
+        const outputPath = resolve(
+          outputRoot,
+          COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+        );
+        expect(JSON.parse(readFileSync(outputPath, "utf8"))).toStrictEqual(
+          artifact,
+        );
+        expect(statSync(outputPath).mode & 0o777).toBe(0o600);
+        await expect(
+          writeCopySonnetRecoveryRuntimeBindingCreateOnly(outputRoot, artifact),
+        ).rejects.toMatchObject({ code: "EEXIST" });
+      } finally {
+        rmSync(outputRoot, { recursive: true, force: true });
+      }
     },
     90_000,
   );
