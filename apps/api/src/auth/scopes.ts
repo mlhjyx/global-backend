@@ -139,7 +139,9 @@ function policy(roleScopeMap: RoleScopeMap): RolesToScopesPolicy {
     resolve(roles: readonly string[]): readonly AuthorizationScope[] {
       const granted = new Set<AuthorizationScope>();
       for (const role of roles) {
-        const scopes = roleScopeMap[role];
+        const scopes = Object.hasOwn(roleScopeMap, role)
+          ? roleScopeMap[role]
+          : undefined;
         if (!scopes) continue;
         for (const scope of scopes) granted.add(scope);
       }

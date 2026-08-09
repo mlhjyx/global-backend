@@ -18,7 +18,7 @@ import {
  * 配置（.env）：
  *   AUTH_JWKS_URI      SaaS 平台的 JWKS 端点（必填，启用本验证器的开关）
  *   AUTH_ISSUER        期望 iss（必填）
- *   AUTH_AUDIENCE      期望 aud（可选但强烈建议）
+ *   AUTH_AUDIENCE      期望 aud（必填）
  *   AUTH_CLOCK_SKEW_S  允许时钟偏移秒（默认 60）
  *   AUTH_WORKSPACE_CLAIM  workspace 所在 claim 名（默认 'workspace_id'）
  *   AUTH_ROLES_CLAIM      roles 所在 claim 名（默认 'roles'）
@@ -61,6 +61,9 @@ export class JwksTokenVerifier extends TokenVerifier {
       'workspace_id',
     );
     this.rolesClaim = resolveTokenClaimName(env.AUTH_ROLES_CLAIM, 'roles');
+    if (this.wsClaim === this.rolesClaim) {
+      throw new Error('token claim names must be distinct');
+    }
   }
 
   async verify(token: string): Promise<RequestContext> {

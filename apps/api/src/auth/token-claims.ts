@@ -3,8 +3,15 @@ const UUID_PATTERN =
 const CLAIM_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$/;
 const RESERVED_CLAIM_NAMES = new Set([
   '__proto__',
+  'aud',
   'constructor',
+  'exp',
+  'iat',
+  'iss',
+  'jti',
+  'nbf',
   'prototype',
+  'sub',
 ]);
 function containsControlCharacter(value: string): boolean {
   for (const character of value) {
