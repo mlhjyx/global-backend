@@ -134,4 +134,40 @@ describe('Suppression governance', () => {
     expect(h.deleteRecord).not.toHaveBeenCalled();
     expect(h.current()).toMatchObject({ id: SUPPRESSION_ID, protectionClass: 'LEGAL' });
   });
+
+  it('并发同 requestId 使用 INSERT ON CONFLICT 语义返回同一事实，不因唯一键竞争变成 500', async () => {
+    const existing = {
+      id: '55555555-5555-4555-8555-555555555555',
+      workspaceId: WORKSPACE_ID,
+      suppressionId: SUPPRESSION_ID,
+      requestId: REQUEST_ID,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+      actorId: CTX.userId,
+      createdAt: new Date('2026-08-10T00:00:00.000Z'),
+    };
+    const findDecision = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(existing);
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const create = vi.fn(async () => {
+      throw Object.assign(new Error('unique constraint'), { code: 'P2002' });
+    });
+    const tx = {
+      suppressionRecord: { findUnique: vi.fn(async () => row('PREFERENCE')) },
+      suppressionDecision: { findUnique: findDecision, createMany, create },
+    };
+    const prisma = {
+      withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
+    };
+    const service = new DiscoveryService(prisma as never, {} as never);
+
+    await expect(service.requestSuppressionDecision(CTX, SUPPRESSION_ID, {
+      requestId: REQUEST_ID,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+    })).resolves.toEqual(existing);
+    expect(createMany).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+  });
 });
