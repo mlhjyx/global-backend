@@ -4,7 +4,7 @@
 
 ## 当前合同
 
-- `production-dependency-audit-baseline.json` 固定 `origin/main@6b78901c2b4aee211e93ca11d5af13ea74398459` 的 `pnpm audit --prod` 结果与 canonical finding evidence：36 条 advisory，其中 high 18、moderate 14、low 4、critical 0。
+- `production-dependency-audit-baseline.json` 固定 `origin/main@fcb61e3060dd3289fec93bca11d02584f8080791` 的 `pnpm audit --prod` 结果与 canonical finding evidence：36 条 advisory，其中 high 18、moderate 14、low 4、critical 0。
 - ratchet 允许 advisory 消失；PR 还会使用受信 base 的依赖图生成独立 audit，已经消失的 advisory 再次出现、同一 advisory 新增 vulnerable version/path 或风险元数据漂移都会失败。新增 advisory、严重度提高、critical、畸形/非 production-only 报告和过期 baseline 全部失败。
 - PR 正常路径读取 base commit 中的 baseline 与 verifier，避免同一个 PR 放宽 policy 后自证通过。head 与 base 都以固定 pnpm、禁 lifecycle scripts、禁 `.pnpmfile.cjs` hooks 的方式物化依赖路径；缺路径证据直接失败。首次引入时只允许 candidate baseline 逐字绑定 PR exact base、base lockfile digest、advisory 集和 finding exposure；bootstrap PR 不得同时修改 manifest、lockfile、workspace、npmrc、pnpm hook 或 patch。合并后不再走 bootstrap。
 - 扫描器固定使用 `https://registry.npmjs.org/`；安装与 audit 从环境 allowlist 启动，user/global npm config 固定到 `/dev/null`，仓库任意层级 `.npmrc` 在联网前 fail-closed。受信 base 的 `supply-chain-source-policy.mjs` 还会在 head 安装前拒绝 direct HTTPS/Git/tarball/file source、越界 workspace/link 和未经评审的 patch/config dependency，只允许官方 registry 版本与已跟踪 workspace 包；`supply-chain-audit.mjs` 即使脱离 workflow 单独执行，也会先重复执行同一依赖源准入。依赖 manifest、lock/workspace、npmrc、pnpm hook、source-policy 与 patch 同时进入 CODEOWNERS。未来若需要私有 registry 或其他 source，必须先引入独立的受信配置合同，不能在普通依赖 PR 中直接放行。

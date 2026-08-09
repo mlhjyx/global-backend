@@ -1,10 +1,10 @@
 # Supply-chain canary 与 production audit ratchet TDD 记录
 
-> 基线：`origin/main@6b78901c2b4aee211e93ca11d5af13ea74398459`
+> 基线：`origin/main@fcb61e3060dd3289fec93bca11d02584f8080791`
 >
 > 范围：dependency review、production-only audit ratchet、机器可读遗留漏洞基线、Dependabot 分域、CodeQL canary。
 >
-> 边界：本文只记录本地源码与测试证据；没有 push、远端 PR、live ruleset/security setting、部署或真实试点证据。
+> 边界：本文只把源码与本地测试作为实现证据；GitHub-hosted canary、live ruleset/security setting、部署和真实试点必须由各自的 exact-head 运行证据证明，不能从本文推断。
 
 ## 用户旅程与失败面
 
@@ -22,27 +22,28 @@
 
 ## RED → GREEN 证据
 
-| 周期 | RED checkpoint 与预期失败                                                                                    | GREEN checkpoint 与结果                                                                                            |
-| ---- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败                                     | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过                              |
-| 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败                               | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过                     |
-| 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败                        | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执                    |
-| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败                          | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过                        |
-| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败                            | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝                      |
-| 6    | `67df655e`：新增 dependency ownership 未同步机器治理清单时总门失败                                           | `a39d4cbe`：CODEOWNERS 末尾承重块与 required-contexts 机器真值逐项一致，governance verifier 通过                   |
-| 7    | `1ca67ba2` / `69f4efaa`：direct URL/Git/tarball 与不可枚举的 archive base checkout 合同失败                  | `8ba9c2b8`：受信 source-policy 在 base/head install 前运行；base 改用可审计 detached Git worktree                  |
-| 8    | `ed34bd0b`：无显式协议、仅 `repo/commit/type: git` 的 lock resolution 仍能绕过                               | `8ba9c2b8`：隐式 Git/directory resolution、越界 importer/link 也 fail-closed；官方 registry 图通过                 |
-| 9    | `7ecda778`：workspace flow/越界 glob 与 YAML escape 合同失败；partial GREEN 的单引号保留键 mutation 再次变红 | `7e0230a1`：严格 workspace schema 与 lock YAML 子集 fail-closed；`\\x`/`\\u`/`\\U`、quoted key、flow path 均被阻断 |
-| 10   | `b4ecce59`：`!!binary` 可把 base64 解码为 Git resolution 并绕过 raw-text source marker                       | `de54ddd8`：全面拒绝 tag/anchor/alias 指示符；`!!`、`!<...>` 与 `*.alias` mutation 均被阻断                        |
-| 11   | `9d2214a8`：`pnpm.auditConfig.ignoreGhsas/ignoreCves` 可在 ratchet 前隐藏 advisory                           | `7102fe29`：所有 tracked manifest 的 `pnpm.auditConfig` 均 fail-closed，candidate 不能过滤 audit 事实              |
-| 12   | `eee0026e`：flow singleton-sequence key 被 js-yaml 字符串化为 `resolution/repo/commit/type`                  | `3a80d502`：拒绝 complex-key `?` 与 collection mapping key，并补 scp-like Git source 防线                          |
-| 13   | `febf8f21`：workspace glob 尚未把 tracked symlink/gitlink 纳入 trust boundary                                | `d865d606`：联网安装前只接受 Git index 中的 100644/100755 regular files，其他 mode 全部 fail-closed                |
-| 14   | `f09917cf`：审计 CLI 尚未独立调用 source-policy，脱离 workflow 时可遗漏依赖源准入                            | `aeed36b1`：CLI 在读取基线或运行 `pnpm audit` 前执行仓库依赖源准入，workflow 前置门继续作为第一层防护              |
-| 15   | `81eb0140`：合成到当前 main 后，机器测试精确报 `BASELINE_BOOTSTRAP_BASE_MISMATCH`                            | `3691304d`：baseline 重绑定 `6b78901c…`；36 advisories/183 exposures 与 lock digest 不变，bootstrap exact 参数通过 |
+| 周期 | RED checkpoint 与预期失败                                                                                        | GREEN checkpoint 与结果                                                                                            |
+| ---- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 1    | `fe9bb3bdfb7bdbe7d45a2b66329cda6772edbf10`：39 tests 中 8 个新增合同失败                                         | `c3ba6b5f343b75d1b0aa8238be11cfbacc9c581a`：基础 canary、baseline、分域、治理入口通过                              |
+| 2    | `29176d51c9bf41dd361c9ad8a64efe88df01b800`：41 tests 中 4 个新增防绕过合同失败                                   | `9666fa09`：bootstrap 锁定 base lock/advisory 集，metadata 与 due date fail-closed，41/41 通过                     |
+| 3    | `01f1aa26`：回执语义、base/head regression、comparison input 和 pnpm 固定版本合同失败                            | `b3c3f0e5`：43/43 governance tests 通过；官方 registry base/head 本地模拟返回 36 条遗留风险回执                    |
+| 4    | `9860d912`：finding exposure、advisory metadata 和实际 `.pnpmfile.cjs` 路径合同失败                              | `0a283dab`：45/45 governance tests；183 条 canonical exposure；installed base/head 比较通过                        |
+| 5    | `480eff12`：候选 `.npmrc`、代理/TLS/CA/Node 环境注入和依赖配置 ownership 合同失败                                | `652f3607`：46/46 governance tests；安装/audit 使用环境 allowlist，仓库 `.npmrc` 在联网前拒绝                      |
+| 6    | `67df655e`：新增 dependency ownership 未同步机器治理清单时总门失败                                               | `a39d4cbe`：CODEOWNERS 末尾承重块与 required-contexts 机器真值逐项一致，governance verifier 通过                   |
+| 7    | `1ca67ba2` / `69f4efaa`：direct URL/Git/tarball 与不可枚举的 archive base checkout 合同失败                      | `8ba9c2b8`：受信 source-policy 在 base/head install 前运行；base 改用可审计 detached Git worktree                  |
+| 8    | `ed34bd0b`：无显式协议、仅 `repo/commit/type: git` 的 lock resolution 仍能绕过                                   | `8ba9c2b8`：隐式 Git/directory resolution、越界 importer/link 也 fail-closed；官方 registry 图通过                 |
+| 9    | `7ecda778`：workspace flow/越界 glob 与 YAML escape 合同失败；partial GREEN 的单引号保留键 mutation 再次变红     | `7e0230a1`：严格 workspace schema 与 lock YAML 子集 fail-closed；`\\x`/`\\u`/`\\U`、quoted key、flow path 均被阻断 |
+| 10   | `b4ecce59`：`!!binary` 可把 base64 解码为 Git resolution 并绕过 raw-text source marker                           | `de54ddd8`：全面拒绝 tag/anchor/alias 指示符；`!!`、`!<...>` 与 `*.alias` mutation 均被阻断                        |
+| 11   | `9d2214a8`：`pnpm.auditConfig.ignoreGhsas/ignoreCves` 可在 ratchet 前隐藏 advisory                               | `7102fe29`：所有 tracked manifest 的 `pnpm.auditConfig` 均 fail-closed，candidate 不能过滤 audit 事实              |
+| 12   | `eee0026e`：flow singleton-sequence key 被 js-yaml 字符串化为 `resolution/repo/commit/type`                      | `3a80d502`：拒绝 complex-key `?` 与 collection mapping key，并补 scp-like Git source 防线                          |
+| 13   | `febf8f21`：workspace glob 尚未把 tracked symlink/gitlink 纳入 trust boundary                                    | `d865d606`：联网安装前只接受 Git index 中的 100644/100755 regular files，其他 mode 全部 fail-closed                |
+| 14   | `f09917cf`：审计 CLI 尚未独立调用 source-policy，脱离 workflow 时可遗漏依赖源准入                                | `aeed36b1`：CLI 在读取基线或运行 `pnpm audit` 前执行仓库依赖源准入，workflow 前置门继续作为第一层防护              |
+| 15   | `81eb0140`：合成到当前 main 后，机器测试精确报 `BASELINE_BOOTSTRAP_BASE_MISMATCH`                                | `3691304d`：baseline 重绑定 `6b78901c…`；36 advisories/183 exposures 与 lock digest 不变，bootstrap exact 参数通过 |
+| 16   | `7da72efa` / `0a41c1f4`：合入 #361 后，CLI 与 repository baseline test 精确报 `BASELINE_BOOTSTRAP_BASE_MISMATCH` | `01249ef4`：baseline 重绑定 `fcb61e30…`；36 advisories/183 exposures、remediation 时限和 lock digest 均保持不变    |
 
 实现过程中只修生产代码以满足既定 RED；测试修正仅有一处 YAML 标准缩进期望从 8 空格改为实际 `with.version` 的 10 空格，没有降低行为合同。
 
-Cycle 15 的 exact-main 重采样只更新 source/base commit 与 `captured_at`；原有 remediation due date、baseline `valid_until`、36 条 advisory、183 条 exposure 和 lock digest 全部保持不变，不能借主线同步延长漏洞债务。
+Cycle 15 与 16 的 exact-main 重采样都只更新 source/base commit 与 `captured_at`；原有 remediation due date、baseline `valid_until`、36 条 advisory、183 条 exposure 和 lock digest 全部保持不变，不能借主线同步延长漏洞债务。
 
 ## 本地验证矩阵
 
