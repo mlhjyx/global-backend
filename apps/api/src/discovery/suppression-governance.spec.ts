@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestContext } from '../auth/request-context';
 import { DiscoveryService } from './discovery.service';
@@ -134,6 +134,46 @@ describe('Suppression governance', () => {
 
     expect(result).toMatchObject({ protectionClass: 'LEGAL' });
     expect(h.current()).toMatchObject({ protectionClass: 'LEGAL' });
+  });
+
+  it.each([
+    ['email', '   '],
+    ['email', 'not-an-email'],
+    ['domain', 'https://localhost/path'],
+    ['domain', 'https://bad_domain.example/path'],
+    ['company_name', '\t\n'],
+    ['unknown_type', 'example.com'],
+  ])('非法 suppression %s/%j 在任何 DB 调用前 fail-closed', async (type, value) => {
+    const withWorkspace = vi.fn();
+    const service = new DiscoveryService({ withWorkspace } as never, {} as never);
+
+    await expect(service.addSuppression(CTX, { type, value, reason: 'legal' }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['email', ' Sales@EXAMPLE.COM ', 'sales@example.com'],
+    ['domain', 'https://www.Example.COM/path?q=1', 'example.com'],
+    ['company_name', '  ACME   GmbH  ', 'acme gmbh'],
+  ])('suppression %s 在写入与即时匹配前规范化为 %s', async (type, value, canonicalValue) => {
+    const h = makeHarness(row('PREFERENCE'));
+
+    await h.service.addSuppression(CTX, { type, value, reason: 'manual' });
+
+    expect(h.tx.suppressionRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        workspaceId_type_value: {
+          workspaceId: WORKSPACE_ID,
+          type,
+          value: canonicalValue,
+        },
+      },
+      create: expect.objectContaining({ type, value: canonicalValue }),
+    }));
+    if (type === 'domain' || type === 'company_name') {
+      expect(h.tx.canonicalCompany.updateMany).toHaveBeenCalled();
+    }
   });
 
   it('身份误关联只能追加带 request/actor/reason/time 的 correction 决策，不修改 suppression', async () => {
