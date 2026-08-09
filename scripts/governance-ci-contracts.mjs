@@ -311,7 +311,9 @@ export function validateRequiredContexts(
         !isObject(item) ||
         !isNonEmptyString(item.name) ||
         !isNonEmptyString(item.workflow) ||
-        !isNonEmptyString(item.event),
+        !isNonEmptyString(item.event) ||
+        (item.allowed_job_if !== undefined &&
+          !isNonEmptyString(item.allowed_job_if)),
     ) ||
     !uniqueStrings(implementationNames)
   ) {
@@ -374,11 +376,20 @@ export function validateRequiredContexts(
       }
       if (matches.length === 1) {
         const [job] = matches;
-        if (job.condition !== null) {
+        const allowedCondition = implementation.allowed_job_if ?? null;
+        if (job.condition !== null && job.condition !== allowedCondition) {
           issues.push(
             issue(
               "REQUIRED_CONTEXT_JOB_CONDITIONAL",
               `${implementation.workflow} job ${job.id} uses job-level if and can report a skipped required context`,
+            ),
+          );
+        }
+        if (allowedCondition !== null && job.condition !== allowedCondition) {
+          issues.push(
+            issue(
+              "REQUIRED_CONTEXT_JOB_CONDITION_DRIFT",
+              `${implementation.workflow} job ${job.id} does not use its exact approved invariant condition`,
             ),
           );
         }

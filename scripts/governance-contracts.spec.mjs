@@ -767,6 +767,54 @@ test("required-context policy fails when a repository workflow drops a named con
     );
   }
 
+  const approvedCondition =
+    "github.event.pull_request.base.ref == github.event.repository.default_branch";
+  const conditionPolicy = {
+    ...policy,
+    context_implementations: policy.context_implementations.map((item) =>
+      item.name === "build · typecheck · test"
+        ? { ...item, allowed_job_if: approvedCondition }
+        : item,
+    ),
+  };
+  const approvedConditional = new Map(workflows);
+  approvedConditional.set(
+    ".github/workflows/ci.yml",
+    `on:\n  pull_request:\njobs:\n  build:\n    if: ${approvedCondition}\n    name: build · typecheck · test\n`,
+  );
+  const approvedConditionalCodes = issueCodes(
+    validateRequiredContexts(
+      conditionPolicy,
+      approvedConditional,
+      repositoryContext,
+    ),
+  );
+  assert.ok(
+    !approvedConditionalCodes.includes("REQUIRED_CONTEXT_JOB_CONDITIONAL"),
+  );
+  assert.ok(
+    !approvedConditionalCodes.includes("REQUIRED_CONTEXT_JOB_CONDITION_DRIFT"),
+  );
+  approvedConditional.set(
+    ".github/workflows/ci.yml",
+    "on:\n  pull_request:\njobs:\n  build:\n    if: false\n    name: build · typecheck · test\n",
+  );
+  const driftedConditionalCodes = issueCodes(
+    validateRequiredContexts(
+      conditionPolicy,
+      approvedConditional,
+      repositoryContext,
+    ),
+  );
+  assert.ok(
+    driftedConditionalCodes.includes("REQUIRED_CONTEXT_JOB_CONDITIONAL"),
+  );
+  assert.ok(
+    driftedConditionalCodes.includes(
+      "REQUIRED_CONTEXT_JOB_CONDITION_DRIFT",
+    ),
+  );
+
   const conditionalDependency = new Map(workflows);
   conditionalDependency.set(
     ".github/workflows/ci.yml",

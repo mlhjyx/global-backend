@@ -15,7 +15,7 @@
 
 ## 仓内 required contexts 与外部 ruleset
 
-唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会把每个 context 绑定到声明 workflow 的一个唯一 job，确认 event 存在，并拒绝 required job 的 job-level `if` 与 `continue-on-error`；其 `needs` 只能指向另一个 required job，避免 GitHub 把条件跳过、容错失败或未受保护的前置依赖显示成绿色。验证器同时拒绝放宽 CODEOWNERS/review/history 保护的仓内政策，并扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence、Release Bundle、Gitleaks suppression 配置或 Provider SourceClass manifest。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
+唯一机器清单是 [`.github/required-contexts.json`](../../.github/required-contexts.json)。`pnpm governance:verify` 会把每个 context 绑定到声明 workflow 的一个唯一 job，确认 event 存在，并拒绝未在机器清单逐字登记的 job-level `if` 与任何 `continue-on-error`；当前唯一获准条件是 decision-card 对 GitHub default branch 的精确不变量。required job 的 `needs` 只能指向另一个 required job，避免 GitHub 把条件跳过、容错失败或未受保护的前置依赖显示成绿色。验证器同时拒绝放宽 CODEOWNERS/review/history 保护的仓内政策，并扫描 `.github/workflows/` 的全部外部 `uses:`：每个 action 必须绑定政策中的 40 位 commit SHA 并保留版本注释；新增 workflow 也不能逃过检查。CODEOWNERS 必须以完整治理 ownership block 结尾，防止后续规则覆盖政策、schema、verifier、RuntimeEvidence、Release Bundle、Gitleaks suppression 配置或 Provider SourceClass manifest。新增/改名 context、action 或治理路径必须同时更新 workflow、清单和 mutation tests。
 
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 

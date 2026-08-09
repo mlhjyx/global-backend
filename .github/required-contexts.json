@@ -37,7 +37,8 @@
     {
       "name": "nontechnical decision card freshness",
       "workflow": ".github/workflows/pr-decision-card.yml",
-      "event": "pull_request_target"
+      "event": "pull_request_target",
+      "allowed_job_if": "github.event.pull_request.base.ref == github.event.repository.default_branch"
     }
   ],
   "workflow_runtime_requirements": [
