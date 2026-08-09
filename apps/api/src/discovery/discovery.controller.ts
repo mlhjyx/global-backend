@@ -268,7 +268,7 @@ export class DiscoveryController {
   // ── Suppression ───────────────────────────────────────────────────────────
 
   @Post('suppressions')
-  @RequireScopes('acquisition:label:write', 'compliance:manage')
+  @RequireScopes('compliance:manage')
   @HttpCode(201)
   @ApiOperation({ summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED' })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' }, { status: 201 })
@@ -285,7 +285,7 @@ export class DiscoveryController {
   }
 
   @Delete('suppressions/:id')
-  @RequireScopes('acquisition:label:write', 'compliance:manage')
+  @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '移除禁联记录' })
   @ApiEnvelope({ type: 'object', required: ['deleted'], properties: { deleted: { type: 'boolean' } } })
   async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {

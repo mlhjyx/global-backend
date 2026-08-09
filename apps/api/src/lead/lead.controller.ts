@@ -153,7 +153,7 @@ export class LeadController {
   @Post('leads/:leadId/sanctions-review')
   @RequireScopes(
     'acquisition:review',
-    'acquisition:identity:review',
+    'compliance:manage',
   )
   @HttpCode(200)
   @ApiOperation({

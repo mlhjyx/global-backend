@@ -2499,7 +2499,6 @@
           "Discovery"
         ],
         "x-required-scopes": [
-          "acquisition:label:write",
           "compliance:manage"
         ]
       },
@@ -2596,7 +2595,6 @@
           "Discovery"
         ],
         "x-required-scopes": [
-          "acquisition:label:write",
           "compliance:manage"
         ]
       }
@@ -3105,7 +3103,7 @@
         ],
         "x-required-scopes": [
           "acquisition:review",
-          "acquisition:identity:review"
+          "compliance:manage"
         ]
       }
     },
