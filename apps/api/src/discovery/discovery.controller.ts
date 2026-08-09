@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -27,14 +27,17 @@ import {
 } from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { LawfulBasisKind } from './provider-contract';
+import { SUPPRESSION_TYPES } from './suppression-value';
 
 class CreateSuppressionDto {
-  @ApiProperty({ enum: ['email', 'domain', 'company_name'] })
-  @IsIn(['email', 'domain', 'company_name'])
+  @ApiProperty({ enum: SUPPRESSION_TYPES })
+  @IsIn(SUPPRESSION_TYPES)
   type!: string;
 
-  @ApiProperty({ example: 'noreply@example.com' })
+  @ApiProperty({ example: 'noreply@example.com', minLength: 1, maxLength: 2048 })
   @IsString()
+  @MinLength(1)
+  @MaxLength(2048)
   value!: string;
 
   @ApiPropertyOptional({ enum: ['unsubscribe', 'bounce', 'complaint', 'manual', 'legal'] })

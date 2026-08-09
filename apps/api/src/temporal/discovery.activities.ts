@@ -6,6 +6,7 @@ import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-j
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
+import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
@@ -243,9 +244,11 @@ export function createDiscoveryActivities(deps: {
             country: rec.country,
             identifier: rec.identifier, // §8.4：无域名时按税号消歧，防同名同国不同实体误并
           });
+          const domainKey = rec.domain ? canonicalizeSuppressionValue('domain', rec.domain) : null;
+          const nameKey = canonicalizeSuppressionValue('company_name', rec.name);
           const isSuppressed =
-            (rec.domain && suppressedDomains.has(rec.domain.toLowerCase())) ||
-            suppressedNames.has(rec.name.toLowerCase());
+            (!!domainKey && suppressedDomains.has(domainKey)) ||
+            (!!nameKey && suppressedNames.has(nameKey));
 
           const canonical = await tx.canonicalCompany.upsert({
             where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: identity.dedupeKey } },

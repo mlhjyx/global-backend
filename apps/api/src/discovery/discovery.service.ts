@@ -10,6 +10,7 @@ import { buildGuessTargets } from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
 import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
+import { canonicalizeSuppressionValue } from './suppression-value';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -399,6 +400,12 @@ export class DiscoveryService {
   // ── Suppression 治理 ──────────────────────────────────────────────────────
 
   async addSuppression(ctx: RequestContext, entry: { type: string; value: string; reason?: string }) {
+    const canonicalValue = canonicalizeSuppressionValue(entry.type, entry.value);
+    if (!canonicalValue) {
+      throw new BadRequestException({
+        error: { code: 'INVALID_SUPPRESSION_VALUE', message: 'suppression type/value is invalid' },
+      });
+    }
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const reason = entry.reason ?? 'manual';
       // Fail closed: only the explicitly reviewed preference reasons are releasable.
@@ -409,7 +416,7 @@ export class DiscoveryService {
           workspaceId_type_value: {
             workspaceId: ctx.workspaceId,
             type: entry.type,
-            value: entry.value.toLowerCase(),
+            value: canonicalValue,
           },
         },
         // suppression facts are immutable. A repeated write may only strengthen protection.
@@ -417,7 +424,7 @@ export class DiscoveryService {
         create: {
           workspaceId: ctx.workspaceId,
           type: entry.type,
-          value: entry.value.toLowerCase(),
+          value: canonicalValue,
           reason,
           protectionClass,
         },
@@ -425,7 +432,12 @@ export class DiscoveryService {
       // 立刻生效：命中的 canonical 公司标记 SUPPRESSED
       if (entry.type === 'domain') {
         await tx.canonicalCompany.updateMany({
-          where: { domain: entry.value.toLowerCase() },
+          where: { domain: canonicalValue },
+          data: { status: 'SUPPRESSED' },
+        });
+      } else if (entry.type === 'company_name') {
+        await tx.canonicalCompany.updateMany({
+          where: { name: { equals: canonicalValue, mode: 'insensitive' } },
           data: { status: 'SUPPRESSED' },
         });
       }

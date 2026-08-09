@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
+import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
 
 const CHUNK = 100;
 
@@ -61,8 +62,10 @@ export class TenantProjectionService {
         for (const e of chunk) {
           const cleaned = (e.cleaned ?? {}) as Record<string, unknown>;
           const identity = companyIdentity({ name: e.name, domain: e.domain, country: e.country });
+          const domainKey = e.domain ? canonicalizeSuppressionValue('domain', e.domain) : null;
+          const nameKey = canonicalizeSuppressionValue('company_name', e.name);
           const isSuppressed =
-            (!!e.domain && suppressedDomains.has(e.domain.toLowerCase())) || suppressedNames.has(e.name.toLowerCase());
+            (!!domainKey && suppressedDomains.has(domainKey)) || (!!nameKey && suppressedNames.has(nameKey));
 
           // 合规：人名邮箱不投；职能邮箱作为法人联系点随公司走
           const roleEmail = cleaned.email_kind === 'role' ? (cleaned.email as string) : undefined;
