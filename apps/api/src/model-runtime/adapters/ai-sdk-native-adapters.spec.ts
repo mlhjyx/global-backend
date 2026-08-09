@@ -562,6 +562,144 @@ describe("AI SDK 7 native provider adapters", () => {
     );
   });
 
+  it("preserves Anthropic cache-write-only usage", async () => {
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_cache_write_only",
+          model: "claude-sonnet-5",
+          content: [{ type: "text", text: '{"name":"Acme"}' }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 94,
+            cache_creation_input_tokens: 1_199,
+            cache_read_input_tokens: 0,
+          },
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const result = await adapter.execute<{ name: string }>({
+      alias: "claude-sonnet-5",
+      prompt: "Name the company.",
+      outputSchema: companySchema,
+      outputSchemaName: "company",
+      reasoning: { effort: "medium" },
+      maxOutputTokens: 1_200,
+      abortSignal: AbortSignal.timeout(5_000),
+    });
+
+    expect(result).toMatchObject({
+      protocol: "anthropic-messages",
+      requestedModel: "claude-sonnet-5",
+      reportedModel: "claude-sonnet-5",
+      requestId: ANTHROPIC_REQUEST_ID,
+      output: { name: "Acme" },
+      usage: {
+        inputTokens: 1_199,
+        uncachedInputTokens: 0,
+        outputTokens: 94,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 1_199,
+      },
+    });
+  });
+
+  it("records only a redacted response shape when a Messages HTTP 200 body is invalid", async () => {
+    const sensitiveCopy = "sensitive-copy-must-not-enter-diagnostics";
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_invalid_200",
+          model: "claude-sonnet-5",
+          content: [
+            {
+              type: "text",
+              text: { invalid: sensitiveCopy },
+              private_note: sensitiveCopy,
+            },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 94,
+            cache_creation_input_tokens: 1_199,
+            cache_read_input_tokens: 0,
+            private_usage: sensitiveCopy,
+          },
+          private_note: sensitiveCopy,
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const error = await adapter
+      .execute({
+        alias: "claude-sonnet-5",
+        prompt: "Name the company.",
+        outputSchema: companySchema,
+        outputSchemaName: "company",
+        reasoning: { effort: "medium" },
+        maxOutputTokens: 1_200,
+        abortSignal: AbortSignal.timeout(5_000),
+      })
+      .then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+
+    expect(error).toBeInstanceOf(NativeModelApiError);
+    expect(error).toMatchObject({
+      protocol: "anthropic-messages",
+      requestedModel: "claude-sonnet-5",
+      requestId: ANTHROPIC_REQUEST_ID,
+      statusCode: 200,
+      retryable: false,
+      responseShape: {
+        schemaVersion: "native-model-response-shape/2026-08-09-v1",
+        topLevelKeys: [
+          "content",
+          "id",
+          "model",
+          "stop_reason",
+          "stop_sequence",
+          "type",
+          "usage",
+        ],
+        contentBlockTypes: ["text"],
+        usageKeys: [
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens",
+          "input_tokens",
+          "output_tokens",
+        ],
+        validationPaths: ["content[0].text"],
+      },
+    });
+    expect(error).not.toHaveProperty("responseBody");
+    expect(error).not.toHaveProperty("requestBodyValues");
+    expect(JSON.stringify(error)).not.toContain(sensitiveCopy);
+    expect(JSON.stringify(error)).not.toContain("private_note");
+    expect(JSON.stringify(error)).not.toContain("private_usage");
+    expect(gateway.observed).toHaveLength(1);
+  });
+
   it.each([
     ["openai-responses", AiSdkOpenAiResponsesAdapter, "gpt-5.6-terra"],
     ["openai-chat", AiSdkOpenAiChatCompletionsAdapter, "gpt-5.6-terra"],
