@@ -135,9 +135,13 @@ function safeResponseKeys(
 function responseValidationIssues(error: unknown): readonly unknown[] {
   let current = error;
   for (let depth = 0; depth < 4; depth += 1) {
-    if (Array.isArray(current)) return current;
+    if (Array.isArray(current)) {
+      return current.slice(0, MAX_MODEL_RESPONSE_SHAPE_ITEMS);
+    }
     const currentRecord = responseRecord(current);
-    if (Array.isArray(currentRecord?.issues)) return currentRecord.issues;
+    if (Array.isArray(currentRecord?.issues)) {
+      return currentRecord.issues.slice(0, MAX_MODEL_RESPONSE_SHAPE_ITEMS);
+    }
     current = currentRecord?.cause;
   }
   return [];

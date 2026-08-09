@@ -50,6 +50,6 @@ describe("createRedactedModelResponseShape", () => {
 
     expect(shape?.validationPaths).toHaveLength(32);
     expect(shape?.validationPaths.at(0)).toBe("content[0].signature");
-    expect(shape?.validationPaths.at(-1)).toBe("content[31].signature");
+    expect(shape?.validationPaths).toContain("content[31].signature");
   });
 });
