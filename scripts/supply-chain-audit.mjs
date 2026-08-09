@@ -8,6 +8,7 @@ import {
   assertNoRepositoryNpmrc,
   buildTrustedPnpmEnvironment,
   listTrackedRepositoryNpmrc,
+  validateRepositoryDependencySources,
 } from "./supply-chain-source-policy.mjs";
 
 const BASELINE_SCHEMA = "production-dependency-audit-baseline/v1";
@@ -871,6 +872,10 @@ function parseCliArguments(argv) {
 
 async function main() {
   const options = parseCliArguments(process.argv.slice(2));
+  const sourcePolicy = await validateRepositoryDependencySources(process.cwd());
+  if (!sourcePolicy.ok) {
+    throw new Error("repository dependency sources are not trusted");
+  }
   const baseline = await readBoundedJson(resolve(options.baseline));
   const audit = options.auditFile
     ? await readBoundedJson(resolve(options.auditFile))
