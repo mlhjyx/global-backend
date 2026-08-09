@@ -314,6 +314,12 @@ async function compiledRecoveryRepository(
     observedModelWireCalls: 0,
     observedModelCost: { CNY: 0, USD: 0 },
     duplicatePrevention: COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
+    recoveryManifestReference: {
+      path: "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json",
+      fileSha256: "f".repeat(64),
+      artifactDigest: "e".repeat(64),
+      manifestDigest: "d".repeat(64),
+    },
     manifest,
     sourceBundle: {
       schemaVersion:
@@ -359,7 +365,7 @@ function admission(
   const manifest = options.manifest ?? {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/test-v1",
+    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
     recoveryManifestArtifactDigest: "a".repeat(64),
     recoveryManifestDigest: "b".repeat(64),
     fixedSourceCommit: "c".repeat(40),

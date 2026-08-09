@@ -1,6 +1,15 @@
 import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 
+export const COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json" as const;
+export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json" as const;
+export const COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID =
+  "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1" as const;
+export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID =
+  "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1" as const;
+
 const SOURCE_SONNET_EXECUTION = COPY_CAPABILITY_PILOT_PLAN.executions.find(
   ({ alias }) => alias === "claude-sonnet-5",
 );

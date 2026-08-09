@@ -17,6 +17,10 @@ import {
 import {
   COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION,
   COPY_SONNET_RECOVERY_PLAN_DIGEST,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID,
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
+  COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
 } from "./copy-sonnet-recovery-contract";
 import {
   validateCopySonnetRecoveryManifestArtifact,
@@ -35,10 +39,10 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
-export const COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json" as const;
-export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json" as const;
+export {
+  COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+};
 
 const RECOVERY_SOURCE_FILE_SPECS = Object.freeze([
   Object.freeze({
@@ -84,7 +88,7 @@ export const COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS = Object.freeze(
 
 export interface CopySonnetRecoveryRuntimeBindingArtifact {
   schemaVersion: "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1";
-  artifactId: "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1";
+  artifactId: typeof COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID;
   classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -291,7 +295,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1",
+    manifestId: COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
     recoveryManifestArtifactDigest: recoveryArtifact.artifactDigest,
     recoveryManifestDigest: recoveryManifestReference.manifestDigest,
     fixedSourceCommit: input.fixedSourceCommit,
@@ -307,8 +311,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
   const withoutDigest = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1" as const,
-    artifactId:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1" as const,
+    artifactId: COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID,
     classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME" as const,
     fixedSourceCommit: input.fixedSourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,

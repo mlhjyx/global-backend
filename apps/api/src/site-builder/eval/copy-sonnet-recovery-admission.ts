@@ -4,6 +4,7 @@ import {
   COPY_SONNET_RECOVERY_EXECUTION,
   COPY_SONNET_RECOVERY_PLAN,
   COPY_SONNET_RECOVERY_PLAN_DIGEST,
+  COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
 } from "./copy-sonnet-recovery-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -306,7 +307,7 @@ function validateManifest(
     ]) ||
     manifest.schemaVersion !==
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" ||
-    !IDENTIFIER.test(manifest.manifestId) ||
+    manifest.manifestId !== COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID ||
     !SHA256.test(manifest.recoveryManifestArtifactDigest) ||
     !SHA256.test(manifest.recoveryManifestDigest) ||
     !GIT_COMMIT.test(manifest.fixedSourceCommit) ||
