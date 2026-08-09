@@ -173,6 +173,25 @@ interface ArtifactInventory {
   files: ArtifactFile[];
 }
 
+export function accountArtifactBytes(
+  currentBytes: number,
+  stableFileBytes: number,
+): number {
+  if (
+    !Number.isSafeInteger(currentBytes) ||
+    currentBytes < 0 ||
+    !Number.isSafeInteger(stableFileBytes) ||
+    stableFileBytes < 0
+  ) {
+    throw new Error('artifact tree byte accounting is invalid');
+  }
+  const nextBytes = currentBytes + stableFileBytes;
+  if (!Number.isSafeInteger(nextBytes) || nextBytes > MAX_ARTIFACT_TOTAL_BYTES) {
+    throw new Error('artifact tree exceeds the total byte limit');
+  }
+  return nextBytes;
+}
+
 function descriptorPath(handle: FileHandle, name?: string): string {
   const root = `/proc/self/fd/${handle.fd}`;
   return name === undefined ? root : `${root}/${name}`;
@@ -192,12 +211,14 @@ async function openStableDirectory(path: string, label: string): Promise<FileHan
     }
     throw error;
   }
-  const stat = await handle.stat({ bigint: true });
-  if (!stat.isDirectory()) {
-    await handle.close();
-    throw new Error(`${label} must be a directory`);
+  try {
+    const stat = await handle.stat({ bigint: true });
+    if (!stat.isDirectory()) throw new Error(`${label} must be a directory`);
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
   }
-  return handle;
 }
 
 async function collectArtifactFiles(
@@ -233,20 +254,18 @@ async function collectArtifactFiles(
       if (!childStat.isFile()) {
         throw new Error(`artifact tree contains a non-regular file: ${artifactPath}`);
       }
-      if (childStat.size > BigInt(MAX_ARTIFACT_FILE_BYTES)) {
-        throw new Error(`artifact tree entry ${artifactPath} exceeds the byte limit`);
-      }
-      inventory.totalBytes += Number(childStat.size);
-      if (inventory.totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-        throw new Error('artifact tree exceeds the total byte limit');
-      }
+      const contents = await readBoundedRegularHandle(
+        child,
+        MAX_ARTIFACT_FILE_BYTES,
+        `artifact tree entry ${artifactPath}`,
+      );
+      inventory.totalBytes = accountArtifactBytes(
+        inventory.totalBytes,
+        contents.length,
+      );
       inventory.files.push({
         path: artifactPath,
-        contents: await readBoundedRegularHandle(
-          child,
-          MAX_ARTIFACT_FILE_BYTES,
-          `artifact tree entry ${artifactPath}`,
-        ),
+        contents,
       });
     } finally {
       await child.close();
