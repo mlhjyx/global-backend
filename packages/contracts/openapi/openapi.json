@@ -32,7 +32,9 @@
           }
         },
         "summary": "健康检查（存活）",
-        "tags": ["System"]
+        "tags": [
+          "System"
+        ]
       }
     },
     "/api/v1/health/live": {
@@ -46,15 +48,23 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["status", "service", "ts"],
+                  "required": [
+                    "status",
+                    "service",
+                    "ts"
+                  ],
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok"]
+                      "enum": [
+                        "ok"
+                      ]
                     },
                     "service": {
                       "type": "string",
-                      "enum": ["global-api"]
+                      "enum": [
+                        "global-api"
+                      ]
                     },
                     "ts": {
                       "type": "string",
@@ -67,7 +77,9 @@
           }
         },
         "summary": "进程存活检查（不探测任何依赖）",
-        "tags": ["System"]
+        "tags": [
+          "System"
+        ]
       }
     },
     "/api/v1/health/db": {
@@ -93,7 +105,9 @@
           }
         },
         "summary": "数据库连通性检查（以 app_user 连接）",
-        "tags": ["System"]
+        "tags": [
+          "System"
+        ]
       }
     },
     "/api/v1/health/build": {
@@ -108,15 +122,23 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["status", "service", "build"],
+                  "required": [
+                    "status",
+                    "service",
+                    "build"
+                  ],
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ok"]
+                      "enum": [
+                        "ok"
+                      ]
                     },
                     "service": {
                       "type": "string",
-                      "enum": ["global-api"]
+                      "enum": [
+                        "global-api"
+                      ]
                     },
                     "build": {
                       "oneOf": [
@@ -135,11 +157,15 @@
                           "properties": {
                             "attested": {
                               "type": "boolean",
-                              "enum": [true]
+                              "enum": [
+                                true
+                              ]
                             },
                             "schema_version": {
                               "type": "string",
-                              "enum": ["global-runtime-build-attestation/v1"]
+                              "enum": [
+                                "global-runtime-build-attestation/v1"
+                              ]
                             },
                             "build_sha": {
                               "type": "string",
@@ -165,15 +191,22 @@
                         {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["attested", "schema_version"],
+                          "required": [
+                            "attested",
+                            "schema_version"
+                          ],
                           "properties": {
                             "attested": {
                               "type": "boolean",
-                              "enum": [false]
+                              "enum": [
+                                false
+                              ]
                             },
                             "schema_version": {
                               "type": "string",
-                              "enum": ["global-runtime-build-attestation/v1"]
+                              "enum": [
+                                "global-runtime-build-attestation/v1"
+                              ]
                             }
                           }
                         }
@@ -186,7 +219,9 @@
           }
         },
         "summary": "非敏感构建身份回执",
-        "tags": ["System"]
+        "tags": [
+          "System"
+        ]
       }
     },
     "/api/v1/health/ready": {
@@ -201,15 +236,25 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["status", "service", "ts", "components"],
+                  "required": [
+                    "status",
+                    "service",
+                    "ts",
+                    "components"
+                  ],
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ready", "not_ready"]
+                      "enum": [
+                        "ready",
+                        "not_ready"
+                      ]
                     },
                     "service": {
                       "type": "string",
-                      "enum": ["global-api"]
+                      "enum": [
+                        "global-api"
+                      ]
                     },
                     "ts": {
                       "type": "string",
@@ -229,11 +274,17 @@
                         "database": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -243,11 +294,17 @@
                         "temporal_control_plane": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -257,11 +314,17 @@
                         "worker": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -271,11 +334,17 @@
                         "outbox_relay": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -285,11 +354,17 @@
                         "admission": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -310,15 +385,25 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["status", "service", "ts", "components"],
+                  "required": [
+                    "status",
+                    "service",
+                    "ts",
+                    "components"
+                  ],
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["ready", "not_ready"]
+                      "enum": [
+                        "ready",
+                        "not_ready"
+                      ]
                     },
                     "service": {
                       "type": "string",
-                      "enum": ["global-api"]
+                      "enum": [
+                        "global-api"
+                      ]
                     },
                     "ts": {
                       "type": "string",
@@ -338,11 +423,17 @@
                         "database": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -352,11 +443,17 @@
                         "temporal_control_plane": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -366,11 +463,17 @@
                         "worker": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -380,11 +483,17 @@
                         "outbox_relay": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -394,11 +503,17 @@
                         "admission": {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["status"],
+                          "required": [
+                            "status"
+                          ],
                           "properties": {
                             "status": {
                               "type": "string",
-                              "enum": ["ok", "failed", "not_proven"]
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
                             },
                             "code": {
                               "type": "string"
@@ -414,7 +529,9 @@
           }
         },
         "summary": "接流就绪检查（DB、Temporal control plane 与受控 admission）",
-        "tags": ["System"]
+        "tags": [
+          "System"
+        ]
       }
     },
     "/api/v1/whoami": {
@@ -428,11 +545,17 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["userId", "workspaceId", "roles"],
+                      "required": [
+                        "userId",
+                        "workspaceId",
+                        "roles"
+                      ],
                       "properties": {
                         "userId": {
                           "type": "string"
@@ -461,7 +584,9 @@
           }
         ],
         "summary": "返回从 token 解出的调用上下文（user / workspace / roles）",
-        "tags": ["System"]
+        "tags": [
+          "System"
+        ]
       }
     },
     "/api/v1/companies": {
@@ -496,7 +621,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CompanyDto"
@@ -513,7 +640,9 @@
           }
         ],
         "summary": "提交官网，创建企业画像并触发理解（异步）",
-        "tags": ["Companies"]
+        "tags": [
+          "Companies"
+        ]
       },
       "get": {
         "operationId": "CompanyController_list_v1",
@@ -544,7 +673,10 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "page"],
+                  "required": [
+                    "data",
+                    "page"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -554,7 +686,10 @@
                     },
                     "page": {
                       "type": "object",
-                      "required": ["next_cursor", "has_more"],
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
                       "properties": {
                         "next_cursor": {
                           "type": "string",
@@ -578,7 +713,9 @@
           }
         ],
         "summary": "列出当前 workspace 的企业画像（游标分页）",
-        "tags": ["Companies"]
+        "tags": [
+          "Companies"
+        ]
       }
     },
     "/api/v1/companies/{companyId}": {
@@ -601,7 +738,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CompanyDto"
@@ -618,7 +757,9 @@
           }
         ],
         "summary": "按 id 获取企业画像（跨租户返回 404）",
-        "tags": ["Companies"]
+        "tags": [
+          "Companies"
+        ]
       }
     },
     "/api/v1/companies/{companyId}/completeness": {
@@ -641,7 +782,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -682,7 +825,9 @@
           }
         ],
         "summary": "企业完整度（5.2.7）：审批数/待审数/产品数/未决冲突 + 当前状态",
-        "tags": ["Companies"]
+        "tags": [
+          "Companies"
+        ]
       }
     },
     "/api/v1/companies/{companyId}/confirm": {
@@ -705,7 +850,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CompanyDto"
@@ -722,7 +869,9 @@
           }
         ],
         "summary": "人工确认企业可用（REVIEW → ACTIVE，显式 Gate 出口）",
-        "tags": ["Companies"]
+        "tags": [
+          "Companies"
+        ]
       }
     },
     "/api/v1/companies/{companyId}/offerings": {
@@ -745,7 +894,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -765,7 +916,9 @@
           }
         ],
         "summary": "企业的结构化产品/服务（理解工作流抽取，逐条带来源页与原文片段）",
-        "tags": ["Companies"]
+        "tags": [
+          "Companies"
+        ]
       }
     },
     "/api/v1/companies/{companyId}/claims": {
@@ -796,7 +949,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -816,7 +971,9 @@
           }
         ],
         "summary": "列出企业的 Claim（可用 ?status=NEEDS_REVIEW 过滤）",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       },
       "post": {
         "operationId": "ClaimController_createManual_v1",
@@ -847,7 +1004,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/ClaimDto"
@@ -864,7 +1023,9 @@
           }
         ],
         "summary": "手工录入企业事实（KNW-001 手工路径，进入同一审批生命周期）",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       }
     },
     "/api/v1/claims/{claimId}/approve": {
@@ -887,7 +1048,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/ClaimDto"
@@ -904,7 +1067,9 @@
           }
         ],
         "summary": "审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       }
     },
     "/api/v1/claims/{claimId}/reject": {
@@ -927,7 +1092,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/ClaimDto"
@@ -944,7 +1111,9 @@
           }
         ],
         "summary": "驳回（NEEDS_REVIEW → REVOKED）",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       }
     },
     "/api/v1/claims/{claimId}/revoke": {
@@ -967,7 +1136,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/ClaimDto"
@@ -984,7 +1155,9 @@
           }
         ],
         "summary": "撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       }
     },
     "/api/v1/companies/{companyId}/conflicts": {
@@ -1015,7 +1188,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -1037,7 +1212,9 @@
           }
         ],
         "summary": "知识冲突列表（KNW-004；?status=OPEN）",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       }
     },
     "/api/v1/conflicts/{conflictId}/resolve": {
@@ -1070,7 +1247,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -1089,7 +1268,9 @@
           }
         ],
         "summary": "裁决冲突：保留一条，另一条 REVOKED",
-        "tags": ["Claims"]
+        "tags": [
+          "Claims"
+        ]
       }
     },
     "/api/v1/companies/{companyId}/icps": {
@@ -1112,7 +1293,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IcpDto"
@@ -1129,7 +1312,9 @@
           }
         ],
         "summary": "基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icps": {
@@ -1152,7 +1337,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -1172,7 +1359,9 @@
           }
         ],
         "summary": "列出 ICP（可用 ?companyId= 过滤）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icps/{icpId}": {
@@ -1195,7 +1384,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IcpDto"
@@ -1212,7 +1403,9 @@
           }
         ],
         "summary": "获取 ICP 详情（含 Persona + 买家委员会）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       },
       "patch": {
         "operationId": "IcpController_update_v1",
@@ -1243,7 +1436,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IcpDto"
@@ -1260,7 +1455,9 @@
           }
         ],
         "summary": "人工修订 ICP（AI 产出是假设，可编辑；乐观锁）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/activate": {
@@ -1283,7 +1480,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IcpDto"
@@ -1300,7 +1499,9 @@
           }
         ],
         "summary": "激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/rules": {
@@ -1333,7 +1534,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/RuleDto"
@@ -1350,7 +1553,9 @@
           }
         ],
         "summary": "新增验证规则（must_have / nice_to_have / exclusion，机器可评估）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icp-rules/{ruleId}": {
@@ -1383,7 +1588,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/RuleDto"
@@ -1400,7 +1607,9 @@
           }
         ],
         "summary": "修改验证规则",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       },
       "delete": {
         "operationId": "IcpController_deleteRule_v1",
@@ -1421,11 +1630,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["deleted"],
+                      "required": [
+                        "deleted"
+                      ],
                       "properties": {
                         "deleted": {
                           "type": "boolean"
@@ -1444,7 +1657,9 @@
           }
         ],
         "summary": "删除验证规则",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/backtests": {
@@ -1477,7 +1692,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/BacktestDto"
@@ -1494,7 +1711,9 @@
           }
         ],
         "summary": "用已知客户/非客户样例回测 ICP 规则（确定性评估）；HYPOTHESIS → VALIDATING",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       },
       "get": {
         "operationId": "IcpController_listBacktests_v1",
@@ -1515,7 +1734,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -1535,7 +1756,9 @@
           }
         ],
         "summary": "回测历史",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/query-plans": {
@@ -1558,7 +1781,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/QueryPlanDto"
@@ -1575,7 +1800,9 @@
           }
         ],
         "summary": "从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       },
       "get": {
         "operationId": "IcpController_listQueryPlans_v1",
@@ -1596,7 +1823,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -1616,7 +1845,9 @@
           }
         ],
         "summary": "查询计划列表",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/query-plans/{planId}/confirm": {
@@ -1639,7 +1870,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/QueryPlanDto"
@@ -1656,7 +1889,9 @@
           }
         ],
         "summary": "人工确认查询计划（DRAFT → READY，Discover 可执行）",
-        "tags": ["ICP"]
+        "tags": [
+          "ICP"
+        ]
       }
     },
     "/api/v1/query-plans/{planId}/execute": {
@@ -1679,11 +1914,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["runId", "status"],
+                      "required": [
+                        "runId",
+                        "status"
+                      ],
                       "properties": {
                         "runId": {
                           "type": "string",
@@ -1706,7 +1946,9 @@
           }
         ],
         "summary": "执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/discovery-runs/{runId}": {
@@ -1729,7 +1971,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -1785,7 +2029,9 @@
           }
         ],
         "summary": "发现执行状态与统计（每源计数/归一/Suppression）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/canonical-companies": {
@@ -1826,7 +2072,10 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "page"],
+                  "required": [
+                    "data",
+                    "page"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -1838,7 +2087,10 @@
                     },
                     "page": {
                       "type": "object",
-                      "required": ["next_cursor", "has_more"],
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
                       "properties": {
                         "next_cursor": {
                           "type": "string",
@@ -1862,7 +2114,9 @@
           }
         ],
         "summary": "发现的目标客户公司（归一后，游标分页；?status=NEW|ENRICHED|SUPPRESSED）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/canonical-companies/{id}": {
@@ -1885,7 +2139,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -1904,7 +2160,9 @@
           }
         ],
         "summary": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/canonical-companies/{id}/discover-contacts": {
@@ -1927,7 +2185,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -1946,7 +2206,9 @@
           }
         ],
         "summary": "按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/contact-points/{pointId}/verify": {
@@ -1980,7 +2242,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -1999,7 +2263,9 @@
           }
         ],
         "summary": "邮箱验证（Waterfall 第7步）：状态回写 UNVERIFIED→VALID|RISKY|INVALID|BLOCKED",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/canonical-companies/{id}/guess-emails": {
@@ -2033,7 +2299,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2052,7 +2320,9 @@
           }
         ],
         "summary": "猜测缺邮箱决策人的邮箱（排列/格式学习 + SMTP RCPT 验证 → 落库）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/suppressions": {
@@ -2076,7 +2346,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2095,7 +2367,9 @@
           }
         ],
         "summary": "加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       },
       "get": {
         "operationId": "DiscoveryController_listSuppressions_v1",
@@ -2107,7 +2381,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -2129,7 +2405,9 @@
           }
         ],
         "summary": "禁联名单",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/suppressions/{id}": {
@@ -2152,11 +2430,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["deleted"],
+                      "required": [
+                        "deleted"
+                      ],
                       "properties": {
                         "deleted": {
                           "type": "boolean"
@@ -2175,7 +2457,9 @@
           }
         ],
         "summary": "移除禁联记录",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/data-providers": {
@@ -2189,7 +2473,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -2211,7 +2497,9 @@
           }
         ],
         "summary": "Provider 注册表（平台级：状态/成本；DISABLED = Kill Switch）",
-        "tags": ["Discovery"]
+        "tags": [
+          "Discovery"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/qualify": {
@@ -2234,11 +2522,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["accepted", "eventId"],
+                      "required": [
+                        "accepted",
+                        "eventId"
+                      ],
                       "properties": {
                         "accepted": {
                           "type": "boolean"
@@ -2261,7 +2554,9 @@
           }
         ],
         "summary": "对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/leads": {
@@ -2318,7 +2613,10 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "page"],
+                  "required": [
+                    "data",
+                    "page"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -2330,7 +2628,10 @@
                     },
                     "page": {
                       "type": "object",
-                      "required": ["next_cursor", "has_more"],
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
                       "properties": {
                         "next_cursor": {
                           "type": "string",
@@ -2354,7 +2655,9 @@
           }
         ],
         "summary": "Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/lead-queues": {
@@ -2377,7 +2680,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2414,7 +2719,9 @@
           }
         ],
         "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/leads/{leadId}": {
@@ -2437,7 +2744,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2456,7 +2765,9 @@
           }
         ],
         "summary": "Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/leads/{leadId}/accept": {
@@ -2489,7 +2800,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2508,7 +2821,9 @@
           }
         ],
         "summary": "接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/leads/{leadId}/reject": {
@@ -2541,7 +2856,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2560,7 +2877,9 @@
           }
         ],
         "summary": "拒绝 Lead（→ REJECTED，原因留痕做质量反馈）",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/leads/{leadId}/sanctions-review": {
@@ -2593,7 +2912,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2618,7 +2939,9 @@
           }
         ],
         "summary": "制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付",
-        "tags": ["Leads"]
+        "tags": [
+          "Leads"
+        ]
       }
     },
     "/api/v1/events": {
@@ -2661,7 +2984,10 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data", "page"],
+                  "required": [
+                    "data",
+                    "page"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -2734,7 +3060,10 @@
                     },
                     "page": {
                       "type": "object",
-                      "required": ["next_cursor", "has_more"],
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
                       "properties": {
                         "next_cursor": {
                           "type": "string",
@@ -2758,7 +3087,9 @@
           }
         ],
         "summary": "拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）",
-        "tags": ["Events"]
+        "tags": [
+          "Events"
+        ]
       }
     },
     "/api/v1/events/ack": {
@@ -2782,11 +3113,15 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["acked"],
+                      "required": [
+                        "acked"
+                      ],
                       "properties": {
                         "acked": {
                           "type": "integer"
@@ -2805,7 +3140,9 @@
           }
         ],
         "summary": "ACK 已消费事件（pull sink 消费真值；幂等，重复 ACK 计 0）",
-        "tags": ["Events"]
+        "tags": [
+          "Events"
+        ]
       }
     },
     "/api/v1/deletion-requests": {
@@ -2829,7 +3166,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2857,7 +3196,10 @@
                         },
                         "subjectType": {
                           "type": "string",
-                          "enum": ["contact", "company"]
+                          "enum": [
+                            "contact",
+                            "company"
+                          ]
                         },
                         "subjectId": {
                           "type": "string",
@@ -2929,7 +3271,9 @@
           }
         ],
         "summary": "受理数据主体删除请求（GDPR Art.17）——异步编排，返回 202 + 请求 id",
-        "tags": ["Compliance"]
+        "tags": [
+          "Compliance"
+        ]
       }
     },
     "/api/v1/deletion-requests/{id}": {
@@ -2952,7 +3296,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -2980,7 +3326,10 @@
                         },
                         "subjectType": {
                           "type": "string",
-                          "enum": ["contact", "company"]
+                          "enum": [
+                            "contact",
+                            "company"
+                          ]
                         },
                         "subjectId": {
                           "type": "string",
@@ -3052,7 +3401,9 @@
           }
         ],
         "summary": "查询删除请求状态与擦除回执",
-        "tags": ["Compliance"]
+        "tags": [
+          "Compliance"
+        ]
       }
     },
     "/api/v1/site-builder/intake": {
@@ -3089,7 +3440,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IntakeResultDto"
@@ -3105,11 +3458,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -3134,11 +3492,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -3163,15 +3526,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
-                          "enum": ["DEMO_LAUNCH_UNAVAILABLE"]
+                          "enum": [
+                            "DEMO_LAUNCH_UNAVAILABLE"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -3190,7 +3560,9 @@
           }
         ],
         "summary": "注册引导提交：无条件建站档案并秒级触发 demo v0",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites": {
@@ -3204,7 +3576,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -3224,7 +3598,9 @@
           }
         ],
         "summary": "列出本 workspace 站点（含预览地址）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites/{id}": {
@@ -3247,7 +3623,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/SiteDto"
@@ -3264,7 +3642,9 @@
           }
         ],
         "summary": "站点详情",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites/{id}/profile": {
@@ -3302,7 +3682,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -3367,7 +3749,9 @@
                                   "minimum": 0
                                 }
                               },
-                              "required": ["currency"]
+                              "required": [
+                                "currency"
+                              ]
                             },
                             "exportMarkets": {
                               "type": "array",
@@ -3437,7 +3821,9 @@
                                     }
                                   }
                                 },
-                                "required": ["name"]
+                                "required": [
+                                  "name"
+                                ]
                               }
                             },
                             "patents": {
@@ -3469,10 +3855,14 @@
                                 },
                                 "anyOf": [
                                   {
-                                    "required": ["title"]
+                                    "required": [
+                                      "title"
+                                    ]
                                   },
                                   {
-                                    "required": ["number"]
+                                    "required": [
+                                      "number"
+                                    ]
                                   }
                                 ]
                               }
@@ -3522,13 +3912,19 @@
                                 },
                                 "anyOf": [
                                   {
-                                    "required": ["displayLabel"]
+                                    "required": [
+                                      "displayLabel"
+                                    ]
                                   },
                                   {
-                                    "required": ["industry"]
+                                    "required": [
+                                      "industry"
+                                    ]
                                   },
                                   {
-                                    "required": ["summary"]
+                                    "required": [
+                                      "summary"
+                                    ]
                                   }
                                 ]
                               }
@@ -3557,7 +3953,10 @@
                                     "pattern": "^[A-Z]{2}$"
                                   }
                                 },
-                                "required": ["name", "year"]
+                                "required": [
+                                  "name",
+                                  "year"
+                                ]
                               }
                             }
                           }
@@ -3622,7 +4021,10 @@
                                     "maxLength": 2048
                                   }
                                 },
-                                "required": ["platform", "url"]
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
                               }
                             },
                             "googleBusinessProfiles": {
@@ -3747,13 +4149,18 @@
                                     "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
                                   }
                                 },
-                                "required": ["platform", "url"]
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
                               }
                             }
                           }
                         }
                       },
-                      "required": ["versionId"]
+                      "required": [
+                        "versionId"
+                      ]
                     }
                   }
                 }
@@ -3781,11 +4188,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -3811,7 +4223,9 @@
           }
         ],
         "summary": "建站向导档案（五组）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       },
       "patch": {
         "operationId": "SitesController_patchProfile_v1",
@@ -3902,7 +4316,9 @@
                             "minimum": 0
                           }
                         },
-                        "required": ["currency"]
+                        "required": [
+                          "currency"
+                        ]
                       },
                       "exportMarkets": {
                         "type": "array",
@@ -3973,7 +4389,9 @@
                               }
                             }
                           },
-                          "required": ["name"]
+                          "required": [
+                            "name"
+                          ]
                         }
                       },
                       "patents": {
@@ -4005,10 +4423,14 @@
                           },
                           "anyOf": [
                             {
-                              "required": ["title"]
+                              "required": [
+                                "title"
+                              ]
                             },
                             {
-                              "required": ["number"]
+                              "required": [
+                                "number"
+                              ]
                             }
                           ]
                         }
@@ -4058,13 +4480,19 @@
                           },
                           "anyOf": [
                             {
-                              "required": ["displayLabel"]
+                              "required": [
+                                "displayLabel"
+                              ]
                             },
                             {
-                              "required": ["industry"]
+                              "required": [
+                                "industry"
+                              ]
                             },
                             {
-                              "required": ["summary"]
+                              "required": [
+                                "summary"
+                              ]
                             }
                           ]
                         }
@@ -4093,7 +4521,10 @@
                               "pattern": "^[A-Z]{2}$"
                             }
                           },
-                          "required": ["name", "year"]
+                          "required": [
+                            "name",
+                            "year"
+                          ]
                         }
                       }
                     },
@@ -4129,7 +4560,11 @@
                               "type": "boolean"
                             }
                           },
-                          "required": ["platform", "url", "importAuthorized"]
+                          "required": [
+                            "platform",
+                            "url",
+                            "importAuthorized"
+                          ]
                         }
                       },
                       "socialProfiles": {
@@ -4155,7 +4590,10 @@
                               "maxLength": 2048
                             }
                           },
-                          "required": ["platform", "url"]
+                          "required": [
+                            "platform",
+                            "url"
+                          ]
                         }
                       },
                       "googleBusinessProfiles": {
@@ -4282,7 +4720,10 @@
                               "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
                             }
                           },
-                          "required": ["platform", "url"]
+                          "required": [
+                            "platform",
+                            "url"
+                          ]
                         }
                       }
                     },
@@ -4291,19 +4732,29 @@
                 },
                 "anyOf": [
                   {
-                    "required": ["companyProfile"]
+                    "required": [
+                      "companyProfile"
+                    ]
                   },
                   {
-                    "required": ["trustAssets"]
+                    "required": [
+                      "trustAssets"
+                    ]
                   },
                   {
-                    "required": ["onlineAssets"]
+                    "required": [
+                      "onlineAssets"
+                    ]
                   },
                   {
-                    "required": ["brand"]
+                    "required": [
+                      "brand"
+                    ]
                   },
                   {
-                    "required": ["contact"]
+                    "required": [
+                      "contact"
+                    ]
                   }
                 ]
               }
@@ -4332,7 +4783,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
@@ -4397,7 +4850,9 @@
                                   "minimum": 0
                                 }
                               },
-                              "required": ["currency"]
+                              "required": [
+                                "currency"
+                              ]
                             },
                             "exportMarkets": {
                               "type": "array",
@@ -4467,7 +4922,9 @@
                                     }
                                   }
                                 },
-                                "required": ["name"]
+                                "required": [
+                                  "name"
+                                ]
                               }
                             },
                             "patents": {
@@ -4499,10 +4956,14 @@
                                 },
                                 "anyOf": [
                                   {
-                                    "required": ["title"]
+                                    "required": [
+                                      "title"
+                                    ]
                                   },
                                   {
-                                    "required": ["number"]
+                                    "required": [
+                                      "number"
+                                    ]
                                   }
                                 ]
                               }
@@ -4552,13 +5013,19 @@
                                 },
                                 "anyOf": [
                                   {
-                                    "required": ["displayLabel"]
+                                    "required": [
+                                      "displayLabel"
+                                    ]
                                   },
                                   {
-                                    "required": ["industry"]
+                                    "required": [
+                                      "industry"
+                                    ]
                                   },
                                   {
-                                    "required": ["summary"]
+                                    "required": [
+                                      "summary"
+                                    ]
                                   }
                                 ]
                               }
@@ -4587,7 +5054,10 @@
                                     "pattern": "^[A-Z]{2}$"
                                   }
                                 },
-                                "required": ["name", "year"]
+                                "required": [
+                                  "name",
+                                  "year"
+                                ]
                               }
                             }
                           }
@@ -4652,7 +5122,10 @@
                                     "maxLength": 2048
                                   }
                                 },
-                                "required": ["platform", "url"]
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
                               }
                             },
                             "googleBusinessProfiles": {
@@ -4777,13 +5250,18 @@
                                     "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
                                   }
                                 },
-                                "required": ["platform", "url"]
+                                "required": [
+                                  "platform",
+                                  "url"
+                                ]
                               }
                             }
                           }
                         }
                       },
-                      "required": ["versionId"]
+                      "required": [
+                        "versionId"
+                      ]
                     }
                   }
                 }
@@ -4796,11 +5274,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -4825,11 +5308,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -4869,11 +5357,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -4913,11 +5406,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -4942,11 +5440,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -4971,11 +5474,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string"
@@ -5001,7 +5509,9 @@
           }
         ],
         "summary": "向导分步保存：组级替换（companyProfile/trustAssets/onlineAssets/brand/contact），可跳过",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites/{id}/assets/presign": {
@@ -5034,7 +5544,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/PresignAssetResponseDto"
@@ -5050,11 +5562,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5090,11 +5607,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5130,11 +5652,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5170,11 +5697,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5211,7 +5743,9 @@
           }
         ],
         "summary": "素材上传第 1 步：校验并签发直传 URL（15 分钟有效）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/assets/{id}/commit": {
@@ -5234,7 +5768,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CommitAssetResponseDto"
@@ -5250,11 +5786,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5290,11 +5831,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5330,11 +5876,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5370,11 +5921,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5410,11 +5966,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5450,11 +6011,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5491,7 +6057,9 @@
           }
         ],
         "summary": "素材上传第 3 步：魔数/大小/去重校验 → 归位；doc 类进 KB 队列",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites/{id}/assets": {
@@ -5530,7 +6098,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "array",
@@ -5549,11 +6119,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5589,11 +6164,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5629,11 +6209,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5670,7 +6255,9 @@
           }
         ],
         "summary": "站点素材列表",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/assets/{id}": {
@@ -5696,11 +6283,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5736,11 +6328,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5776,11 +6373,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -5857,7 +6459,9 @@
           }
         ],
         "summary": "引用守卫通过后软删除素材；对象由异步清理回收",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites/{id}/kb/status": {
@@ -5880,11 +6484,17 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "type": "object",
-                      "required": ["documents", "chunks", "gaps"],
+                      "required": [
+                        "documents",
+                        "chunks",
+                        "gaps"
+                      ],
                       "properties": {
                         "documents": {
                           "type": "integer",
@@ -5898,7 +6508,11 @@
                           "type": "array",
                           "items": {
                             "type": "object",
-                            "required": ["field", "reason", "hint"],
+                            "required": [
+                              "field",
+                              "reason",
+                              "hint"
+                            ],
                             "properties": {
                               "field": {
                                 "type": "string"
@@ -5925,15 +6539,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
-                          "enum": ["VALIDATION_ERROR"]
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -5951,15 +6572,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
-                          "enum": ["NOT_FOUND"]
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
                         },
                         "message": {
                           "type": "string"
@@ -5978,7 +6606,9 @@
           }
         ],
         "summary": "知识库状态：文档/块计数 + 待补资料缺口（gaps 随 M1 brandProfile）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/sites/{id}/builds": {
@@ -6014,11 +6644,17 @@
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["scope"],
+                "required": [
+                  "scope"
+                ],
                 "properties": {
                   "scope": {
                     "type": "string",
-                    "enum": ["site", "page", "section"]
+                    "enum": [
+                      "site",
+                      "page",
+                      "section"
+                    ]
                   },
                   "targetId": {
                     "type": "string",
@@ -6032,7 +6668,10 @@
                     "properties": {
                       "stylePreset": {
                         "type": "string",
-                        "enum": ["modern-industrial", "precision-light"]
+                        "enum": [
+                          "modern-industrial",
+                          "precision-light"
+                        ]
                       },
                       "locales": {
                         "type": "array",
@@ -6041,7 +6680,10 @@
                         "uniqueItems": true,
                         "items": {
                           "type": "string",
-                          "enum": ["en", "de-DE"]
+                          "enum": [
+                            "en",
+                            "de-DE"
+                          ]
                         }
                       },
                       "pages": {
@@ -6067,7 +6709,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/BuildActionResponseDto"
@@ -6083,11 +6727,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6129,11 +6778,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6175,11 +6829,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6221,11 +6880,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6267,11 +6931,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6313,11 +6982,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6360,7 +7034,9 @@
           }
         ],
         "summary": "触发精装修构建（07 §5；409=进行中，429=当日配额）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/builds/{id}": {
@@ -6383,7 +7059,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/BuildStatusResponseDto"
@@ -6399,11 +7077,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6445,11 +7128,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6492,7 +7180,9 @@
           }
         ],
         "summary": "构建进度（轮询；SSE 事件流按 07 §5 后置）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     },
     "/api/v1/site-builder/builds/{id}/cancel": {
@@ -6515,7 +7205,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["data"],
+                  "required": [
+                    "data"
+                  ],
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/BuildActionResponseDto"
@@ -6531,11 +7223,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6577,11 +7274,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6623,11 +7325,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6669,11 +7376,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["error"],
+                  "required": [
+                    "error"
+                  ],
                   "properties": {
                     "error": {
                       "type": "object",
-                      "required": ["code", "message"],
+                      "required": [
+                        "code",
+                        "message"
+                      ],
                       "properties": {
                         "code": {
                           "type": "string",
@@ -6716,7 +7428,9 @@
           }
         ],
         "summary": "取消构建（终态 409）",
-        "tags": ["SiteBuilder"]
+        "tags": [
+          "SiteBuilder"
+        ]
       }
     }
   },
@@ -6776,7 +7490,11 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["email", "phone", "social"]
+            "enum": [
+              "email",
+              "phone",
+              "social"
+            ]
           },
           "value": {
             "type": "string",
@@ -6787,7 +7505,11 @@
             "description": "该联系方式被发现的页面 URL（溯源）"
           }
         },
-        "required": ["type", "value", "sourceUrl"]
+        "required": [
+          "type",
+          "value",
+          "sourceUrl"
+        ]
       },
       "CompanyDto": {
         "type": "object",
@@ -6807,7 +7529,12 @@
           },
           "status": {
             "type": "string",
-            "enum": ["DRAFT", "ENRICHING", "REVIEW", "ACTIVE"]
+            "enum": [
+              "DRAFT",
+              "ENRICHING",
+              "REVIEW",
+              "ACTIVE"
+            ]
           },
           "industry": {
             "type": "string",
@@ -6856,7 +7583,9 @@
             "description": "企业名称（可选；未填则先用域名占位，理解后回填）"
           }
         },
-        "required": ["website"]
+        "required": [
+          "website"
+        ]
       },
       "OfferingDto": {
         "type": "object",
@@ -6927,7 +7656,11 @@
             "nullable": true
           }
         },
-        "required": ["sourceUrl", "snippet", "confidence"]
+        "required": [
+          "sourceUrl",
+          "snippet",
+          "confidence"
+        ]
       },
       "ClaimDto": {
         "type": "object",
@@ -7019,18 +7752,26 @@
             "maxLength": 2000
           }
         },
-        "required": ["type", "statement"]
+        "required": [
+          "type",
+          "statement"
+        ]
       },
       "ResolveConflictDto": {
         "type": "object",
         "properties": {
           "keep": {
             "type": "string",
-            "enum": ["a", "b"],
+            "enum": [
+              "a",
+              "b"
+            ],
             "description": "保留哪条 Claim（另一条 REVOKED）"
           }
         },
-        "required": ["keep"]
+        "required": [
+          "keep"
+        ]
       },
       "PersonaDto": {
         "type": "object",
@@ -7051,7 +7792,11 @@
             }
           }
         },
-        "required": ["title", "goals", "painPoints"]
+        "required": [
+          "title",
+          "goals",
+          "painPoints"
+        ]
       },
       "BuyingRoleDto": {
         "type": "object",
@@ -7071,7 +7816,11 @@
             }
           }
         },
-        "required": ["role", "title", "concerns"]
+        "required": [
+          "role",
+          "title",
+          "concerns"
+        ]
       },
       "IcpRuleDto": {
         "type": "object",
@@ -7082,7 +7831,11 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["MUST_HAVE", "NICE_TO_HAVE", "EXCLUSION"]
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
           },
           "field": {
             "type": "string"
@@ -7291,7 +8044,11 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["MUST_HAVE", "NICE_TO_HAVE", "EXCLUSION"]
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
           },
           "field": {
             "type": "string"
@@ -7356,7 +8113,11 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["MUST_HAVE", "NICE_TO_HAVE", "EXCLUSION"]
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
           },
           "field": {
             "type": "string",
@@ -7394,7 +8155,10 @@
                 "items": {}
               }
             ],
-            "example": ["automotive", "aerospace"]
+            "example": [
+              "automotive",
+              "aerospace"
+            ]
           },
           "weight": {
             "type": "number",
@@ -7407,14 +8171,23 @@
             "description": "规则依据（推断透明）"
           }
         },
-        "required": ["kind", "field", "operator", "value"]
+        "required": [
+          "kind",
+          "field",
+          "operator",
+          "value"
+        ]
       },
       "UpdateRuleDto": {
         "type": "object",
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["MUST_HAVE", "NICE_TO_HAVE", "EXCLUSION"]
+            "enum": [
+              "MUST_HAVE",
+              "NICE_TO_HAVE",
+              "EXCLUSION"
+            ]
           },
           "field": {
             "type": "string"
@@ -7490,7 +8263,13 @@
             "format": "date-time"
           }
         },
-        "required": ["id", "icpId", "results", "metrics", "createdAt"]
+        "required": [
+          "id",
+          "icpId",
+          "results",
+          "metrics",
+          "createdAt"
+        ]
       },
       "BacktestSampleDto": {
         "type": "object",
@@ -7515,11 +8294,18 @@
           },
           "expected": {
             "type": "string",
-            "enum": ["match", "exclude"],
+            "enum": [
+              "match",
+              "exclude"
+            ],
             "description": "期望结果：已知客户=match，已知不合适=exclude"
           }
         },
-        "required": ["name", "attributes", "expected"]
+        "required": [
+          "name",
+          "attributes",
+          "expected"
+        ]
       },
       "RunBacktestDto": {
         "type": "object",
@@ -7533,7 +8319,9 @@
             }
           }
         },
-        "required": ["samples"]
+        "required": [
+          "samples"
+        ]
       },
       "QueryPlanDto": {
         "type": "object",
@@ -7548,7 +8336,11 @@
           },
           "status": {
             "type": "string",
-            "enum": ["DRAFT", "READY", "EXECUTED"]
+            "enum": [
+              "DRAFT",
+              "READY",
+              "EXECUTED"
+            ]
           },
           "queries": {
             "type": "array",
@@ -7647,7 +8439,11 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["email", "domain", "company_name"]
+            "enum": [
+              "email",
+              "domain",
+              "company_name"
+            ]
           },
           "value": {
             "type": "string",
@@ -7655,10 +8451,19 @@
           },
           "reason": {
             "type": "string",
-            "enum": ["unsubscribe", "bounce", "complaint", "manual", "legal"]
+            "enum": [
+              "unsubscribe",
+              "bounce",
+              "complaint",
+              "manual",
+              "legal"
+            ]
           }
         },
-        "required": ["type", "value"]
+        "required": [
+          "type",
+          "value"
+        ]
       },
       "AcceptLeadDto": {
         "type": "object",
@@ -7682,7 +8487,10 @@
         "properties": {
           "decision": {
             "type": "string",
-            "enum": ["cleared_false_positive", "confirmed_true_hit"],
+            "enum": [
+              "cleared_false_positive",
+              "confirmed_true_hit"
+            ],
             "description": "复核裁决：误报清白（回落队列，抑制复发）/ 真命中确认（留隔离，永不交付）"
           },
           "note": {
@@ -7690,7 +8498,9 @@
             "description": "复核备注（留痕）"
           }
         },
-        "required": ["decision"]
+        "required": [
+          "decision"
+        ]
       },
       "AckEventsDto": {
         "type": "object",
@@ -7706,14 +8516,19 @@
             "maxItems": 200
           }
         },
-        "required": ["event_ids"]
+        "required": [
+          "event_ids"
+        ]
       },
       "CreateDeletionRequestDto": {
         "type": "object",
         "properties": {
           "subjectType": {
             "type": "string",
-            "enum": ["contact", "company"],
+            "enum": [
+              "contact",
+              "company"
+            ],
             "description": "删除主体类型"
           },
           "subjectId": {
@@ -7723,7 +8538,12 @@
           },
           "reason": {
             "type": "string",
-            "enum": ["erasure", "objection", "legal", "manual"],
+            "enum": [
+              "erasure",
+              "objection",
+              "legal",
+              "manual"
+            ],
             "description": "删除依据（默认 erasure）"
           },
           "requestRef": {
@@ -7731,7 +8551,10 @@
             "description": "工单/LIA/请求来源引用（审计用，🔴 非明文 PII）"
           }
         },
-        "required": ["subjectType", "subjectId"]
+        "required": [
+          "subjectType",
+          "subjectId"
+        ]
       },
       "IntakeResultDto": {
         "type": "object",
@@ -7747,11 +8570,17 @@
           },
           "status": {
             "type": "string",
-            "enum": ["generating_demo"],
+            "enum": [
+              "generating_demo"
+            ],
             "description": "demo v0 已确认进入编排"
           }
         },
-        "required": ["siteId", "buildId", "status"]
+        "required": [
+          "siteId",
+          "buildId",
+          "status"
+        ]
       },
       "IntakeCompanyDto": {
         "type": "object",
@@ -7766,7 +8595,9 @@
             "nullable": true
           }
         },
-        "required": ["nameZh"]
+        "required": [
+          "nameZh"
+        ]
       },
       "IntakeDto": {
         "type": "object",
@@ -7790,7 +8621,10 @@
           },
           "targetMarkets": {
             "description": "目标市场（ISO 3166-1 alpha-2，大写）",
-            "example": ["DE", "US"],
+            "example": [
+              "DE",
+              "US"
+            ],
             "type": "array",
             "items": {
               "type": "string"
@@ -7836,11 +8670,20 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["builder", "diagnosis"]
+            "enum": [
+              "builder",
+              "diagnosis"
+            ]
           },
           "status": {
             "type": "string",
-            "enum": ["draft", "building", "ready", "published", "setup_failed"]
+            "enum": [
+              "draft",
+              "building",
+              "ready",
+              "published",
+              "setup_failed"
+            ]
           },
           "stylePreset": {
             "type": "object",
@@ -7898,7 +8741,11 @@
             "format": "date-time"
           }
         },
-        "required": ["assetId", "uploadUrl", "expiresAt"]
+        "required": [
+          "assetId",
+          "uploadUrl",
+          "expiresAt"
+        ]
       },
       "PresignDto": {
         "type": "object",
@@ -7926,7 +8773,12 @@
             "example": "image/jpeg"
           }
         },
-        "required": ["kind", "filename", "size", "mime"]
+        "required": [
+          "kind",
+          "filename",
+          "size",
+          "mime"
+        ]
       },
       "CommitAssetResponseDto": {
         "type": "object",
@@ -7937,10 +8789,16 @@
           },
           "processingStatus": {
             "type": "string",
-            "enum": ["queued", "ready"]
+            "enum": [
+              "queued",
+              "ready"
+            ]
           }
         },
-        "required": ["assetId", "processingStatus"]
+        "required": [
+          "assetId",
+          "processingStatus"
+        ]
       },
       "AssetListItemDto": {
         "type": "object",
@@ -8011,7 +8869,10 @@
             "type": "string"
           }
         },
-        "required": ["buildId", "status"]
+        "required": [
+          "buildId",
+          "status"
+        ]
       },
       "BuildStatusResponseDto": {
         "type": "object",
@@ -8045,7 +8906,10 @@
             "nullable": true,
             "items": {
               "type": "object",
-              "required": ["key", "status"],
+              "required": [
+                "key",
+                "status"
+              ],
               "properties": {
                 "key": {
                   "type": "string"
@@ -8106,15 +8970,21 @@
             "properties": {
               "schemaVersion": {
                 "type": "string",
-                "enum": ["site-builder-cost-summary/v1"]
+                "enum": [
+                  "site-builder-cost-summary/v1"
+                ]
               },
               "currency": {
                 "type": "string",
-                "enum": ["USD"]
+                "enum": [
+                  "USD"
+                ]
               },
               "unit": {
                 "type": "string",
-                "enum": ["microusd"]
+                "enum": [
+                  "microusd"
+                ]
               },
               "budget": {
                 "type": "object",
@@ -8218,7 +9088,12 @@
               "operations": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["succeeded", "failed", "unknown", "released"],
+                "required": [
+                  "succeeded",
+                  "failed",
+                  "unknown",
+                  "released"
+                ],
                 "properties": {
                   "succeeded": {
                     "type": "integer",
