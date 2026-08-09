@@ -403,7 +403,7 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     const artifact = JSON.parse(bindingBytes.toString("utf8"));
 
     expect(sha256(bindingBytes)).toBe(
-      "1a6458acbfdd65692cf6e4f3a1dd8141854d927de8a790e550fab3695c6f2a2d",
+      "1ad6088afd6883adeae6824aa2a80ddd8d919b03cfcc90d35ecfe7172213b458",
     );
     expect(() =>
       validateCopySonnetRecoveryRuntimeBindingArtifact(
@@ -414,10 +414,10 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     expect(artifact).toMatchObject({
       artifactId:
         "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1",
-      fixedSourceCommit: "914a3eedbae1214c9b31edbe527b7959fb52ad94",
-      preparationHeadCommit: "914a3eedbae1214c9b31edbe527b7959fb52ad94",
+      fixedSourceCommit: "3da93486163404e3943711c6689a55c9a9e2c119",
+      preparationHeadCommit: "3da93486163404e3943711c6689a55c9a9e2c119",
       artifactDigest:
-        "4f36a85cebfa66a46dbba66fda2d9ebb1a1ef24e98a54462be470f48922d3691",
+        "4f9fdf0623f854053e337c569760edfe82f643ab31e2034470fc18c26c04e475",
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedNetworkCalls: 0,
@@ -432,12 +432,12 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
       },
       sourceBundle: {
         digest:
-          "ce8546a3ae5b84e8172b27263a9290ccf459cf57f8010dd1ad43ddb791efdf10",
+          "cbec88ade4ba5694448f468fccdd43b3e5ca95bff7784f90e74825ced0ebe616",
       },
       compiledRuntimeExpectation: {
         artifactCount: 53,
         artifactTreeDigest:
-          "97a6a1ec20665835da41a9f188a64938be318ff2ba7b5280ce31eecaefa63458",
+          "ce806d78b06b2dbfe38fcd337a0faabff5f46c2ed3b120cbec125f59b3e9d66a",
         artifacts: expect.arrayContaining([
           expect.objectContaining({
             path: "apps/api/dist/model-runtime/adapters/ai-sdk-adapter-result.js",

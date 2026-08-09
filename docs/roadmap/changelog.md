@@ -3,7 +3,8 @@
 
 ## 2026-08-09 · Copy Sonnet recovery v14 create-only preparation
 
-- #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定 canonical path 与后续身份绑定提交 `914a3eedbae1214c9b31edbe527b7959fb52ad94`、82-file source digest `ce8546a3…`、53-file compiled tree `97a6a1ec…` 与 artifact digest `4f36a85c…`。
+- #356 与 #359 已以 merge commit 进入 `origin/main@2557b991e62ff171aeec60abff33de2ad8f2859f`。v14 [manifest](../evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v14.json) 以该主线为 fixed source；[runtime binding](../evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v14.json) 固定 canonical path 与后续身份绑定提交 `3da93486163404e3943711c6689a55c9a9e2c119`、82-file source digest `cbec88ad…`、53-file compiled tree `ce806d78…` 与 artifact digest `4f9fdf06…`。
+- admission 现在要求 campaign、global authorization、child authorization 与 reservation 全部使用各自的 v14 namespace；即使重算 manifest/global/child/reservation digest，v11/v12/v13 身份仍会在 ledger/client 前拒绝。同代 v14 的重复消费继续由 durable ledger/marker 阻止。
 - recovery execution 与 child slot 均版本化为 v14；runner 的 Git-reviewed evidence acceptance 复用 recovery-aware execution plan，不再把合法 v14 receipt 误当成旧 pilot ID。fake gateway 覆盖 1 wire known settlement、完成、PR-merge acceptance，全程零真实模型调用。
 - v13 后续私有 operator run 以 2 known-settlement wires、1 repair、0 completion 停止并冻结；它不是 tracked capability/质量 evidence。v14 明确禁止复用 Terra/Sol v11 及停止的 v12/v13 authorization、campaign 或 wire。
 - v14 artifact 继续是 create-only、`NOT_AUTHORIZED`、`dispatchCapable=false`、0 network/model wire、0 cost；本批次不包含凭据、真实调用、36/72、晋级或 route adoption。
