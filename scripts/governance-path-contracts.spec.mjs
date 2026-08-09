@@ -94,4 +94,9 @@ test("the explicit root governance entry loads the CI topology suite", async () 
     /^import "\.\/governance-ci-topology\.spec\.mjs";$/m,
     "the independently rooted governance path suite must reject removal of the CI topology suite import",
   );
+  assert.match(
+    governanceContractsTest,
+    /^import "\.\/supply-chain-gates\.spec\.mjs";$/m,
+    "the independently rooted governance path suite must reject removal of the supply-chain gate suite import",
+  );
 });
