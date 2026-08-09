@@ -258,12 +258,19 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST === "1")(
-    "rebuilds the create-only manifest from a clean post-#359 commit",
+    "rebuilds only at its fixed preparation source and rejects later drift",
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: REPOSITORY_ROOT,
         encoding: "utf8",
       }).trim();
+      const preparationCommit = "d92b1bf70be781c18516fad8c8d76827521382b9";
+      if (currentCommit !== preparationCommit) {
+        await expect(
+          prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT),
+        ).rejects.toThrow("COPY_SONNET_RECOVERY_TRACKED_BYTES_MISMATCH");
+        return;
+      }
       const artifact =
         await prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT);
 
