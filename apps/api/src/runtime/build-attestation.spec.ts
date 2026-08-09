@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  accountArtifactBytes,
   computeArtifactDigest,
   generateBuildAttestation,
   loadBuildIdentity,
@@ -33,6 +34,19 @@ const validAttestation = {
 };
 
 describe('build attestation', () => {
+  it('accounts the stable bytes actually read before retaining an artifact buffer', () => {
+    expect(accountArtifactBytes(10, 12)).toBe(22);
+    expect(() => accountArtifactBytes(128 * 1024 * 1024 - 1, 2)).toThrow(
+      /total byte limit/i,
+    );
+
+    const source = readFileSync(join(import.meta.dirname, 'build-attestation.ts'), 'utf8');
+    expect(source).not.toContain('inventory.totalBytes += Number(childStat.size)');
+    expect(source).toMatch(
+      /const contents = await readBoundedRegularHandle[\s\S]*accountArtifactBytes\(\s*inventory\.totalBytes,\s*contents\.length,?\s*\)[\s\S]*inventory\.files\.push/,
+    );
+  });
+
   it('accepts only the closed, non-sensitive v1 identity contract', () => {
     expect(parseBuildAttestation(validAttestation)).toEqual(validAttestation);
     expect(() =>
