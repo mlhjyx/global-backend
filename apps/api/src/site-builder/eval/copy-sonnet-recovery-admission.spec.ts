@@ -66,16 +66,18 @@ function admission(): CopySonnetRecoveryAdmissionInput {
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: "copy-sonnet-recovery-campaign-v14",
-    authorizationId: "copy-sonnet-recovery-child-authorization-v14",
-    reservationId: "copy-sonnet-recovery-child-reservation-v14",
+    campaignId: "copy-sonnet-recovery-v14-campaign-admission-test",
+    authorizationId:
+      "copy-sonnet-recovery-v14-child-authorization-admission-test",
+    reservationId: "copy-sonnet-recovery-v14-child-reservation-admission-test",
     ledgerIdentityDigest: "f".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
-    authorizationId: "copy-sonnet-recovery-global-authorization-v14",
+    authorizationId:
+      "copy-sonnet-recovery-v14-global-authorization-admission-test",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,

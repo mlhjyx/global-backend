@@ -5,6 +5,7 @@ import {
   COPY_SONNET_RECOVERY_PLAN,
   COPY_SONNET_RECOVERY_PLAN_DIGEST,
   COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
+  COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES,
 } from "./copy-sonnet-recovery-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -13,6 +14,14 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const MAX_PROOF_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 const MAX_SETTLEMENT_POLL_MS = 30_000;
 const CANONICAL_DIGEST = canonicalDigest;
+
+function versionedIdentity(value: string, prefix: string): boolean {
+  return (
+    IDENTIFIER.test(value) &&
+    value.length > prefix.length &&
+    value.startsWith(prefix)
+  );
+}
 
 export interface CopySonnetRecoveryExecutionScope {
   executionKey: string;
@@ -469,9 +478,18 @@ function validChildShape(
       unknownSettlementPolicy: child.unknownSettlementPolicy,
       sharedDriftPolicy: child.sharedDriftPolicy,
     }) === CANONICAL_DIGEST(expected) &&
-    IDENTIFIER.test(child.campaignId) &&
-    IDENTIFIER.test(child.authorizationId) &&
-    IDENTIFIER.test(child.reservationId) &&
+    versionedIdentity(
+      child.campaignId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.campaignId,
+    ) &&
+    versionedIdentity(
+      child.authorizationId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.childAuthorizationId,
+    ) &&
+    versionedIdentity(
+      child.reservationId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.reservationId,
+    ) &&
     SHA256.test(child.ledgerIdentityDigest) &&
     child.reservedQuotaPoints === expectedReservation
   );
@@ -502,7 +520,10 @@ function validateAuthorization(
     ]) ||
     authorization.schemaVersion !==
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" ||
-    !IDENTIFIER.test(authorization.authorizationId) ||
+    !versionedIdentity(
+      authorization.authorizationId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.globalAuthorizationId,
+    ) ||
     authorization.status !== "AUTHORIZED" ||
     authorization.reservationStatus !== "RESERVED" ||
     authorization.maximumExecutions !== 1 ||
@@ -582,6 +603,18 @@ function validateChildAuthorization(
     child.globalAuthorizationDigest !== globalDigest ||
     child.childSlotId !== slot.childSlotId ||
     child.executionKey !== slot.executionKey ||
+    !versionedIdentity(
+      child.campaignId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.campaignId,
+    ) ||
+    !versionedIdentity(
+      child.authorizationId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.childAuthorizationId,
+    ) ||
+    !versionedIdentity(
+      child.reservationId,
+      COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES.reservationId,
+    ) ||
     child.campaignId !== slot.campaignId ||
     child.authorizationId !== slot.authorizationId ||
     child.status !== "AUTHORIZED" ||

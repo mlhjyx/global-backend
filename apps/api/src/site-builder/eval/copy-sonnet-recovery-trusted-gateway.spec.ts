@@ -432,16 +432,16 @@ function admission(
   };
   const child = {
     ...COPY_SONNET_RECOVERY_ADMISSION_SOURCE.childCampaign,
-    campaignId: options.campaignId ?? "copy-sonnet-recovery-campaign-test",
-    authorizationId: "copy-sonnet-recovery-child-auth-test",
-    reservationId: "copy-sonnet-recovery-child-reservation-test",
+    campaignId: options.campaignId ?? "copy-sonnet-recovery-v14-campaign-test",
+    authorizationId: "copy-sonnet-recovery-v14-child-authorization-test",
+    reservationId: "copy-sonnet-recovery-v14-child-reservation-test",
     ledgerIdentityDigest: options.ledgerIdentityDigest ?? "e".repeat(64),
     reservedQuotaPoints: 1_000,
   };
   const authorization = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" as const,
-    authorizationId: "copy-sonnet-recovery-global-auth-test",
+    authorizationId: "copy-sonnet-recovery-v14-global-authorization-test",
     status: "AUTHORIZED" as const,
     issuedAt,
     expiresAt,
@@ -505,7 +505,8 @@ describe("Copy Sonnet recovery trusted gateway", () => {
         ledgerPath: "/not-read/ledger.jsonl",
         authorizationClaimPath: "/not-read/claim.jsonl",
         ledgerMarkerPath: "/not-read/marker.jsonl",
-        campaignId: "copy-sonnet-recovery-compiled-entrypoint-test",
+        campaignId:
+          "copy-sonnet-recovery-v14-campaign-compiled-entrypoint-test",
         admission: admission("http://127.0.0.1:3001"),
         verifiedSource: Object.freeze({}) as CopyPilotVerifiedSource,
         trustedGateway: Object.freeze({}) as CopyPilotTrustedGateway,
@@ -687,7 +688,8 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       join(tmpdir(), "copy-sonnet-recovery-pre-dispatch-drift-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-pre-dispatch-drift-test";
+    const campaignId =
+      "copy-sonnet-recovery-v14-campaign-pre-dispatch-drift-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
@@ -768,7 +770,7 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       join(tmpdir(), "copy-sonnet-recovery-git-acceptance-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-v14-git-acceptance-test";
+    const campaignId = "copy-sonnet-recovery-v14-campaign-git-acceptance-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
@@ -898,7 +900,7 @@ describe("Copy Sonnet recovery trusted gateway", () => {
       join(tmpdir(), "copy-sonnet-recovery-invalid-200-"),
     );
     directories.push(directory);
-    const campaignId = "copy-sonnet-recovery-invalid-200-test";
+    const campaignId = "copy-sonnet-recovery-v14-campaign-invalid-200-test";
     const paths = {
       ledgerPath: join(directory, "ledger.jsonl"),
       authorizationClaimPath: join(directory, "authorization.claim.jsonl"),

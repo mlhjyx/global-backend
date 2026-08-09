@@ -9,6 +9,14 @@ export const COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID =
   "site-builder-copy-sonnet-recovery-runtime/2026-08-09-v14-v1" as const;
 export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID =
   "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-09-v14-v1" as const;
+export const COPY_SONNET_RECOVERY_V14_IDENTITY_PREFIXES = Object.freeze({
+  campaignId: "copy-sonnet-recovery-v14-campaign-" as const,
+  globalAuthorizationId:
+    "copy-sonnet-recovery-v14-global-authorization-" as const,
+  childAuthorizationId:
+    "copy-sonnet-recovery-v14-child-authorization-" as const,
+  reservationId: "copy-sonnet-recovery-v14-child-reservation-" as const,
+});
 
 const SOURCE_SONNET_EXECUTION = COPY_CAPABILITY_PILOT_PLAN.executions.find(
   ({ alias }) => alias === "claude-sonnet-5",
