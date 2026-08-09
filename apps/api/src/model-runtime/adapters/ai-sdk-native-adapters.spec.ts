@@ -700,6 +700,111 @@ describe("AI SDK 7 native provider adapters", () => {
     expect(gateway.observed).toHaveLength(1);
   });
 
+  it("records only allowlisted nested paths for a v13-shaped invalid Messages response", async () => {
+    const sensitiveCopy = "sensitive-v13-copy-must-not-enter-diagnostics";
+    const gateway = await startFakeGateway((_request, response) => {
+      sendJson(
+        response,
+        200,
+        {
+          type: "message",
+          id: "msg_anthropic_v13_shape",
+          model: "claude-sonnet-5",
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: sensitiveCopy,
+              signature: "fixture-signature",
+            },
+            { type: "text", text: '{"name":"Acme"}' },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          stop_details: {
+            type: "end_turn",
+            category: null,
+            explanation: null,
+            recommended_model: { private_value: sensitiveCopy },
+          },
+          usage: {
+            input_tokens: 0,
+            output_tokens: 94,
+            output_tokens_details: { thinking_tokens: sensitiveCopy },
+            cache_creation_input_tokens: 1_199,
+            cache_read_input_tokens: 0,
+          },
+          context_management: {
+            applied_edits: [
+              { type: "future_context_edit", private_value: sensitiveCopy },
+            ],
+          },
+        },
+        { "x-oneapi-request-id": ANTHROPIC_REQUEST_ID },
+      );
+    });
+    const adapter = new AiSdkAnthropicMessagesAdapter(
+      adapterSettings(gateway.baseUrl),
+    );
+
+    const error = await adapter
+      .execute({
+        alias: "claude-sonnet-5",
+        prompt: "Name the company.",
+        outputSchema: companySchema,
+        outputSchemaName: "company",
+        reasoning: { effort: "medium" },
+        maxOutputTokens: 1_200,
+        abortSignal: AbortSignal.timeout(5_000),
+      })
+      .then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+
+    expect(error).toBeInstanceOf(NativeModelApiError);
+    expect(error).toMatchObject({
+      protocol: "anthropic-messages",
+      requestedModel: "claude-sonnet-5",
+      requestId: ANTHROPIC_REQUEST_ID,
+      statusCode: 200,
+      retryable: false,
+      responseShape: {
+        schemaVersion: "native-model-response-shape/2026-08-09-v1",
+        topLevelKeys: [
+          "content",
+          "context_management",
+          "id",
+          "model",
+          "role",
+          "stop_details",
+          "stop_reason",
+          "stop_sequence",
+          "type",
+          "usage",
+        ],
+        contentBlockTypes: ["text", "thinking"],
+        usageKeys: [
+          "cache_creation_input_tokens",
+          "cache_read_input_tokens",
+          "input_tokens",
+          "output_tokens",
+          "output_tokens_details",
+        ],
+        validationPaths: [
+          "context_management.applied_edits[0]",
+          "stop_details.recommended_model",
+          "usage.output_tokens_details.thinking_tokens",
+        ],
+      },
+    });
+    expect(error).not.toHaveProperty("responseBody");
+    expect(error).not.toHaveProperty("requestBodyValues");
+    expect(JSON.stringify(error)).not.toContain(sensitiveCopy);
+    expect(JSON.stringify(error)).not.toContain("private_value");
+    expect(gateway.observed).toHaveLength(1);
+  });
+
   it.each([
     ["openai-responses", AiSdkOpenAiResponsesAdapter, "gpt-5.6-terra"],
     ["openai-chat", AiSdkOpenAiChatCompletionsAdapter, "gpt-5.6-terra"],
