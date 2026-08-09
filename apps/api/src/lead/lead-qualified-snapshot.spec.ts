@@ -349,13 +349,29 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     expect(logDecision.mock.invocationCallOrder[0]).toBeLessThan(outboxCreate.mock.invocationCallOrder[0]);
   });
 
-  it('DENY 路径不写审计（decide 上方 throw 回滚，logDecision 不被调）', async () => {
-    const svc = makeDecideService(makeDecideTx(makeLead(), makeCompany(), vi.fn(), vi.fn()), { effect: 'DENY', allowed: false });
+  it('DENY 路径提交审计后再拒绝，且不修改 Lead、不建人工裁决、不发 handoff', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, decisionCreate);
+    const svc = makeDecideService(tx, { effect: 'DENY', allowed: false });
+
     await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
       response: { error: { code: 'STORAGE_RIGHTS_NOT_GRANTED' } },
     });
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((svc as any).__logDecision).not.toHaveBeenCalled();
+    const logDecision = (svc as any).__logDecision as ReturnType<typeof vi.fn>;
+    expect(logDecision).toHaveBeenCalledTimes(1);
+    expect(logDecision.mock.calls[0][0]).toBe(tx);
+    expect(logDecision.mock.calls[0][3]).toMatchObject({ effect: 'DENY', allowed: false });
+    expect(logDecision.mock.calls[0][4]).toMatchObject({
+      subjectType: 'lead',
+      subjectId: LEAD_ID,
+      actorId: 'user-1',
+    });
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(decisionCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 
   it('收口⑥ 强制：storage_rights !allowed（DENY/跨境人审）→ accept 抛 CONFLICT，绝不发 handoff', async () => {
