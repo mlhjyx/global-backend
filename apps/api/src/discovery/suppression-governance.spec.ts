@@ -123,6 +123,19 @@ describe('Suppression governance', () => {
     expect(h.current()).toMatchObject({ reason: 'unsubscribe', protectionClass: 'LEGAL' });
   });
 
+  it('未知/未来 reason 默认按 LEGAL fail-closed，不能因词表漂移成为可释放偏好类', async () => {
+    const h = makeHarness(row('PREFERENCE'));
+
+    const result = await h.service.addSuppression(CTX, {
+      type: 'email',
+      value: 'blocked@example.com',
+      reason: 'future_legal_basis',
+    });
+
+    expect(result).toMatchObject({ protectionClass: 'LEGAL' });
+    expect(h.current()).toMatchObject({ protectionClass: 'LEGAL' });
+  });
+
   it('身份误关联只能追加带 request/actor/reason/time 的 correction 决策，不修改 suppression', async () => {
     const h = makeHarness(row('LEGAL'));
 
