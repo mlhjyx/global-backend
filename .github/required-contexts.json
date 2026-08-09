@@ -193,6 +193,7 @@
       "/scripts/governance-*.mjs",
       "/scripts/pr-decision-card*.mjs",
       "/scripts/supply-chain-audit*.mjs",
+      "/scripts/supply-chain-source-policy*.mjs",
       "/scripts/supply-chain-gates.spec.mjs",
       "/scripts/verify-docs.mjs",
       "/scripts/worktree-inventory.mjs"

@@ -49,6 +49,7 @@
 /scripts/governance-*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx
 /scripts/supply-chain-audit*.mjs @mlhjyx
+/scripts/supply-chain-source-policy*.mjs @mlhjyx
 /scripts/supply-chain-gates.spec.mjs @mlhjyx
 /scripts/verify-docs.mjs @mlhjyx
 /scripts/worktree-inventory.mjs @mlhjyx

@@ -64,21 +64,6 @@ jobs:
             exit 1
           fi
 
-      - name: Materialize audited dependency paths without hooks
-        shell: bash
-        run: |
-          set -euo pipefail
-          env -i \
-            HOME="$HOME" \
-            PATH="$PATH" \
-            CI=true \
-            NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
-            NPM_CONFIG_USERCONFIG=/dev/null \
-            NPM_CONFIG_GLOBALCONFIG=/dev/null \
-            NPM_CONFIG_IGNORE_PNPMFILE=true \
-            NPM_CONFIG_IGNORE_SCRIPTS=true \
-            pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
-
       - name: Audit production dependencies against the trusted ratchet
         shell: bash
         env:
@@ -88,9 +73,9 @@ jobs:
           BASELINE_PATH: docs/security/production-dependency-audit-baseline.json
           TRUSTED_BASELINE: ${{ runner.temp }}/production-dependency-audit-baseline.json
           TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
+          TRUSTED_SOURCE_POLICY: ${{ runner.temp }}/supply-chain-source-policy.mjs
           BASE_LOCKFILE: ${{ runner.temp }}/base-pnpm-lock.yaml
           BASE_CHECKOUT: ${{ runner.temp }}/supply-chain-base-checkout
-          BASE_NPMRC: ${{ runner.temp }}/base-repository-npmrc.bin
           BASE_AUDIT: ${{ runner.temp }}/base-production-audit.json
           BOOTSTRAP_DIFF: ${{ runner.temp }}/supply-chain-bootstrap-paths.txt
         run: |
@@ -101,13 +86,9 @@ jobs:
             if git cat-file -e "${PR_BASE_SHA}:${BASELINE_PATH}" 2>/dev/null; then
               git show "$PR_BASE_SHA:$BASELINE_PATH" > "$TRUSTED_BASELINE"
               git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
-              mkdir "$BASE_CHECKOUT"
-              git archive "$PR_BASE_SHA" | tar -xf - -C "$BASE_CHECKOUT"
-              find "$BASE_CHECKOUT" -name .npmrc -print0 > "$BASE_NPMRC"
-              if [[ -s "$BASE_NPMRC" ]]; then
-                echo "::error::trusted PR base contains a repository .npmrc outside the audit trust boundary"
-                exit 1
-              fi
+              git show "$PR_BASE_SHA:scripts/supply-chain-source-policy.mjs" > "$TRUSTED_SOURCE_POLICY"
+              git worktree add --detach "$BASE_CHECKOUT" "$PR_BASE_SHA"
+              node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$BASE_CHECKOUT"
               (
                 cd "$BASE_CHECKOUT"
                 env -i \
@@ -167,6 +148,7 @@ jobs:
               base_lock_digest="sha256:$(sha256sum "$BASE_LOCKFILE" | awk '{print $1}')"
               cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
               cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
+              cp scripts/supply-chain-source-policy.mjs "$TRUSTED_SOURCE_POLICY"
               audit_args+=(
                 --expected-bootstrap-base "$PR_BASE_SHA"
                 --expected-source-lockfile-digest "$base_lock_digest"
@@ -175,7 +157,22 @@ jobs:
           else
             cp "$BASELINE_PATH" "$TRUSTED_BASELINE"
             cp scripts/supply-chain-audit.mjs "$TRUSTED_VERIFIER"
+            cp scripts/supply-chain-source-policy.mjs "$TRUSTED_SOURCE_POLICY"
           fi
 
-          sha256sum "$TRUSTED_BASELINE" "$TRUSTED_VERIFIER"
+          node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"
+          (
+            cd "$GITHUB_WORKSPACE"
+            env -i \
+              HOME="$HOME" \
+              PATH="$PATH" \
+              CI=true \
+              NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+              NPM_CONFIG_USERCONFIG=/dev/null \
+              NPM_CONFIG_GLOBALCONFIG=/dev/null \
+              NPM_CONFIG_IGNORE_PNPMFILE=true \
+              NPM_CONFIG_IGNORE_SCRIPTS=true \
+              pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
+          )
+          sha256sum "$TRUSTED_BASELINE" "$TRUSTED_VERIFIER" "$TRUSTED_SOURCE_POLICY"
           node "$TRUSTED_VERIFIER" "${audit_args[@]}"
