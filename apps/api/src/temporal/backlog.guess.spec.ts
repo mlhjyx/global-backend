@@ -96,6 +96,7 @@ function makeDeps(opts: {
       },
     },
     fieldEvidence: { create: async () => ({}) },
+    $queryRaw: async () => [{ id: COMPANY.id, name: COMPANY.name, domain: COMPANY.domain, status: 'NEW' }],
   };
 
   const prisma = {

@@ -45,11 +45,21 @@ function fakeTx(currentSuppressedEmails: string[] = []) {
   const upsert = vi.fn(async () => ({}));
   const create = vi.fn(async () => ({}));
   const findMany = vi.fn(async () => currentSuppressedEmails.map((value) => ({ type: 'email', value })));
+  const queryRaw = vi.fn(async () => [{ id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }]);
+  const updateMany = vi.fn(async () => ({ count: 1 }));
   return {
-    tx: { contactPoint: { upsert }, fieldEvidence: { create }, suppressionRecord: { findMany } } as never,
+    tx: {
+      contactPoint: { upsert },
+      fieldEvidence: { create },
+      suppressionRecord: { findMany },
+      canonicalCompany: { updateMany },
+      $queryRaw: queryRaw,
+    } as never,
     upsert,
     create,
     findMany,
+    queryRaw,
+    updateMany,
   };
 }
 const NOW = new Date('2026-07-10T00:00:00.000Z');

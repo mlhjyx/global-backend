@@ -4,6 +4,7 @@ import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
 import { cleanEmail } from '../acquisition/clean';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from './suppression-value';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -57,13 +58,24 @@ export async function persistDiscoveredContacts(
   //   contactId）捕获 → 该已擦除自然人可被重物化。**不可**用擦除侧「按 person-key 扫描删除」根治：person-key 仅按
   //   归一人名，会误删同公司同名的**另一真人**（数据丢失，比本窗口更糟——本 PR 复审已就此驳回 sweep 思路）。
   //   本闸已完全消除**顺序**重摄入（DSR 完成后 contact_key 已提交，任何后续 persist 必命中）——即 Codex 线程所诉场景。
+  const currentSuppressions = await tx.suppressionRecord.findMany({
+    where: { type: { in: ['contact_key', 'email'] } },
+    select: { type: true, value: true },
+  });
   const suppressedContactKeys = new Set(
-    (await tx.suppressionRecord.findMany({ where: { type: 'contact_key' } })).map((s) => s.value.toLowerCase()),
+    currentSuppressions.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
   );
+  const effectiveSuppressedEmails = new Set([
+    ...args.suppressedEmails,
+    ...canonicalizeSuppressionValues(
+      'email',
+      currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
+    ),
+  ]);
 
   for (const c of args.contacts) {
-    const email = c.email?.toLowerCase();
-    if (email && args.suppressedEmails.has(email)) {
+    const email = c.email ? canonicalizeSuppressionValue('email', c.email) ?? undefined : undefined;
+    if (email && effectiveSuppressedEmails.has(email)) {
       skippedSuppressed += 1;
       continue;
     }

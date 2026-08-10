@@ -72,6 +72,7 @@ interface Store {
   leads: FakeLead[];
   raws: FakeRaw[];
   links: FakeLink[];
+  suppressions: { type: string; value: string }[];
 }
 
 type VerdictCond = null | string | { not: string | null };
@@ -125,6 +126,14 @@ function makeTx(store: Store) {
         if (take != null) rows = rows.slice(0, take);
         return rows.map((c) => ({ ...c }));
       },
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        store.companies.find((company) => company.id === where.id) ?? null,
+      updateMany: async ({ where, data }: { where: { id: string }; data: { status?: string } }) => {
+        store.companies = store.companies.map((company) =>
+          company.id === where.id ? { ...company, ...(data.status ? { status: data.status } : {}) } : company,
+        );
+        return { count: 1 };
+      },
       // 旧代码路径（fit 写 canonical）——保留以证明旧实现 FAIL（此断言下不建 Lead）。
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       update: async ({ where, data }: any) => {
@@ -133,6 +142,7 @@ function makeTx(store: Store) {
         return store.companies[idx];
       },
     },
+    suppressionRecord: { findMany: async () => store.suppressions },
     lead: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       findUnique: async ({ where }: any) => {
@@ -193,6 +203,7 @@ function seedOneCompany(): Store {
     leads: [],
     raws: [{ id: 'raw1', runId: RUN }],
     links: [{ canonicalType: 'company', rawRecordId: 'raw1', canonicalId: 'c1' }],
+    suppressions: [],
   };
 }
 
@@ -248,6 +259,7 @@ describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立�
       leads: [],
       raws: [],
       links: [],
+      suppressions: [],
     };
     const acts = createBacklogActivities({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -271,5 +283,26 @@ describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立�
     expect(store.leads).toHaveLength(2);
     expect(leadFor(store, ICP_A)?.fitVerdict).toBe('match'); // 不被覆盖
     expect(leadFor(store, ICP_B)?.fitVerdict).toBe('mismatch');
+  });
+
+  it('历史 company_name suppression 在 LLM 资格判定前拦截并修复状态', async () => {
+    const store: Store = {
+      companies: [{ id: 'c1', name: 'Acme GmbH', domain: 'acme.com', country: 'DE', industry: 'manufacturing', attributes: {}, status: 'NEW' }],
+      leads: [],
+      raws: [],
+      links: [],
+      suppressions: [{ type: 'company_name', value: '  ACME   GMBH ' }],
+    };
+    const acts = createBacklogActivities({
+      prisma: makeFakePrisma(store) as never,
+      providers: {} as never,
+      gateway: {} as never,
+      ownerDb: {} as never,
+    });
+    judgeFitMock.mockResolvedValue(judgment('match'));
+    const result = await acts.qualifyFitBacklog({ workspaceId: WS, icpId: ICP_A });
+    expect(result.judged).toBe(0);
+    expect(judgeFitMock).not.toHaveBeenCalled();
+    expect(store.companies[0].status).toBe('SUPPRESSED');
   });
 });

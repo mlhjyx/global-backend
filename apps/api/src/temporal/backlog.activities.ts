@@ -16,6 +16,7 @@ import { KnownEmailSample } from '../discovery/email-format-learning';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
 import { canonicalizeSuppressionValues } from '../discovery/suppression-value';
+import { companyMayUseExternalProcessing } from '../discovery/company-suppression-gate';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
 
@@ -158,6 +159,11 @@ export function createBacklogActivities(deps: {
     );
   }
 
+  /** Workspace-bound terminal gate immediately before every automatic model/provider/network action. */
+  async function mayUseExternalProcessing(workspaceId: string, companyId: string): Promise<boolean> {
+    return deps.prisma.withWorkspace(workspaceId, (tx) => companyMayUseExternalProcessing(tx, companyId));
+  }
+
   return {
     /** 跨租户列 ACTIVE ICP（owner 只读扫描）→ backlog sweep 的处理目标。 */
     async listBacklogTargets(): Promise<{ targets: { workspaceId: string; icpId: string }[] }> {
@@ -200,6 +206,7 @@ export function createBacklogActivities(deps: {
       try {
         for (let i = 0; i < companies.length; i++) {
           const c = companies[i];
+          if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
           let judgment;
           try {
             judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
@@ -262,6 +269,7 @@ export function createBacklogActivities(deps: {
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const pending = enrichers.filter((e) => !existing[e.key]); // 已有该源命名空间 → 跳过（幂等）
         if (!pending.length) continue;
+        if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
         attempted += 1;
         const hits: { key: string; result: EnrichmentResult }[] = [];
         const ctx: ExecutionContext = { workspaceId: args.workspaceId, correlationId: 'backlog-enrich' };
@@ -360,6 +368,10 @@ export function createBacklogActivities(deps: {
           return !(prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS); // TTL 新鲜 → 跳过
         });
         if (!pending.length) { processedIds.push(c.id); continue; } // TTL 全新鲜 → 无事可做，已处理
+        if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) {
+          processedIds.push(c.id);
+          continue;
+        }
         const hits: { key: string; result: EnrichmentResult }[] = [];
         // #51：信号抓取计入 sweep:signals 预算账户（runId=budget.key），否则计到裸 workspace = 无账户 = 不限额。
         const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-signals' };
@@ -442,7 +454,7 @@ export function createBacklogActivities(deps: {
           where: backlogEligibleWhere({ watermarkField: 'lastWatchAt', now, requireDomain: true }),
           orderBy: backlogEligibleOrderBy('lastWatchAt'),
           take: limit,
-          select: { id: true, domain: true },
+          select: { id: true, name: true, domain: true },
         }),
       );
       if (!companies.length) return { scanned: 0, registered: 0, nextCursor: null };
@@ -460,6 +472,7 @@ export function createBacklogActivities(deps: {
       for (const c of companies) {
         if (!c.domain || existing.has(keyOf(c.domain))) continue;
         if (suspended.has(c.domain.toLowerCase())) continue; // DAT-011：kill-switch 域名不注册、不探测 sitemap
+        if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
         try {
           await intentSvc.registerWatch(args.workspaceId, c.id);
           registered += 1;
@@ -540,6 +553,10 @@ export function createBacklogActivities(deps: {
         }
         if (c.domain && suspended.has(c.domain.toLowerCase())) {
           processedIds.push(c.id); // DAT-011：跳过抓取但仍已处理 → stamp（离开过滤集）
+          continue;
+        }
+        if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) {
+          processedIds.push(c.id);
           continue;
         }
         // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
@@ -655,7 +672,7 @@ export function createBacklogActivities(deps: {
           }),
           orderBy: backlogEligibleOrderBy('emailGuessAttemptedAt'),
           take: limit,
-          select: { id: true, domain: true }, // country/dedupeKey/name 未用（猜测走 buildGuessTargets 派生）
+          select: { id: true, name: true, domain: true },
         });
         const suppressedEmails = canonicalizeSuppressionValues(
           'email',
@@ -693,6 +710,7 @@ export function createBacklogActivities(deps: {
       let attempted = 0;
       for (const gc of guessCompanies) {
         if (suspended.has(gc.domain.toLowerCase())) continue; // DAT-011：SUSPENDED 域连 MX/SMTP 都不探
+        if (!(await mayUseExternalProcessing(args.workspaceId, gc.id))) continue;
         for (const t of gc.emailless) {
           attempted += 1;
           try {
