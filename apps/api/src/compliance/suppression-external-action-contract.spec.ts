@@ -23,6 +23,18 @@ describe('suppression external-action and PII projection topology', () => {
     expect(router).toContain('suppression_action_gate');
   });
 
+  it('threads the callback through multi-wire acquisition providers instead of rebuilding a narrower context', () => {
+    for (const provider of [
+      'decision-maker.provider.ts',
+      'public-web.provider.ts',
+      'structured-harvest.provider.ts',
+      'digital-footprint.provider.ts',
+    ]) {
+      const source = read(`apps/api/src/discovery/providers/${provider}`);
+      expect(source).toContain('{ ...ctx }');
+    }
+  });
+
   it('manual and backlog email guessing pass a per-candidate authorization callback', () => {
     const service = read('apps/api/src/discovery/discovery.service.ts');
     const manual = service.slice(service.indexOf('async guessEmailsForCompany'), service.indexOf('async verifyContactPoint'));

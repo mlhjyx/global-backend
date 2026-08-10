@@ -22,6 +22,37 @@ afterEach(async () => {
 });
 
 describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () => {
+  it('rechecks acquisition authorization before every redirect hop and starts no second wire after denial', async () => {
+    const authorizeExternalAction = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const resolver: PublicUrlResolver = vi.fn(async (raw) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4,
+      addresses: [{ address: '93.184.216.34', family: 4 }],
+    }));
+    const executePinned = vi.fn(async () => ({
+      status: 302,
+      headers: { location: 'https://second.example/final' },
+      body: Buffer.alloc(0),
+      text: '',
+    }));
+
+    await expect(
+      requestPublicHttp(
+        'https://first.example/start',
+        { maxRedirects: 3 },
+        { resolver, executePinned, authorizeExternalAction },
+      ),
+    ).rejects.toThrow(/external action denied|suppression_action_gate/i);
+
+    expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(executePinned).toHaveBeenCalledTimes(1);
+  });
+
   it('连接固定到校验所得 IP，不对原始 hostname 做第二次 DNS 解析', async () => {
     const server = createServer((req, res) => {
       expect(req.headers.host).toMatch(/^rebind\.example:/);
