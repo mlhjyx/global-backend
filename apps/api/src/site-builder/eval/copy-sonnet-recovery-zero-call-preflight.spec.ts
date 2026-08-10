@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { canonicalDigest } from "../../model-runtime/context-engine";
+
 import {
   COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
   provisionAndAttestCopySonnetRecoveryZeroCall,
@@ -59,6 +61,7 @@ function liveFetch(options: {
   broadenedModels?: boolean;
   duplicateChannels?: boolean;
   invalidLogShape?: boolean;
+  postCreatePrefixToken?: boolean;
 } = {}) {
   const observed: Array<{ method: string; path: string }> = [];
   const tokens: Array<Record<string, unknown>> = options.existingPurposeToken
@@ -92,6 +95,18 @@ function liveFetch(options: {
         });
       }
       if (url.pathname === "/api/token/" && method === "GET") {
+        if (
+          options.postCreatePrefixToken &&
+          tokens.some(({ id }) => id === 24) &&
+          !tokens.some(({ id }) => id === 25)
+        ) {
+          tokens.push({
+            ...tokens.find(({ id }) => id === 24),
+            id: 25,
+            name: "Site Builder Copy Sonnet Recovery v16-race",
+            status: 1,
+          });
+        }
         return json({
           success: true,
           data: { items: tokens, total: tokens.length },
@@ -110,6 +125,18 @@ function liveFetch(options: {
         });
         expect(body.expired_time).toBe(1_786_428_000);
         tokens.push({ id: 24, status: 1, ...body });
+        return json({ success: true });
+      }
+      if (url.pathname === "/api/token/" && method === "PUT") {
+        expect(url.searchParams.get("status_only")).toBe("true");
+        const body = JSON.parse(String(init?.body)) as {
+          id: number;
+          status: number;
+        };
+        expect(body.status).toBe(2);
+        expect([24, 25]).toContain(body.id);
+        const token = tokens.find(({ id }) => id === body.id);
+        if (token) token.status = body.status;
         return json({ success: true });
       }
       if (url.pathname === "/api/token/24/key" && method === "POST") {
@@ -164,13 +191,25 @@ function input() {
   };
 }
 
+function runtimeDeps(fetchMock: typeof fetch) {
+  return {
+    fetch: fetchMock,
+    now: () => NOW,
+    readRepositoryState: () => ({
+      head: "ca16c5336a51f5ada152aff5c39e57ba8ff4589a",
+      clean: true,
+    }),
+    withExclusiveLock: async <T>(operation: () => Promise<T>) => operation(),
+  };
+}
+
 describe("Copy Sonnet recovery zero-model-call preflight", () => {
   it("creates one 24h exact-scope finite token and attests route, quota, price and resolver readiness without dispatch", async () => {
     const live = liveFetch();
-    const result = await provisionAndAttestCopySonnetRecoveryZeroCall(input(), {
-      fetch: live.fetchMock,
-      now: () => NOW,
-    });
+    const result = await provisionAndAttestCopySonnetRecoveryZeroCall(
+      input(),
+      runtimeDeps(live.fetchMock),
+    );
 
     expect(COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH).toBe(
       "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v16.json",
@@ -213,6 +252,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
         taskId: "site_builder.copy",
         alias: "claude-sonnet-5",
         protocol: "anthropic_messages",
+        transportProtocol: "anthropic-messages",
         reasoning: "medium",
         maximumExecutions: 1,
         maximumWireCalls: 2,
@@ -254,16 +294,38 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     ]) {
       const live = liveFetch(options);
       await expect(
-        provisionAndAttestCopySonnetRecoveryZeroCall(input(), {
-          fetch: live.fetchMock,
-          now: () => NOW,
-        }),
+        provisionAndAttestCopySonnetRecoveryZeroCall(
+          input(),
+          runtimeDeps(live.fetchMock),
+        ),
       ).rejects.toThrow(/COPY_SONNET_RECOVERY_(TOKEN_EXISTS|ROUTE_AMBIGUOUS)/u);
       expect(
         live.observed.some(
           ({ method, path }) => method === "POST" && path === "/api/token/",
         ),
       ).toBe(false);
+    }
+  });
+
+  it("rejects a dirty or mismatched execution head before any control-plane request", async () => {
+    for (const state of [
+      {
+        head: "0".repeat(40),
+        clean: true,
+      },
+      {
+        head: "ca16c5336a51f5ada152aff5c39e57ba8ff4589a",
+        clean: false,
+      },
+    ]) {
+      const live = liveFetch();
+      await expect(
+        provisionAndAttestCopySonnetRecoveryZeroCall(input(), {
+          ...runtimeDeps(live.fetchMock),
+          readRepositoryState: () => state,
+        }),
+      ).rejects.toThrow("COPY_SONNET_RECOVERY_REPOSITORY_STATE_INVALID");
+      expect(live.observed).toEqual([]);
     }
   });
 
@@ -274,10 +336,10 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     ]) {
       const live = liveFetch(options);
       await expect(
-        provisionAndAttestCopySonnetRecoveryZeroCall(input(), {
-          fetch: live.fetchMock,
-          now: () => NOW,
-        }),
+        provisionAndAttestCopySonnetRecoveryZeroCall(
+          input(),
+          runtimeDeps(live.fetchMock),
+        ),
       ).rejects.toThrow(
         /COPY_SONNET_RECOVERY_(LIVE_SCOPE_INVALID|SETTLEMENT_PREFLIGHT_INVALID)/u,
       );
@@ -288,15 +350,60 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
           ),
         ),
       ).toBe(false);
+      expect(
+        live.observed.some(
+          ({ method, path }) => method === "PUT" && path === "/api/token/",
+        ),
+      ).toBe(true);
     }
+  });
+
+  it("disables every active purpose-prefix token when a duplicate appears during creation", async () => {
+    const live = liveFetch({ postCreatePrefixToken: true });
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_TOKEN_READBACK_INVALID");
+    expect(
+      live.observed.filter(
+        ({ method, path }) => method === "PUT" && path === "/api/token/",
+      ),
+    ).toHaveLength(2);
+    expect(
+      live.observed.some(({ path }) =>
+        ["/v1/messages", "/v1/chat/completions", "/v1/responses"].includes(
+          path,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("rejects authorization, wire-count, lifetime, digest or secret-bearing artifact drift", async () => {
     const live = liveFetch();
     const { artifact } = await provisionAndAttestCopySonnetRecoveryZeroCall(
       input(),
-      { fetch: live.fetchMock, now: () => NOW },
+      runtimeDeps(live.fetchMock),
     );
+    const { artifactDigest: _artifactDigest, ...understatedWithoutDigest } = {
+      ...artifact,
+      credential: {
+        ...artifact.credential,
+        quotaCapPoints: 2,
+        remainingQuotaPoints: 2,
+        maximumQuotaPointsPerWire: 1,
+      },
+      pricing: {
+        ...artifact.pricing,
+        maximumNativeCostMicrounitsPerWire: 1,
+        maximumNativeCostMicrounits: 2,
+      },
+    };
+    const understated = {
+      ...understatedWithoutDigest,
+      artifactDigest: canonicalDigest(understatedWithoutDigest),
+    };
     for (const mutation of [
       { ...artifact, dispatchAuthorization: "AUTHORIZED" },
       { ...artifact, observedModelWireCalls: 1 },
@@ -309,6 +416,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
       },
       { ...artifact, artifactDigest: "0".repeat(64) },
       { ...artifact, bearerToken: "sk-forbidden" },
+      understated,
     ]) {
       expect(() =>
         validateCopySonnetRecoveryZeroCallPreflightArtifact(mutation),
