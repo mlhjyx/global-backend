@@ -243,8 +243,8 @@ describe("Copy pilot fixed-source verifier", () => {
     ).rejects.toThrow("COPY_PILOT_PREPARATION_SOURCE_UNREACHABLE");
   });
 
-  for (const version of ["v13", "v14"] as const) {
-    it(`rejects the frozen ${version} recovery binding as the live v15 source`, async () => {
+  for (const version of ["v13", "v14", "v15"] as const) {
+    it(`rejects the frozen ${version} recovery binding as the live v16 source`, async () => {
       await expect(
         createCopyPilotVerifiedSource({
           repositoryRoot: REPOSITORY_ROOT,
