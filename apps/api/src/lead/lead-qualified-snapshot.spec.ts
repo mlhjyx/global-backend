@@ -411,6 +411,55 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     expect(outboxCreate).not.toHaveBeenCalled();
   });
 
+  it('email suppression 命中的联系人不进 LeadQualified，其他可达联系人仍可交付', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const company = makeCompany({
+      contacts: [
+        ...makeCompany().contacts,
+        {
+          id: '66666666-6666-6666-6666-666666666666',
+          fullName: 'Erika Einkauf',
+          title: 'Buyer',
+          seniority: 'manager',
+          department: 'procurement',
+          contactPoints: [{ status: 'VALID', type: 'phone', value: '+49 456' }],
+        },
+      ],
+    });
+    const tx = makeDecideTx(makeLead(), company, outboxCreate, vi.fn());
+    tx.suppressionRecord.findMany = vi.fn(async () => [{ type: 'email', value: ' MAX@ACME-PUMPEN.DE ' }]);
+
+    await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept');
+
+    const payload = outboxCreate.mock.calls[0][0].data.payload as { contact_refs: { contact_id: string }[] };
+    expect(payload.contact_refs).toEqual([
+      expect.objectContaining({ contact_id: '66666666-6666-6666-6666-666666666666' }),
+    ]);
+    expect(payload.contact_refs.some((ref) => ref.contact_id === CONTACT_ID)).toBe(false);
+  });
+
+  it('唯一 Reachability 来自被禁邮箱时 accept fail-closed，不改状态不发交付', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const company = makeCompany({
+      contacts: [
+        {
+          ...makeCompany().contacts[0],
+          contactPoints: [{ status: 'VALID', type: 'email', value: 'max@acme-pumpen.de' }],
+        },
+      ],
+    });
+    const tx = makeDecideTx(makeLead(), company, outboxCreate, decisionCreate);
+    tx.suppressionRecord.findMany = vi.fn(async () => [{ type: 'email', value: 'max@acme-pumpen.de' }]);
+
+    await expect(makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'SUPPRESSED_CONTACT_UNREACHABLE' } },
+    });
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(decisionCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
   it('收口⑥ 强制：storage_rights !allowed（DENY/跨境人审）→ accept 抛 CONFLICT，绝不发 handoff', async () => {
     const outboxCreate = vi.fn();
     const svc = makeDecideService(
