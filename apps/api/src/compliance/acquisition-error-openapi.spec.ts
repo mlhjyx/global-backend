@@ -19,8 +19,9 @@ const codes = (path: string, method: string, status: string): string[] | undefin
     ?.properties?.error?.properties?.code?.enum;
 
 describe('acquisition compliance error OpenAPI', () => {
-  it('publishes every reachable Lead accept 404/409 result', () => {
+  it('publishes every reachable Lead accept 400/404/409 result', () => {
     const accept = api.paths['/api/v1/leads/{leadId}/accept']?.post;
+    expect(codes('/api/v1/leads/{leadId}/accept', 'post', '400')).toEqual(['VALIDATION_ERROR']);
     expect(accept?.responses).toHaveProperty('404');
     expect(codes('/api/v1/leads/{leadId}/accept', 'post', '409')).toEqual([
       'SUPPRESSED',
@@ -30,6 +31,18 @@ describe('acquisition compliance error OpenAPI', () => {
       'SANCTIONS_HOLD_UNRESOLVED',
       'CONFLICT',
     ]);
+  });
+
+  it('publishes every reachable Lead reject 400/404/409 result', () => {
+    const reject = api.paths['/api/v1/leads/{leadId}/reject']?.post;
+    expect(codes('/api/v1/leads/{leadId}/reject', 'post', '400')).toEqual(['VALIDATION_ERROR']);
+    expect(codes('/api/v1/leads/{leadId}/reject', 'post', '404')).toEqual(['NOT_FOUND']);
+    expect(codes('/api/v1/leads/{leadId}/reject', 'post', '409')).toEqual([
+      'SUPPRESSED',
+      'INVALID_STATE',
+      'CONFLICT',
+    ]);
+    expect(reject?.responses).toHaveProperty('200');
   });
 
   it('publishes only HTTP-reachable decision validation codes', () => {
