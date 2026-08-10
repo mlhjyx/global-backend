@@ -101,6 +101,14 @@ function fdaFakePrisma(
     canonicalCompany: {
       findUnique: async ({ where }: { where: { workspaceId_dedupeKey: { dedupeKey: string } } }) =>
         companies.get(where.workspaceId_dedupeKey.dedupeKey) ?? null,
+      updateMany: async ({ where }: { where: { id: string } }) => {
+        for (const [key, company] of companies) {
+          if (company.id !== where.id) continue;
+          companies.set(key, { ...company, status: 'SUPPRESSED', version: Number(company.version ?? 0) + 1 });
+          return { count: 1 };
+        }
+        return { count: 0 };
+      },
       upsert: async ({
         where,
         create,
@@ -178,6 +186,7 @@ describe('OpenFdaIntentProjectionService.projectClearances —— source_signal 
     const result = await svc.projectClearances(WS, { productCodes: ['QAS'] });
 
     expect(result.companiesTouched).toBe(0);
+    expect(prisma.companies.get(signal.subjectKey as string)).toMatchObject({ status: 'SUPPRESSED', version: 2 });
     expect(prisma.evidence).toHaveLength(0);
   });
 });

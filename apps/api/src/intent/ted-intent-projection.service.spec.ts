@@ -90,6 +90,22 @@ function fakePrisma(
           workspaceId_dedupeKey: { workspaceId: string; dedupeKey: string };
         };
       }) => companies.get(where.workspaceId_dedupeKey.dedupeKey) ?? null,
+      updateMany: async ({
+        where,
+      }: {
+        where: { id: string };
+      }) => {
+        for (const [key, company] of companies) {
+          if (company.id !== where.id) continue;
+          companies.set(key, {
+            ...company,
+            status: 'SUPPRESSED',
+            version: company.version + 1,
+          });
+          return { count: 1 };
+        }
+        return { count: 0 };
+      },
       upsert: async ({
         where,
         create,
@@ -340,7 +356,7 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
     const result = await svc.projectTenders(WS, params);
 
     expect(result.companiesTouched).toBe(0);
-    expect(prisma.companies.get(signal.subjectKey)?.version).toBe(1);
+    expect(prisma.companies.get(signal.subjectKey)).toMatchObject({ status: 'SUPPRESSED', version: 2 });
     expect(prisma.evidence).toHaveLength(0);
   });
 

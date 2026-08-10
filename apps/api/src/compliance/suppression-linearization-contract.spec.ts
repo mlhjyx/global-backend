@@ -41,8 +41,8 @@ describe('suppression writer/action linearization topology', () => {
       const projectOne = source.slice(source.indexOf('private async projectOne'));
       const gateAt = projectOne.indexOf('loadMaterializableCompanyState');
       expect(gateAt, `${path} must use the shared materialization gate`).toBeGreaterThanOrEqual(0);
-      expect(gateAt, `${path} must authorize before reading canonical state`).toBeLessThan(
-        projectOne.indexOf('canonicalCompany.findUnique'),
+      expect(projectOne, `${path} must not reload canonical identity outside the shared gate`).not.toContain(
+        'canonicalCompany.findUnique',
       );
       expect(gateAt, `${path} must authorize before writing canonical state`).toBeLessThan(
         projectOne.indexOf('canonicalCompany.upsert'),
@@ -57,5 +57,14 @@ describe('suppression writer/action linearization topology', () => {
     expect(service.match(/companyMayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(backlog).toContain('contactMayUseExternalProcessing');
     expect(backlog.match(/mayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(10);
+  });
+
+  it('passes the company-scoped action gate into backlog watch sitemap and probe wires', () => {
+    const source = read('apps/api/src/temporal/backlog.activities.ts');
+    const body = source.slice(
+      source.indexOf('async registerWatchesBacklog'),
+      source.indexOf('async discoverContactsBacklog'),
+    );
+    expect(body).toContain('authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id)');
   });
 });

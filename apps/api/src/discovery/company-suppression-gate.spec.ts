@@ -4,6 +4,7 @@ import {
   companyMayBeMaterialized,
   companyMayUseExternalProcessing,
   contactMayUseExternalProcessing,
+  loadMaterializableCompanyState,
 } from './company-suppression-gate';
 import { contactSuppressionKeys } from './identity';
 import { blindContactKey } from '../compliance/pii-crypto';
@@ -60,6 +61,47 @@ describe('company suppression terminal gate', () => {
     });
 
     await expect(companyMayUseExternalProcessing(tx, 'ws-1', 'co-1')).resolves.toBe(false);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'co-1', status: { not: 'SUPPRESSED' } },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+  });
+
+  it('loads canonical identity under the policy lock and blocks its suppressed domain', async () => {
+    const order: string[] = [];
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        order.push('lock');
+        return [{ locked: true }];
+      }),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => {
+          order.push('company');
+          return {
+            id: 'co-1',
+            name: 'Existing Legal Entity GmbH',
+            domain: 'https://www.blocked.example/about',
+            attributes: {},
+            status: 'NEW',
+          };
+        }),
+        updateMany,
+      },
+      suppressionRecord: {
+        findMany: vi.fn(async () => {
+          order.push('suppression');
+          return [{ type: 'domain', value: 'blocked.example' }];
+        }),
+      },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      loadMaterializableCompanyState(tx, 'ws-1', 'name:source office|de', {
+        name: 'Source Office',
+      }),
+    ).resolves.toMatchObject({ allowed: false, prior: { id: 'co-1' } });
+    expect(order).toEqual(['lock', 'company', 'suppression']);
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'co-1', status: { not: 'SUPPRESSED' } },
       data: { status: 'SUPPRESSED', version: { increment: 1 } },
