@@ -37,7 +37,11 @@ function makeDeps(opts: {
       findMany: async ({ take }: { take?: number }) =>
         (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),
       findUnique: async ({ where }: { where: { id: string } }) => opts.companies.find((c) => c.id === where.id) ?? null,
-      update: async () => ({}),
+      update: async ({ where, data }: { where: { id: string }; data: { attributes?: Record<string, unknown> } }) => {
+        const company = opts.companies.find((candidate) => candidate.id === where.id);
+        if (company && data.attributes) company.attributes = data.attributes;
+        return {};
+      },
       updateMany: async ({ where, data }: { where: { id: { in: string[] } | string }; data: Record<string, unknown> }) => {
         const ids = typeof where.id === 'string' ? [where.id] : where.id.in;
         updateManyCalls.push({ ids, data });
@@ -134,6 +138,28 @@ describe('enrichSignalsBacklog —— 信号抓取计入 sweep:signals 预算 + 
     expect(enrichCalls).toHaveLength(0);
     expect(r.attempted).toBe(0);
     expect(updateManyCalls.some((call) => call.data.status === 'SUPPRESSED')).toBe(true);
+  });
+
+  it('provider 返回前提交的 email suppression 不会被 pre-wire attributes 快照复活', async () => {
+    const suppressionRows: { type: string; value: string }[] = [];
+    const company = {
+      ...C('c1', 'acme.example'),
+      attributes: { contact_email: 'sales@agency.example', keep: true },
+    };
+    const { deps } = makeDeps({
+      companies: [company],
+      suppressionRows,
+      onEnrich: async () => {
+        suppressionRows.push({ type: 'email', value: 'sales@agency.example' });
+        company.attributes = { keep: true };
+        return { matched: true, attributes: { ads: true }, confidence: 0.9, costCents: 0 };
+      },
+    });
+
+    await createBacklogActivities(deps).enrichSignalsBacklog({ workspaceId: WS, limit: 1 });
+
+    expect(company.attributes).toMatchObject({ keep: true, digital_footprint: { ads: true } });
+    expect(company.attributes).not.toHaveProperty('contact_email');
   });
 
   it('本家内首个 enricher 打穿 → 后续 enricher 不再出网（逐 enricher 检 kill-switch，#82 P2）', async () => {
