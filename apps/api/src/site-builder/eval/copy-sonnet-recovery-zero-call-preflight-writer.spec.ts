@@ -6,10 +6,11 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH } from "./copy-sonnet-recovery-zero-call-preflight-artifact";
@@ -86,7 +87,7 @@ afterEach(() => {
 });
 
 describe("Copy Sonnet recovery zero-call evidence writer", () => {
-  it("publishes a create-only artifact and a direct /tmp 0600 secret without leaking it in the summary", async () => {
+  it("publishes a create-only artifact and a private-parent 0600 secret without leaking it in the summary", async () => {
     const root = repository();
     const secretOutputPath = join(temporaryRoot(), "credential.json");
     const provision = vi.fn(async () => fixture());
@@ -153,6 +154,63 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
     expect(provision).not.toHaveBeenCalled();
   });
 
+  it("preserves an existing secret path and refuses to provision", async () => {
+    const root = repository();
+    const secretOutputPath = join(temporaryRoot(), "credential.json");
+    writeFileSync(secretOutputPath, "existing-secret-owner\n", { mode: 0o600 });
+    const provision = vi.fn(async () => fixture());
+
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(root, secretOutputPath),
+        { provision, validateArtifact: () => undefined },
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_SECRET_PATH_EXISTS");
+    expect(provision).not.toHaveBeenCalled();
+    expect(readFileSync(secretOutputPath, "utf8")).toBe(
+      "existing-secret-owner\n",
+    );
+  });
+
+  it("rejects a non-private secret parent before provisioning", async () => {
+    const root = repository();
+    const secretParent = temporaryRoot();
+    chmodSync(secretParent, 0o777);
+    const provision = vi.fn(async () => fixture());
+
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(root, join(secretParent, "credential.json")),
+        { provision, validateArtifact: () => undefined },
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_SECRET_PARENT_INVALID");
+    expect(provision).not.toHaveBeenCalled();
+  });
+
+  it("rejects an intermediate symlink that resolves the secret parent outside /tmp", async () => {
+    const root = repository();
+    const linkContainer = temporaryRoot();
+    const outsideRoot = mkdtempSync("/var/tmp/copy-zero-call-writer-");
+    temporaryRoots.push(outsideRoot);
+    mkdirSync(join(outsideRoot, "private"), { mode: 0o700 });
+    symlinkSync(outsideRoot, join(linkContainer, "link"));
+    const provision = vi.fn(async () => fixture());
+
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(
+          root,
+          join(linkContainer, "link", "private", "credential.json"),
+        ),
+        { provision, validateArtifact: () => undefined },
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_SECRET_PATH_INVALID");
+    expect(provision).not.toHaveBeenCalled();
+    expect(existsSync(join(outsideRoot, "private", "credential.json"))).toBe(
+      false,
+    );
+  });
+
   it("removes the reserved secret path on preflight failure", async () => {
     const root = repository();
     const secretOutputPath = join(temporaryRoot(), "credential.json");
@@ -168,6 +226,57 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
       ),
     ).rejects.toThrow("LIVE_PREFLIGHT_FAILED");
     expect(existsSync(secretOutputPath)).toBe(false);
+  });
+
+  it("fails closed and removes the secret if its private parent mode drifts", async () => {
+    const root = repository();
+    const secretOutputPath = join(temporaryRoot(), "credential.json");
+    const cleanup = vi.fn(async () => undefined);
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(root, secretOutputPath),
+        {
+          provision: async () => {
+            chmodSync(dirname(secretOutputPath), 0o755);
+            return fixture();
+          },
+          cleanup,
+          validateArtifact: () => undefined,
+        },
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_SECRET_RESERVATION_DRIFT");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(existsSync(secretOutputPath)).toBe(false);
+  });
+
+  it("rolls back its artifact and token if the secret parent drifts after publication", async () => {
+    const root = repository();
+    const secretOutputPath = join(temporaryRoot(), "credential.json");
+    const artifactPath = resolve(
+      root,
+      COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
+    );
+    const cleanup = vi.fn(async () => undefined);
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(root, secretOutputPath),
+        {
+          provision: async () => fixture(),
+          cleanup,
+          publishArtifact: async (path, artifact) => {
+            writeFileSync(path, `${JSON.stringify(artifact)}\n`, {
+              flag: "wx",
+              mode: 0o644,
+            });
+            chmodSync(dirname(secretOutputPath), 0o755);
+          },
+          validateArtifact: () => undefined,
+        },
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_SECRET_RESERVATION_DRIFT");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(existsSync(secretOutputPath)).toBe(false);
+    expect(existsSync(artifactPath)).toBe(false);
   });
 
   it("disables the created purpose token and removes its secret if artifact publication fails", async () => {
@@ -188,6 +297,57 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
       ),
     ).rejects.toThrow("ARTIFACT_WRITE_FAILED");
     expect(cleanup).toHaveBeenCalledOnce();
+    expect(existsSync(secretOutputPath)).toBe(false);
+  });
+
+  it("removes the local secret even when remote token cleanup fails", async () => {
+    const root = repository();
+    const secretOutputPath = join(temporaryRoot(), "credential.json");
+    const cleanup = vi.fn(async () => {
+      throw new Error("REMOTE_CLEANUP_FAILED");
+    });
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(root, secretOutputPath),
+        {
+          provision: async () => fixture(),
+          cleanup,
+          publishArtifact: async () => {
+            throw new Error("ARTIFACT_WRITE_FAILED");
+          },
+          validateArtifact: () => undefined,
+        },
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_WRITER_TOKEN_CLEANUP_FAILED");
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(existsSync(secretOutputPath)).toBe(false);
+  });
+
+  it("preserves a raced evidence target while disabling the new token", async () => {
+    const root = repository();
+    const secretOutputPath = join(temporaryRoot(), "credential.json");
+    const artifactPath = resolve(
+      root,
+      COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
+    );
+    const cleanup = vi.fn(async () => undefined);
+    await expect(
+      writeCopySonnetRecoveryZeroCallPreflightEvidence(
+        input(root, secretOutputPath),
+        {
+          provision: async () => fixture(),
+          cleanup,
+          validateArtifact: () => {
+            writeFileSync(artifactPath, "concurrent-writer\n", {
+              flag: "wx",
+              mode: 0o644,
+            });
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "EEXIST" });
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(readFileSync(artifactPath, "utf8")).toBe("concurrent-writer\n");
     expect(existsSync(secretOutputPath)).toBe(false);
   });
 });

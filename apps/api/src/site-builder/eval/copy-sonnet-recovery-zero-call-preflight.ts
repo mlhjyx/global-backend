@@ -423,7 +423,7 @@ function isPurposeToken(token: Token): boolean {
   return typeof token.name === "string" && token.name.startsWith(TOKEN_NAME);
 }
 
-async function disableCreatedPurposeTokens(
+export async function disableCopySonnetRecoveryPurposeTokens(
   input: CopySonnetRecoveryZeroCallPreflightInput,
   fetchImpl: typeof fetch,
   observation: ObservedRequest[],
@@ -772,7 +772,7 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
   } catch (error) {
     if (creationAttempted) {
       try {
-        await disableCreatedPurposeTokens(
+        await disableCopySonnetRecoveryPurposeTokens(
           input,
           fetchImpl,
           observation,
