@@ -53,15 +53,16 @@
 | reconciliation + recompute | `835bba70` | `d5e23dea` | 已禁公司与 email/domain mailbox 清理闭合；Intent 重算首读和提交均复核 authority                 |
 | stale enrichment commits   | `c531cf08` | `a96508a2` | forward/backlog enrich/signal 提交复读 current attrs+authority；denial 后零 evidence          |
 | bounded reconciliation     | `57c7dddf` | `a96508a2` | derived scan 每 50 行短事务、5 秒上限并释放 workspace lock，不再单事务扫到 EOF               |
-| source-policy terminal     | `3cf1c08f` | `a96508a2` | branded ToolPolicyDenied 不再被 sitemap/root/homepage fallback 当作普通网络失败               |
+| source-policy terminal     | `3cf1c08f` | `a96508a2` | machine-shaped ToolPolicyDenied 不再被 sitemap/root/homepage fallback 当作普通网络失败         |
+| full-suite fixture         | final exact-head full run | `cb57d6d9` | intent recompute 假体补齐 advisory lock、suppression authority 与 existing-identity 查询合同；不以 focused green 替代全量测试 |
 
 ## 三、最终本地验证
 
 | 门                | 结果                                                                                                                                                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 聚焦 Vitest       | `a96508a2` 前工作树运行 6 files / 71 tests PASS；覆盖 stale enrichment commit、final authority/evidence、短批 reconciliation、suppression/source-policy terminal fallback 与原有重算/清理面                       |
-| API 全量 Vitest   | 上一实现 `d5e23dea` 的全量命令完整退出 0；`a96508a2` 后仍须在最终 exact head 重新执行，不沿用旧总数                                                                                                              |
-| API lint / build  | `a96508a2` 前实现树的 lint 与 Nest build PASS；lint 仅 7 个既有 warning、0 error。最终 docs exact head 仍须重跑                                                                                                 |
+| API 全量 Vitest   | `cb57d6d9` 实现树运行 305 files：4599 passed、2 skipped、0 failed；第一次 exact-head run 暴露 3 个旧 fixture 缺失 suppression transaction mock 的失败，修复后全量重跑退出 0                              |
+| API lint / build  | `cb57d6d9` 实现树的 lint 与 Nest build PASS；lint 仅 7 个既有 warning、0 error                                                                                                                                    |
 | OpenAPI           | development + loopback + 显式 dev token 开关下重新导出 60 paths；提交 artifact 无额外 drift；Spectral 0 errors、15 个既有 tag warnings                                                                             |
 | 文档与治理        | governance 60/60 PASS；`docs:verify` 检查 121 Markdown，0 errors、1 个既有 table warning                                                                                                                           |
 | PostgreSQL 16     | 前一 GREEN `017f0d9f` 的隔离无卷临时库证据：82/82 migrations PASS；`app_user` 非 superuser/non-BYPASSRLS；RLS/append-only/CHECK/LEGAL 防降级均 fail-closed。本轮新增 projection/wire 路径未重跑真实 PG，不把 mock 当并发证明 |
