@@ -86,11 +86,14 @@ describe("Copy Sonnet recovery OpenOx pricing ToolBroker boundary", () => {
     });
   });
 
-  it("rejects redirects without following or forwarding the request", async () => {
+  it.each([
+    [307, "https://attacker.example/collect"],
+    [308, "https://openox.tech/redirected-catalog"],
+  ])("rejects %i redirects without following or forwarding the request", async (status, location) => {
     const fetchMock = vi.fn(async () =>
       new Response(null, {
-        status: 307,
-        headers: { location: "https://attacker.example/collect" },
+        status,
+        headers: { location },
       }),
     );
 

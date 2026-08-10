@@ -37,7 +37,10 @@ function protocolFor(alias: string) {
 
 function routeEntries() {
   return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
-    const target = resolveTaskExecutionTarget(taskId, REVIEWED_RUNTIME_ROUTE_ENV);
+    const target = resolveTaskExecutionTarget(
+      taskId,
+      REVIEWED_RUNTIME_ROUTE_ENV,
+    );
     if (target.kind === 'deterministic_fallback') return [];
     const route = target.route;
     return [route.primary, ...route.fallbacks].map((alias) => ({

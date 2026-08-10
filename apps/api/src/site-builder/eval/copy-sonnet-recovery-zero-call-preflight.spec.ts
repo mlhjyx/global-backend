@@ -96,6 +96,7 @@ function liveFetch(options: {
   channelOverrides?: Record<string, unknown>;
   duplicatePricingModel?: boolean;
   duplicatePricingGroup?: boolean;
+  controlPlaneRedirect?: { status: 307 | 308; location: string };
 } = {}) {
   const observed: Array<{ method: string; path: string }> = [];
   const tokens: Array<Record<string, unknown>> = options.existingPurposeToken
@@ -120,10 +121,16 @@ function liveFetch(options: {
   };
   const fetchMock = vi.fn(
     async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(String(input));
-      const method = init?.method ?? "GET";
-      observed.push({ method, path: url.pathname });
-      if (url.pathname === "/api/channel/") {
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
+    observed.push({ method, path: url.pathname });
+    if (options.controlPlaneRedirect && url.pathname === "/api/channel/") {
+      return new Response(null, {
+        status: options.controlPlaneRedirect.status,
+        headers: { location: options.controlPlaneRedirect.location },
+      });
+    }
+    if (url.pathname === "/api/channel/") {
         return json({
           success: true,
           data: {
@@ -427,10 +434,28 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     }
   });
 
+  it.each([
+    [307, "https://attacker.example/collect"],
+    [308, "http://127.0.0.1:3001/api/channel/redirected"],
+  ] as const)("rejects local control-plane %i redirects without a second request", async (status, location) => {
+    const live = liveFetch({ controlPlaneRedirect: { status, location } });
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(pricingBroker().broker),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_CONTROL_PLANE_REDIRECT_REJECTED");
+    expect(live.fetchMock).toHaveBeenCalledOnce();
+    expect(live.fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+  });
+
   it("rejects channel transport, OpenOx base URL, or model-mapping drift before token creation", async () => {
     for (const channelOverrides of [
       { type: 1 },
       { base_url: "https://proxy.example" },
+      { model_mapping: undefined },
+      { model_mapping: null },
+      { model_mapping: "" },
       { model_mapping: JSON.stringify({ "claude-sonnet-5": "claude-opus-5" }) },
     ]) {
       const live = liveFetch({ channelOverrides });

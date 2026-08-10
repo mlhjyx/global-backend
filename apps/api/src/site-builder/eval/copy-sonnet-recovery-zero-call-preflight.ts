@@ -6,11 +6,11 @@ import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import type { ExecutionBroker } from "../../tools/tool-contract";
 import {
   OPENOX_PRICING_AUTHORITY,
   settlementOpenOxPrice,
   settlementPricingSnapshotSha256,
-  type OpenOxPricingCatalog,
   type SettlementDispatch,
 } from "../site-builder-model-settlement";
 import {
@@ -27,6 +27,8 @@ import {
   COPY_SONNET_RECOVERY_MAXIMUM_INPUT_TOKENS_PER_WIRE as MAXIMUM_INPUT_TOKENS_PER_WIRE,
   COPY_SONNET_RECOVERY_MAXIMUM_LIFETIME_MS as MAXIMUM_LIFETIME_MS,
   COPY_SONNET_RECOVERY_MAXIMUM_OUTPUT_TOKENS_PER_WIRE as MAXIMUM_OUTPUT_TOKENS_PER_WIRE,
+  COPY_SONNET_RECOVERY_NEW_API_CHANNEL_TYPE as NEW_API_ANTHROPIC_CHANNEL_TYPE,
+  COPY_SONNET_RECOVERY_OPENOX_BASE_URL as OPENOX_ANTHROPIC_BASE_URL,
   COPY_SONNET_RECOVERY_OPENOX_GROUP as OPENOX_GROUP,
   COPY_SONNET_RECOVERY_QUOTA_PER_NATIVE_UNIT as QUOTA_PER_NATIVE_UNIT,
   COPY_SONNET_RECOVERY_TRANSPORT_PROTOCOL as ANTHROPIC_MESSAGES_TRANSPORT_PROTOCOL,
@@ -38,6 +40,10 @@ import {
   type CopySonnetRecoveryObservedRequest as ObservedRequest,
   type CopySonnetRecoveryZeroCallPreflightArtifact,
 } from "./copy-sonnet-recovery-zero-call-preflight-artifact";
+import {
+  COPY_SONNET_RECOVERY_OPENOX_PRICING_TOOL_ID,
+  type CopySonnetRecoveryOpenOxPricingOutput,
+} from "./copy-sonnet-recovery-openox-pricing-tool";
 
 export {
   COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_ARTIFACT_ID,
@@ -83,9 +89,12 @@ interface RuntimeBindingShape {
 interface Channel {
   id?: unknown;
   name?: unknown;
+  type?: unknown;
   status?: unknown;
+  base_url?: unknown;
   models?: unknown;
   group?: unknown;
+  model_mapping?: unknown;
 }
 
 interface Token {
@@ -115,6 +124,7 @@ export interface CopySonnetRecoveryZeroCallPreflightInput {
   gatewayOrigin: string;
   adminAccessToken: string;
   adminUserId: number;
+  pricingBroker?: ExecutionBroker;
 }
 
 interface RuntimeDeps {
@@ -300,8 +310,12 @@ async function requestJson(
   });
   const response = await fetchImpl(url, {
     ...init,
+    redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),
   });
+  if (response.status >= 300 && response.status < 400) {
+    fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_REDIRECT_REJECTED");
+  }
   const body = await boundedJson(response, onBodySha256);
   if (!response.ok) fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_UNAVAILABLE");
   if (
@@ -324,7 +338,7 @@ function pageItems<T>(value: unknown): { items: T[]; total: number } {
   if (!Array.isArray(page.items)) {
     fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_RESPONSE_INVALID");
   }
-  const total = page.total ?? page.items.length;
+  const total = page.total;
   if (!Number.isSafeInteger(total) || (total as number) < page.items.length) {
     fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_RESPONSE_INVALID");
   }
@@ -339,6 +353,7 @@ async function listAll<T>(
   timeoutMs: number,
 ): Promise<T[]> {
   const items: T[] = [];
+  let expectedTotal: number | undefined;
   for (let page = 1; page <= MAXIMUM_PAGES; page += 1) {
     const body = await requestJson(
       fetchImpl,
@@ -349,8 +364,15 @@ async function listAll<T>(
       timeoutMs,
     );
     const batch = pageItems<T>(body);
+    expectedTotal ??= batch.total;
+    if (
+      batch.total !== expectedTotal ||
+      items.length + batch.items.length > expectedTotal
+    ) {
+      fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_RESPONSE_INVALID");
+    }
     items.push(...batch.items);
-    if (items.length >= batch.total) return items;
+    if (items.length === expectedTotal) return items;
     if (batch.items.length === 0) {
       fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_RESPONSE_INVALID");
     }
@@ -407,6 +429,25 @@ function validateRuntimeBinding(
   };
 }
 
+function hasIdentityModelMapping(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    return (
+      entries.length === 0 ||
+      (entries.length === 1 &&
+        entries[0][0] === COPY_SONNET_RECOVERY_EXECUTION.alias &&
+        entries[0][1] === COPY_SONNET_RECOVERY_EXECUTION.alias)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function exactRoute(channels: Channel[]): Channel {
   const matches = channels.filter(
     (channel) =>
@@ -417,7 +458,30 @@ function exactRoute(channels: Channel[]): Channel {
   if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id)) {
     fail("COPY_SONNET_RECOVERY_ROUTE_AMBIGUOUS");
   }
-  return matches[0];
+  const route = matches[0];
+  if (
+    typeof route.name !== "string" ||
+    !route.name.trim() ||
+    route.type !== NEW_API_ANTHROPIC_CHANNEL_TYPE ||
+    typeof route.base_url !== "string" ||
+    trimSlash(route.base_url) !== OPENOX_ANTHROPIC_BASE_URL ||
+    !hasIdentityModelMapping(route.model_mapping)
+  ) {
+    fail("COPY_SONNET_RECOVERY_ROUTE_IDENTITY_INVALID");
+  }
+  return route;
+}
+
+function routeIdentity(route: Channel): string {
+  return canonicalDigest({
+    id: route.id,
+    name: route.name,
+    type: route.type,
+    baseUrl: trimSlash(route.base_url as string),
+    models: splitCsv(route.models),
+    group: splitCsv(route.group),
+    modelMapping: "IDENTITY",
+  });
 }
 
 function assertNoPriorPurposeToken(tokens: Token[]): void {
@@ -509,16 +573,18 @@ function liveRemainingQuota(value: unknown, quotaCapPoints: number): number {
     fail("COPY_SONNET_RECOVERY_LIVE_SCOPE_INVALID");
   }
   const usage = data as Record<string, unknown>;
-  const allowlist =
+  const modelLimits =
     usage.model_limits &&
     typeof usage.model_limits === "object" &&
     !Array.isArray(usage.model_limits)
-      ? Object.keys(usage.model_limits as Record<string, unknown>).sort()
-      : [];
+      ? (usage.model_limits as Record<string, unknown>)
+      : undefined;
+  const allowlist = modelLimits ? Object.keys(modelLimits).sort() : [];
   if (
     usage.unlimited_quota !== false ||
     usage.model_limits_enabled !== true ||
     JSON.stringify(allowlist) !== JSON.stringify([COPY_SONNET_RECOVERY_EXECUTION.alias]) ||
+    modelLimits?.[COPY_SONNET_RECOVERY_EXECUTION.alias] !== true ||
     usage.total_granted !== quotaCapPoints ||
     usage.total_available !== quotaCapPoints
   ) {
@@ -530,10 +596,18 @@ function liveRemainingQuota(value: unknown, quotaCapPoints: number): number {
 function assertExactModelInventory(value: unknown): void {
   const models = (value as { data?: unknown } | undefined)?.data;
   if (!Array.isArray(models)) fail("COPY_SONNET_RECOVERY_LIVE_SCOPE_INVALID");
-  const aliases = models
-    .map((entry) => (entry && typeof entry === "object" ? (entry as { id?: unknown }).id : undefined))
-    .filter((entry): entry is string => typeof entry === "string")
-    .sort();
+  const aliases: string[] = [];
+  for (const entry of models) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      fail("COPY_SONNET_RECOVERY_LIVE_SCOPE_INVALID");
+    }
+    const id = (entry as { id?: unknown }).id;
+    if (typeof id !== "string" || !id.trim()) {
+      fail("COPY_SONNET_RECOVERY_LIVE_SCOPE_INVALID");
+    }
+    aliases.push(id);
+  }
+  aliases.sort();
   if (JSON.stringify(aliases) !== JSON.stringify([COPY_SONNET_RECOVERY_EXECUTION.alias])) {
     fail("COPY_SONNET_RECOVERY_LIVE_SCOPE_INVALID");
   }
@@ -544,6 +618,44 @@ function assertEmptyLogShape(value: unknown): void {
   if (!Array.isArray(rows) || rows.length !== 0) {
     fail("COPY_SONNET_RECOVERY_SETTLEMENT_PREFLIGHT_INVALID");
   }
+}
+
+async function readOpenOxCatalog(
+  input: CopySonnetRecoveryZeroCallPreflightInput,
+  observation: ObservedRequest[],
+): Promise<CopySonnetRecoveryOpenOxPricingOutput> {
+  if (!input.pricingBroker) {
+    fail("COPY_SONNET_RECOVERY_PRICING_BROKER_REQUIRED");
+  }
+  const result = await input.pricingBroker.invoke<
+    Record<string, never>,
+    CopySonnetRecoveryOpenOxPricingOutput
+  >(
+    COPY_SONNET_RECOVERY_OPENOX_PRICING_TOOL_ID,
+    {},
+    {
+      workspaceId: "site-builder-copy-sonnet-recovery-v16",
+      purpose: CREDENTIAL_PURPOSE,
+    },
+  );
+  const output = result.data;
+  if (
+    !output ||
+    typeof output !== "object" ||
+    Array.isArray(output) ||
+    !output.catalog ||
+    typeof output.catalog !== "object" ||
+    Array.isArray(output.catalog) ||
+    !SHA256.test(output.responseSha256)
+  ) {
+    fail("COPY_SONNET_RECOVERY_PRICE_INVALID");
+  }
+  observation.push({
+    method: "GET",
+    authority: "tool_broker",
+    path: OPENOX_PRICING_AUTHORITY.catalogEndpoint,
+  });
+  return output;
 }
 
 async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
@@ -575,24 +687,16 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
 
   const channels = await listAll<Channel>("channel", input, fetchImpl, observation, timeoutMs);
   const route = exactRoute(channels);
-  let catalogResponseSha256 = "";
-  const catalog = (await requestJson(
-    fetchImpl,
-    `${OPENOX_PRICING_AUTHORITY.origin}${OPENOX_PRICING_AUTHORITY.catalogEndpoint}`,
-    {},
-    observation,
-    "openox_public",
-    timeoutMs,
-    (digest) => {
-      catalogResponseSha256 = digest;
-    },
-  )) as OpenOxPricingCatalog;
+  const initialPricing = await readOpenOxCatalog(input, observation);
+  const { catalog, responseSha256: catalogResponseSha256 } = initialPricing;
   const price = settlementOpenOxPrice(catalog, COPY_SONNET_RECOVERY_EXECUTION.alias, OPENOX_GROUP);
   if (!price || price.currency !== "USD") fail("COPY_SONNET_RECOVERY_PRICE_INVALID");
 
   const nativeCostPerWire = calculateMaximumNativeCostPerWire(
     price.inputPriceMicrounitsPerMillionTokens,
     price.outputPriceMicrounitsPerMillionTokens,
+    price.cacheReadPriceMicrounitsPerMillionTokens,
+    price.cacheWritePriceMicrounitsPerMillionTokens,
   );
   const maximumQuotaPointsPerWire = quotaPoints(nativeCostPerWire);
   const quotaCapPoints = maximumQuotaPointsPerWire * COPY_SONNET_RECOVERY_PLAN.maximumWireCalls;
@@ -649,12 +753,12 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
   }
   const apiKey = rawKey.startsWith("sk-") ? rawKey : `sk-${rawKey}`;
 
-  const [usage, models, logs, postChannels, postCatalog, postTokens] = await Promise.all([
+  const [usage, models, logs, postChannels, postPricing, postTokens] = await Promise.all([
     requestJson(fetchImpl, `${gatewayOrigin}/api/usage/token`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
     requestJson(fetchImpl, `${gatewayOrigin}/v1/models`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
     requestJson(fetchImpl, `${gatewayOrigin}/api/log/token`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
     listAll<Channel>("channel", input, fetchImpl, observation, timeoutMs),
-    requestJson(fetchImpl, `${OPENOX_PRICING_AUTHORITY.origin}${OPENOX_PRICING_AUTHORITY.catalogEndpoint}`, {}, observation, "openox_public", timeoutMs),
+    readOpenOxCatalog(input, observation),
     listAll<Token>("token", input, fetchImpl, observation, timeoutMs),
   ]);
   const remainingQuotaPoints = liveRemainingQuota(usage, quotaCapPoints);
@@ -662,14 +766,15 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
   assertEmptyLogShape(logs);
   const postRoute = exactRoute(postChannels);
   const postPrice = settlementOpenOxPrice(
-    postCatalog as OpenOxPricingCatalog,
+    postPricing.catalog,
     COPY_SONNET_RECOVERY_EXECUTION.alias,
     OPENOX_GROUP,
   );
   if (
-    postRoute.id !== route.id ||
+    routeIdentity(postRoute) !== routeIdentity(route) ||
     !postPrice ||
     postPrice.pricingVersion !== price.pricingVersion ||
+    postPricing.responseSha256 !== catalogResponseSha256 ||
     postTokens.filter(isPurposeToken).length !== 1
   ) {
     fail("COPY_SONNET_RECOVERY_POST_CREATE_DRIFT");
@@ -732,6 +837,10 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
     route: {
       channelId: route.id as number,
       channelName: typeof route.name === "string" ? route.name : "",
+      channelType: NEW_API_ANTHROPIC_CHANNEL_TYPE,
+      baseUrl: OPENOX_ANTHROPIC_BASE_URL,
+      modelMapping: "IDENTITY" as const,
+      upstreamModelId: COPY_SONNET_RECOVERY_EXECUTION.alias,
       group: OPENOX_GROUP,
     },
     pricing: {
@@ -744,6 +853,10 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
       currency: "USD" as const,
       inputPriceMicrounitsPerMillionTokens: price.inputPriceMicrounitsPerMillionTokens,
       outputPriceMicrounitsPerMillionTokens: price.outputPriceMicrounitsPerMillionTokens,
+      cacheReadPriceMicrounitsPerMillionTokens:
+        price.cacheReadPriceMicrounitsPerMillionTokens,
+      cacheWritePriceMicrounitsPerMillionTokens:
+        price.cacheWritePriceMicrounitsPerMillionTokens,
       maximumInputTokensPerWire: MAXIMUM_INPUT_TOKENS_PER_WIRE,
       maximumOutputTokensPerWire: MAXIMUM_OUTPUT_TOKENS_PER_WIRE,
       maximumNativeCostMicrounitsPerWire: nativeCostPerWire,
