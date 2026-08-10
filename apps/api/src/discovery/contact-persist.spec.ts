@@ -272,6 +272,20 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
     expect(contactPointUpsert).not.toHaveBeenCalled();
   });
 
+  it('provider 返回非法 email 时 fail-closed，不把具名人或 PII 候选落库', async () => {
+    const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([]);
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'invalid', fullName: 'Invalid Mail', email: 'not-an-email', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(contactPointUpsert).not.toHaveBeenCalled();
+  });
+
   it('person-level 禁联键命中 → 同一人换新邮箱再现也跳过（不重建被 Art.17 擦除的具名人）', async () => {
     // 该人此前被删，冻结时写了 person-level 禁联键**集**（email-独立）。现以**不同邮箱**被重新发现。
     const personKeys = contactSuppressionKeys('Klaus Löschmann', companyKey).map((k) => blindContactKey(k).toLowerCase());
