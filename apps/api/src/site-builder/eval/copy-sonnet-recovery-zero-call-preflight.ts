@@ -782,7 +782,7 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
   const apiKey = rawKey.startsWith("sk-") ? rawKey : `sk-${rawKey}`;
 
   const [usage, models, logs, postChannels, postPricing, postTokens] = await Promise.all([
-    requestJson(fetchImpl, `${gatewayOrigin}/api/usage/token`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
+    requestJson(fetchImpl, `${gatewayOrigin}/api/usage/token/`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
     requestJson(fetchImpl, `${gatewayOrigin}/v1/models`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
     requestJson(fetchImpl, `${gatewayOrigin}/api/log/token`, { headers: bearerHeaders(apiKey) }, observation, "new_api_bearer", timeoutMs),
     listAll<Channel>("channel", input, fetchImpl, observation, timeoutMs),

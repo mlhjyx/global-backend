@@ -321,7 +321,7 @@ export function validateCopySonnetRecoveryZeroCallPreflightArtifact(
           (authority !== "tool_broker" ||
             path === OPENOX_PRICING_AUTHORITY.catalogEndpoint) &&
           (authority !== "new_api_bearer" ||
-            ["/api/usage/token", "/v1/models", "/api/log/token"].includes(
+            ["/api/usage/token/", "/v1/models", "/api/log/token"].includes(
               path,
             )) &&
           (authority !== "new_api_admin" ||
@@ -352,7 +352,7 @@ export function validateCopySonnetRecoveryZeroCallPreflightArtifact(
         "POST",
         /^\/api\/token\/[1-9][0-9]*\/key$/u,
       ) === 1 &&
-      countObservation("new_api_bearer", "GET", "/api/usage/token") === 1 &&
+      countObservation("new_api_bearer", "GET", "/api/usage/token/") === 1 &&
       countObservation("new_api_bearer", "GET", "/v1/models") === 1 &&
       countObservation("new_api_bearer", "GET", "/api/log/token") === 1 &&
       countObservation(

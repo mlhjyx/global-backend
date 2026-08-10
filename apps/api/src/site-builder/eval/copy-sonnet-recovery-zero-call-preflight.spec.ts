@@ -198,7 +198,7 @@ function liveFetch(options: {
       if (url.pathname === "/api/token/25/key" && method === "POST") {
         return json({ success: true, data: { key: "one-time-secret" } });
       }
-      if (url.pathname === "/api/usage/token") {
+      if (url.pathname === "/api/usage/token/") {
         return json({
           data: {
             unlimited_quota: false,
@@ -652,7 +652,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
       { authority: "new_api_admin", method: "GET", path: "/api/channel/" },
       { authority: "new_api_admin", method: "GET", path: "/api/token/" },
       { authority: "new_api_admin", method: "POST", path: "/api/token/" },
-      { authority: "new_api_bearer", method: "GET", path: "/api/usage/token" },
+      { authority: "new_api_bearer", method: "GET", path: "/api/usage/token/" },
       { authority: "new_api_bearer", method: "GET", path: "/v1/models" },
       { authority: "new_api_bearer", method: "GET", path: "/api/log/token" },
       { authority: "tool_broker", method: "GET", path: "/api/public/pricing-catalog" },
