@@ -5,7 +5,11 @@ import {
   EnrichmentResult,
   ExecutionContext,
 } from '../provider-contract';
-import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import {
+  isSuppressionActionDenied,
+  type ExecutionBroker,
+  type ToolContext,
+} from '../../tools/tool-contract';
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -45,7 +49,7 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
     const toolCtx: ToolContext = { ...ctx };
     const httpGet: HttpGetFn = async (req) => (await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', req, toolCtx)).data;
 
-    const urls = await fetchSitemapUrls(input.domain, httpGet).catch(() => [] as string[]);
+    const urls = await recoverExternalActionFailure(fetchSitemapUrls(input.domain, httpGet), [] as string[]);
     const sections = tallySections(urls);
     const careersUrl = pickCareersUrl(urls) ?? (await probeCommonCareersPath(input.domain, httpGet));
 
@@ -60,9 +64,9 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
         titles: [...new Set(titles)].slice(0, 12),
         has_buying_role: titles.some(isBuyingRole),
       };
-    } else if (careersUrl && (await isAllowedByRobots(careersUrl, {
+    } else if (careersUrl && (await recoverExternalActionFailure(isAllowedByRobots(careersUrl, {
         authorizeExternalAction: ctx.authorizeExternalAction,
-      }).catch(() => false))) {
+      }), false))) {
       // ② 抓 careers 落地页 → 优先 ATS 结构化真值，兜底 JobPosting JSON-LD（robots 在 crawl4ai.render 工具内权威强制）
       try {
         const page = await broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
@@ -90,7 +94,8 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
             };
           }
         }
-      } catch {
+      } catch (error) {
+        rethrowSuppressionActionDenied(error);
         // careers 抓取失败不致命
       }
     }
@@ -196,7 +201,8 @@ async function fetchAtsHiring(board: AtsBoard, httpGet: HttpGetFn) {
     if (res.blocked || !res.ok) return null;
     const json = JSON.parse(res.text) as unknown;
     return buildHiringFromAtsJobs(board.vendor, parseAtsJobs(board.vendor, json));
-  } catch {
+  } catch (error) {
+    rethrowSuppressionActionDenied(error);
     return null;
   }
 }
@@ -205,7 +211,8 @@ async function fetchAtsHiring(board: AtsBoard, httpGet: HttpGetFn) {
  *  遇 sitemap index 再取前若干子 sitemap。总量与子表数有上限。 */
 export async function fetchSitemapUrls(domain: string, httpGet: HttpGetFn): Promise<string[]> {
   const roots = new Set<string>();
-  for (const line of (await fetchText(`https://${domain}/robots.txt`, httpGet).catch(() => '')).split('\n')) {
+  const robots = await recoverExternalActionFailure(fetchText(`https://${domain}/robots.txt`, httpGet), '');
+  for (const line of robots.split('\n')) {
     const m = line.match(/^\s*sitemap:\s*(\S+)/i);
     if (m) roots.add(m[1].trim());
   }
@@ -219,14 +226,14 @@ export async function fetchSitemapUrls(domain: string, httpGet: HttpGetFn): Prom
     // robots.txt 广告的 Sitemap: / sitemap-index 的 <loc> 可能是任意 URL → 只收同注册域
     //（业务归属规则，留在 provider 侧；私网/SSRF 拦截由 http.get 工具权威强制）
     if (!isSameSiteUrl(root, domain)) continue;
-    const xml = await fetchText(root, httpGet).catch(() => '');
+    const xml = await recoverExternalActionFailure(fetchText(root, httpGet), '');
     if (!xml) continue;
     const { locs, isIndex } = parseSitemapXml(xml);
     if (isIndex) {
       for (const child of locs) {
         if (childBudget-- <= 0 || out.length >= MAX_URLS) break;
         if (!isSameSiteUrl(child, domain)) continue;
-        const childXml = await fetchText(child, httpGet).catch(() => '');
+        const childXml = await recoverExternalActionFailure(fetchText(child, httpGet), '');
         out.push(...parseSitemapXml(childXml).locs);
       }
     } else {
@@ -261,7 +268,8 @@ export async function probeCommonCareersPath(domain: string, httpGet: HttpGetFn)
     try {
       const res = await httpGet({ url: u, method: 'HEAD', timeoutMs: 8000 });
       if (res.ok) return res.finalUrl && isSameSiteUrl(res.finalUrl, domain) ? res.finalUrl : u;
-    } catch {
+    } catch (error) {
+      rethrowSuppressionActionDenied(error);
       // 试下一个
     }
   }
@@ -273,6 +281,19 @@ async function fetchText(url: string, httpGet: HttpGetFn): Promise<string> {
   // blocked = SSRF 护栏拦截（未出网）；非 ok 与原 fetch 失败路径同义 → 抛错交由调用方 catch 降级。
   if (res.blocked || !res.ok) throw new Error(`http.get ${res.blocked ?? res.status}`);
   return res.text;
+}
+
+function rethrowSuppressionActionDenied(error: unknown): void {
+  if (isSuppressionActionDenied(error)) throw error;
+}
+
+async function recoverExternalActionFailure<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await promise;
+  } catch (error) {
+    rethrowSuppressionActionDenied(error);
+    return fallback;
+  }
 }
 
 // ─────────────────────── helpers ───────────────────────

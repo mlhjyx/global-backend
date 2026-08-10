@@ -136,6 +136,33 @@ describe('company suppression terminal gate', () => {
     });
   });
 
+  it('scrubs the current mailbox when a concurrent derived-status repair wins the conditional update', async () => {
+    const updateMany = vi
+      .fn()
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: 'co-1', name: 'Acme GmbH', domain: 'acme.de',
+        attributes: { contact_email: 'sales@acme.de', keep: true }, status: 'NEW',
+      })
+      .mockResolvedValueOnce({ attributes: { contact_email: 'sales@acme.de', keep: 'current' } });
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: { findUnique, updateMany },
+      suppressionRecord: { findMany: vi.fn(async () => [{ type: 'domain', value: 'acme.de' }]) },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      loadMaterializableCompanyState(tx, 'ws-1', 'd:acme.de', { name: 'Acme GmbH', domain: 'acme.de' }),
+    ).resolves.toMatchObject({ allowed: false });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: 'co-1' },
+      data: { attributes: { keep: 'current' }, version: { increment: 1 } },
+    });
+  });
+
   it('canonicalizes a legacy company-name value and blocks it', async () => {
     const { tx } = fakeTx({
       company: { id: 'co-1', name: '  Müller   Pumpen GmbH ', domain: null, status: 'NEW' },

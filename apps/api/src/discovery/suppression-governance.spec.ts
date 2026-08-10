@@ -21,7 +21,7 @@ type SuppressionRow = {
   protectionClass: 'PREFERENCE' | 'LEGAL';
 };
 
-function makeHarness(record: SuppressionRow) {
+function makeHarness(record: SuppressionRow, companyOverride?: Record<string, unknown>) {
   let current = { ...record };
   const decisions: Array<Record<string, unknown>> = [];
   const deleteRecord = vi.fn(async () => {
@@ -66,6 +66,7 @@ function makeHarness(record: SuppressionRow) {
               name: '  ACME   GmbH ',
               status: 'SUPPRESSED',
               attributes: { contact_email: ' Sales@EXAMPLE.COM ', keep: true },
+              ...companyOverride,
             }]),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
@@ -202,6 +203,25 @@ describe('Suppression governance', () => {
     });
   });
 
+  it('domain suppression removes a matching alternate-domain mailbox without suppressing an unrelated company domain', async () => {
+    const h = makeHarness(row('PREFERENCE'), {
+      domain: 'acme.example',
+      status: 'NEW',
+      attributes: { contact_email: 'buyer@agency.example', keep: true },
+    });
+
+    await h.service.addSuppression(CTX, {
+      type: 'domain',
+      value: 'agency.example',
+      reason: 'unsubscribe',
+    });
+
+    expect(h.tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+      where: { id: '66666666-6666-4666-8666-666666666666' },
+      data: { attributes: { keep: true }, version: { increment: 1 } },
+    });
+  });
+
   it.each([
     ['email', ' Sales@EXAMPLE.COM ', 'sales@example.com'],
     ['domain', 'https://www.Example.COM/path?q=1', 'example.com'],
@@ -223,8 +243,12 @@ describe('Suppression governance', () => {
     }));
     if (type === 'domain' || type === 'company_name') {
       expect(h.tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['66666666-6666-4666-8666-666666666666'] } },
-        data: { status: 'SUPPRESSED' },
+        where: { id: '66666666-6666-4666-8666-666666666666' },
+        data: {
+          status: 'SUPPRESSED',
+          attributes: { keep: true },
+          version: { increment: 1 },
+        },
       });
     }
   });

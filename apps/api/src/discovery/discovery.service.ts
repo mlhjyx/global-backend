@@ -696,11 +696,13 @@ export class DiscoveryService {
       });
       return rec;
     });
-    // The append-only fact is authoritative immediately. Derived status reconciliation runs in a
-    // separate transaction so a large workspace scan cannot hold the policy linearization lock.
-    if (entry.type === 'domain' || entry.type === 'company_name') {
+    // The append-only fact is authoritative immediately. Derived reconciliation runs in a second
+    // transaction and reacquires the workspace policy lock before scanning/writing, so external
+    // action admissions cannot interleave with mailbox/status repair. The authority fact remains
+    // committed even if this best-effort derived projection later fails.
+    if (entry.type === 'domain' || entry.type === 'company_name' || entry.type === 'email') {
       await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-        this.suppressCanonicalCompanies(tx, entry.type as 'domain' | 'company_name', canonicalValue),
+        this.reconcileCanonicalSuppression(tx, ctx.workspaceId, entry.type as 'domain' | 'company_name' | 'email', canonicalValue),
       );
     }
     return rec;
@@ -737,11 +739,13 @@ export class DiscoveryService {
     });
   }
 
-  private async suppressCanonicalCompanies(
+  private async reconcileCanonicalSuppression(
     tx: Prisma.TransactionClient,
-    type: 'domain' | 'company_name',
+    workspaceId: string,
+    type: 'domain' | 'company_name' | 'email',
     canonicalValue: string,
   ): Promise<void> {
+    await lockWorkspaceSuppressionPolicy(tx, workspaceId);
     const batchSize = 250;
     let afterId: string | undefined;
     for (;;) {
@@ -749,18 +753,28 @@ export class DiscoveryService {
         ...(afterId ? { where: { id: { gt: afterId } } } : {}),
         orderBy: { id: 'asc' },
         take: batchSize,
-        select: { id: true, domain: true, name: true },
+        select: { id: true, domain: true, name: true, status: true, attributes: true },
       });
-      const ids = rows
-        .filter(
-          (row) =>
-            canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue,
-        )
-        .map((row) => row.id);
-      if (ids.length) {
+      for (const row of rows) {
+        const attributes = jsonRecord(row.attributes);
+        const mailbox = canonicalizeSuppressionValue('email', typeof attributes.contact_email === 'string' ? attributes.contact_email : '');
+        const mailboxDomain = mailbox ? canonicalizeSuppressionValue('domain', mailbox.split('@')[1]) : null;
+        const companyMatches = type !== 'email' &&
+          canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue;
+        const mailboxMatches =
+          (type === 'email' && mailbox === canonicalValue) ||
+          (type === 'domain' && mailboxDomain === canonicalValue);
+        if (!companyMatches && !mailboxMatches) continue;
+        const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
         await tx.canonicalCompany.updateMany({
-          where: { id: { in: ids } },
-          data: { status: 'SUPPRESSED' },
+          where: { id: row.id },
+          data: {
+            ...(companyMatches ? { status: 'SUPPRESSED' as const } : {}),
+            ...(mailboxMatches || companyMatches
+              ? { attributes: safeAttributes as Prisma.InputJsonValue }
+              : {}),
+            version: { increment: 1 },
+          },
         });
       }
       if (rows.length < batchSize) return;
@@ -962,6 +976,10 @@ function suppressionPage<T extends { id: string }>(rows: T[], limit: number) {
     hasMore,
     nextCursor: hasMore ? (visible[visible.length - 1]?.id ?? null) : null,
   };
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 /** 验证裁决 → field_evidence.allowed_actions（诚实：BLOCKED 不授予任何动作；仅 VALID 授 outreach）。 */

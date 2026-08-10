@@ -51,10 +51,8 @@ export async function loadMaterializableCompanyState(
   else await lockWorkspaceSuppressionPolicy(tx, workspaceId);
   const prior = await tx.canonicalCompany.findUnique({
     where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-    select: { id: true, name: true, domain: true, attributes: true, status: true },
+    select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
   });
-  if (prior?.status === 'SUPPRESSED') return { allowed: false, prior } as const;
-
   const suppressions =
     options?.knownSuppressions ??
     (await tx.suppressionRecord.findMany({
@@ -63,22 +61,9 @@ export async function loadMaterializableCompanyState(
     }));
   const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
   const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
-  if (prior && (sourceSuppressed || canonicalSuppressed)) {
-    const priorAttributes =
-      prior.attributes && typeof prior.attributes === 'object' && !Array.isArray(prior.attributes)
-        ? (prior.attributes as Record<string, unknown>)
-        : null;
-    const { contact_email: removedContactEmail, ...safeAttributes } = priorAttributes ?? {};
-    await tx.canonicalCompany.updateMany({
-      where: { id: prior.id, status: { not: 'SUPPRESSED' } },
-      data: {
-        status: 'SUPPRESSED',
-        ...(removedContactEmail === undefined ? {} : { attributes: safeAttributes as Prisma.InputJsonValue }),
-        version: { increment: 1 },
-      },
-    });
-  }
-  return { allowed: !sourceSuppressed && !canonicalSuppressed, prior } as const;
+  const blocked = prior?.status === 'SUPPRESSED' || sourceSuppressed || canonicalSuppressed;
+  if (prior && blocked) await repairSuppressedCompany(tx, prior);
+  return { allowed: !blocked, prior } as const;
 }
 
 /**
@@ -97,9 +82,13 @@ export async function companyMayUseExternalProcessing(
   await lockWorkspaceSuppressionPolicy(tx, workspaceId);
   const company = await tx.canonicalCompany.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, domain: true, status: true },
+    select: { id: true, name: true, domain: true, status: true, attributes: true },
   });
-  if (!company || company.status === 'SUPPRESSED') return false;
+  if (!company) return false;
+  if (company.status === 'SUPPRESSED') {
+    await repairSuppressedCompany(tx, company);
+    return false;
+  }
 
   const suppressions = await tx.suppressionRecord.findMany({
     where: { type: { in: ['domain', 'company_name'] } },
@@ -107,10 +96,7 @@ export async function companyMayUseExternalProcessing(
   });
   if (!companyMatchesSuppression(suppressions, company)) return true;
 
-  await tx.canonicalCompany.updateMany({
-    where: { id: company.id, status: { not: 'SUPPRESSED' } },
-    data: { status: 'SUPPRESSED', version: { increment: 1 } },
-  });
+  await repairSuppressedCompany(tx, company);
   return false;
 }
 
@@ -135,21 +121,23 @@ export async function contactMayUseExternalProcessing(
           domain: true,
           status: true,
           dedupeKey: true,
+          attributes: true,
         },
       },
     },
   });
-  if (!contact || contact.company.status === 'SUPPRESSED') return false;
+  if (!contact) return false;
+  if (contact.company.status === 'SUPPRESSED') {
+    await repairSuppressedCompany(tx, contact.company);
+    return false;
+  }
 
   const suppressions = await tx.suppressionRecord.findMany({
     where: { type: { in: ['domain', 'company_name', 'email', 'contact_key'] } },
     select: { type: true, value: true },
   });
   if (companyMatchesSuppression(suppressions, contact.company)) {
-    await tx.canonicalCompany.updateMany({
-      where: { id: contact.company.id, status: { not: 'SUPPRESSED' } },
-      data: { status: 'SUPPRESSED', version: { increment: 1 } },
-    });
+    await repairSuppressedCompany(tx, contact.company);
     return false;
   }
 
@@ -176,4 +164,45 @@ export async function contactMayUseExternalProcessing(
     if (suppressedEmails.has(email) || (!!emailDomain && suppressedDomains.has(emailDomain))) return false;
   }
   return true;
+}
+
+async function repairSuppressedCompany(
+  tx: Prisma.TransactionClient,
+  company: { id: string; status: string; attributes?: unknown },
+): Promise<void> {
+  const attributes = jsonObject(company.attributes);
+  const hasMailbox = Object.prototype.hasOwnProperty.call(attributes, 'contact_email');
+  const { contact_email: _removedContactEmail, ...safeAttributes } = attributes;
+
+  if (company.status !== 'SUPPRESSED') {
+    const repaired = await tx.canonicalCompany.updateMany({
+      where: { id: company.id, status: { not: 'SUPPRESSED' } },
+      data: {
+        status: 'SUPPRESSED',
+        ...(hasMailbox ? { attributes: safeAttributes as Prisma.InputJsonValue } : {}),
+        version: { increment: 1 },
+      },
+    });
+    if (repaired.count > 0 || !hasMailbox) return;
+  } else if (!hasMailbox) {
+    return;
+  }
+
+  // A concurrent derived-status repair may win the conditional update. Re-read the current
+  // JSON before scrubbing so an old snapshot cannot restore unrelated attributes.
+  const current = await tx.canonicalCompany.findUnique({
+    where: { id: company.id },
+    select: { attributes: true },
+  });
+  const currentAttributes = jsonObject(current?.attributes);
+  if (!Object.prototype.hasOwnProperty.call(currentAttributes, 'contact_email')) return;
+  const { contact_email: _currentMailbox, ...currentSafeAttributes } = currentAttributes;
+  await tx.canonicalCompany.updateMany({
+    where: { id: company.id },
+    data: { attributes: currentSafeAttributes as Prisma.InputJsonValue, version: { increment: 1 } },
+  });
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
