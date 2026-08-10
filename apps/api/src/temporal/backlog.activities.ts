@@ -22,6 +22,7 @@ import { companyMayUseExternalProcessing,
 } from '../discovery/company-suppression-gate';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
+import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
 
 /**
  * 存量对账活动（backlog reconciliation）——漏斗总闸的解锁器。
@@ -351,39 +352,15 @@ export function createBacklogActivities(deps: {
           }
         }
         if (!hits.length) continue;
-        matched += 1;
-        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const merged: Record<string, unknown> = { ...existing };
-          for (const h of hits) merged[h.key] = h.result.attributes;
-          // status=ENRICHED 在「真正富集成功」时写（与 enrichRun 一致）；SUPPRESSED 守护防竞态翻回。
-          await tx.canonicalCompany.updateMany({
-            where: { id: c.id, status: { not: 'SUPPRESSED' } },
-            data: {
-              attributes: merged as never,
-              status: 'ENRICHED',
-              version: { increment: 1 },
-            },
-          });
-          for (const h of hits) {
-            for (const [field, value] of Object.entries(h.result.attributes)) {
-              if (value == null) continue;
-              await tx.fieldEvidence.create({
-                data: {
-                  workspaceId: args.workspaceId,
-                  entityType: 'company',
-                  entityId: c.id,
-                  field: `${h.key}.${field}`,
-                  value: value as Prisma.InputJsonValue,
-                  providerKey: h.key,
-                  confidence: h.result.confidence,
-                  license: 'public',
-                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
-                },
-              });
-            }
-          }
-        });
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          commitCompanyEnrichmentResults(tx, {
+            workspaceId: args.workspaceId,
+            companyId: c.id,
+            hits,
+            status: 'ENRICHED',
+          }),
+        );
+        if (committed) matched += 1;
       }
       // 水位：本批全部已处理（命中/未命中/已有命名空间跳过）→ 离开过滤集，游标吞噬存量。
       await stampProcessed(
@@ -497,38 +474,15 @@ export function createBacklogActivities(deps: {
           attempted += 1;
           processedIds.push(c.id); // 本家已处理（命中/未命中信号）
           if (!hits.length) continue;
-          matched += 1;
-          await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-            const merged: Record<string, unknown> = { ...existing };
-            for (const h of hits)
-              merged[h.key] = {
-                ...h.result.attributes,
-                _ts: new Date(nowMs).toISOString(),
-              };
-            await tx.canonicalCompany.update({
-              where: { id: c.id },
-              data: { attributes: merged as never, version: { increment: 1 } },
-            });
-            for (const h of hits) {
-              for (const [field, value] of Object.entries(h.result.attributes)) {
-                if (value == null) continue;
-                await tx.fieldEvidence.create({
-                  data: {
-                    workspaceId: args.workspaceId,
-                    entityType: 'company',
-                    entityId: c.id,
-                    field: `${h.key}.${field}`,
-                    value: value as Prisma.InputJsonValue,
-                    providerKey: h.key,
-                    confidence: h.result.confidence,
-                    license: 'public',
-                    allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                    ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
-                  },
-                });
-              }
-            }
-          });
+          const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            commitCompanyEnrichmentResults(tx, {
+              workspaceId: args.workspaceId,
+              companyId: c.id,
+              hits,
+              signalTimestamp: new Date(nowMs),
+            }),
+          );
+          if (committed) matched += 1;
         }
       } finally {
         budget.close();

@@ -101,6 +101,53 @@ export async function companyMayUseExternalProcessing(
 }
 
 /**
+ * Commit-side state for provider/model results. The caller must merge only its owned namespaces
+ * into the returned current attributes and write in the same transaction. This closes the window
+ * between the last physical wire and database commit without holding a transaction across I/O.
+ */
+export async function loadCompanyForSuppressionSafeWrite(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  companyId: string,
+): Promise<{ id: string; attributes: Record<string, unknown> } | null> {
+  await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+  const company = await tx.canonicalCompany.findUnique({
+    where: { id: companyId },
+    select: { id: true, name: true, domain: true, status: true, attributes: true },
+  });
+  if (!company) return null;
+
+  const suppressions = await tx.suppressionRecord.findMany({
+    where: { type: { in: ['domain', 'company_name', 'email'] } },
+    select: { type: true, value: true },
+  });
+  if (company.status === 'SUPPRESSED' || companyMatchesSuppression(suppressions, company)) {
+    await repairSuppressedCompany(tx, company);
+    return null;
+  }
+
+  const attributes = jsonObject(company.attributes);
+  const mailbox = canonicalizeSuppressionValue(
+    'email',
+    typeof attributes.contact_email === 'string' ? attributes.contact_email : '',
+  );
+  const mailboxDomain = mailbox ? canonicalizeSuppressionValue('domain', mailbox.split('@')[1]) : null;
+  const suppressedEmails = canonicalizeSuppressionValues(
+    'email',
+    suppressions.filter((row) => row.type === 'email').map((row) => row.value),
+  );
+  const suppressedDomains = canonicalizeSuppressionValues(
+    'domain',
+    suppressions.filter((row) => row.type === 'domain').map((row) => row.value),
+  );
+  const mailboxSuppressed =
+    !!mailbox && (suppressedEmails.has(mailbox) || (!!mailboxDomain && suppressedDomains.has(mailboxDomain)));
+  if (!mailboxSuppressed) return { id: company.id, attributes };
+  const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
+  return { id: company.id, attributes: safeAttributes };
+}
+
+/**
  * Linearization point for a physical action concerning a named contact. A suppression committed
  * before this short transaction is observed and denies the call; an authorization committed first
  * defines the action as already started. No DB transaction is held across provider/network latency.

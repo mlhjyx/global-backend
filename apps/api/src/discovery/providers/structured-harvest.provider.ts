@@ -6,7 +6,7 @@ import {
   ExecutionContext,
 } from '../provider-contract';
 import {
-  isSuppressionActionDenied,
+  isTerminalExternalActionPolicyDenied,
   type ExecutionBroker,
   type ToolContext,
 } from '../../tools/tool-contract';
@@ -284,7 +284,7 @@ async function fetchText(url: string, httpGet: HttpGetFn): Promise<string> {
 }
 
 function rethrowSuppressionActionDenied(error: unknown): void {
-  if (isSuppressionActionDenied(error)) throw error;
+  if (isTerminalExternalActionPolicyDenied(error)) throw error;
 }
 
 async function recoverExternalActionFailure<T>(promise: Promise<T>, fallback: T): Promise<T> {

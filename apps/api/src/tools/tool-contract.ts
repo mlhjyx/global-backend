@@ -96,16 +96,21 @@ export class ExternalToolActionDeniedError extends Error {
 }
 
 /**
- * Suppression admission is terminal across provider retry/fallback boundaries.
- * ToolBroker uses `reason`; lower-level guarded transports use `decision`.
- * Check the closed machine value instead of an error message so ordinary
- * network failures remain eligible for bounded degradation.
+ * Machine policy denial is terminal across provider retry/fallback boundaries.
+ * ToolBroker uses its branded name/toolId/reason tuple; lower-level guarded
+ * transports use `decision`. Check machine fields instead of an error message
+ * so ordinary network failures remain eligible for bounded degradation.
  */
-export function isSuppressionActionDenied(error: unknown): boolean {
+export function isTerminalExternalActionPolicyDenied(error: unknown): boolean {
   if (error instanceof ExternalToolActionDeniedError) return true;
   if (!error || typeof error !== 'object') return false;
-  const candidate = error as { decision?: unknown; reason?: unknown };
-  return candidate.decision === 'suppression_action_gate' || candidate.reason === 'suppression_action_gate';
+  const candidate = error as { decision?: unknown; name?: unknown; reason?: unknown; toolId?: unknown };
+  if (candidate.decision === 'suppression_action_gate' || candidate.reason === 'suppression_action_gate') return true;
+  return (
+    candidate.name === 'ToolPolicyDenied' &&
+    typeof candidate.toolId === 'string' &&
+    typeof candidate.reason === 'string'
+  );
 }
 
 /** Reusable fail-closed guard for tools that contain more than one wire. */

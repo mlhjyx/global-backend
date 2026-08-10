@@ -44,6 +44,12 @@ function makeDeps(opts: {
       },
       updateMany: async ({ where, data }: { where: { id: { in: string[] } | string }; data: Record<string, unknown> }) => {
         const ids = typeof where.id === 'string' ? [where.id] : where.id.in;
+        for (const id of ids) {
+          const company = opts.companies.find((candidate) => candidate.id === id);
+          if (company && data.attributes && typeof data.attributes === 'object') {
+            company.attributes = data.attributes as Record<string, unknown>;
+          }
+        }
         updateManyCalls.push({ ids, data });
         return { count: ids.length };
       },

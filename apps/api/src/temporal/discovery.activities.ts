@@ -17,6 +17,7 @@ import {
   loadMaterializableCompanyState,
 } from '../discovery/company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
+import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -559,43 +560,17 @@ export function createDiscoveryActivities(deps: {
         }
         enriched += 1;
         if (!hits.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          commitCompanyEnrichmentResults(tx, {
+            workspaceId: args.workspaceId,
+            companyId: c.id,
+            hits,
+            status: 'ENRICHED',
+          }),
+        );
+        if (!committed) continue;
         matched += 1;
         hits.forEach((h) => providersHit.add(h.key));
-
-        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          // attributes 按 enricher key 命名空间合并（attributes.gleif.* / attributes.wikidata.*）
-          const merged: Record<string, unknown> = { ...existing };
-          for (const h of hits) merged[h.key] = h.result.attributes;
-          // status=ENRICHED 在「真正富集成功」时写（fit 迁 Lead 后由此处负责其本义「已富集」，
-          // 供 ?status=ENRICHED 列表过滤）；updateMany + SUPPRESSED 守护：并发被抑制的公司不被翻回。
-          await tx.canonicalCompany.updateMany({
-            where: { id: c.id, status: { not: 'SUPPRESSED' } },
-            data: {
-              attributes: merged as never,
-              status: 'ENRICHED',
-              version: { increment: 1 },
-            },
-          });
-          for (const h of hits) {
-            for (const [field, value] of Object.entries(h.result.attributes)) {
-              if (value == null) continue;
-              await tx.fieldEvidence.create({
-                data: {
-                  workspaceId: args.workspaceId,
-                  entityType: 'company',
-                  entityId: c.id,
-                  field: `${h.key}.${field}`,
-                  value: value as Prisma.InputJsonValue,
-                  providerKey: h.key,
-                  confidence: h.result.confidence,
-                  license: 'public', // GLEIF / Wikidata 均为 CC0 公共领域
-                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
-                },
-              });
-            }
-          }
-        });
       }
       // 富集阶段与发现共享 run 预算账户：某源在富集中打穿 → wasExhausted 检出，让 run 判 PARTIAL 而非假 DONE
       // （provider fail-safe 吞了 BudgetExceededError，仍靠 ledger 唯一真相点判——与 executeQuery 一致）。
@@ -714,41 +689,17 @@ export function createDiscoveryActivities(deps: {
         }
         enriched += 1;
         if (!hits.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          commitCompanyEnrichmentResults(tx, {
+            workspaceId: args.workspaceId,
+            companyId: c.id,
+            hits,
+            signalTimestamp: new Date(nowMs),
+          }),
+        );
+        if (!committed) continue;
         matched += 1;
         hits.forEach((h) => providersHit.add(h.key));
-
-        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const merged: Record<string, unknown> = { ...existing };
-          // 命名空间存入并盖 _ts（供下次 TTL 判新鲜）
-          for (const h of hits)
-            merged[h.key] = {
-              ...h.result.attributes,
-              _ts: new Date(nowMs).toISOString(),
-            };
-          await tx.canonicalCompany.update({
-            where: { id: c.id },
-            data: { attributes: merged as never, version: { increment: 1 } },
-          });
-          for (const h of hits) {
-            for (const [field, value] of Object.entries(h.result.attributes)) {
-              if (value == null) continue;
-              await tx.fieldEvidence.create({
-                data: {
-                  workspaceId: args.workspaceId,
-                  entityType: 'company',
-                  entityId: c.id,
-                  field: `${h.key}.${field}`,
-                  value: value as Prisma.InputJsonValue,
-                  providerKey: h.key,
-                  confidence: h.result.confidence,
-                  license: 'public',
-                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
-                },
-              });
-            }
-          }
-        });
       }
       return {
         enriched,

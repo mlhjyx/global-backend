@@ -701,8 +701,10 @@ export class DiscoveryService {
     // action admissions cannot interleave with mailbox/status repair. The authority fact remains
     // committed even if this best-effort derived projection later fails.
     if (entry.type === 'domain' || entry.type === 'company_name' || entry.type === 'email') {
-      await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-        this.reconcileCanonicalSuppression(tx, ctx.workspaceId, entry.type as 'domain' | 'company_name' | 'email', canonicalValue),
+      await this.reconcileCanonicalSuppression(
+        ctx.workspaceId,
+        entry.type as 'domain' | 'company_name' | 'email',
+        canonicalValue,
       );
     }
     return rec;
@@ -740,43 +742,54 @@ export class DiscoveryService {
   }
 
   private async reconcileCanonicalSuppression(
-    tx: Prisma.TransactionClient,
     workspaceId: string,
     type: 'domain' | 'company_name' | 'email',
     canonicalValue: string,
   ): Promise<void> {
-    await lockWorkspaceSuppressionPolicy(tx, workspaceId);
-    const batchSize = 250;
+    const batchSize = 50;
     let afterId: string | undefined;
     for (;;) {
-      const rows = await tx.canonicalCompany.findMany({
-        ...(afterId ? { where: { id: { gt: afterId } } } : {}),
-        orderBy: { id: 'asc' },
-        take: batchSize,
-        select: { id: true, domain: true, name: true, status: true, attributes: true },
-      });
-      for (const row of rows) {
-        const attributes = jsonRecord(row.attributes);
-        const mailbox = canonicalizeSuppressionValue('email', typeof attributes.contact_email === 'string' ? attributes.contact_email : '');
-        const mailboxDomain = mailbox ? canonicalizeSuppressionValue('domain', mailbox.split('@')[1]) : null;
-        const companyMatches = type !== 'email' &&
-          canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue;
-        const mailboxMatches =
-          (type === 'email' && mailbox === canonicalValue) ||
-          (type === 'domain' && mailboxDomain === canonicalValue);
-        if (!companyMatches && !mailboxMatches) continue;
-        const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
-        await tx.canonicalCompany.updateMany({
-          where: { id: row.id },
-          data: {
-            ...(companyMatches ? { status: 'SUPPRESSED' as const } : {}),
-            ...(mailboxMatches || companyMatches
-              ? { attributes: safeAttributes as Prisma.InputJsonValue }
-              : {}),
-            version: { increment: 1 },
-          },
-        });
-      }
+      const rows = await this.prisma.withWorkspace(
+        workspaceId,
+        async (tx) => {
+          await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+          const page = await tx.canonicalCompany.findMany({
+            ...(afterId ? { where: { id: { gt: afterId } } } : {}),
+            orderBy: { id: 'asc' },
+            take: batchSize,
+            select: { id: true, domain: true, name: true, status: true, attributes: true },
+          });
+          for (const row of page) {
+            const attributes = jsonRecord(row.attributes);
+            const mailbox = canonicalizeSuppressionValue(
+              'email',
+              typeof attributes.contact_email === 'string' ? attributes.contact_email : '',
+            );
+            const mailboxDomain = mailbox ? canonicalizeSuppressionValue('domain', mailbox.split('@')[1]) : null;
+            const companyMatches =
+              type !== 'email' &&
+              canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) ===
+                canonicalValue;
+            const mailboxMatches =
+              (type === 'email' && mailbox === canonicalValue) ||
+              (type === 'domain' && mailboxDomain === canonicalValue);
+            if (!companyMatches && !mailboxMatches) continue;
+            const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
+            await tx.canonicalCompany.updateMany({
+              where: { id: row.id },
+              data: {
+                ...(companyMatches ? { status: 'SUPPRESSED' as const } : {}),
+                ...(mailboxMatches || companyMatches
+                  ? { attributes: safeAttributes as Prisma.InputJsonValue }
+                  : {}),
+                version: { increment: 1 },
+              },
+            });
+          }
+          return page;
+        },
+        { maxWait: 1_000, timeout: 5_000 },
+      );
       if (rows.length < batchSize) return;
       afterId = rows[rows.length - 1].id;
     }

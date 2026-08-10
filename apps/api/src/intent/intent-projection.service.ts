@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain, companyIdentity } from '../discovery/identity';
 import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-harvest.provider';
-import { isSuppressionActionDenied } from '../tools/tool-contract';
+import { isTerminalExternalActionPolicyDenied } from '../tools/tool-contract';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
@@ -345,7 +345,7 @@ export async function discoverWatchPages(
   try {
     urls = await fetchSitemapUrls(domain, httpGet);
   } catch (error) {
-    if (isSuppressionActionDenied(error)) throw error;
+    if (isTerminalExternalActionPolicyDenied(error)) throw error;
     urls = [];
   }
   const pathLen = (u: string) => {
