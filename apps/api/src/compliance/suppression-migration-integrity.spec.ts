@@ -54,7 +54,28 @@ describe('suppression decision governance migration', () => {
     const operation = openApi.paths['/api/v1/suppressions/{id}/decisions']?.post;
     expect(operation?.responses).toHaveProperty('409');
     expect(operation?.responses?.['409']?.content?.['application/json']?.schema?.required).toEqual(['error']);
+    expect(operation?.responses).toHaveProperty('400');
+    expect(operation?.responses).toHaveProperty('404');
+    expect(operation?.parameters?.find((parameter) => parameter.name === 'id')?.schema).toMatchObject({
+      type: 'string',
+      format: 'uuid',
+    });
     const listOperation = openApi.paths['/api/v1/suppressions/{id}/decisions']?.get;
     expect(listOperation?.parameters?.find((parameter) => parameter.name === 'limit')?.schema?.type).toBe('integer');
+    expect(listOperation?.responses).toHaveProperty('400');
+    expect(listOperation?.responses).toHaveProperty('404');
+
+    const createOperation = openApi.paths['/api/v1/suppressions']?.post;
+    expect(createOperation?.responses).toHaveProperty('400');
+
+    const deprecatedDelete = openApi.paths['/api/v1/suppressions/{id}']?.delete;
+    expect(deprecatedDelete?.responses).toHaveProperty('400');
+    expect(deprecatedDelete?.responses).toHaveProperty('404');
+    expect(deprecatedDelete?.responses).toHaveProperty('409');
+    expect(deprecatedDelete?.responses?.['409']?.content?.['application/json']?.schema?.required).toEqual(['error']);
+    expect(deprecatedDelete?.parameters?.find((parameter) => parameter.name === 'id')?.schema).toMatchObject({
+      type: 'string',
+      format: 'uuid',
+    });
   });
 });
