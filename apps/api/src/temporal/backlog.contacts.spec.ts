@@ -25,6 +25,7 @@ interface FakeCompany {
 function makeDeps(opts: {
   companies: FakeCompany[];
   suspendedDomains?: string[];
+  suppressionRows?: { type: string; value: string }[];
   onDiscover: (company: { name: string }, ctx: ExecutionContext) => Promise<ContactDiscoveryResult>;
 }) {
   const updateManyCalls: { ids: string[]; data: Record<string, unknown> }[] = [];
@@ -35,14 +36,16 @@ function makeDeps(opts: {
       findMany: async ({ take }: { take?: number }) =>
         (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),
       updateMany: async ({ where, data }: { where: { id: { in: string[] } }; data: Record<string, unknown> }) => {
-        updateManyCalls.push({ ids: where.id.in, data });
-        return { count: where.id.in.length };
+        const ids = Array.isArray(where.id.in) ? where.id.in : [where.id as unknown as string];
+        updateManyCalls.push({ ids, data });
+        return { count: ids.length };
       },
+      findUnique: async ({ where }: { where: { id: string } }) => opts.companies.find((c) => c.id === where.id) ?? null,
     },
     icpDefinition: {
       findUnique: async () => ({ company: { name: 'Seller', summary: null }, roles: [] as unknown[] }),
     },
-    suppressionRecord: { findMany: async () => [] as { value: string }[] },
+    suppressionRecord: { findMany: async () => opts.suppressionRows ?? [] },
   };
 
   const prisma = {
@@ -119,5 +122,17 @@ describe('discoverContactsBacklog —— 预算打穿停机 + 不 stamp 跳过�
     expect(discoverCalls).toHaveLength(0); // 被 DAT-011 跳过，不触网
     expect(updateManyCalls[0].ids).toEqual(['c1']); // 仍 stamp（离开当批过滤集）
     expect(r.attempted).toBe(0);
+  });
+
+  it('历史非规范 domain suppression 在 adapter 出网前复核，修复公司状态且零调用', async () => {
+    const { deps, updateManyCalls, discoverCalls } = makeDeps({
+      companies: [C('c1', 'acme.de')],
+      suppressionRows: [{ type: 'domain', value: ' https://www.ACME.de/path ' }],
+      onDiscover: async () => ({ contacts: [], costCents: 0 }),
+    });
+    const r = await createBacklogActivities(deps).discoverContactsBacklog({ workspaceId: WS, icpId: ICP, limit: 1 });
+    expect(discoverCalls).toHaveLength(0);
+    expect(r.attempted).toBe(0);
+    expect(updateManyCalls.some((call) => call.data.status === 'SUPPRESSED')).toBe(true);
   });
 });

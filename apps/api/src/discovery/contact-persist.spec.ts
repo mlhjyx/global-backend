@@ -15,7 +15,12 @@ type FakeCandidate = { id: string; fullName: string; contactPoints: { type: stri
  */
 function fakeTx(
   candidates: FakeCandidate[],
-  opts?: { existingBlindedKeys?: string[]; companyStatus?: string; suppressedContactKeys?: string[] },
+  opts?: {
+    existingBlindedKeys?: string[];
+    companyStatus?: string;
+    suppressedContactKeys?: string[];
+    suppressedEmails?: string[];
+  },
 ) {
   const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
   const contactPointUpsert = vi.fn(async () => ({}));
@@ -31,7 +36,10 @@ function fakeTx(
     return { title: 'Geschäftsführer', seniority: null, department: null };
   });
   // $queryRaw = 公司 FOR SHARE 状态复检（默认 NEW=未 SUPPRESSED）；suppressionRecord.findMany = person-level 禁联键。
-  const suppressionFindMany = vi.fn(async () => (opts?.suppressedContactKeys ?? []).map((value) => ({ value })));
+  const suppressionFindMany = vi.fn(async () => [
+    ...(opts?.suppressedContactKeys ?? []).map((value) => ({ type: 'contact_key', value })),
+    ...(opts?.suppressedEmails ?? []).map((value) => ({ type: 'email', value })),
+  ]);
   const queryRaw = vi.fn(async () => [{ status: opts?.companyStatus ?? 'NEW' }]);
   const tx = {
     canonicalContact: {
@@ -246,6 +254,22 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
     expect(res.created).toBe(0);
     expect(res.skippedSuppressed).toBe(2); // 整批跳过
     expect(canonicalUpsert).not.toHaveBeenCalled(); // 未新建任何联系人
+  });
+
+  it('长网络调用后新增的 email suppression 在写事务内复读，规范等价候选不入库', async () => {
+    const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([], {
+      suppressedEmails: ['sales@example.com'],
+    });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'late', fullName: 'Sales Team', email: ' Sales@EXAMPLE.COM ', personalData: false }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(contactPointUpsert).not.toHaveBeenCalled();
   });
 
   it('person-level 禁联键命中 → 同一人换新邮箱再现也跳过（不重建被 Art.17 擦除的具名人）', async () => {

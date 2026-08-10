@@ -41,10 +41,16 @@ describe('email-guess-persist · 落库计划（纯）', () => {
   });
 });
 
-function fakeTx() {
+function fakeTx(currentSuppressedEmails: string[] = []) {
   const upsert = vi.fn(async () => ({}));
   const create = vi.fn(async () => ({}));
-  return { tx: { contactPoint: { upsert }, fieldEvidence: { create } } as never, upsert, create };
+  const findMany = vi.fn(async () => currentSuppressedEmails.map((value) => ({ type: 'email', value })));
+  return {
+    tx: { contactPoint: { upsert }, fieldEvidence: { create }, suppressionRecord: { findMany } } as never,
+    upsert,
+    create,
+    findMany,
+  };
 }
 const NOW = new Date('2026-07-10T00:00:00.000Z');
 const LIA = { basis: 'legitimate_interest' as const, ref: 'LIA-1' };
@@ -73,6 +79,19 @@ describe('email-guess-persist · 落库（fake tx）', () => {
   it('suppression 命中：不落，upsert 不调用', async () => {
     const { tx, upsert } = fakeTx();
     const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(['h.herold@acme.de']), now: NOW });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('长 SMTP 调用后新增的 suppression 在写事务内复读，即使载入快照为空也不落库', async () => {
+    const { tx, upsert } = fakeTx(['h.herold@acme.de']);
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
     expect(out).toEqual({ persisted: false, reason: 'suppressed' });
     expect(upsert).not.toHaveBeenCalled();
   });
