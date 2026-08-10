@@ -38,7 +38,7 @@ describe('suppression external-action and PII projection topology', () => {
       'wikidata.provider.ts',
     ]) {
       const source = read(`apps/api/src/discovery/providers/${provider}`);
-      expect(source).toContain('{ ...ctx }');
+      expect(source).toMatch(/\.\.\.ctx[,}\s]/);
     }
   });
 
@@ -52,6 +52,30 @@ describe('suppression external-action and PII projection topology', () => {
     );
     expect(manual).toContain('authorizeCandidate:');
     expect(backlog).toContain('authorizeCandidate:');
+  });
+
+  it('multi-wire source adapters recheck authorization inside pagination, retry, and fallback loops', () => {
+    for (const adapter of [
+      'bigquery-patents.ts',
+      'companies-house.ts',
+      'gleif.ts',
+      'inpi-rne.ts',
+      'openfda-api.ts',
+      'openstreetmap.ts',
+      'ted-api.ts',
+      'trade-fair-algolia.ts',
+      'wikidata.ts',
+    ]) {
+      const source = read(`apps/api/src/adapters/${adapter}`);
+      expect(source).toContain('beforeRequest');
+      expect(source).toContain('await beforeRequest?.()');
+    }
+    expect(read('apps/api/src/tools/source-tools.ts')).toContain(
+      'beforeExternalRequest(ctx)',
+    );
+    expect(read('apps/api/src/tools/builtin-tools.ts')).toContain(
+      'beforeExternalRequest(ctx)',
+    );
   });
 
   it('the acquisition-read company list cannot project named contacts or contact points', () => {
