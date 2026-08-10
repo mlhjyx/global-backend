@@ -25,10 +25,17 @@ describe('suppression external-action and PII projection topology', () => {
 
   it('threads the callback through multi-wire acquisition providers instead of rebuilding a narrower context', () => {
     for (const provider of [
+      'bigquery-patents.provider.ts',
+      'companies-house.provider.ts',
       'decision-maker.provider.ts',
       'public-web.provider.ts',
       'structured-harvest.provider.ts',
       'digital-footprint.provider.ts',
+      'inpi-rne.provider.ts',
+      'openfda.provider.ts',
+      'osm.provider.ts',
+      'ted.provider.ts',
+      'wikidata.provider.ts',
     ]) {
       const source = read(`apps/api/src/discovery/providers/${provider}`);
       expect(source).toContain('{ ...ctx }');
