@@ -28,9 +28,9 @@ const ELIGIBILITY_KEYS = Object.freeze(
 export const COPY_RUNTIME_ELIGIBILITY_PATH =
   "docs/evidence/site-builder/copy-runtime-eligibility.json";
 export const ACTIVE_COPY_RUNTIME_BINDING_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json";
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json";
 export const ACTIVE_COPY_RUNTIME_BINDING_SHA256 =
-  "838121ccf9649b05d9c04b05a1cec7ba094439a8a81a177462e5955a17c2ef7c";
+  "a0b04862b538ae601b352a37d42eb8999ab67011d712d7d4dd765e6fa27ff6af";
 const ALLOWED_STALE_PATHS = Object.freeze(["packages/db/prisma/schema.prisma"]);
 
 function fail(code) {
