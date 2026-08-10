@@ -6,11 +6,31 @@ const root = resolve(__dirname, '../../../..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
 describe('suppression external-action and PII projection topology', () => {
+  it('threads one optional authorization callback through acquisition, tool, and model contexts', () => {
+    const providerContract = read('apps/api/src/discovery/provider-contract.ts');
+    const toolContract = read('apps/api/src/tools/tool-contract.ts');
+    const modelContract = read('apps/api/src/model-gateway/types.ts');
+    expect(providerContract).toContain('authorizeExternalAction?:');
+    expect(toolContract).toContain('authorizeExternalAction?:');
+    expect(modelContract).toContain('authorizeExternalAction?:');
+  });
+
+  it('enforces the callback at ToolBroker and RouterModelGateway physical-call boundaries', () => {
+    const broker = read('apps/api/src/tools/tool-broker.ts');
+    const router = read('apps/api/src/model-gateway/router-model-gateway.ts');
+    expect(broker).toContain('await ctx.authorizeExternalAction()');
+    expect(router).toContain('await ctx.authorizeExternalAction()');
+    expect(router).toContain('suppression_action_gate');
+  });
+
   it('manual and backlog email guessing pass a per-candidate authorization callback', () => {
     const service = read('apps/api/src/discovery/discovery.service.ts');
     const manual = service.slice(service.indexOf('async guessEmailsForCompany'), service.indexOf('async verifyContactPoint'));
     const backlogSource = read('apps/api/src/temporal/backlog.activities.ts');
-    const backlog = backlogSource.slice(backlogSource.indexOf('async guessEmailsBacklog'), backlogSource.indexOf('\n  };'));
+    const backlog = backlogSource.slice(
+      backlogSource.indexOf('async guessEmailsBacklog'),
+      backlogSource.indexOf('export type BacklogActivities'),
+    );
     expect(manual).toContain('authorizeCandidate:');
     expect(backlog).toContain('authorizeCandidate:');
   });

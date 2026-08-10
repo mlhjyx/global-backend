@@ -22,7 +22,7 @@ describe('suppression writer/action linearization topology', () => {
       ['async qualifyFitForRun', 'async enrichRun'],
       ['async enrichRun', 'async enrichSignalsRun'],
       ['async enrichSignalsRun', 'async registerWatchesForRun'],
-      ['async registerWatchesForRun', 'async enqueuePatentWarmupForRun'],
+      ['async registerWatchesForRun', 'async enqueuePatentLookupsForRun'],
     ] as const) {
       const body = source.slice(source.indexOf(start), source.indexOf(end));
       expect(body, `${start} must authorize immediately before external processing`).toContain(
@@ -37,6 +37,6 @@ describe('suppression writer/action linearization topology', () => {
     expect(service).toContain('contactMayUseExternalProcessing');
     expect(service.match(/companyMayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(backlog).toContain('contactMayUseExternalProcessing');
-    expect(backlog.match(/companyMayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    expect(backlog.match(/mayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(10);
   });
 });

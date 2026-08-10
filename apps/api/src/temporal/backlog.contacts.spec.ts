@@ -32,6 +32,7 @@ function makeDeps(opts: {
   const discoverCalls: string[] = [];
 
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
     canonicalCompany: {
       findMany: async ({ take }: { take?: number }) =>
         (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),

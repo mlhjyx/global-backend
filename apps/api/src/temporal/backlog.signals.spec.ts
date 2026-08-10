@@ -32,6 +32,7 @@ function makeDeps(opts: {
   const seenRunIds: (string | undefined)[] = [];
 
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
     canonicalCompany: {
       findMany: async ({ take }: { take?: number }) =>
         (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),
@@ -140,6 +141,7 @@ describe('enrichSignalsBacklog —— 信号抓取计入 sweep:signals 预算 + 
     const e1 = { key: 'digital_footprint', enrichCompany: async (_i: unknown, ctx: ExecutionContext) => { calls.push('e1'); return swallowBudget(ctx); } };
     const e2 = { key: 'structured_harvest', enrichCompany: async () => { calls.push('e2'); return MISS; } };
     const tx = {
+      $queryRaw: async () => [{ locked: true }],
       canonicalCompany: {
         findMany: async ({ take }: { take?: number }) => [C('c1', 'c1.de')].slice(0, take ?? 1),
         findUnique: async () => C('c1', 'c1.de'),

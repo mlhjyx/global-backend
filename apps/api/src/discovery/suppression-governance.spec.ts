@@ -139,7 +139,7 @@ describe('Suppression governance', () => {
       reasonCode: 'BOUNCE_CLASSIFICATION_ERROR',
     })).rejects.toMatchObject({ response: { error: { code: 'IDEMPOTENCY_CONFLICT' } } });
 
-    expect(h.createDecision).toHaveBeenCalledTimes(2);
+    expect(h.createDecision).toHaveBeenCalledTimes(1);
     expect(h.createDecision.mock.results[0]?.value).toBeDefined();
   });
 
@@ -268,12 +268,13 @@ describe('Suppression governance', () => {
       actorId: CTX.userId,
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
     };
-    const findDecision = vi.fn().mockResolvedValue(existing);
+    const findDecision = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(existing);
     const createMany = vi.fn(async () => ({ count: 0 }));
     const create = vi.fn(async () => {
       throw Object.assign(new Error('unique constraint'), { code: 'P2002' });
     });
     const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
       suppressionRecord: { findUnique: vi.fn(async () => row('PREFERENCE')) },
       suppressionDecision: { findUnique: findDecision, createMany, create },
     };
@@ -305,6 +306,7 @@ describe('Suppression governance', () => {
       createdAt: new Date('2026-08-10T00:00:00.000Z'),
     };
     const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
       suppressionRecord: { findUnique: vi.fn(async () => row('PREFERENCE')) },
       suppressionDecision: {
         createMany: vi.fn(async () => ({ count: 0 })),
@@ -424,6 +426,7 @@ describe('Suppression governance', () => {
       name: 'Acme Pumpen GmbH',
       domain: 'acme-pumpen.de',
       status: 'ENRICHED',
+      dedupeKey: 'd:acme-pumpen.de',
     };
     const point = {
       id: '88888888-8888-4888-8888-888888888888',
@@ -440,11 +443,17 @@ describe('Suppression governance', () => {
     const tx = {
       $queryRaw: vi.fn(async () => [{ locked: true }]),
       contactPoint: { findUnique: vi.fn(async () => point), update },
-      canonicalCompany: { update: vi.fn(async () => ({ ...company, status: 'SUPPRESSED' })) },
+      canonicalCompany: {
+        update: vi.fn(async () => ({ ...company, status: 'SUPPRESSED' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      canonicalContact: {
+        findUnique: vi.fn(async () => ({ id: point.contactId, fullName: 'Info Desk', company })),
+      },
       suppressionRecord: {
         findMany: vi.fn(async () => {
           suppressionRead += 1;
-          return suppressionRead === 1 ? [] : [{ type: 'email', value: ' INFO@ACME-PUMPEN.DE ' }];
+          return suppressionRead <= 2 ? [] : [{ type: 'email', value: ' INFO@ACME-PUMPEN.DE ' }];
         }),
       },
       fieldEvidence: { create: vi.fn(async () => ({})) },

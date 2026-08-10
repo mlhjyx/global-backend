@@ -7,6 +7,17 @@ const schema = readFileSync(resolve(root, 'packages/db/prisma/schema.prisma'), '
 const openApi = JSON.parse(
   readFileSync(resolve(root, 'packages/contracts/openapi/openapi.json'), 'utf8'),
 ) as {
+  components?: {
+    schemas?: Record<string, {
+      properties?: Record<string, {
+        type?: string;
+        minimum?: number;
+        maximum?: number;
+        maxLength?: number;
+        pattern?: string;
+      }>;
+    }>;
+  };
   paths: Record<string, Record<string, {
     parameters?: Array<{ name?: string; schema?: { type?: string } }>;
     responses?: Record<string, { content?: { 'application/json'?: { schema?: { required?: string[]; properties?: Record<string, unknown> } } } }>;
@@ -81,9 +92,10 @@ describe('suppression decision governance migration', () => {
     const decision400 = operation?.responses?.['400']?.content?.['application/json']?.schema as {
       properties?: { error?: { properties?: { code?: { enum?: string[] } } } };
     };
-    expect(decision400?.properties?.error?.properties?.code?.enum).toEqual(
-      expect.arrayContaining(['VALIDATION_ERROR', 'INVALID_REASON', 'INVALID_REQUEST_ID', 'INVALID_DECISION']),
-    );
+    expect(decision400?.properties?.error?.properties?.code?.enum).toEqual([
+      'VALIDATION_ERROR',
+      'INVALID_REASON',
+    ]);
 
     const accept = openApi.paths['/api/v1/leads/{leadId}/accept']?.post;
     expect(accept?.responses).toHaveProperty('409');
@@ -91,5 +103,21 @@ describe('suppression decision governance migration', () => {
       properties?: { error?: { properties?: { code?: { enum?: string[] } } } };
     };
     expect(accept409?.properties?.error?.properties?.code?.enum).toContain('SUPPRESSED_CONTACT_UNREACHABLE');
+  });
+
+  it('publishes verification and guessing input bounds in OpenAPI', () => {
+    const verify = openApi.components?.schemas?.VerifyContactPointDto?.properties;
+    expect(verify?.lawfulBasisRef).toMatchObject({ type: 'string', maxLength: 512 });
+    expect(verify?.lawfulBasisNote).toMatchObject({ type: 'string', maxLength: 1000 });
+    expect(verify?.lawfulBasisRef?.pattern).toBeDefined();
+    expect(verify?.lawfulBasisNote?.pattern).toBeDefined();
+
+    const guess = openApi.components?.schemas?.GuessEmailsDto?.properties;
+    expect(guess?.lawfulBasisRef).toMatchObject({ type: 'string', maxLength: 512 });
+    expect(guess?.lawfulBasisNote).toMatchObject({ type: 'string', maxLength: 1000 });
+    expect(guess?.lawfulBasisRef?.pattern).toBeDefined();
+    expect(guess?.lawfulBasisNote?.pattern).toBeDefined();
+    expect(guess?.maxContacts).toMatchObject({ type: 'integer', minimum: 1, maximum: 25 });
+    expect(guess?.maxProbe).toMatchObject({ type: 'integer', minimum: 1, maximum: 8 });
   });
 });

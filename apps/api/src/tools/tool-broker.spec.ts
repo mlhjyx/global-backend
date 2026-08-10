@@ -50,6 +50,54 @@ describe('ToolBroker — allowedTools 白名单（无超级 Agent 的代码强�
   });
 });
 
+describe('ToolBroker — per-wire external-action authorization', () => {
+  it('rechecks immediately before every physical tool execution and traces a denial', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const authorizeExternalAction = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const traces: { status: string; reason?: string }[] = [];
+    const { broker } = makeBroker(fakeTool('crawl4ai.fetch', 0, execute), {
+      traceRecorder: (trace) => traces.push(trace),
+    });
+    const ctx = { workspaceId: 'w', authorizeExternalAction };
+
+    await expect(
+      broker.invoke('crawl4ai.fetch', { url: 'https://example.com/first' }, ctx),
+    ).resolves.toBeDefined();
+    await expect(
+      broker.invoke('crawl4ai.fetch', { url: 'https://example.com/second' }, ctx),
+    ).rejects.toThrow(/external action denied|suppression_action_gate/i);
+
+    expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(traces.at(-1)).toMatchObject({
+      status: 'DENIED',
+      reason: expect.stringMatching(/suppression_action_gate/i),
+    });
+  });
+
+  it('fails closed when the authorization callback throws', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const { broker } = makeBroker(fakeTool('crawl4ai.fetch', 0, execute));
+
+    await expect(
+      broker.invoke(
+        'crawl4ai.fetch',
+        { url: 'https://example.com/' },
+        {
+          workspaceId: 'w',
+          authorizeExternalAction: async () => {
+            throw new Error('policy database unavailable');
+          },
+        },
+      ),
+    ).rejects.toThrow(/external action denied|suppression_action_gate/i);
+    expect(execute).not.toHaveBeenCalled();
+  });
+});
+
 describe('ToolBroker — 预算 reserve-then-settle', () => {
   it('超预算 → BudgetExceededError，工具不执行', async () => {
     const exec = vi.fn(async () => ({ ok: true }));

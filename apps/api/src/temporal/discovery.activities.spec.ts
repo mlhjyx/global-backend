@@ -81,13 +81,16 @@ const budgetSwallowingEnricher = {
 
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
     rawSourceRecord: { findMany: async () => [{ id: 'raw1' }] },
     identityLink: { findMany: async () => [{ canonicalId: 'c1' }] },
     canonicalCompany: {
       findMany: async () => [{ id: 'c1', name: 'C1', domain: 'c1.de', country: 'DE', region: null, attributes: {} }],
       updateMany: async () => ({ count: 1 }),
       update: async () => ({}),
+      findUnique: async () => ({ id: 'c1', name: 'C1', domain: 'c1.de', status: 'NEW' }),
     },
+    suppressionRecord: { findMany: async () => [] },
     fieldEvidence: { create: async () => ({}) },
   };
   const prisma = {

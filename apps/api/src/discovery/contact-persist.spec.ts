@@ -61,6 +61,7 @@ function fakeTx(
     contactPoint: { upsert: contactPointUpsert },
     fieldEvidence: { create: fieldEvidenceCreate },
     suppressionRecord: { findMany: suppressionFindMany },
+    canonicalCompany: { updateMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: queryRaw,
   } as unknown as Prisma.TransactionClient;
   return { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert, canonicalUpdate, canonicalFindUnique, suppressionFindMany, queryRaw };

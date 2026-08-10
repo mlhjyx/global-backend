@@ -80,6 +80,12 @@ function makeDeps(opts: {
         opts.contacts
           .filter((c) => where.companyId.in.includes(c.companyId))
           .map((c) => ({ ...c, contactPoints: c.contactPoints.map((p) => ({ ...p })) })),
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const contact = opts.contacts.find((candidate) => candidate.id === where.id);
+        if (!contact) return null;
+        const company = opts.companies.find((candidate) => candidate.id === contact.companyId);
+        return company ? { ...contact, company: { ...company, status: 'NEW' } } : null;
+      },
     },
     suppressionRecord: { findMany: async () => opts.suppressionRows ?? [] },
     // persistGuessedEmail（真实）在落库短事务里用到 contactPoint.upsert + fieldEvidence.create。
