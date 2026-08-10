@@ -39,7 +39,7 @@ describe('suppression writer/action linearization topology', () => {
     ]) {
       const source = read(path);
       const projectOne = source.slice(source.indexOf('private async projectOne'));
-      const gateAt = projectOne.indexOf('companyMayBeMaterialized');
+      const gateAt = projectOne.indexOf('loadMaterializableCompanyState');
       expect(gateAt, `${path} must use the shared materialization gate`).toBeGreaterThanOrEqual(0);
       expect(gateAt, `${path} must authorize before reading canonical state`).toBeLessThan(
         projectOne.indexOf('canonicalCompany.findUnique'),

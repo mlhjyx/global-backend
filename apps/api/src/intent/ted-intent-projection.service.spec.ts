@@ -60,6 +60,7 @@ interface FakeTenant {
       workspaceId: string;
       dedupeKey: string;
       name: string;
+      domain?: string | null;
       country: string;
       status: string;
       attributes: Record<string, unknown>;
@@ -316,6 +317,30 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
 
     expect(result.companiesTouched).toBe(0);
     expect(prisma.companies.size).toBe(0);
+    expect(prisma.evidence).toHaveLength(0);
+  });
+
+  it('既有 canonical domain 命中 suppression 时阻断源名不同的 intent 更新', async () => {
+    const at = new Date(now - 3 * DAY_MS);
+    const signal = tedSignal({ name: 'Federal Procurement Office', occurredAt: at });
+    const prisma = fakePrisma([signal], [{ type: 'domain', value: 'blocked.example' }]);
+    prisma.companies.set(signal.subjectKey, {
+      id: 'co-existing',
+      workspaceId: WS,
+      dedupeKey: signal.subjectKey,
+      name: 'Existing Legal Entity GmbH',
+      domain: 'https://www.blocked.example/about',
+      country: 'DE',
+      status: 'NEW',
+      attributes: {},
+      version: 1,
+    });
+    const svc = new TedIntentProjectionService({ prisma });
+
+    const result = await svc.projectTenders(WS, params);
+
+    expect(result.companiesTouched).toBe(0);
+    expect(prisma.companies.get(signal.subjectKey)?.version).toBe(1);
     expect(prisma.evidence).toHaveLength(0);
   });
 

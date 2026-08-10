@@ -87,13 +87,16 @@ function fdaSignal(name: string, over?: Record<string, unknown>) {
   };
 }
 
-function fdaFakePrisma(signals: Record<string, unknown>[]) {
+function fdaFakePrisma(
+  signals: Record<string, unknown>[],
+  suppressions: { type: string; value: string }[] = [],
+) {
   const companies = new Map<string, Record<string, unknown>>();
   const evidence: unknown[] = [];
   const tx = {
     $queryRaw: async () => [{ locked: true }],
     suppressionRecord: {
-      findMany: async () => [],
+      findMany: async () => suppressions,
     },
     canonicalCompany: {
       findUnique: async ({ where }: { where: { workspaceId_dedupeKey: { dedupeKey: string } } }) =>
@@ -154,5 +157,27 @@ describe('OpenFdaIntentProjectionService.projectClearances —— source_signal 
     expect(r.signalsMatched).toBe(1); // 仅 Smith, John 的 QAS 键匹配
     expect(r.skippedIndividual).toBe(1); // §6 防御纵深
     expect(r.companiesTouched).toBe(0);
+  });
+
+  it('既有 canonical domain 命中 suppression 时阻断源名不同的 clearance 更新', async () => {
+    const signal = fdaSignal('Source Applicant LLC');
+    const prisma = fdaFakePrisma([signal], [{ type: 'domain', value: 'blocked.example' }]);
+    prisma.companies.set(signal.subjectKey as string, {
+      id: 'co-existing',
+      workspaceId: WS,
+      dedupeKey: signal.subjectKey,
+      name: 'Existing Medical Entity Inc',
+      domain: 'www.blocked.example',
+      country: 'IL',
+      status: 'NEW',
+      attributes: {},
+      version: 1,
+    });
+    const svc = new OpenFdaIntentProjectionService({ prisma });
+
+    const result = await svc.projectClearances(WS, { productCodes: ['QAS'] });
+
+    expect(result.companiesTouched).toBe(0);
+    expect(prisma.evidence).toHaveLength(0);
   });
 });
