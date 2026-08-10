@@ -775,6 +775,84 @@ describe("Copy Sonnet recovery trusted gateway", () => {
     );
   });
 
+  it("rejects source drift before opening ledger or authorization claim files", async () => {
+    const repository = await compiledRecoveryRepository();
+    const directory = await mkdtemp(
+      join(tmpdir(), "copy-sonnet-recovery-pre-ledger-source-drift-"),
+    );
+    directories.push(directory);
+    const campaignId =
+      "copy-sonnet-recovery-v15-campaign-pre-ledger-source-drift-test";
+    const paths = {
+      ledgerPath: join(directory, "ledger.jsonl"),
+      authorizationClaimPath: join(directory, "authorization.claim.jsonl"),
+      ledgerMarkerPath: join(directory, "ledger.marker.jsonl"),
+      campaignId,
+    };
+    const markerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-ledger-identity.js",
+      ),
+    ) as typeof import("./copy-pilot-ledger-identity");
+    const sourceModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-source-verifier.js",
+      ),
+    ) as typeof import("./copy-pilot-source-verifier");
+    const gatewayModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-pilot-trusted-gateway.js",
+      ),
+    ) as typeof import("./copy-pilot-trusted-gateway");
+    const runnerModule = REQUIRE(
+      join(
+        repository.root,
+        "apps/api/dist/site-builder/eval/copy-real-capability-runner.js",
+      ),
+    ) as typeof import("./copy-real-capability-runner");
+    const prepared = await markerModule.prepareCopyPilotLedgerIdentity({
+      ...paths,
+      markerPath: paths.ledgerMarkerPath,
+    });
+    const live = await recoveryGateway();
+    const admitted = admission(live.origin, {
+      manifest: repository.manifest,
+      campaignId,
+      ledgerIdentityDigest: prepared.ledgerIdentityDigest,
+    });
+    const verifiedSource = await sourceModule.createCopyPilotVerifiedSource({
+      repositoryRoot: repository.root,
+      manifestArtifactPath: repository.manifestPath,
+    });
+    const trustedGateway = await gatewayModule.createCopyPilotTrustedGateway({
+      admission: admitted,
+      bearerToken: TOKEN,
+    });
+    await writeFile(join(repository.root, "source.txt"), "source drift\n");
+
+    await expect(
+      runnerModule.createCopySonnetRecoveryRunner({
+        ...paths,
+        admission: admitted,
+        verifiedSource,
+        trustedGateway,
+      }),
+    ).rejects.toThrow("COPY_PILOT_SOURCE_BYTES_MISMATCH");
+
+    await expect(readFile(paths.ledgerPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(paths.authorizationClaimPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(live.observed.some(({ path }) => path === "/v1/messages")).toBe(
+      false,
+    );
+  });
+
   it("accepts Git-reviewed evidence for the v15 recovery execution identity", async () => {
     const repository = await compiledRecoveryRepository();
     const directory = await mkdtemp(
