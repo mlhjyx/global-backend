@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { SourceSignal } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { companyMayBeMaterialized } from '../discovery/company-suppression-gate';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
@@ -140,18 +140,11 @@ export class TedIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, demand: BuyerDemand): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
-      if (
-        !(await companyMayBeMaterialized(tx, workspaceId, {
-          name: demand.name,
-        }))
-      ) {
-        return false;
-      }
-      const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-        select: { id: true, attributes: true, status: true },
+      const materialization = await loadMaterializableCompanyState(tx, workspaceId, dedupeKey, {
+        name: demand.name,
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      if (!materialization.allowed) return false;
+      const { prior } = materialization;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;

@@ -585,7 +585,9 @@ export function createBacklogActivities(deps: {
         if (suspended.has(c.domain.toLowerCase())) continue; // DAT-011：kill-switch 域名不注册、不探测 sitemap
         if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
         try {
-          await intentSvc.registerWatch(args.workspaceId, c.id);
+          await intentSvc.registerWatch(args.workspaceId, c.id, {
+            authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          });
           registered += 1;
         } catch {
           /* 单家注册失败（sitemap 不可达/DAT-011）不影响其余 */

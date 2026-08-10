@@ -7,6 +7,7 @@ import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageKind, classifyPageKind } from './page-signals';
 import { WEB_WATCH_KEY } from './website-watch.service';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
@@ -153,11 +154,14 @@ export class IntentProjectionService {
       eventsProjected = 0;
     for (const [dedupeKey, changes] of byKey) {
       const touched = await prisma.withWorkspace(workspaceId, async (tx) => {
-        const company = await tx.canonicalCompany.findUnique({
-          where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-          select: { id: true, attributes: true, status: true },
+        const sourceCompany = companyOf(changes[0]?.source?.config);
+        if (!sourceCompany) return false;
+        const materialization = await loadMaterializableCompanyState(tx, workspaceId, dedupeKey, {
+          name: sourceCompany.name,
+          domain: sourceCompany.domain,
         });
-        if (!company || company.status === 'SUPPRESSED') return false;
+        if (!materialization.allowed || !materialization.prior) return false;
+        const company = materialization.prior;
 
         const events = changes.map(toIntentEvent);
         const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;

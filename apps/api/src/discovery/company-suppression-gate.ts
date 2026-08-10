@@ -6,7 +6,11 @@ import {
   canonicalizeSuppressionValues,
   companyMatchesSuppression,
 } from './suppression-value';
-import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
+import {
+  assertWorkspaceSuppressionPolicyLock,
+  lockWorkspaceSuppressionPolicy,
+  type SuppressionPolicyLockReceipt,
+} from './suppression-policy-lock';
 
 /**
  * Final gate for writers that may create a canonical company from a platform
@@ -25,6 +29,56 @@ export async function companyMayBeMaterialized(
     select: { type: true, value: true },
   });
   return !companyMatchesSuppression(suppressions, company);
+}
+
+/**
+ * Signal projections need the existing canonical identity and the materialization decision from
+ * the same suppression-policy critical section. Checking only the source-side name is insufficient:
+ * an existing canonical row may already carry a domain that is covered by an append-only suppression
+ * while its derived SUPPRESSED status is still being reconciled.
+ */
+export async function loadMaterializableCompanyState(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  dedupeKey: string,
+  sourceCompany: { name: string; domain?: string | null },
+  options?: {
+    knownSuppressions?: ReadonlyArray<{ type: string; value: string }>;
+    policyLock?: SuppressionPolicyLockReceipt;
+  },
+) {
+  if (options?.policyLock) assertWorkspaceSuppressionPolicyLock(options.policyLock, workspaceId);
+  else await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+  const prior = await tx.canonicalCompany.findUnique({
+    where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+    select: { id: true, name: true, domain: true, attributes: true, status: true },
+  });
+  if (prior?.status === 'SUPPRESSED') return { allowed: false, prior } as const;
+
+  const suppressions =
+    options?.knownSuppressions ??
+    (await tx.suppressionRecord.findMany({
+      where: { type: { in: ['domain', 'company_name'] } },
+      select: { type: true, value: true },
+    }));
+  const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
+  const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
+  if (prior && (sourceSuppressed || canonicalSuppressed)) {
+    const priorAttributes =
+      prior.attributes && typeof prior.attributes === 'object' && !Array.isArray(prior.attributes)
+        ? (prior.attributes as Record<string, unknown>)
+        : null;
+    const { contact_email: removedContactEmail, ...safeAttributes } = priorAttributes ?? {};
+    await tx.canonicalCompany.updateMany({
+      where: { id: prior.id, status: { not: 'SUPPRESSED' } },
+      data: {
+        status: 'SUPPRESSED',
+        ...(removedContactEmail === undefined ? {} : { attributes: safeAttributes as Prisma.InputJsonValue }),
+        version: { increment: 1 },
+      },
+    });
+  }
+  return { allowed: !sourceSuppressed && !canonicalSuppressed, prior } as const;
 }
 
 /**

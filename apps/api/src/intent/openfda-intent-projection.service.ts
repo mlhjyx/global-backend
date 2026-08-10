@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { companyMayBeMaterialized } from '../discovery/company-suppression-gate';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import { OPENFDA_ATTRIBUTION, OPENFDA_LICENSE, FDA_REGISTRATION_DISCLAIMER } from '../adapters/openfda-api';
 import { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
@@ -136,18 +136,11 @@ export class OpenFdaIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, c: Clearance): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
-      if (
-        !(await companyMayBeMaterialized(tx, workspaceId, {
-          name: c.applicant,
-        }))
-      ) {
-        return false;
-      }
-      const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-        select: { id: true, attributes: true, status: true },
+      const materialization = await loadMaterializableCompanyState(tx, workspaceId, dedupeKey, {
+        name: c.applicant,
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      if (!materialization.allowed) return false;
+      const { prior } = materialization;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;

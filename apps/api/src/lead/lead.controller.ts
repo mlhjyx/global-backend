@@ -155,6 +155,11 @@ export class LeadController {
   @ApiOperation({ summary: '接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）',
   })
   @ApiResponse({
+    status: 400,
+    description: '路径或请求体验证失败',
+    schema: leadDecisionErrorSchema(['VALIDATION_ERROR']),
+  })
+  @ApiResponse({
     status: 404,
     description: 'Lead 或其公司不存在',
     schema: leadDecisionErrorSchema(['NOT_FOUND']),
@@ -183,6 +188,21 @@ export class LeadController {
   @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '拒绝 Lead（→ REJECTED，原因留痕做质量反馈）' })
+  @ApiResponse({
+    status: 400,
+    description: '路径或请求体验证失败',
+    schema: leadDecisionErrorSchema(['VALIDATION_ERROR']),
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Lead 不存在',
+    schema: leadDecisionErrorSchema(['NOT_FOUND']),
+  })
+  @ApiResponse({
+    status: 409,
+    description: '当前状态阻断拒绝裁决',
+    schema: leadDecisionErrorSchema(['SUPPRESSED', 'INVALID_STATE', 'CONFLICT']),
+  })
   @ApiEnvelope(LEAD_SCHEMA)
   async reject(
     @Ctx() ctx: RequestContext,

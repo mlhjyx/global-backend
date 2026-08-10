@@ -39,7 +39,20 @@ function projectionHarness(
     $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
     suppressionRecord,
     canonicalCompany: {
-      findUnique: vi.fn(async () => prior ?? null),
+      findUnique: vi.fn(async () =>
+        prior
+          ? {
+              name: 'Existing Company',
+              domain: null,
+              status: 'NEW',
+              ...prior,
+            }
+          : null,
+      ),
+      updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        if (prior) updates.push(data);
+        return { count: prior ? 1 : 0 };
+      }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         creates.push(data);
         return { id: `company-${creates.length}`, ...data };

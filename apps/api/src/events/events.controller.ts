@@ -82,6 +82,7 @@ export class EventsController {
   constructor(private readonly events: EventsService) {}
 
   @Get()
+  @RequireScopes('acquisition:read', 'personal-data:read')
   @ApiOperation({ summary: '拉取集成事件（envelope 流，?cursor=&limit=&type=，游标与 ACK 无关可重放）' })
   // swagger 对 @Query 推断 required:true，SaaS codegen 客户端会强制要参数——三个都显式 optional。
   @ApiQuery({ name: 'cursor', required: false, description: '游标（上次响应的 nextCursor；缺省从头拉）' })

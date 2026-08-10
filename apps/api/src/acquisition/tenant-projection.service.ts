@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 
 const CHUNK = 100;
 
@@ -66,7 +67,7 @@ export class TenantProjectionService {
         // Authority fact + projection commit share one short workspace lock.
         // A suppression committed before this chunk admission is visible here;
         // no database transaction is held while the platform source is fetched.
-        await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+        const policyLock = await lockWorkspaceSuppressionPolicy(tx, workspaceId);
         const suppressionRows = await tx.suppressionRecord.findMany({
           where: {
             type: { in: ['domain', 'company_name', 'email'] },
@@ -76,10 +77,6 @@ export class TenantProjectionService {
         const suppressedDomains = canonicalizeSuppressionValues(
           'domain',
           suppressionRows.filter((row) => row.type === 'domain').map((row) => row.value),
-        );
-        const suppressedNames = canonicalizeSuppressionValues(
-          'company_name',
-          suppressionRows.filter((row) => row.type === 'company_name').map((row) => row.value),
         );
         const suppressedEmails = canonicalizeSuppressionValues(
           'email',
@@ -92,10 +89,18 @@ export class TenantProjectionService {
             domain: e.domain,
             country: e.country,
           });
-          const domainKey = e.domain ? canonicalizeSuppressionValue('domain', e.domain) : null;
-          const nameKey = canonicalizeSuppressionValue('company_name', e.name);
-          const isSuppressed =
-            (!!domainKey && suppressedDomains.has(domainKey)) || (!!nameKey && suppressedNames.has(nameKey));
+          const materialization = await loadMaterializableCompanyState(
+            tx,
+            workspaceId,
+            identity.dedupeKey,
+            { name: e.name, domain: e.domain },
+            { knownSuppressions: suppressionRows, policyLock },
+          );
+          const { prior } = materialization;
+          if (!materialization.allowed) {
+            suppressed += 1;
+            continue;
+          }
 
           // 合规：人名邮箱不投；职能邮箱作为法人联系点随公司走
           const roleEmailKey =
@@ -106,7 +111,6 @@ export class TenantProjectionService {
             ? canonicalizeSuppressionValue('domain', roleEmailKey.split('@')[1])
             : null;
           const roleEmail =
-            !isSuppressed &&
             roleEmailKey &&
             !suppressedEmails.has(roleEmailKey) &&
             (!roleEmailDomain || !suppressedDomains.has(roleEmailDomain))
@@ -127,15 +131,6 @@ export class TenantProjectionService {
 
           // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
           // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
-          const prior = await tx.canonicalCompany.findUnique({
-            where: {
-              workspaceId_dedupeKey: {
-                workspaceId,
-                dedupeKey: identity.dedupeKey,
-              },
-            },
-            select: { id: true, attributes: true },
-          });
           const canonical = prior
             ? await tx.canonicalCompany.update({
                 where: { id: prior.id },
@@ -148,11 +143,10 @@ export class TenantProjectionService {
                       (prior.attributes ?? {}) as Record<string, unknown>,
                       suppressedEmails,
                       suppressedDomains,
-                      isSuppressed,
+                      false,
                     ),
                     attributes,
                   ) as Prisma.InputJsonValue,
-                  status: isSuppressed ? 'SUPPRESSED' : undefined,
                   version: { increment: 1 },
                 },
               })
@@ -163,11 +157,10 @@ export class TenantProjectionService {
                   domain: e.domain ?? null,
                   country: e.country ?? null,
                   attributes: attributes as Prisma.InputJsonValue,
-                  status: isSuppressed ? 'SUPPRESSED' : 'NEW',
+                  status: 'NEW',
                   dedupeKey: identity.dedupeKey,
                 },
               });
-          if (isSuppressed) suppressed += 1;
           projected += 1;
 
           // identity_link：canonical ↔ source_entity（rawRecordId=source_entity.id），去重

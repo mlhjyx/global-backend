@@ -6,14 +6,16 @@ import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-j
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
-import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { resolveEvidenceLicense } from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import { BudgetExceededError, budgetLedger, runBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { companyMayUseExternalProcessing } from '../discovery/company-suppression-gate';
+import {
+  companyMayUseExternalProcessing,
+  loadMaterializableCompanyState,
+} from '../discovery/company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 
 export interface DiscoveryRunInput {
@@ -247,22 +249,13 @@ export function createDiscoveryActivities(deps: {
         // protocol as suppression creation and downstream PII commits. This
         // stage performs no network I/O, so the transaction-scoped lock covers
         // the authoritative suppression read and every canonical write.
-        await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
+        const policyLock = await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
         const raws = await tx.rawSourceRecord.findMany({
           where: { runId: args.runId },
         });
         const suppressions = await tx.suppressionRecord.findMany({
           where: { type: { in: ['domain', 'company_name'] } },
         });
-        const suppressedDomains = canonicalizeSuppressionValues(
-          'domain',
-          suppressions.filter((s) => s.type === 'domain').map((s) => s.value),
-        );
-        const suppressedNames = canonicalizeSuppressionValues(
-          'company_name',
-          suppressions.filter((s) => s.type === 'company_name').map((s) => s.value),
-        );
-
         let companies = 0;
         let suppressed = 0;
         for (const raw of raws) {
@@ -285,10 +278,17 @@ export function createDiscoveryActivities(deps: {
             country: rec.country,
             identifier: rec.identifier, // §8.4：无域名时按税号消歧，防同名同国不同实体误并
           });
-          const domainKey = rec.domain ? canonicalizeSuppressionValue('domain', rec.domain) : null;
-          const nameKey = canonicalizeSuppressionValue('company_name', rec.name);
-          const isSuppressed =
-            (!!domainKey && suppressedDomains.has(domainKey)) || (!!nameKey && suppressedNames.has(nameKey));
+          const materialization = await loadMaterializableCompanyState(
+            tx,
+            args.workspaceId,
+            identity.dedupeKey,
+            { name: rec.name, domain: rec.domain },
+            { knownSuppressions: suppressions, policyLock },
+          );
+          if (!materialization.allowed) {
+            suppressed += 1;
+            continue;
+          }
 
           const canonical = await tx.canonicalCompany.upsert({
             where: {
@@ -300,7 +300,6 @@ export function createDiscoveryActivities(deps: {
             update: {
               // 后到的源只补缺，不覆盖已有值（冲突留在 field_evidence 里可见）
               ...(rec.region ? { region: { set: rec.region } } : {}),
-              status: isSuppressed ? 'SUPPRESSED' : undefined,
               version: { increment: 1 },
             },
             create: {
@@ -313,11 +312,10 @@ export function createDiscoveryActivities(deps: {
               employeeCount: rec.employeeCount ?? null,
               revenueUsd: rec.revenueUsd ?? null,
               attributes: (rec.attributes ?? undefined) as never,
-              status: isSuppressed ? 'SUPPRESSED' : 'NEW',
+              status: 'NEW',
               dedupeKey: identity.dedupeKey,
             },
           });
-          if (isSuppressed) suppressed += 1;
           companies += 1;
 
           const linkExists = await tx.identityLink.findFirst({

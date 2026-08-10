@@ -143,6 +143,8 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
         },
       },
       canonicalCompany: {
+        findUnique: async () => null,
+        updateMany: async () => ({ count: 0 }),
         upsert: async () => {
           order.push('canonical-write');
           return { id: 'company-1' };
