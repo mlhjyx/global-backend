@@ -114,11 +114,32 @@ describe('Suppression governance', () => {
     expect(h.current()).toMatchObject({ id: SUPPRESSION_ID, protectionClass: 'LEGAL' });
     expect(h.createDecision).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        requestedDecision: 'RELEASE_REQUESTED',
+        requestedReasonCode: 'USER_PREFERENCE_CHANGED',
         decision: 'RELEASE_REQUEST_DENIED',
         reasonCode: 'LEGAL_SUPPRESSION_IMMUTABLE',
         actorId: CTX.userId,
       }),
     });
+  });
+
+  it('法定 release 的同 requestId 不同原始 reason 以 409 fail-closed，并保留首个请求命令', async () => {
+    const h = makeHarness(row('LEGAL'));
+
+    await expect(h.service.requestSuppressionDecision(CTX, SUPPRESSION_ID, {
+      requestId: REQUEST_ID,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'USER_PREFERENCE_CHANGED',
+    })).rejects.toMatchObject({ response: { error: { code: 'LEGAL_SUPPRESSION_IMMUTABLE' } } });
+
+    await expect(h.service.requestSuppressionDecision(CTX, SUPPRESSION_ID, {
+      requestId: REQUEST_ID,
+      decision: 'RELEASE_REQUESTED',
+      reasonCode: 'BOUNCE_CLASSIFICATION_ERROR',
+    })).rejects.toMatchObject({ response: { error: { code: 'IDEMPOTENCY_CONFLICT' } } });
+
+    expect(h.createDecision).toHaveBeenCalledTimes(2);
+    expect(h.createDecision.mock.results[0]?.value).toBeDefined();
   });
 
   it('重复人工写入不能把已有 LEGAL suppression 降级为 manual/PREFERENCE', async () => {
@@ -239,6 +260,8 @@ describe('Suppression governance', () => {
       workspaceId: WORKSPACE_ID,
       suppressionId: SUPPRESSION_ID,
       requestId: REQUEST_ID,
+      requestedDecision: 'RELEASE_REQUESTED',
+      requestedReasonCode: 'USER_PREFERENCE_CHANGED',
       decision: 'RELEASE_REQUESTED',
       reasonCode: 'USER_PREFERENCE_CHANGED',
       actorId: CTX.userId,
@@ -260,6 +283,8 @@ describe('Suppression governance', () => {
 
     await expect(service.requestSuppressionDecision(CTX, SUPPRESSION_ID, {
       requestId: REQUEST_ID,
+      requestedDecision: 'RELEASE_REQUESTED',
+      requestedReasonCode: 'USER_PREFERENCE_CHANGED',
       decision: 'RELEASE_REQUESTED',
       reasonCode: 'USER_PREFERENCE_CHANGED',
     })).resolves.toEqual(existing);

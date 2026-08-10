@@ -22,6 +22,8 @@ describe('suppression decision governance migration', () => {
   it('keeps suppression facts and decisions as separate models', () => {
     expect(schema).toContain('protectionClass String');
     expect(schema).toContain('model SuppressionDecision');
+    expect(schema).toContain('requestedDecision   String');
+    expect(schema).toContain('requestedReasonCode String');
     expect(schema).toContain('@@unique([workspaceId, requestId])');
   });
 
@@ -42,6 +44,7 @@ describe('suppression decision governance migration', () => {
   it('enforces protection/reason and decision/reason semantic pairs at the DB layer', () => {
     const migration = readMigration();
     expect(migration).toContain('suppression_record_preference_reason_check');
+    expect(migration).toContain('suppression_decision_requested_pair_check');
     expect(migration).toContain('suppression_decision_semantic_pair_check');
     expect(migration).toMatch(/"decision" = 'RELEASE_REQUEST_DENIED'[\s\S]+"reason_code" = 'LEGAL_SUPPRESSION_IMMUTABLE'/);
   });
