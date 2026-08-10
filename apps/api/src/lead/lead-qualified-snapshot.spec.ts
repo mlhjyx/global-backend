@@ -6,6 +6,8 @@ import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { buildLeadQualifiedSnapshot, classifyLeadQualified, computeValidUntil } from './lead-qualified-snapshot';
 import { LeadService } from './lead.service';
+import { contactSuppressionKeys } from '../discovery/identity';
+import { blindContactKey } from '../compliance/pii-crypto';
 
 /**
  * 收口③ LeadQualified 快照 v1：decide(accept) 的 outbox payload 从「三字段摘要」升级为
@@ -457,6 +459,44 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     });
     expect(tx.lead.updateMany).not.toHaveBeenCalled();
     expect(decisionCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('联系人邮箱域命中 domain suppression 时不进入 LeadQualified', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const company = makeCompany({
+      contacts: [{
+        ...makeCompany().contacts[0],
+        contactPoints: [{ status: 'VALID', type: 'email', value: 'buyer@agency.example' }],
+      }],
+    });
+    const tx = makeDecideTx(makeLead(), company, outboxCreate, decisionCreate);
+    tx.suppressionRecord.findMany = vi.fn(async () => [{ type: 'domain', value: 'agency.example' }]);
+
+    await expect(makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'SUPPRESSED_CONTACT_UNREACHABLE' } },
+    });
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('contact_key 命中的无邮箱具名人不进入 LeadQualified', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const company = makeCompany({
+      dedupeKey: 'd:acme-pumpen.de',
+      contacts: [{
+        ...makeCompany().contacts[0],
+        contactPoints: [{ status: 'VALID', type: 'phone', value: '+49 123' }],
+      }],
+    });
+    const key = blindContactKey(contactSuppressionKeys('Max Mustermann', 'd:acme-pumpen.de')[0]);
+    const tx = makeDecideTx(makeLead(), company, outboxCreate, decisionCreate);
+    tx.suppressionRecord.findMany = vi.fn(async () => [{ type: 'contact_key', value: key }]);
+
+    await expect(makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'SUPPRESSED_CONTACT_UNREACHABLE' } },
+    });
     expect(outboxCreate).not.toHaveBeenCalled();
   });
 

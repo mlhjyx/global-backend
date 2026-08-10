@@ -9,7 +9,7 @@ const openApi = JSON.parse(
 ) as {
   paths: Record<string, Record<string, {
     parameters?: Array<{ name?: string; schema?: { type?: string } }>;
-    responses?: Record<string, { content?: { 'application/json'?: { schema?: { required?: string[] } } } }>;
+    responses?: Record<string, { content?: { 'application/json'?: { schema?: { required?: string[]; properties?: Record<string, unknown> } } } }>;
   }>>;
 };
 const readMigration = (): string =>
@@ -77,5 +77,19 @@ describe('suppression decision governance migration', () => {
       type: 'string',
       format: 'uuid',
     });
+
+    const decision400 = operation?.responses?.['400']?.content?.['application/json']?.schema as {
+      properties?: { error?: { properties?: { code?: { enum?: string[] } } } };
+    };
+    expect(decision400?.properties?.error?.properties?.code?.enum).toEqual(
+      expect.arrayContaining(['VALIDATION_ERROR', 'INVALID_REASON', 'INVALID_REQUEST_ID', 'INVALID_DECISION']),
+    );
+
+    const accept = openApi.paths['/api/v1/leads/{leadId}/accept']?.post;
+    expect(accept?.responses).toHaveProperty('409');
+    const accept409 = accept?.responses?.['409']?.content?.['application/json']?.schema as {
+      properties?: { error?: { properties?: { code?: { enum?: string[] } } } };
+    };
+    expect(accept409?.properties?.error?.properties?.code?.enum).toContain('SUPPRESSED_CONTACT_UNREACHABLE');
   });
 });

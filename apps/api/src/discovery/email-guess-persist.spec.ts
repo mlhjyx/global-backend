@@ -46,6 +46,7 @@ function fakeTx(
   opts?: {
     company?: { id: string; name: string; domain: string | null; status: string };
     companySuppressions?: { type: string; value: string }[];
+    contact?: { id: string; fullName: string; company: { dedupeKey: string } };
   },
 ) {
   const upsert = vi.fn(async () => ({}));
@@ -62,6 +63,13 @@ function fakeTx(
       fieldEvidence: { create },
       suppressionRecord: { findMany },
       canonicalCompany: { updateMany },
+      canonicalContact: {
+        findUnique: vi.fn(async () => opts?.contact ?? {
+          id: 'c1',
+          fullName: 'Hans Herold',
+          company: { dedupeKey: 'd:acme.de' },
+        }),
+      },
       $queryRaw: queryRaw,
     } as never,
     upsert,
@@ -128,6 +136,43 @@ describe('email-guess-persist · 落库（fake tx）', () => {
     });
     expect(out).toEqual({ persisted: false, reason: 'suppressed' });
     expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('猜测邮箱自身域命中 domain suppression 时不落库，即使 company.domain 不同', async () => {
+    const agencyResult: GuessResult = {
+      ...verifiedResult,
+      best: { ...verifiedResult.best!, email: 'h.herold@agency.example' },
+    };
+    const { tx, upsert } = fakeTx([], {
+      companySuppressions: [{ type: 'domain', value: 'agency.example' }],
+    });
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: agencyResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('contact_key 命中时不为已冻结具名人补写猜测邮箱', async () => {
+    const { contactSuppressionKeys } = await import('./identity');
+    const { blindContactKey } = await import('../compliance/pii-crypto');
+    const keys = contactSuppressionKeys('Hans Herold', 'd:acme.de').map((value) => blindContactKey(value));
+    const { tx, upsert } = fakeTx([], {
+      companySuppressions: keys.map((value) => ({ type: 'contact_key', value })),
+    });
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
     expect(upsert).not.toHaveBeenCalled();
   });
 

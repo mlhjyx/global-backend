@@ -20,6 +20,7 @@ function fakeTx(
     companyStatus?: string;
     suppressedContactKeys?: string[];
     suppressedEmails?: string[];
+    suppressedDomains?: string[];
   },
 ) {
   const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
@@ -39,6 +40,7 @@ function fakeTx(
   const suppressionFindMany = vi.fn(async () => [
     ...(opts?.suppressedContactKeys ?? []).map((value) => ({ type: 'contact_key', value })),
     ...(opts?.suppressedEmails ?? []).map((value) => ({ type: 'email', value })),
+    ...(opts?.suppressedDomains ?? []).map((value) => ({ type: 'domain', value })),
   ]);
   const queryRaw = vi.fn(async () => [{ status: opts?.companyStatus ?? 'NEW' }]);
   const tx = {
@@ -281,7 +283,23 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       contacts: [{ externalId: 'invalid', fullName: 'Invalid Mail', email: 'not-an-email', personalData: true }],
       suppressedEmails: new Set(),
     });
-    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 0, skippedInvalid: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(contactPointUpsert).not.toHaveBeenCalled();
+  });
+
+  it('联系人邮箱域命中 domain suppression 时不落库，即使公司自身使用不同域名', async () => {
+    const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([], {
+      suppressedDomains: ['agency.example'],
+    });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'agency', fullName: 'Agency Buyer', email: 'buyer@agency.example', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1, skippedInvalid: 0 });
     expect(canonicalUpsert).not.toHaveBeenCalled();
     expect(contactPointUpsert).not.toHaveBeenCalled();
   });
