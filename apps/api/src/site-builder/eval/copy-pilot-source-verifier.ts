@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { constants, type BigIntStats } from "node:fs";
+import { open, realpath, type FileHandle } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
@@ -24,6 +24,9 @@ import {
 const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const MAXIMUM_MANIFEST_BYTES = 2 * 1024 * 1024;
+const MAXIMUM_SOURCE_FILE_BYTES = 16 * 1024 * 1024;
+const MAXIMUM_SOURCE_TOTAL_BYTES = 128 * 1024 * 1024;
+const MAXIMUM_SOURCE_FILES = 512;
 
 export const COPY_PILOT_COMPILED_BUILD_COMMANDS = Object.freeze([
   "pnpm --filter @global/db generate",
@@ -126,32 +129,145 @@ function withinRoot(root: string, path: string): boolean {
   );
 }
 
-async function secureRead(path: string, maximumBytes: number): Promise<Buffer> {
-  const metadata = await lstat(path).catch(() =>
-    fail("COPY_PILOT_SOURCE_FILE_INVALID"),
+function sameOpenedNode(before: BigIntStats, after: BigIntStats): boolean {
+  return (
+    before.dev === after.dev &&
+    before.ino === after.ino &&
+    before.mode === after.mode &&
+    before.size === after.size &&
+    before.mtimeNs === after.mtimeNs &&
+    before.ctimeNs === after.ctimeNs
   );
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    fail("COPY_PILOT_SOURCE_FILE_INVALID");
-  }
-  let handle;
+}
+
+async function openNoFollow(
+  path: string,
+  flags: number,
+  errorCode: string,
+): Promise<FileHandle> {
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    return await open(
+      path,
+      flags | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
   } catch {
-    return fail("COPY_PILOT_SOURCE_FILE_INVALID");
+    return fail(errorCode);
   }
+}
+
+async function openStableDirectory(
+  path: string,
+  errorCode: string,
+): Promise<{ handle: FileHandle; stat: BigIntStats }> {
+  const handle = await openNoFollow(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY,
+    errorCode,
+  );
   try {
-    const opened = await handle.stat();
-    if (
-      !opened.isFile() ||
-      opened.dev !== metadata.dev ||
-      opened.ino !== metadata.ino ||
-      opened.size > maximumBytes
-    ) {
-      fail("COPY_PILOT_SOURCE_FILE_INVALID");
+    const stat = await handle.stat({ bigint: true });
+    if (!stat.isDirectory()) fail(errorCode);
+    return { handle, stat };
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+function descriptorPath(handle: FileHandle, name: string): string {
+  return `/proc/self/fd/${handle.fd}/${name}`;
+}
+
+async function readStableRegularHandle(
+  handle: FileHandle,
+  maximumBytes: number,
+  errorCode: string,
+): Promise<Buffer> {
+  const before = await handle.stat({ bigint: true });
+  if (!before.isFile() || before.size > BigInt(maximumBytes)) {
+    fail(errorCode);
+  }
+  const expectedSize = Number(before.size);
+  const bytes = Buffer.alloc(expectedSize + 1);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const result = await handle.read(
+      bytes,
+      offset,
+      bytes.length - offset,
+      offset,
+    );
+    if (result.bytesRead === 0) break;
+    offset += result.bytesRead;
+  }
+  const after = await handle.stat({ bigint: true });
+  if (!sameOpenedNode(before, after) || offset !== expectedSize) {
+    fail(errorCode);
+  }
+  return bytes.subarray(0, offset);
+}
+
+async function secureRead(
+  root: string,
+  repositoryPath: string,
+  maximumBytes: number,
+  errorCode: string,
+): Promise<Buffer> {
+  if (!safeRelativePath(repositoryPath)) fail(errorCode);
+  const openedDirectories: Array<{
+    handle: FileHandle;
+    stat: BigIntStats;
+  }> = [];
+  let fileHandle: FileHandle | undefined;
+  try {
+    openedDirectories.push(await openStableDirectory(root, errorCode));
+    const components = repositoryPath.split("/");
+    for (let index = 0; index < components.length; index += 1) {
+      const parent = openedDirectories.at(-1);
+      if (parent == null) fail(errorCode);
+      const parentBefore = await parent.handle.stat({ bigint: true });
+      if (!sameOpenedNode(parent.stat, parentBefore)) fail(errorCode);
+      const finalComponent = index === components.length - 1;
+      const child = await openNoFollow(
+        descriptorPath(parent.handle, components[index]),
+        constants.O_RDONLY |
+          (finalComponent ? 0 : constants.O_DIRECTORY),
+        errorCode,
+      );
+      const parentAfter = await parent.handle.stat({ bigint: true });
+      if (!sameOpenedNode(parentBefore, parentAfter)) {
+        await child.close().catch(() => undefined);
+        fail(errorCode);
+      }
+      if (finalComponent) {
+        fileHandle = child;
+      } else {
+        try {
+          const childStat = await child.stat({ bigint: true });
+          if (!childStat.isDirectory()) fail(errorCode);
+          openedDirectories.push({ handle: child, stat: childStat });
+        } catch (error) {
+          await child.close().catch(() => undefined);
+          throw error;
+        }
+      }
     }
-    return await handle.readFile();
+    if (fileHandle == null) fail(errorCode);
+    const bytes = await readStableRegularHandle(
+      fileHandle,
+      maximumBytes,
+      errorCode,
+    );
+    for (const directory of openedDirectories) {
+      const after = await directory.handle.stat({ bigint: true });
+      if (!sameOpenedNode(directory.stat, after)) fail(errorCode);
+    }
+    return bytes;
   } finally {
-    await handle.close();
+    await fileHandle?.close().catch(() => undefined);
+    for (const directory of openedDirectories.reverse()) {
+      await directory.handle.close().catch(() => undefined);
+    }
   }
 }
 
@@ -259,9 +375,7 @@ export async function createCopyPilotVerifiedSource(input: {
   const root = await realpath(input.repositoryRoot).catch(() =>
     fail("COPY_PILOT_REPOSITORY_ROOT_INVALID"),
   );
-  const manifestPath = await realpath(input.manifestArtifactPath).catch(() =>
-    fail("COPY_PILOT_MANIFEST_INVALID"),
-  );
+  const manifestPath = resolve(root, input.manifestArtifactPath);
   if (!withinRoot(root, manifestPath)) {
     fail("COPY_PILOT_MANIFEST_INVALID");
   }
@@ -281,7 +395,12 @@ export async function createCopyPilotVerifiedSource(input: {
   ) {
     fail("COPY_PILOT_MANIFEST_NOT_TRACKED");
   }
-  const manifestBytes = await secureRead(manifestPath, MAXIMUM_MANIFEST_BYTES);
+  const manifestBytes = await secureRead(
+    root,
+    manifestRelativePath,
+    MAXIMUM_MANIFEST_BYTES,
+    "COPY_PILOT_MANIFEST_INVALID",
+  );
   const trackedManifestBytes = gitBytes(root, [
     "show",
     `HEAD:${manifestRelativePath}`,
@@ -338,6 +457,10 @@ export async function createCopyPilotVerifiedSource(input: {
   }
 
   const seen = new Set<string>();
+  let sourceBytes = 0;
+  if (artifact.sourceBundle.files.length > MAXIMUM_SOURCE_FILES) {
+    fail("COPY_PILOT_SOURCE_BUNDLE_INVALID");
+  }
   for (const file of artifact.sourceBundle.files) {
     if (
       !file ||
@@ -350,17 +473,22 @@ export async function createCopyPilotVerifiedSource(input: {
       fail("COPY_PILOT_SOURCE_BUNDLE_INVALID");
     }
     seen.add(file.path);
-    const absolutePath = resolve(root, file.path);
-    if (!withinRoot(root, absolutePath)) {
-      fail("COPY_PILOT_SOURCE_BUNDLE_INVALID");
-    }
     const fixedBytes = gitBytes(root, [
       "show",
       `${artifact.fixedSourceCommit}:${file.path}`,
     ]);
     const digest = createHash("sha256").update(fixedBytes).digest("hex");
     if (digest !== file.sha256) fail("COPY_PILOT_SOURCE_DIGEST_MISMATCH");
-    const workingBytes = await secureRead(absolutePath, 16 * 1024 * 1024);
+    const workingBytes = await secureRead(
+      root,
+      file.path,
+      MAXIMUM_SOURCE_FILE_BYTES,
+      "COPY_PILOT_SOURCE_FILE_INVALID",
+    );
+    sourceBytes += workingBytes.length;
+    if (sourceBytes > MAXIMUM_SOURCE_TOTAL_BYTES) {
+      fail("COPY_PILOT_SOURCE_BUNDLE_INVALID");
+    }
     if (!workingBytes.equals(fixedBytes)) {
       fail("COPY_PILOT_SOURCE_BYTES_MISMATCH");
     }

@@ -5,7 +5,7 @@ import {
   COPY_SONNET_RECOVERY_PLAN,
   COPY_SONNET_RECOVERY_PLAN_DIGEST,
   COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
-  COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES,
+  COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES,
 } from "./copy-sonnet-recovery-contract";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -55,7 +55,7 @@ const EXECUTIONS = Object.freeze([
 ] as const);
 const CHILD_CAMPAIGN = Object.freeze({
   ...COPY_SONNET_RECOVERY_EXECUTION,
-  childSlotId: "copy-sonnet-recovery-v15-child-claude-sonnet-5",
+  childSlotId: "copy-sonnet-recovery-v16-child-claude-sonnet-5",
   maximumExecutions: 1 as const,
   maximumWireCalls: 2 as const,
   maximumRepairCallsPerExecution: 1 as const,
@@ -480,15 +480,15 @@ function validChildShape(
     }) === CANONICAL_DIGEST(expected) &&
     versionedIdentity(
       child.campaignId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.campaignId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.campaignId,
     ) &&
     versionedIdentity(
       child.authorizationId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.childAuthorizationId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.childAuthorizationId,
     ) &&
     versionedIdentity(
       child.reservationId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.reservationId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.reservationId,
     ) &&
     SHA256.test(child.ledgerIdentityDigest) &&
     child.reservedQuotaPoints === expectedReservation
@@ -522,7 +522,7 @@ function validateAuthorization(
       "site-builder-copy-sonnet-recovery-dispatch-authorization/2026-08-08-v1" ||
     !versionedIdentity(
       authorization.authorizationId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.globalAuthorizationId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.globalAuthorizationId,
     ) ||
     authorization.status !== "AUTHORIZED" ||
     authorization.reservationStatus !== "RESERVED" ||
@@ -605,15 +605,15 @@ function validateChildAuthorization(
     child.executionKey !== slot.executionKey ||
     !versionedIdentity(
       child.campaignId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.campaignId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.campaignId,
     ) ||
     !versionedIdentity(
       child.authorizationId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.childAuthorizationId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.childAuthorizationId,
     ) ||
     !versionedIdentity(
       child.reservationId,
-      COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES.reservationId,
+      COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES.reservationId,
     ) ||
     child.campaignId !== slot.campaignId ||
     child.authorizationId !== slot.authorizationId ||

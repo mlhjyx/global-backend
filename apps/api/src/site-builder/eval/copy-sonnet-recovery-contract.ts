@@ -2,20 +2,20 @@ import { canonicalDigest } from "../../model-runtime/context-engine";
 import { COPY_CAPABILITY_PILOT_PLAN } from "./copy-capability-pilot";
 
 export const COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v15.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v16.json" as const;
 export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json" as const;
 export const COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID =
-  "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v15-v1" as const;
+  "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v16-v1" as const;
 export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID =
-  "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1" as const;
-export const COPY_SONNET_RECOVERY_V15_IDENTITY_PREFIXES = Object.freeze({
-  campaignId: "copy-sonnet-recovery-v15-campaign-" as const,
+  "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v16-v1" as const;
+export const COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES = Object.freeze({
+  campaignId: "copy-sonnet-recovery-v16-campaign-" as const,
   globalAuthorizationId:
-    "copy-sonnet-recovery-v15-global-authorization-" as const,
+    "copy-sonnet-recovery-v16-global-authorization-" as const,
   childAuthorizationId:
-    "copy-sonnet-recovery-v15-child-authorization-" as const,
-  reservationId: "copy-sonnet-recovery-v15-child-reservation-" as const,
+    "copy-sonnet-recovery-v16-child-authorization-" as const,
+  reservationId: "copy-sonnet-recovery-v16-child-reservation-" as const,
 });
 
 const SOURCE_SONNET_EXECUTION = COPY_CAPABILITY_PILOT_PLAN.executions.find(
@@ -30,7 +30,7 @@ if (
 }
 
 export const COPY_SONNET_RECOVERY_EXECUTION = Object.freeze({
-  executionKey: "copy-sonnet-recovery-v15-claude-sonnet-5" as const,
+  executionKey: "copy-sonnet-recovery-v16-claude-sonnet-5" as const,
   sourcePilotExecutionKey: SOURCE_SONNET_EXECUTION.executionKey,
   alias: "claude-sonnet-5" as const,
   protocol: "anthropic_messages" as const,
@@ -43,15 +43,15 @@ export const COPY_SONNET_RECOVERY_DUPLICATE_PREVENTION = Object.freeze({
     "gpt-5.6-sol",
   ] as const),
   acceptedWireReplayPolicy:
-    "never_repeat_successful_v11_or_stopped_v12_or_v13_or_v14_wires" as const,
+    "never_repeat_successful_v11_or_stopped_v12_or_v13_or_v14_or_v15_wires" as const,
   consumedAuthorizationPolicy:
-    "never_reuse_v11_v12_v13_or_v14_authorization" as const,
+    "never_reuse_v11_v12_v13_v14_or_v15_authorization" as const,
 });
 
 export const COPY_SONNET_RECOVERY_PLAN = Object.freeze({
   schemaVersion:
     "site-builder-copy-sonnet-recovery-plan/2026-08-08-v1" as const,
-  planId: "site-builder-copy-sonnet-recovery/2026-08-10-v15" as const,
+  planId: "site-builder-copy-sonnet-recovery/2026-08-10-v16" as const,
   taskId: "site_builder.copy" as const,
   plannedExecutions: 1 as const,
   maximumWireCalls: 2 as const,

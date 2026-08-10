@@ -1,6 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -180,6 +188,21 @@ describe("Copy pilot fixed-source verifier", () => {
     ).rejects.toThrow("COPY_PILOT_MANIFEST_NOT_TRACKED");
   });
 
+  it("rejects an intermediate source-directory symlink even when bytes match", async () => {
+    const fixture = await repository();
+    const originalDirectory = join(fixture.root, "src");
+    const relocatedDirectory = join(fixture.root, "src-relocated");
+    await rename(originalDirectory, relocatedDirectory);
+    await symlink(relocatedDirectory, originalDirectory, "dir");
+
+    await expect(
+      createCopyPilotVerifiedSource({
+        repositoryRoot: fixture.root,
+        manifestArtifactPath: fixture.manifestPath,
+      }),
+    ).rejects.toThrow("COPY_PILOT_SOURCE_FILE_INVALID");
+  });
+
   it("rejects stale compiled bytes and unreachable preparation provenance", async () => {
     const fixture = await repository();
     await writeFile(join(fixture.root, "dist", "runtime.js"), "stale\n");
@@ -220,8 +243,8 @@ describe("Copy pilot fixed-source verifier", () => {
     ).rejects.toThrow("COPY_PILOT_PREPARATION_SOURCE_UNREACHABLE");
   });
 
-  for (const version of ["v13", "v14"] as const) {
-    it(`rejects the frozen ${version} recovery binding as the live v15 source`, async () => {
+  for (const version of ["v13", "v14", "v15"] as const) {
+    it(`rejects the frozen ${version} recovery binding as the live v16 source`, async () => {
       await expect(
         createCopyPilotVerifiedSource({
           repositoryRoot: REPOSITORY_ROOT,

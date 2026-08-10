@@ -39,9 +39,9 @@ const GIT_COMMIT = /^[0-9a-f]{40}$/u;
 const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 
 export const COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT =
-  "fcb61e3060dd3289fec93bca11d02584f8080791" as const;
+  "dcbbff8dfc34e7f2559327ccbdce0d4049387453" as const;
 export const COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v15.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-manifest-v16.json" as const;
 
 const PROVENANCE_ARTIFACT_SPECS = Object.freeze([
   Object.freeze({
@@ -104,7 +104,7 @@ export interface CopySonnetRecoveryProvenanceArtifactRef {
 
 export interface CopySonnetRecoveryManifest {
   schemaVersion: "site-builder-copy-sonnet-recovery-manifest/2026-08-08-v1";
-  manifestId: "site-builder-copy-sonnet-recovery/2026-08-10-v15";
+  manifestId: "site-builder-copy-sonnet-recovery/2026-08-10-v16";
   fixedSourceCommit: string;
   sourceBundleDigest: string;
   recoveryPlanDigest: string;
@@ -118,7 +118,7 @@ export interface CopySonnetRecoveryManifest {
 
 export interface CopySonnetRecoveryManifestArtifact {
   schemaVersion: "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v1";
-  artifactId: "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-10-v15";
+  artifactId: "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-10-v16";
   classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -171,7 +171,7 @@ export interface CopySonnetRecoveryManifestArtifact {
     "GIT_REVIEWED_RECOVERY_RUNTIME_EVIDENCE",
     "KNOWN_SETTLEMENT_PER_PHYSICAL_CALL",
     "NEVER_REPEAT_TERRA_OR_SOL_V11_WIRES",
-    "NEVER_REUSE_V11_V12_V13_OR_V14_AUTHORIZATION_OR_WIRE",
+    "NEVER_REUSE_V11_V12_V13_V14_OR_V15_AUTHORIZATION_OR_WIRE",
   ];
   artifactDigest: string;
 }
@@ -297,7 +297,7 @@ export function buildCopySonnetRecoveryManifestArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-sonnet-recovery-manifest/2026-08-08-v1" as const,
-    manifestId: "site-builder-copy-sonnet-recovery/2026-08-10-v15" as const,
+    manifestId: "site-builder-copy-sonnet-recovery/2026-08-10-v16" as const,
     fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
     sourceBundleDigest: sourceBundle.digest,
     recoveryPlanDigest: planDigest,
@@ -322,7 +322,7 @@ export function buildCopySonnetRecoveryManifestArtifact(input: {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-08-v1" as const,
     artifactId:
-      "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-10-v15" as const,
+      "site-builder-copy-sonnet-recovery-manifest-prep/2026-08-10-v16" as const,
     classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY" as const,
     fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
     preparationHeadCommit: input.preparationHeadCommit,
@@ -371,7 +371,7 @@ export function buildCopySonnetRecoveryManifestArtifact(input: {
       "GIT_REVIEWED_RECOVERY_RUNTIME_EVIDENCE",
       "KNOWN_SETTLEMENT_PER_PHYSICAL_CALL",
       "NEVER_REPEAT_TERRA_OR_SOL_V11_WIRES",
-      "NEVER_REUSE_V11_V12_V13_OR_V14_AUTHORIZATION_OR_WIRE",
+      "NEVER_REUSE_V11_V12_V13_V14_OR_V15_AUTHORIZATION_OR_WIRE",
     ] as const),
   };
   return deepFreeze({

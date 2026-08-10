@@ -34,7 +34,7 @@ function regularStat(overrides = {}) {
 function binding() {
   return {
     artifactId:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1",
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v16-v1",
     fixedSourceCommit: "f".repeat(40),
     dispatchAuthorization: "NOT_AUTHORIZED",
     sourceBundle: {
@@ -55,9 +55,9 @@ function eligibility(overrides = {}) {
   return {
     schema_version: "site-builder-copy-runtime-eligibility/v1",
     active_binding_path:
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json",
     active_binding_artifact_id:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v15-v1",
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v16-v1",
     active_binding_source_bundle_digest: SHA_A,
     status: "CURRENT",
     current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
@@ -73,11 +73,11 @@ function eligibility(overrides = {}) {
 test("Copy impact stays CURRENT only when every bound source byte matches", () => {
   assert.equal(
     ACTIVE_COPY_RUNTIME_BINDING_PATH,
-    "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v15.json",
+    "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json",
   );
   assert.equal(
     ACTIVE_COPY_RUNTIME_BINDING_SHA256,
-    "838121ccf9649b05d9c04b05a1cec7ba094439a8a81a177462e5955a17c2ef7c",
+    "a0b04862b538ae601b352a37d42eb8999ab67011d712d7d4dd765e6fa27ff6af",
   );
   const result = evaluateCopyFixedSourceImpact({
     binding: binding(),

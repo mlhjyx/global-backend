@@ -1580,6 +1580,8 @@ async function createCopyCapabilityChildRunner(input: {
     input.admission.childAuthorization,
     ledgerEvidenceBinding,
   );
+  await assertCopyPilotVerifiedSourceCurrent(input.verifiedSource);
+  await ASSERT_COMPILED_CURRENT(compiledGuard);
   const ledger = await RealModelExecutionLedger.open({
     ledgerPath: input.ledgerPath,
     authorizationClaimPath: input.authorizationClaimPath,
