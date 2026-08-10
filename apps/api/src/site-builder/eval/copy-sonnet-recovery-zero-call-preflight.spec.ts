@@ -109,7 +109,7 @@ function liveFetch(options: {
     ...(options.retiredV16Token
       ? [{ id: 24, name: "Site Builder Copy Sonnet Recovery v16", status: 2 }]
       : []),
-    ...(options.retiredV17Token
+    ...(options.retiredV17Token !== false
       ? [{ id: 25, name: "Site Builder Copy Sonnet Recovery v17", status: 2 }]
       : []),
     ...(options.activeV16Token
@@ -283,11 +283,11 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     expect(COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH).toBe(
       "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v18.json",
     );
-    expect(result.secret.tokenId).toBe(25);
+    expect(result.secret.tokenId).toBe(26);
     expect(result.secret.apiKey).toBe(["sk", "one", "time", "secret"].join("-"));
     expect(result.artifact).toMatchObject({
       schemaVersion:
-        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v1",
+        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v18-v1",
       artifactId:
         "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v18-v1",
       classification: "CONTROL_PLANE_ATTESTATION_ONLY",
@@ -308,7 +308,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
       },
       credential: {
         purpose: "site_builder_copy_sonnet_recovery",
-        tokenId: 25,
+        tokenId: 26,
         bearerTokenSha256:
           "e98839495b40726d4193460951a0e4ee0d76f0e9772619275ded5db4d0017a9b",
         expiresAt: "2026-08-11T06:00:00.000Z",

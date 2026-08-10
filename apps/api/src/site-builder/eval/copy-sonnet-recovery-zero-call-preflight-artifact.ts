@@ -7,11 +7,11 @@ import {
 } from "./copy-sonnet-recovery-contract";
 
 export const COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v17.json" as const;
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v18.json" as const;
 export const COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_SCHEMA_VERSION =
-  "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v1" as const;
+  "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v18-v1" as const;
 export const COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_ARTIFACT_ID =
-  "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v17-v1" as const;
+  "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v18-v1" as const;
 export const COPY_SONNET_RECOVERY_CREDENTIAL_PURPOSE =
   "site_builder_copy_sonnet_recovery" as const;
 export const COPY_SONNET_RECOVERY_OPENOX_GROUP = "special" as const;
