@@ -819,7 +819,12 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
     !postPrice ||
     postPrice.pricingVersion !== price.pricingVersion ||
     postPricing.responseSha256 !== catalogResponseSha256 ||
-    postTokens.filter(isV18PurposeToken).length !== 1
+    postTokens.filter(isV18PurposeToken).length !== 1 ||
+    postTokens.filter((token) => token.name === RETIRED_V17_TOKEN_NAME).length !== 1 ||
+    postTokens.some(
+      (token) =>
+        token.name === RETIRED_V17_TOKEN_NAME && !isExactRetiredV17Token(token),
+    )
   ) {
     fail("COPY_SONNET_RECOVERY_POST_CREATE_DRIFT");
   }
@@ -922,7 +927,7 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
       prohibitedModelEndpointCalls: 0 as const,
     },
     requiredFollowup: [
-      "SEPARATE_V17_DISPATCH_AUTHORIZATION",
+      "SEPARATE_V18_DISPATCH_AUTHORIZATION",
       "REQUEST_BOUND_SETTLEMENT_PER_PHYSICAL_WIRE",
       "GIT_REVIEWED_CAPABILITY_EVIDENCE",
     ] as const,

@@ -119,7 +119,7 @@ export interface CopySonnetRecoveryZeroCallPreflightArtifact {
     prohibitedModelEndpointCalls: 0;
   };
   requiredFollowup: readonly [
-    "SEPARATE_V17_DISPATCH_AUTHORIZATION",
+    "SEPARATE_V18_DISPATCH_AUTHORIZATION",
     "REQUEST_BOUND_SETTLEMENT_PER_PHYSICAL_WIRE",
     "GIT_REVIEWED_CAPABILITY_EVIDENCE",
   ];
@@ -464,7 +464,7 @@ export function validateCopySonnetRecoveryZeroCallPreflightArtifact(
       !observationsComplete ||
       JSON.stringify(artifact.requiredFollowup) !==
         JSON.stringify([
-          "SEPARATE_V17_DISPATCH_AUTHORIZATION",
+          "SEPARATE_V18_DISPATCH_AUTHORIZATION",
           "REQUEST_BOUND_SETTLEMENT_PER_PHYSICAL_WIRE",
           "GIT_REVIEWED_CAPABILITY_EVIDENCE",
         ]) ||

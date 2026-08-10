@@ -635,6 +635,14 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     };
     for (const mutation of [
       { ...artifact, dispatchAuthorization: "AUTHORIZED" },
+      {
+        ...artifact,
+        requiredFollowup: [
+          "SEPARATE_V17_DISPATCH_AUTHORIZATION",
+          "REQUEST_BOUND_SETTLEMENT_PER_PHYSICAL_WIRE",
+          "GIT_REVIEWED_CAPABILITY_EVIDENCE",
+        ],
+      },
       { ...artifact, observedModelWireCalls: 1 },
       {
         ...artifact,
