@@ -329,7 +329,7 @@ describe("Copy Sonnet recovery admission", () => {
     ).toThrow("COPY_SONNET_RECOVERY_MANIFEST_INVALID");
   });
 
-  for (const version of ["v11", "v12", "v13", "v14"] as const) {
+  for (const version of ["v11", "v12", "v13", "v14", "v15"] as const) {
     for (const field of [
       "globalAuthorization",
       "campaign",
