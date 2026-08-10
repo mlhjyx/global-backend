@@ -22,7 +22,13 @@ function entity(index: number, email = 'sales@example.com') {
 function projectionHarness(
   entities: ReturnType<typeof entity>[],
   suppressions: unknown[][],
-  prior?: { id: string; attributes: Record<string, unknown> },
+  prior?: {
+    id: string;
+    name?: string;
+    domain?: string | null;
+    status?: string;
+    attributes: Record<string, unknown>;
+  },
 ) {
   const creates: Record<string, unknown>[] = [];
   const updates: Record<string, unknown>[] = [];
@@ -115,5 +121,31 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
     expect(harness.suppressionRecord.findMany).toHaveBeenCalledTimes(2);
     expect(harness.creates).toHaveLength(101);
     expect(harness.creates.at(-1)?.attributes).not.toHaveProperty('contact_email');
+  });
+
+  it('repairs and stops when an existing canonical identity matches company suppression', async () => {
+    const incoming = { ...entity(1), name: 'Source Listing Name', domain: null };
+    const harness = projectionHarness(
+      [incoming],
+      [[{ type: 'domain', value: 'blocked.example' }]],
+      {
+        id: 'company-existing',
+        name: 'Existing Legal Entity GmbH',
+        domain: 'https://www.blocked.example/about',
+        status: 'NEW',
+        attributes: { products: ['pump'], contact_email: 'sales@blocked.example' },
+      },
+    );
+
+    const result = await harness.service.projectSource('workspace-1', source.id);
+
+    expect(result).toMatchObject({ projected: 0, suppressed: 1 });
+    expect(harness.updates).toEqual([
+      {
+        status: 'SUPPRESSED',
+        attributes: { products: ['pump'] },
+        version: { increment: 1 },
+      },
+    ]);
   });
 });

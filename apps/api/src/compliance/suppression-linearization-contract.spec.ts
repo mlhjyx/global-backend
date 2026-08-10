@@ -50,6 +50,17 @@ describe('suppression writer/action linearization topology', () => {
     }
   });
 
+  it('canonicalize and tenant projections reuse existing-identity materialization state', () => {
+    for (const path of [
+      'apps/api/src/temporal/discovery.activities.ts',
+      'apps/api/src/acquisition/tenant-projection.service.ts',
+    ]) {
+      expect(read(path), `${path} must check incoming and existing canonical identity`).toContain(
+        'loadMaterializableCompanyState',
+      );
+    }
+  });
+
   it('manual and backlog contact/email paths authorize each adapter or contact before network processing', () => {
     const service = read('apps/api/src/discovery/discovery.service.ts');
     const backlog = read('apps/api/src/temporal/backlog.activities.ts');
