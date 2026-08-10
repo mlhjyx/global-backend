@@ -1,5 +1,7 @@
 import { resolveMx } from 'node:dns/promises';
-import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext } from '../provider-contract';
+import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext,
+  externalActionAuthorized,
+} from '../provider-contract';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
 
@@ -47,9 +49,18 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       } catch {
         // 读失败 → 放行到下游 invoke 合规门权威判定（fail-safe）
       }
-      if (!precheck.allowed) return { status: 'RISKY', detail: `source_policy_${precheck.reason ?? 'denied'}`, costCents: 0 };
+      if (!precheck.allowed) return { status: 'RISKY', detail: `source_policy_${precheck.reason ?? 'denied'}`,
+          costCents: 0,
+        };
     }
 
+    if (!(await externalActionAuthorized(ctx ?? {}))) {
+      return {
+        status: 'BLOCKED',
+        detail: 'suppression_action_gate',
+        costCents: 0,
+      };
+    }
     let mx: { exchange: string; priority: number }[];
     try {
       mx = await resolveMx(domain);
@@ -66,7 +77,11 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
 
     // 反枚举 provider（Gmail/M365…）：SMTP 一律 250，探了也白探 → 直接 RISKY，省一次连接
     if (enumResistant) {
-      return { status: 'RISKY', detail: `provider_anti_enumeration:${provider}`, costCents: 0 };
+      return {
+        status: 'RISKY',
+        detail: `provider_anti_enumeration:${provider}`,
+        costCents: 0,
+      };
     }
 
     // 无闸门 = 不允许原始 SMTP 出网（绝不绕过 ToolBroker）→ 诚实降级。
@@ -80,6 +95,7 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       // 不把各租户折叠进同一个合成 run。
       runId: ctx?.runId,
       correlationId: `email-verify:${domain}`,
+      authorizeExternalAction: ctx?.authorizeExternalAction,
     };
     let probe: SmtpProbeOutput;
     try {
@@ -93,11 +109,19 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       // Broker 拒绝：SUSPENDED/用途门（竞态）= source_policy_denied；其余（预算/限流兜底）= probe_failed。
       // 任何情况都**不**回落到原始出网。
       const denied = (err as { name?: string })?.name === 'ToolPolicyDenied';
-      return { status: 'RISKY', detail: denied ? 'source_policy_denied' : 'smtp_probe_failed', costCents: 0 };
+      return {
+        status: 'RISKY',
+        detail: denied ? 'source_policy_denied' : 'smtp_probe_failed',
+        costCents: 0,
+      };
     }
     // 工具内 SSRF 护栏拦截（MX 指向私网/内网）→ 未发生出网 → RISKY。
     if (probe.egressBlocked) {
-      return { status: 'RISKY', detail: `mx_egress_blocked:${probe.egressBlocked}`, costCents: 0 };
+      return {
+        status: 'RISKY',
+        detail: `mx_egress_blocked:${probe.egressBlocked}`,
+        costCents: 0,
+      };
     }
     const randomCode = probe.codes[1] ?? null;
 
@@ -119,10 +143,14 @@ const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 // ─────────────────────── 纯逻辑（可测，不触网） ───────────────────────
 
 /** 从 MX 主机名分类邮件服务商 + 是否**反枚举**（对任意地址一律 250，无法逐一确认）。 */
-export function classifyEmailProvider(mxExchanges: string[]): { provider: string; enumResistant: boolean } {
+export function classifyEmailProvider(mxExchanges: string[]): {
+  provider: string;
+  enumResistant: boolean;
+} {
   const h = mxExchanges.join(' ').toLowerCase();
   if (/aspmx|google|googlemail/.test(h)) return { provider: 'google_workspace', enumResistant: true };
-  if (/protection\.outlook|outlook|office365|microsoft/.test(h)) return { provider: 'microsoft_365', enumResistant: true };
+  if (/protection\.outlook|outlook|office365|microsoft/.test(h))
+    return { provider: 'microsoft_365', enumResistant: true };
   if (/pphosted|proofpoint/.test(h)) return { provider: 'proofpoint', enumResistant: true };
   if (/mimecast/.test(h)) return { provider: 'mimecast', enumResistant: true };
   if (/barracuda/.test(h)) return { provider: 'barracuda', enumResistant: true };
@@ -157,16 +185,39 @@ export interface VerdictSignals {
  */
 export function decideEmailVerdict(s: VerdictSignals): EmailVerdict {
   if (!s.mxPresent) return { status: 'INVALID', detail: 'no_mx', costCents: 0 };
-  if (s.enumResistant) return { status: 'RISKY', detail: `provider_anti_enumeration:${s.provider}`, costCents: 0 };
-  if (!s.smtpReachable) return { status: 'RISKY', detail: 'smtp_unreachable(port25_blocked?)_mx_present', costCents: 0 };
+  if (s.enumResistant)
+    return {
+      status: 'RISKY',
+      detail: `provider_anti_enumeration:${s.provider}`,
+      costCents: 0,
+    };
+  if (!s.smtpReachable)
+    return {
+      status: 'RISKY',
+      detail: 'smtp_unreachable(port25_blocked?)_mx_present',
+      costCents: 0,
+    };
   // MAIL FROM 被拒（发件人策略/503/554…）→ RCPT 结果不代表 mailbox 存在性，不可判 INVALID
   if (!s.mailFromOk) return { status: 'RISKY', detail: 'mail_from_rejected', costCents: 0 };
-  if (isRejected(s.rcptCode)) return { status: 'INVALID', detail: `mailbox_rejected:${s.rcptCode}`, costCents: 0 };
+  if (isRejected(s.rcptCode))
+    return {
+      status: 'INVALID',
+      detail: `mailbox_rejected:${s.rcptCode}`,
+      costCents: 0,
+    };
   if (s.catchAllStatus === 'catch_all') return { status: 'RISKY', detail: 'catch_all_domain', costCents: 0 };
   if (isAccepted(s.rcptCode) && s.catchAllStatus === 'not_catch_all') {
-    return { status: 'VALID', detail: `smtp_accepted:${s.rcptCode}`, costCents: 0 };
+    return {
+      status: 'VALID',
+      detail: `smtp_accepted:${s.rcptCode}`,
+      costCents: 0,
+    };
   }
   // 真实地址被接受、但 catch-all 未证伪(inconclusive) → 不能判 VALID（可能是 catch-all）
   if (isAccepted(s.rcptCode)) return { status: 'RISKY', detail: 'catch_all_unproven', costCents: 0 };
-  return { status: 'RISKY', detail: `inconclusive:${s.rcptCode ?? 'no_code'}`, costCents: 0 };
+  return {
+    status: 'RISKY',
+    detail: `inconclusive:${s.rcptCode ?? 'no_code'}`,
+    costCents: 0,
+  };
 }

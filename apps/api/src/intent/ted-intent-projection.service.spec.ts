@@ -40,7 +40,11 @@ function tedSignal(over: Partial<SignalRow> & { name: string; occurredAt: Date }
     strength: 0.9,
     occurredAt: over.occurredAt,
     observedAt: over.observedAt ?? over.occurredAt,
-    payload: over.payload ?? { cpv: ['42122130'], notice: over.externalId ?? 'N-1', source: 'ted' },
+    payload: over.payload ?? {
+      cpv: ['42122130'],
+      notice: over.externalId ?? 'N-1',
+      source: 'ted',
+    },
     license: 'CC BY 4.0',
     jurisdiction: 'EU',
     status: over.status ?? 'ACTIVE',
@@ -49,21 +53,50 @@ function tedSignal(over: Partial<SignalRow> & { name: string; occurredAt: Date }
 }
 
 interface FakeTenant {
-  companies: Map<string, { id: string; workspaceId: string; dedupeKey: string; name: string; country: string; status: string; attributes: Record<string, unknown>; version: number }>;
+  companies: Map<
+    string,
+    {
+      id: string;
+      workspaceId: string;
+      dedupeKey: string;
+      name: string;
+      country: string;
+      status: string;
+      attributes: Record<string, unknown>;
+      version: number;
+    }
+  >;
   evidence: { field: string; providerKey: string; value: unknown }[];
 }
 
 /** 平台 source_signal + 租户 canonical/fieldEvidence 的内存假体。 */
-function fakePrisma(signals: SignalRow[]): PrismaService & FakeTenant {
+function fakePrisma(
+  signals: SignalRow[],
+  suppressions: { type: string; value: string }[] = [],
+): PrismaService & FakeTenant {
   const companies: FakeTenant['companies'] = new Map();
   const evidence: FakeTenant['evidence'] = [];
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
+    suppressionRecord: {
+      findMany: async () => suppressions,
+    },
     canonicalCompany: {
-      findUnique: async ({ where }: { where: { workspaceId_dedupeKey: { workspaceId: string; dedupeKey: string } } }) =>
-        companies.get(where.workspaceId_dedupeKey.dedupeKey) ?? null,
-      upsert: async ({ where, create, update }: {
+      findUnique: async ({
+        where,
+      }: {
+        where: {
+          workspaceId_dedupeKey: { workspaceId: string; dedupeKey: string };
+        };
+      }) => companies.get(where.workspaceId_dedupeKey.dedupeKey) ?? null,
+      upsert: async ({
+        where,
+        create,
+        update,
+      }: {
         where: { workspaceId_dedupeKey: { dedupeKey: string } };
-        create: Record<string, unknown>; update: Record<string, unknown>;
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
       }) => {
         const key = where.workspaceId_dedupeKey.dedupeKey;
         const prior = companies.get(key);
@@ -92,7 +125,11 @@ function fakePrisma(signals: SignalRow[]): PrismaService & FakeTenant {
     },
     fieldEvidence: {
       create: async ({ data }: { data: { field: string; providerKey: string; value: unknown } }) => {
-        evidence.push({ field: data.field, providerKey: data.providerKey, value: data.value });
+        evidence.push({
+          field: data.field,
+          providerKey: data.providerKey,
+          value: data.value,
+        });
         return { id: `fe-${evidence.length}` };
       },
     },
@@ -102,8 +139,19 @@ function fakePrisma(signals: SignalRow[]): PrismaService & FakeTenant {
     evidence,
     sourceSignal: {
       // 支持 (occurredAt desc, id desc) 稳定排序 + Prisma cursor 分页（cursor/skip）——投影端分页扫描 CPV 匹配。
-      findMany: async ({ where, take, cursor, skip }: {
-        where: { providerKey: string; signalType: string; status: string; occurredAt: { gte: Date }; subjectCountry: { in: string[] } };
+      findMany: async ({
+        where,
+        take,
+        cursor,
+        skip,
+      }: {
+        where: {
+          providerKey: string;
+          signalType: string;
+          status: string;
+          occurredAt: { gte: Date };
+          subjectCountry: { in: string[] };
+        };
         take: number;
         cursor?: { id: string };
         skip?: number;
@@ -147,9 +195,21 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
   it('ACTIVE 信号按 CPV 子树×国别（ISO-3→alpha-2）匹配 → 新建买方线索 + TENDER_PUBLISHED + CC BY 双证据', async () => {
     const at = new Date(now - 3 * DAY_MS);
     const prisma = fakePrisma([
-      tedSignal({ name: 'Stadt Musterstadt', occurredAt: at, externalId: 'N-100' }),
-      tedSignal({ name: 'Ville de Lyon', occurredAt: at, subjectCountry: 'FR' }), // 国别外 → 不投
-      tedSignal({ name: 'Klinikum Beispiel', occurredAt: at, taxonomyKeys: ['cpv:33100000'] }), // 子树外 → 不投
+      tedSignal({
+        name: 'Stadt Musterstadt',
+        occurredAt: at,
+        externalId: 'N-100',
+      }),
+      tedSignal({
+        name: 'Ville de Lyon',
+        occurredAt: at,
+        subjectCountry: 'FR',
+      }), // 国别外 → 不投
+      tedSignal({
+        name: 'Klinikum Beispiel',
+        occurredAt: at,
+        taxonomyKeys: ['cpv:33100000'],
+      }), // 子树外 → 不投
     ]);
     const svc = new TedIntentProjectionService({ prisma });
     const r = await svc.projectTenders(WS, params);
@@ -172,8 +232,16 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
     const older = new Date(now - 10 * DAY_MS);
     const newer = new Date(now - 2 * DAY_MS);
     const prisma = fakePrisma([
-      tedSignal({ name: 'Stadt Musterstadt', occurredAt: older, externalId: 'N-old' }),
-      tedSignal({ name: 'Stadt Musterstadt', occurredAt: newer, externalId: 'N-new' }),
+      tedSignal({
+        name: 'Stadt Musterstadt',
+        occurredAt: older,
+        externalId: 'N-old',
+      }),
+      tedSignal({
+        name: 'Stadt Musterstadt',
+        occurredAt: newer,
+        externalId: 'N-new',
+      }),
     ]);
     const svc = new TedIntentProjectionService({ prisma });
     const r = await svc.projectTenders(WS, params);
@@ -198,7 +266,13 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
 
   it('幂等：同信号第二轮投影 → 不 bump version、不堆 evidence 行', async () => {
     const at = new Date(now - 3 * DAY_MS);
-    const prisma = fakePrisma([tedSignal({ name: 'Stadt Musterstadt', occurredAt: at, externalId: 'N-100' })]);
+    const prisma = fakePrisma([
+      tedSignal({
+        name: 'Stadt Musterstadt',
+        occurredAt: at,
+        externalId: 'N-100',
+      }),
+    ]);
     const svc = new TedIntentProjectionService({ prisma });
     await svc.projectTenders(WS, params);
     const versionAfterFirst = [...prisma.companies.values()][0].version;
@@ -215,8 +289,14 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
     const sig = tedSignal({ name: 'Stadt Musterstadt', occurredAt: at });
     const prisma = fakePrisma([sig]);
     prisma.companies.set(sig.subjectKey, {
-      id: 'co-x', workspaceId: WS, dedupeKey: sig.subjectKey, name: 'Stadt Musterstadt', country: 'DE',
-      status: 'SUPPRESSED', attributes: {}, version: 1,
+      id: 'co-x',
+      workspaceId: WS,
+      dedupeKey: sig.subjectKey,
+      name: 'Stadt Musterstadt',
+      country: 'DE',
+      status: 'SUPPRESSED',
+      attributes: {},
+      version: 1,
     });
     const svc = new TedIntentProjectionService({ prisma });
     const r = await svc.projectTenders(WS, params);
@@ -224,13 +304,38 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
     expect(prisma.evidence.length).toBe(0);
   });
 
+  it('append-only legacy company_name suppression 在创建 canonical 前阻断投影', async () => {
+    const at = new Date(now - 3 * DAY_MS);
+    const prisma = fakePrisma(
+      [tedSignal({ name: 'Müller Pumpen GmbH', occurredAt: at })],
+      [{ type: 'company_name', value: ' MÜLLER   PUMPEN GMBH ' }],
+    );
+    const svc = new TedIntentProjectionService({ prisma });
+
+    const result = await svc.projectTenders(WS, params);
+
+    expect(result.companiesTouched).toBe(0);
+    expect(prisma.companies.size).toBe(0);
+    expect(prisma.evidence).toHaveLength(0);
+  });
+
   it('分页扫描：>SCAN_LIMIT 条更新的非匹配 ACTIVE 信号不截断更旧的 CPV 匹配信号（#56 P2）', async () => {
     // 首页 2000 条更"新"的异子树信号（cpv:33*，不匹配 ICP 42*）+ 1 条更旧的匹配信号（cpv:42122130）。
     // 旧单次 take:2000 只拿到首页 → 匹配信号被截断在窗外（signalsMatched=0）；分页后第二页扫到它。
     const noise = Array.from({ length: 2000 }, (_, i) =>
-      tedSignal({ name: `Noise ${i}`, occurredAt: new Date(now - DAY_MS - i), taxonomyKeys: ['cpv:33100000'], id: `noise-${String(i).padStart(5, '0')}` }),
+      tedSignal({
+        name: `Noise ${i}`,
+        occurredAt: new Date(now - DAY_MS - i),
+        taxonomyKeys: ['cpv:33100000'],
+        id: `noise-${String(i).padStart(5, '0')}`,
+      }),
     );
-    const oldMatch = tedSignal({ name: 'Stadt Alt', occurredAt: new Date(now - 20 * DAY_MS), externalId: 'N-old', id: 'zmatch-old' });
+    const oldMatch = tedSignal({
+      name: 'Stadt Alt',
+      occurredAt: new Date(now - 20 * DAY_MS),
+      externalId: 'N-old',
+      id: 'zmatch-old',
+    });
     const prisma = fakePrisma([...noise, oldMatch]);
     const svc = new TedIntentProjectionService({ prisma });
     const r = await svc.projectTenders(WS, params);
@@ -243,6 +348,13 @@ describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只
     const prisma = fakePrisma([tedSignal({ name: 'X', occurredAt: new Date(now) })]);
     const svc = new TedIntentProjectionService({ prisma });
     expect((await svc.projectTenders(WS, { cpvCodes: [], buyerCountries: ['DEU'] })).signalsMatched).toBe(0);
-    expect((await svc.projectTenders(WS, { cpvCodes: ['42120000'], buyerCountries: [] })).signalsMatched).toBe(0);
+    expect(
+      (
+        await svc.projectTenders(WS, {
+          cpvCodes: ['42120000'],
+          buyerCountries: [],
+        })
+      ).signalsMatched,
+    ).toBe(0);
   });
 });

@@ -69,6 +69,12 @@ export interface ToolContext {
   taskContractId?: string; // 发起此调用的 AI Task（用于 allowedTools 校验与 Trace）
   correlationId?: string;
   /**
+   * Acquisition suppression admission, evaluated by ToolBroker immediately
+   * before this physical tool execution. A rejection or callback error is
+   * fail-closed and must not execute the tool.
+   */
+  authorizeExternalAction?: () => Promise<boolean>;
+  /**
    * 本次调用的用途（'discovery' | 'enrichment' | 'intent' …，可多值=任一允许即放行）。
    * source_policy 用途门优先按它判（须在工具声明集内 + 域策略允许其一）；
    * 缺省退回工具声明的 allowedPurpose 任一交集（多用途工具如 smtp.rcpt_probe 的既有语义）。
@@ -78,6 +84,28 @@ export interface ToolContext {
   sourcePolicySnapshot?: Record<string, unknown>;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: Omit<PaidCostContext, 'siteId'>;
+}
+
+export class ExternalToolActionDeniedError extends Error {
+  readonly decision = 'suppression_action_gate';
+
+  constructor(options?: { cause?: unknown }) {
+    super('external action denied: suppression_action_gate', options);
+    this.name = 'ExternalToolActionDeniedError';
+  }
+}
+
+/** Reusable fail-closed guard for tools that contain more than one wire. */
+export async function assertToolExternalActionAuthorized(
+  ctx: Pick<ToolContext, 'authorizeExternalAction'>,
+): Promise<void> {
+  if (!ctx.authorizeExternalAction) return;
+  try {
+    if ((await ctx.authorizeExternalAction()) === true) return;
+  } catch (cause) {
+    throw new ExternalToolActionDeniedError({ cause });
+  }
+  throw new ExternalToolActionDeniedError();
 }
 
 export interface ToolResult<T = unknown> {
@@ -100,7 +128,8 @@ export type SourcePolicyDenyReason = 'suspended' | 'purpose_not_allowed' | 'unre
  * 所有原始出网（HTTP/SMTP）必须经 invoke —— 白名单/source_policy/预算/限流/Trace 在闸门内强制。
  */
 export interface ExecutionBroker {
-  checkSourcePolicy(toolId: string, domain: string, purpose?: string | string[]): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }>;
+  checkSourcePolicy(toolId: string, domain: string, purpose?: string | string[],
+  ): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }>;
   invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
 }
 

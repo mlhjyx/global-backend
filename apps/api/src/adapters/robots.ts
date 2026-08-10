@@ -10,7 +10,7 @@
  * 复杂 robots（Allow 覆盖、按 UA 细分）从严处理为不可抓。结果带 TTL 缓存。
  */
 
-import { EgressBlockedError, requestPublicHttp } from './guarded-http';
+import { EgressBlockedError, ExternalHttpActionDeniedError, requestPublicHttp } from './guarded-http';
 import { resolvePublicHttpUrl, type PublicUrlResolver } from './url-guard';
 
 interface RobotsRule {
@@ -24,12 +24,12 @@ const TTL_MS = 60 * 60 * 1000; // 1h（生产可对齐 SourcePolicy）
 export interface RobotsDependencies {
   request?: typeof requestPublicHttp;
   resolve?: PublicUrlResolver;
+  authorizeExternalAction?: () => Promise<boolean>;
 }
 
 async function loadRobots(
   origin: string,
-  request: typeof requestPublicHttp,
-): Promise<RobotsRule> {
+  request: typeof requestPublicHttp): Promise<RobotsRule> {
   const cached = cache.get(origin);
   if (cached && Date.now() - cached.fetchedAt < TTL_MS) return cached;
   let disallow: string[] = [];
@@ -45,10 +45,16 @@ async function loadRobots(
     }
     // 4xx/无 robots → 视为无限制（RFC 惯例）
   } catch (error) {
-    if (
-      error instanceof EgressBlockedError ||
-      (error instanceof Error && error.name === 'EgressBlockedError')
-    ) {
+    const workspaceActionDenied =
+      error instanceof ExternalHttpActionDeniedError ||
+      (error instanceof Error && error.name === 'ExternalHttpActionDeniedError');
+    if (workspaceActionDenied) {
+      // A suppression decision belongs to the current workspace/request. It is
+      // fail-closed for this call, but must never become a one-hour global
+      // origin fact that blocks unrelated workspaces.
+      return { disallow: ['/'], fetchedAt: Date.now() };
+    }
+    if (error instanceof EgressBlockedError || (error instanceof Error && error.name === 'EgressBlockedError')) {
       // redirect 到私网、超限或其他安全拒绝不得降级成 allow。
       disallow = ['/'];
     }
@@ -79,18 +85,24 @@ export function parseWildcardDisallow(robotsText: string): string[] {
 }
 
 /** 目标 URL 是否允许抓取（通配 UA 视角）。 */
-export async function isAllowedByRobots(
-  url: string,
-  dependencies: RobotsDependencies = {},
-): Promise<boolean> {
+export async function isAllowedByRobots(url: string, dependencies: RobotsDependencies = {}): Promise<boolean> {
   let u: URL;
   try {
+    if (dependencies.authorizeExternalAction && (await dependencies.authorizeExternalAction()) !== true) {
+      return false;
+    }
     // 即便 robots 命中缓存，也先验证实际抓取目标，避免缓存绕过入口 SSRF 闸。
     u = (await (dependencies.resolve ?? resolvePublicHttpUrl)(url)).url;
   } catch {
     return false;
   }
-  const rule = await loadRobots(u.origin, dependencies.request ?? requestPublicHttp);
+  const request = dependencies.request
+    ? dependencies.request
+    : (raw: string, options: Parameters<typeof requestPublicHttp>[1]) =>
+        requestPublicHttp(raw, options, {
+          authorizeExternalAction: dependencies.authorizeExternalAction,
+        });
+  const rule = await loadRobots(u.origin, request);
   const path = u.pathname || '/';
   // 任一 Disallow 前缀命中路径 → 禁止。Disallow: / 表示全站禁抓。
   return !rule.disallow.some((d) => path.startsWith(d));

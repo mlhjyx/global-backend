@@ -15,6 +15,7 @@ import {
   LocatedErasureTargets,
   SuppressionEntry,
 } from '../compliance/deletion.types';
+import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 
 /**
  * 收口⑥ PR-B 删除编排（GDPR Art.17）的 Temporal 活动。deletionWorkflow 四步：
@@ -34,8 +35,9 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
   return {
     async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedErasureTargets> {
-      const { located, suppressionEntries } = await locate(prisma, input);
-      await prisma.withWorkspace(input.workspaceId, async (tx) => {
+      return prisma.withWorkspace(input.workspaceId, async (tx) => {
+        await lockWorkspaceSuppressionPolicy(tx, input.workspaceId);
+        const { located, suppressionEntries } = await locateInTransaction(tx, input);
         await upsertSuppressionEntries(tx, input.workspaceId, suppressionEntries);
         // company 主体：**冻结即标 SUPPRESSED**（不等到 eraseSubject）——联系人发现/存量 sweep 以 company.status
         // ==='SUPPRESSED' 为载入闸门，尽早置位可拦下 freeze 之后才发起的发现，收窄「漏网新联系人」窗口。
@@ -50,16 +52,17 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           where: { id: input.deletionRequestId, status: 'RECEIVED' },
           data: { status: 'FROZEN' },
         });
-      });
-      return located;
+        return located;
+    });
     },
 
     async eraseSubject(args: {
       input: DeletionWorkflowInput;
-      located: LocatedErasureTargets;
-    }): Promise<ErasureCounts> {
+      located: LocatedErasureTargets }): Promise<ErasureCounts> {
       const { input, located } = args;
       return prisma.withWorkspace(input.workspaceId, async (tx) => {
+        // Fixed global lock order: policy advisory lock -> company/contact rows -> suppression facts.
+        await lockWorkspaceSuppressionPolicy(tx, input.workspaceId);
         // 幂等 CAS：FROZEN → ERASING。已擦除过（≠FROZEN）→ 取**擦除时刻持久化的真实 stats** 返回，跳过全部
         // 删除/发事件副作用（Temporal 重试不重复擦除）。stats 未持久化则回退快照计数（合法的空/0）。
         const moved = await tx.deletionRequest.updateMany({
@@ -80,8 +83,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         // 整批跳过；已提交的漏网联系人则被下面的重查捕获。二者合拢=完成删除后不再有新 PII 落到本公司。
         if (located.companyIdsToSuppress.length) {
           await tx.$queryRaw`SELECT id FROM canonical_company WHERE id IN (${Prisma.join(
-            located.companyIdsToSuppress.map((id) => Prisma.sql`${id}::uuid`),
-          )}) FOR UPDATE`;
+            located.companyIdsToSuppress.map((id) => Prisma.sql`${id}::uuid`))}) FOR UPDATE`;
         }
 
         // 待硬删的联系人集（连同当前 contactPoints 一并重查，供真实计数 + 冻结后新增邮箱补写禁联）：
@@ -102,7 +104,8 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         const eraseContacts = eraseTargetWhere
           ? await tx.canonicalContact.findMany({
               where: eraseTargetWhere,
-              select: { id: true, fullName: true, contactPoints: { select: { type: true, value: true } } },
+              select: { id: true, fullName: true, contactPoints: { select: { type: true, value: true } },
+              },
             })
           : [];
         const eraseContactIds = eraseContacts.map((c) => c.id);
@@ -117,7 +120,8 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           await upsertSuppressionEntries(
             tx,
             input.workspaceId,
-            buildSuppressionEntries({ subjectType: 'contact', emails: lateEmails }),
+            buildSuppressionEntries({ subjectType: 'contact', emails: lateEmails,
+            }),
           );
         }
 
@@ -135,7 +139,8 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           });
           fieldEvidenceErased = fe.count;
           // canonical_contact 硬删 → DB 级联删 contact_point（onDelete: Cascade）
-          await tx.canonicalContact.deleteMany({ where: { id: { in: eraseContactIds } } });
+          await tx.canonicalContact.deleteMany({ where: { id: { in: eraseContactIds } },
+          });
         }
 
         // 🔴 Art.17 扫描面（scale-safe #89）：平台级专利发明人缓存（patent_inventor_cache，无 RLS/无 workspace）
@@ -152,7 +157,8 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             data: erasureKeys.map((inventorNameKey) => ({ inventorNameKey })),
             skipDuplicates: true,
           });
-          const pc = await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } } });
+          const pc = await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } },
+          });
           patentCacheErased = pc.count;
         }
 
@@ -223,7 +229,10 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         if (existing) {
           // 回执已写但状态未收尾（complete 在 create 之后崩）→ 只补状态（CAS，绝不覆盖 COMPLETED），不重复发事件
           await tx.deletionRequest.updateMany({
-            where: { id: input.deletionRequestId, status: { notIn: ['COMPLETED'] } },
+            where: {
+              id: input.deletionRequestId,
+              status: { notIn: ['COMPLETED'] },
+            },
             data: { status: 'COMPLETED', completedAt: new Date() },
           });
           return counts;
@@ -232,9 +241,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         // 🔴 拒绝为「擦除从未发生」的请求伪造回执/事件：仅当擦除已发生（状态 ERASING，或 stats 已持久化）才收尾。
         const eraseHappened = req.status === 'ERASING' || persisted !== null;
         if (!eraseHappened) {
-          throw new Error(
-            `completeDeletion: erase not performed (status=${req.status}) — refuse to fabricate receipt`,
-          );
+          throw new Error(`completeDeletion: erase not performed (status=${req.status}) — refuse to fabricate receipt`);
         }
 
         // 回执（append-only）——🔴 只计数 + subjectId 引用，绝不嵌人名/邮箱
@@ -276,21 +283,23 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
         // CAS：仅从 ERASING/FAILED 收尾为 COMPLETED（FAILED-with-stats = 擦除已发生的合法收尾；绝不无条件直更）
         await tx.deletionRequest.updateMany({
-          where: { id: input.deletionRequestId, status: { in: ['ERASING', 'FAILED'] } },
+          where: {
+            id: input.deletionRequestId,
+            status: { in: ['ERASING', 'FAILED'] },
+          },
           data: { status: 'COMPLETED', completedAt: new Date() },
         });
         return counts;
       });
     },
 
-    async failDeletion(args: {
-      workspaceId: string;
-      deletionRequestId: string;
-      error: string;
-    }): Promise<void> {
+    async failDeletion(args: { workspaceId: string; deletionRequestId: string; error: string }): Promise<void> {
       await prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.deletionRequest.updateMany({
-          where: { id: args.deletionRequestId, status: { notIn: ['COMPLETED', 'FAILED'] } },
+          where: {
+            id: args.deletionRequestId,
+            status: { notIn: ['COMPLETED', 'FAILED'] },
+          },
           data: { status: 'FAILED', error: args.error.slice(0, 500) },
         }),
       );
@@ -308,7 +317,9 @@ async function upsertSuppressionEntries(
 ): Promise<void> {
   for (const s of entries) {
     await tx.suppressionRecord.upsert({
-      where: { workspaceId_type_value: { workspaceId, type: s.type, value: s.value } },
+      where: {
+        workspaceId_type_value: { workspaceId, type: s.type, value: s.value },
+      },
       // 已存在则只允许把偏好类提升为法定保护；更早的时间、原因与主体键均不可改写。
       update: { protectionClass: 'LEGAL' },
       create: {
@@ -342,7 +353,12 @@ async function reconcileContactSubjectEraseIds(
   const originalId = located.contactIds[0];
   const original = await tx.canonicalContact.findUnique({
     where: { id: originalId },
-    select: { id: true, fullName: true, companyId: true, company: { select: { dedupeKey: true } } },
+    select: {
+      id: true,
+      fullName: true,
+      companyId: true,
+      company: { select: { dedupeKey: true } },
+    },
   });
   // 原始件已不在：Temporal 重跑的幂等由前面 moved.count===0 早返回守（不会走到这里）；此分支守的是
   // **并发跨主体删除**（如同公司的 company 主体擦除先删到该行）——回退快照 id（后续 deleteMany 命中 0，安全）。
@@ -360,7 +376,11 @@ async function reconcileContactSubjectEraseIds(
   const companyKey = original.company.dedupeKey;
   // 候选走扩展 client → fullName 读路径解密为明文（供 person-key 变体集计算）
   const candidates = await tx.canonicalContact.findMany({
-    where: { companyId: original.companyId, id: { not: originalId }, createdAt: { gte: req.createdAt } },
+    where: {
+      companyId: original.companyId,
+      id: { not: originalId },
+      createdAt: { gte: req.createdAt },
+    },
     select: { id: true, fullName: true, createdAt: true },
   });
   // 被擦除人明文名 → contactSuppressionKeys 变体集（与冻结/创建闸同构），与候选变体集有交集且 createdAt>=受理即入选。
@@ -393,84 +413,88 @@ async function affectedActiveIcpIds(tx: Prisma.TransactionClient, companyId: str
  * 定位主体擦除面（withWorkspace RLS 事务）：返回 **PII-free** located（uuid+计数，进 workflow 历史）+
  * **内部用** suppressionEntries（含邮箱明文，仅冻结步用，永不外泄）。主体已不存在 → 空快照（幂等）。
  */
-async function locate(
-  prisma: PrismaService,
+async function locateInTransaction(
+  tx: Prisma.TransactionClient,
   input: DeletionWorkflowInput,
-): Promise<{ located: LocatedErasureTargets; suppressionEntries: SuppressionEntry[] }> {
-  return prisma.withWorkspace(input.workspaceId, async (tx) => {
-    const base: LocatedErasureTargets = {
-      subjectType: input.subjectType,
-      subjectId: input.subjectId,
-      contactIds: [],
-      contactPointsCount: 0,
-      fieldEvidenceCount: 0,
-      companyIdsToSuppress: [],
-      signalsToRevoke: 0,
-      affectedIcpIds: [],
-    };
+): Promise<{
+  located: LocatedErasureTargets;
+  suppressionEntries: SuppressionEntry[];
+}> {
+  const base: LocatedErasureTargets = {
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
+    contactIds: [],
+    contactPointsCount: 0,
+    fieldEvidenceCount: 0,
+    companyIdsToSuppress: [],
+    signalsToRevoke: 0,
+    affectedIcpIds: [],
+  };
 
-    if (input.subjectType === 'contact') {
-      const contact = await tx.canonicalContact.findUnique({
-        where: { id: input.subjectId },
-        include: { contactPoints: true, company: { select: { dedupeKey: true } } },
-      });
-      if (!contact) return { located: base, suppressionEntries: [] };
-      // contactPoints.value 经 PII 扩展在读路径解密；decryptPii 对已明文值幂等（防嵌套解密漏层）。
-      const emails = contact.contactPoints
-        .filter((p) => p.type === 'email')
-        .map((p) => decryptPii(p.value));
-      const fieldEvidenceCount = await tx.fieldEvidence.count({
-        where: { entityType: 'contact', entityId: input.subjectId },
-      });
-      const affectedIcpIds = await affectedActiveIcpIds(tx, contact.companyId);
-      return {
-        located: {
-          ...base,
-          contactIds: [contact.id],
-          contactPointsCount: contact.contactPoints.length,
-          fieldEvidenceCount,
-          affectedIcpIds,
-        },
-        // contactName + companyKey → 写 person-level 禁联键（Codex P1「Add a person-level suppression」）：
-        // 擦除后该具名人即便换邮箱/无邮箱再被发现，也命中禁联而不重建。fullName 经 PII 扩展读路径解密为明文。
-        suppressionEntries: buildSuppressionEntries({
-          subjectType: 'contact',
-          emails,
-          contactName: contact.fullName,
-          companyKey: contact.company.dedupeKey,
-        }),
-      };
-    }
-
-    const company = await tx.canonicalCompany.findUnique({
+  if (input.subjectType === 'contact') {
+    const contact = await tx.canonicalContact.findUnique({
       where: { id: input.subjectId },
-      include: { contacts: { include: { contactPoints: true } } },
+      include: {
+        contactPoints: true,
+        company: { select: { dedupeKey: true } },
+      },
     });
-    if (!company) return { located: base, suppressionEntries: [] };
-    const contactIds = company.contacts.map((c) => c.id);
-    const contactPointsCount = company.contacts.reduce((n, c) => n + c.contactPoints.length, 0);
-    const emails = company.contacts.flatMap((c) =>
-      c.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value)),
-    );
-    const fieldEvidenceCount = contactIds.length
-      ? await tx.fieldEvidence.count({ where: { entityType: 'contact', entityId: { in: contactIds } } })
-      : 0;
-    const affectedIcpIds = await affectedActiveIcpIds(tx, company.id);
+    if (!contact) return { located: base, suppressionEntries: [] };
+    // contactPoints.value 经 PII 扩展在读路径解密；decryptPii 对已明文值幂等（防嵌套解密漏层）。
+    const emails = contact.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value));
+    const fieldEvidenceCount = await tx.fieldEvidence.count({
+      where: { entityType: 'contact', entityId: input.subjectId },
+    });
+    const affectedIcpIds = await affectedActiveIcpIds(tx, contact.companyId);
     return {
       located: {
         ...base,
-        contactIds,
-        contactPointsCount,
+        contactIds: [contact.id],
+        contactPointsCount: contact.contactPoints.length,
         fieldEvidenceCount,
-        companyIdsToSuppress: [company.id],
         affectedIcpIds,
       },
+      // contactName + companyKey → 写 person-level 禁联键（Codex P1「Add a person-level suppression」）：
+      // 擦除后该具名人即便换邮箱/无邮箱再被发现，也命中禁联而不重建。fullName 经 PII 扩展读路径解密为明文。
       suppressionEntries: buildSuppressionEntries({
-        subjectType: 'company',
+        subjectType: 'contact',
         emails,
-        domain: company.domain,
-        companyName: company.name,
+        contactName: contact.fullName,
+        companyKey: contact.company.dedupeKey,
       }),
     };
+  }
+
+  const company = await tx.canonicalCompany.findUnique({
+    where: { id: input.subjectId },
+    include: { contacts: { include: { contactPoints: true } } },
   });
+  if (!company) return { located: base, suppressionEntries: [] };
+  const contactIds = company.contacts.map((c) => c.id);
+  const contactPointsCount = company.contacts.reduce((n, c) => n + c.contactPoints.length, 0);
+  const emails = company.contacts.flatMap((c) =>
+    c.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value)),
+  );
+  const fieldEvidenceCount = contactIds.length
+    ? await tx.fieldEvidence.count({
+        where: { entityType: 'contact', entityId: { in: contactIds } },
+      })
+    : 0;
+  const affectedIcpIds = await affectedActiveIcpIds(tx, company.id);
+  return {
+    located: {
+      ...base,
+      contactIds,
+      contactPointsCount,
+      fieldEvidenceCount,
+      companyIdsToSuppress: [company.id],
+      affectedIcpIds,
+    },
+    suppressionEntries: buildSuppressionEntries({
+      subjectType: 'company',
+      emails,
+      domain: company.domain,
+      companyName: company.name,
+    }),
+  };
 }

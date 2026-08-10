@@ -66,7 +66,9 @@ export async function upsertLeadFit(
   judgment: FitJudgment,
 ): Promise<void> {
   await tx.lead.upsert({
-    where: { workspaceId_icpId_canonicalCompanyId: { workspaceId, icpId, canonicalCompanyId } },
+    where: { workspaceId_icpId_canonicalCompanyId: { workspaceId, icpId, canonicalCompanyId,
+      },
+    },
     update: {
       fitVerdict: judgment.verdict,
       fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
@@ -84,8 +86,10 @@ export async function upsertLeadFit(
 }
 
 /** 事务内加载 ICP 摘要（供判定 prompt）。ICP 不存在时返回空对象（与既有行为一致）。 */
-export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string): Promise<IcpBrief | Record<string, never>> {
-  const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { company: true } });
+export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string,
+): Promise<IcpBrief | Record<string, never>> {
+  const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { company: true },
+  });
   if (!icp) return {};
   return {
     seller: icp.company?.name ?? 'unknown',
@@ -106,7 +110,9 @@ export async function judgeFitCompany(
   workspaceId: string,
   icpBrief: IcpBrief | Record<string, never>,
   company: FitJudgeCompany,
-  opts?: { runId?: string; runtimeTelemetry?: RuntimeTelemetry },
+  opts?: { runId?: string; runtimeTelemetry?: RuntimeTelemetry;
+    authorizeExternalAction?: () => Promise<boolean>;
+  },
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
   const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
@@ -117,7 +123,8 @@ export async function judgeFitCompany(
       {
         task: contract.id,
         prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${JSON.stringify(
-          { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products },
+          { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products,
+          },
           null,
           2,
         )}\n\n判断该候选是否为卖方的真实目标客户，输出中文理由。`,
@@ -126,7 +133,11 @@ export async function judgeFitCompany(
         schema: contract.outputSchema,
       },
       // runId=预算归账键（run 内 fit 判定消耗计入该 run 的账；sweep 无 runId 则按 workspace 归账）
-      { workspaceId, runId: opts?.runId },
+      {
+        workspaceId,
+        runId: opts?.runId,
+        authorizeExternalAction: opts?.authorizeExternalAction,
+      },
       { telemetry: opts?.runtimeTelemetry },
     );
     // 🔴 stub 兜底绝不写真实判定：dev 里网关瞬时失败会 fallback 到 stub（罐头 null 输出），
@@ -140,7 +151,9 @@ export async function judgeFitCompany(
     if (err instanceof BudgetExceededError) throw err;
     return null;
   }
-  const verdict = (['match', 'weak', 'mismatch'].includes(out.verdict) ? out.verdict : 'weak') as FitJudgment['verdict'];
+  const verdict = (
+    ['match', 'weak', 'mismatch'].includes(out.verdict) ? out.verdict : 'weak'
+  ) as FitJudgment['verdict'];
   return {
     verdict,
     fitReasons: {

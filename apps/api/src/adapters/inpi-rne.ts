@@ -55,6 +55,7 @@ export interface FrCompanyHit {
 /** 注入点（测试用假 fetch；生产走全局 fetch，无 key）。 */
 export interface InpiRneDeps {
   fetchImpl?: typeof fetch;
+  beforeRequest?: () => Promise<void>;
 }
 
 /** 审计师 qualite（外部会计师，非买方委员会）——即便 personne physique 也跳过。 */
@@ -126,11 +127,13 @@ async function rneGet(
   timeoutMs = 20_000,
 ): Promise<RneResponse> {
   const fetchImpl = deps?.fetchImpl ?? fetch;
+  const beforeRequest = deps?.beforeRequest;
   const url = new URL(path, BASE_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await beforeRequest?.();
     try {
       const res = await fetchImpl(url, {
         headers: { Accept: 'application/json' },

@@ -19,11 +19,13 @@ const MAX_RETRIES = 2; // 瞬时抖动/限流下不静默丢富集
  * 带退避重试的 GLEIF 请求：429/5xx/网络错误各重试一次（尊重 Retry-After）。
  * 404 交给调用方（母公司未申报是正常语义，不重试）。
  */
-async function gleifFetch(url: string, timeoutMs = 25_000): Promise<Response> {
+async function gleifFetch(url: string, timeoutMs = 25_000, beforeRequest?: () => Promise<void>): Promise<Response> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await beforeRequest?.();
     try {
-      const res = await fetch(url, { headers: { Accept: ACCEPT }, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(url, { headers: { Accept: ACCEPT }, signal: AbortSignal.timeout(timeoutMs),
+      });
       if (res.status === 429 || res.status >= 500) {
         if (attempt === MAX_RETRIES) return res; // 用尽后把响应交回，由调用方抛错
         const retryAfter = Number(res.headers.get('retry-after'));
@@ -85,31 +87,33 @@ export async function searchLeiRecords(params: {
   name: string;
   country?: string;
   limit?: number;
-}): Promise<GleifRecord[]> {
+},
+  beforeRequest?: () => Promise<void>,
+): Promise<GleifRecord[]> {
   const { name, country, limit = 10 } = params;
   const qs = new URLSearchParams();
   qs.set('filter[entity.legalName]', name);
   if (country) qs.set('filter[entity.legalAddress.country]', country.toUpperCase());
   qs.set('page[size]', String(Math.min(limit, 50)));
 
-  const res = await gleifFetch(`${BASE}/lei-records?${qs.toString()}`);
+  const res = await gleifFetch(`${BASE}/lei-records?${qs.toString()}`, 25_000, beforeRequest);
   if (!res.ok) throw new Error(`gleif ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const json = (await res.json()) as { data?: JsonApiEntity[] };
   return (json.data ?? []).map(mapRecord).filter((r): r is GleifRecord => r !== null);
 }
 
 /** 取直接母公司（无申报或隐私例外 → 404 → 返回 null，属正常）。 */
-export async function getDirectParent(lei: string): Promise<GleifParent | null> {
-  return fetchParent(`${BASE}/lei-records/${encodeURIComponent(lei)}/direct-parent`);
+export async function getDirectParent(lei: string, beforeRequest?: () => Promise<void>): Promise<GleifParent | null> {
+  return fetchParent(`${BASE}/lei-records/${encodeURIComponent(lei)}/direct-parent`, beforeRequest);
 }
 
 /** 取最终母公司（集团顶层）。 */
-export async function getUltimateParent(lei: string): Promise<GleifParent | null> {
-  return fetchParent(`${BASE}/lei-records/${encodeURIComponent(lei)}/ultimate-parent`);
+export async function getUltimateParent(lei: string, beforeRequest?: () => Promise<void>): Promise<GleifParent | null> {
+  return fetchParent(`${BASE}/lei-records/${encodeURIComponent(lei)}/ultimate-parent`, beforeRequest);
 }
 
-async function fetchParent(url: string): Promise<GleifParent | null> {
-  const res = await gleifFetch(url);
+async function fetchParent(url: string, beforeRequest?: () => Promise<void>): Promise<GleifParent | null> {
+  const res = await gleifFetch(url, 25_000, beforeRequest);
   if (res.status === 404) return null; // 未申报母公司（例外原因或本就无母公司）
   if (!res.ok) throw new Error(`gleif parent ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const json = (await res.json()) as { data?: JsonApiEntity };

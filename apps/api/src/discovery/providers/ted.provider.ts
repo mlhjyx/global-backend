@@ -38,7 +38,8 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult> {
     const filters = query.filters ?? {};
     const cpvCodes = readCpvCodes(filters);
     if (!cpvCodes.length) return { records: [], costCents: 0 }; // 无 CPV → 不启动（绝不裸拉全库）
@@ -65,7 +66,7 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
+        { ...ctx, purpose: 'discovery' },
       );
       notices = res.data.awards ?? [];
     } catch (err) {
@@ -92,7 +93,6 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
     }
     return { records: [...dedup.values()], costCents: 0 };
   }
-
 }
 
 /**
@@ -103,7 +103,7 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
   return notice.winners
     .filter((w) => w.name.trim())
     .map((w, i) => {
-      const domain = w.internetAddress ? normalizeDomain(w.internetAddress) ?? undefined : undefined;
+      const domain = w.internetAddress ? (normalizeDomain(w.internetAddress) ?? undefined) : undefined;
       const ted = prune({
         publication_number: notice.publicationNumber,
         publication_date: notice.publicationDate,
@@ -126,7 +126,10 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         // §8.4：winner-identifier 是**国别**税号/注册号（仅国内唯一）→ scheme 按国别限定，防不同国
         // 同号的不同法人跨境误并（审查修正 · 绝不贴错身份）；无国别时退回裸 scheme（罕见）。
         identifier: idValue
-          ? { scheme: country ? `${TED_ID_SCHEME}:${country.toLowerCase()}` : TED_ID_SCHEME, value: idValue }
+          ? {
+              scheme: country ? `${TED_ID_SCHEME}:${country.toLowerCase()}` : TED_ID_SCHEME,
+              value: idValue,
+            }
           : undefined,
         license: TED_LICENSE, // §8.5 绿事实 CC BY 4.0 署名义务（写入 field_evidence.license）
         attributes: { ted },
@@ -160,7 +163,11 @@ function readSinceDays(filters: Record<string, unknown>): number {
 /** 逗号串或数组 → 去空 trim 后的字符串数组。 */
 function csvList(v: unknown): string[] {
   if (v == null) return [];
-  if (Array.isArray(v)) return v.filter((x) => x != null).map((x) => String(x).trim()).filter(Boolean);
+  if (Array.isArray(v))
+    return v
+      .filter((x) => x != null)
+      .map((x) => String(x).trim())
+      .filter(Boolean);
   return String(v)
     .split(',')
     .map((s) => s.trim())
@@ -178,13 +185,52 @@ function prune(o: Record<string, unknown>): Record<string, unknown> {
  * 覆盖 TED 买方覆盖集（§2.4 EU/EEA/UK）+ 常见中标方来源国。未收录码保留原值（best-effort，不静默出错）。
  */
 const TED_ISO3_TO_ISO2: Record<string, string> = {
-  AUT: 'AT', BEL: 'BE', BGR: 'BG', CHE: 'CH', CYP: 'CY', CZE: 'CZ', DEU: 'DE', DNK: 'DK',
-  ESP: 'ES', EST: 'EE', FIN: 'FI', FRA: 'FR', GBR: 'GB', GRC: 'GR', HRV: 'HR', HUN: 'HU',
-  IRL: 'IE', ISL: 'IS', ITA: 'IT', LIE: 'LI', LTU: 'LT', LUX: 'LU', LVA: 'LV', MLT: 'MT',
-  NLD: 'NL', NOR: 'NO', POL: 'PL', PRT: 'PT', ROU: 'RO', SVK: 'SK', SVN: 'SI', SWE: 'SE',
+  AUT: 'AT',
+  BEL: 'BE',
+  BGR: 'BG',
+  CHE: 'CH',
+  CYP: 'CY',
+  CZE: 'CZ',
+  DEU: 'DE',
+  DNK: 'DK',
+  ESP: 'ES',
+  EST: 'EE',
+  FIN: 'FI',
+  FRA: 'FR',
+  GBR: 'GB',
+  GRC: 'GR',
+  HRV: 'HR',
+  HUN: 'HU',
+  IRL: 'IE',
+  ISL: 'IS',
+  ITA: 'IT',
+  LIE: 'LI',
+  LTU: 'LT',
+  LUX: 'LU',
+  LVA: 'LV',
+  MLT: 'MT',
+  NLD: 'NL',
+  NOR: 'NO',
+  POL: 'PL',
+  PRT: 'PT',
+  ROU: 'RO',
+  SVK: 'SK',
+  SVN: 'SI',
+  SWE: 'SE',
   // 常见非欧盟中标方来源
-  USA: 'US', CHN: 'CN', JPN: 'JP', KOR: 'KR', TUR: 'TR', IND: 'IN', CAN: 'CA', AUS: 'AU',
-  BRA: 'BR', RUS: 'RU', UKR: 'UA', SRB: 'RS', ISR: 'IL',
+  USA: 'US',
+  CHN: 'CN',
+  JPN: 'JP',
+  KOR: 'KR',
+  TUR: 'TR',
+  IND: 'IN',
+  CAN: 'CA',
+  AUS: 'AU',
+  BRA: 'BR',
+  RUS: 'RU',
+  UKR: 'UA',
+  SRB: 'RS',
+  ISR: 'IL',
 };
 
 /** ISO-3 → alpha-2（未收录保留原值）。空/无值透传。 */

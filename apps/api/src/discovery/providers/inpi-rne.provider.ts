@@ -39,7 +39,8 @@ export function isFrCompany(country?: string, domain?: string): boolean {
  */
 // 阴阳性并收（Directrice/Administratrice 等女性执行位与男性同权，绝不系统性低标女性高管）。
 const EXEC_QUALITE = /g[ée]rant|pr[ée]sident|directeur|directrice|administrat(?:eur|rice)|directoire|associ[ée] ind[ée]finiment responsable/i;
-export function classifyRole(qualite: string): { buyingRole: string; seniority?: string } {
+export function classifyRole(qualite: string): { buyingRole: string; seniority?: string;
+} {
   if (EXEC_QUALITE.test(qualite)) return { buyingRole: 'economic_buyer', seniority: 'executive' };
   return { buyingRole: 'decision_maker' };
 }
@@ -102,9 +103,7 @@ export class InpiRneContactProvider implements ContactDiscoveryAdapter {
       return { contacts: [], costCents: 0 };
     }
     const purposeCtx = {
-      workspaceId: ctx.workspaceId,
-      runId: ctx.runId,
-      correlationId: ctx.correlationId,
+      ...ctx,
       purpose: 'discovery',
     };
     try {

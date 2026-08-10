@@ -34,7 +34,9 @@ export async function discoverCompaniesByIndustry(params: {
   countryQid?: string;
   requireWebsite?: boolean;
   limit?: number;
-}): Promise<WikidataCompany[]> {
+},
+  beforeRequest?: () => Promise<void>,
+): Promise<WikidataCompany[]> {
   const { industryQids, countryQid, requireWebsite = true, limit = 50 } = params;
   if (!industryQids.length) return [];
 
@@ -53,18 +55,28 @@ SELECT ?company ?companyLabel ?website ?employees ?coord ?countryCode WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de,zh" }
 } LIMIT ${Math.min(limit, 200)}`;
 
-  const rows = await runSparql(query);
+  const rows = await runSparql(query, 40_000, beforeRequest);
   return rows.map(bindingToCompany).filter((c): c is WikidataCompany => c !== null);
 }
 
 /** 通用 SPARQL 执行（供未来更多结构化查询复用）。 */
-export async function runSparql(query: string, timeoutMs = 40_000): Promise<SparqlBinding[]> {
+export async function runSparql(
+  query: string,
+  timeoutMs = 40_000,
+  beforeRequest?: () => Promise<void>,
+): Promise<SparqlBinding[]> {
+  await beforeRequest?.();
   const res = await fetch(`${ENDPOINT}?query=${encodeURIComponent(query)}`, {
-    headers: { Accept: 'application/sparql-results+json', 'User-Agent': USER_AGENT },
+    headers: {
+      Accept: 'application/sparql-results+json',
+      'User-Agent': USER_AGENT,
+    },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`wikidata ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const json = (await res.json()) as { results?: { bindings?: SparqlBinding[] } };
+  const json = (await res.json()) as {
+    results?: { bindings?: SparqlBinding[] };
+  };
   return json.results?.bindings ?? [];
 }
 
@@ -78,20 +90,36 @@ export interface WikidataEntitySummary {
 }
 
 /** wbsearchentities：按名（模糊）搜实体，返回 QID + 标签 + 描述（描述助消歧）。 */
-export async function wikidataSearchEntity(name: string, limit = 7): Promise<WikidataEntitySummary[]> {
+export async function wikidataSearchEntity(
+  name: string,
+  limit = 7,
+  beforeRequest?: () => Promise<void>,
+): Promise<WikidataEntitySummary[]> {
   const url =
     `${WD_API}?action=wbsearchentities&search=${encodeURIComponent(name)}` +
     `&language=en&uselang=en&type=item&format=json&origin=*&limit=${Math.min(limit, 20)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(20_000) });
+  await beforeRequest?.();
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(20_000),
+  });
   if (!res.ok) throw new Error(`wikidata search ${res.status}: ${(await res.text()).slice(0, 160)}`);
-  const json = (await res.json()) as { search?: { id: string; label?: string; description?: string }[] };
+  const json = (await res.json()) as {
+    search?: { id: string; label?: string; description?: string }[];
+  };
   return (json.search ?? [])
     .filter((r) => r.id && r.label)
     .map((r) => ({ qid: r.id, label: r.label!, description: r.description }));
 }
 
 export interface RawEntity {
-  claims?: Record<string, { mainsnak?: { datavalue?: { value?: unknown } }; qualifiers?: Record<string, unknown[]> }[]>;
+  claims?: Record<
+    string,
+    {
+      mainsnak?: { datavalue?: { value?: unknown } };
+      qualifiers?: Record<string, unknown[]>;
+    }[]
+  >;
   labels?: Record<string, { value?: string }>;
 }
 
@@ -99,12 +127,17 @@ export interface RawEntity {
 export async function wikidataGetEntities(
   qids: string[],
   props = 'claims|labels',
+  beforeRequest?: () => Promise<void>,
 ): Promise<Record<string, RawEntity>> {
   if (!qids.length) return {};
   const url =
     `${WD_API}?action=wbgetentities&ids=${qids.slice(0, 50).join('|')}` +
     `&props=${encodeURIComponent(props)}&languages=en&format=json&origin=*`;
-  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(25_000) });
+  await beforeRequest?.();
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(25_000),
+  });
   if (!res.ok) throw new Error(`wikidata getentities ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const json = (await res.json()) as { entities?: Record<string, RawEntity> };
   return json.entities ?? {};
@@ -149,8 +182,19 @@ const P = {
 
 // 判「是公司/组织」的 instance-of 目标（含常见子类）
 const COMPANY_INSTANCE_QIDS = new Set([
-  'Q4830453', 'Q6881511', 'Q783794', 'Q891723', 'Q18388277', 'Q43229', 'Q167037',
-  'Q4830453', 'Q1058914', 'Q210167', 'Q2085381', 'Q3918', 'Q1589009',
+  'Q4830453',
+  'Q6881511',
+  'Q783794',
+  'Q891723',
+  'Q18388277',
+  'Q43229',
+  'Q167037',
+  'Q4830453',
+  'Q1058914',
+  'Q210167',
+  'Q2085381',
+  'Q3918',
+  'Q1589009',
 ]);
 
 function values(e: RawEntity, prop: string): unknown[] {

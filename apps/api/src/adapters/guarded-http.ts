@@ -4,8 +4,7 @@ import {
   EgressBlockedError,
   resolvePublicHttpUrl,
   type PinnedPublicUrl,
-  type PublicUrlResolver,
-} from './url-guard';
+  type PublicUrlResolver } from './url-guard';
 
 export { EgressBlockedError } from './url-guard';
 export type { PinnedPublicUrl, PublicUrlResolver } from './url-guard';
@@ -51,6 +50,27 @@ export type PinnedHttpExecutor = (
 export interface PublicHttpDependencies {
   resolver?: PublicUrlResolver;
   executePinned?: PinnedHttpExecutor;
+  /** Acquisition suppression admission, rechecked before DNS and every wire hop. */
+  authorizeExternalAction?: () => Promise<boolean>;
+}
+
+export class ExternalHttpActionDeniedError extends Error {
+  readonly decision = 'suppression_action_gate';
+
+  constructor(options?: { cause?: unknown }) {
+    super('external action denied: suppression_action_gate', options);
+    this.name = 'ExternalHttpActionDeniedError';
+  }
+}
+
+async function assertExternalHttpActionAuthorized(authorizeExternalAction?: () => Promise<boolean>): Promise<void> {
+  if (!authorizeExternalAction) return;
+  try {
+    if ((await authorizeExternalAction()) === true) return;
+  } catch (cause) {
+    throw new ExternalHttpActionDeniedError({ cause });
+  }
+  throw new ExternalHttpActionDeniedError();
 }
 
 function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
@@ -118,40 +138,37 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
         callbackOne(null, target.ip, target.family);
       },
     };
-    const request = (target.url.protocol === 'https:' ? httpsRequest : httpRequest)(
-      requestOptions,
-      (response) => {
-        const chunks: Buffer[] = [];
-        let size = 0;
-        const contentLength = Number(response.headers['content-length'] ?? 0);
-        if (Number.isFinite(contentLength) && contentLength > options.maxBytes) {
+    const request = (target.url.protocol === 'https:' ? httpsRequest : httpRequest)(requestOptions, (response) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const contentLength = Number(response.headers['content-length'] ?? 0);
+      if (Number.isFinite(contentLength) && contentLength > options.maxBytes) {
+        response.destroy();
+        finishReject(new EgressBlockedError('response_too_large'));
+        return;
+      }
+      response.on('data', (chunk: Buffer | string) => {
+        if (settled) return;
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += buffer.length;
+        if (size > options.maxBytes) {
           response.destroy();
           finishReject(new EgressBlockedError('response_too_large'));
           return;
         }
-        response.on('data', (chunk: Buffer | string) => {
-          if (settled) return;
-          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-          size += buffer.length;
-          if (size > options.maxBytes) {
-            response.destroy();
-            finishReject(new EgressBlockedError('response_too_large'));
-            return;
-          }
-          if (options.method !== 'HEAD') chunks.push(buffer);
+        if (options.method !== 'HEAD') chunks.push(buffer);
+      });
+      response.once('end', () => {
+        const body = options.method === 'HEAD' ? Buffer.alloc(0) : Buffer.concat(chunks);
+        finishResolve({
+          status: response.statusCode ?? 0,
+          headers: normalizeHeaders(response.headers),
+          body,
+          text: body.toString('utf8'),
         });
-        response.once('end', () => {
-          const body = options.method === 'HEAD' ? Buffer.alloc(0) : Buffer.concat(chunks);
-          finishResolve({
-            status: response.statusCode ?? 0,
-            headers: normalizeHeaders(response.headers),
-            body,
-            text: body.toString('utf8'),
-          });
-        });
-        response.once('error', finishReject);
-      },
-    );
+      });
+      response.once('error', finishReject);
+    });
     // request.setTimeout 只是 socket 空闲超时；慢速端可定期吐 1 字节无限续命。
     // 用墙钟 deadline 给整次响应（含 body）设硬上限。
     const deadline = setTimeout(() => {
@@ -183,8 +200,13 @@ export async function requestPublicHttp(
   let currentHeaders = effective.headers;
 
   for (let hop = 0; hop <= effective.maxRedirects; hop++) {
+    await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     const target = await resolver(current);
-    const response = await execute(target, { ...effective, headers: currentHeaders });
+    await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
+    const response = await execute(target, {
+      ...effective,
+      headers: currentHeaders,
+    });
     if (response.status < 300 || response.status >= 400) {
       return {
         ...response,

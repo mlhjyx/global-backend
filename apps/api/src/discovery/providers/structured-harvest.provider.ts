@@ -42,7 +42,7 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
       return miss();
     }
     const broker = this.deps.broker;
-    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const toolCtx: ToolContext = { ...ctx };
     const httpGet: HttpGetFn = async (req) => (await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', req, toolCtx)).data;
 
     const urls = await fetchSitemapUrls(input.domain, httpGet).catch(() => [] as string[]);
@@ -60,7 +60,9 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
         titles: [...new Set(titles)].slice(0, 12),
         has_buying_role: titles.some(isBuyingRole),
       };
-    } else if (careersUrl && (await isAllowedByRobots(careersUrl).catch(() => true))) {
+    } else if (careersUrl && (await isAllowedByRobots(careersUrl, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+      }).catch(() => false))) {
       // ② 抓 careers 落地页 → 优先 ATS 结构化真值，兜底 JobPosting JSON-LD（robots 在 crawl4ai.render 工具内权威强制）
       try {
         const page = await broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
@@ -119,7 +121,10 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
 // ─────────────────────── 纯解析器（可测，不触网） ───────────────────────
 
 /** 解析 sitemap XML：返回 <loc>（普通 sitemap）或子 sitemap 链接（sitemap index）。 */
-export function parseSitemapXml(xml: string): { locs: string[]; isIndex: boolean } {
+export function parseSitemapXml(xml: string): {
+  locs: string[];
+  isIndex: boolean;
+} {
   const isIndex = /<sitemapindex[\s>]/i.test(xml);
   const locs: string[] = [];
   const re = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
@@ -132,9 +137,7 @@ const CAREERS_RE = /career|careers|jobs?|stellen|stellenangebote|karriere|vacanc
 
 /** 从 URL 清单挑最像"招聘/职业"的页面（路径命中招聘词，短路径优先）。 */
 export function pickCareersUrl(urls: string[]): string | undefined {
-  const hits = urls
-    .filter((u) => CAREERS_RE.test(pathOf(u)))
-    .sort((a, b) => pathOf(a).length - pathOf(b).length);
+  const hits = urls.filter((u) => CAREERS_RE.test(pathOf(u))).sort((a, b) => pathOf(a).length - pathOf(b).length);
   return hits[0];
 }
 
@@ -155,7 +158,8 @@ export function tallySections(urls: string[]): Record<string, number> {
 }
 
 // 职位详情 URL：招聘路径下带具体岗位 slug（≥4 字符 slug，排除落地页本身）
-const JOB_DETAIL_RE = /\/(jobs?|stellen(?:angebot(?:e)?)?|vacanc(?:y|ies)|positions?|openings?|karriere)\/[a-z0-9][a-z0-9/_-]{4,}/i;
+const JOB_DETAIL_RE =
+  /\/(jobs?|stellen(?:angebot(?:e)?)?|vacanc(?:y|ies)|positions?|openings?|karriere)\/[a-z0-9][a-z0-9/_-]{4,}/i;
 
 /** 从 URL 清单挑职位详情页（= 开放岗位）。 */
 export function pickJobDetailUrls(urls: string[]): string[] {

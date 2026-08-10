@@ -64,9 +64,7 @@ function projectionHarness(
 
 describe('TenantProjectionService — suppression-aware role mailbox projection', () => {
   it('does not rematerialize an already suppressed exact role mailbox', async () => {
-    const harness = projectionHarness([entity(1)], [
-      [{ type: 'email', value: ' Sales@EXAMPLE.COM ' }],
-    ]);
+    const harness = projectionHarness([entity(1)], [[{ type: 'email', value: ' Sales@EXAMPLE.COM ' }]]);
 
     await harness.service.projectSource('workspace-1', source.id);
 
@@ -75,9 +73,10 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
   });
 
   it('does not create a role mailbox whose own domain is suppressed', async () => {
-    const harness = projectionHarness([entity(1, 'buyer@agency.example')], [
-      [{ type: 'domain', value: 'agency.example' }],
-    ]);
+    const harness = projectionHarness(
+      [entity(1, 'buyer@agency.example')],
+      [[{ type: 'domain', value: 'agency.example' }]],
+    );
 
     await harness.service.projectSource('workspace-1', source.id);
 
@@ -91,31 +90,30 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       [[{ type: 'domain', value: 'agency.example' }]],
       {
         id: 'company-existing',
-        attributes: { contact_email: 'buyer@agency.example', products: ['pump'] },
+        attributes: {
+          contact_email: 'buyer@agency.example',
+          products: ['pump'],
+        },
       },
     );
 
     await harness.service.projectSource('workspace-1', source.id);
 
     expect(harness.updates).toHaveLength(1);
-    expect(harness.updates[0].attributes).toEqual({ products: ['pump'] });
+    expect(harness.updates[0].attributes).not.toHaveProperty('contact_email');
+    expect(harness.updates[0].attributes).toHaveProperty('products', ['pump']);
   });
 
   it('refreshes suppression facts for each chunk so a later fact blocks later projection', async () => {
     const entities = Array.from({ length: 101 }, (_, index) =>
       entity(index + 1, index === 100 ? 'blocked@example.com' : undefined),
     );
-    const harness = projectionHarness(entities, [
-      [],
-      [{ type: 'email', value: 'blocked@example.com' }],
-    ]);
+    const harness = projectionHarness(entities, [[], [{ type: 'email', value: 'blocked@example.com' }]]);
 
     await harness.service.projectSource('workspace-1', source.id);
 
     expect(harness.suppressionRecord.findMany).toHaveBeenCalledTimes(2);
     expect(harness.creates).toHaveLength(101);
-    expect(harness.creates.at(-1)?.attributes).not.toHaveProperty(
-      'contact_email',
-    );
+    expect(harness.creates.at(-1)?.attributes).not.toHaveProperty('contact_email');
   });
 });

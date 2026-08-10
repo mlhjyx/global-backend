@@ -19,8 +19,10 @@ const PARSER_VERSION = 'decision_maker/v1';
 /** 人物页优先级（Impressum 最高——德国 §5 DDG 依法列 Geschäftsführer；然后管理层/团队）。 */
 const PEOPLE_PATTERNS: { re: RegExp; w: number }[] = [
   { re: /impressum|imprint|legal-?notice|mentions-legales/i, w: 100 },
-  { re: /management|leadership|vorstand|gesch(ae|ä)ftsf(ue|ü)hr|gesch(ae|ä)ftsleitung|executive|board|direktion/i, w: 95 },
-  { re: /team|ansprechpartner|mitarbeiter|our-?people|\/people|\/staff/i, w: 85 },
+  { re: /management|leadership|vorstand|gesch(ae|ä)ftsf(ue|ü)hr|gesch(ae|ä)ftsleitung|executive|board|direktion/i, w: 95,
+  },
+  { re: /team|ansprechpartner|mitarbeiter|our-?people|\/people|\/staff/i, w: 85,
+  },
   { re: /(ueber|über)-?uns|about-?us|\/about|unternehmen/i, w: 70 },
   { re: /kontakt|\/contact/i, w: 60 },
 ];
@@ -80,7 +82,8 @@ export class DecisionMakerProvider {
     gateway: ModelGateway;
     broker?: ExecutionBroker;
     runtimeTelemetry?: RuntimeTelemetry;
-  }) {}
+  },
+  ) {}
 
   private log(msg: string): void {
 
@@ -89,7 +92,7 @@ export class DecisionMakerProvider {
 
   /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
   private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
-    return { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, taskContractId };
+    return { ...ctx, taskContractId };
   }
 
   /**
@@ -100,7 +103,11 @@ export class DecisionMakerProvider {
   async findDecisionMakers(
     company: { domain: string; name?: string },
     ctx: ExecutionContext,
-    sellerContext?: { seller?: string; target_roles?: string[]; offering?: string },
+    sellerContext?: {
+      seller?: string;
+      target_roles?: string[];
+      offering?: string;
+    },
   ): Promise<DecisionMakerContact[]> {
     // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
     if (!this.deps.broker) {
@@ -108,7 +115,9 @@ export class DecisionMakerProvider {
       return [];
     }
     const base = `https://${company.domain}/`;
-    if (!(await isAllowedByRobots(base))) {
+    if (!(await isAllowedByRobots(base, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+      }))) {
       this.log(`skip ${company.domain}: robots disallow`);
       return [];
     }
@@ -120,14 +129,22 @@ export class DecisionMakerProvider {
     // 2) 逐页抓取 + LLM 抽取分类，按人名去重合并
     const dedup = new Map<string, DecisionMakerContact>();
     for (const url of pages.slice(0, MAX_PEOPLE_PAGES)) {
-      if (!(await isAllowedByRobots(url))) continue;
+      if (
+        !(await isAllowedByRobots(url, {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+        }))
+      )
+        continue;
       let text: string;
       try {
         const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
           'crawl4ai.fetch',
           { url },
           // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及决策人抓取（复现变更前有效集）。
-          { ...this.toolCtx(ctx, 'contact.find_decision_makers'), purpose: ['discovery', 'enrichment'] },
+          {
+            ...this.toolCtx(ctx, 'contact.find_decision_makers'),
+            purpose: ['discovery', 'enrichment'],
+          },
         );
         text = crawled.data.text.slice(0, 30_000);
       } catch {
@@ -164,7 +181,9 @@ export class DecisionMakerProvider {
       }
     }
     const out = [...dedup.values()];
-    this.log(`✓ ${company.domain}: ${out.length} named people (${out.filter((p) => p.isTargetRole).length} target-role)`);
+    this.log(
+      `✓ ${company.domain}: ${out.length} named people (${out.filter((p) => p.isTargetRole).length} target-role)`,
+    );
     return out;
   }
 
@@ -175,7 +194,10 @@ export class DecisionMakerProvider {
         'crawl4ai.fetch',
         { url: base },
         // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及决策人抓取（复现变更前有效集）。
-        { ...this.toolCtx(ctx, 'contact.find_decision_makers'), purpose: ['discovery', 'enrichment'] },
+        {
+          ...this.toolCtx(ctx, 'contact.find_decision_makers'),
+          purpose: ['discovery', 'enrichment'],
+        },
       );
       const links = extractSameSiteLinks(home.data.text, base);
       const scored = links
@@ -213,7 +235,11 @@ export class DecisionMakerProvider {
     url: string,
     text: string,
     ctx: ExecutionContext,
-    sellerContext?: { seller?: string; target_roles?: string[]; offering?: string },
+    sellerContext?: {
+      seller?: string;
+      target_roles?: string[];
+      offering?: string;
+    },
   ): Promise<NonNullable<ExtractedPeople['people']>> {
     const contract = getTask('contact.find_decision_makers');
     try {
@@ -223,15 +249,14 @@ export class DecisionMakerProvider {
           task: contract?.id ?? 'contact.find_decision_makers',
           prompt:
             `卖方/ICP 上下文（用于判断谁是目标买家角色；禁止照抄进字段）：${JSON.stringify(
-              sellerContext ?? {},
-            ).slice(0, 600)}\n\n` +
+              sellerContext ?? {}).slice(0, 600)}\n\n` +
             `企业页面文本（URL: ${url}）：\n${text}`,
           system: contract?.description,
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['people'] },
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        { ...ctx },
         { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data?.people ?? [];
@@ -252,11 +277,7 @@ export class DecisionMakerContactAdapter implements ContactDiscoveryAdapter {
   readonly key = 'decision_maker';
   private readonly inner: DecisionMakerProvider;
 
-  constructor(deps: {
-    gateway: ModelGateway;
-    broker?: ExecutionBroker;
-    runtimeTelemetry?: RuntimeTelemetry;
-  }) {
+  constructor(deps: { gateway: ModelGateway; broker?: ExecutionBroker; runtimeTelemetry?: RuntimeTelemetry }) {
     this.inner = new DecisionMakerProvider(deps);
   }
 
@@ -269,8 +290,17 @@ export class DecisionMakerContactAdapter implements ContactDiscoveryAdapter {
     const people = await this.inner.findDecisionMakers(
       { domain: company.domain, name: company.name },
       ctx,
-      sellerCtx ? { seller: sellerCtx.seller, target_roles: sellerCtx.targetRoles, offering: sellerCtx.offering } : undefined,
+      sellerCtx
+        ? {
+            seller: sellerCtx.seller,
+            target_roles: sellerCtx.targetRoles,
+            offering: sellerCtx.offering,
+          }
+        : undefined,
     );
-    return { contacts: DecisionMakerProvider.toContactRecords(people), costCents: 0 };
+    return {
+      contacts: DecisionMakerProvider.toContactRecords(people),
+      costCents: 0,
+    };
   }
 }

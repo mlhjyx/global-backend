@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { discoverByArea } from './openstreetmap';
 import { queryAlgoliaExhibitors } from './trade-fair-algolia';
+import { ExternalToolActionDeniedError } from '../tools/tool-contract';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -21,14 +22,13 @@ describe('adapter internal physical-wire authorization', () => {
     const beforeRequest = vi
       .fn<() => Promise<void>>()
       .mockResolvedValueOnce()
-      .mockRejectedValueOnce(new Error('suppression_action_gate'));
+      .mockRejectedValueOnce(new ExternalToolActionDeniedError());
 
     await expect(
       discoverByArea(
         { areaName: 'Bavaria', tagFilters: [{ k: 'industrial' }], limit: 10 },
-        beforeRequest,
-      ),
-    ).resolves.toEqual([]);
+        beforeRequest),
+    ).rejects.toThrow(/suppression_action_gate/);
 
     expect(beforeRequest).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledOnce();

@@ -94,9 +94,7 @@ export class CompaniesHouseContactProvider implements ContactDiscoveryAdapter {
       return { contacts: [], costCents: 0 };
     }
     const purposeCtx = {
-      workspaceId: ctx.workspaceId,
-      runId: ctx.runId,
-      correlationId: ctx.correlationId,
+      ...ctx,
       purpose: 'discovery',
     };
     try {
@@ -118,11 +116,11 @@ export class CompaniesHouseContactProvider implements ContactDiscoveryAdapter {
         { op: 'officers', companyNumber: best.item.companyNumber, limit: 50 },
         purposeCtx,
       );
-      const directors = (officersRes.data.officers ?? []).filter(
-        (o) => o.officerRole === 'director' && !o.resignedOn,
-      );
+      const directors = (officersRes.data.officers ?? []).filter((o) => o.officerRole === 'director' && !o.resignedOn);
       const contacts = directors.map((o) => toContactRecord(o, best.item));
-      this.log(`✓ ${company.name} → ${best.item.companyNumber} (${best.score.toFixed(2)}): ${contacts.length} active directors`);
+      this.log(
+        `✓ ${company.name} → ${best.item.companyNumber} (${best.score.toFixed(2)}): ${contacts.length} active directors`,
+      );
       return { contacts, costCents: 0 };
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。

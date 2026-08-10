@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import { Tool } from './tool-contract';
+import { assertToolExternalActionAuthorized, Tool, ToolContext } from './tool-contract';
 import { ToolRegistry } from './tool-registry';
 import { crawlHtml, CrawlHtmlResult } from '../adapters/web-crawler';
 import { isAllowedByRobots } from '../adapters/robots';
@@ -43,6 +43,10 @@ import { fetchSourcesSought, SamSourcesSought, SamSearchParams } from '../adapte
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex').slice(0, 24);
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
 
+function beforeExternalRequest(ctx: ToolContext): (() => Promise<void>) | undefined {
+  return ctx.authorizeExternalAction ? () => assertToolExternalActionAuthorized(ctx) : undefined;
+}
+
 /** crawl4ai.render —— 渲染后原始 HTML（数字足迹/结构化收割/web_watch 用；robots 在内强制）。 */
 export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }> = {
   id: 'crawl4ai.render',
@@ -51,20 +55,34 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
   sourceClass: 'public_intelligence',
   cost: { unit: 'page', estimatedCents: 1, external: false },
   rateLimit: { rps: 1, concurrency: 3, perDomainCrawlDelayMs: 2000 },
-  compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
-  capabilities: { produces: ['company', 'domain', 'contact'], accepts: ['domain'] },
+  compliance: { sourcePolicy: 'advisory', respectsRobots: true, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low',
+  },
+  capabilities: { produces: ['company', 'domain', 'contact'], accepts: ['domain'],
+  },
   idempotencyKey: (i) => `crawl4ai.render:${hash(i.url)}`,
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
-  execute: async (input) => {
-    if (!(await isAllowedByRobots(input.url))) {
+  execute: async (input, ctx) => {
+    if (
+      !(await isAllowedByRobots(input.url, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+      }))
+    ) {
       // robots 禁抓 → 合规放弃（不换 UA）。空 HTML 返回，不计费。
-      return { data: { url: input.url, html: '', headers: {}, robotsBlocked: true }, costCents: 0 };
+      return {
+        data: { url: input.url, html: '', headers: {}, robotsBlocked: true },
+        costCents: 0,
+      };
     }
-    const r = await crawlHtml(input.url);
+    const r = await crawlHtml(input.url, () => assertToolExternalActionAuthorized(ctx));
     return {
       data: r,
       costCents: 1,
-      provenance: { sourceUrl: input.url, fetchedAt: new Date().toISOString(), contentHash: hash(r.html), parserVersion: 'crawl4ai/1' },
+      provenance: {
+        sourceUrl: input.url,
+        fetchedAt: new Date().toISOString(),
+        contentHash: hash(r.html),
+        parserVersion: 'crawl4ai/1',
+      },
     };
   },
 };
@@ -102,19 +120,33 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
   sourceClass: 'public_intelligence',
   cost: { unit: 'request', estimatedCents: 0, external: false },
   rateLimit: { rps: 3, concurrency: 4, perDomainCrawlDelayMs: 500 },
-  compliance: { sourcePolicy: 'advisory', respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'advisory',
+    respectsRobots: false,
+    personalData: false,
+    allowedPurpose: ['discovery', 'enrichment'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
   capabilities: { produces: ['domain'], accepts: ['domain'] },
   idempotencyKey: (i) => `http.get:${stableKey({ url: i.url, method: i.method ?? 'GET' })}`,
   healthCheck: async () => ({ healthy: true, detail: 'fetch' }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     try {
-      const res = await requestPublicHttp(input.url, {
-        method: input.method ?? 'GET',
-        headers: { 'User-Agent': HTTP_GET_UA, ...input.headers },
-        timeoutMs: input.timeoutMs ?? 15_000,
-        maxBytes: 3_000_000,
-        maxRedirects: MAX_REDIRECT_HOPS,
-      });
+      const res = await requestPublicHttp(
+        input.url,
+        {
+          method: input.method ?? 'GET',
+          headers: { 'User-Agent': HTTP_GET_UA, ...input.headers },
+          timeoutMs: input.timeoutMs ?? 15_000,
+          maxBytes: 3_000_000,
+          maxRedirects: MAX_REDIRECT_HOPS,
+        },
+        {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+        },
+      );
       // gzip 魔数透明解压（sitemap.xml.gz 常见；与原 fetchText 实现对齐）
       let buf = res.body;
       if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
@@ -147,8 +179,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
 };
 
 export type WikidataEntityInput =
-  | { op: 'search'; name: string; limit?: number }
-  | { op: 'get'; qids: string[]; props?: string };
+  { op: 'search'; name: string; limit?: number } | { op: 'get'; qids: string[]; props?: string };
 export interface WikidataEntityOutput {
   search?: WikidataEntitySummary[];
   entities?: Record<string, RawEntity>;
@@ -162,15 +193,39 @@ export const wikidataEntityTool: Tool<WikidataEntityInput, WikidataEntityOutput>
   sourceClass: 'company_registry',
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 2, concurrency: 2 },
-  compliance: { sourcePolicy: 'required', policyDomain: 'www.wikidata.org', respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
-  capabilities: { produces: ['company', 'relation'], accepts: ['keywords'], enrichesOnly: true },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'www.wikidata.org',
+    respectsRobots: false,
+    personalData: false,
+    allowedPurpose: ['discovery', 'enrichment'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
+  capabilities: {
+    produces: ['company', 'relation'],
+    accepts: ['keywords'],
+    enrichesOnly: true,
+  },
   idempotencyKey: (i) => `wikidata.entity:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'wikidata-api' }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
+    const beforeRequest = beforeExternalRequest(ctx);
     if (input.op === 'search') {
-      return { data: { search: await wikidataSearchEntity(input.name, input.limit) }, costCents: 0 };
+      return {
+        data: {
+          search: await wikidataSearchEntity(input.name, input.limit, beforeRequest),
+        },
+        costCents: 0,
+      };
     }
-    return { data: { entities: await wikidataGetEntities(input.qids, input.props) }, costCents: 0 };
+    return {
+      data: {
+        entities: await wikidataGetEntities(input.qids, input.props, beforeRequest),
+      },
+      costCents: 0,
+    };
   },
 };
 
@@ -191,20 +246,48 @@ export const gleifFetchTool: Tool<GleifFetchInput, GleifFetchOutput> = {
   sourceClass: 'company_registry',
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 2, concurrency: 2 },
-  compliance: { sourcePolicy: 'required', policyDomain: 'api.gleif.org', respectsRobots: false, personalData: false, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
-  capabilities: { produces: ['company', 'relation'], accepts: ['lei', 'keywords'], enrichesOnly: true },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'api.gleif.org',
+    respectsRobots: false,
+    personalData: false,
+    allowedPurpose: ['discovery', 'enrichment'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
+  capabilities: {
+    produces: ['company', 'relation'],
+    accepts: ['lei', 'keywords'],
+    enrichesOnly: true,
+  },
   idempotencyKey: (i) => `gleif.fetch:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'gleif' }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
+    const beforeRequest = beforeExternalRequest(ctx);
     if (input.op === 'search') {
-      return { data: { records: await searchLeiRecords({ name: input.name, country: input.country, limit: input.limit }) }, costCents: 0 };
+      return {
+        data: {
+          records: await searchLeiRecords(
+            { name: input.name, country: input.country, limit: input.limit },
+            beforeRequest,
+          ),
+        },
+        costCents: 0,
+      };
     }
-    const parent = input.op === 'directParent' ? await getDirectParent(input.lei) : await getUltimateParent(input.lei);
+    const parent =
+      input.op === 'directParent'
+        ? await getDirectParent(input.lei, beforeRequest)
+        : await getUltimateParent(input.lei, beforeRequest);
     return { data: { parent }, costCents: 0 };
   },
 };
 
-export type TedSearchInput = { kind: 'award' | 'contract'; params: SearchAwardParams };
+export type TedSearchInput = {
+  kind: 'award' | 'contract';
+  params: SearchAwardParams;
+};
 export interface TedSearchOutput {
   awards?: TedAwardNotice[];
   notices?: TedContractNotice[];
@@ -220,21 +303,41 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
   rateLimit: { rps: 1, concurrency: 2 },
   // personalData:true —— notice 可含具名联系人（绿字段抽取已隔离，元数据仍如实标注，与 source_policy 行一致）。
   // 'intent'：招标 intent 投影（TENDER_PUBLISHED）以该用途经本工具（旧 §8.8 门显式列 intent）。
-  compliance: { sourcePolicy: 'required', policyDomain: 'api.ted.europa.eu', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment', 'intent'], reversible: true, authRequired: false, risk: 'low' },
-  capabilities: { produces: ['company', 'trade_record'], accepts: ['keywords'] },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'api.ted.europa.eu',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery', 'enrichment', 'intent'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
+  capabilities: {
+    produces: ['company', 'trade_record'],
+    accepts: ['keywords'],
+  },
   idempotencyKey: (i) => `ted.search:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'ted' }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
+    const beforeRequest = beforeExternalRequest(ctx);
     if (input.kind === 'award') {
-      return { data: { awards: await searchAwardNotices(input.params) }, costCents: 0 };
+      return {
+        data: { awards: await searchAwardNotices(input.params, beforeRequest) },
+        costCents: 0,
+      };
     }
-    return { data: { notices: await searchContractNotices(input.params) }, costCents: 0 };
+    return {
+      data: {
+        notices: await searchContractNotices(input.params, beforeRequest),
+      },
+      costCents: 0,
+    };
   },
 };
 
 export type OpenFdaSearchInput =
-  | { kind: 'registration'; params: RegistrationSearchParams }
-  | { kind: '510k'; params: Search510kParams };
+  { kind: 'registration'; params: RegistrationSearchParams } | { kind: '510k'; params: Search510kParams };
 export interface OpenFdaSearchOutput {
   establishments?: OpenFdaEstablishment[];
   clearances?: Fda510kClearance[];
@@ -250,21 +353,40 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
   rateLimit: { rps: 1, concurrency: 2 },
   // personalData:true —— registrationlisting 可含具名 us_agent/contact（不入绿库由 provider 抽取面守）。
   // 'intent'：510k 清关 intent 投影（FDA_CLEARANCE）以该用途经本工具。
-  compliance: { sourcePolicy: 'required', policyDomain: 'api.fda.gov', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment', 'intent'], reversible: true, authRequired: false, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'api.fda.gov',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery', 'enrichment', 'intent'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
   capabilities: { produces: ['company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `openfda.search:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'openfda' }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
+    const beforeRequest = beforeExternalRequest(ctx);
     if (input.kind === 'registration') {
-      return { data: { establishments: await searchRegistrations(input.params) }, costCents: 0 };
+      return {
+        data: {
+          establishments: await searchRegistrations(input.params, beforeRequest),
+        },
+        costCents: 0,
+      };
     }
-    return { data: { clearances: await search510kClearances(input.params) }, costCents: 0 };
+    return {
+      data: {
+        clearances: await search510kClearances(input.params, beforeRequest),
+      },
+      costCents: 0,
+    };
   },
 };
 
 export type CompaniesHouseInput =
-  | { op: 'search'; query: string; limit?: number }
-  | { op: 'officers'; companyNumber: string; limit?: number };
+  { op: 'search'; query: string; limit?: number } | { op: 'officers'; companyNumber: string; limit?: number };
 export interface CompaniesHouseOutput {
   companies?: ChCompanyHit[];
   officers?: ChOfficer[];
@@ -283,15 +405,39 @@ export const companiesHouseSearchTool: Tool<CompaniesHouseInput, CompaniesHouseO
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 2, concurrency: 2 },
   // personalData:true —— officers 是具名董事（GDPR）；数据最小化（无 DOB/国籍/住址）在 adapter 层强制。
-  compliance: { sourcePolicy: 'required', policyDomain: 'api.company-information.service.gov.uk', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: true, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'api.company-information.service.gov.uk',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery', 'enrichment'],
+    reversible: true,
+    authRequired: true,
+    risk: 'low',
+  },
   capabilities: { produces: ['contact', 'company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `companies_house.search:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'companies-house' }),
-  execute: async (input) => {
+  execute: async (input, ctx) => {
+    const beforeRequest = beforeExternalRequest(ctx);
     if (input.op === 'search') {
-      return { data: { companies: await searchCompanies(input.query, input.limit) }, costCents: 0 };
+      return {
+        data: {
+          companies: await searchCompanies(input.query, input.limit, {
+            beforeRequest,
+          }),
+        },
+        costCents: 0,
+      };
     }
-    return { data: { officers: await listOfficers(input.companyNumber, input.limit) }, costCents: 0 };
+    return {
+      data: {
+        officers: await listOfficers(input.companyNumber, input.limit, {
+          beforeRequest,
+        }),
+      },
+      costCents: 0,
+    };
   },
 };
 
@@ -313,12 +459,25 @@ export const inpiRneSearchTool: Tool<InpiRneInput, InpiRneOutput> = {
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 2, concurrency: 2 },
   // personalData:true —— dirigeants 是具名负责人（GDPR）；数据最小化（无 DOB/国籍/住址）在 adapter 层强制。
-  compliance: { sourcePolicy: 'required', policyDomain: 'recherche-entreprises.api.gouv.fr', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'recherche-entreprises.api.gouv.fr',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery', 'enrichment'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
   capabilities: { produces: ['contact', 'company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `inpi_rne.search:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'inpi-rne' }),
-  execute: async (input) => ({
-    data: { companies: await searchCompaniesWithDirigeants(input.query, input.limit) },
+  execute: async (input, ctx) => ({
+    data: {
+      companies: await searchCompaniesWithDirigeants(input.query, input.limit, {
+        beforeRequest: beforeExternalRequest(ctx),
+      }),
+    },
     costCents: 0,
   }),
 };
@@ -348,17 +507,33 @@ export const googlePatentsSearchTool: Tool<GooglePatentsInput, GooglePatentsOutp
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
   // personalData:true —— inventors 是具名发明人（GDPR）；数据最小化（只 name）在 adapter 层强制。
-  compliance: { sourcePolicy: 'required', policyDomain: 'bigquery.googleapis.com', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: true, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'bigquery.googleapis.com',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery', 'enrichment'],
+    reversible: true,
+    authRequired: true,
+    risk: 'low',
+  },
   capabilities: { produces: ['contact'], accepts: ['keywords'] },
   idempotencyKey: (i) => `google_patents.search:${stableKey(i)}`,
-  healthCheck: async () => ({ healthy: true, detail: 'google-patents-bigquery' }),
-  execute: async (input) => ({
+  healthCheck: async () => ({
+    healthy: true,
+    detail: 'google-patents-bigquery',
+  }),
+  execute: async (input, ctx) => ({
     data: {
-      patents: await bigqueryPatents.searchPatentsByAssignee(input.applicant, {
-        fromYear: input.fromYear,
-        toYear: input.toYear,
-        maxRows: input.maxRows,
-      }),
+      patents: await bigqueryPatents.searchPatentsByAssignee(
+        input.applicant,
+        {
+          fromYear: input.fromYear,
+          toYear: input.toYear,
+          maxRows: input.maxRows,
+        },
+        beforeExternalRequest(ctx),
+      ),
     },
     costCents: 0,
   }),
@@ -379,12 +554,24 @@ export const tradeFairAlgoliaTool: Tool<TradeFairAlgoliaInput, { exhibitors: Fai
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 2 },
   // personalData:true —— 参展商记录可内联联系人邮箱/电话。
-  compliance: { sourcePolicy: 'required', policyDomain: 'algolia.net', respectsRobots: false, personalData: true, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'medium' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'algolia.net',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery'],
+    reversible: true,
+    authRequired: false,
+    risk: 'medium',
+  },
   capabilities: { produces: ['company', 'contact'], accepts: ['keywords'] },
-  idempotencyKey: (i) => `tradefair.algolia:${stableKey({ appId: i.cfg.appId, index: i.cfg.indexName, edition: i.cfg.eventEditionId, limit: i.limit })}`,
+  idempotencyKey: (i) =>
+    `tradefair.algolia:${stableKey({ appId: i.cfg.appId, index: i.cfg.indexName, edition: i.cfg.eventEditionId, limit: i.limit })}`,
   healthCheck: async () => ({ healthy: true, detail: 'algolia' }),
-  execute: async (input) => ({
-    data: { exhibitors: await queryAlgoliaExhibitors(input.cfg, input.limit) },
+  execute: async (input, ctx) => ({
+    data: {
+      exhibitors: await queryAlgoliaExhibitors(input.cfg, input.limit, beforeExternalRequest(ctx)),
+    },
     costCents: 0,
   }),
 };
@@ -412,7 +599,16 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
   sourceClass: 'industry_data',
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 2 },
-  compliance: { sourcePolicy: 'required', policyDomain: 'mapyourshow.com', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'medium' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'mapyourshow.com',
+    respectsRobots: false,
+    personalData: false,
+    allowedPurpose: ['discovery'],
+    reversible: true,
+    authRequired: false,
+    risk: 'medium',
+  },
   capabilities: { produces: ['company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `mapyourshow.fetch:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'mapyourshow' }),
@@ -422,7 +618,8 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
     // IIS 对裸请求 403：带浏览器 UA + XHR 头 + 同源 Referer（与站点前端一致的公开端点访问方式）。
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
         Accept: 'application/json, text/javascript, */*; q=0.01',
         'X-Requested-With': 'XMLHttpRequest',
         Referer: `${base}/explore/exhibitor-gallery.cfm`,
@@ -430,8 +627,13 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`mapyourshow ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    const json = (await res.json()) as { DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } } };
-    return { data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] }, costCents: 0 };
+    const json = (await res.json()) as {
+      DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } };
+    };
+    return {
+      data: { hits: json?.DATA?.results?.exhibitor?.hit ?? [] },
+      costCents: 0,
+    };
   },
 };
 
@@ -456,11 +658,23 @@ export const samgovSearchTool: Tool<SamSearchInput, SamSearchOutput> = {
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
   // personalData:true —— 上游 CSV 含联系官具名字段（adapter 层结构性剔除，绿库红线；元数据仍如实标注）。
-  compliance: { sourcePolicy: 'required', policyDomain: 'sam.gov', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment', 'intent'], reversible: true, authRequired: false, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'required',
+    policyDomain: 'sam.gov',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['discovery', 'enrichment', 'intent'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
   capabilities: { produces: ['company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `samgov.search:${stableKey(i)}`,
   healthCheck: async () => ({ healthy: true, detail: 'samgov' }),
-  execute: async (input) => ({ data: { notices: await fetchSourcesSought(input.params) }, costCents: 0 }),
+  execute: async (input) => ({
+    data: { notices: await fetchSourcesSought(input.params) },
+    costCents: 0,
+  }),
 };
 
 /**
@@ -488,7 +702,15 @@ export const sanctionsDownloadTool: Tool<SanctionsDownloadInput, SanctionsDownlo
   sourceClass: 'public_intelligence',
   cost: { unit: 'call', estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
-  compliance: { sourcePolicy: 'required', respectsRobots: false, personalData: true, allowedPurpose: ['sanctions_screening'], reversible: true, authRequired: false, risk: 'low' },
+  compliance: {
+    sourcePolicy: 'required',
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ['sanctions_screening'],
+    reversible: true,
+    authRequired: false,
+    risk: 'low',
+  },
   capabilities: { produces: ['company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `sanctions.download:${hash(i.url)}`,
   healthCheck: async () => ({ healthy: true, detail: 'sanctions' }),
@@ -500,9 +722,18 @@ export const sanctionsDownloadTool: Tool<SanctionsDownloadInput, SanctionsDownlo
     if (!res.ok) throw new Error(`sanctions.download HTTP ${res.status} for ${input.url}`);
     const body = await res.text();
     return {
-      data: { body, contentType: res.headers.get('content-type'), lastModified: res.headers.get('last-modified') },
+      data: {
+        body,
+        contentType: res.headers.get('content-type'),
+        lastModified: res.headers.get('last-modified'),
+      },
       costCents: 0,
-      provenance: { sourceUrl: input.url, fetchedAt: new Date().toISOString(), contentHash: hash(body), parserVersion: 'sanctions-download/1' },
+      provenance: {
+        sourceUrl: input.url,
+        fetchedAt: new Date().toISOString(),
+        contentHash: hash(body),
+        parserVersion: 'sanctions-download/1',
+      },
     };
   },
 };

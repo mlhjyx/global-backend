@@ -53,6 +53,7 @@ export interface ChOfficer {
 export interface CompaniesHouseDeps {
   fetchImpl?: typeof fetch;
   apiKey?: string;
+  beforeRequest?: () => Promise<void>;
 }
 
 /** 从 `/officers/{OFFICER_ID}/appointments` 抽 officer id（纯函数）。缺/畸形 → undefined。 */
@@ -67,7 +68,8 @@ export function mapCompanyHit(raw: Record<string, unknown>): ChCompanyHit | null
   const companyNumber = str(raw['company_number'])?.trim();
   const title = str(raw['title'])?.trim();
   if (!companyNumber || !title) return null;
-  return { companyNumber, title, companyStatus: str(raw['company_status'])?.trim().toLowerCase() ?? 'unknown' };
+  return { companyNumber, title, companyStatus: str(raw['company_status'])?.trim().toLowerCase() ?? 'unknown',
+  };
 }
 
 /**
@@ -130,6 +132,7 @@ async function chGet(
   const apiKey = deps?.apiKey ?? process.env.COMPANIES_HOUSE_API_KEY;
   if (!apiKey) throw new Error('COMPANIES_HOUSE_API_KEY not configured');
   const fetchImpl = deps?.fetchImpl ?? fetch;
+  const beforeRequest = deps?.beforeRequest;
   const url = new URL(path, BASE_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   // Basic auth：key 作 username、空 password → base64(key + ":")。
@@ -137,6 +140,7 @@ async function chGet(
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await beforeRequest?.();
     try {
       const res = await fetchImpl(url, {
         headers: { Authorization: auth, Accept: 'application/json' },

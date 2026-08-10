@@ -9,13 +9,15 @@ import { persistGuessedEmail } from './email-guess-persist';
 import { buildGuessTargets } from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
-import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
+import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis,
+} from './compliance/email-verification-gate';
 import {
   canonicalizeSuppressionValue,
   canonicalizeSuppressionValues,
   companyMatchesSuppression,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
+import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -45,11 +47,14 @@ export class DiscoveryService {
   /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
   async executePlan(ctx: RequestContext, planId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: planId } });
-      if (!plan) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'query plan not found' } });
+      const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: planId },
+      });
+      if (!plan) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'query plan not found' },
+        });
       if (plan.status !== 'READY') {
         throw new ConflictException({
-          error: { code: 'INVALID_STATE', message: `plan is ${plan.status}; confirm it (READY) before executing` },
+          error: { code: 'INVALID_STATE', message: `plan is ${plan.status}; confirm it (READY) before executing`,
+          },
         });
       }
       const run = await tx.discoveryRun.create({
@@ -72,25 +77,28 @@ export class DiscoveryService {
     const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.discoveryRun.findUnique({ where: { id: runId } }),
     );
-    if (!run) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+    if (!run)
+      throw new NotFoundException({
+        error: { code: 'NOT_FOUND', message: 'run not found' },
+      });
     return run;
   }
 
-  listCanonicalCompanies(
-    ctx: RequestContext,
-    opts: { status?: string; limit: number; cursor?: string },
-  ) {
+  listCanonicalCompanies(ctx: RequestContext, opts: { status?: string; limit: number; cursor?: string }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.canonicalCompany.findMany({
         where: opts.status ? { status: opts.status } : {},
         take: opts.limit + 1,
         ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        include: { contacts: { include: { contactPoints: true } } },
       });
       const hasMore = rows.length > opts.limit;
       const data = hasMore ? rows.slice(0, opts.limit) : rows;
-      return { data, nextCursor: hasMore ? data[data.length - 1].id : null, hasMore };
+      return {
+        data,
+        nextCursor: hasMore ? data[data.length - 1].id : null,
+        hasMore,
+      };
     });
   }
 
@@ -100,7 +108,10 @@ export class DiscoveryService {
         where: { id },
         include: { contacts: { include: { contactPoints: true } } },
       });
-      if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      if (!company)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'company not found' },
+        });
       const evidence = await tx.fieldEvidence.findMany({
         where: { entityType: 'company', entityId: id },
         orderBy: { fetchedAt: 'desc' },
@@ -117,20 +128,33 @@ export class DiscoveryService {
    */
   async discoverContacts(ctx: RequestContext, companyId: string) {
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.canonicalCompany.findUnique({ where: { id: companyId } });
-      if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      const company = await tx.canonicalCompany.findUnique({
+        where: { id: companyId },
+      });
+      if (!company)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'company not found' },
+        });
       const companySuppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
       });
       if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
         throw new ConflictException({
-          error: { code: 'SUPPRESSED', message: 'company is suppressed; contact discovery blocked' },
+          error: {
+            code: 'SUPPRESSED',
+            message: 'company is suppressed; contact discovery blocked',
+          },
         });
       }
       const adapters = await this.providers.routeContactDiscovery(tx as never);
       if (!adapters.length) {
-        throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no contact discovery provider enabled' } });
+        throw new ConflictException({
+          error: {
+            code: 'NO_PROVIDER',
+            message: 'no contact discovery provider enabled',
+          },
+        });
       }
       const suppressedEmails = canonicalizeSuppressionValues(
         'email',
@@ -141,9 +165,19 @@ export class DiscoveryService {
 
     // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
     // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；各自保留自己的 adapterKey。
-    const perAdapter: { key: string; contacts: ProviderContactRecord[]; costCents: number }[] = [];
+    const perAdapter: {
+      key: string;
+      contacts: ProviderContactRecord[];
+      costCents: number;
+    }[] = [];
+    const authorizeExternalAction = () =>
+      this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+        companyMayUseExternalProcessing(tx, ctx.workspaceId, companyId),
+      );
     for (const adapter of loaded.adapters) {
       try {
+        const authorized = await authorizeExternalAction();
+        if (!authorized) break;
         const result = await adapter.discoverContacts(
           {
             name: loaded.company.name,
@@ -151,9 +185,17 @@ export class DiscoveryService {
             country: loaded.company.country ?? undefined,
           },
           // 收口②：真租户贯穿（LLM/抓取按 workspace 归属 trace/预算）
-          { workspaceId: ctx.workspaceId, correlationId: companyId },
+          {
+            workspaceId: ctx.workspaceId,
+            correlationId: companyId,
+            authorizeExternalAction,
+          },
         );
-        perAdapter.push({ key: adapter.key, contacts: result.contacts, costCents: result.costCents });
+        perAdapter.push({
+          key: adapter.key,
+          contacts: result.contacts,
+          costCents: result.costCents,
+        });
       } catch (err) {
         // 单 adapter fail-safe：不阻断其余源——但**留痕**（交互端点不静默退化为 0 联系人）
         console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
@@ -164,15 +206,20 @@ export class DiscoveryService {
       // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
       // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
       let skippedSuppressed = 0;
+      let skippedInvalid = 0;
       for (const pa of perAdapter) {
         const res = await persistDiscoveredContacts(tx, {
           workspaceId: ctx.workspaceId,
-          company: { id: loaded.company.id, dedupeKey: loaded.company.dedupeKey },
+          company: {
+            id: loaded.company.id,
+            dedupeKey: loaded.company.dedupeKey,
+          },
           adapterKey: pa.key,
           contacts: pa.contacts,
           suppressedEmails: loaded.suppressedEmails,
         });
         skippedSuppressed += res.skippedSuppressed;
+        skippedInvalid += res.skippedInvalid;
         if (pa.costCents > 0) {
           await tx.usageLedger.create({
             data: {
@@ -191,7 +238,7 @@ export class DiscoveryService {
         where: { companyId: loaded.company.id },
         include: { contactPoints: true },
       });
-      return { contacts, skippedSuppressed };
+      return { contacts, skippedSuppressed, skippedInvalid };
     });
   }
 
@@ -206,46 +253,103 @@ export class DiscoveryService {
   async guessEmailsForCompany(
     ctx: RequestContext,
     companyId: string,
-    opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean; maxContacts?: number; maxProbe?: number },
+    opts?: {
+      lawfulBasis?: LawfulBasis;
+      allowPersonalWithoutBasis?: boolean;
+      maxContacts?: number;
+      maxProbe?: number;
+    },
   ) {
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.canonicalCompany.findUnique({ where: { id: companyId } });
-      if (!company) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      const company = await tx.canonicalCompany.findUnique({
+        where: { id: companyId },
+      });
+      if (!company)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'company not found' },
+        });
       const companySuppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
       });
       if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
-        throw new ConflictException({ error: { code: 'SUPPRESSED', message: 'company suppressed; email guessing blocked' } });
+        throw new ConflictException({
+          error: {
+            code: 'SUPPRESSED',
+            message: 'company suppressed; email guessing blocked',
+          },
+        });
       }
       if (!company.domain) {
-        throw new ConflictException({ error: { code: 'NO_DOMAIN', message: 'company has no domain; cannot guess emails' } });
+        throw new ConflictException({
+          error: {
+            code: 'NO_DOMAIN',
+            message: 'company has no domain; cannot guess emails',
+          },
+        });
       }
       const adapters = await this.providers.routeEmailVerification(tx as never);
       if (!adapters.length) {
-        throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
+        throw new ConflictException({
+          error: {
+            code: 'NO_PROVIDER',
+            message: 'no email verification provider enabled',
+          },
+        });
       }
-      const contacts = await tx.canonicalContact.findMany({ where: { companyId }, include: { contactPoints: true } });
+      const contacts = await tx.canonicalContact.findMany({
+        where: { companyId },
+        include: { contactPoints: true },
+      });
       const suppressedEmails = canonicalizeSuppressionValues(
         'email',
         (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
       );
-      return { company, domain: company.domain, adapter: adapters[0], contacts, suppressedEmails };
+      return {
+        company,
+        domain: company.domain,
+        adapter: adapters[0],
+        contacts,
+        suppressedEmails,
+      };
     });
 
     const domain = loaded.domain;
     // 格式学习样本（同域非-RISKY，全公司合并）+ 缺邮箱决策人（有界，默认 25）——与 backlog 阶段⑤b 共用
     // 纯件 buildGuessTargets（复审 MEDIUM：消 service/backlog 逐字重复漂移 + 统一 per-company cap）。
-    const { knownSamples, emailless: targets, emaillessTotal } = buildGuessTargets(
-      loaded.contacts,
-      domain,
-      opts?.maxContacts,
-    );
+    const {
+      knownSamples,
+      emailless: targets,
+      emaillessTotal,
+    } = buildGuessTargets(loaded.contacts, domain, opts?.maxContacts);
 
     // 事务外：逐人 SMTP 猜测（adapter 单例不绑 tx）
     const guesser = new EmailGuesser(loaded.adapter);
-    const results: { contactId: string; fullName: string; result: GuessResult }[] = [];
+    const results: {
+      contactId: string;
+      fullName: string;
+      result: GuessResult;
+    }[] = [];
     for (const c of targets) {
+      const authorized = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+        contactMayUseExternalProcessing(tx, {
+          workspaceId: ctx.workspaceId,
+          contactId: c.contactId,
+        }),
+      );
+      if (!authorized) {
+        results.push({
+          contactId: c.contactId,
+          fullName: c.fullName,
+          result: {
+            status: 'blocked',
+            triedCount: 0,
+            candidates: [],
+            reason: 'suppression_action_gate',
+          },
+        });
+        continue;
+      }
       const result = await guesser.guess(
         { fullName: c.fullName, domain, knownSamples },
         {
@@ -255,6 +359,14 @@ export class DiscoveryService {
           actor: ctx.userId,
           maxProbe: opts?.maxProbe,
           suppressedEmails: loaded.suppressedEmails,
+          authorizeCandidate: (email) =>
+            this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+              contactMayUseExternalProcessing(tx, {
+                workspaceId: ctx.workspaceId,
+                contactId: c.contactId,
+                email,
+              }),
+            ),
         },
       );
       results.push({ contactId: c.contactId, fullName: c.fullName, result });
@@ -270,7 +382,12 @@ export class DiscoveryService {
         verified: 0,
         unverified: 0,
         blocked: 0,
-        perContact: [] as { fullName: string; status: GuessResult['status']; email: string | null; pointStatus: string | null }[],
+        perContact: [] as {
+          fullName: string;
+          status: GuessResult['status'];
+          email: string | null;
+          pointStatus: string | null;
+        }[],
       };
       for (const r of results) {
         const out = await persistGuessedEmail(tx, {
@@ -324,14 +441,24 @@ export class DiscoveryService {
           contactId: true,
           contact: {
             select: {
-              company: { select: { id: true, name: true, domain: true, status: true } },
+              company: {
+                select: { id: true, name: true, domain: true, status: true },
+              },
             },
           },
         },
       });
-      if (!point) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'contact point not found' } });
+      if (!point)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'contact point not found' },
+        });
       if (point.type !== 'email') {
-        throw new ConflictException({ error: { code: 'INVALID_TYPE', message: 'only email points can be verified' } });
+        throw new ConflictException({
+          error: {
+            code: 'INVALID_TYPE',
+            message: 'only email points can be verified',
+          },
+        });
       }
       const emailKey = canonicalizeSuppressionValue('email', point.value);
       const domainKey = emailKey ? canonicalizeSuppressionValue('domain', emailKey.split('@')[1]) : null;
@@ -377,7 +504,9 @@ export class DiscoveryService {
       kind: loaded.kind,
       lawfulBasis: opts?.lawfulBasis,
       suppressed: loaded.suppressed,
-      policy: resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis }),
+      policy: resolveEmailVerificationPolicy({
+        allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
+      }),
     });
     const gateKind = gate.kind === 'invalid' ? undefined : gate.kind;
     // 将被落库的合法性基础统一补断言人/时间——覆盖操作者显式断言的**与开关合成的**（后者无 who/when），
@@ -390,12 +519,32 @@ export class DiscoveryService {
     // 门拦截则合成 BLOCKED，**不路由/不触任何验证器**（即便 smtp_self 被 kill-switch 关掉也不绕过）。
     let verdict: EmailVerdict;
     let providerKey: string;
-    if (!gate.allowed) {
-      verdict = { status: 'BLOCKED', detail: `lawful_basis_gate:${gate.reason}`, costCents: 0, kind: gateKind };
+    const actionAuthorized = gate.allowed
+      ? await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+          contactMayUseExternalProcessing(tx, {
+            workspaceId: ctx.workspaceId,
+            contactId: loaded.contactId,
+            email: loaded.pointValue,
+          }),
+        )
+      : false;
+    if (!gate.allowed || !actionAuthorized) {
+      verdict = {
+        status: 'BLOCKED',
+        detail: `lawful_basis_gate:${gate.reason}`,
+        costCents: 0,
+        kind: gateKind,
+      };
+      if (gate.allowed && !actionAuthorized) verdict.detail = 'suppression_action_gate';
       providerKey = 'compliance_gate';
     } else {
       if (!loaded.adapter) {
-        throw new ConflictException({ error: { code: 'NO_PROVIDER', message: 'no email verification provider enabled' } });
+        throw new ConflictException({
+          error: {
+            code: 'NO_PROVIDER',
+            message: 'no email verification provider enabled',
+          },
+        });
       }
       const verifyCtx: EmailVerifyContext = {
         workspaceId: ctx.workspaceId,
@@ -403,6 +552,14 @@ export class DiscoveryService {
         lawfulBasis: recordedBasis,
         allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
         suppressed: loaded.suppressed,
+        authorizeExternalAction: () =>
+          this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+            contactMayUseExternalProcessing(tx, {
+              workspaceId: ctx.workspaceId,
+              contactId: loaded.contactId,
+              email: loaded.pointValue,
+            }),
+          ),
       };
       verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
       providerKey = loaded.adapter.key;
@@ -417,22 +574,24 @@ export class DiscoveryService {
           value: true,
           contact: {
             select: {
-              company: { select: { id: true, name: true, domain: true, status: true } },
+              company: {
+                select: { id: true, name: true, domain: true, status: true },
+              },
             },
           },
         },
       });
       if (!currentPoint) {
-        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'contact point not found' } });
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'contact point not found' },
+        });
       }
       const currentSuppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['email', 'domain', 'company_name'] } },
         select: { type: true, value: true },
       });
       const currentEmail = canonicalizeSuppressionValue('email', currentPoint.value);
-      const currentDomain = currentEmail
-        ? canonicalizeSuppressionValue('domain', currentEmail.split('@')[1])
-        : null;
+      const currentDomain = currentEmail ? canonicalizeSuppressionValue('domain', currentEmail.split('@')[1]) : null;
       const currentCompany = currentPoint.contact.company;
       const currentCompanySuppressed = companyMatchesSuppression(currentSuppressions, currentCompany);
       if (currentCompanySuppressed && currentCompany.status !== 'SUPPRESSED') {
@@ -444,14 +603,16 @@ export class DiscoveryService {
       const currentlySuppressed =
         currentCompany.status === 'SUPPRESSED' ||
         currentCompanySuppressed ||
-        (!!currentEmail && canonicalizeSuppressionValues(
-          'email',
-          currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
-        ).has(currentEmail)) ||
-        (!!currentDomain && canonicalizeSuppressionValues(
-          'domain',
-          currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
-        ).has(currentDomain));
+        (!!currentEmail &&
+          canonicalizeSuppressionValues(
+            'email',
+            currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
+          ).has(currentEmail)) ||
+        (!!currentDomain &&
+          canonicalizeSuppressionValues(
+            'domain',
+            currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
+          ).has(currentDomain));
       const committedVerdict: EmailVerdict = currentlySuppressed
         ? {
             status: 'BLOCKED',
@@ -503,10 +664,13 @@ export class DiscoveryService {
     const canonicalValue = canonicalizeSuppressionValue(entry.type, entry.value);
     if (!canonicalValue) {
       throw new BadRequestException({
-        error: { code: 'INVALID_SUPPRESSION_VALUE', message: 'suppression type/value is invalid' },
+        error: {
+          code: 'INVALID_SUPPRESSION_VALUE',
+          message: 'suppression type/value is invalid',
+        },
       });
     }
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    const rec = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
       const reason = entry.reason ?? 'manual';
       // Fail closed: only the explicitly reviewed preference reasons are releasable.
@@ -530,22 +694,28 @@ export class DiscoveryService {
           protectionClass,
         },
       });
-      // 立刻生效：命中的 canonical 公司标记 SUPPRESSED
-      if (entry.type === 'domain' || entry.type === 'company_name') {
-        await this.suppressCanonicalCompanies(tx, entry.type, canonicalValue);
-      }
       return rec;
     });
+    // The append-only fact is authoritative immediately. Derived status reconciliation runs in a
+    // separate transaction so a large workspace scan cannot hold the policy linearization lock.
+    if (entry.type === 'domain' || entry.type === 'company_name') {
+      await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+        this.suppressCanonicalCompanies(tx, entry.type as 'domain' | 'company_name', canonicalValue),
+      );
+    }
+    return rec;
   }
 
   listSuppressions(ctx: RequestContext, page?: SuppressionPageRequest) {
     const pagination = suppressionPagination(page);
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.suppressionRecord.findMany({
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: pagination.limit + 1,
-        ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
-      }).then((rows) => suppressionPage(rows, pagination.limit)),
+      tx.suppressionRecord
+        .findMany({
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: pagination.limit + 1,
+          ...(pagination.cursor ? { cursor: { id: pagination.cursor }, skip: 1 } : {}),
+        })
+        .then((rows) => suppressionPage(rows, pagination.limit)),
     );
   }
 
@@ -553,7 +723,10 @@ export class DiscoveryService {
     const pagination = suppressionPagination(page);
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rec = await tx.suppressionRecord.findUnique({ where: { id } });
-      if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
+      if (!rec)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'suppression not found' },
+        });
       const rows = await tx.suppressionDecision.findMany({
         where: { suppressionId: id },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -579,8 +752,10 @@ export class DiscoveryService {
         select: { id: true, domain: true, name: true },
       });
       const ids = rows
-        .filter((row) =>
-          canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue)
+        .filter(
+          (row) =>
+            canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue,
+        )
         .map((row) => row.id);
       if (ids.length) {
         await tx.canonicalCompany.updateMany({
@@ -593,15 +768,35 @@ export class DiscoveryService {
     }
   }
 
-  async requestSuppressionDecision(
-    ctx: RequestContext,
-    id: string,
-    request: SuppressionDecisionRequest,
-  ) {
+  async requestSuppressionDecision(ctx: RequestContext, id: string, request: SuppressionDecisionRequest) {
     validateSuppressionDecisionRequest(request);
     const outcome = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
       const rec = await tx.suppressionRecord.findUnique({ where: { id } });
-      if (!rec) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'suppression not found' } });
+      if (!rec)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'suppression not found' },
+        });
+
+      const existing = await tx.suppressionDecision.findUnique({
+        where: {
+          workspaceId_requestId: {
+            workspaceId: ctx.workspaceId,
+            requestId: request.requestId,
+          },
+        },
+      });
+      if (existing) {
+        assertSameSuppressionCommand(existing, {
+          id,
+          request,
+          actorId: ctx.userId,
+        });
+        return {
+          denied: existing.decision === 'RELEASE_REQUEST_DENIED',
+          record: existing,
+        };
+      }
 
       const denied = request.decision === 'RELEASE_REQUESTED' && rec.protectionClass === 'LEGAL';
       const decision = denied ? 'RELEASE_REQUEST_DENIED' : request.decision;
@@ -609,39 +804,42 @@ export class DiscoveryService {
       // createMany(skipDuplicates) maps to INSERT ... ON CONFLICT DO NOTHING. Unlike catching P2002 after
       // create(), it leaves the PostgreSQL transaction usable so a concurrent winner can be read safely.
       await tx.suppressionDecision.createMany({
-        data: [{
-          workspaceId: ctx.workspaceId,
-          suppressionId: id,
-          requestId: request.requestId,
-          requestedDecision: request.decision,
-          requestedReasonCode: request.reasonCode,
-          decision,
-          reasonCode,
-          actorId: ctx.userId,
-        }],
+        data: [
+          {
+            workspaceId: ctx.workspaceId,
+            suppressionId: id,
+            requestId: request.requestId,
+            requestedDecision: request.decision,
+            requestedReasonCode: request.reasonCode,
+            decision,
+            reasonCode,
+            actorId: ctx.userId,
+          },
+        ],
         skipDuplicates: true,
       });
       const record = await tx.suppressionDecision.findUnique({
-        where: { workspaceId_requestId: { workspaceId: ctx.workspaceId, requestId: request.requestId } },
+        where: {
+          workspaceId_requestId: {
+            workspaceId: ctx.workspaceId,
+            requestId: request.requestId,
+          },
+        },
       });
       if (!record) {
         throw new ConflictException({
-          error: { code: 'DECISION_NOT_PERSISTED', message: 'suppression decision could not be persisted' },
+          error: {
+            code: 'DECISION_NOT_PERSISTED',
+            message: 'suppression decision could not be persisted',
+          },
         });
       }
-      const same =
-        record.suppressionId === id &&
-        record.requestedDecision === request.decision &&
-        record.requestedReasonCode === request.reasonCode &&
-        record.decision === decision &&
-        record.reasonCode === reasonCode &&
-        record.actorId === ctx.userId;
-      if (!same) {
-        throw new ConflictException({
-          error: { code: 'IDEMPOTENCY_CONFLICT', message: 'requestId was already used with a different decision' },
-        });
-      }
-      return { denied, record };
+      assertSameSuppressionCommand(record, {
+        id,
+        request,
+        actorId: ctx.userId,
+      });
+      return { denied: record.decision === 'RELEASE_REQUEST_DENIED', record };
     });
 
     if (outcome.denied) {
@@ -671,6 +869,34 @@ export class DiscoveryService {
   }
 }
 
+function assertSameSuppressionCommand(
+  record: {
+    suppressionId: string;
+    requestedDecision: string;
+    requestedReasonCode: string;
+    actorId: string;
+  },
+  expected: {
+    id: string;
+    request: SuppressionDecisionRequest;
+    actorId: string;
+  },
+): void {
+  const same =
+    record.suppressionId === expected.id &&
+    record.requestedDecision === expected.request.decision &&
+    record.requestedReasonCode === expected.request.reasonCode &&
+    record.actorId === expected.actorId;
+  if (!same) {
+    throw new ConflictException({
+      error: {
+        code: 'IDEMPOTENCY_CONFLICT',
+        message: 'requestId was already used with a different decision',
+      },
+    });
+  }
+}
+
 function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest): void {
   const requestId = request.requestId;
   const hasControlCharacter =
@@ -680,25 +906,47 @@ function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest)
       return codePoint <= 0x1f || codePoint === 0x7f;
     });
   if (typeof requestId !== 'string' || !requestId || requestId.length > 128 || hasControlCharacter) {
-    throw new BadRequestException({ error: { code: 'INVALID_REQUEST_ID', message: 'requestId is invalid' } });
+    throw new BadRequestException({
+      error: { code: 'INVALID_REQUEST_ID', message: 'requestId is invalid' },
+    });
   }
   if (!(SUPPRESSION_DECISIONS as readonly string[]).includes(request.decision)) {
-    throw new BadRequestException({ error: { code: 'INVALID_DECISION', message: 'unsupported suppression decision' } });
+    throw new BadRequestException({
+      error: {
+        code: 'INVALID_DECISION',
+        message: 'unsupported suppression decision',
+      },
+    });
   }
   if (!(SUPPRESSION_DECISION_REASONS as readonly string[]).includes(request.reasonCode)) {
-    throw new BadRequestException({ error: { code: 'INVALID_REASON', message: 'unsupported suppression reason' } });
+    throw new BadRequestException({
+      error: {
+        code: 'INVALID_REASON',
+        message: 'unsupported suppression reason',
+      },
+    });
   }
   const correctionReason = ['IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER'].includes(request.reasonCode);
-  const releaseReason = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER'].includes(request.reasonCode);
+  const releaseReason = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER'].includes(
+    request.reasonCode,
+  );
   if (
     (request.decision === 'IDENTITY_CORRECTION_REQUESTED' && !correctionReason) ||
     (request.decision === 'RELEASE_REQUESTED' && !releaseReason)
   ) {
-    throw new BadRequestException({ error: { code: 'INVALID_REASON', message: 'reason is invalid for this decision' } });
+    throw new BadRequestException({
+      error: {
+        code: 'INVALID_REASON',
+        message: 'reason is invalid for this decision',
+      },
+    });
   }
 }
 
-function suppressionPagination(page?: SuppressionPageRequest): { cursor?: string; limit: number } {
+function suppressionPagination(page?: SuppressionPageRequest): {
+  cursor?: string;
+  limit: number;
+} {
   const requested = Number.isInteger(page?.limit) ? Number(page?.limit) : 50;
   return {
     ...(page?.cursor ? { cursor: page.cursor } : {}),

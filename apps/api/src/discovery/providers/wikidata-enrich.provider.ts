@@ -39,7 +39,7 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
       console.warn('[wikidata] broker unavailable, skip enrichment (no raw egress)');
       return miss();
     }
-    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const toolCtx: ToolContext = { ...ctx };
     let candidates: WikidataEntitySummary[];
     try {
       candidates = await searchEntityViaBroker(broker, input.name, MAX_CANDIDATES, toolCtx);
@@ -51,7 +51,8 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
     // 取候选实体的 claims+labels，只保留"是公司/组织"的
     let entities: Record<string, RawEntity>;
     try {
-      entities = await getEntitiesViaBroker(broker, candidates.map((c) => c.qid), undefined, toolCtx);
+      entities = await getEntitiesViaBroker(broker, candidates.map((c) => c.qid), undefined, toolCtx,
+      );
     } catch {
       return miss();
     }

@@ -2631,8 +2631,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "VALIDATION_ERROR",
-                            "INVALID_SUPPRESSION_VALUE"
+                            "VALIDATION_ERROR"
                           ]
                         },
                         "message": {
@@ -2660,6 +2659,7 @@
           "Discovery"
         ],
         "x-required-scopes": [
+          "personal-data:read",
           "compliance:manage"
         ]
       }
@@ -2733,7 +2733,7 @@
                           "type": "string",
                           "enum": [
                             "VALIDATION_ERROR",
-                            "INVALID_SUPPRESSION_VALUE"
+                            "INVALID_REASON"
                           ]
                         },
                         "message": {
@@ -2946,8 +2946,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "VALIDATION_ERROR",
-                            "INVALID_SUPPRESSION_VALUE"
+                            "VALIDATION_ERROR"
                           ]
                         },
                         "message": {
@@ -3097,8 +3096,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "VALIDATION_ERROR",
-                            "INVALID_SUPPRESSION_VALUE"
+                            "VALIDATION_ERROR"
                           ]
                         },
                         "message": {
@@ -3576,6 +3574,81 @@
                       "type": "object",
                       "additionalProperties": true,
                       "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead 或其公司不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "当前 suppression/合规/制裁状态阻断交付",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SUPPRESSED",
+                            "INVALID_STATE",
+                            "SUPPRESSED_CONTACT_UNREACHABLE",
+                            "STORAGE_RIGHTS_NOT_GRANTED",
+                            "SANCTIONS_HOLD_UNRESOLVED",
+                            "CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -9217,11 +9290,15 @@
           },
           "lawfulBasisRef": {
             "type": "string",
-            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）"
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "lawfulBasisNote": {
             "type": "string",
-            "description": "备注"
+            "description": "备注",
+            "maxLength": 1000,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "allowPersonalWithoutBasis": {
             "type": "boolean",
@@ -9244,23 +9321,31 @@
           },
           "lawfulBasisRef": {
             "type": "string",
-            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）"
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "lawfulBasisNote": {
             "type": "string",
-            "description": "备注"
+            "description": "备注",
+            "maxLength": 1000,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "allowPersonalWithoutBasis": {
             "type": "boolean",
             "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
           },
           "maxContacts": {
-            "type": "number",
-            "description": "最多补全几个缺邮箱决策人（有界护栏，默认 25）"
+            "type": "integer",
+            "description": "最多补全几个缺邮箱决策人（有界护栏，默认 25）",
+            "minimum": 1,
+            "maximum": 25
           },
           "maxProbe": {
-            "type": "number",
-            "description": "每人最多探测几个候选（有界护栏，默认 8）"
+            "type": "integer",
+            "description": "每人最多探测几个候选（有界护栏，默认 8）",
+            "minimum": 1,
+            "maximum": 8
           }
         }
       },

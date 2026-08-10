@@ -49,7 +49,9 @@ export function countryConflicts(companyCountry?: string, applicantCountry?: str
 export function toReadableName(name: string): string {
   const idx = name.indexOf(',');
   const ordered = idx >= 0 ? `${name.slice(idx + 1).trim()} ${name.slice(0, idx).trim()}` : name.trim();
-  return ordered.toLowerCase().replace(/(^|[\s'’.-])(\p{L})/gu, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
+  return ordered
+    .toLowerCase()
+    .replace(/(^|[\s'’.-])(\p{L})/gu, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
 /**
@@ -123,14 +125,22 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
     company: { name: string; country?: string },
     fromYear: number,
     toYear: number,
-    purposeCtx: { workspaceId: string; runId?: string; correlationId?: string; purpose: string },
+    purposeCtx: {
+      workspaceId: string;
+      runId?: string;
+      correlationId?: string;
+      purpose: string;
+    },
   ): Promise<PatentRecord[]> {
     if (this.mode() === 'cache') {
       if (!this.deps?.cacheReader) {
         this.log('skip: cache 模式但无 cacheReader（降级空）');
         return [];
       }
-      const patents = await this.deps.cacheReader(company.name, { fromYear, toYear });
+      const patents = await this.deps.cacheReader(company.name, {
+        fromYear,
+        toYear,
+      });
       if (!patents.length && this.deps.enqueue) {
         try {
           await this.deps.enqueue(company.name, company.country); // miss → 预热队列
@@ -168,9 +178,7 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
     const toYear = currentYear(this.deps?.now);
     const fromYear = toYear - RECENCY_YEARS;
     const purposeCtx = {
-      workspaceId: ctx.workspaceId,
-      runId: ctx.runId,
-      correlationId: ctx.correlationId,
+      ...ctx,
       purpose: 'discovery',
     };
     try {
