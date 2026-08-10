@@ -34,6 +34,7 @@ function makeHarness(record: SuppressionRow) {
     ...data,
   }));
   const tx = {
+    $queryRaw: vi.fn(async () => [{ locked: true }]),
     suppressionRecord: {
       findUnique: vi.fn(async () => current),
       findMany: vi.fn(async () => [current]),
@@ -354,6 +355,7 @@ describe('Suppression governance', () => {
       contact: { company },
     };
     const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
       contactPoint: {
         findUnique: vi.fn(async () => point),
         update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...point, ...data })),
@@ -378,5 +380,50 @@ describe('Suppression governance', () => {
       where: { id: company.id },
       data: { status: 'SUPPRESSED', version: { increment: 1 } },
     });
+  });
+
+  it('SMTP 返回前新增 email suppression 时，提交侧复核将结果降为 BLOCKED', async () => {
+    const verifyEmail = vi.fn(async () => ({ status: 'VALID', detail: 'smtp_accepted:250', costCents: 0 }));
+    const routeEmailVerification = vi.fn(async () => [{ key: 'smtp_self', verifyEmail }]);
+    const company = {
+      id: '77777777-7777-4777-8777-777777777777',
+      name: 'Acme Pumpen GmbH',
+      domain: 'acme-pumpen.de',
+      status: 'ENRICHED',
+    };
+    const point = {
+      id: '88888888-8888-4888-8888-888888888888',
+      workspaceId: WORKSPACE_ID,
+      contactId: '99999999-9999-4999-8999-999999999999',
+      type: 'email',
+      value: 'info@acme-pumpen.de',
+      status: 'UNVERIFIED',
+      verifiedAt: null,
+      contact: { company },
+    };
+    let suppressionRead = 0;
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...point, ...data }));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      contactPoint: { findUnique: vi.fn(async () => point), update },
+      canonicalCompany: { update: vi.fn(async () => ({ ...company, status: 'SUPPRESSED' })) },
+      suppressionRecord: {
+        findMany: vi.fn(async () => {
+          suppressionRead += 1;
+          return suppressionRead === 1 ? [] : [{ type: 'email', value: ' INFO@ACME-PUMPEN.DE ' }];
+        }),
+      },
+      fieldEvidence: { create: vi.fn(async () => ({})) },
+    };
+    const prisma = {
+      withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
+    };
+    const service = new DiscoveryService(prisma as never, { routeEmailVerification } as never);
+
+    const result = await service.verifyContactPoint(CTX, point.id);
+
+    expect(verifyEmail).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: 'BLOCKED' });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'BLOCKED' }) }));
   });
 });
