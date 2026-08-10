@@ -37,20 +37,27 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     console.log(`[trade_fair] ${msg}`);
   }
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(
+    query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
+    opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult> {
     const broker = this.deps?.broker;
     if (!broker) {
-       
       console.warn('[trade_fair] broker unavailable, fail-closed (no raw egress)');
       return { records: [], costCents: 0 };
     }
 
     const f = query.filters ?? {};
     const industryTerms = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
-    const fairs = selectFairs({ industryTerms, keywords: query.keywords, region: String(f.region ?? '') });
+    const fairs = selectFairs({
+      industryTerms,
+      keywords: query.keywords,
+      region: String(f.region ?? ''),
+    });
     if (!fairs.length) return { records: [], costCents: 0 };
 
-    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const toolCtx: ToolContext = { ...ctx };
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const dedup = new Map<string, ProviderCompanyRecord>();
     const perFair = Math.min(PER_FAIR_LIMIT, Math.max(query.limit, 50));
@@ -90,7 +97,7 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     return exhibitors.map((e) => ({
       externalId: `${fair.slug}:${e.externalId}`,
       name: e.companyName,
-      domain: e.website ? normalizeDomain(e.website) ?? undefined : undefined,
+      domain: e.website ? (normalizeDomain(e.website) ?? undefined) : undefined,
       country: e.country,
       attributes: {
         // 展会公示的公开商务联系点（非个人数据）——直接进 attributes，供后续按需晋级

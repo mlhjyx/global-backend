@@ -10,6 +10,11 @@ export interface AiContext {
   /** 预算归账键（BudgetLedger reserve-then-settle 按 runId ?? workspaceId 归账）。 */
   runId?: string;
   correlationId?: string;
+  /**
+   * Acquisition suppression admission. RouterModelGateway evaluates it before
+   * every provider wire call, including fallback and structured repair calls.
+   */
+  authorizeExternalAction?: () => Promise<boolean>;
   /** Optional Site Builder policy evidence; copied to every gateway trace row. */
   modelPolicy?: ModelExecutionTrace;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
@@ -87,8 +92,7 @@ export interface GenerateStructuredInput {
 
 export const VISION_REVIEW_MATERIAL_CLASSES = [
   'workspace_site_screenshot',
-  'model_eval_fixture',
-] as const;
+  'model_eval_fixture'] as const;
 
 export type VisionReviewMaterialClass =
   (typeof VISION_REVIEW_MATERIAL_CLASSES)[number];
@@ -133,8 +137,7 @@ export interface EmbedInput {
   input: string[];
 }
 
-export type ModelOp =
-  | 'generateText'
+export type ModelOp = 'generateText'
   | 'generateStructured'
   | 'reviewVision'
   | 'embed';

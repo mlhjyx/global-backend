@@ -4,6 +4,10 @@ import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
 import { cleanEmail } from '../acquisition/clean';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
+  companyMatchesSuppression,
+} from './suppression-value';
+import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -35,35 +39,78 @@ export interface PersistDiscoveredContactsArgs {
 export async function persistDiscoveredContacts(
   tx: Prisma.TransactionClient,
   args: PersistDiscoveredContactsArgs,
-): Promise<{ created: number; merged: number; skippedSuppressed: number }> {
+): Promise<{ created: number; merged: number; skippedSuppressed: number;
+  skippedInvalid: number;
+}> {
   let created = 0;
   let merged = 0;
   let skippedSuppressed = 0;
+  let skippedInvalid = 0;
+
+  await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
 
   // 🔒 Codex P1「Prevent inserts after the company contact re-read」的写入侧硬底：在**本写入事务内**对公司行
   // 取 FOR SHARE 锁并复读 status（与删除擦除活动的 FOR UPDATE 互斥）。载入闸门在长网络 fan-out 后可能已失效
   //（发现载入时 ACTIVE、擦除随后标 SUPPRESSED）——此处是提交前最后一道确定性闸：公司已 SUPPRESSED 则整批不入库。
-  const locked = await tx.$queryRaw<{ status: string }[]>`
-    SELECT status FROM canonical_company WHERE id = ${args.company.id}::uuid FOR SHARE`;
-  if (locked[0]?.status === 'SUPPRESSED') {
-    return { created: 0, merged: 0, skippedSuppressed: args.contacts.length };
+  const locked = await tx.$queryRaw<{ status: string; name: string; domain: string | null }[]>`
+    SELECT status, name, domain FROM canonical_company WHERE id = ${args.company.id}::uuid FOR SHARE`;
+  if (!locked[0] || locked[0].status === 'SUPPRESSED') {
+    return {
+      created: 0,
+      merged: 0,
+      skippedSuppressed: args.contacts.length,
+      skippedInvalid: 0,
+    };
   }
 
   // Codex P1「Add a person-level suppression」的消费侧：被 Art.17 擦除的具名人 person-level 禁联键（email-独立），
   // 命中则跳过重建——即便该人换了邮箱/无邮箱再被发现（此前只按 email 禁联 → 换邮箱即漏）。值为盲化 HMAC，本表不存人名明文。
-  // ⚠️ 残留并发窗口（已知局限，单独跟踪）：本 findMany 在 READ COMMITTED 下是**非加锁快照读**。contact 主体删除
-  //   **不冻结/不锁公司**（公司仍 ACTIVE，故上面的 FOR SHARE 复检对 contact 主体不设防），若某并发发现事务在
-  //   freezeSubject **提交 contact_key 之前**读到空集，其后新建的该人行不会被本闸拦、亦不被 eraseSubject（只删原
-  //   contactId）捕获 → 该已擦除自然人可被重物化。**不可**用擦除侧「按 person-key 扫描删除」根治：person-key 仅按
-  //   归一人名，会误删同公司同名的**另一真人**（数据丢失，比本窗口更糟——本 PR 复审已就此驳回 sweep 思路）。
-  //   本闸已完全消除**顺序**重摄入（DSR 完成后 contact_key 已提交，任何后续 persist 必命中）——即 Codex 线程所诉场景。
+  // 本 suppression 复读与 DSR freeze/erase 写入共用 workspace advisory lock，且统一遵守
+  // advisory → company/contact row lock 顺序。因此：DSR 先获锁并提交时，本事务必能看到 contact_key；
+  // 本事务先获锁时，本次入库被线性化为早于后续 suppression 事实。长时网络调用不持有该锁，
+  // 但结果提交必须在该锁下重读当前禁联事实，从而不依赖调用前快照。
+  const currentSuppressions = await tx.suppressionRecord.findMany({
+    where: { type: { in: ['contact_key', 'email', 'domain', 'company_name'] } },
+    select: { type: true, value: true },
+  });
+  if (companyMatchesSuppression(currentSuppressions, locked[0])) {
+    await tx.canonicalCompany.updateMany({
+      where: { id: args.company.id, status: { not: 'SUPPRESSED' } },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+    return {
+      created: 0,
+      merged: 0,
+      skippedSuppressed: args.contacts.length,
+      skippedInvalid: 0,
+    };
+  }
   const suppressedContactKeys = new Set(
-    (await tx.suppressionRecord.findMany({ where: { type: 'contact_key' } })).map((s) => s.value.toLowerCase()),
+    currentSuppressions.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
+  );
+  const effectiveSuppressedEmails = new Set([
+    ...args.suppressedEmails,
+    ...canonicalizeSuppressionValues(
+      'email',
+      currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
+    ),
+  ]);
+  const suppressedDomains = canonicalizeSuppressionValues(
+    'domain',
+    currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
   );
 
   for (const c of args.contacts) {
-    const email = c.email?.toLowerCase();
-    if (email && args.suppressedEmails.has(email)) {
+    const email = c.email ? (canonicalizeSuppressionValue('email', c.email) ?? undefined) : undefined;
+    // An adapter-provided email is a system-boundary input. If it is present but cannot be
+    // canonicalized, fail closed for the whole candidate rather than materializing the named
+    // person while silently dropping the malformed address.
+    if (c.email && !email) {
+      skippedInvalid += 1;
+      continue;
+    }
+    const emailDomain = email ? canonicalizeSuppressionValue('domain', email.split('@')[1]) : null;
+    if (email && (effectiveSuppressedEmails.has(email) || (!!emailDomain && suppressedDomains.has(emailDomain)))) {
       skippedSuppressed += 1;
       continue;
     }
@@ -98,14 +145,24 @@ export async function persistDiscoveredContacts(
       { type: 'linkedin', value: c.linkedin },
       // external_id 点（value=`${scheme}:${value}`，与 person-identity Tier 0 查法一致，小写比对）——
       // 写上后，下次同源/跨源同人经 Tier 0 精确并（不再靠人名模糊）。
-      ...(c.externalIds ?? []).map((e) => ({ type: 'external_id', value: `${e.scheme}:${e.value}` })),
+      ...(c.externalIds ?? []).map((e) => ({
+        type: 'external_id',
+        value: `${e.scheme}:${e.value}`,
+      })),
     ];
     for (const p of points) {
       if (!p.value) continue;
       await tx.contactPoint.upsert({
-        where: { contactId_type_value: { contactId, type: p.type, value: p.value } },
+        where: {
+          contactId_type_value: { contactId, type: p.type, value: p.value },
+        },
         update: {},
-        create: { workspaceId: args.workspaceId, contactId, type: p.type, value: p.value },
+        create: {
+          workspaceId: args.workspaceId,
+          contactId,
+          type: p.type,
+          value: p.value,
+        },
       });
       // 收口⑥：field_evidence 是同一 PII 的第二副本——PII 值加密落库（确定性，与 contact_point 密文一致），
       // 并落 dataClass 分级（email 按职能/人名分 amber/red，phone/linkedin red）。
@@ -152,7 +209,7 @@ export async function persistDiscoveredContacts(
     if (hit) merged += 1;
     else created += 1;
   }
-  return { created, merged, skippedSuppressed };
+  return { created, merged, skippedSuppressed, skippedInvalid };
 }
 
 /**
@@ -188,18 +245,32 @@ async function createContact(
   // ② 决定 email 能否作拒并判别符（占用 = catch-all/RISKY 共享 → 不可信，退回人名）。
   const plainCollides =
     (await tx.canonicalContact.findUnique({
-      where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey: plainKey } },
+      where: {
+        workspaceId_dedupeKey: {
+          workspaceId: args.workspaceId,
+          dedupeKey: plainKey,
+        },
+      },
       select: { id: true },
     })) != null;
   const usableEmail = email && !plainCollides ? email : undefined; // 未占用的 email 才可信作判别符
   const dedupeKey =
     ambiguous || plainCollides
       ? blindContactKey(
-          declinedContactIdentity({ fullName: c.fullName, email: usableEmail, externalIds: c.externalIds }, args.company.dedupeKey),
+          declinedContactIdentity(
+            {
+              fullName: c.fullName,
+              email: usableEmail,
+              externalIds: c.externalIds,
+            },
+            args.company.dedupeKey,
+          ),
         )
       : plainKey;
   const contact = await tx.canonicalContact.upsert({
-    where: { workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey } },
+    where: {
+      workspaceId_dedupeKey: { workspaceId: args.workspaceId, dedupeKey },
+    },
     update: {
       ...(c.title ? { title: c.title } : {}),
       ...(c.seniority ? { seniority: c.seniority } : {}),

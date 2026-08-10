@@ -57,6 +57,24 @@ export class ProviderIdentityError extends ProviderOutputError {
   }
 }
 
+/**
+ * A workspace suppression fact denied an acquisition external action at the
+ * final wire boundary. This is terminal: model fallback/repair must not turn a
+ * compliance denial into another provider call. It carries prior-call usage
+ * when a denial arrives between an initial structured call and its repair.
+ */
+export class ExternalActionDeniedError extends ProviderOutputError {
+  readonly decision = 'suppression_action_gate';
+
+  constructor(usage?: ModelUsage, opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance) {
+    super('external action denied: suppression_action_gate', usage, {
+      ...opts,
+      callCount: opts?.callCount ?? 0,
+    });
+    this.name = 'ExternalActionDeniedError';
+  }
+}
+
 /** Stable HTTP status surface used by capability probes and unavailable mapping. */
 export class ProviderHttpError extends Error {
   readonly status: number;
@@ -67,11 +85,9 @@ export class ProviderHttpError extends Error {
     status: number;
     provider: string;
     model: string;
-    responseExcerpt: string;
-  }) {
+    responseExcerpt: string }) {
     super(
-      `${input.provider} ${input.model}: HTTP ${input.status}: ${input.responseExcerpt}`,
-    );
+      `${input.provider} ${input.model}: HTTP ${input.status}: ${input.responseExcerpt}`);
     this.name = 'ProviderHttpError';
     this.status = input.status;
     this.provider = input.provider;

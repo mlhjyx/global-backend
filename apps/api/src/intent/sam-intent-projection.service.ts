@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { SourceSignal } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import { US_FED_SOURCES_SOUGHT, SOURCES_SOUGHT_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
 
@@ -48,7 +49,8 @@ export class SamIntentProjectionService {
     workspaceId: string,
     params: { naicsCodes: string[]; sinceDays?: number; maxCompanies?: number },
   ): Promise<ProjectSourcesSoughtResult> {
-    const base: ProjectSourcesSoughtResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, subjectsTruncated: 0 };
+    const base: ProjectSourcesSoughtResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, subjectsTruncated: 0,
+    };
     if (!params.naicsCodes.length) return base; // 无码 → 本 ICP 无匹配面
 
     const since = new Date(Date.now() - (params.sinceDays ?? DEFAULT_SINCE_DAYS) * 86_400_000);
@@ -91,7 +93,8 @@ export class SamIntentProjectionService {
       }
     }
     if (!windowExhausted && seenSubjects.size < maxCompanies) {
-      console.warn(`[sam-intent] NAICS 匹配分页达页上限(${SIGNAL_SCAN_MAX_PAGES}×${SIGNAL_SCAN_LIMIT})仍未扫尽——更旧匹配信号可能被截断（记档：NAICS 前缀列+GIN 根治）`);
+      console.warn(`[sam-intent] NAICS 匹配分页达页上限(${SIGNAL_SCAN_MAX_PAGES}×${SIGNAL_SCAN_LIMIT})仍未扫尽——更旧匹配信号可能被截断（记档：NAICS 前缀列+GIN 根治）`,
+      );
     }
     base.signalsMatched = matched.length;
     if (!matched.length) return base;
@@ -135,11 +138,11 @@ export class SamIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, demand: FederalDemand): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
-      const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-        select: { id: true, attributes: true, status: true },
+      const materialization = await loadMaterializableCompanyState(tx, workspaceId, dedupeKey, {
+        name: demand.name,
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      if (!materialization.allowed) return false;
+      const { prior } = materialization;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
@@ -147,13 +150,21 @@ export class SamIntentProjectionService {
         type: US_FED_SOURCES_SOUGHT,
         at: demand.publicationDateIso, // §8.6：source_signal.occurredAt 保证合法时间
         strength: SOURCES_SOUGHT_STRENGTH,
-        evidence: { naics: demand.naicsCodes, notice: demand.noticeId, source: 'samgov' },
+        evidence: {
+          naics: demand.naicsCodes,
+          notice: demand.noticeId,
+          source: 'samgov',
+        },
       };
       const intent = mergeIntent(priorIntent, [event]);
       // 幂等门：既有买方且合并后 intent 实质未变（同一 Sources Sought 每 sweep 复现）→ 不 bump、不堆 evidence。
       if (prior && priorIntent && sameIntent(priorIntent, intent)) return false;
 
-      const marker = { government_buyer: true, sam_market_signal: true, sam_disclaimer: SAM_DISCLAIMER };
+      const marker = {
+        government_buyer: true,
+        sam_market_signal: true,
+        sam_disclaimer: SAM_DISCLAIMER,
+      };
       const saved = await tx.canonicalCompany.upsert({
         where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
         create: {
@@ -165,7 +176,11 @@ export class SamIntentProjectionService {
           attributes: { ...marker, intent } as unknown as Prisma.InputJsonValue,
         },
         update: {
-          attributes: { ...priorAttrs, ...marker, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...priorAttrs,
+            ...marker,
+            intent,
+          } as unknown as Prisma.InputJsonValue,
           version: { increment: 1 },
         },
         select: { id: true },
@@ -196,7 +211,13 @@ export class SamIntentProjectionService {
             entityType: 'company',
             entityId: saved.id,
             field: 'identity',
-            value: { name: demand.name, country: 'US', source: 'samgov', notice: demand.noticeId, disclaimer: SAM_DISCLAIMER } as unknown as Prisma.InputJsonValue,
+            value: {
+              name: demand.name,
+              country: 'US',
+              source: 'samgov',
+              notice: demand.noticeId,
+              disclaimer: SAM_DISCLAIMER,
+            } as unknown as Prisma.InputJsonValue,
             providerKey: 'samgov',
             confidence: 1,
             license: SAM_LICENSE,

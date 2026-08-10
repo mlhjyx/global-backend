@@ -57,29 +57,34 @@ const ALGOLIA_MAX_PER_PAGE = 1000;
 export async function queryAlgoliaExhibitors(
   cfg: AlgoliaFairConfig,
   limit = 1000,
+  beforeRequest?: () => Promise<void>,
 ): Promise<FairExhibitor[]> {
   const locale = cfg.locale ?? 'en-gb';
   const endpoint =
     `https://${cfg.appId.toLowerCase()}-dsn.algolia.net/1/indexes/${encodeURIComponent(cfg.indexName)}/query` +
     `?x-algolia-application-id=${cfg.appId}&x-algolia-api-key=${cfg.apiKey}`;
-  const filters =
-    `recordType:exhibitor AND locale:${locale} AND eventEditionId:${cfg.eventEditionId}`;
+  const filters = `recordType:exhibitor AND locale:${locale} AND eventEditionId:${cfg.eventEditionId}`;
 
   const out: FairExhibitor[] = [];
   const seen = new Set<string>();
   const perPage = Math.min(ALGOLIA_MAX_PER_PAGE, limit);
   for (let page = 0; out.length < limit; page++) {
-    const params =
-      `query=&page=${page}&hitsPerPage=${perPage}` +
-      `&filters=${encodeURIComponent(filters)}`;
+    const params = `query=&page=${page}&hitsPerPage=${perPage}` + `&filters=${encodeURIComponent(filters)}`;
+    await beforeRequest?.();
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
       body: JSON.stringify({ params }),
       signal: AbortSignal.timeout(25_000),
     });
     if (!res.ok) throw new Error(`algolia ${res.status}: ${(await res.text()).slice(0, 160)}`);
-    const json = (await res.json()) as { hits?: AlgoliaHit[]; nbPages?: number };
+    const json = (await res.json()) as {
+      hits?: AlgoliaHit[];
+      nbPages?: number;
+    };
     const hits = json.hits ?? [];
     for (const h of hits) {
       const rec = mapHit(h);
@@ -109,7 +114,10 @@ function mapHit(h: AlgoliaHit): FairExhibitor | null {
     country: h.countryName || undefined,
     stand: h.standReference || undefined,
     description: h.exhibitorDescription?.slice(0, 500) || undefined,
-    products: (h.products ?? []).map((p) => p.name).filter((n): n is string => !!n).slice(0, 12),
+    products: (h.products ?? [])
+      .map((p) => p.name)
+      .filter((n): n is string => !!n)
+      .slice(0, 12),
     hiring: hiring || undefined,
   };
 }

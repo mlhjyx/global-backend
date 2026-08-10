@@ -41,6 +41,8 @@ export interface GuessContext {
   suppressedEmails?: Set<string>;
   /** 最多探测几个候选（默认 8），控 SMTP 扇出与耗时。 */
   maxProbe?: number;
+  /** 每个物理 SMTP 候选前的当前 suppression 授权；false 时终止本联系人后续探测。 */
+  authorizeCandidate?: (email: string) => Promise<boolean>;
 }
 
 export type GuessStatus =
@@ -120,7 +122,8 @@ export class EmailGuesser {
   async guess(input: GuessInput, ctx: GuessContext = {}): Promise<GuessResult> {
     const candidates = this.buildCandidates(input);
     if (candidates.length === 0) {
-      return { status: 'no_candidates', triedCount: 0, candidates, reason: 'name_or_domain_unusable' };
+      return { status: 'no_candidates', triedCount: 0, candidates, reason: 'name_or_domain_unusable',
+      };
     }
 
     // 🔴 合规门：所有候选=同域人名邮箱，门决策一致 → 判一次。拦截则一个都不探测。
@@ -129,7 +132,8 @@ export class EmailGuesser {
       kind: 'personal',
       lawfulBasis: ctx.lawfulBasis,
       suppressed: false, // 逐候选 suppression 在探测循环里查（域级 suppression 由验证器 source_policy 门兜）
-      policy: resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: ctx.allowPersonalWithoutBasis }),
+      policy: resolveEmailVerificationPolicy({ allowPersonalWithoutBasis: ctx.allowPersonalWithoutBasis,
+      }),
     });
     if (!gate.allowed) {
       return {
@@ -161,8 +165,21 @@ export class EmailGuesser {
     for (const cand of candidates) {
       if (tried >= maxProbe) break;
       if (suppressed.has(cand.email.toLowerCase())) continue;
+      if (ctx.authorizeCandidate && !(await ctx.authorizeCandidate(cand.email))) {
+        return {
+          status: 'blocked',
+          domainFact: 'suppressed',
+          triedCount: tried,
+          candidates,
+          reason: 'suppression_action_gate',
+          lawfulBasis: recordedBasis,
+        };
+      }
       tried += 1;
-      const verdict = await this.verifier.verifyEmail(cand.email, verifyCtx);
+      const verdict = await this.verifier.verifyEmail(cand.email, {
+        ...verifyCtx,
+        authorizeExternalAction: ctx.authorizeCandidate ? () => ctx.authorizeCandidate!(cand.email) : undefined,
+      });
 
       if (verdict.status === 'VALID') {
         const learned = cand.pattern.startsWith('learned:');
@@ -178,7 +195,11 @@ export class EmailGuesser {
 
       // 记录最优可信猜测：非 INVALID 即未被证伪（含 RISKY 域级事实/inconclusive）。
       if (verdict.status !== 'INVALID' && !bestPlausible) {
-        bestPlausible = { ...cand, verdict, confidence: unverifiedConfidence(cand.prior) };
+        bestPlausible = {
+          ...cand,
+          verdict,
+          confidence: unverifiedConfidence(cand.prior),
+        };
       }
 
       // 域级事实（catch-all/反枚举/不可达/无 MX/SSRF/policy）→ 全候选同命 → 一次即短路。
@@ -189,13 +210,33 @@ export class EmailGuesser {
     }
 
     if (bestPlausible) {
-      return { status: 'unverified', best: bestPlausible, triedCount: tried, candidates, reason: 'no_valid_best_effort_risky', lawfulBasis: recordedBasis };
+      return {
+        status: 'unverified',
+        best: bestPlausible,
+        triedCount: tried,
+        candidates,
+        reason: 'no_valid_best_effort_risky',
+        lawfulBasis: recordedBasis,
+      };
     }
     if (tried === 0) {
       // 候选全在禁联名单 → 一次都没探 → 别谎称「已逐个探测后拒收」。
-      return { status: 'exhausted', domainFact: 'suppressed', triedCount: 0, candidates, reason: 'all_candidates_suppressed', lawfulBasis: recordedBasis };
+      return {
+        status: 'exhausted',
+        domainFact: 'suppressed',
+        triedCount: 0,
+        candidates,
+        reason: 'all_candidates_suppressed',
+        lawfulBasis: recordedBasis,
+      };
     }
-    return { status: 'exhausted', triedCount: tried, candidates, reason: 'all_probed_candidates_rejected', lawfulBasis: recordedBasis };
+    return {
+      status: 'exhausted',
+      triedCount: tried,
+      candidates,
+      reason: 'all_probed_candidates_rejected',
+      lawfulBasis: recordedBasis,
+    };
   }
 
   /** 域级事实收尾（抽出以缩短 guess）：no_mx=不可投递无猜测；被闸门挡=无信号无猜测；其余给最优可信猜测。 */
@@ -208,14 +249,36 @@ export class EmailGuesser {
   ): GuessResult {
     const reason = DOMAIN_FACT_REASON[fact];
     if (fact === 'no_mx') {
-      return { status: 'undeliverable_domain', domainFact: fact, triedCount: tried, candidates, reason, lawfulBasis };
+      return {
+        status: 'undeliverable_domain',
+        domainFact: fact,
+        triedCount: tried,
+        candidates,
+        reason,
+        lawfulBasis,
+      };
     }
     // egress_blocked / source_policy：被 SSRF 护栏或用途门挡下 → 无任何投递信号 → 诚实不给猜测。
     if (fact === 'egress_blocked' || fact === 'suppressed') {
-      return { status: 'unverified', domainFact: fact, triedCount: tried, candidates, reason, lawfulBasis };
+      return {
+        status: 'unverified',
+        domainFact: fact,
+        triedCount: tried,
+        candidates,
+        reason,
+        lawfulBasis,
+      };
     }
     // catch_all / anti_enumeration / unreachable：域收信但无法逐地址证实 → 给最优可信猜测（排除已证伪者）。
-    return { status: 'unverified', domainFact: fact, best: bestPlausible ?? undefined, triedCount: tried, candidates, reason, lawfulBasis };
+    return {
+      status: 'unverified',
+      domainFact: fact,
+      best: bestPlausible ?? undefined,
+      triedCount: tried,
+      candidates,
+      reason,
+      lawfulBasis,
+    };
   }
 
   /** 生成候选：有已知样本先学格式（高置信在前），再拼盲排列兜底，去重保序。 */
@@ -227,12 +290,18 @@ export class EmailGuesser {
       const learned = inferEmailPattern(input.knownSamples.slice(0, MAX_LEARN_SAMPLES));
       if (learned) {
         for (const c of applyLearnedPattern(learned, input.fullName, input.domain)) {
-          if (!seen.has(c.email)) { seen.add(c.email); out.push(c); }
+          if (!seen.has(c.email)) {
+            seen.add(c.email);
+            out.push(c);
+          }
         }
       }
     }
     for (const c of generateEmailCandidates(input.fullName, input.domain)) {
-      if (!seen.has(c.email)) { seen.add(c.email); out.push(c); }
+      if (!seen.has(c.email)) {
+        seen.add(c.email);
+        out.push(c);
+      }
     }
     return out;
   }

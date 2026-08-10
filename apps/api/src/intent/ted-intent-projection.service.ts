@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { SourceSignal } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
@@ -45,9 +46,11 @@ export class TedIntentProjectionService {
 
   async projectTenders(
     workspaceId: string,
-    params: { cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number; maxCompanies?: number },
+    params: { cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number; maxCompanies?: number;
+    },
   ): Promise<ProjectTendersResult> {
-    const base: ProjectTendersResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, subjectsTruncated: 0 };
+    const base: ProjectTendersResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, subjectsTruncated: 0,
+    };
     if (!params.cpvCodes.length || !params.buyerCountries.length) return base; // 无码/无国别 → 本 ICP 无匹配面
 
     const since = new Date(Date.now() - (params.sinceDays ?? DEFAULT_SINCE_DAYS) * 86_400_000);
@@ -89,7 +92,8 @@ export class TedIntentProjectionService {
       if (rows.length < SIGNAL_SCAN_LIMIT) { windowExhausted = true; break; }
     }
     if (!windowExhausted && seenSubjects.size < maxCompanies) {
-      console.warn(`[ted-intent] CPV 匹配分页达页上限(${SIGNAL_SCAN_MAX_PAGES}×${SIGNAL_SCAN_LIMIT})仍未扫尽窗口——更旧匹配信号可能仍被截断（记档：CPV 前缀列+GIN 根治）`);
+      console.warn(`[ted-intent] CPV 匹配分页达页上限(${SIGNAL_SCAN_MAX_PAGES}×${SIGNAL_SCAN_LIMIT})仍未扫尽窗口——更旧匹配信号可能仍被截断（记档：CPV 前缀列+GIN 根治）`,
+      );
     }
     base.signalsMatched = matched.length;
     if (!matched.length) return base;
@@ -99,7 +103,10 @@ export class TedIntentProjectionService {
     const overflow = new Set<string>(); // 触顶后被排除的主体（可观测，不静默丢；复审 MEDIUM）
     for (const s of matched) {
       if (byKey.has(s.subjectKey) || overflow.has(s.subjectKey)) continue;
-      if (byKey.size >= maxCompanies) { overflow.add(s.subjectKey); continue; }
+      if (byKey.size >= maxCompanies) {
+        overflow.add(s.subjectKey);
+        continue;
+      }
       const payload = (s.payload ?? {}) as Record<string, unknown>;
       byKey.set(s.subjectKey, {
         name: s.subjectName,
@@ -111,7 +118,9 @@ export class TedIntentProjectionService {
     }
     base.subjectsTruncated = overflow.size;
     if (overflow.size) {
-      console.warn(`[ted-intent] maxCompanies=${maxCompanies} 触顶，${overflow.size} 个主体本轮未投影（游标化根治随缺口#8）`);
+      console.warn(
+        `[ted-intent] maxCompanies=${maxCompanies} 触顶，${overflow.size} 个主体本轮未投影（游标化根治随缺口#8）`,
+      );
     }
 
     for (const [dedupeKey, demand] of byKey) {
@@ -131,11 +140,11 @@ export class TedIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, demand: BuyerDemand): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
-      const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-        select: { id: true, attributes: true, status: true },
+      const materialization = await loadMaterializableCompanyState(tx, workspaceId, dedupeKey, {
+        name: demand.name,
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      if (!materialization.allowed) return false;
+      const { prior } = materialization;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
@@ -143,7 +152,11 @@ export class TedIntentProjectionService {
         type: TENDER_PUBLISHED,
         at: demand.publicationDateIso, // §8.6：source_signal.occurredAt 保证合法时间
         strength: TENDER_STRENGTH,
-        evidence: { cpv: demand.cpvCodes, notice: demand.publicationNumber, source: 'ted' },
+        evidence: {
+          cpv: demand.cpvCodes,
+          notice: demand.publicationNumber,
+          source: 'ted',
+        },
       };
       const intent = mergeIntent(priorIntent, [event]);
       // 幂等门：既有买方且合并后 intent 实质未变（同一开放招标每日 sweep 复现）→ 不 bump version、不堆 evidence 行。
@@ -157,10 +170,17 @@ export class TedIntentProjectionService {
           country: demand.country,
           dedupeKey,
           status: 'NEW',
-          attributes: { ted_buyer: true, intent } as unknown as Prisma.InputJsonValue, // 标记来源=招标买方
+          attributes: {
+            ted_buyer: true,
+            intent,
+          } as unknown as Prisma.InputJsonValue, // 标记来源=招标买方
         },
         update: {
-          attributes: { ...priorAttrs, ted_buyer: true, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...priorAttrs,
+            ted_buyer: true,
+            intent,
+          } as unknown as Prisma.InputJsonValue,
           version: { increment: 1 },
         },
         select: { id: true },
@@ -188,7 +208,13 @@ export class TedIntentProjectionService {
             entityType: 'company',
             entityId: saved.id,
             field: 'identity',
-            value: { name: demand.name, country: demand.country, source: 'ted', notice: demand.publicationNumber, attribution: TED_ATTRIBUTION } as unknown as Prisma.InputJsonValue,
+            value: {
+              name: demand.name,
+              country: demand.country,
+              source: 'ted',
+              notice: demand.publicationNumber,
+              attribution: TED_ATTRIBUTION,
+            } as unknown as Prisma.InputJsonValue,
             providerKey: 'ted',
             confidence: 1,
             license: 'CC BY 4.0',

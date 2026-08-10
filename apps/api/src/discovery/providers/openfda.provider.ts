@@ -42,7 +42,8 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, _opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, _opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult> {
     const filters = query.filters ?? {};
     const productCodes = readProductCodes(filters);
     if (!productCodes.length) return { records: [], costCents: 0 }; // 无产品码 → 不启动（绝不裸拉全库）
@@ -72,7 +73,7 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
+        { ...ctx, purpose: 'discovery' },
       );
       establishments = res.data.establishments ?? [];
     } catch (err) {
@@ -128,7 +129,10 @@ export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string)
     country: est.country,
     industry: est.deviceFacts?.medicalSpecialtyDescription, // 匹配搜索码的专科 ≈ 行业维（便利，非硬编码）
     // fit 门只读 attributes.products（fit-judge.ts）→ 喂可读设备名（无则退产品码），否则 openFDA 线索在门前设备信号为空。
-    attributes: { fda, products: est.deviceNames.length ? est.deviceNames : est.productCodes },
+    attributes: {
+      fda,
+      products: est.deviceNames.length ? est.deviceNames : est.productCodes,
+    },
     // FDA 注册号全局唯一（非国别税号）→ scheme 不按国别限定。
     identifier: idValue ? { scheme: FDA_ID_SCHEME, value: idValue } : undefined,
     license: OPENFDA_LICENSE, // 写入 field_evidence.license（CC0，非硬编码 licensed）
@@ -143,7 +147,9 @@ export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string)
 
 // ── filters 读取（多别名容错；csv 或数组）────────────────────────────────
 function readProductCodes(filters: Record<string, unknown>): string[] {
-  return csvList(filters.product_code ?? filters.product_codes ?? filters._productCodes ?? filters.fda_product_code).map((c) => c.toUpperCase());
+  return csvList(
+    filters.product_code ?? filters.product_codes ?? filters._productCodes ?? filters.fda_product_code,
+  ).map((c) => c.toUpperCase());
 }
 function readIsoCountry(filters: Record<string, unknown>): string | undefined {
   const v = csvList(filters.iso_country ?? filters.country ?? filters.registrant_country)[0];
@@ -160,8 +166,15 @@ function readEstablishmentTypes(filters: Record<string, unknown>): string[] | un
 
 function csvList(v: unknown): string[] {
   if (v == null) return [];
-  if (Array.isArray(v)) return v.filter((x) => x != null).map((x) => String(x).trim()).filter(Boolean);
-  return String(v).split(',').map((s) => s.trim()).filter(Boolean);
+  if (Array.isArray(v))
+    return v
+      .filter((x) => x != null)
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+  return String(v)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 function prune(o: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([, val]) => val != null));

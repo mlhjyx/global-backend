@@ -14,6 +14,7 @@ import {
 } from '../intent/intent-projection.service';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { isLikelyIndividualApplicant } from './signal-mappers';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 
 const DEFAULT_WEB_WATCH_REPLAY_MS = 90 * 86_400_000; // web_watch 事实重放窗（受保留期清理约束——GDPR 存储限制即复算地平线）
 const DEFAULT_PAGE_LIMIT = 200;
@@ -68,13 +69,23 @@ export class IntentRecomputeService {
     opts?: RecomputeOpts,
   ): Promise<RecomputeCompanyOutcome> {
     const { prisma } = this.deps;
-    const company = await prisma.withWorkspace(workspaceId, (tx) =>
-      tx.canonicalCompany.findUnique({
+    const company = await prisma.withWorkspace(workspaceId, async (tx) => {
+      const candidate = await tx.canonicalCompany.findUnique({
         where: { id: canonicalCompanyId },
-        select: { id: true, domain: true, dedupeKey: true, attributes: true, status: true },
-      }),
-    );
-    if (!company || company.status === 'SUPPRESSED') return 'missing';
+        select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
+      });
+      if (!candidate) return null;
+      const materialization = await loadMaterializableCompanyState(
+        tx,
+        workspaceId,
+        candidate.dedupeKey,
+        candidate,
+      );
+      return materialization.allowed && materialization.prior?.id === candidate.id
+        ? materialization.prior
+        : null;
+    });
+    if (!company) return 'missing';
 
     const events: IntentEvent[] = [];
     const now = Date.now();
@@ -124,15 +135,16 @@ export class IntentRecomputeService {
     const nextIntent = events.length ? mergeIntent(undefined, events) : undefined;
 
     if (!nextIntent) {
-      if (!priorIntent) return 'unchanged';
+      if (!priorIntent) {
+        return (await this.commitIntent(workspaceId, company, undefined, false)) ? 'unchanged' : 'missing';
+      }
       // 事实源已无任何有效事件（全过期/撤回/超保留期/出投影面）→ 清除陈旧投影（过期收敛）。
-      const { intent: _stale, ...rest } = attrs;
-      await this.writeAttributes(workspaceId, company.id, rest);
-      return 'cleared';
+      return (await this.commitIntent(workspaceId, company, undefined)) ? 'cleared' : 'missing';
     }
-    if (priorIntent && sameIntent(priorIntent, nextIntent)) return 'unchanged';
-    await this.writeAttributes(workspaceId, company.id, { ...attrs, intent: nextIntent });
-    return 'rebuilt';
+    if (priorIntent && sameIntent(priorIntent, nextIntent)) {
+      return (await this.commitIntent(workspaceId, company, nextIntent, false)) ? 'unchanged' : 'missing';
+    }
+    return (await this.commitIntent(workspaceId, company, nextIntent)) ? 'rebuilt' : 'missing';
   }
 
   /** 分页复算整个 workspace（id 游标防活锁，同 backlog 惯例；有界，绝不单轮 grind 全量）。 */
@@ -164,14 +176,30 @@ export class IntentRecomputeService {
     return out;
   }
 
-  private async writeAttributes(workspaceId: string, companyId: string, attributes: Record<string, unknown>): Promise<void> {
-    await this.deps.prisma.withWorkspace(workspaceId, (tx) =>
-      tx.canonicalCompany.update({
-        where: { id: companyId },
-        data: { attributes: attributes as unknown as Prisma.InputJsonValue, version: { increment: 1 } },
-      }),
-    );
+  private async commitIntent(
+    workspaceId: string,
+    company: { id: string; name: string; domain: string | null; dedupeKey: string },
+    intent: IntentAttr | undefined,
+    write = true,
+  ): Promise<boolean> {
+    return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
+      const materialization = await loadMaterializableCompanyState(tx, workspaceId, company.dedupeKey, company);
+      if (!materialization.allowed || materialization.prior?.id !== company.id) return false;
+      if (!write) return true;
+      const currentAttributes = jsonAttributes(materialization.prior.attributes);
+      const { intent: _priorIntent, ...withoutIntent } = currentAttributes;
+      const attributes = intent ? { ...withoutIntent, intent } : withoutIntent;
+      await tx.canonicalCompany.update({
+        where: { id: company.id },
+        data: { attributes: attributes as Prisma.InputJsonValue, version: { increment: 1 } },
+      });
+      return true;
+    });
   }
+}
+
+function jsonAttributes(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 /** 投影面谓词（与 ted/openfda 投影 service 的过滤语义逐条对齐——改那边必须同步改这里）。 */

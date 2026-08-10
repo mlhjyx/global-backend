@@ -166,11 +166,24 @@ describe('projectExternalIntentForIcp — 注入 live 快照（单次重读优�
  * 各家无域名/无信号 → recomputeCompany 'unchanged'（不写）。此处只验分组 + 分页轮上限（重建内容在 intent-recompute.service.spec）。
  */
 function recomputeActs() {
+  const company = (id: string) => ({
+    id,
+    name: `Company ${id}`,
+    domain: null,
+    dedupeKey: `dk-${id}`,
+    attributes: {},
+    status: 'NEW',
+  });
   const tx = {
+    $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+    suppressionRecord: { findMany: vi.fn(async () => []) },
     canonicalCompany: {
       findMany: async ({ take, where }: { take: number; where?: { id?: { gt?: string } } }) =>
         Array.from({ length: take }, (_, i) => ({ id: `${where?.id?.gt ?? 'c'}-${i}` })),
-      findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, domain: null, dedupeKey: `dk-${where.id}`, attributes: {}, status: 'NEW' }),
+      findUnique: async ({ where }: { where: { id?: string; workspaceId_dedupeKey?: { dedupeKey: string } } }) => {
+        const id = where.id ?? where.workspaceId_dedupeKey?.dedupeKey.replace(/^dk-/, '');
+        return id ? company(id) : null;
+      },
       update: async () => ({}),
     },
   };

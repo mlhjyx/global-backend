@@ -15,7 +15,16 @@ type FakeCandidate = { id: string; fullName: string; contactPoints: { type: stri
  */
 function fakeTx(
   candidates: FakeCandidate[],
-  opts?: { existingBlindedKeys?: string[]; companyStatus?: string; suppressedContactKeys?: string[] },
+  opts?: {
+    existingBlindedKeys?: string[];
+    companyStatus?: string;
+    suppressedContactKeys?: string[];
+    suppressedEmails?: string[];
+    suppressedDomains?: string[];
+    suppressedCompanyNames?: string[];
+    companyName?: string;
+    companyDomain?: string | null;
+  },
 ) {
   const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
   const contactPointUpsert = vi.fn(async () => ({}));
@@ -31,8 +40,17 @@ function fakeTx(
     return { title: 'Geschäftsführer', seniority: null, department: null };
   });
   // $queryRaw = 公司 FOR SHARE 状态复检（默认 NEW=未 SUPPRESSED）；suppressionRecord.findMany = person-level 禁联键。
-  const suppressionFindMany = vi.fn(async () => (opts?.suppressedContactKeys ?? []).map((value) => ({ value })));
-  const queryRaw = vi.fn(async () => [{ status: opts?.companyStatus ?? 'NEW' }]);
+  const suppressionFindMany = vi.fn(async () => [
+    ...(opts?.suppressedContactKeys ?? []).map((value) => ({ type: 'contact_key', value })),
+    ...(opts?.suppressedEmails ?? []).map((value) => ({ type: 'email', value })),
+    ...(opts?.suppressedDomains ?? []).map((value) => ({ type: 'domain', value })),
+    ...(opts?.suppressedCompanyNames ?? []).map((value) => ({ type: 'company_name', value })),
+  ]);
+  const queryRaw = vi.fn(async () => [{
+    status: opts?.companyStatus ?? 'NEW',
+    name: opts?.companyName ?? 'AstraZeneca GmbH',
+    domain: opts?.companyDomain === undefined ? 'astrazeneca.com' : opts.companyDomain,
+  }]);
   const tx = {
     canonicalContact: {
       findMany: vi.fn(async () => candidates),
@@ -43,6 +61,7 @@ function fakeTx(
     contactPoint: { upsert: contactPointUpsert },
     fieldEvidence: { create: fieldEvidenceCreate },
     suppressionRecord: { findMany: suppressionFindMany },
+    canonicalCompany: { updateMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: queryRaw,
   } as unknown as Prisma.TransactionClient;
   return { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert, canonicalUpdate, canonicalFindUnique, suppressionFindMany, queryRaw };
@@ -242,10 +261,73 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       ],
       suppressedEmails: new Set(),
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1); // 取了 FOR SHARE 状态锁并复读
+    expect(queryRaw).toHaveBeenCalledTimes(2); // workspace suppression advisory lock + 公司 FOR SHARE 复读
     expect(res.created).toBe(0);
     expect(res.skippedSuppressed).toBe(2); // 整批跳过
     expect(canonicalUpsert).not.toHaveBeenCalled(); // 未新建任何联系人
+  });
+
+  it('company_name fact 已提交但派生状态尚未对账时，提交闸仍按原始事实阻止 PII', async () => {
+    const { tx, canonicalUpsert } = fakeTx([], {
+      companyStatus: 'NEW',
+      companyName: '  AstraZeneca   GmbH  ',
+      suppressedCompanyNames: ['astrazeneca gmbh'],
+    });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'late', fullName: 'Late Person', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+  });
+
+  it('长网络调用后新增的 email suppression 在写事务内复读，规范等价候选不入库', async () => {
+    const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([], {
+      suppressedEmails: ['sales@example.com'],
+    });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'late', fullName: 'Sales Team', email: ' Sales@EXAMPLE.COM ', personalData: false }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(contactPointUpsert).not.toHaveBeenCalled();
+  });
+
+  it('provider 返回非法 email 时 fail-closed，不把具名人或 PII 候选落库', async () => {
+    const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([]);
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'invalid', fullName: 'Invalid Mail', email: 'not-an-email', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 0, skippedInvalid: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(contactPointUpsert).not.toHaveBeenCalled();
+  });
+
+  it('联系人邮箱域命中 domain suppression 时不落库，即使公司自身使用不同域名', async () => {
+    const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([], {
+      suppressedDomains: ['agency.example'],
+    });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'agency', fullName: 'Agency Buyer', email: 'buyer@agency.example', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1, skippedInvalid: 0 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(contactPointUpsert).not.toHaveBeenCalled();
   });
 
   it('person-level 禁联键命中 → 同一人换新邮箱再现也跳过（不重建被 Art.17 擦除的具名人）', async () => {

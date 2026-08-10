@@ -33,6 +33,25 @@ export interface ExecutionContext {
   workspaceId: string;
   runId?: string;
   correlationId?: string;
+  /**
+   * Optional acquisition-only terminal authorization. Providers must thread it
+   * into every ToolContext/AiContext so each physical external call rechecks
+   * the current workspace suppression facts. Absence preserves non-acquisition
+   * and platform discovery behavior; callers must never synthesize `true`.
+   */
+  authorizeExternalAction?: () => Promise<boolean>;
+}
+
+/** Fail-closed helper for direct DNS/robots boundaries that are not Tool calls. */
+export async function externalActionAuthorized(
+  ctx: Pick<ExecutionContext, 'authorizeExternalAction'>,
+): Promise<boolean> {
+  if (!ctx.authorizeExternalAction) return true;
+  try {
+    return (await ctx.authorizeExternalAction()) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** 平台级执行的 ToolContext 哨兵（对齐 email-verify 先例）；只用于工具 Trace/预算归属，禁止流入 AiContext。 */
@@ -146,7 +165,8 @@ export interface EmailVerdict {
 export interface CompanyDiscoveryAdapter {
   key: string;
   classes: SourceClass[];
-  discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult>;
+  discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult>;
 }
 
 /** 联系人发现（Waterfall 第 5 步：仅对高价值企业购买联系人）。sellerCtx 可选（旧实现忽略即可，非破坏性）。 */
@@ -179,6 +199,8 @@ export interface EmailVerifyContext {
   allowPersonalWithoutBasis?: boolean;
   /** 该地址是否已在禁联名单（suppression）——命中则一律不探测。 */
   suppressed?: boolean;
+  /** Rechecked before direct MX lookup and passed to ToolBroker for SMTP. */
+  authorizeExternalAction?: () => Promise<boolean>;
 }
 
 /** 邮箱验证（发送前实时验证，PRD 7.4.7）。 */

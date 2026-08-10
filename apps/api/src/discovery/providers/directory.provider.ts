@@ -43,7 +43,8 @@ const CRAWL_CONCURRENCY = 4;
 interface ExtractedList {
   is_directory: boolean;
   list_kind?: string;
-  companies?: { name: string; website?: string; location?: string; detail_url?: string }[];
+  companies?: { name: string; website?: string; location?: string; detail_url?: string;
+  }[];
   has_next_page?: boolean;
 }
 
@@ -62,7 +63,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     gateway: ModelGateway;
     broker?: ExecutionBroker;
     runtimeTelemetry?: RuntimeTelemetry;
-  }) {}
+  },
+  ) {}
 
   private log(msg: string): void {
 
@@ -71,10 +73,14 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
 
   /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
   private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
-    return { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, taskContractId };
+    return { ...ctx, taskContractId };
   }
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(
+    query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
+    opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult> {
     // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
     if (!this.deps.broker) {
       this.log('skip: broker unavailable (fail-closed, no raw egress)');
@@ -125,14 +131,22 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   }
 
   /** 抓一个名录页（含有限翻页）→ 列表抽取 → 该页所有公司记录。 */
-  private async mineListing(listUrl: string, query: CompanyDiscoveryQuery, ctx: ExecutionContext): Promise<ProviderCompanyRecord[]> {
+  private async mineListing(
+    listUrl: string,
+    query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
+  ): Promise<ProviderCompanyRecord[]> {
     const out: ProviderCompanyRecord[] = [];
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
 
     for (let page = 0; page < MAX_PAGINATION && pageUrl && !visited.has(pageUrl); page++) {
       visited.add(pageUrl);
-      if (!(await isAllowedByRobots(pageUrl))) {
+      if (
+        !(await isAllowedByRobots(pageUrl, {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+        }))
+      ) {
         this.log(`skip ${pageUrl}: robots disallow`);
         break;
       }
@@ -143,7 +157,10 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           // maxChars=60k：名录列表页单页数百家公司，工具默认 40k 会静默砍掉尾部 1/3 条目（复审 medium）
           { url: pageUrl, maxChars: 60_000 },
           // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及本发现抓取（复现变更前有效集）。
-          { ...this.toolCtx(ctx, 'discovery.extract_list'), purpose: ['discovery', 'enrichment'] },
+          {
+            ...this.toolCtx(ctx, 'discovery.extract_list'),
+            purpose: ['discovery', 'enrichment'],
+          },
         );
         text = crawled.data.text.slice(0, 60_000);
       } catch (err) {
@@ -205,10 +222,12 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           }).slice(0, 800)}\n\n名录页文本（URL: ${url}）：\n${text}`,
           system: contract?.description,
           model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['is_directory', 'companies'] },
+          schema: contract?.outputSchema ?? {
+            required: ['is_directory', 'companies'],
+          },
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+        { ...ctx },
         { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data;
@@ -235,7 +254,11 @@ export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
 }
 
 function slug(s: string): string {
-  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
 }
 
 /** 从当前页文本里找"下一页"链接（同站，含 next/weiter 或数字页码）。 */

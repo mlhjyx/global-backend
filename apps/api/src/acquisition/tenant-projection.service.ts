@@ -1,6 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
+import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 
 const CHUNK = 100;
 
@@ -32,7 +35,8 @@ export class TenantProjectionService {
   async projectSource(workspaceId: string, sourceId: string, opts?: { limit?: number }): Promise<ProjectResult> {
     const { prisma } = this.deps;
 
-    const source = await prisma.monitoredSource.findUnique({ where: { id: sourceId } });
+    const source = await prisma.monitoredSource.findUnique({ where: { id: sourceId },
+    });
     if (!source) throw new Error(`monitored_source ${sourceId} not found`);
 
     // 平台级表无 RLS，直接读活跃实体
@@ -41,31 +45,77 @@ export class TenantProjectionService {
       ...(opts?.limit ? { take: opts.limit } : {}),
     });
     if (!entities.length) {
-      return { sourceId, sourceKey: source.sourceKey, entities: 0, projected: 0, suppressed: 0, personalContactsWithheld: 0, status: 'SKIPPED', reason: 'no active entities' };
+      return {
+        sourceId,
+        sourceKey: source.sourceKey,
+        entities: 0,
+        projected: 0,
+        suppressed: 0,
+        personalContactsWithheld: 0,
+        status: 'SKIPPED',
+        reason: 'no active entities',
+      };
     }
 
-    // Suppression 名单（RLS 内读一次）
-    const { domains: suppressedDomains, names: suppressedNames } = await prisma.withWorkspace(workspaceId, async (tx) => {
-      const s = await tx.suppressionRecord.findMany({ where: { type: { in: ['domain', 'company_name'] } } });
-      return {
-        domains: new Set(s.filter((x) => x.type === 'domain').map((x) => x.value.toLowerCase())),
-        names: new Set(s.filter((x) => x.type === 'company_name').map((x) => x.value.toLowerCase())),
-      };
-    });
-
-    let projected = 0, suppressed = 0, personalWithheld = 0;
+    let projected = 0,
+      suppressed = 0,
+      personalWithheld = 0;
 
     for (let i = 0; i < entities.length; i += CHUNK) {
       const chunk = entities.slice(i, i + CHUNK);
       await prisma.withWorkspace(workspaceId, async (tx) => {
+        // Authority fact + projection commit share one short workspace lock.
+        // A suppression committed before this chunk admission is visible here;
+        // no database transaction is held while the platform source is fetched.
+        const policyLock = await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+        const suppressionRows = await tx.suppressionRecord.findMany({
+          where: {
+            type: { in: ['domain', 'company_name', 'email'] },
+          },
+          select: { type: true, value: true },
+        });
+        const suppressedDomains = canonicalizeSuppressionValues(
+          'domain',
+          suppressionRows.filter((row) => row.type === 'domain').map((row) => row.value),
+        );
+        const suppressedEmails = canonicalizeSuppressionValues(
+          'email',
+          suppressionRows.filter((row) => row.type === 'email').map((row) => row.value),
+        );
         for (const e of chunk) {
           const cleaned = (e.cleaned ?? {}) as Record<string, unknown>;
-          const identity = companyIdentity({ name: e.name, domain: e.domain, country: e.country });
-          const isSuppressed =
-            (!!e.domain && suppressedDomains.has(e.domain.toLowerCase())) || suppressedNames.has(e.name.toLowerCase());
+          const identity = companyIdentity({
+            name: e.name,
+            domain: e.domain,
+            country: e.country,
+          });
+          const materialization = await loadMaterializableCompanyState(
+            tx,
+            workspaceId,
+            identity.dedupeKey,
+            { name: e.name, domain: e.domain },
+            { knownSuppressions: suppressionRows, policyLock },
+          );
+          const { prior } = materialization;
+          if (!materialization.allowed) {
+            suppressed += 1;
+            continue;
+          }
 
           // 合规：人名邮箱不投；职能邮箱作为法人联系点随公司走
-          const roleEmail = cleaned.email_kind === 'role' ? (cleaned.email as string) : undefined;
+          const roleEmailKey =
+            cleaned.email_kind === 'role' && typeof cleaned.email === 'string'
+              ? canonicalizeSuppressionValue('email', cleaned.email)
+              : null;
+          const roleEmailDomain = roleEmailKey
+            ? canonicalizeSuppressionValue('domain', roleEmailKey.split('@')[1])
+            : null;
+          const roleEmail =
+            roleEmailKey &&
+            !suppressedEmails.has(roleEmailKey) &&
+            (!roleEmailDomain || !suppressedDomains.has(roleEmailDomain))
+              ? roleEmailKey
+              : undefined;
           if (cleaned.email_kind === 'personal') personalWithheld += 1;
 
           const attributes = pruneUndefined({
@@ -81,10 +131,6 @@ export class TenantProjectionService {
 
           // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
           // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
-          const prior = await tx.canonicalCompany.findUnique({
-            where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: identity.dedupeKey } },
-            select: { id: true, attributes: true },
-          });
           const canonical = prior
             ? await tx.canonicalCompany.update({
                 where: { id: prior.id },
@@ -92,8 +138,15 @@ export class TenantProjectionService {
                   // 后到的源只补缺（domain/country），不覆盖已有
                   ...(e.domain ? { domain: { set: e.domain } } : {}),
                   ...(e.country ? { country: { set: e.country } } : {}),
-                  attributes: mergeAttributes((prior.attributes ?? {}) as Record<string, unknown>, attributes) as Prisma.InputJsonValue,
-                  status: isSuppressed ? 'SUPPRESSED' : undefined,
+                  attributes: mergeAttributes(
+                    withoutSuppressedContactEmail(
+                      (prior.attributes ?? {}) as Record<string, unknown>,
+                      suppressedEmails,
+                      suppressedDomains,
+                      false,
+                    ),
+                    attributes,
+                  ) as Prisma.InputJsonValue,
                   version: { increment: 1 },
                 },
               })
@@ -104,11 +157,10 @@ export class TenantProjectionService {
                   domain: e.domain ?? null,
                   country: e.country ?? null,
                   attributes: attributes as Prisma.InputJsonValue,
-                  status: isSuppressed ? 'SUPPRESSED' : 'NEW',
+                  status: 'NEW',
                   dedupeKey: identity.dedupeKey,
                 },
               });
-          if (isSuppressed) suppressed += 1;
           projected += 1;
 
           // identity_link：canonical ↔ source_entity（rawRecordId=source_entity.id），去重
@@ -154,8 +206,36 @@ export class TenantProjectionService {
       });
     }
 
-    return { sourceId, sourceKey: source.sourceKey, entities: entities.length, projected, suppressed, personalContactsWithheld: personalWithheld, status: 'DONE' };
+    return {
+      sourceId,
+      sourceKey: source.sourceKey,
+      entities: entities.length,
+      projected,
+      suppressed,
+      personalContactsWithheld: personalWithheld,
+      status: 'DONE',
+    };
   }
+}
+
+function withoutSuppressedContactEmail(
+  attributes: Record<string, unknown>,
+  suppressedEmails: ReadonlySet<string>,
+  suppressedDomains: ReadonlySet<string>,
+  suppressCompany: boolean,
+): Record<string, unknown> {
+  const current =
+    typeof attributes.contact_email === 'string'
+      ? canonicalizeSuppressionValue('email', attributes.contact_email)
+      : null;
+  const currentDomain = current ? canonicalizeSuppressionValue('domain', current.split('@')[1]) : null;
+  if (
+    !suppressCompany &&
+    (!current || (!suppressedEmails.has(current) && (!currentDomain || !suppressedDomains.has(currentDomain))))
+  )
+    return attributes;
+  const { contact_email: _removed, ...safe } = attributes;
+  return safe;
 }
 
 function pruneUndefined(o: Record<string, unknown>): Record<string, unknown> {

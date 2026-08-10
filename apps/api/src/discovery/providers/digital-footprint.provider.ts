@@ -5,6 +5,7 @@ import {
   CompanyEnrichmentInput,
   EnrichmentResult,
   ExecutionContext,
+  externalActionAuthorized,
 } from '../provider-contract';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
@@ -37,9 +38,14 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
     }
     const base = `https://${input.domain}/`;
     // robots 早跳过（robots.ts 有缓存；crawl4ai.render 工具内亦权威强制）
-    if (!(await isAllowedByRobots(base).catch(() => true))) return miss();
+    if (
+      !(await isAllowedByRobots(base, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+      }).catch(() => false))
+    )
+      return miss();
 
-    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const toolCtx: ToolContext = { ...ctx };
     const page = await this.deps.broker
       .invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>('crawl4ai.render', { url: base }, toolCtx)
       .catch(() => null);
@@ -51,7 +57,7 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
     const pixels = detectAdPixels(html);
     const platforms = detectPlatform(html, headers);
     const markets = detectServedMarkets(html);
-    const emailProvider = await classifyMxProvider(input.domain).catch(() => undefined);
+    const emailProvider = await classifyMxProvider(input.domain, ctx).catch(() => undefined);
 
     const attributes = prune({
       tech_platform: platforms.length ? platforms : undefined,
@@ -60,7 +66,10 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
       served_markets: markets.countries.length ? markets.countries : undefined,
       served_langs: markets.langs.length ? markets.langs : undefined,
       hiring_signal: jsonld.jobPostings.length
-        ? { open_roles: jsonld.jobPostings.length, titles: jsonld.jobPostings.slice(0, 8).map((j) => j.title) }
+        ? {
+            open_roles: jsonld.jobPostings.length,
+            titles: jsonld.jobPostings.slice(0, 8).map((j) => j.title),
+          }
         : undefined,
       structured_org: jsonld.organization,
       structured_products: jsonld.products.length ? jsonld.products.slice(0, 12) : undefined,
@@ -105,8 +114,8 @@ export function extractJsonLd(html: string): JsonLdFacts {
     } catch {
       continue; // 跳过畸形 JSON-LD
     }
-    const graph =
-      Array.isArray(parsed) ? parsed
+    const graph = Array.isArray(parsed)
+      ? parsed
       : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>)['@graph'])
         ? ((parsed as Record<string, unknown>)['@graph'] as unknown[])
         : [parsed];
@@ -128,7 +137,12 @@ export function extractJsonLd(html: string): JsonLdFacts {
     }
     if (types.some((t) => /^Product$/i.test(t)) && str(n.name)) out.products.push(str(n.name)!.trim());
     if (types.some((t) => /JobPosting/i.test(t)) && str(n.title)) {
-      out.jobPostings.push(prune({ title: str(n.title)!.trim(), datePosted: str(n.datePosted) }) as { title: string; datePosted?: string });
+      out.jobPostings.push(
+        prune({
+          title: str(n.title)!.trim(),
+          datePosted: str(n.datePosted),
+        }) as { title: string; datePosted?: string },
+      );
     }
   }
   out.products = [...new Set(out.products)].slice(0, 20);
@@ -137,10 +151,19 @@ export function extractJsonLd(html: string): JsonLdFacts {
 }
 
 const PIXEL_SIGS: { key: string; re: RegExp }[] = [
-  { key: 'meta_pixel', re: /fbq\(|connect\.facebook\.net\/[^"']*fbevents\.js/i },
-  { key: 'google_ads', re: /gtag\(\s*['"]event['"]|googleads\.g\.doubleclick|google_conversion|gtag\/js\?id=AW-/i },
+  {
+    key: 'meta_pixel',
+    re: /fbq\(|connect\.facebook\.net\/[^"']*fbevents\.js/i,
+  },
+  {
+    key: 'google_ads',
+    re: /gtag\(\s*['"]event['"]|googleads\.g\.doubleclick|google_conversion|gtag\/js\?id=AW-/i,
+  },
   { key: 'google_tag_manager', re: /googletagmanager\.com\/gtm\.js/i },
-  { key: 'google_analytics', re: /googletagmanager\.com\/gtag\/js\?id=G-|google-analytics\.com\/(analytics|ga|g\/collect)/i },
+  {
+    key: 'google_analytics',
+    re: /googletagmanager\.com\/gtag\/js\?id=G-|google-analytics\.com\/(analytics|ga|g\/collect)/i,
+  },
   { key: 'linkedin_insight', re: /snap\.licdn\.com|_linkedin_partner_id/i },
   { key: 'tiktok_pixel', re: /analytics\.tiktok\.com|ttq\.(load|page)\(/i },
   { key: 'hubspot', re: /js\.hs-scripts\.com|hs-analytics\.net/i },
@@ -155,7 +178,10 @@ export function detectAdPixels(html: string): string[] {
 const PLATFORM_SIGS: { key: string; re: RegExp }[] = [
   { key: 'shopify', re: /cdn\.shopify\.com|Shopify\.theme|\.myshopify\.com/i },
   { key: 'magento', re: /Magento_|mage\/cookies|\/static\/version\d/i },
-  { key: 'woocommerce', re: /woocommerce|wc-ajax|wp-content\/plugins\/woocommerce/i },
+  {
+    key: 'woocommerce',
+    re: /woocommerce|wc-ajax|wp-content\/plugins\/woocommerce/i,
+  },
   { key: 'wordpress', re: /wp-content|wp-includes/i },
   { key: 'wix', re: /static\.wixstatic\.com|_wix|wix\.com/i },
   { key: 'squarespace', re: /squarespace\.com|static1\.squarespace/i },
@@ -175,7 +201,10 @@ export function detectPlatform(html: string, headers?: Record<string, string>): 
   return [...found];
 }
 
-export function detectServedMarkets(html: string): { langs: string[]; countries: string[] } {
+export function detectServedMarkets(html: string): {
+  langs: string[];
+  countries: string[];
+} {
   const re = /hreflang=["']([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)["']/g;
   const langs = new Set<string>();
   const countries = new Set<string>();
@@ -186,13 +215,20 @@ export function detectServedMarkets(html: string): { langs: string[]; countries:
     if (lang) langs.add(lang);
     if (country) countries.add(country.toUpperCase());
   }
-  return { langs: [...langs].slice(0, 30), countries: [...countries].slice(0, 60) };
+  return {
+    langs: [...langs].slice(0, 30),
+    countries: [...countries].slice(0, 60),
+  };
 }
 
 /** MX 记录 → 邮件服务商分类（DNS，非 SMTP；出网友好）。DNS 解析是 Broker 登记例外，保留直连。 */
-export async function classifyMxProvider(domain: string): Promise<string | undefined> {
+export async function classifyMxProvider(
+  domain: string,
+  ctx: Pick<ExecutionContext, 'authorizeExternalAction'> = {},
+): Promise<string | undefined> {
   let mx: { exchange: string }[];
   try {
+    if (!(await externalActionAuthorized(ctx))) return undefined;
     mx = await resolveMx(domain);
   } catch {
     return undefined;

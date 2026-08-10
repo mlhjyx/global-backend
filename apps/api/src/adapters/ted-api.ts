@@ -206,6 +206,7 @@ async function fetchNoticesRaw(
   scope: 'ALL' | 'ACTIVE' | 'LATEST',
   limit: number,
   maxRecords: number,
+  beforeRequest?: () => Promise<void>,
 ): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   let token: string | undefined;
@@ -221,13 +222,14 @@ async function fetchNoticesRaw(
     };
     if (token) body.iterationNextToken = token;
 
-    const json = await tedPost(body);
+    const json = await tedPost(body, beforeRequest);
     const notices = Array.isArray(json.notices) ? json.notices : [];
     for (const n of notices) {
       out.push(n as Record<string, unknown>);
       if (out.length >= maxRecords) break;
     }
-    token = typeof json.iterationNextToken === 'string' && json.iterationNextToken ? json.iterationNextToken : undefined;
+    token =
+      typeof json.iterationNextToken === 'string' && json.iterationNextToken ? json.iterationNextToken : undefined;
     if (!token || !notices.length) break;
     await sleep(THROTTLE_MS);
   }
@@ -235,19 +237,35 @@ async function fetchNoticesRaw(
 }
 
 /** 拉中标公告（award notice，winner-* 揭示供应商）。网络失败向上抛，由 provider fail-safe。 */
-export async function searchAwardNotices(params: SearchAwardParams): Promise<TedAwardNotice[]> {
+export async function searchAwardNotices(
+  params: SearchAwardParams,
+  beforeRequest?: () => Promise<void>,
+): Promise<TedAwardNotice[]> {
   const scope = params.scope ?? 'ACTIVE';
   const limit = Math.min(params.limit ?? MAX_LIMIT, MAX_LIMIT);
-  const raw = await fetchNoticesRaw(buildAwardQuery(params), AWARD_FIELDS, scope, limit, params.maxRecords ?? limit);
+  const raw = await fetchNoticesRaw(
+    buildAwardQuery(params),
+    AWARD_FIELDS,
+    scope,
+    limit,
+    params.maxRecords ?? limit,
+    beforeRequest,
+  );
   return raw.map(mapAwardNotice);
 }
 
 /** 拉招标公告（contract notice，cn-standard；买方需求 = intent/时机）。默认 scope=ACTIVE（当前开放机会）。 */
-export async function searchContractNotices(params: SearchAwardParams): Promise<TedContractNotice[]> {
+export async function searchContractNotices(
+  params: SearchAwardParams,
+  beforeRequest?: () => Promise<void>,
+): Promise<TedContractNotice[]> {
   const scope = params.scope ?? 'ACTIVE';
   const limit = Math.min(params.limit ?? MAX_LIMIT, MAX_LIMIT);
-  const query = buildAwardQuery({ ...params, noticeType: params.noticeType ?? 'cn-standard' });
-  const raw = await fetchNoticesRaw(query, CONTRACT_FIELDS, scope, limit, params.maxRecords ?? limit);
+  const query = buildAwardQuery({
+    ...params,
+    noticeType: params.noticeType ?? 'cn-standard',
+  });
+  const raw = await fetchNoticesRaw(query, CONTRACT_FIELDS, scope, limit, params.maxRecords ?? limit, beforeRequest);
   return raw.map(mapContractNotice);
 }
 
@@ -257,20 +275,28 @@ interface TedSearchResponse {
   totalNoticeCount?: number;
 }
 
-async function tedPost(body: Record<string, unknown>): Promise<TedSearchResponse> {
-  const res = await tedFetch(body);
+async function tedPost(body: Record<string, unknown>, beforeRequest?: () => Promise<void>): Promise<TedSearchResponse> {
+  const res = await tedFetch(body, 30_000, beforeRequest);
   if (!res.ok) throw new Error(`ted ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()) as TedSearchResponse;
 }
 
 /** 带退避的 POST：429/403/5xx/网络错误重试；其余状态原样交回由调用方判定（不误重试 400 语法错）。 */
-async function tedFetch(body: Record<string, unknown>, timeoutMs = 30_000): Promise<Response> {
+async function tedFetch(
+  body: Record<string, unknown>,
+  timeoutMs = 30_000,
+  beforeRequest?: () => Promise<void>,
+): Promise<Response> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await beforeRequest?.();
     try {
       const res = await fetch(SEARCH_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -317,8 +343,7 @@ function unpackMultilang(v: unknown): string[] {
 
 /** 标量字段取首值（多语言对象取 eng 优先首项）。 */
 function firstString(v: unknown): string | undefined {
-  const arr =
-    typeof v === 'object' && v !== null && !Array.isArray(v) ? unpackMultilang(v) : asStringArray(v);
+  const arr = typeof v === 'object' && v !== null && !Array.isArray(v) ? unpackMultilang(v) : asStringArray(v);
   return arr[0];
 }
 

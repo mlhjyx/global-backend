@@ -97,14 +97,20 @@ function orClause(field: string, values: string[]): string {
  * 🔴 **绝不提取** `registration.us_agent` / `contact`（具名个人，GDPR）——绿事实只取法人字段。
  * `openfda` 谐调块缺块/缺字段当 null（谐调精确匹配失败即整块缺失）。
  */
-export function mapRegistration(raw: Record<string, unknown>, preferProductCodes?: string[]): OpenFdaEstablishment | null {
+export function mapRegistration(
+  raw: Record<string, unknown>,
+  preferProductCodes?: string[],
+): OpenFdaEstablishment | null {
   const reg = asObject(raw['registration']);
   const name = str(reg['name'])?.trim();
   if (!name) return null; // 无法人名 → 跳过（主解析键缺失，不臆造）
 
   const products = asArray(raw['products']).map(asObject);
   const productCodes = dedupe(products.map((p) => str(p['product_code'])).filter(isNonEmpty));
-  const createdDates = products.map((p) => str(p['created_date'])).filter(isNonEmpty).sort();
+  const createdDates = products
+    .map((p) => str(p['created_date']))
+    .filter(isNonEmpty)
+    .sort();
   // 分类事实取**匹配 ICP 搜索码**的产品（openFDA 返回该 establishment 全部产品、顺序不定；
   // 只看 products[0] 会取到无关设备的专科 → 误导 fit 门）。无匹配退首个带谐调块的产品。
   const deviceFacts = pickDeviceFacts(products, preferProductCodes);
@@ -130,10 +136,15 @@ export function mapRegistration(raw: Record<string, unknown>, preferProductCodes
 }
 
 /** 从产品数组挑分类事实：优先匹配 preferProductCodes 的产品谐调块，否则首个带谐调块的产品；皆无 → undefined。 */
-function pickDeviceFacts(products: Record<string, unknown>[], preferProductCodes?: string[]): OpenFdaDeviceFacts | undefined {
+function pickDeviceFacts(
+  products: Record<string, unknown>[],
+  preferProductCodes?: string[],
+): OpenFdaDeviceFacts | undefined {
   const prefer = new Set((preferProductCodes ?? []).map((c) => c.toUpperCase()));
   const withBlock = products.filter((p) => Object.keys(asObject(p['openfda'])).length > 0);
-  const matched = prefer.size ? withBlock.find((p) => prefer.has(str(p['product_code'])?.toUpperCase() ?? '')) : undefined;
+  const matched = prefer.size
+    ? withBlock.find((p) => prefer.has(str(p['product_code'])?.toUpperCase() ?? ''))
+    : undefined;
   const chosen = matched ?? withBlock[0];
   return chosen ? unpackDeviceFacts(asObject(chosen['openfda'])) : undefined;
 }
@@ -149,7 +160,10 @@ function unpackDeviceFacts(openfda: Record<string, unknown>): OpenFdaDeviceFacts
 }
 
 /** 拉器械注册（有界样本分页）。网络/错误向上抛，由 provider fail-safe。0 命中返 []（判 error.NOT_FOUND）。 */
-export async function searchRegistrations(params: RegistrationSearchParams): Promise<OpenFdaEstablishment[]> {
+export async function searchRegistrations(
+  params: RegistrationSearchParams,
+  beforeRequest?: () => Promise<void>,
+): Promise<OpenFdaEstablishment[]> {
   const search = buildRegistrationSearch(params);
   const limit = Math.min(params.limit ?? 100, MAX_LIMIT);
   const maxRecords = params.maxRecords ?? limit;
@@ -157,7 +171,7 @@ export async function searchRegistrations(params: RegistrationSearchParams): Pro
   for (let page = 0; page < MAX_PAGES && out.length < maxRecords; page++) {
     const skip = page * limit;
     if (skip > MAX_SKIP) break; // 深翻超限 → 停（P1 不做 search_after）
-    const json = await openFdaGet('/device/registrationlisting.json', { search, limit, skip });
+    const json = await openFdaGet('/device/registrationlisting.json', { search, limit, skip }, 30_000, beforeRequest);
     if (json.error) break; // NOT_FOUND / 其它 → 视作无更多结果
     const results = Array.isArray(json.results) ? json.results : [];
     for (const r of results) {
@@ -172,8 +186,15 @@ export async function searchRegistrations(params: RegistrationSearchParams): Pro
 }
 
 /** `count=<field>.exact` 服务端聚合（sizing / top 公司）——秒出 term+计数，不拉全量。 */
-export async function countField(endpoint: string, field: string, search?: string): Promise<{ term: string; count: number }[]> {
-  const json = await openFdaGet(endpoint, { count: `${field}.exact`, ...(search ? { search } : {}) });
+export async function countField(
+  endpoint: string,
+  field: string,
+  search?: string,
+): Promise<{ term: string; count: number }[]> {
+  const json = await openFdaGet(endpoint, {
+    count: `${field}.exact`,
+    ...(search ? { search } : {}),
+  });
   if (json.error || !Array.isArray(json.results)) return [];
   return (json.results as Record<string, unknown>[])
     .map((r) => ({ term: String(r.term ?? ''), count: Number(r.count ?? 0) }))
@@ -253,7 +274,8 @@ export function build510kSearch(p: Build510kParams): string {
   const clauses: string[] = [orClause('product_code', p.productCodes)];
   const countries = (p.countries ?? []).map((c) => c.toUpperCase()).filter(Boolean);
   if (countries.length) clauses.push(orClause('country_code', countries));
-  if (p.decisionDateFrom && p.decisionDateTo) clauses.push(`decision_date:[${p.decisionDateFrom} TO ${p.decisionDateTo}]`);
+  if (p.decisionDateFrom && p.decisionDateTo)
+    clauses.push(`decision_date:[${p.decisionDateFrom} TO ${p.decisionDateTo}]`);
   return clauses.join(' AND ');
 }
 
@@ -293,7 +315,10 @@ export interface Search510kParams {
  * `clearedOnly`（默认 true）客户端过滤 isClearedDecision；无合法 decisionDateIso 的记录丢弃
  * （§8.6：无可靠时机信号）。网络/错误向上抛由 provider fail-safe；0 命中（error.NOT_FOUND）返 []。
  */
-export async function search510kClearances(params: Search510kParams): Promise<Fda510kClearance[]> {
+export async function search510kClearances(
+  params: Search510kParams,
+  beforeRequest?: () => Promise<void>,
+): Promise<Fda510kClearance[]> {
   const now = params.now ?? Date.now();
   const search = build510kSearch({
     productCodes: params.productCodes,
@@ -308,7 +333,7 @@ export async function search510kClearances(params: Search510kParams): Promise<Fd
   for (let page = 0; page < MAX_PAGES && out.length < maxRecords; page++) {
     const skip = page * limit;
     if (skip > MAX_SKIP) break;
-    const json = await openFdaGet('/device/510k.json', { search, limit, skip });
+    const json = await openFdaGet('/device/510k.json', { search, limit, skip }, 30_000, beforeRequest);
     if (json.error) break; // NOT_FOUND / 其它 → 无更多结果
     const results = Array.isArray(json.results) ? json.results : [];
     for (const r of results) {
@@ -335,15 +360,24 @@ interface OpenFdaResponse {
 }
 
 /** 带退避的 GET（api-umbrella 无限流头 → 429 感知 + 退避；其余错误状态原样解析交调用方判 error）。 */
-async function openFdaGet(path: string, params: Record<string, string | number>, timeoutMs = 30_000): Promise<OpenFdaResponse> {
+async function openFdaGet(
+  path: string,
+  params: Record<string, string | number>,
+  timeoutMs = 30_000,
+  beforeRequest?: () => Promise<void>,
+): Promise<OpenFdaResponse> {
   const url = new URL(path, BASE_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   if (API_KEY) url.searchParams.set('api_key', API_KEY);
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await beforeRequest?.();
     try {
-      const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
         const retryAfter = Number(res.headers.get('retry-after'));
         await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : backoff(attempt));

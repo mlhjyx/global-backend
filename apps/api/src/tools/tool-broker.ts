@@ -1,4 +1,7 @@
-import { ExecutionBroker, SourcePolicyDenyReason, Tool, ToolContext, ToolResult } from './tool-contract';
+import { ExecutionBroker,
+  ExternalToolActionDeniedError,
+  SourcePolicyDenyReason, Tool, ToolContext, ToolResult,
+} from './tool-contract';
 import { ToolRegistry } from './tool-registry';
 import { BudgetLedger, BudgetExceededError, budgetLedger } from './budget';
 import { RateLimiter, rateLimiter } from './rate-limiter';
@@ -174,10 +177,7 @@ export class ToolBroker implements ExecutionBroker {
                 ? `purpose not allowed for ${domain}`
                 : `source_policy ${chk.reason}: ${domain}`;
           this.trace(ctx, tool, 'DENIED', detail, 0, now() - started);
-          throw new ToolPolicyDenied(
-            toolId,
-            chk.reason === 'suspended' ? `domain ${domain} is SUSPENDED` : detail,
-          );
+          throw new ToolPolicyDenied(toolId, chk.reason === 'suspended' ? `domain ${domain} is SUSPENDED` : detail);
         }
       }
     }
@@ -190,14 +190,7 @@ export class ToolBroker implements ExecutionBroker {
     let paidScope: PaidOperationReservation | undefined;
     if (ctx.paidCost) {
       if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
-        this.trace(
-          ctx,
-          tool,
-          'DENIED',
-          'persistent paid ledger unavailable',
-          0,
-          now() - started,
-        );
+        this.trace(ctx, tool, 'DENIED', 'persistent paid ledger unavailable', 0, now() - started);
         throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
       }
       paidScope = {
@@ -224,23 +217,16 @@ export class ToolBroker implements ExecutionBroker {
           idempotencyKey: tool.idempotencyKey(input),
         },
       };
-      const paidDecision = await this.deps.paidLedger.reserveOperation(
-        paidScope,
-      );
+      const paidDecision = await this.deps.paidLedger.reserveOperation(paidScope);
       if (paidDecision.kind === 'replay') {
         if (
           paidDecision.status === 'SUCCEEDED' &&
           paidDecision.result &&
           Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
         ) {
-          const replay = tool.durableReplayResult?.(
-            paidDecision.result as unknown as ToolResult<O>,
-          );
+          const replay = tool.durableReplayResult?.(paidDecision.result as unknown as ToolResult<O>);
           if (replay) return replay;
-          throw new PaidOperationUnknownError(
-            paidScope.operationKey,
-            'REPLAY_PAYLOAD_UNAVAILABLE',
-          );
+          throw new PaidOperationUnknownError(paidScope.operationKey, 'REPLAY_PAYLOAD_UNAVAILABLE');
         }
         throw new Error(
           `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? 'recorded_failure'}`,
@@ -248,20 +234,10 @@ export class ToolBroker implements ExecutionBroker {
       }
     } else {
       try {
-        reservation = this.budget.reserve(
-          runId,
-          tool.cost.estimatedCents,
-        );
+        reservation = this.budget.reserve(runId, tool.cost.estimatedCents);
       } catch (err) {
         if (err instanceof BudgetExceededError) {
-          this.trace(
-            ctx,
-            tool,
-            'DENIED',
-            `budget exceeded: ${err.message.slice(0, 150)}`,
-            0,
-            now() - started,
-          );
+          this.trace(ctx, tool, 'DENIED', `budget exceeded: ${err.message.slice(0, 150)}`, 0, now() - started);
         }
         throw err;
       }
@@ -291,19 +267,57 @@ export class ToolBroker implements ExecutionBroker {
 
     // 5) 执行 + 6) settle + 7) trace
     try {
+      // Acquisition suppression is linearized at the last common Tool wire
+      // boundary. The check intentionally happens after limiter/domain delay:
+      // a suppression committed while this invocation was waiting must still
+      // prevent execute(). No database transaction is held across the network.
+      if (ctx.authorizeExternalAction) {
+        let authorized = false;
+        try {
+          authorized = (await ctx.authorizeExternalAction()) === true;
+        } catch {
+          authorized = false;
+        }
+        if (!authorized) {
+          if (paidScope) {
+            await this.settlePersistentOperation({
+              scope: paidScope,
+              status: 'RELEASED',
+              measurement: this.notIncurredMeasurement(),
+              errorCode: 'SUPPRESSION_ACTION_GATE',
+            });
+          } else if (reservation) {
+            this.budget.settle(reservation, 0);
+          }
+          this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
+          throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
+        }
+      }
       let result: ToolResult<O>;
       try {
         result = await tool.execute(input, ctx);
       } catch (err) {
+        if (err instanceof ExternalToolActionDeniedError) {
+          if (paidScope) {
+            await this.settlePersistentOperation({
+              scope: paidScope,
+              status: 'RELEASED',
+              measurement: this.notIncurredMeasurement(),
+              errorCode: 'SUPPRESSION_ACTION_GATE',
+            });
+          } else if (reservation) {
+            this.budget.settle(reservation, 0);
+          }
+          this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
+          throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
+        }
         if (paidScope) {
           await this.settlePersistentOperation({
             scope: paidScope,
             status: 'FAILED',
             // Once execute() starts, an upstream may have consumed quota even if
             // no response arrived. Charge the reservation but keep cost unknown.
-            measurement: this.unknownMeasurement(
-              paidScope.reservationMicrousd,
-            ),
+            measurement: this.unknownMeasurement(paidScope.reservationMicrousd),
             errorCode: 'TOOL_CALL_ERROR',
           });
         } else if (reservation) {
@@ -320,10 +334,7 @@ export class ToolBroker implements ExecutionBroker {
         await this.settlePersistentOperation({
           scope: paidScope,
           status: 'SUCCEEDED',
-          measurement: legacyToolCostMeasurement(
-            result.costCents,
-            paidScope.reservationMicrousd,
-          ),
+          measurement: legacyToolCostMeasurement(result.costCents, paidScope.reservationMicrousd),
           ...(durableReplay
             ? {
                 result: durableReplay as unknown as Record<string, unknown>,
@@ -339,7 +350,16 @@ export class ToolBroker implements ExecutionBroker {
       } else if (reservation) {
         this.budget.settle(reservation, result.costCents);
       }
-      this.trace(ctx, tool, 'OK', undefined, result.costCents, now() - started, tool.idempotencyKey(input), result.degraded);
+      this.trace(
+        ctx,
+        tool,
+        'OK',
+        undefined,
+        result.costCents,
+        now() - started,
+        tool.idempotencyKey(input),
+        result.degraded,
+      );
       return result;
     } finally {
       release?.();
@@ -360,30 +380,20 @@ export class ToolBroker implements ExecutionBroker {
     };
   }
 
-  private async settlePersistentOperation(
-    input: Parameters<SiteBuildCostLedger['settleOperation']>[0],
-  ): Promise<void> {
+  private async settlePersistentOperation(input: Parameters<SiteBuildCostLedger['settleOperation']>[0]): Promise<void> {
     let decision: string;
     try {
       decision = await this.deps.paidLedger!.settleOperation(input);
     } catch (error) {
       if (error instanceof PaidOperationUnknownError) throw error;
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        'SETTLEMENT_ACK_UNKNOWN',
-      );
+      throw new PaidOperationUnknownError(input.scope.operationKey, 'SETTLEMENT_ACK_UNKNOWN');
     }
     if (decision !== 'SETTLED') {
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        `SETTLEMENT_${decision}`,
-      );
+      throw new PaidOperationUnknownError(input.scope.operationKey, `SETTLEMENT_${decision}`);
     }
   }
 
-  private unknownMeasurement(
-    reservationMicrousd: number,
-  ): PaidCostMeasurement {
+  private unknownMeasurement(reservationMicrousd: number): PaidCostMeasurement {
     return {
       basis: 'unknown',
       budgetChargeMicrousd: reservationMicrousd,

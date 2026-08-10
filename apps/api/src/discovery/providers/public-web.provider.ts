@@ -9,7 +9,9 @@ import {
   DiscoveryResult,
   EmailVerdict,
   EmailVerificationAdapter,
+  EmailVerifyContext,
   ExecutionContext,
+  externalActionAuthorized,
   GENERIC_CONTACT_TITLE,
   ProviderCompanyRecord,
   ProviderContactRecord,
@@ -79,7 +81,8 @@ export class PublicWebDiscoveryProvider
     gateway: ModelGateway;
     broker?: ExecutionBroker;
     runtimeTelemetry?: RuntimeTelemetry;
-  }) {}
+  },
+  ) {}
 
   private log(msg: string): void {
 
@@ -88,10 +91,14 @@ export class PublicWebDiscoveryProvider
 
   /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
   private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
-    return { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, taskContractId };
+    return { ...ctx, taskContractId };
   }
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(
+    query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
+    opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult> {
     // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 诚实降级空结果。
     if (!this.deps.broker) {
       this.log('skip: broker unavailable (fail-closed, no raw egress)');
@@ -136,10 +143,16 @@ export class PublicWebDiscoveryProvider
     return res.data.results.slice(0, 20);
   }
 
-  private async mineDomain(domain: string, query: CompanyDiscoveryQuery, ctx: ExecutionContext): Promise<ProviderCompanyRecord | null> {
+  private async mineDomain(
+    domain: string,
+    query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
+  ): Promise<ProviderCompanyRecord | null> {
     const homeUrl = `https://${domain}/`;
     // 合规闸门（DAT-011）：robots 禁抓则放弃，不换 UA 硬闯（robots.ts 有缓存；工具内亦权威强制）
-    if (!(await isAllowedByRobots(homeUrl))) {
+    if (!(await isAllowedByRobots(homeUrl, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+      }))) {
       this.log(`skip ${domain}: robots disallow`);
       return null;
     }
@@ -150,7 +163,10 @@ export class PublicWebDiscoveryProvider
         { url: homeUrl },
         // FIX C（Codex P1）：仅在 crawl4ai.fetch 处显式声明用途（toolCtx 与 searxng.search 共享，
         // searxng 是 sourcePolicy=none 短路放行，不在此加）；精确复现 site_builder 扩宽前的有效集。
-        { ...this.toolCtx(ctx, 'discovery.extract_company'), purpose: ['discovery', 'enrichment'] },
+        {
+          ...this.toolCtx(ctx, 'discovery.extract_company'),
+          purpose: ['discovery', 'enrichment'],
+        },
       );
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
@@ -176,7 +192,7 @@ export class PublicWebDiscoveryProvider
         schema: contract?.outputSchema ?? { required: ['is_company_site'] },
       },
       // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-      { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId },
+      { ...ctx },
       { telemetry: this.deps.runtimeTelemetry },
     );
     const out = result.data;
@@ -211,17 +227,23 @@ export class PublicWebDiscoveryProvider
 
   // ── 联系人（公开、确定性）────────────────────────────────────────────────
 
-  async discoverContacts(company: { name: string; domain?: string }, ctx: ExecutionContext): Promise<ContactDiscoveryResult> {
+  async discoverContacts(
+    company: { name: string; domain?: string },
+    ctx: ExecutionContext,
+  ): Promise<ContactDiscoveryResult> {
     if (!company.domain) return { contacts: [], costCents: 0 };
     if (!this.deps.broker) return { contacts: [], costCents: 0 }; // fail-closed：无闸门不出网
     const base = `https://${company.domain}/`;
-    if (!(await isAllowedByRobots(base))) return { contacts: [], costCents: 0 };
+    if (!(await isAllowedByRobots(base, {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+      }))) return { contacts: [], costCents: 0 };
     const crawl = (url: string) =>
       this.deps.broker!.invoke<{ url: string }, CrawlResult>('crawl4ai.fetch', { url }, {
         // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及本发现抓取。
         ...this.toolCtx(ctx, 'contact.find_decision_makers'),
         purpose: ['discovery', 'enrichment'],
-      });
+      },
+      );
     const pages: { url: string; text: string }[] = [];
     try {
       const home = await crawl(base);
@@ -244,21 +266,31 @@ export class PublicWebDiscoveryProvider
     const found = extractPublicContacts(pages);
     const emails = found.filter((c) => c.type === 'email');
     const phones = found.filter((c) => c.type === 'phone');
-    return { contacts: buildPublicContacts(company.domain, emails, phones[0]?.value), costCents: 0 };
+    return { contacts: buildPublicContacts(company.domain, emails, phones[0]?.value), costCents: 0,
+    };
   }
 
   // ── 邮箱验证（语法 + MX；诚实上限 RISKY）─────────────────────────────────
 
-  async verifyEmail(email: string): Promise<EmailVerdict> {
+  async verifyEmail(email: string, ctx?: EmailVerifyContext): Promise<EmailVerdict> {
     if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email)) {
       return { status: 'INVALID', detail: 'syntax', costCents: 0 };
     }
     const domain = email.split('@')[1];
+    if (!(await externalActionAuthorized(ctx ?? {}))) {
+      return {
+        status: 'BLOCKED',
+        detail: 'suppression_action_gate',
+        costCents: 0,
+      };
+    }
     try {
       const mx = await resolveMx(domain);
       if (!mx.length) return { status: 'INVALID', detail: 'no MX records', costCents: 0 };
       // 没有 SMTP 级验证源之前，不谎报 VALID —— MX 存在只能说明「可能可达」。
-      return { status: 'RISKY', detail: `MX present (${mx[0].exchange}); mailbox unverified`, costCents: 0 };
+      return { status: 'RISKY', detail: `MX present (${mx[0].exchange}); mailbox unverified`,
+        costCents: 0,
+      };
     } catch {
       return { status: 'INVALID', detail: 'DNS lookup failed', costCents: 0 };
     }
@@ -280,7 +312,10 @@ export function buildPublicContacts(
     const local = e.value.split('@')[0];
     const personal = /^[a-z]+[._-][a-z]+$/i.test(local);
     const fullName = personal
-      ? local.split(/[._-]/).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')
+      ? local
+          .split(/[._-]/)
+          .map((w) => w[0].toUpperCase() + w.slice(1))
+          .join(' ')
       : `公开联系点 (${local}@)`;
     return {
       externalId: `${domain}:${e.value}`,

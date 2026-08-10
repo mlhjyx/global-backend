@@ -26,7 +26,8 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions): Promise<DiscoveryResult> {
+  async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
+  ): Promise<DiscoveryResult> {
     if (!this.deps?.broker) {
        
       console.warn('[openstreetmap] broker unavailable, fail-closed (no raw egress)');
@@ -41,13 +42,14 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
     let places: OsmPlace[];
     try {
       const res = await this.deps.broker.invoke<
-        { areaName: string; tagFilters: { k: string; v?: string }[]; limit?: number },
+        { areaName: string; tagFilters: { k: string; v?: string }[]; limit?: number;
+        },
         { places: OsmPlace[] }
       >(
         'osm.overpass',
         { areaName, tagFilters, limit: Math.min(query.limit, 80) },
         // #51：传本次调用用途，用途门按 discovery 判（osm.overpass allowedPurpose=['discovery']）
-        { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId, purpose: 'discovery' },
+        { ...ctx, purpose: 'discovery' },
       );
       places = res.data.places ?? [];
     } catch (err) {

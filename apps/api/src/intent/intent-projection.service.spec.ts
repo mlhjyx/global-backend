@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { canonicalize, sameIntent, mergeIntent, IntentAttr, IntentEvent } from './intent-projection.service';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  canonicalize,
+  sameIntent,
+  mergeIntent,
+  IntentAttr,
+  IntentEvent,
+  IntentProjectionService,
+} from './intent-projection.service';
+import { ToolPolicyDenied } from '../tools/tool-broker';
 
 // 这三个纯函数是 TED P3 / openFDA P3 / web_watch 共享的**幂等基石**——每 sweep 复现同一信号时靠它们判「实质未变」
 // 而不重写 canonical / 不堆 field_evidence。TED P3 实测抓到过 jsonb 键序 bug（DB 取回对象键序被 Postgres 规范化，
@@ -104,5 +112,87 @@ describe('mergeIntent — at 格式漂移免疫（存量旧格式与新 UTC ISO 
       { type: 'HIRING_UP', at: '2026-07-01T00:00:00.000Z', strength: 0.6 },
     ]);
     expect(merged.events).toHaveLength(3);
+  });
+});
+
+describe('IntentProjectionService — suppression authority materialization gate', () => {
+  it('权威 domain suppression 已提交但派生 status 陈旧时只修复状态，不写 intent/evidence', async () => {
+    const update = vi.fn();
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const evidenceCreate = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'company-1',
+          name: 'Acme GmbH',
+          domain: 'blocked.example',
+          attributes: {},
+          status: 'NEW',
+        })),
+        updateMany,
+        update,
+      },
+      suppressionRecord: {
+        findMany: vi.fn(async () => [{ type: 'domain', value: 'blocked.example' }]),
+      },
+      fieldEvidence: { create: evidenceCreate },
+    };
+    const prisma = {
+      sourceEntityChange: {
+        findMany: vi.fn(async () => [
+          {
+            changeType: 'PAGE_CHANGED',
+            createdAt: new Date('2026-08-10T00:00:00.000Z'),
+            detail: { strength: 0.3 },
+            source: {
+              config: { company: { name: 'Acme GmbH', domain: 'blocked.example' } },
+            },
+          },
+        ]),
+      },
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new IntentProjectionService({ prisma: prisma as never });
+
+    await expect(service.projectIntent('workspace-1')).resolves.toEqual({
+      companiesTouched: 0,
+      eventsProjected: 0,
+    });
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(update).not.toHaveBeenCalled();
+    expect(evidenceCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntentProjectionService — watch registration terminal suppression denial', () => {
+  it('does not downgrade a sitemap suppression denial into homepage monitor creation', async () => {
+    const create = vi.fn(async () => ({ id: 'monitor-1' }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: unknown) => unknown) =>
+        callback({
+          canonicalCompany: {
+            findUnique: vi.fn(async () => ({ name: 'Acme GmbH', domain: 'acme.example', region: null })),
+          },
+        }),
+      ),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create,
+      },
+    };
+    const broker = {
+      invoke: vi.fn(async () => {
+        throw new ToolPolicyDenied('http.get', 'suppression_action_gate');
+      }),
+    };
+    const service = new IntentProjectionService({ prisma: prisma as never, broker: broker as never });
+
+    await expect(
+      service.registerWatch('workspace-1', 'company-1', {
+        authorizeExternalAction: vi.fn(async () => false),
+      }),
+    ).rejects.toThrow(/suppression_action_gate/);
+    expect(create).not.toHaveBeenCalled();
   });
 });

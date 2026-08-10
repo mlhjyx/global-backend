@@ -834,6 +834,51 @@ describe('RouterModelGateway — generateStructured 修复路径结算合并 tok
   });
 });
 
+describe('RouterModelGateway — per-wire external-action authorization', () => {
+  it('rechecks before schema repair, preserves first-call usage, and never falls back after denial', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 500);
+    const primary = fakeProvider();
+    const fallback = fakeProvider();
+    fallback.id = 'fallback';
+    (primary.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: {} as never,
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 100_000 },
+    });
+    const authorizeExternalAction = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const router = {
+      route: () => [primary, fallback],
+    } as unknown as ModelRouter;
+    const gateway = new RouterModelGateway(router);
+    gateway.budget = budget;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: QUALIFY_TASK,
+          prompt: 'p',
+          schema: { required: ['x'] },
+        },
+        {
+          workspaceId: 'ws-1',
+          runId: 'run-1',
+          authorizeExternalAction,
+        },
+      ),
+    ).rejects.toThrow(/external action denied|suppression_action_gate/i);
+
+    expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
+    expect(primary.generateStructured).toHaveBeenCalledTimes(1);
+    expect(fallback.generateStructured).not.toHaveBeenCalled();
+    expect(budget.remainingCents('run-1')).toBe(490);
+  });
+});
+
 describe('RouterModelGateway — task-level deterministic output gate', () => {
   it('repairs one schema-valid task-gate rejection when the task explicitly opts in', async () => {
     const budget = new BudgetLedger();

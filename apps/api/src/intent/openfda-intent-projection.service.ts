@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
 import { OPENFDA_ATTRIBUTION, OPENFDA_LICENSE, FDA_REGISTRATION_DISCLAIMER } from '../adapters/openfda-api';
 import { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
@@ -48,7 +49,8 @@ export class OpenFdaIntentProjectionService {
   constructor(private readonly deps: { prisma: PrismaService }) {}
 
   async projectClearances(workspaceId: string, params: ProjectClearancesParams): Promise<ProjectClearancesResult> {
-    const base: ProjectClearancesResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, skippedIndividual: 0, subjectsTruncated: 0 };
+    const base: ProjectClearancesResult = { signalsMatched: 0, companiesTouched: 0, eventsProjected: 0, skippedIndividual: 0, subjectsTruncated: 0,
+    };
     if (!params.productCodes.length) return base;
 
     const since = new Date(Date.now() - (params.sinceDays ?? DEFAULT_SINCE_DAYS) * 86_400_000);
@@ -66,13 +68,16 @@ export class OpenFdaIntentProjectionService {
         ...(countries ? { subjectCountry: { in: countries } } : {}),
         // 码过滤下推 SQL（jsonb @> 任一码；复审：过滤放截断后会让无关码/他租户信号挤占扫描窗，
         // 匹配信号被静默截丢）。内存 filter 仍保留作防御纵深（大小写容错）。
-        OR: [...wantedCodes].map((code) => ({ taxonomyKeys: { array_contains: [`fda:${code}`] } })),
+        OR: [...wantedCodes].map((code) => ({ taxonomyKeys: { array_contains: [`fda:${code}`] },
+        })),
       },
       orderBy: { occurredAt: 'desc' },
       take: SIGNAL_SCAN_LIMIT,
     });
     if (signals.length === SIGNAL_SCAN_LIMIT) {
-      console.warn(`[openfda-intent] signal scan window saturated (limit=${SIGNAL_SCAN_LIMIT}) — 更旧的匹配信号可能被截断`);
+      console.warn(
+        `[openfda-intent] signal scan window saturated (limit=${SIGNAL_SCAN_LIMIT}) — 更旧的匹配信号可能被截断`,
+      );
     }
 
     const matched = signals.filter((s) => {
@@ -88,8 +93,14 @@ export class OpenFdaIntentProjectionService {
     const overflow = new Set<string>(); // 触顶后被排除的主体（可观测，不静默丢；复审 MEDIUM）
     for (const s of matched) {
       if (byKey.has(s.subjectKey) || overflow.has(s.subjectKey)) continue;
-      if (isLikelyIndividualApplicant(s.subjectName)) { base.skippedIndividual += 1; continue; } // 防御纵深
-      if (byKey.size >= maxCompanies) { overflow.add(s.subjectKey); continue; }
+      if (isLikelyIndividualApplicant(s.subjectName)) {
+        base.skippedIndividual += 1;
+        continue;
+      } // 防御纵深
+      if (byKey.size >= maxCompanies) {
+        overflow.add(s.subjectKey);
+        continue;
+      }
       const payload = (s.payload ?? {}) as Record<string, unknown>;
       byKey.set(s.subjectKey, {
         applicant: s.subjectName,
@@ -102,7 +113,9 @@ export class OpenFdaIntentProjectionService {
     }
     base.subjectsTruncated = overflow.size;
     if (overflow.size) {
-      console.warn(`[openfda-intent] maxCompanies=${maxCompanies} 触顶，${overflow.size} 个主体本轮未投影（游标化根治随缺口#8）`);
+      console.warn(
+        `[openfda-intent] maxCompanies=${maxCompanies} 触顶，${overflow.size} 个主体本轮未投影（游标化根治随缺口#8）`,
+      );
     }
 
     for (const [dedupeKey, clearance] of byKey) {
@@ -123,11 +136,11 @@ export class OpenFdaIntentProjectionService {
    */
   private async projectOne(workspaceId: string, dedupeKey: string, c: Clearance): Promise<boolean> {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
-      const prior = await tx.canonicalCompany.findUnique({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
-        select: { id: true, attributes: true, status: true },
+      const materialization = await loadMaterializableCompanyState(tx, workspaceId, dedupeKey, {
+        name: c.applicant,
       });
-      if (prior?.status === 'SUPPRESSED') return false;
+      if (!materialization.allowed) return false;
+      const { prior } = materialization;
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;
@@ -135,7 +148,12 @@ export class OpenFdaIntentProjectionService {
         type: FDA_CLEARANCE,
         at: c.decisionDateIso, // §8.6：source_signal.occurredAt 保证合法时间
         strength: FDA_CLEARANCE_STRENGTH,
-        evidence: { product_code: c.productCode, k_number: c.kNumber, device: c.deviceName, source: 'openfda' },
+        evidence: {
+          product_code: c.productCode,
+          k_number: c.kNumber,
+          device: c.deviceName,
+          source: 'openfda',
+        },
       };
       const intent = mergeIntent(priorIntent, [event]);
       // 幂等门：既有申请人且合并后 intent 实质未变（同一清关每 sweep 复现）→ 不 bump version、不堆 evidence 行。
@@ -153,10 +171,19 @@ export class OpenFdaIntentProjectionService {
           country: c.country,
           dedupeKey,
           status: 'NEW',
-          attributes: { fda_applicant: true, fda, intent } as unknown as Prisma.InputJsonValue, // 标记来源=510k 申请人
+          attributes: {
+            fda_applicant: true,
+            fda,
+            intent,
+          } as unknown as Prisma.InputJsonValue, // 标记来源=510k 申请人
         },
         update: {
-          attributes: { ...priorAttrs, fda_applicant: true, fda, intent } as unknown as Prisma.InputJsonValue,
+          attributes: {
+            ...priorAttrs,
+            fda_applicant: true,
+            fda,
+            intent,
+          } as unknown as Prisma.InputJsonValue,
           version: { increment: 1 },
         },
         select: { id: true },
@@ -186,7 +213,14 @@ export class OpenFdaIntentProjectionService {
             entityType: 'company',
             entityId: saved.id,
             field: 'identity',
-            value: { name: c.applicant, country: c.country, source: 'openfda', k_number: c.kNumber, attribution: OPENFDA_ATTRIBUTION, disclaimer: FDA_REGISTRATION_DISCLAIMER } as unknown as Prisma.InputJsonValue,
+            value: {
+              name: c.applicant,
+              country: c.country,
+              source: 'openfda',
+              k_number: c.kNumber,
+              attribution: OPENFDA_ATTRIBUTION,
+              disclaimer: FDA_REGISTRATION_DISCLAIMER,
+            } as unknown as Prisma.InputJsonValue,
             providerKey: 'openfda',
             confidence: 1,
             license: OPENFDA_LICENSE,

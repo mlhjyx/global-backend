@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isLikelyIndividualApplicant, FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH } from './openfda-intent-projection.service';
+import { isLikelyIndividualApplicant, FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH,
+} from './openfda-intent-projection.service';
 
 // isLikelyIndividualApplicant = §6 GDPR 边界的**高精度**闸门：只在明确人名格式（头衔 / "Surname, Given"）上触发，
 // 绝不按「几个大写词」形状误伤真公司（会丢线索、损核心功能）。裸「John Smith」式不自动判个体（风险有界——从不落
@@ -75,26 +76,54 @@ function fdaSignal(name: string, over?: Record<string, unknown>) {
     taxonomyKeys: (over?.taxonomyKeys as string[]) ?? ['fda:QAS'],
     strength: 0.85,
     occurredAt: (over?.occurredAt as Date) ?? new Date(Date.now() - 5 * DAY),
-    payload: { product_code: 'QAS', k_number: 'K261234', device: 'BriefCase', source: 'openfda' },
+    payload: {
+      product_code: 'QAS',
+      k_number: 'K261234',
+      device: 'BriefCase',
+      source: 'openfda',
+    },
     status: (over?.status as string) ?? 'ACTIVE',
     ...over,
   };
 }
 
-function fdaFakePrisma(signals: Record<string, unknown>[]) {
+function fdaFakePrisma(
+  signals: Record<string, unknown>[],
+  suppressions: { type: string; value: string }[] = [],
+) {
   const companies = new Map<string, Record<string, unknown>>();
   const evidence: unknown[] = [];
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
+    suppressionRecord: {
+      findMany: async () => suppressions,
+    },
     canonicalCompany: {
       findUnique: async ({ where }: { where: { workspaceId_dedupeKey: { dedupeKey: string } } }) =>
         companies.get(where.workspaceId_dedupeKey.dedupeKey) ?? null,
-      upsert: async ({ where, create }: { where: { workspaceId_dedupeKey: { dedupeKey: string } }; create: Record<string, unknown> }) => {
+      updateMany: async ({ where }: { where: { id: string } }) => {
+        for (const [key, company] of companies) {
+          if (company.id !== where.id) continue;
+          companies.set(key, { ...company, status: 'SUPPRESSED', version: Number(company.version ?? 0) + 1 });
+          return { count: 1 };
+        }
+        return { count: 0 };
+      },
+      upsert: async ({
+        where,
+        create,
+      }: {
+        where: { workspaceId_dedupeKey: { dedupeKey: string } };
+        create: Record<string, unknown>;
+      }) => {
         const key = where.workspaceId_dedupeKey.dedupeKey;
         if (!companies.has(key)) companies.set(key, { id: `co-${companies.size}`, ...create });
         return { id: (companies.get(key) as { id: string }).id };
       },
     },
-    fieldEvidence: { create: async ({ data }: { data: unknown }) => (evidence.push(data), { id: 'fe' }) },
+    fieldEvidence: {
+      create: async ({ data }: { data: unknown }) => (evidence.push(data), { id: 'fe' }),
+    },
   };
   const prisma = {
     companies,
@@ -102,13 +131,18 @@ function fdaFakePrisma(signals: Record<string, unknown>[]) {
     sourceSignal: {
       findMany: async ({ where, take }: { where: { status: string; occurredAt: { gte: Date } }; take: number }) =>
         signals
-          .filter((s) => s.status === where.status && (s.occurredAt as Date).getTime() >= where.occurredAt.gte.getTime())
+          .filter(
+            (s) => s.status === where.status && (s.occurredAt as Date).getTime() >= where.occurredAt.gte.getTime(),
+          )
           .sort((a, b) => (b.occurredAt as Date).getTime() - (a.occurredAt as Date).getTime())
           .slice(0, take),
     },
     withWorkspace: async (_ws: string, fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   };
-  return prisma as unknown as PrismaService & { companies: typeof companies; evidence: typeof evidence };
+  return prisma as unknown as PrismaService & {
+    companies: typeof companies;
+    evidence: typeof evidence;
+  };
 }
 
 describe('OpenFdaIntentProjectionService.projectClearances —— source_signal 只读投影', () => {
@@ -131,5 +165,28 @@ describe('OpenFdaIntentProjectionService.projectClearances —— source_signal 
     expect(r.signalsMatched).toBe(1); // 仅 Smith, John 的 QAS 键匹配
     expect(r.skippedIndividual).toBe(1); // §6 防御纵深
     expect(r.companiesTouched).toBe(0);
+  });
+
+  it('既有 canonical domain 命中 suppression 时阻断源名不同的 clearance 更新', async () => {
+    const signal = fdaSignal('Source Applicant LLC');
+    const prisma = fdaFakePrisma([signal], [{ type: 'domain', value: 'blocked.example' }]);
+    prisma.companies.set(signal.subjectKey as string, {
+      id: 'co-existing',
+      workspaceId: WS,
+      dedupeKey: signal.subjectKey,
+      name: 'Existing Medical Entity Inc',
+      domain: 'www.blocked.example',
+      country: 'IL',
+      status: 'NEW',
+      attributes: {},
+      version: 1,
+    });
+    const svc = new OpenFdaIntentProjectionService({ prisma });
+
+    const result = await svc.projectClearances(WS, { productCodes: ['QAS'] });
+
+    expect(result.companiesTouched).toBe(0);
+    expect(prisma.companies.get(signal.subjectKey as string)).toMatchObject({ status: 'SUPPRESSED', version: 2 });
+    expect(prisma.evidence).toHaveLength(0);
   });
 });

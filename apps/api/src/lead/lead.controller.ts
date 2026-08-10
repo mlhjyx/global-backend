@@ -7,9 +7,11 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
-  UseGuards,
-} from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
+  UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -21,7 +23,25 @@ import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
 
 /** Lead 行（六维分+队列）；完整字段结构化 DTO 待收口⑤ 一等 Signal 后定型。 */
-const LEAD_SCHEMA = { type: 'object', additionalProperties: true, description: 'Lead（六维分+队列+裁决状态）' };
+const LEAD_SCHEMA = { type: 'object', additionalProperties: true, description: 'Lead（六维分+队列+裁决状态）',
+};
+
+const leadDecisionErrorSchema = (codes: readonly string[]) => ({
+  type: 'object',
+  additionalProperties: false,
+  required: ['error'],
+  properties: {
+    error: {
+      type: 'object',
+      additionalProperties: true,
+      required: ['code', 'message'],
+      properties: {
+        code: { type: 'string', enum: [...codes] },
+        message: { type: 'string' },
+      },
+    },
+  },
+});
 
 class RejectLeadDto {
   @ApiPropertyOptional({ description: '拒绝原因（回流做评分质量反馈）' })
@@ -62,7 +82,8 @@ export class LeadController {
   @Post('icps/:icpId/qualify')
   @RequireScopes('acquisition:write')
   @HttpCode(202)
-  @ApiOperation({ summary: '对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）' })
+  @ApiOperation({ summary: '对 ACTIVE ICP 的全部候选公司做六维评分 → Lead + 四队列（异步）',
+  })
   @ApiEnvelope(
     {
       type: 'object',
@@ -79,12 +100,14 @@ export class LeadController {
   }
 
   @Get('leads')
-  @ApiOperation({ summary: 'Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）' })
+  @ApiOperation({ summary: 'Lead 列表（?icpId=&queue=recommended|needs_review|rejected|suppressed，按分数排序）',
+  })
   // swagger 对裸 @Query 推断 required:true（无 CLI 插件），可选参数必须显式声明（同 events.controller）
   @ApiQuery({ name: 'icpId', required: false })
   @ApiQuery({ name: 'queue', required: false })
   @ApiQuery({ name: 'status', required: false })
-  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 },
+  })
   @ApiQuery({ name: 'cursor', required: false })
   @ApiPageEnvelope(LEAD_SCHEMA)
   async list(
@@ -96,7 +119,8 @@ export class LeadController {
     @Query('cursor') cursor?: string,
   ) {
     const n = Math.min(Math.max(Number(limit) || 20, 1), 100);
-    const r = await this.leads.list(ctx, { icpId, queue, status, limit: n, cursor });
+    const r = await this.leads.list(ctx, { icpId, queue, status, limit: n, cursor,
+    });
     return pageEnvelope(r.data, r);
   }
 
@@ -118,7 +142,8 @@ export class LeadController {
 
   @Get('leads/:leadId')
   @RequireScopes('acquisition:read', 'personal-data:read')
-  @ApiOperation({ summary: 'Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史' })
+  @ApiOperation({ summary: 'Lead 详情：六维分 + 规则逐条评估依据 + 公司/联系人 + 裁决历史',
+  })
   @ApiEnvelope(LEAD_SCHEMA)
   async get(@Ctx() ctx: RequestContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
     return envelope(await this.leads.get(ctx, leadId));
@@ -127,13 +152,35 @@ export class LeadController {
   @Post('leads/:leadId/accept')
   @RequireScopes('acquisition:review')
   @HttpCode(200)
-  @ApiOperation({ summary: '接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）' })
+  @ApiOperation({ summary: '接受 Lead（→ QUALIFIED，发 LeadQualified —— 交给 Campaign 的出口）',
+  })
+  @ApiResponse({
+    status: 400,
+    description: '路径或请求体验证失败',
+    schema: leadDecisionErrorSchema(['VALIDATION_ERROR']),
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Lead 或其公司不存在',
+    schema: leadDecisionErrorSchema(['NOT_FOUND']),
+  })
+  @ApiResponse({
+    status: 409,
+    description: '当前 suppression/合规/制裁状态阻断交付',
+    schema: leadDecisionErrorSchema([
+      'SUPPRESSED',
+      'INVALID_STATE',
+      'SUPPRESSED_CONTACT_UNREACHABLE',
+      'STORAGE_RIGHTS_NOT_GRANTED',
+      'SANCTIONS_HOLD_UNRESOLVED',
+      'CONFLICT',
+    ]),
+  })
   @ApiEnvelope(LEAD_SCHEMA)
   async accept(
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
-    @Body() dto: AcceptLeadDto,
-  ) {
+    @Body() dto: AcceptLeadDto) {
     return envelope(await this.leads.decide(ctx, leadId, 'accept', dto.reason));
   }
 
@@ -141,20 +188,33 @@ export class LeadController {
   @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '拒绝 Lead（→ REJECTED，原因留痕做质量反馈）' })
+  @ApiResponse({
+    status: 400,
+    description: '路径或请求体验证失败',
+    schema: leadDecisionErrorSchema(['VALIDATION_ERROR']),
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Lead 不存在',
+    schema: leadDecisionErrorSchema(['NOT_FOUND']),
+  })
+  @ApiResponse({
+    status: 409,
+    description: '当前状态阻断拒绝裁决',
+    schema: leadDecisionErrorSchema(['SUPPRESSED', 'INVALID_STATE', 'CONFLICT']),
+  })
   @ApiEnvelope(LEAD_SCHEMA)
   async reject(
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
-    @Body() dto: RejectLeadDto,
-  ) {
+    @Body() dto: RejectLeadDto) {
     return envelope(await this.leads.decide(ctx, leadId, 'reject', dto.reason));
   }
 
   @Post('leads/:leadId/sanctions-review')
   @RequireScopes(
     'acquisition:review',
-    'compliance:manage',
-  )
+    'compliance:manage')
   @HttpCode(200)
   @ApiOperation({
     summary: '制裁筛查复核裁决（第五门人审）：误报清白 → 回落队列；真命中确认 → 留隔离，永不交付',

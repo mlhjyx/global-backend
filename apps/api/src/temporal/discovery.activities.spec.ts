@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
 import { budgetLedger } from '../tools/budget';
@@ -81,13 +81,16 @@ const budgetSwallowingEnricher = {
 
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
     rawSourceRecord: { findMany: async () => [{ id: 'raw1' }] },
     identityLink: { findMany: async () => [{ canonicalId: 'c1' }] },
     canonicalCompany: {
       findMany: async () => [{ id: 'c1', name: 'C1', domain: 'c1.de', country: 'DE', region: null, attributes: {} }],
       updateMany: async () => ({ count: 1 }),
       update: async () => ({}),
+      findUnique: async () => ({ id: 'c1', name: 'C1', domain: 'c1.de', status: 'NEW' }),
     },
+    suppressionRecord: { findMany: async () => [] },
     fieldEvidence: { create: async () => ({}) },
   };
   const prisma = {
@@ -113,6 +116,110 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     const r = await acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-ok-x', query: QUERY });
     expect(r.budgetTruncated).toBe(false);
     expect(r.rawCount).toBe(1);
+  });
+});
+
+describe('canonicalizeRun —— suppression authority 线性化', () => {
+  it('在读 suppression 和任何 canonical write 前先取 workspace policy lock', async () => {
+    const order: string[] = [];
+    const tx = {
+      $queryRaw: async () => {
+        order.push('lock');
+        return [{ pg_advisory_xact_lock: null }];
+      },
+      rawSourceRecord: {
+        findMany: async () => [
+          {
+            id: 'raw-1',
+            providerKey: 'wikidata',
+            payload: { name: 'Acme GmbH', domain: 'acme.de', country: 'DE' },
+          },
+        ],
+      },
+      suppressionRecord: {
+        findMany: async () => {
+          order.push('suppression-read');
+          return [];
+        },
+      },
+      canonicalCompany: {
+        findUnique: async () => null,
+        updateMany: async () => ({ count: 0 }),
+        upsert: async () => {
+          order.push('canonical-write');
+          return { id: 'company-1' };
+        },
+      },
+      identityLink: {
+        findFirst: async () => ({ id: 'existing-link' }),
+        create: async () => ({}),
+      },
+      fieldEvidence: { create: async () => ({}) },
+    };
+    const prisma = {
+      withWorkspace: async <T>(
+        _workspaceId: string,
+        callback: (client: typeof tx) => Promise<T>,
+      ): Promise<T> => callback(tx),
+    };
+    const activities = createDiscoveryActivities({
+      prisma,
+      providers: {},
+      gateway: {},
+    } as never);
+
+    await activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' });
+
+    expect(order).toEqual(['lock', 'suppression-read', 'canonical-write']);
+  });
+
+  it('既有 canonical identity 命中 suppression 时只修复状态，不再链接或写 evidence', async () => {
+    const upsert = vi.fn();
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const linkCreate = vi.fn();
+    const evidenceCreate = vi.fn();
+    const tx = {
+      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      rawSourceRecord: {
+        findMany: async () => [
+          {
+            id: 'raw-1',
+            providerKey: 'wikidata',
+            payload: { name: 'Source Listing Name', country: 'DE' },
+          },
+        ],
+      },
+      suppressionRecord: {
+        findMany: async () => [{ type: 'domain', value: 'blocked.example' }],
+      },
+      canonicalCompany: {
+        findUnique: async () => ({
+          id: 'company-1',
+          name: 'Existing Legal Entity GmbH',
+          domain: 'blocked.example',
+          attributes: {},
+          status: 'NEW',
+        }),
+        updateMany,
+        upsert,
+      },
+      identityLink: { findFirst: vi.fn(), create: linkCreate },
+      fieldEvidence: { create: evidenceCreate },
+    };
+    const prisma = {
+      withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
+        callback(tx),
+    };
+    const activities = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
+
+    await expect(activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' })).resolves.toEqual({
+      companies: 0,
+      suppressed: 1,
+    });
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(linkCreate).not.toHaveBeenCalled();
+    expect(evidenceCreate).not.toHaveBeenCalled();
   });
 });
 

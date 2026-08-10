@@ -230,7 +230,8 @@ export class BigQueryPatentsClient {
     const keyFile = process.env.GOOGLE_PATENTS_SA_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS;
     const projectId = process.env.GOOGLE_PATENTS_PROJECT;
     if (!keyFile || !projectId) return null;
-    this.client = new BigQuery({ keyFilename: keyFile, projectId }) as unknown as BigQueryLike;
+    this.client = new BigQuery({ keyFilename: keyFile, projectId,
+    }) as unknown as BigQueryLike;
     return this.client;
   }
 
@@ -245,13 +246,16 @@ export class BigQueryPatentsClient {
    * 按 assignee（公司名）查近 [fromYear, toYear] 专利 → {@link PatentRecord}[]。
    * 无锚/无 creds → 返空（天然 no-op）。查询错误/超额向上抛，由 provider 的 try/catch fail-safe 兜（不在此吞）。
    */
-  async searchPatentsByAssignee(assignee: string, opts: PatentSearchOptions): Promise<PatentRecord[]> {
+  async searchPatentsByAssignee(assignee: string, opts: PatentSearchOptions,
+    beforeRequest?: () => Promise<void>,
+  ): Promise<PatentRecord[]> {
     const name = assignee?.trim();
     if (!name) return [];
     const anchor = assigneeLikeAnchor(name);
     if (!anchor) return [];
     const client = this.getClient();
     if (!client) return []; // 无 creds → 天然 no-op（同 EPO 无 key）
+    await beforeRequest?.();
     const [rows] = await client.query({
       query: buildQuery(clampMaxRows(opts.maxRows)),
       params: {
@@ -287,7 +291,8 @@ export class BigQueryPatentsClient {
     if (!client) return { rows: [], bytesScanned: null, scanned: false };
     const queryOpts = {
       query: buildRefreshQuery(),
-      params: { fromDate: yearToStart(opts.fromYear), toDate: yearToEnd(opts.toYear), anchors: uniq },
+      params: { fromDate: yearToStart(opts.fromYear), toDate: yearToEnd(opts.toYear), anchors: uniq,
+      },
       types: { fromDate: 'INT64', toDate: 'INT64', anchors: ['STRING'] },
       maximumBytesBilled: this.maxBytes(),
     };
@@ -329,7 +334,8 @@ function normCountry(v: unknown): string | undefined {
 export function normalizeRow(row: Record<string, unknown>): PatentRecord {
   const applicants = Array.isArray(row.applicants)
     ? (row.applicants as Array<Record<string, unknown>>)
-        .map((a) => ({ name: String(a?.name ?? '').trim(), country: normCountry(a?.country) }))
+        .map((a) => ({ name: String(a?.name ?? '').trim(), country: normCountry(a?.country),
+        }))
         .filter((a) => a.name)
     : [];
   const inventors = Array.isArray(row.inventors)

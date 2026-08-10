@@ -35,7 +35,7 @@ export class GleifEnrichmentProvider implements CompanyEnrichmentAdapter {
       console.warn('[gleif] broker unavailable, skip enrichment (no raw egress)');
       return miss();
     }
-    const toolCtx: ToolContext = { workspaceId: ctx.workspaceId, runId: ctx.runId, correlationId: ctx.correlationId };
+    const toolCtx: ToolContext = { ...ctx };
     const country = input.country?.trim();
     // 搜索用**核心名**（剥法人后缀）放宽召回：GLEIF 存全称（"Siemens Aktiengesellschaft"），
     // 直接拿 "Siemens AG" 做 contains 过滤会漏掉真身。核心名 "siemens" 召回全部同名实体，

@@ -101,6 +101,26 @@ describe('EmailGuesser · 诚实降级（域级事实短路）', () => {
 });
 
 describe('EmailGuesser · 合规红线', () => {
+  it('每个物理 SMTP 候选前重新授权；首探后禁联时不发第二次调用', async () => {
+    const { adapter, calls } = fakeVerifier(() => REJECT);
+    const authorizations: string[] = [];
+    const r = await new EmailGuesser(adapter).guess(
+      { fullName: 'Hans Herold', domain: 'acme.de' },
+      {
+        ...CTX,
+        authorizeCandidate: async (email) => {
+          authorizations.push(email);
+          return authorizations.length === 1;
+        },
+      },
+    );
+    expect(r.status).toBe('blocked');
+    expect(r.reason).toBe('suppression_action_gate');
+    expect(r.triedCount).toBe(1);
+    expect(authorizations).toHaveLength(2);
+    expect(calls).toHaveLength(1);
+  });
+
   it('人名邮箱无 lawful-basis 且未开开关 → BLOCKED，一个都不探测', async () => {
     const { adapter, calls } = fakeVerifier(() => REJECT);
     const r = await new EmailGuesser(adapter).guess(

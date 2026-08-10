@@ -2,7 +2,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
-import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, ProviderContactRecord } from '../discovery/provider-contract';
+import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, ProviderContactRecord,
+} from '../discovery/provider-contract';
 import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
@@ -15,8 +16,13 @@ import { LAWFUL_BASIS_KINDS } from '../discovery/compliance/email-verification-g
 import { KnownEmailSample } from '../discovery/email-format-learning';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
+import { canonicalizeSuppressionValues } from '../discovery/suppression-value';
+import { companyMayUseExternalProcessing,
+  contactMayUseExternalProcessing,
+} from '../discovery/company-suppression-gate';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
+import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
 
 /**
  * 存量对账活动（backlog reconciliation）——漏斗总闸的解锁器。
@@ -121,7 +127,8 @@ export function createBacklogActivities(deps: {
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
 }) {
-  const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
+  const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker,
+  });
 
   /**
    * 收口② D：sweep 阶段预算——按「阶段×workspace」开账、**每页活动**结束配对 close
@@ -138,7 +145,10 @@ export function createBacklogActivities(deps: {
 
   /** DAT-011：SUSPENDED 域名黑名单（平台治理表，无 RLS）。 */
   async function suspendedDomains(): Promise<Set<string>> {
-    const rows = await deps.prisma.sourcePolicy.findMany({ where: { reviewStatus: 'SUSPENDED' }, select: { domain: true } });
+    const rows = await deps.prisma.sourcePolicy.findMany({
+      where: { reviewStatus: 'SUSPENDED' },
+      select: { domain: true },
+    });
     return new Set(rows.map((r) => r.domain.toLowerCase()));
   }
 
@@ -157,15 +167,35 @@ export function createBacklogActivities(deps: {
     );
   }
 
+  /** Workspace-bound terminal gate immediately before every automatic model/provider/network action. */
+  async function mayUseExternalProcessing(workspaceId: string, companyId: string): Promise<boolean> {
+    return deps.prisma.withWorkspace(workspaceId, (tx) => companyMayUseExternalProcessing(tx, workspaceId, companyId));
+  }
+
+  async function contactMayUseExternal(workspaceId: string, contactId: string, email?: string): Promise<boolean> {
+    return deps.prisma.withWorkspace(workspaceId, (tx) =>
+      contactMayUseExternalProcessing(tx, { workspaceId, contactId, email }),
+    );
+  }
+
+  const authorizeCompanyExternalAction =
+    (workspaceId: string, companyId: string): (() => Promise<boolean>) =>
+    () =>
+      mayUseExternalProcessing(workspaceId, companyId);
+
   return {
     /** 跨租户列 ACTIVE ICP（owner 只读扫描）→ backlog sweep 的处理目标。 */
-    async listBacklogTargets(): Promise<{ targets: { workspaceId: string; icpId: string }[] }> {
+    async listBacklogTargets(): Promise<{
+      targets: { workspaceId: string; icpId: string }[];
+    }> {
       const icps = await deps.ownerDb.icpDefinition.findMany({
         where: { status: 'ACTIVE' },
         select: { id: true, workspaceId: true },
         orderBy: { createdAt: 'asc' },
       });
-      return { targets: icps.map((i) => ({ workspaceId: i.workspaceId, icpId: i.id })) };
+      return {
+        targets: icps.map((i) => ({ workspaceId: i.workspaceId, icpId: i.id })),
+      };
     },
 
     /**
@@ -181,35 +211,55 @@ export function createBacklogActivities(deps: {
         const companies = await tx.canonicalCompany.findMany({
           where: {
             // 尚无「本 ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）→ 才判定（per-ICP，非公司级）。
-            NOT: { leads: { some: { icpId: args.icpId, fitVerdict: { not: null } } } },
+            NOT: {
+              leads: {
+                some: { icpId: args.icpId, fitVerdict: { not: null } },
+              },
+            },
             status: { not: 'SUPPRESSED' },
             ...(args.cursor ? { id: { gt: args.cursor } } : {}),
           },
           orderBy: { id: 'asc' },
           take: limit,
-          select: { id: true, name: true, domain: true, country: true, industry: true, attributes: true },
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            country: true,
+            industry: true,
+            attributes: true,
+          },
         });
         return { icpBrief, companies };
       });
 
-      const verdicts: Record<string, number> = { match: 0, weak: 0, mismatch: 0 };
+      const verdicts: Record<string, number> = {
+        match: 0,
+        weak: 0,
+        mismatch: 0,
+      };
       let judged = 0;
       let skippedForBudget = 0;
       const budget = openStageBudget('fit', args.workspaceId);
       try {
         for (let i = 0; i < companies.length; i++) {
           const c = companies[i];
+          if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
           let judgment;
           try {
+            const authorizeExternalAction = authorizeCompanyExternalAction(args.workspaceId, c.id);
             judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
               runId: budget.key,
               runtimeTelemetry: deps.runtimeTelemetry,
+              authorizeExternalAction,
             });
           } catch (err) {
             if (err instanceof BudgetExceededError) {
               // 预算耗尽 → 中断本页并显性计数；游标**不**吞掉这些行（下轮 sweep 重判）
               skippedForBudget = companies.length - i;
-              console.warn(`[backlog] fit 阶段预算耗尽（ws=${args.workspaceId}）：本页跳过余下 ${skippedForBudget} 家，下轮 sweep 重判`);
+              console.warn(
+                `[backlog] fit 阶段预算耗尽（ws=${args.workspaceId}）：本页跳过余下 ${skippedForBudget} 家，下轮 sweep 重判`,
+              );
               break;
             }
             throw err;
@@ -227,7 +277,12 @@ export function createBacklogActivities(deps: {
       if (skippedForBudget > 0) {
         // 预算截断的行未获 fitVerdict → 仍在过滤集内，nextCursor 置 null 让本 ICP 本轮就此收手
         // （继续翻页只会连环触发同一账户超限）。
-        return { scanned: companies.length, judged, verdicts, nextCursor: null };
+        return {
+          scanned: companies.length,
+          judged,
+          verdicts,
+          nextCursor: null,
+        };
       }
       return {
         scanned: companies.length,
@@ -248,10 +303,20 @@ export function createBacklogActivities(deps: {
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({ watermarkField: 'lastEnrichedAt', now }),
+          where: backlogEligibleWhere({
+            watermarkField: 'lastEnrichedAt',
+            now,
+          }),
           orderBy: backlogEligibleOrderBy('lastEnrichedAt'),
           take: limit,
-          select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            country: true,
+            region: true,
+            attributes: true,
+          },
         }),
       );
 
@@ -261,10 +326,16 @@ export function createBacklogActivities(deps: {
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const pending = enrichers.filter((e) => !existing[e.key]); // 已有该源命名空间 → 跳过（幂等）
         if (!pending.length) continue;
+        if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
         attempted += 1;
         const hits: { key: string; result: EnrichmentResult }[] = [];
-        const ctx: ExecutionContext = { workspaceId: args.workspaceId, correlationId: 'backlog-enrich' };
+        const ctx: ExecutionContext = {
+          workspaceId: args.workspaceId,
+          correlationId: 'backlog-enrich',
+          authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+        };
         for (const e of pending) {
+          if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
           try {
             const r = await e.enrichCompany(
               {
@@ -281,38 +352,22 @@ export function createBacklogActivities(deps: {
           }
         }
         if (!hits.length) continue;
-        matched += 1;
-        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const merged: Record<string, unknown> = { ...existing };
-          for (const h of hits) merged[h.key] = h.result.attributes;
-          // status=ENRICHED 在「真正富集成功」时写（与 enrichRun 一致）；SUPPRESSED 守护防竞态翻回。
-          await tx.canonicalCompany.updateMany({
-            where: { id: c.id, status: { not: 'SUPPRESSED' } },
-            data: { attributes: merged as never, status: 'ENRICHED', version: { increment: 1 } },
-          });
-          for (const h of hits) {
-            for (const [field, value] of Object.entries(h.result.attributes)) {
-              if (value == null) continue;
-              await tx.fieldEvidence.create({
-                data: {
-                  workspaceId: args.workspaceId,
-                  entityType: 'company',
-                  entityId: c.id,
-                  field: `${h.key}.${field}`,
-                  value: value as Prisma.InputJsonValue,
-                  providerKey: h.key,
-                  confidence: h.result.confidence,
-                  license: 'public',
-                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
-                },
-              });
-            }
-          }
-        });
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          commitCompanyEnrichmentResults(tx, {
+            workspaceId: args.workspaceId,
+            companyId: c.id,
+            hits,
+            status: 'ENRICHED',
+          }),
+        );
+        if (committed) matched += 1;
       }
       // 水位：本批全部已处理（命中/未命中/已有命名空间跳过）→ 离开过滤集，游标吞噬存量。
-      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { lastEnrichedAt: now });
+      await stampProcessed(
+        args.workspaceId,
+        companies.map((c) => c.id),
+        { lastEnrichedAt: now },
+      );
       return {
         scanned: companies.length,
         attempted,
@@ -334,10 +389,21 @@ export function createBacklogActivities(deps: {
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({ watermarkField: 'lastSignalAt', now, requireDomain: true }),
+          where: backlogEligibleWhere({
+            watermarkField: 'lastSignalAt',
+            now,
+            requireDomain: true,
+          }),
           orderBy: backlogEligibleOrderBy('lastSignalAt'),
           take: limit,
-          select: { id: true, name: true, domain: true, country: true, region: true, attributes: true },
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            country: true,
+            region: true,
+            attributes: true,
+          },
         }),
       );
 
@@ -348,78 +414,83 @@ export function createBacklogActivities(deps: {
       let budgetExhausted = false;
       const budget = openStageBudget('signals', args.workspaceId);
       try {
-      for (const c of companies) {
-        // 预算打穿（DigitalFootprint/StructuredHarvest 的 crawl4ai/http 计入 sweep:signals 账户）→ 停机：
-        // 本家及后续不处理、不 stamp。provider fail-safe 会吞 BudgetExceededError，故用 ledger 唯一真相点判。
-        if (budgetLedger.wasExhausted(budget.key)) { budgetExhausted = true; break; }
-        if (c.domain && suspended.has(c.domain.toLowerCase())) { processedIds.push(c.id); continue; } // DAT-011：跳过但已处理
-        const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
-        const pending = enrichers.filter((e) => {
-          const prev = existing[e.key] as { _ts?: string } | undefined;
-          return !(prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS); // TTL 新鲜 → 跳过
-        });
-        if (!pending.length) { processedIds.push(c.id); continue; } // TTL 全新鲜 → 无事可做，已处理
-        const hits: { key: string; result: EnrichmentResult }[] = [];
-        // #51：信号抓取计入 sweep:signals 预算账户（runId=budget.key），否则计到裸 workspace = 无账户 = 不限额。
-        const ctx: ExecutionContext = { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-signals' };
-        for (const e of pending) {
-          // #82 P2：本家内**逐 enricher** 检 kill-switch——首个 enricher 打穿 sweep:signals 后（其 fail-safe 吞
-          // BudgetExceededError），后续 enricher（如 structured_harvest 的 sitemap http.get）不得再在已耗尽账户上出网。
-          if (budgetLedger.wasExhausted(budget.key)) break;
-          try {
-            const r = await e.enrichCompany(
-              {
-                name: c.name,
-                domain: c.domain ?? undefined,
-                country: c.country ?? undefined,
-                region: c.region ?? undefined,
-              },
-              ctx,
-            );
-            if (r.matched) hits.push({ key: e.key, result: r });
-          } catch {
-            /* 单信号源失败不影响其余 */
+        for (const c of companies) {
+          // 预算打穿（DigitalFootprint/StructuredHarvest 的 crawl4ai/http 计入 sweep:signals 账户）→ 停机：
+          // 本家及后续不处理、不 stamp。provider fail-safe 会吞 BudgetExceededError，故用 ledger 唯一真相点判。
+          if (budgetLedger.wasExhausted(budget.key)) {
+            budgetExhausted = true;
+            break;
           }
-        }
-        // 本家处理中打穿预算 → 本家未处理完：不 stamp、停机（下轮重试）。
-        if (budgetLedger.wasExhausted(budget.key)) { budgetExhausted = true; break; }
-        attempted += 1;
-        processedIds.push(c.id); // 本家已处理（命中/未命中信号）
-        if (!hits.length) continue;
-        matched += 1;
-        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const merged: Record<string, unknown> = { ...existing };
-          for (const h of hits) merged[h.key] = { ...h.result.attributes, _ts: new Date(nowMs).toISOString() };
-          await tx.canonicalCompany.update({
-            where: { id: c.id },
-            data: { attributes: merged as never, version: { increment: 1 } },
+          if (c.domain && suspended.has(c.domain.toLowerCase())) {
+            processedIds.push(c.id);
+            continue;
+          } // DAT-011：跳过但已处理
+          const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+          const pending = enrichers.filter((e) => {
+            const prev = existing[e.key] as { _ts?: string } | undefined;
+            return !(prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS); // TTL 新鲜 → 跳过
           });
-          for (const h of hits) {
-            for (const [field, value] of Object.entries(h.result.attributes)) {
-              if (value == null) continue;
-              await tx.fieldEvidence.create({
-                data: {
-                  workspaceId: args.workspaceId,
-                  entityType: 'company',
-                  entityId: c.id,
-                  field: `${h.key}.${field}`,
-                  value: value as Prisma.InputJsonValue,
-                  providerKey: h.key,
-                  confidence: h.result.confidence,
-                  license: 'public',
-                  allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-                  ...(h.result.provenance ? { fetchedAt: new Date(h.result.provenance.fetchedAt) } : {}),
+          if (!pending.length) {
+            processedIds.push(c.id);
+            continue;
+          } // TTL 全新鲜 → 无事可做，已处理
+          if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) {
+            processedIds.push(c.id);
+            continue;
+          }
+          const hits: { key: string; result: EnrichmentResult }[] = [];
+          // #51：信号抓取计入 sweep:signals 预算账户（runId=budget.key），否则计到裸 workspace = 无账户 = 不限额。
+          const ctx: ExecutionContext = {
+            workspaceId: args.workspaceId,
+            runId: budget.key,
+            correlationId: 'backlog-signals',
+            authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          };
+          for (const e of pending) {
+            // #82 P2：本家内**逐 enricher** 检 kill-switch——首个 enricher 打穿 sweep:signals 后（其 fail-safe 吞
+            // BudgetExceededError），后续 enricher（如 structured_harvest 的 sitemap http.get）不得再在已耗尽账户上出网。
+            if (budgetLedger.wasExhausted(budget.key)) break;
+            if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
+            try {
+              const r = await e.enrichCompany(
+                {
+                  name: c.name,
+                  domain: c.domain ?? undefined,
+                  country: c.country ?? undefined,
+                  region: c.region ?? undefined,
                 },
-              });
+                ctx,
+              );
+              if (r.matched) hits.push({ key: e.key, result: r });
+            } catch {
+              /* 单信号源失败不影响其余 */
             }
           }
-        });
-      }
+          // 本家处理中打穿预算 → 本家未处理完：不 stamp、停机（下轮重试）。
+          if (budgetLedger.wasExhausted(budget.key)) {
+            budgetExhausted = true;
+            break;
+          }
+          attempted += 1;
+          processedIds.push(c.id); // 本家已处理（命中/未命中信号）
+          if (!hits.length) continue;
+          const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            commitCompanyEnrichmentResults(tx, {
+              workspaceId: args.workspaceId,
+              companyId: c.id,
+              hits,
+              signalTimestamp: new Date(nowMs),
+            }),
+          );
+          if (committed) matched += 1;
+        }
       } finally {
         budget.close();
       }
       // 水位：只 stamp **已处理**的公司（命中/未命中/DAT-011/TTL 新鲜跳过）；预算耗尽的尾部不 stamp、下轮重试。
-      await stampProcessed(args.workspaceId, processedIds, { lastSignalAt: now });
+      await stampProcessed(args.workspaceId, processedIds, {
+        lastSignalAt: now,
+      });
       return {
         scanned: companies.length,
         attempted,
@@ -438,10 +509,14 @@ export function createBacklogActivities(deps: {
       const suspended = await suspendedDomains(); // DAT-011：SUSPENDED 域名连注册期 sitemap 探测都不发（与信号/联系人阶段一致）
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({ watermarkField: 'lastWatchAt', now, requireDomain: true }),
+          where: backlogEligibleWhere({
+            watermarkField: 'lastWatchAt',
+            now,
+            requireDomain: true,
+          }),
           orderBy: backlogEligibleOrderBy('lastWatchAt'),
           take: limit,
-          select: { id: true, domain: true },
+          select: { id: true, name: true, domain: true },
         }),
       );
       if (!companies.length) return { scanned: 0, registered: 0, nextCursor: null };
@@ -451,7 +526,10 @@ export function createBacklogActivities(deps: {
       const keys = companies.filter((c) => c.domain).map((c) => keyOf(c.domain!));
       const existing = new Set(
         (
-          await deps.prisma.monitoredSource.findMany({ where: { sourceKey: { in: keys } }, select: { sourceKey: true } })
+          await deps.prisma.monitoredSource.findMany({
+            where: { sourceKey: { in: keys } },
+            select: { sourceKey: true },
+          })
         ).map((s) => s.sourceKey),
       );
 
@@ -459,15 +537,22 @@ export function createBacklogActivities(deps: {
       for (const c of companies) {
         if (!c.domain || existing.has(keyOf(c.domain))) continue;
         if (suspended.has(c.domain.toLowerCase())) continue; // DAT-011：kill-switch 域名不注册、不探测 sitemap
+        if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
         try {
-          await intentSvc.registerWatch(args.workspaceId, c.id);
+          await intentSvc.registerWatch(args.workspaceId, c.id, {
+            authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          });
           registered += 1;
         } catch {
           /* 单家注册失败（sitemap 不可达/DAT-011）不影响其余 */
         }
       }
       // 水位：本批全部已处理（新注册/已注册跳过/DAT-011）→ 离开过滤集，游标吞噬存量。
-      await stampProcessed(args.workspaceId, companies.map((c) => c.id), { lastWatchAt: now });
+      await stampProcessed(
+        args.workspaceId,
+        companies.map((c) => c.id),
+        { lastWatchAt: now },
+      );
       return {
         scanned: companies.length,
         registered,
@@ -500,8 +585,9 @@ export function createBacklogActivities(deps: {
                 offering: icp.company?.summary ?? undefined,
               }
             : undefined;
-          const suppressedEmails = new Set(
-            (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+          const suppressedEmails = canonicalizeSuppressionValues(
+            'email',
+            (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
           );
           const companies = await tx.canonicalCompany.findMany({
             where: backlogEligibleWhere({
@@ -512,12 +598,24 @@ export function createBacklogActivities(deps: {
             }),
             orderBy: backlogEligibleOrderBy('contactDiscoveryAttemptedAt'),
             take: limit,
-            select: { id: true, name: true, domain: true, country: true, dedupeKey: true },
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              dedupeKey: true,
+            },
           });
           return { adapters, sellerCtx, suppressedEmails, companies };
         },
       );
-      if (!adapters.length || !companies.length) return { scanned: companies.length, attempted: 0, contactsCreated: 0, nextCursor: null };
+      if (!adapters.length || !companies.length)
+        return {
+          scanned: companies.length,
+          attempted: 0,
+          contactsCreated: 0,
+          nextCursor: null,
+        };
 
       let attempted = 0;
       let contactsCreated = 0;
@@ -527,71 +625,99 @@ export function createBacklogActivities(deps: {
       let budgetExhausted = false;
       const budget = openStageBudget('contact', args.workspaceId);
       try {
-      for (const c of companies) {
-        // 预算已打穿（本 sweep:contact 账户任一 reserve 失败）→ 停机：本家及后续不处理、不 stamp（下轮重试）。
-        // 🔴 关键：adapter 的 fail-safe catch（decision_maker/public_web/companies_house 各自）会把
-        // BudgetExceededError 吞成空结果，编排层区分不出「没决策人」还是「预算打穿被吞」——故用 BudgetLedger
-        // 唯一真相点 wasExhausted 判，不靠源抛错（否则打穿后每家被误当「无决策人」stamp、离开水位永不重试）。
-        if (budgetLedger.wasExhausted(budget.key)) {
-          budgetExhausted = true;
-          break;
-        }
-        if (c.domain && suspended.has(c.domain.toLowerCase())) {
-          processedIds.push(c.id); // DAT-011：跳过抓取但仍已处理 → stamp（离开过滤集）
-          continue;
-        }
-        // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
-        // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe，含被 provider 吞掉的预算错——由 ledger 检出）。
-        const perAdapter: { key: string; contacts: ProviderContactRecord[] }[] = [];
-        for (const adapter of adapters) {
-          try {
-            const result = await adapter.discoverContacts(
-              { name: c.name, domain: c.domain ?? undefined, country: c.country ?? undefined },
-              { workspaceId: args.workspaceId, runId: budget.key, correlationId: 'backlog-contacts' },
-              sellerCtx,
-            );
-            if (result.contacts.length) perAdapter.push({ key: adapter.key, contacts: result.contacts });
-          } catch {
-            // 单 adapter fail-safe：不阻断其余源
+        for (const c of companies) {
+          // 预算已打穿（本 sweep:contact 账户任一 reserve 失败）→ 停机：本家及后续不处理、不 stamp（下轮重试）。
+          // 🔴 关键：adapter 的 fail-safe catch（decision_maker/public_web/companies_house 各自）会把
+          // BudgetExceededError 吞成空结果，编排层区分不出「没决策人」还是「预算打穿被吞」——故用 BudgetLedger
+          // 唯一真相点 wasExhausted 判，不靠源抛错（否则打穿后每家被误当「无决策人」stamp、离开水位永不重试）。
+          if (budgetLedger.wasExhausted(budget.key)) {
+            budgetExhausted = true;
+            break;
           }
-        }
-        // 本家处理过程中打穿预算 → 本家未真正处理完：不计 attempted、不 stamp、停机（下轮 sweep 重试）。
-        if (budgetLedger.wasExhausted(budget.key)) {
-          budgetExhausted = true;
-          break;
-        }
-        attempted += 1;
-        processedIds.push(c.id); // 本家已处理（建联系人/无具名决策人）
-        if (!perAdapter.length) continue;
-        // 同一 tx 内顺序 persist：同一人经 resolvePersonIdentity 跨 adapter 合并（email + officer_id 落同一条）。
-        const created = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          let n = 0;
-          for (const pa of perAdapter) {
-            const res = await persistDiscoveredContacts(tx, {
-              workspaceId: args.workspaceId,
-              company: { id: c.id, dedupeKey: c.dedupeKey },
-              adapterKey: pa.key,
-              contacts: pa.contacts,
-              suppressedEmails,
-            });
-            n += res.created;
+          if (c.domain && suspended.has(c.domain.toLowerCase())) {
+            processedIds.push(c.id); // DAT-011：跳过抓取但仍已处理 → stamp（离开过滤集）
+            continue;
           }
-          return n;
-        });
-        contactsCreated += created;
-      }
+          if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) {
+            processedIds.push(c.id);
+            continue;
+          }
+          // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
+          // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe，含被 provider 吞掉的预算错——由 ledger 检出）。
+          const perAdapter: {
+            key: string;
+            contacts: ProviderContactRecord[];
+          }[] = [];
+          for (const adapter of adapters) {
+            try {
+              if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
+              const result = await adapter.discoverContacts(
+                {
+                  name: c.name,
+                  domain: c.domain ?? undefined,
+                  country: c.country ?? undefined,
+                },
+                {
+                  workspaceId: args.workspaceId,
+                  runId: budget.key,
+                  correlationId: 'backlog-contacts',
+                  authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+                },
+                sellerCtx,
+              );
+              if (result.contacts.length)
+                perAdapter.push({
+                  key: adapter.key,
+                  contacts: result.contacts,
+                });
+            } catch {
+              // 单 adapter fail-safe：不阻断其余源
+            }
+          }
+          // 本家处理过程中打穿预算 → 本家未真正处理完：不计 attempted、不 stamp、停机（下轮 sweep 重试）。
+          if (budgetLedger.wasExhausted(budget.key)) {
+            budgetExhausted = true;
+            break;
+          }
+          attempted += 1;
+          processedIds.push(c.id); // 本家已处理（建联系人/无具名决策人）
+          if (!perAdapter.length) continue;
+          // 同一 tx 内顺序 persist：同一人经 resolvePersonIdentity 跨 adapter 合并（email + officer_id 落同一条）。
+          const created = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+            let n = 0;
+            for (const pa of perAdapter) {
+              const res = await persistDiscoveredContacts(tx, {
+                workspaceId: args.workspaceId,
+                company: { id: c.id, dedupeKey: c.dedupeKey },
+                adapterKey: pa.key,
+                contacts: pa.contacts,
+                suppressedEmails,
+              });
+              n += res.created;
+            }
+            return n;
+          });
+          contactsCreated += created;
+        }
       } finally {
         budget.close();
       }
       // 水位：只对**已处理**的公司写 contactDiscoveryAttemptedAt（无具名决策人属常态，这条防「联系不上的
       // 公司」永占前排、每 sweep 重烧多页渲染+LLM——复审最尖锐的一条）。预算耗尽的尾部不 stamp、下轮重试。
-      await stampProcessed(args.workspaceId, processedIds, { contactDiscoveryAttemptedAt: now });
+      await stampProcessed(args.workspaceId, processedIds, {
+        contactDiscoveryAttemptedAt: now,
+      });
       if (budgetExhausted) {
         // 预算耗尽即收手：nextCursor=null 停止翻页（继续只会连环触发同账户超限，与 qualifyFitBacklog 一致）。
         console.warn(
           `[backlog] contact 阶段预算耗尽（ws=${args.workspaceId}）：本页处理 ${processedIds.length} 家后停，未处理的保留水位下轮重试`,
         );
-        return { scanned: companies.length, attempted, contactsCreated, nextCursor: null };
+        return {
+          scanned: companies.length,
+          attempted,
+          contactsCreated,
+          nextCursor: null,
+        };
       }
       return {
         scanned: companies.length,
@@ -628,11 +754,25 @@ export function createBacklogActivities(deps: {
         select: { config: true },
       });
       if (!provider) {
-        return { scanned: 0, attempted: 0, guessed: 0, skipped: true, reason: 'kill_switch_disabled', nextCursor: null };
+        return {
+          scanned: 0,
+          attempted: 0,
+          guessed: 0,
+          skipped: true,
+          reason: 'kill_switch_disabled',
+          nextCursor: null,
+        };
       }
       const lawfulBasis = parseConfiguredLawfulBasis(provider.config);
       if (!lawfulBasis) {
-        return { scanned: 0, attempted: 0, guessed: 0, skipped: true, reason: 'no_lawful_basis_configured', nextCursor: null };
+        return {
+          scanned: 0,
+          attempted: 0,
+          guessed: 0,
+          skipped: true,
+          reason: 'no_lawful_basis_configured',
+          nextCursor: null,
+        };
       }
 
       const suspended = await suspendedDomains();
@@ -642,7 +782,12 @@ export function createBacklogActivities(deps: {
         const verifiers = await deps.providers.routeEmailVerification(tx as never);
         const verifier = verifiers[0];
         if (!verifier) {
-          return { verifier: undefined, companyIds: [] as string[], guessCompanies: [] as GuessTargetCompany[], suppressedEmails: new Set<string>() };
+          return {
+            verifier: undefined,
+            companyIds: [] as string[],
+            guessCompanies: [] as GuessTargetCompany[],
+            suppressedEmails: new Set<string>(),
+          };
         }
         const companies = await tx.canonicalCompany.findMany({
           where: backlogEligibleWhere({
@@ -653,10 +798,11 @@ export function createBacklogActivities(deps: {
           }),
           orderBy: backlogEligibleOrderBy('emailGuessAttemptedAt'),
           take: limit,
-          select: { id: true, domain: true }, // country/dedupeKey/name 未用（猜测走 buildGuessTargets 派生）
+          select: { id: true, name: true, domain: true },
         });
-        const suppressedEmails = new Set(
-          (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value.toLowerCase()),
+        const suppressedEmails = canonicalizeSuppressionValues(
+          'email',
+          (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
         );
         const contacts = await tx.canonicalContact.findMany({
           where: { companyId: { in: companies.map((c) => c.id) } },
@@ -673,13 +819,30 @@ export function createBacklogActivities(deps: {
           if (!c.domain) continue; // requireDomain 已保证；narrow 到 string
           // 共用纯件：同域非-RISKY 格式样本 + 缺邮箱决策人（默认 cap 25，与手动路径一致，防单活动超时）。
           const { knownSamples, emailless } = buildGuessTargets(byCompany.get(c.id) ?? [], c.domain);
-          guessCompanies.push({ id: c.id, domain: c.domain, emailless, knownSamples });
+          guessCompanies.push({
+            id: c.id,
+            domain: c.domain,
+            emailless,
+            knownSamples,
+          });
         }
-        return { verifier, companyIds: companies.map((c) => c.id), guessCompanies, suppressedEmails };
+        return {
+          verifier,
+          companyIds: companies.map((c) => c.id),
+          guessCompanies,
+          suppressedEmails,
+        };
       });
 
       if (!loaded.verifier) {
-        return { scanned: 0, attempted: 0, guessed: 0, skipped: true, reason: 'no_verifier', nextCursor: null };
+        return {
+          scanned: 0,
+          attempted: 0,
+          guessed: 0,
+          skipped: true,
+          reason: 'no_verifier',
+          nextCursor: null,
+        };
       }
       const { verifier, companyIds, guessCompanies, suppressedEmails } = loaded;
       if (!companyIds.length) return { scanned: 0, attempted: 0, guessed: 0, nextCursor: null };
@@ -690,17 +853,24 @@ export function createBacklogActivities(deps: {
       let attempted = 0;
       for (const gc of guessCompanies) {
         if (suspended.has(gc.domain.toLowerCase())) continue; // DAT-011：SUSPENDED 域连 MX/SMTP 都不探
+        if (!(await mayUseExternalProcessing(args.workspaceId, gc.id))) continue;
         for (const t of gc.emailless) {
+          if (!(await contactMayUseExternal(args.workspaceId, t.contactId))) continue;
           attempted += 1;
           try {
             const result = await guesser.guess(
-              { fullName: t.fullName, domain: gc.domain, knownSamples: gc.knownSamples },
+              {
+                fullName: t.fullName,
+                domain: gc.domain,
+                knownSamples: gc.knownSamples,
+              },
               {
                 workspaceId: args.workspaceId,
                 lawfulBasis, // interim 全局 LIA（config 配置）；🔴 自动路径**绝不**传 allowPersonalWithoutBasis
                 actor: 'backlog',
                 suppressedEmails,
                 maxProbe: undefined,
+                authorizeCandidate: (email) => contactMayUseExternal(args.workspaceId, t.contactId, email),
               },
             );
             results.push({ contactId: t.contactId, result });
@@ -730,7 +900,9 @@ export function createBacklogActivities(deps: {
       }
 
       // ── 水位 stamp-all（命中/未命中/DAT-011 跳过都 stamp）：30d TTL 防每 sweep 重锤 MX，游标吞噬存量 ──
-      await stampProcessed(args.workspaceId, companyIds, { emailGuessAttemptedAt: now });
+      await stampProcessed(args.workspaceId, companyIds, {
+        emailGuessAttemptedAt: now,
+      });
       return {
         scanned: companyIds.length,
         attempted,

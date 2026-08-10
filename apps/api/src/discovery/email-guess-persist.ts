@@ -1,7 +1,11 @@
 import { Prisma } from '@prisma/client';
 import { GuessResult } from './email-guesser';
 import { LawfulBasis } from './provider-contract';
-import { encryptPii } from '../compliance/pii-crypto';
+import { blindContactKey, encryptPii } from '../compliance/pii-crypto';
+import { companyMatchesSuppression, canonicalizeSuppressionValue, canonicalizeSuppressionValues,
+} from './suppression-value';
+import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
+import { contactSuppressionKeys } from './identity';
 
 /**
  * 邮箱猜测结果的落库（选项 B · P0.3）——把 {@link EmailGuesser} 猜到的决策人邮箱写进
@@ -71,20 +75,85 @@ export async function persistGuessedEmail(
 ): Promise<PersistGuessOutcome> {
   const plan = guessedEmailWritePlan(args.result);
   if (!plan) return { persisted: false, reason: args.result.reason };
-  if (args.suppressedEmails.has(plan.email.toLowerCase())) {
+
+  await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
+
+  // Commit-side terminal gate: the SMTP call can take minutes, so the load-time company/email
+  // suppression snapshot is not authoritative here. Lock and reread the owning company, then
+  // consume current append-only suppression rows before creating any contact point or PII evidence.
+  const companies = await tx.$queryRaw<{ id: string; name: string; domain: string | null; status: string }[]>`
+    SELECT co.id, co.name, co.domain, co.status
+    FROM canonical_contact ct
+    JOIN canonical_company co ON co.id = ct.company_id
+    WHERE ct.id = ${args.contactId}::uuid
+    FOR SHARE OF co`;
+  const company = companies[0];
+  if (!company || company.status === 'SUPPRESSED') return { persisted: false, reason: 'suppressed' };
+
+  const currentSuppressions = await tx.suppressionRecord.findMany({
+    where: { type: { in: ['domain', 'company_name', 'email', 'contact_key'] } },
+    select: { type: true, value: true },
+  });
+  if (companyMatchesSuppression(currentSuppressions, company)) {
+    await tx.canonicalCompany.updateMany({
+      where: { id: company.id, status: { not: 'SUPPRESSED' } },
+      data: { status: 'SUPPRESSED', version: { increment: 1 } },
+    });
+    return { persisted: false, reason: 'suppressed' };
+  }
+
+  const email = canonicalizeSuppressionValue('email', plan.email);
+  const contact = await tx.canonicalContact.findUnique({
+    where: { id: args.contactId },
+    select: { fullName: true, company: { select: { dedupeKey: true } } },
+  });
+  if (!contact) return { persisted: false, reason: 'suppressed' };
+  const suppressedContactKeys = new Set(
+    currentSuppressions.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
+  );
+  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey).map((value) =>
+    blindContactKey(value).toLowerCase(),
+  );
+  const suppressedDomains = canonicalizeSuppressionValues(
+    'domain',
+    currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
+  );
+  const emailDomain = email ? canonicalizeSuppressionValue('domain', email.split('@')[1]) : null;
+  const effectiveSuppressedEmails = new Set([
+    ...args.suppressedEmails,
+    ...canonicalizeSuppressionValues(
+      'email',
+      currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
+    ),
+  ]);
+  if (
+    !email ||
+    effectiveSuppressedEmails.has(email) ||
+    (!!emailDomain && suppressedDomains.has(emailDomain)) ||
+    contactKeys.some((value) => suppressedContactKeys.has(value))
+  ) {
     return { persisted: false, reason: 'suppressed' };
   }
 
   await tx.contactPoint.upsert({
-    where: { contactId_type_value: { contactId: args.contactId, type: 'email', value: plan.email } },
+    where: {
+      contactId_type_value: {
+        contactId: args.contactId,
+        type: 'email',
+        value: email,
+      },
+    },
     // 显式 null（非条件 spread）：既有 VALID 行被 RISKY 结果重 upsert 时清掉旧 verifiedAt，
     // 守住「RISKY 无 verifiedAt」不变式（复审 MEDIUM：防降级留下 stale 时间戳）。
-    update: { status: plan.pointStatus, verifiedAt: plan.verified ? args.now : null },
+    update: {
+      status: plan.pointStatus,
+      verifiedAt: plan.verified ? args.now : null,
+    },
     create: {
       workspaceId: args.workspaceId,
       contactId: args.contactId,
       type: 'email',
-      value: plan.email,
+      value: email,
       status: plan.pointStatus,
       verifiedAt: plan.verified ? args.now : null,
     },
@@ -98,7 +167,7 @@ export async function persistGuessedEmail(
       field: 'email.guess',
       value: {
         // 收口⑥：证据里的人名邮箱=第二份 PII → 加密落库（确定性，与 contact_point 密文一致）。
-        email: encryptPii(plan.email),
+        email: encryptPii(email),
         pattern: plan.pattern,
         confidence: plan.confidence,
         status: plan.pointStatus,
@@ -115,5 +184,10 @@ export async function persistGuessedEmail(
     },
   });
 
-  return { persisted: true, email: plan.email, status: plan.pointStatus, reason: plan.reason };
+  return {
+    persisted: true,
+    email,
+    status: plan.pointStatus,
+    reason: plan.reason,
+  };
 }

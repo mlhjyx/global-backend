@@ -82,6 +82,9 @@ describe('OpenAPI authorization scope contract', () => {
       operation(spec, 'post', '/api/v1/events/ack')['x-required-scopes'],
     ).toEqual(['acquisition:event:ack']);
     expect(
+      operation(spec, 'get', '/api/v1/events')['x-required-scopes'],
+    ).toEqual(['acquisition:read', 'personal-data:read']);
+    expect(
       operation(spec, 'post', '/api/v1/deletion-requests')[
         'x-required-scopes'
       ],
@@ -94,6 +97,9 @@ describe('OpenAPI authorization scope contract', () => {
         'x-required-scopes'
       ],
     ).toEqual(['compliance:manage']);
+    expect(
+      operation(spec, 'get', '/api/v1/suppressions')['x-required-scopes'],
+    ).toEqual(['personal-data:read', 'compliance:manage']);
     expect(
       operation(spec, 'get', '/api/v1/canonical-companies/{id}')[
         'x-required-scopes'

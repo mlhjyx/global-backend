@@ -1,6 +1,12 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-10 · 获客 Suppression/DataRights source 治理
+
+- #375 已以 merge commit `5b588353fba6cdbda3a7e0f5f171a3e2fabbc786` 合入 roles→scopes，并在该 main commit 上通过 CI、Governance、Security、Supply Chain 与 CodeQL push canary；Supply Chain 仍是带 36 项生产依赖遗留风险的 ratchet pass，不是漏洞清零。
+- 当前独立变更集取消 suppression 裸 DELETE：`suppression_record` 保留事实、未知原因 fail-closed 为 LEGAL、只允许 PREFERENCE→LEGAL；类型化 canonicalizer 拒绝无效禁联值，并在新写入、旧值读取、发现匹配、即时公司分块更新和所有动作门共享规范键，避免“201 成功但永不命中”。fit/enrich/signal/watch/contact/guess 六个自动 backlog 阶段每家出网前直接复核原始 suppression；长网络后的联系人/猜测写入、邮箱验证回写、Lead accept 和 suppression 创建共享 workspace 事务 advisory lock 并在提交前复读。被禁邮箱联系人从 `LeadQualifiedPackage` 排除，过滤后零可达则 accept fail-closed。释放和身份纠正的 `suppression_decision` 分别保留 requested command 与 outcome，同 requestId 的不同原始 reason 返回幂等冲突；DB 固定合法语义组合，普通 API 不执行真实 release。OpenAPI 现显式列出 400/404/409 统一错误 envelope 与 UUID path；审计/PII 列表使用 cursor page envelope 且每页最多 100。
+- DataRights DENY 从“throw 导致日志回滚”改为先在租户事务提交 `policy_decision_log`、再在事务外返回 409；在 DENY 前不执行 Lead CAS、不建 LeadDecision、不发 LeadQualified。隔离无卷 PostgreSQL 空库完成全部 82 migrations，并验证 app_user 禁止删除 suppression、禁止更新/删除 decision、禁止 LEGAL 降级与跨 workspace 关联；测试容器已删除。该证据只属于 source/migration 验证，不代表已部署或真实 pilot。
+
 ## 2026-08-10 · Copy fixed-source 影响治理
 
 - 新增 [Copy source eligibility receipt](../evidence/site-builder/copy-runtime-eligibility.json) 和 required-build verifier。活跃 v15 binding 的路径、文件 SHA、artifact ID、82-file bundle digest、当前 source fingerprint 与 drift paths 都必须精确匹配。

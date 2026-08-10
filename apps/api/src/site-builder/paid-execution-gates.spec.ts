@@ -10,8 +10,7 @@ import { RateLimiter } from '../tools/rate-limiter';
 import type { Tool, ToolResult } from '../tools/tool-contract';
 import {
   PaidCallDeniedError,
-  PaidOperationUnknownError,
-} from './site-build-cost-ledger';
+  PaidOperationUnknownError } from './site-build-cost-ledger';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const SITE_ID = '22222222-2222-4222-8222-222222222222';
@@ -41,8 +40,7 @@ const SETTLEMENT_PREFLIGHT = {
 };
 
 function settledUsage(
-  usage: ModelResult<unknown>['usage'],
-): ModelResult<unknown>['usage'] {
+  usage: ModelResult<unknown>['usage']): ModelResult<unknown>['usage'] {
   return {
     ...usage,
     gatewaySettlements: [
@@ -64,8 +62,7 @@ function settledUsage(
 }
 
 function provider(
-  implementation: () => Promise<ModelResult<unknown>>,
-): ModelProvider {
+  implementation: () => Promise<ModelResult<unknown>>): ModelProvider {
   return {
     id: 'gateway',
     preflightPaidCall: vi.fn(async () => SETTLEMENT_PREFLIGHT),
@@ -131,6 +128,120 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     });
     expect(reserveOperation).not.toHaveBeenCalled();
     expect(model.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it('releases a reservation when suppression denies before the first paid wire', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+    }));
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+      disablePaidCalls,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        {
+          ...paidModelContext,
+          authorizeExternalAction: vi.fn(async () => false),
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'ExternalActionDeniedError',
+      decision: 'suppression_action_gate',
+      callCount: 0,
+    });
+
+    expect(model.generateStructured).not.toHaveBeenCalled();
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'RELEASED',
+        errorCode: 'SUPPRESSION_ACTION_GATE',
+        measurement: expect.objectContaining({
+          basis: 'not_incurred',
+          budgetChargeMicrousd: 0,
+          callCount: 0,
+        }),
+      }),
+    );
+    expect(disablePaidCalls).not.toHaveBeenCalled();
+  });
+
+  it('settles the incurred first wire when suppression denies structured repair', async () => {
+    const model = provider(async () => ({
+      data: {},
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+      reportedModel: 'gpt-5.6-terra',
+      modelResolutionSource: 'upstream_response',
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }));
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const authorizeExternalAction = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+      disablePaidCalls,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {
+            type: 'object',
+            required: ['ok'],
+            properties: { ok: { type: 'boolean' } },
+          },
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        { ...paidModelContext, authorizeExternalAction },
+      ),
+    ).rejects.toMatchObject({
+      name: 'ExternalActionDeniedError',
+      callCount: 1,
+    });
+
+    expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
+    expect(model.generateStructured).toHaveBeenCalledOnce();
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        errorCode: 'SUPPRESSION_ACTION_GATE',
+        measurement: expect.objectContaining({
+          basis: 'token_pricing',
+          budgetChargeMicrousd: 1_000,
+          callCount: 1,
+        }),
+      }),
+    );
+    expect(disablePaidCalls).not.toHaveBeenCalled();
   });
 
   it('preflights before reserve and settles request-bound gateway cost with provenance', async () => {
@@ -250,8 +361,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     await gateway.generateStructured(input, paidModelContext);
 
     const firstKey = paidLedger.reserveOperation.mock.calls[0]![0].operationKey;
-    const secondKey =
-      paidLedger.reserveOperation.mock.calls[1]![0].operationKey;
+    const secondKey = paidLedger.reserveOperation.mock.calls[1]![0].operationKey;
     expect(firstKey).toBe(secondKey);
     expect(paidLedger.reserveOperation.mock.calls[1]![0].meta).toMatchObject({
       settlementPreflight: {
@@ -476,9 +586,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
         }),
       }),
     );
-    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
-      'jane@example.com',
-    );
+    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain('jane@example.com');
   });
 
   it('omits model replay payloads when the caller did not install a persistence gate', async () => {
@@ -510,12 +618,8 @@ describe('RouterModelGateway persistent paid-call gate', () => {
         paidModelContext,
       ),
     ).resolves.toMatchObject(rawResult);
-    expect(settleOperation).toHaveBeenCalledWith(
-      expect.objectContaining({ result: undefined }),
-    );
-    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
-      'raw-provider-output',
-    );
+    expect(settleOperation).toHaveBeenCalledWith(expect.objectContaining({ result: undefined }));
+    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain('raw-provider-output');
   });
 
   it('fails closed when a settled paid model has no approved replay payload', async () => {
@@ -598,9 +702,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       }),
     );
     expect(settleOperation.mock.calls[0]![0]).not.toHaveProperty('result');
-    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain(
-      'jane@example.com',
-    );
+    expect(JSON.stringify(settleOperation.mock.calls)).not.toContain('jane@example.com');
   });
 
   it('replays a cached provider result without calling or settling the provider again', async () => {
@@ -705,11 +807,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       ),
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
     expect(execute).toHaveBeenCalledOnce();
-    expect(disablePaidCalls).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      RUN_ID,
-      'SETTLEMENT_ACK_UNKNOWN',
-    );
+    expect(disablePaidCalls).toHaveBeenCalledWith(WORKSPACE_ID, RUN_ID, 'SETTLEMENT_ACK_UNKNOWN');
   });
 
   it('freezes the BuildRun when settlement returns a non-SETTLED decision', async () => {
@@ -746,14 +844,8 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(PaidOperationUnknownError);
-    expect((error as PaidOperationUnknownError).errorCode).toBe(
-      'SETTLEMENT_STALE_FENCE',
-    );
-    expect(disablePaidCalls).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      RUN_ID,
-      'SETTLEMENT_STALE_FENCE',
-    );
+    expect((error as PaidOperationUnknownError).errorCode).toBe('SETTLEMENT_STALE_FENCE');
+    expect(disablePaidCalls).toHaveBeenCalledWith(WORKSPACE_ID, RUN_ID, 'SETTLEMENT_STALE_FENCE');
   });
 
   it('settles conservatively, freezes the run, and never returns an unknown model settlement', async () => {
@@ -805,9 +897,7 @@ describe('RouterModelGateway persistent paid-call gate', () => {
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(PaidOperationUnknownError);
-    expect((error as PaidOperationUnknownError).errorCode).toBe(
-      'MODEL_SETTLEMENT_UNKNOWN',
-    );
+    expect((error as PaidOperationUnknownError).errorCode).toBe('MODEL_SETTLEMENT_UNKNOWN');
     expect(settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'FAILED',
@@ -888,11 +978,7 @@ describe('ToolBroker persistent paid-call gate', () => {
     });
 
     await expect(
-      broker.invoke(
-        'crawl4ai.fetch',
-        { url: 'https://example.com' },
-        paidToolContext,
-      ),
+      broker.invoke('crawl4ai.fetch', { url: 'https://example.com' }, paidToolContext),
     ).resolves.toMatchObject({ data: { text: 'ok' }, costCents: 2 });
     expect(order).toEqual(['reserve', 'tool', 'settle']);
     expect(paidLedger.reserveOperation).toHaveBeenCalledWith(
@@ -937,13 +1023,7 @@ describe('ToolBroker persistent paid-call gate', () => {
       paidLedger: paidLedger as never,
     });
 
-    await expect(
-      broker.invoke(
-        'crawl4ai.fetch',
-        { url: 'https://example.com' },
-        paidToolContext,
-      ),
-    ).resolves.toEqual({
+    await expect(broker.invoke('crawl4ai.fetch', { url: 'https://example.com' }, paidToolContext)).resolves.toEqual({
       data: { text: '[scrubbed-replay]' },
       costCents: 2,
     });
@@ -967,11 +1047,7 @@ describe('ToolBroker persistent paid-call gate', () => {
     });
 
     await expect(
-      broker.invoke(
-        'crawl4ai.fetch',
-        { url: 'https://example.com' },
-        paidToolContext,
-      ),
+      broker.invoke('crawl4ai.fetch', { url: 'https://example.com' }, paidToolContext),
     ).rejects.toBeInstanceOf(PaidOperationUnknownError);
     expect(execute).toHaveBeenCalledOnce();
   });

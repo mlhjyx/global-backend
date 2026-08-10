@@ -5,8 +5,7 @@ import {
   EgressBlockedError,
   requestPublicHttp,
   type PinnedPublicUrl,
-  type PublicUrlResolver,
-} from './guarded-http';
+  type PublicUrlResolver } from './guarded-http';
 
 const servers: ReturnType<typeof createServer>[] = [];
 
@@ -22,6 +21,38 @@ afterEach(async () => {
 });
 
 describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () => {
+  it('rechecks acquisition authorization before every redirect hop and starts no second wire after denial', async () => {
+    const authorizeExternalAction = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const resolver: PublicUrlResolver = vi.fn(async (raw) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4,
+      addresses: [{ address: '93.184.216.34', family: 4 }],
+    }));
+    const executePinned = vi.fn(async () => ({
+      status: 302,
+      headers: { location: 'https://second.example/final' },
+      body: Buffer.alloc(0),
+      text: '',
+    }));
+
+    await expect(
+      requestPublicHttp(
+        'https://first.example/start',
+        { maxRedirects: 3 },
+        { resolver, executePinned, authorizeExternalAction },
+      ),
+    ).rejects.toThrow(/external action denied|suppression_action_gate/i);
+
+    expect(authorizeExternalAction).toHaveBeenCalledTimes(3);
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(executePinned).toHaveBeenCalledTimes(1);
+  });
+
   it('连接固定到校验所得 IP，不对原始 hostname 做第二次 DNS 解析', async () => {
     const server = createServer((req, res) => {
       expect(req.headers.host).toMatch(/^rebind\.example:/);
@@ -76,8 +107,7 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
       requestPublicHttp(
         'https://public.example/start',
         { maxRedirects: 3 },
-        { resolver, executePinned },
-      ),
+        { resolver, executePinned }),
     ).rejects.toMatchObject({ code: 'non_global_address' });
 
     expect(executePinned).toHaveBeenCalledOnce();
@@ -154,7 +184,9 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
 
     await requestPublicHttp(
       'https://first.example/start',
-      { headers: { Authorization: 'Bearer secret', Cookie: 'sid=secret', Accept: 'text/plain' } },
+      { headers: { Authorization: 'Bearer secret', Cookie: 'sid=secret', Accept: 'text/plain',
+        },
+      },
       { resolver, executePinned },
     );
 
@@ -163,6 +195,7 @@ describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () =>
       Cookie: 'sid=secret',
       Accept: 'text/plain',
     });
-    expect(executePinned.mock.calls[1][1].headers).toEqual({ Accept: 'text/plain' });
+    expect(executePinned.mock.calls[1][1].headers).toEqual({ Accept: 'text/plain',
+    });
   });
 });

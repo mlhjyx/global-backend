@@ -11,13 +11,13 @@
 
 // 公共 Overpass 实例限流严格且易超载（504）——多实例 fallback。
 // 生产建议自托管 Overpass（OVERPASS_URL 覆盖）以获得稳定配额。
-const OVERPASS_ENDPOINTS = (process.env.OVERPASS_URL
+const OVERPASS_ENDPOINTS = process.env.OVERPASS_URL
   ? [process.env.OVERPASS_URL]
   : [
       'https://overpass-api.de/api/interpreter',
       'https://overpass.kumi.systems/api/interpreter',
       'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-    ]);
+    ];
 const USER_AGENT = process.env.OSM_UA ?? 'GlobalDiscoveryBot/1.0 (b2b discovery)';
 
 export interface OsmPlace {
@@ -40,11 +40,22 @@ export async function discoverByArea(params: {
   areaName: string;
   tagFilters: { k: string; v?: string }[];
   limit?: number;
-}): Promise<OsmPlace[]> {
+},
+  beforeRequest?: () => Promise<void>,
+): Promise<OsmPlace[]> {
   const { areaName, tagFilters, limit = 80 } = params;
   // 逐标签分别查询再合并：一个慢/超时的标签不至于让整批返回空（州级 union 易超时）。
   const perTag = Math.max(10, Math.ceil(limit / Math.max(1, tagFilters.length)));
-  const settled = await Promise.allSettled(tagFilters.map((f) => queryOneTag(areaName, f, perTag)));
+  const settled = await Promise.allSettled(tagFilters.map((f) => queryOneTag(areaName, f, perTag, beforeRequest)));
+  const authorizationDenial = settled.find(
+    (result) =>
+      result.status === 'rejected' &&
+      result.reason instanceof Error &&
+      result.reason.name === 'ExternalToolActionDeniedError',
+  );
+  if (authorizationDenial?.status === 'rejected') {
+    throw authorizationDenial.reason;
+  }
   const byId = new Map<string, OsmPlace>();
   for (const s of settled) {
     if (s.status !== 'fulfilled') continue;
@@ -54,7 +65,9 @@ export async function discoverByArea(params: {
 }
 
 // Overpass 规范：POST 以 application/x-www-form-urlencoded 的 data= 参数传查询。
-async function queryOneTag(areaName: string, f: { k: string; v?: string }, limit: number): Promise<OsmPlace[]> {
+async function queryOneTag(areaName: string, f: { k: string; v?: string }, limit: number,
+  beforeRequest?: () => Promise<void>,
+): Promise<OsmPlace[]> {
   const sel = f.v ? `["${f.k}"="${f.v}"]` : `["${f.k}"]`;
   const query = `[out:json][timeout:25];
 area["name"="${areaName}"]->.a;
@@ -62,10 +75,14 @@ nwr${sel}["name"](area.a);
 out center ${Math.min(limit, 200)};`;
   let lastErr: unknown;
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    await beforeRequest?.();
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': USER_AGENT,
+        },
         body: `data=${encodeURIComponent(query)}`,
         signal: AbortSignal.timeout(40_000),
       });

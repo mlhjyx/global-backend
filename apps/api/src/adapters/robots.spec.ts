@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EgressBlockedError } from './guarded-http';
+import { EgressBlockedError, ExternalHttpActionDeniedError } from './guarded-http';
 import { isAllowedByRobots, parseWildcardDisallow } from './robots';
 
 describe('robots 合规与 SSRF 入口', () => {
@@ -36,5 +36,37 @@ describe('robots 合规与 SSRF 入口', () => {
       isAllowedByRobots('https://robots-redirect.example/private', { request, resolve }),
     ).resolves.toBe(false);
     expect(request).toHaveBeenCalledOnce();
+  });
+
+  it('workspace-specific action denial is request-local and never poisons the shared origin cache', async () => {
+    const origin = 'https://workspace-local-denial.example';
+    const resolve = vi.fn(async (raw: string) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4 as const,
+      addresses: [{ address: '93.184.216.34', family: 4 as const }],
+    }));
+    const deniedRequest = vi.fn(async () => {
+      throw new ExternalHttpActionDeniedError();
+    });
+
+    await expect(
+      isAllowedByRobots(`${origin}/about`, {
+        request: deniedRequest,
+        resolve,
+      }),
+    ).resolves.toBe(false);
+
+    const otherWorkspaceRequest = vi.fn(async () => ({
+      ok: true,
+      text: 'User-agent: *\nDisallow:',
+    }));
+    await expect(
+      isAllowedByRobots(`${origin}/about`, {
+        request: otherWorkspaceRequest as never,
+        resolve,
+      }),
+    ).resolves.toBe(true);
+    expect(otherWorkspaceRequest).toHaveBeenCalledOnce();
   });
 });

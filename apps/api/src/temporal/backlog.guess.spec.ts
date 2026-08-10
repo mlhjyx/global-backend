@@ -58,6 +58,7 @@ function makeDeps(opts: {
   contacts: FakeContact[];
   suspendedDomains?: string[];
   noVerifier?: boolean;
+  suppressionRows?: { type: string; value: string }[];
 }) {
   const updateManyCalls: { ids: string[]; data: Record<string, unknown> }[] = [];
   const upsertedPoints: { contactId: string; value: string; status: string }[] = [];
@@ -68,17 +69,25 @@ function makeDeps(opts: {
       findMany: async ({ take }: { take?: number }) =>
         (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),
       updateMany: async ({ where, data }: { where: { id: { in: string[] } }; data: Record<string, unknown> }) => {
-        updateManyCalls.push({ ids: where.id.in, data });
-        return { count: where.id.in.length };
+        const ids = Array.isArray(where.id.in) ? where.id.in : [where.id as unknown as string];
+        updateManyCalls.push({ ids, data });
+        return { count: ids.length };
       },
+      findUnique: async ({ where }: { where: { id: string } }) => opts.companies.find((c) => c.id === where.id) ?? null,
     },
     canonicalContact: {
       findMany: async ({ where }: { where: { companyId: { in: string[] } } }) =>
         opts.contacts
           .filter((c) => where.companyId.in.includes(c.companyId))
           .map((c) => ({ ...c, contactPoints: c.contactPoints.map((p) => ({ ...p })) })),
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const contact = opts.contacts.find((candidate) => candidate.id === where.id);
+        if (!contact) return null;
+        const company = opts.companies.find((candidate) => candidate.id === contact.companyId);
+        return company ? { ...contact, company: { ...company, status: 'NEW' } } : null;
+      },
     },
-    suppressionRecord: { findMany: async () => [] as { value: string }[] },
+    suppressionRecord: { findMany: async () => opts.suppressionRows ?? [] },
     // persistGuessedEmail（真实）在落库短事务里用到 contactPoint.upsert + fieldEvidence.create。
     contactPoint: {
       upsert: async ({
@@ -93,6 +102,7 @@ function makeDeps(opts: {
       },
     },
     fieldEvidence: { create: async () => ({}) },
+    $queryRaw: async () => [{ id: COMPANY.id, name: COMPANY.name, domain: COMPANY.domain, status: 'NEW' }],
   };
 
   const prisma = {
@@ -221,6 +231,20 @@ describe('guessEmailsBacklog — 双闸合规门 + 补全 + 水位 + 红线', ()
     expect(r.attempted).toBe(0);
     expect(r.guessed).toBe(0);
     expect(updateManyCalls[0].ids).toEqual(['c1']); // 仍 stamp（离开当批过滤集）
+  });
+
+  it('历史 company_name suppression 在 SMTP 前复核，修复公司状态且零探测', async () => {
+    const guessSpy = vi.spyOn(EmailGuesser.prototype, 'guess').mockResolvedValue(RISKY_GUESS);
+    const { deps, updateManyCalls } = makeDeps({
+      providerRow: { config: { lawfulBasis: GLOBAL_LIA } },
+      companies: [COMPANY],
+      contacts: [CONTACT],
+      suppressionRows: [{ type: 'company_name', value: '  ACME  ' }],
+    });
+    const r = await createBacklogActivities(deps).guessEmailsBacklog({ workspaceId: WS, icpId: ICP });
+    expect(guessSpy).not.toHaveBeenCalled();
+    expect(r.attempted).toBe(0);
+    expect(updateManyCalls.some((call) => call.data.status === 'SUPPRESSED')).toBe(true);
   });
 
   it('只对缺 email 决策人补全：已有 email point 的人不进 guess 目标', async () => {

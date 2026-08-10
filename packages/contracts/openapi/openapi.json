@@ -2487,6 +2487,46 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "请求校验失败或 suppression value 非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_SUPPRESSION_VALUE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2504,7 +2544,29 @@
       },
       "get": {
         "operationId": "DiscoveryController_listSuppressions_v1",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页最后一条记录的 id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -2513,7 +2575,8 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "data"
+                    "data",
+                    "page"
                   ],
                   "properties": {
                     "data": {
@@ -2522,6 +2585,62 @@
                         "type": "object",
                         "additionalProperties": true,
                         "description": "Suppression 记录"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "分页参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
                       }
                     }
                   }
@@ -2540,12 +2659,367 @@
           "Discovery"
         ],
         "x-required-scopes": [
+          "personal-data:read",
+          "compliance:manage"
+        ]
+      }
+    },
+    "/api/v1/suppressions/{id}/decisions": {
+      "post": {
+        "description": "法定 suppression 的 release 请求会持久化拒绝审计并返回 409。",
+        "operationId": "DiscoveryController_requestSuppressionDecision_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuppressionDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "append-only SuppressionDecision"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径或请求体校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_REASON"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "suppression 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "法定 suppression 不可释放，或幂等 requestId 与首个事实冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "LEGAL_SUPPRESSION_IMMUTABLE",
+                            "IDEMPOTENCY_CONFLICT",
+                            "DECISION_NOT_PERSISTED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "追加 suppression release/correction 请求；请求本身不解除禁联",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      },
+      "get": {
+        "operationId": "DiscoveryController_listSuppressionDecisions_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页最后一条记录的 id",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "SuppressionDecision"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径或分页参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "suppression 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出 suppression 的 append-only release/correction 决策",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
           "compliance:manage"
         ]
       }
     },
     "/api/v1/suppressions/{id}": {
       "delete": {
+        "deprecated": true,
         "operationId": "DiscoveryController_removeSuppression_v1",
         "parameters": [
           {
@@ -2553,6 +3027,7 @@
             "required": true,
             "in": "path",
             "schema": {
+              "format": "uuid",
               "type": "string"
             }
           }
@@ -2571,11 +3046,149 @@
                     "data": {
                       "type": "object",
                       "required": [
-                        "deleted"
+                        "deleted",
+                        "releaseRequested",
+                        "decisionId"
                       ],
                       "properties": {
                         "deleted": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        },
+                        "releaseRequested": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "suppression 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "法定 suppression 不可释放；拒绝决策已 append-only 持久化",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "LEGAL_SUPPRESSION_IMMUTABLE",
+                            "IDEMPOTENCY_CONFLICT",
+                            "DECISION_NOT_PERSISTED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid"
                         }
                       }
                     }
@@ -2590,7 +3203,7 @@
             "bearer": []
           }
         ],
-        "summary": "移除禁联记录",
+        "summary": "已弃用：提交 preference release request，永不物理删除",
         "tags": [
           "Discovery"
         ],
@@ -2966,6 +3579,116 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "路径或请求体验证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead 或其公司不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "当前 suppression/合规/制裁状态阻断交付",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SUPPRESSED",
+                            "INVALID_STATE",
+                            "SUPPRESSED_CONTACT_UNREACHABLE",
+                            "STORAGE_RIGHTS_NOT_GRANTED",
+                            "SANCTIONS_HOLD_UNRESOLVED",
+                            "CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3020,6 +3743,113 @@
                       "type": "object",
                       "additionalProperties": true,
                       "description": "Lead（六维分+队列+裁决状态）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径或请求体验证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "当前状态阻断拒绝裁决",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SUPPRESSED",
+                            "INVALID_STATE",
+                            "CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -3254,7 +4084,8 @@
           "Events"
         ],
         "x-required-scopes": [
-          "acquisition:read"
+          "acquisition:read",
+          "personal-data:read"
         ]
       }
     },
@@ -8602,11 +9433,15 @@
           },
           "lawfulBasisRef": {
             "type": "string",
-            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）"
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "lawfulBasisNote": {
             "type": "string",
-            "description": "备注"
+            "description": "备注",
+            "maxLength": 1000,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "allowPersonalWithoutBasis": {
             "type": "boolean",
@@ -8629,23 +9464,31 @@
           },
           "lawfulBasisRef": {
             "type": "string",
-            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）"
+            "description": "LIA / 工单 / 合同 / 同意记录的引用（可审计）",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "lawfulBasisNote": {
             "type": "string",
-            "description": "备注"
+            "description": "备注",
+            "maxLength": 1000,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           },
           "allowPersonalWithoutBasis": {
             "type": "boolean",
             "description": "显式开关：无 lawfulBasis 也允许探测人名邮箱（默认 false，仍留痕）"
           },
           "maxContacts": {
-            "type": "number",
-            "description": "最多补全几个缺邮箱决策人（有界护栏，默认 25）"
+            "type": "integer",
+            "description": "最多补全几个缺邮箱决策人（有界护栏，默认 25）",
+            "minimum": 1,
+            "maximum": 25
           },
           "maxProbe": {
-            "type": "number",
-            "description": "每人最多探测几个候选（有界护栏，默认 8）"
+            "type": "integer",
+            "description": "每人最多探测几个候选（有界护栏，默认 8）",
+            "minimum": 1,
+            "maximum": 8
           }
         }
       },
@@ -8662,7 +9505,9 @@
           },
           "value": {
             "type": "string",
-            "example": "noreply@example.com"
+            "example": "noreply@example.com",
+            "minLength": 1,
+            "maxLength": 2048
           },
           "reason": {
             "type": "string",
@@ -8678,6 +9523,38 @@
         "required": [
           "type",
           "value"
+        ]
+      },
+      "SuppressionDecisionDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "调用方生成的幂等请求 ID"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "RELEASE_REQUESTED",
+              "IDENTITY_CORRECTION_REQUESTED"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "USER_PREFERENCE_CHANGED",
+              "BOUNCE_CLASSIFICATION_ERROR",
+              "IDENTITY_MISASSOCIATION",
+              "DUPLICATE_RECORD",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "requestId",
+          "decision",
+          "reasonCode"
         ]
       },
       "AcceptLeadDto": {

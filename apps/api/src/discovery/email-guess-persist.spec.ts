@@ -41,10 +41,43 @@ describe('email-guess-persist · 落库计划（纯）', () => {
   });
 });
 
-function fakeTx() {
+function fakeTx(
+  currentSuppressedEmails: string[] = [],
+  opts?: {
+    company?: { id: string; name: string; domain: string | null; status: string };
+    companySuppressions?: { type: string; value: string }[];
+    contact?: { id: string; fullName: string; company: { dedupeKey: string } };
+  },
+) {
   const upsert = vi.fn(async () => ({}));
   const create = vi.fn(async () => ({}));
-  return { tx: { contactPoint: { upsert }, fieldEvidence: { create } } as never, upsert, create };
+  const findMany = vi.fn(async () => [
+    ...currentSuppressedEmails.map((value) => ({ type: 'email', value })),
+    ...(opts?.companySuppressions ?? []),
+  ]);
+  const queryRaw = vi.fn(async () => [opts?.company ?? { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }]);
+  const updateMany = vi.fn(async () => ({ count: 1 }));
+  return {
+    tx: {
+      contactPoint: { upsert },
+      fieldEvidence: { create },
+      suppressionRecord: { findMany },
+      canonicalCompany: { updateMany },
+      canonicalContact: {
+        findUnique: vi.fn(async () => opts?.contact ?? {
+          id: 'c1',
+          fullName: 'Hans Herold',
+          company: { dedupeKey: 'd:acme.de' },
+        }),
+      },
+      $queryRaw: queryRaw,
+    } as never,
+    upsert,
+    create,
+    findMany,
+    queryRaw,
+    updateMany,
+  };
 }
 const NOW = new Date('2026-07-10T00:00:00.000Z');
 const LIA = { basis: 'legitimate_interest' as const, ref: 'LIA-1' };
@@ -73,6 +106,72 @@ describe('email-guess-persist · 落库（fake tx）', () => {
   it('suppression 命中：不落，upsert 不调用', async () => {
     const { tx, upsert } = fakeTx();
     const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(['h.herold@acme.de']), now: NOW });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('长 SMTP 调用后新增的 suppression 在写事务内复读，即使载入快照为空也不落库', async () => {
+    const { tx, upsert } = fakeTx(['h.herold@acme.de']);
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('SMTP 期间新增的 company suppression 在写事务内复核，修复状态且不落 PII', async () => {
+    const { tx, upsert, updateMany } = fakeTx([], {
+      companySuppressions: [{ type: 'domain', value: 'https://www.acme.de/path' }],
+    });
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('猜测邮箱自身域命中 domain suppression 时不落库，即使 company.domain 不同', async () => {
+    const agencyResult: GuessResult = {
+      ...verifiedResult,
+      best: { ...verifiedResult.best!, email: 'h.herold@agency.example' },
+    };
+    const { tx, upsert } = fakeTx([], {
+      companySuppressions: [{ type: 'domain', value: 'agency.example' }],
+    });
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: agencyResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('contact_key 命中时不为已冻结具名人补写猜测邮箱', async () => {
+    const { contactSuppressionKeys } = await import('./identity');
+    const { blindContactKey } = await import('../compliance/pii-crypto');
+    const keys = contactSuppressionKeys('Hans Herold', 'd:acme.de').map((value) => blindContactKey(value));
+    const { tx, upsert } = fakeTx([], {
+      companySuppressions: keys.map((value) => ({ type: 'contact_key', value })),
+    });
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
     expect(out).toEqual({ persisted: false, reason: 'suppressed' });
     expect(upsert).not.toHaveBeenCalled();
   });
