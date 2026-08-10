@@ -86,6 +86,7 @@ function pricingBroker(options: {
 
 function liveFetch(options: {
   existingPurposeToken?: boolean;
+  retiredV16Token?: boolean;
   broadenedModels?: boolean;
   duplicateChannels?: boolean;
   invalidLogShape?: boolean;
@@ -99,15 +100,14 @@ function liveFetch(options: {
   controlPlaneRedirect?: { status: 307 | 308; location: string };
 } = {}) {
   const observed: Array<{ method: string; path: string }> = [];
-  const tokens: Array<Record<string, unknown>> = options.existingPurposeToken
-    ? [
-        {
-          id: 19,
-          name: "Site Builder Copy Sonnet Recovery v16",
-          status: 1,
-        },
-      ]
-    : [];
+  const tokens: Array<Record<string, unknown>> = [
+    ...(options.existingPurposeToken
+      ? [{ id: 19, name: "Site Builder Copy Sonnet Recovery v17", status: 1 }]
+      : []),
+    ...(options.retiredV16Token
+      ? [{ id: 24, name: "Site Builder Copy Sonnet Recovery v16", status: 2 }]
+      : []),
+  ];
   const channel = {
     id: 22,
     name: "OpenOx Claude Sonnet",
@@ -167,7 +167,7 @@ function liveFetch(options: {
       if (url.pathname === "/api/token/" && method === "POST") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         expect(body).toMatchObject({
-          name: "Site Builder Copy Sonnet Recovery v16",
+          name: "Site Builder Copy Sonnet Recovery v17",
           remain_quota: 186_080,
           unlimited_quota: false,
           model_limits_enabled: true,
@@ -273,7 +273,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     );
 
     expect(COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v16.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v17.json",
     );
     expect(result.secret.tokenId).toBe(24);
     expect(result.secret.apiKey).toBe(["sk", "one", "time", "secret"].join("-"));
@@ -281,7 +281,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
       schemaVersion:
         "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v1",
       artifactId:
-        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v16-v1",
+        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v17-v1",
       classification: "CONTROL_PLANE_ATTESTATION_ONLY",
       executionHeadCommit: "ca16c5336a51f5ada152aff5c39e57ba8ff4589a",
       preflightOnly: true,
