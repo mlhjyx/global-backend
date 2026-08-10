@@ -13,6 +13,7 @@ const SURFACES: ProjectionSurface[] = [{ provider: 'ted', cpvCodes: ['42120000']
 
 interface Company {
   id: string;
+  name: string;
   domain: string | null;
   dedupeKey: string;
   attributes: Record<string, unknown>;
@@ -22,6 +23,7 @@ interface Company {
 
 interface Fixture {
   companies: Map<string, Company>;
+  suppressions?: { type: string; value: string }[];
   signals: Record<string, unknown>[];
   watchSources: Map<string, { id: string }>;
   watchChanges: { sourceId: string; changeType: string; createdAt: Date; detail: unknown }[];
@@ -29,8 +31,12 @@ interface Fixture {
 
 function fakePrisma(f: Fixture): PrismaService {
   const tx = {
+    $queryRaw: async () => [{ locked: true }],
     canonicalCompany: {
-      findUnique: async ({ where }: { where: { id: string } }) => f.companies.get(where.id) ?? null,
+      findUnique: async ({ where }: { where: { id?: string; workspaceId_dedupeKey?: { dedupeKey: string } } }) =>
+        where.id
+          ? (f.companies.get(where.id) ?? null)
+          : ([...f.companies.values()].find((company) => company.dedupeKey === where.workspaceId_dedupeKey?.dedupeKey) ?? null),
       findMany: async ({ where, take }: { where: { id?: { gt: string } }; take: number }) =>
         [...f.companies.values()]
           .filter((c) => (where.id?.gt ? c.id > where.id.gt : true))
@@ -42,6 +48,23 @@ function fakePrisma(f: Fixture): PrismaService {
         f.companies.set(where.id, { ...c, attributes: data.attributes, version: c.version + 1 });
         return { id: where.id };
       },
+      updateMany: async ({ where, data }: {
+        where: { id: string };
+        data: { status?: string; attributes?: Record<string, unknown> };
+      }) => {
+        const company = f.companies.get(where.id);
+        if (!company) return { count: 0 };
+        f.companies.set(where.id, {
+          ...company,
+          ...(data.status ? { status: data.status } : {}),
+          ...(data.attributes ? { attributes: data.attributes } : {}),
+          version: company.version + 1,
+        });
+        return { count: 1 };
+      },
+    },
+    suppressionRecord: {
+      findMany: async () => f.suppressions ?? [],
     },
   };
   return {
@@ -106,7 +129,7 @@ function incrementalEvent(sig: Record<string, unknown>): IntentEvent {
 function fixture(over?: Partial<Fixture>): Fixture {
   return {
     companies: new Map([
-      ['co-1', { id: 'co-1', domain: null, dedupeKey: buyerKey, attributes: { ted_buyer: true }, status: 'NEW', version: 1 }],
+      ['co-1', { id: 'co-1', name: 'Stadt Musterstadt', domain: null, dedupeKey: buyerKey, attributes: { ted_buyer: true }, status: 'NEW', version: 1 }],
     ]),
     signals: [tedSignalRow()],
     watchSources: new Map(),
@@ -128,6 +151,28 @@ describe('IntentRecomputeService —— 收口⑤「信号可复算」（surface
       at: new Date(now - 3 * DAY_MS).toISOString(),
       strength: 0.9,
     });
+  });
+
+  it('写回前以 append-only suppression authority 复核 stale derived status', async () => {
+    const f = fixture({
+      companies: new Map([
+        ['co-1', {
+          id: 'co-1',
+          name: 'Stadt Musterstadt',
+          domain: 'blocked.example',
+          dedupeKey: buyerKey,
+          attributes: { ted_buyer: true },
+          status: 'NEW',
+          version: 1,
+        }],
+      ]),
+      suppressions: [{ type: 'domain', value: 'blocked.example' }],
+    });
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+
+    await expect(svc.recomputeCompany(WS, 'co-1', { surfaces: SURFACES })).resolves.toBe('missing');
+    expect(f.companies.get('co-1')).toMatchObject({ status: 'SUPPRESSED', attributes: { ted_buyer: true } });
+    expect(f.companies.get('co-1')!.attributes.intent).toBeUndefined();
   });
 
   it('信号全过期 → 陈旧 intent 被清除（过期收敛）；再复算幂等 unchanged', async () => {

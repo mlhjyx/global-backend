@@ -108,6 +108,34 @@ describe('company suppression terminal gate', () => {
     });
   });
 
+  it('removes a retained role mailbox even when the canonical company is already SUPPRESSED', async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1',
+          name: 'Acme GmbH',
+          domain: 'acme.de',
+          attributes: { contact_email: 'sales@acme.de', keep: true },
+          status: 'SUPPRESSED',
+        })),
+        updateMany,
+      },
+      suppressionRecord: {
+        findMany: vi.fn(async () => [{ type: 'domain', value: 'acme.de' }]),
+      },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      loadMaterializableCompanyState(tx, 'ws-1', 'd:acme.de', { name: 'Acme GmbH', domain: 'acme.de' }),
+    ).resolves.toMatchObject({ allowed: false, prior: { id: 'co-1' } });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'co-1' },
+      data: { attributes: { keep: true }, version: { increment: 1 } },
+    });
+  });
+
   it('canonicalizes a legacy company-name value and blocks it', async () => {
     const { tx } = fakeTx({
       company: { id: 'co-1', name: '  Müller   Pumpen GmbH ', domain: null, status: 'NEW' },

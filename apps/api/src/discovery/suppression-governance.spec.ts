@@ -64,6 +64,8 @@ function makeHarness(record: SuppressionRow) {
               id: '66666666-6666-4666-8666-666666666666',
               domain: ' HTTPS://WWW.EXAMPLE.COM/path ',
               name: '  ACME   GmbH ',
+              status: 'SUPPRESSED',
+              attributes: { contact_email: ' Sales@EXAMPLE.COM ', keep: true },
             }]),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
@@ -183,6 +185,21 @@ describe('Suppression governance', () => {
     await expect(service.addSuppression(CTX, { type, value, reason: 'legal' }))
       .rejects.toBeInstanceOf(BadRequestException);
     expect(withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('exact email suppression removes a canonical role mailbox without suppressing the company', async () => {
+    const h = makeHarness(row('PREFERENCE'));
+
+    await h.service.addSuppression(CTX, {
+      type: 'email',
+      value: 'sales@example.com',
+      reason: 'unsubscribe',
+    });
+
+    expect(h.tx.canonicalCompany.updateMany).toHaveBeenCalledWith({
+      where: { id: '66666666-6666-4666-8666-666666666666' },
+      data: { attributes: { keep: true }, version: { increment: 1 } },
+    });
   });
 
   it.each([
