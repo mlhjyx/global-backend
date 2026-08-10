@@ -25,12 +25,36 @@ CREATE TABLE "suppression_decision" (
   "workspace_id" UUID NOT NULL,
   "suppression_id" UUID NOT NULL,
   "request_id" VARCHAR(128) NOT NULL,
+  "requested_decision" TEXT NOT NULL,
+  "requested_reason_code" TEXT NOT NULL,
   "decision" TEXT NOT NULL,
   "reason_code" TEXT NOT NULL,
   "actor_id" VARCHAR(256) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "suppression_decision_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "suppression_decision_requested_decision_check" CHECK (
+    "requested_decision" IN ('RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED')
+  ),
+  CONSTRAINT "suppression_decision_requested_reason_code_check" CHECK (
+    "requested_reason_code" IN (
+      'USER_PREFERENCE_CHANGED',
+      'BOUNCE_CLASSIFICATION_ERROR',
+      'IDENTITY_MISASSOCIATION',
+      'DUPLICATE_RECORD',
+      'OTHER'
+    )
+  ),
+  CONSTRAINT "suppression_decision_requested_pair_check" CHECK (
+    (
+      "requested_decision" = 'RELEASE_REQUESTED'
+      AND "requested_reason_code" IN ('USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER')
+    )
+    OR (
+      "requested_decision" = 'IDENTITY_CORRECTION_REQUESTED'
+      AND "requested_reason_code" IN ('IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER')
+    )
+  ),
   CONSTRAINT "suppression_decision_decision_check" CHECK (
     "decision" IN ('RELEASE_REQUESTED', 'RELEASE_REQUEST_DENIED', 'IDENTITY_CORRECTION_REQUESTED')
   ),
@@ -56,6 +80,17 @@ CREATE TABLE "suppression_decision" (
     OR (
       "decision" = 'RELEASE_REQUEST_DENIED'
       AND "reason_code" = 'LEGAL_SUPPRESSION_IMMUTABLE'
+    )
+  ),
+  CONSTRAINT "suppression_decision_outcome_matches_request_check" CHECK (
+    (
+      "decision" = 'RELEASE_REQUEST_DENIED'
+      AND "requested_decision" = 'RELEASE_REQUESTED'
+      AND "reason_code" = 'LEGAL_SUPPRESSION_IMMUTABLE'
+    )
+    OR (
+      "decision" = "requested_decision"
+      AND "reason_code" = "requested_reason_code"
     )
   ),
   CONSTRAINT "suppression_decision_workspace_record_fkey"

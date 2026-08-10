@@ -559,6 +559,8 @@ export class DiscoveryService {
           workspaceId: ctx.workspaceId,
           suppressionId: id,
           requestId: request.requestId,
+          requestedDecision: request.decision,
+          requestedReasonCode: request.reasonCode,
           decision,
           reasonCode,
           actorId: ctx.userId,
@@ -575,6 +577,8 @@ export class DiscoveryService {
       }
       const same =
         record.suppressionId === id &&
+        record.requestedDecision === request.decision &&
+        record.requestedReasonCode === request.reasonCode &&
         record.decision === decision &&
         record.reasonCode === reasonCode &&
         record.actorId === ctx.userId;

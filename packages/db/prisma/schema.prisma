@@ -896,14 +896,17 @@ model SuppressionRecord {
 /// Suppression 释放/身份纠正决策：append-only。请求本身不解除 suppression；法定 suppression 的
 /// 普通释放请求只追加 RELEASE_REQUEST_DENIED。actor/request/reason/time 均为问责字段，不保存明文 PII。
 model SuppressionDecision {
-  id            String   @id @default(uuid()) @db.Uuid
-  workspaceId   String   @map("workspace_id") @db.Uuid
-  suppressionId String   @map("suppression_id") @db.Uuid
-  requestId     String   @map("request_id") @db.VarChar(128)
-  decision      String // RELEASE_REQUESTED | RELEASE_REQUEST_DENIED | IDENTITY_CORRECTION_REQUESTED
-  reasonCode    String   @map("reason_code")
-  actorId       String   @map("actor_id") @db.VarChar(256)
-  createdAt     DateTime @default(now()) @map("created_at")
+  id                  String   @id @default(uuid()) @db.Uuid
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  suppressionId       String   @map("suppression_id") @db.Uuid
+  requestId           String   @map("request_id") @db.VarChar(128)
+  /// 原始操作员命令；法定 release 被拒绝时仍保留申请类型和理由，供幂等与问责审计。
+  requestedDecision   String   @map("requested_decision")
+  requestedReasonCode String   @map("requested_reason_code")
+  decision            String // RELEASE_REQUESTED | RELEASE_REQUEST_DENIED | IDENTITY_CORRECTION_REQUESTED
+  reasonCode          String   @map("reason_code")
+  actorId             String   @map("actor_id") @db.VarChar(256)
+  createdAt           DateTime @default(now()) @map("created_at")
 
   suppression SuppressionRecord @relation(fields: [workspaceId, suppressionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "suppression_decision_workspace_record_fkey")
 
