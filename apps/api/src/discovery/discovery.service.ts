@@ -15,6 +15,7 @@ import {
   canonicalizeSuppressionValues,
   companyMatchesSuppression,
 } from './suppression-value';
+import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -409,6 +410,58 @@ export class DiscoveryService {
 
     // 短事务②：审计留痕（裁决 + 合法性基础）+ 回写状态。返回 point + verification 元数据供前端判断。
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
+      const currentPoint = await tx.contactPoint.findUnique({
+        where: { id: pointId },
+        select: {
+          value: true,
+          contact: {
+            select: {
+              company: { select: { id: true, name: true, domain: true, status: true } },
+            },
+          },
+        },
+      });
+      if (!currentPoint) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'contact point not found' } });
+      }
+      const currentSuppressions = await tx.suppressionRecord.findMany({
+        where: { type: { in: ['email', 'domain', 'company_name'] } },
+        select: { type: true, value: true },
+      });
+      const currentEmail = canonicalizeSuppressionValue('email', currentPoint.value);
+      const currentDomain = currentEmail
+        ? canonicalizeSuppressionValue('domain', currentEmail.split('@')[1])
+        : null;
+      const currentCompany = currentPoint.contact.company;
+      const currentCompanySuppressed = companyMatchesSuppression(currentSuppressions, currentCompany);
+      if (currentCompanySuppressed && currentCompany.status !== 'SUPPRESSED') {
+        await tx.canonicalCompany.update({
+          where: { id: currentCompany.id },
+          data: { status: 'SUPPRESSED', version: { increment: 1 } },
+        });
+      }
+      const currentlySuppressed =
+        currentCompany.status === 'SUPPRESSED' ||
+        currentCompanySuppressed ||
+        (!!currentEmail && canonicalizeSuppressionValues(
+          'email',
+          currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
+        ).has(currentEmail)) ||
+        (!!currentDomain && canonicalizeSuppressionValues(
+          'domain',
+          currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
+        ).has(currentDomain));
+      const committedVerdict: EmailVerdict = currentlySuppressed
+        ? {
+            status: 'BLOCKED',
+            detail: 'suppression_committed_before_verification_write',
+            costCents: verdict.costCents,
+            kind: verdict.kind ?? gateKind ?? loaded.kind,
+            lawfulBasis: verdict.lawfulBasis ?? recordedBasis,
+          }
+        : verdict;
+      const committedProviderKey = currentlySuppressed ? 'compliance_gate' : providerKey;
       await tx.fieldEvidence.create({
         data: {
           workspaceId: ctx.workspaceId,
@@ -416,29 +469,29 @@ export class DiscoveryService {
           entityId: loaded.contactId,
           field: 'email.verification',
           value: {
-            status: verdict.status,
-            detail: verdict.detail ?? null,
-            kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
-            lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
-            suppressed: loaded.suppressed,
+            status: committedVerdict.status,
+            detail: committedVerdict.detail ?? null,
+            kind: committedVerdict.kind ?? gateKind ?? loaded.kind ?? null,
+            lawfulBasis: committedVerdict.lawfulBasis ?? recordedBasis ?? null,
+            suppressed: currentlySuppressed || loaded.suppressed,
           } as unknown as Prisma.InputJsonValue,
-          providerKey,
-          license: providerKey === 'sandbox' ? 'sandbox' : 'public',
-          allowedActions: allowedActionsFor(verdict.status) as unknown as Prisma.InputJsonValue,
+          providerKey: committedProviderKey,
+          license: committedProviderKey === 'sandbox' ? 'sandbox' : 'public',
+          allowedActions: allowedActionsFor(committedVerdict.status) as unknown as Prisma.InputJsonValue,
         },
       });
       const updated = await tx.contactPoint.update({
         where: { id: pointId },
-        data: { status: verdict.status, verifiedAt: new Date() },
+        data: { status: committedVerdict.status, verifiedAt: new Date() },
       });
       return {
         ...updated,
         verification: {
-          status: verdict.status,
-          detail: verdict.detail ?? null,
-          kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
-          providerKey,
-          lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
+          status: committedVerdict.status,
+          detail: committedVerdict.detail ?? null,
+          kind: committedVerdict.kind ?? gateKind ?? loaded.kind ?? null,
+          providerKey: committedProviderKey,
+          lawfulBasis: committedVerdict.lawfulBasis ?? recordedBasis ?? null,
         },
       };
     });
@@ -454,6 +507,7 @@ export class DiscoveryService {
       });
     }
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
       const reason = entry.reason ?? 'manual';
       // Fail closed: only the explicitly reviewed preference reasons are releasable.
       // Unknown/future reasons retain the stronger legal protection until policy is updated.

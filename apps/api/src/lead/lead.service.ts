@@ -15,6 +15,7 @@ import {
 } from '../discovery/suppression-value';
 import { storageRightsContextForLead } from '../compliance/data-rights.context';
 import { SanctionsScreeningService, reconcileReviewState, matchesFromJson } from '../sanctions/sanctions-screening.service';
+import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 
 @Injectable()
 export class LeadService {
@@ -140,6 +141,7 @@ export class LeadService {
         });
       };
       if (action === 'accept') {
+        await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
         // 🔴 Art.17 竞态闸（Codex PR #72）：交棒前**先对公司行加行锁**（SELECT … FOR UPDATE），
         // 与 freezeSubject 的 `status=SUPPRESSED` updateMany 串行化。两种交错都被关死：
         //  ① freeze 先提交 → 本锁在其提交后才拿到，READ COMMITTED 下随后 findUnique 读到 SUPPRESSED

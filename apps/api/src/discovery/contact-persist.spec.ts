@@ -250,7 +250,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       ],
       suppressedEmails: new Set(),
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1); // 取了 FOR SHARE 状态锁并复读
+    expect(queryRaw).toHaveBeenCalledTimes(2); // workspace suppression advisory lock + 公司 FOR SHARE 复读
     expect(res.created).toBe(0);
     expect(res.skippedSuppressed).toBe(2); // 整批跳过
     expect(canonicalUpsert).not.toHaveBeenCalled(); // 未新建任何联系人

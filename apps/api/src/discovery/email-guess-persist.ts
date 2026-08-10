@@ -3,6 +3,7 @@ import { GuessResult } from './email-guesser';
 import { LawfulBasis } from './provider-contract';
 import { encryptPii } from '../compliance/pii-crypto';
 import { companyMatchesSuppression, canonicalizeSuppressionValue, canonicalizeSuppressionValues } from './suppression-value';
+import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 
 /**
  * 邮箱猜测结果的落库（选项 B · P0.3）——把 {@link EmailGuesser} 猜到的决策人邮箱写进
@@ -72,6 +73,8 @@ export async function persistGuessedEmail(
 ): Promise<PersistGuessOutcome> {
   const plan = guessedEmailWritePlan(args.result);
   if (!plan) return { persisted: false, reason: args.result.reason };
+
+  await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
 
   // Commit-side terminal gate: the SMTP call can take minutes, so the load-time company/email
   // suppression snapshot is not authoritative here. Lock and reread the owning company, then

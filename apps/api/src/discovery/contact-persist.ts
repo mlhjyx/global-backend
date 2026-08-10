@@ -5,6 +5,7 @@ import { ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
 import { cleanEmail } from '../acquisition/clean';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from './suppression-value';
+import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -40,6 +41,8 @@ export async function persistDiscoveredContacts(
   let created = 0;
   let merged = 0;
   let skippedSuppressed = 0;
+
+  await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
 
   // 🔒 Codex P1「Prevent inserts after the company contact re-read」的写入侧硬底：在**本写入事务内**对公司行
   // 取 FOR SHARE 锁并复读 status（与删除擦除活动的 FOR UPDATE 互斥）。载入闸门在长网络 fan-out 后可能已失效
