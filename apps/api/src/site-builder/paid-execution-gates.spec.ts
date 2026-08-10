@@ -133,6 +133,59 @@ describe('RouterModelGateway persistent paid-call gate', () => {
     expect(model.generateStructured).not.toHaveBeenCalled();
   });
 
+  it('releases a reservation when suppression denies before the first paid wire', async () => {
+    const model = provider(async () => ({
+      data: { ok: true },
+      provider: 'gateway',
+      model: 'gpt-5.6-terra',
+    }));
+    const settleOperation = vi.fn(async () => 'SETTLED');
+    const disablePaidCalls = vi.fn(async () => undefined);
+    const gateway = new RouterModelGateway({
+      route: () => [model],
+    } as unknown as ModelRouter);
+    gateway.paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: 'execute' as const })),
+      settleOperation,
+      disablePaidCalls,
+    } as never;
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'site_builder.brand_profile',
+          prompt: 'p',
+          schema: {},
+          model: 'gpt-5.6-terra',
+          maxCostCents: 40,
+          maxTokens: 1_000,
+        },
+        {
+          ...paidModelContext,
+          authorizeExternalAction: vi.fn(async () => false),
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: 'ExternalActionDeniedError',
+      decision: 'suppression_action_gate',
+      callCount: 0,
+    });
+
+    expect(model.generateStructured).not.toHaveBeenCalled();
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'RELEASED',
+        errorCode: 'SUPPRESSION_ACTION_GATE',
+        measurement: expect.objectContaining({
+          basis: 'not_incurred',
+          budgetChargeMicrousd: 0,
+          callCount: 0,
+        }),
+      }),
+    );
+    expect(disablePaidCalls).not.toHaveBeenCalled();
+  });
+
   it('preflights before reserve and settles request-bound gateway cost with provenance', async () => {
     const order: string[] = [];
     const model = provider(async () => {
