@@ -78,6 +78,13 @@ export async function persistDiscoveredContacts(
 
   for (const c of args.contacts) {
     const email = c.email ? canonicalizeSuppressionValue('email', c.email) ?? undefined : undefined;
+    // An adapter-provided email is a system-boundary input. If it is present but cannot be
+    // canonicalized, fail closed for the whole candidate rather than materializing the named
+    // person while silently dropping the malformed address.
+    if (c.email && !email) {
+      skippedSuppressed += 1;
+      continue;
+    }
     if (email && effectiveSuppressedEmails.has(email)) {
       skippedSuppressed += 1;
       continue;
