@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiProperty, ApiPropertyOptional, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
@@ -146,6 +146,35 @@ const CANONICAL_COMPANY_SCHEMA = {
   additionalProperties: true,
   description: 'CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）',
 };
+
+const suppressionErrorSchema = (codes: readonly string[], includeDecisionId = false) => ({
+  type: 'object',
+  additionalProperties: false,
+  required: ['error'],
+  properties: {
+    error: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['code', 'message'],
+      properties: {
+        code: { type: 'string', enum: [...codes] },
+        message: { type: 'string' },
+        details: { type: 'object', additionalProperties: true },
+        ...(includeDecisionId ? { decisionId: { type: 'string', format: 'uuid' } } : {}),
+      },
+    },
+  },
+});
+
+const SUPPRESSION_VALIDATION_ERROR_SCHEMA = suppressionErrorSchema([
+  'VALIDATION_ERROR',
+  'INVALID_SUPPRESSION_VALUE',
+]);
+const SUPPRESSION_NOT_FOUND_SCHEMA = suppressionErrorSchema(['NOT_FOUND']);
+const SUPPRESSION_DECISION_CONFLICT_SCHEMA = suppressionErrorSchema(
+  ['LEGAL_SUPPRESSION_IMMUTABLE', 'IDEMPOTENCY_CONFLICT', 'DECISION_NOT_PERSISTED'],
+  true,
+);
 
 @ApiTags('Discovery')
 @ApiBearerAuth()
@@ -310,6 +339,7 @@ export class DiscoveryController {
   @HttpCode(201)
   @ApiOperation({ summary: '加入禁联名单（email/domain/company_name）；命中的公司立即 SUPPRESSED' })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' }, { status: 201 })
+  @ApiResponse({ status: 400, description: '请求校验失败或 suppression value 非法', schema: SUPPRESSION_VALIDATION_ERROR_SCHEMA })
   async addSuppression(@Ctx() ctx: RequestContext, @Body() dto: CreateSuppressionDto) {
     return envelope(await this.discovery.addSuppression(ctx, dto));
   }
@@ -318,6 +348,7 @@ export class DiscoveryController {
   @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '禁联名单' })
   @ApiPageEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录' })
+  @ApiResponse({ status: 400, description: '分页参数校验失败', schema: SUPPRESSION_VALIDATION_ERROR_SCHEMA })
   async listSuppressions(@Ctx() ctx: RequestContext, @Query() page: SuppressionPageDto) {
     const result = await this.discovery.listSuppressions(ctx, page);
     return pageEnvelope(result.rows, result);
@@ -331,29 +362,13 @@ export class DiscoveryController {
     description: '法定 suppression 的 release 请求会持久化拒绝审计并返回 409。',
   })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'append-only SuppressionDecision' }, { status: 201 })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 400, description: '路径或请求体校验失败', schema: SUPPRESSION_VALIDATION_ERROR_SCHEMA })
+  @ApiResponse({ status: 404, description: 'suppression 不存在', schema: SUPPRESSION_NOT_FOUND_SCHEMA })
   @ApiResponse({
     status: 409,
     description: '法定 suppression 不可释放，或幂等 requestId 与首个事实冲突',
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['error'],
-      properties: {
-        error: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['code', 'message'],
-          properties: {
-            code: {
-              type: 'string',
-              enum: ['LEGAL_SUPPRESSION_IMMUTABLE', 'IDEMPOTENCY_CONFLICT', 'DECISION_NOT_PERSISTED'],
-            },
-            message: { type: 'string' },
-            decisionId: { type: 'string', format: 'uuid' },
-          },
-        },
-      },
-    },
+    schema: SUPPRESSION_DECISION_CONFLICT_SCHEMA,
   })
   async requestSuppressionDecision(
     @Ctx() ctx: RequestContext,
@@ -367,6 +382,9 @@ export class DiscoveryController {
   @RequireScopes('compliance:manage')
   @ApiOperation({ summary: '列出 suppression 的 append-only release/correction 决策' })
   @ApiPageEnvelope({ type: 'object', additionalProperties: true, description: 'SuppressionDecision' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 400, description: '路径或分页参数校验失败', schema: SUPPRESSION_VALIDATION_ERROR_SCHEMA })
+  @ApiResponse({ status: 404, description: 'suppression 不存在', schema: SUPPRESSION_NOT_FOUND_SCHEMA })
   async listSuppressionDecisions(
     @Ctx() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
@@ -390,6 +408,14 @@ export class DiscoveryController {
       releaseRequested: { type: 'boolean', enum: [true] },
       decisionId: { type: 'string', format: 'uuid' },
     },
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 400, description: '路径参数校验失败', schema: SUPPRESSION_VALIDATION_ERROR_SCHEMA })
+  @ApiResponse({ status: 404, description: 'suppression 不存在', schema: SUPPRESSION_NOT_FOUND_SCHEMA })
+  @ApiResponse({
+    status: 409,
+    description: '法定 suppression 不可释放；拒绝决策已 append-only 持久化',
+    schema: SUPPRESSION_DECISION_CONFLICT_SCHEMA,
   })
   async removeSuppression(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
     return envelope(await this.discovery.removeSuppression(ctx, id));
