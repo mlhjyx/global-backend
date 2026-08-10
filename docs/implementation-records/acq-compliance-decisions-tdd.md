@@ -14,6 +14,9 @@
 6. 被禁 email/contact_key/domain 的联系人不进 `LeadQualifiedPackage`；剩余可达点为零时 accept fail-closed。
 7. 付费模型在首个 wire 前被 suppression 拒绝时，reservation 以 `RELEASED/not_incurred/callCount=0` 收口且不冻结；若首调已发生、repair 前被拒绝，已发生 usage/settlement 必须照实结算。
 8. workspace-specific robots denial 不得写入跨 workspace 共享 origin cache；普通 robots/egress 结果仍按既有 TTL 语义缓存。
+9. sitemap/watch 的 suppression denial 不得被普通网络降级、root/child 重试或 homepage fallback 吞掉；denial 后零 monitor 写入、零 registered success。
+10. 已 `SUPPRESSED` 公司、exact email 与 mailbox-domain suppression 都必须清除 `attributes.contact_email`；最低禁联事实只保留 canonical suppression key，不保留原 mailbox 值。
+11. Intent recompute 在首次读取和最终写回两个边界都读取 append-only suppression authority；最终写回基于锁内当前 attributes 合并，禁止旧快照复活已清理字段。
 
 ## 二、RED → GREEN 证据
 
@@ -43,14 +46,16 @@
 | restricted event read      | `204d1e8e` | `cd889693` | `GET /events` 同时要求 acquisition read 与 personal-data read；ACK scope 保持独立         |
 | Lead error contracts       | `508dbcac` | `cd889693` | accept/reject 实际可达 400/404/409 与统一 error envelope 进入生成 OpenAPI                 |
 | website intent authority   | `bf4b35aa` | `cd889693` | web-watch intent commit 不再只信派生 status；同锁读取 append-only fact 与现有 canonical 身份 |
+| watch denial terminal      | `30bf2406` | `d5e23dea` | suppression denial 立即越过 sitemap/root/child/homepage fallback；不创建 monitor                |
+| reconciliation + recompute | `835bba70` | `d5e23dea` | 已禁公司与 email/domain mailbox 清理闭合；Intent 重算首读和提交均复核 authority                 |
 
 ## 三、最终本地验证
 
 | 门                | 结果                                                                                                                                                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 聚焦 Vitest       | 原收口面 20 files / 234 tests PASS；`cd889693` 新增修复面再跑 10 files / 72 tests PASS，覆盖 existing identity、watch callback、web intent、event scope 与 Lead error contract                              |
-| API 全量 Vitest   | `pnpm --filter @global/api test` 在 `cd889693` 后完整退出 0；不沿用旧 exact head 的 passed/skipped 数字充当本次 reporter 摘要                                                                            |
-| API lint / build  | `pnpm --filter @global/api lint` 与 Nest build 在 `cd889693` 后 PASS                                                                                                                                               |
+| 聚焦 Vitest       | `d5e23dea` 前工作树运行 5 files / 65 tests PASS，覆盖 watch denial terminal、already-SUPPRESSED 与并发 status-repair mailbox 清理、exact email/alternate-domain mailbox、Intent recompute authority gate |
+| API 全量 Vitest   | `pnpm --filter @global/api test -- --run` 在 `d5e23dea` 前工作树完整退出 0；当前 reporter 未输出可复核总数，因此不沿用旧 exact head 的 passed/skipped 数字充当本次摘要                                             |
+| API lint / build  | `pnpm --filter @global/api lint` 与 Nest build 在 `d5e23dea` 前工作树 PASS；lint 仅 7 个既有 warning、0 error                                                                                                   |
 | OpenAPI           | development + loopback + 显式 dev token 开关下重新导出 60 paths；提交 artifact 无额外 drift；Spectral 0 errors、15 个既有 tag warnings                                                                             |
 | 文档与治理        | governance 60/60 PASS；`docs:verify` 检查 121 Markdown，0 errors、1 个既有 table warning                                                                                                                           |
 | PostgreSQL 16     | 前一 GREEN `017f0d9f` 的隔离无卷临时库证据：82/82 migrations PASS；`app_user` 非 superuser/non-BYPASSRLS；RLS/append-only/CHECK/LEGAL 防降级均 fail-closed。本轮新增 projection/wire 路径未重跑真实 PG，不把 mock 当并发证明 |
