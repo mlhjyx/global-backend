@@ -28,4 +28,35 @@ describe('Crawl4AI adapter 的 API 侧入口闸', () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['crawlUrl', crawlUrl],
+    ['crawlHtml', crawlHtml],
+  ] as const)(
+    '%s 在公网目标解析后、Crawl4AI dispatch 前重新授权',
+    async (_name, crawl) => {
+      const fetchMock = vi.fn();
+      const authorizeExternalAction = vi
+        .fn<() => Promise<void>>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('suppression_action_gate'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        crawl(
+          'https://company.example/path',
+          authorizeExternalAction,
+          vi.fn(async (raw: string) => ({
+            url: new URL(raw),
+            ip: '203.0.113.10',
+            family: 4 as const,
+            addresses: [{ address: '203.0.113.10', family: 4 as const }],
+          })),
+        ),
+      ).rejects.toThrow(/suppression_action_gate/);
+
+      expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });
