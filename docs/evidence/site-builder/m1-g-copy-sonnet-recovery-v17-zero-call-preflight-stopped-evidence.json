@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-recovery-zero-call-preflight-stopped-evidence/2026-08-10-v1",
+  "artifactId": "site-builder-copy-sonnet-recovery-v17-zero-call-preflight-stopped/2026-08-10-v1",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "executionHead": "983a6792e87e75b0cdb53232f3e2999eeb4b77f5",
+  "mergeProvenance": {
+    "pullRequest": 381,
+    "mergeCommit": "983a6792e87e75b0cdb53232f3e2999eeb4b77f5"
+  },
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopPhase": "public_pricing_before_token_creation",
+  "sourceObservation": {
+    "authority": "tool_broker",
+    "toolId": "openox.pricing_catalog",
+    "endpoint": "/api/public/pricing-catalog",
+    "upstreamHost": "openox.tech",
+    "transportOutcomes": ["ipv4_connect_timeout", "ipv6_network_unreachable"],
+    "modelCostCents": 0
+  },
+  "nonOccurrence": {
+    "v17TokenCreated": false,
+    "trackedPreflightArtifactCreated": false,
+    "bearerModelRequestIssued": false,
+    "modelWireCalls": 0,
+    "modelCost": { "CNY": 0, "USD": 0 }
+  },
+  "controlPlaneReadback": {
+    "route": {
+      "channelId": 20,
+      "status": "DISABLED",
+      "channelType": 14,
+      "baseUrl": "https://openox.tech",
+      "model": "claude-sonnet-5",
+      "group": "special",
+      "modelMapping": "IDENTITY"
+    },
+    "retiredV16Token": {
+      "tokenId": 24,
+      "status": "DISABLED",
+      "purpose": "site_builder_copy_sonnet_recovery",
+      "model": "claude-sonnet-5",
+      "group": "special"
+    }
+  },
+  "requiredRecovery": [
+    "do not reuse or mutate retired v16 token 24",
+    "do not create a v18 successor from this transport failure",
+    "restore and independently verify OpenOx public pricing reachability before one controlled v17 zero-call retry",
+    "obtain separate explicit authorization before any model dispatch"
+  ],
+  "artifactDigest": "0663be879dd6466ab62c2073fc0efb825075f39b172d97daaab368df1820e16b"
+}
