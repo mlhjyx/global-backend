@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { canonicalDigest } from "../../model-runtime/context-engine";
+import type { ExecutionBroker } from "../../tools/tool-contract";
 
 import {
   COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
@@ -28,31 +29,58 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function catalog() {
+function catalog(options: {
+  duplicateModel?: boolean;
+  duplicateGroup?: boolean;
+} = {}) {
+  const model = {
+    model_id: "claude-sonnet-5",
+    product_line: "claude",
+    input_rate: "2",
+    output_rate: "10",
+    cache_read_rate: "0.2",
+    cache_write_rate: "2.5",
+    group_rates: null,
+    status: "enabled",
+    updated_at: "2026-08-10T05:30:00.000Z",
+  };
+  const group = {
+    name: "special",
+    product_line: "claude",
+    rate_multiplier: "1",
+  };
   return {
     success: true,
     data: {
-      models: [
-        {
-          model_id: "claude-sonnet-5",
-          product_line: "claude",
-          input_rate: "2",
-          output_rate: "10",
-          cache_read_rate: "0.2",
-          cache_write_rate: "2.5",
-          group_rates: null,
-          status: "enabled",
-          updated_at: "2026-08-10T05:30:00.000Z",
-        },
-      ],
-      groups: [
-        {
-          name: "special",
-          product_line: "claude",
-          rate_multiplier: "1",
-        },
-      ],
+      models: options.duplicateModel ? [model, { ...model }] : [model],
+      groups: options.duplicateGroup ? [group, { ...group }] : [group],
     },
+  };
+}
+
+function pricingBroker(options: {
+  duplicateModel?: boolean;
+  duplicateGroup?: boolean;
+} = {}) {
+  const invoke = vi.fn(async () => ({
+    data: {
+      catalog: catalog(options),
+      responseSha256: "a".repeat(64),
+    },
+    costCents: 0,
+    provenance: {
+      sourceUrl: "https://openox.tech/api/public/pricing-catalog",
+      fetchedAt: NOW.toISOString(),
+      contentHash: "a".repeat(64),
+      parserVersion: "openox-pricing-catalog/1",
+    },
+  }));
+  return {
+    invoke,
+    broker: {
+      checkSourcePolicy: vi.fn(async () => ({ allowed: true })),
+      invoke: invoke as unknown as ExecutionBroker["invoke"],
+    } satisfies ExecutionBroker,
   };
 }
 
@@ -62,6 +90,12 @@ function liveFetch(options: {
   duplicateChannels?: boolean;
   invalidLogShape?: boolean;
   postCreatePrefixToken?: boolean;
+  invalidModelLimitValue?: boolean;
+  malformedModelInventory?: boolean;
+  missingPageTotal?: "channel" | "token";
+  channelOverrides?: Record<string, unknown>;
+  duplicatePricingModel?: boolean;
+  duplicatePricingGroup?: boolean;
 } = {}) {
   const observed: Array<{ method: string; path: string }> = [];
   const tokens: Array<Record<string, unknown>> = options.existingPurposeToken
@@ -76,9 +110,13 @@ function liveFetch(options: {
   const channel = {
     id: 22,
     name: "OpenOx Claude Sonnet",
+    type: 14,
     status: 1,
+    base_url: "https://openox.tech",
     models: "claude-sonnet-5",
     group: "special",
+    model_mapping: "{}",
+    ...options.channelOverrides,
   };
   const fetchMock = vi.fn(
     async (input: string | URL | Request, init?: RequestInit) => {
@@ -90,7 +128,9 @@ function liveFetch(options: {
           success: true,
           data: {
             items: options.duplicateChannels ? [channel, { ...channel, id: 23 }] : [channel],
-            total: options.duplicateChannels ? 2 : 1,
+            ...(options.missingPageTotal === "channel"
+              ? {}
+              : { total: options.duplicateChannels ? 2 : 1 }),
           },
         });
       }
@@ -109,14 +149,19 @@ function liveFetch(options: {
         }
         return json({
           success: true,
-          data: { items: tokens, total: tokens.length },
+          data: {
+            items: tokens,
+            ...(options.missingPageTotal === "token"
+              ? {}
+              : { total: tokens.length }),
+          },
         });
       }
       if (url.pathname === "/api/token/" && method === "POST") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         expect(body).toMatchObject({
           name: "Site Builder Copy Sonnet Recovery v16",
-          remain_quota: 151_264,
+          remain_quota: 186_080,
           unlimited_quota: false,
           model_limits_enabled: true,
           model_limits: "claude-sonnet-5",
@@ -147,9 +192,11 @@ function liveFetch(options: {
           data: {
             unlimited_quota: false,
             model_limits_enabled: true,
-            model_limits: { "claude-sonnet-5": 151_264 },
-            total_granted: 151_264,
-            total_available: 151_264,
+            model_limits: {
+              "claude-sonnet-5": options.invalidModelLimitValue ? false : true,
+            },
+            total_granted: 186_080,
+            total_available: 186_080,
           },
         });
       }
@@ -158,6 +205,7 @@ function liveFetch(options: {
           object: "list",
           data: [
             { id: "claude-sonnet-5", object: "model" },
+            ...(options.malformedModelInventory ? [{}] : []),
             ...(options.broadenedModels
               ? [{ id: "gpt-5.6-terra", object: "model" }]
               : []),
@@ -171,7 +219,12 @@ function liveFetch(options: {
         url.origin === "https://openox.tech" &&
         url.pathname === "/api/public/pricing-catalog"
       ) {
-        return json(catalog());
+        return json(
+          catalog({
+            duplicateModel: options.duplicatePricingModel,
+            duplicateGroup: options.duplicatePricingGroup,
+          }),
+        );
       }
       throw new Error(`unexpected request ${method} ${url}`);
     },
@@ -179,7 +232,7 @@ function liveFetch(options: {
   return { fetchMock, observed };
 }
 
-function input() {
+function input(broker = pricingBroker().broker) {
   return {
     repositoryRoot: REPOSITORY_ROOT,
     executionHeadCommit: "ca16c5336a51f5ada152aff5c39e57ba8ff4589a",
@@ -188,6 +241,7 @@ function input() {
     gatewayOrigin: GATEWAY_ORIGIN,
     adminAccessToken: "admin-secret",
     adminUserId: 1,
+    pricingBroker: broker,
   };
 }
 
@@ -244,9 +298,9 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
           "e98839495b40726d4193460951a0e4ee0d76f0e9772619275ded5db4d0017a9b",
         expiresAt: "2026-08-11T06:00:00.000Z",
         quotaMode: "limited",
-        quotaCapPoints: 151_264,
-        remainingQuotaPoints: 151_264,
-        maximumQuotaPointsPerWire: 75_632,
+        quotaCapPoints: 186_080,
+        remainingQuotaPoints: 186_080,
+        maximumQuotaPointsPerWire: 93_040,
       },
       executionScope: {
         taskId: "site_builder.copy",
@@ -258,13 +312,25 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
         maximumWireCalls: 2,
         maximumRepairCallsPerExecution: 1,
       },
-      route: { channelId: 22, group: "special" },
+      route: {
+        channelId: 22,
+        channelType: 14,
+        baseUrl: "https://openox.tech",
+        modelMapping: "IDENTITY",
+        upstreamModelId: "claude-sonnet-5",
+        group: "special",
+      },
       pricing: {
         authority: "openox_model_marketplace",
         currency: "USD",
+        inputPriceMicrounitsPerMillionTokens: 2_000_000,
+        outputPriceMicrounitsPerMillionTokens: 10_000_000,
+        cacheReadPriceMicrounitsPerMillionTokens: 200_000,
+        cacheWritePriceMicrounitsPerMillionTokens: 2_500_000,
         maximumInputTokensPerWire: 69_632,
         maximumOutputTokensPerWire: 1_200,
-        maximumNativeCostMicrounits: 302_528,
+        maximumNativeCostMicrounitsPerWire: 186_080,
+        maximumNativeCostMicrounits: 372_160,
         quotaPerNativeUnit: 500_000,
       },
       settlement: {
@@ -285,6 +351,15 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
         ["/v1/chat/completions", "/v1/responses"].includes(path),
       ),
     ).toBe(false);
+    expect(result.artifact.controlPlaneObservation.requests).toEqual(
+      expect.arrayContaining([
+        {
+          method: "GET",
+          authority: "tool_broker",
+          path: "/api/public/pricing-catalog",
+        },
+      ]),
+    );
   });
 
   it("fails before creation when a purpose token already exists or route identity is ambiguous", async () => {
@@ -299,6 +374,113 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
           runtimeDeps(live.fetchMock),
         ),
       ).rejects.toThrow(/COPY_SONNET_RECOVERY_(TOKEN_EXISTS|ROUTE_AMBIGUOUS)/u);
+      expect(
+        live.observed.some(
+          ({ method, path }) => method === "POST" && path === "/api/token/",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("routes every OpenOx catalog read through the injected ToolBroker and records the broker authority", async () => {
+    const live = liveFetch();
+    const pricing = pricingBroker();
+    const result = await provisionAndAttestCopySonnetRecoveryZeroCall(
+      input(pricing.broker),
+      runtimeDeps(live.fetchMock),
+    );
+
+    expect(pricing.invoke).toHaveBeenCalledTimes(2);
+    expect(pricing.invoke).toHaveBeenCalledWith(
+      "openox.pricing_catalog",
+      {},
+      expect.objectContaining({
+        purpose: "site_builder_copy_sonnet_recovery",
+      }),
+    );
+    expect(
+      live.fetchMock.mock.calls.some(([request]) =>
+        String(request).startsWith("https://openox.tech/"),
+      ),
+    ).toBe(false);
+    expect(result.artifact.controlPlaneObservation.requests).toEqual(
+      expect.arrayContaining([
+        {
+          method: "GET",
+          authority: "tool_broker",
+          path: "/api/public/pricing-catalog",
+        },
+      ]),
+    );
+  });
+
+  it("uses manual redirect handling for every local control-plane request", async () => {
+    const live = liveFetch();
+    await provisionAndAttestCopySonnetRecoveryZeroCall(
+      input(pricingBroker().broker),
+      runtimeDeps(live.fetchMock),
+    );
+
+    expect(live.fetchMock).toHaveBeenCalled();
+    for (const [, requestInit] of live.fetchMock.mock.calls) {
+      expect(requestInit?.redirect).toBe("manual");
+    }
+  });
+
+  it("rejects channel transport, OpenOx base URL, or model-mapping drift before token creation", async () => {
+    for (const channelOverrides of [
+      { type: 1 },
+      { base_url: "https://proxy.example" },
+      { model_mapping: JSON.stringify({ "claude-sonnet-5": "claude-opus-5" }) },
+    ]) {
+      const live = liveFetch({ channelOverrides });
+      await expect(
+        provisionAndAttestCopySonnetRecoveryZeroCall(
+          input(pricingBroker().broker),
+          runtimeDeps(live.fetchMock),
+        ),
+      ).rejects.toThrow("COPY_SONNET_RECOVERY_ROUTE_IDENTITY_INVALID");
+      expect(
+        live.observed.some(
+          ({ method, path }) => method === "POST" && path === "/api/token/",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("rejects missing pagination totals before token creation", async () => {
+    for (const missingPageTotal of ["channel", "token"] as const) {
+      const live = liveFetch({ missingPageTotal });
+      await expect(
+        provisionAndAttestCopySonnetRecoveryZeroCall(
+          input(pricingBroker().broker),
+          runtimeDeps(live.fetchMock),
+        ),
+      ).rejects.toThrow("COPY_SONNET_RECOVERY_CONTROL_PLANE_RESPONSE_INVALID");
+      expect(
+        live.observed.some(
+          ({ method, path }) => method === "POST" && path === "/api/token/",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("rejects duplicate OpenOx model or group rows before token creation", async () => {
+    for (const duplicate of [
+      { duplicatePricingModel: true },
+      { duplicatePricingGroup: true },
+    ]) {
+      const live = liveFetch(duplicate);
+      const pricing = pricingBroker({
+        duplicateModel: duplicate.duplicatePricingModel,
+        duplicateGroup: duplicate.duplicatePricingGroup,
+      });
+      await expect(
+        provisionAndAttestCopySonnetRecoveryZeroCall(
+          input(pricing.broker),
+          runtimeDeps(live.fetchMock),
+        ),
+      ).rejects.toThrow("COPY_SONNET_RECOVERY_PRICE_INVALID");
       expect(
         live.observed.some(
           ({ method, path }) => method === "POST" && path === "/api/token/",
@@ -333,6 +515,8 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     for (const options of [
       { broadenedModels: true },
       { invalidLogShape: true },
+      { invalidModelLimitValue: true },
+      { malformedModelInventory: true },
     ]) {
       const live = liveFetch(options);
       await expect(
@@ -420,6 +604,40 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     ]) {
       expect(() =>
         validateCopySonnetRecoveryZeroCallPreflightArtifact(mutation),
+      ).toThrow("COPY_SONNET_RECOVERY_ZERO_CALL_ARTIFACT_INVALID");
+    }
+
+    for (const requiredRequest of [
+      { authority: "new_api_admin", method: "GET", path: "/api/channel/" },
+      { authority: "new_api_admin", method: "GET", path: "/api/token/" },
+      { authority: "new_api_admin", method: "POST", path: "/api/token/" },
+      { authority: "new_api_bearer", method: "GET", path: "/api/usage/token" },
+      { authority: "new_api_bearer", method: "GET", path: "/v1/models" },
+      { authority: "new_api_bearer", method: "GET", path: "/api/log/token" },
+      { authority: "tool_broker", method: "GET", path: "/api/public/pricing-catalog" },
+    ]) {
+      const requests = artifact.controlPlaneObservation.requests.filter(
+        (request) =>
+          request.authority !== requiredRequest.authority ||
+          request.method !== requiredRequest.method ||
+          request.path !== requiredRequest.path,
+      );
+      const { artifactDigest: _digest, ...withoutDigest } = {
+        ...artifact,
+        controlPlaneObservation: {
+          ...artifact.controlPlaneObservation,
+          observedNetworkCalls: requests.length,
+          requests,
+        },
+      };
+      const missingRequiredObservation = {
+        ...withoutDigest,
+        artifactDigest: canonicalDigest(withoutDigest),
+      };
+      expect(() =>
+        validateCopySonnetRecoveryZeroCallPreflightArtifact(
+          missingRequiredObservation,
+        ),
       ).toThrow("COPY_SONNET_RECOVERY_ZERO_CALL_ARTIFACT_INVALID");
     }
   });

@@ -223,6 +223,28 @@ describe('OpenOx pricing family admission', () => {
       currency: 'CNY',
     });
   });
+
+  it('rejects ambiguous duplicate model or matching group rows', () => {
+    const original = pricingCatalog(['claude-sonnet-5']);
+    const data = original.data as {
+      models: Record<string, unknown>[];
+      groups: Record<string, unknown>[];
+    };
+    for (const ambiguous of [
+      {
+        ...original,
+        data: { ...data, models: [...data.models, { ...data.models[0] }] },
+      },
+      {
+        ...original,
+        data: { ...data, groups: [...data.groups, { ...data.groups[0] }] },
+      },
+    ]) {
+      expect(
+        settlementOpenOxPrice(ambiguous, 'claude-sonnet-5', 'special'),
+      ).toBeNull();
+    }
+  });
 });
 
 function paidContext() {
