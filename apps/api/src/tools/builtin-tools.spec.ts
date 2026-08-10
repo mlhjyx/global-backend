@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ToolRegistry } from './tool-registry';
 import {
   registerBuiltinTools,
   searxngSearchTool,
   crawl4aiFetchTool,
+  createSmtpRcptProbeTool,
   smtpRcptProbeTool,
   SmtpProbeInput,
   SmtpProbeOutput,
@@ -129,6 +130,31 @@ describe('crawl4ai 用途扩宽已关闭 · 显式 [discovery,enrichment] 用途
 });
 
 describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
+  it('工具内 DNS 后 suppression 提交时，SMTP 物理连接前再复核并拒绝', async () => {
+    const resolveMxHost = vi.fn(async () => ({ safe: true, ip: '203.0.113.7' }));
+    const executeSmtpProbe = vi.fn(async () => ({
+      reachable: true,
+      mailFromCode: 250,
+      codes: [250],
+    }));
+    const authorizeExternalAction = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const tool = createSmtpRcptProbeTool({ resolveMxHost, executeSmtpProbe });
+
+    await expect(
+      tool.execute(
+        { domain: 'acme.de', mxHost: 'mx.acme.de', rcptTo: ['buyer@acme.de'] },
+        { workspaceId: 'w', authorizeExternalAction },
+      ),
+    ).rejects.toThrow(/suppression_action_gate/);
+
+    expect(resolveMxHost).toHaveBeenCalledOnce();
+    expect(executeSmtpProbe).not.toHaveBeenCalled();
+    expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
+  });
+
   it('已注册为 verify/email_verification，sourcePolicy=advisory + personalData（登记即强制、标个人数据）', () => {
     expect(smtpRcptProbeTool.id).toBe('smtp.rcpt_probe');
     expect(smtpRcptProbeTool.category).toBe('verify');
