@@ -71,11 +71,10 @@ function makeHarness(record: SuppressionRow, companyOverride?: Record<string, un
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
   };
-  const prisma = {
-    withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
-  };
+  const withWorkspace = vi.fn(async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx));
+  const prisma = { withWorkspace };
   const service = new DiscoveryService(prisma as never, {} as never);
-  return { service, tx, deleteRecord, createDecision, current: () => current };
+  return { service, tx, deleteRecord, createDecision, withWorkspace, current: () => current };
 }
 
 function row(protectionClass: SuppressionRow['protectionClass']): SuppressionRow {
@@ -220,6 +219,29 @@ describe('Suppression governance', () => {
       where: { id: '66666666-6666-4666-8666-666666666666' },
       data: { attributes: { keep: true }, version: { increment: 1 } },
     });
+  });
+
+  it('derived reconciliation releases the workspace policy lock between bounded pages', async () => {
+    const h = makeHarness(row('PREFERENCE'));
+    const page = Array.from({ length: 50 }, (_, index) => ({
+      id: `company-${String(index).padStart(3, '0')}`,
+      domain: `company-${index}.example`,
+      name: `Company ${index}`,
+      status: 'NEW',
+      attributes: {},
+    }));
+    h.tx.canonicalCompany.findMany
+      .mockResolvedValueOnce(page)
+      .mockResolvedValueOnce([]);
+
+    await h.service.addSuppression(CTX, {
+      type: 'email',
+      value: 'sales@agency.example',
+      reason: 'unsubscribe',
+    });
+
+    expect(h.withWorkspace).toHaveBeenCalledTimes(3);
+    expect(h.tx.$queryRaw).toHaveBeenCalledTimes(3);
   });
 
   it.each([
