@@ -30,17 +30,17 @@ function temporaryRoot(): string {
 
 function fixture() {
   return {
-    secret: { tokenId: 24, apiKey: TEST_API_KEY },
+    secret: { tokenId: 25, apiKey: TEST_API_KEY },
     artifact: {
       artifactId:
-        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v16-v1",
+        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v17-v1",
       artifactDigest: "a".repeat(64),
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedModelWireCalls: 0,
       credential: {
         purpose: "site_builder_copy_sonnet_recovery",
-        tokenId: 24,
+        tokenId: 25,
         bearerTokenSha256: "b".repeat(64),
         expiresAt: "2026-08-11T06:00:00.000Z",
         quotaCapPoints: 151_264,
@@ -127,7 +127,7 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
     const secretFile = readJsonRegularFile(secretOutputPath);
     expect(secretFile.mode).toBe(0o600);
     const secret = secretFile.value as Record<string, unknown>;
-    expect(secret.tokenId).toBe(24);
+    expect(secret.tokenId).toBe(25);
     expect(secret.apiKey).toBe(TEST_API_KEY);
     expect(secret.bearerTokenSha256).toBe("b".repeat(64));
     const artifactPath = resolve(
@@ -141,7 +141,7 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
     expect(summary).toMatchObject({
       outputPath: COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
       secretOutputPath,
-      tokenId: 24,
+      tokenId: 25,
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
       observedModelWireCalls: 0,

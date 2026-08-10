@@ -8,6 +8,8 @@
 
 本页只保留当前 main、在途工作、阻塞、最新运行事实和下一次产品决策。完成史、旧验证数字、模型评测流水与 Site Builder 日期化实施细节已经迁到 [追加式 changelog](../roadmap/changelog.md) 和 [evidence 索引](../evidence/README.md)，不再在 current 页重复。
 
+> **2026-08-10 Copy Sonnet recovery 当前覆盖记录**：live Git 基线已推进至 `origin/main@54084d010dfbf8482e2a9d1eef19e97eac64d7f8`（#380 merge）；此前 v16 zero-call preflight 的 live 控制面尝试在模型 inventory scope 读回前停止，**没有 dispatch、没有 model wire、没有模型费用**。失败审计 token `#24` 保持 disabled，不能删除、重用或作为成功 evidence。当前 v17 successor 仅是待审查的离线代码：它只允许精确保留该 disabled v16 记录，拒绝任何其他既有同目的 token，并在将来单独创建一枚新 token；v17 token 尚未创建。现有 route 仍 disabled。v17 的任何 live preflight 都必须先经 PR、required CI、独立 review、merge commit 和 post-merge 重验；即使成功也只证明零调用控制面 attestation，仍不授权模型 dispatch、capability、质量、promotion 或生产路由采用。
+
 ## 1. 当前基线
 
 | 项目                    | 当前事实                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -65,7 +67,7 @@ pnpm code-intelligence:runtime:status
 1. 在实现并验证独立外部 readback、得到可信 verification receipt 后，明确授权一个有界获客 capability 进入首个 pilot，并签署完整 Release Bundle；或
 2. 保持 `INTERNAL_ONLY / NOT_AUTHORIZED`，指定剩余 blocker 与下一验证任务。
 
-在此之前，不启用默认 `DISABLED` provider，不发真实模型/付费调用，不宣称生产就绪，也不从 v16 create-only 技术完成或零调用 preflight 推导 capability、质量、晋级、生产路由采用或发布授权。
+在此之前，不启用默认 `DISABLED` provider，不发真实模型/付费调用，不宣称生产就绪，也不从 v16/v17 create-only 技术完成或零调用 preflight 推导 capability、质量、晋级、生产路由采用或发布授权。
 
 ## 6. 追溯入口
 
