@@ -17,6 +17,9 @@
 9. sitemap/watch 的 suppression denial 不得被普通网络降级、root/child 重试或 homepage fallback 吞掉；denial 后零 monitor 写入、零 registered success。
 10. 已 `SUPPRESSED` 公司、exact email 与 mailbox-domain suppression 都必须清除 `attributes.contact_email`；最低禁联事实只保留 canonical suppression key，不保留原 mailbox 值。
 11. Intent recompute 在首次读取和最终写回两个边界都读取 append-only suppression authority；最终写回基于锁内当前 attributes 合并，禁止旧快照复活已清理字段。
+12. forward/backlog enrichment 与 signal 的结果提交不接受 pre-wire attributes；提交事务复读 current attributes/authority，只合并活动拥有的 namespace，最终拒绝时零 attributes、零 evidence、零 matched success。
+13. derived reconciliation 每 50 行使用独立、显式 5 秒上限的短事务并在批间释放 workspace lock；它不是安全唯一防线，所有结果 writer 仍须 authority-aware。持久 receipt/后台恢复属于 durable-ops 后续门。
+14. ToolBroker 的机器化 source-policy denial 与 suppression denial 同为 terminal；只有普通网络/解析错误可进入 sitemap 降级。
 
 ## 二、RED → GREEN 证据
 
@@ -48,14 +51,17 @@
 | website intent authority   | `bf4b35aa` | `cd889693` | web-watch intent commit 不再只信派生 status；同锁读取 append-only fact 与现有 canonical 身份 |
 | watch denial terminal      | `30bf2406` | `d5e23dea` | suppression denial 立即越过 sitemap/root/child/homepage fallback；不创建 monitor                |
 | reconciliation + recompute | `835bba70` | `d5e23dea` | 已禁公司与 email/domain mailbox 清理闭合；Intent 重算首读和提交均复核 authority                 |
+| stale enrichment commits   | `c531cf08` | `a96508a2` | forward/backlog enrich/signal 提交复读 current attrs+authority；denial 后零 evidence          |
+| bounded reconciliation     | `57c7dddf` | `a96508a2` | derived scan 每 50 行短事务、5 秒上限并释放 workspace lock，不再单事务扫到 EOF               |
+| source-policy terminal     | `3cf1c08f` | `a96508a2` | branded ToolPolicyDenied 不再被 sitemap/root/homepage fallback 当作普通网络失败               |
 
 ## 三、最终本地验证
 
 | 门                | 结果                                                                                                                                                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 聚焦 Vitest       | `d5e23dea` 前工作树运行 5 files / 65 tests PASS，覆盖 watch denial terminal、already-SUPPRESSED 与并发 status-repair mailbox 清理、exact email/alternate-domain mailbox、Intent recompute authority gate |
-| API 全量 Vitest   | `pnpm --filter @global/api test -- --run` 在 `d5e23dea` 前工作树完整退出 0；当前 reporter 未输出可复核总数，因此不沿用旧 exact head 的 passed/skipped 数字充当本次摘要                                             |
-| API lint / build  | `pnpm --filter @global/api lint` 与 Nest build 在 `d5e23dea` 前工作树 PASS；lint 仅 7 个既有 warning、0 error                                                                                                   |
+| 聚焦 Vitest       | `a96508a2` 前工作树运行 6 files / 71 tests PASS；覆盖 stale enrichment commit、final authority/evidence、短批 reconciliation、suppression/source-policy terminal fallback 与原有重算/清理面                       |
+| API 全量 Vitest   | 上一实现 `d5e23dea` 的全量命令完整退出 0；`a96508a2` 后仍须在最终 exact head 重新执行，不沿用旧总数                                                                                                              |
+| API lint / build  | `a96508a2` 前实现树的 lint 与 Nest build PASS；lint 仅 7 个既有 warning、0 error。最终 docs exact head 仍须重跑                                                                                                 |
 | OpenAPI           | development + loopback + 显式 dev token 开关下重新导出 60 paths；提交 artifact 无额外 drift；Spectral 0 errors、15 个既有 tag warnings                                                                             |
 | 文档与治理        | governance 60/60 PASS；`docs:verify` 检查 121 Markdown，0 errors、1 个既有 table warning                                                                                                                           |
 | PostgreSQL 16     | 前一 GREEN `017f0d9f` 的隔离无卷临时库证据：82/82 migrations PASS；`app_user` 非 superuser/non-BYPASSRLS；RLS/append-only/CHECK/LEGAL 防降级均 fail-closed。本轮新增 projection/wire 路径未重跑真实 PG，不把 mock 当并发证明 |
