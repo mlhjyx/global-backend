@@ -41,11 +41,20 @@ describe('email-guess-persist · 落库计划（纯）', () => {
   });
 });
 
-function fakeTx(currentSuppressedEmails: string[] = []) {
+function fakeTx(
+  currentSuppressedEmails: string[] = [],
+  opts?: {
+    company?: { id: string; name: string; domain: string | null; status: string };
+    companySuppressions?: { type: string; value: string }[];
+  },
+) {
   const upsert = vi.fn(async () => ({}));
   const create = vi.fn(async () => ({}));
-  const findMany = vi.fn(async () => currentSuppressedEmails.map((value) => ({ type: 'email', value })));
-  const queryRaw = vi.fn(async () => [{ id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }]);
+  const findMany = vi.fn(async () => [
+    ...currentSuppressedEmails.map((value) => ({ type: 'email', value })),
+    ...(opts?.companySuppressions ?? []),
+  ]);
+  const queryRaw = vi.fn(async () => [opts?.company ?? { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }]);
   const updateMany = vi.fn(async () => ({ count: 1 }));
   return {
     tx: {
@@ -103,6 +112,22 @@ describe('email-guess-persist · 落库（fake tx）', () => {
       now: NOW,
     });
     expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('SMTP 期间新增的 company suppression 在写事务内复核，修复状态且不落 PII', async () => {
+    const { tx, upsert, updateMany } = fakeTx([], {
+      companySuppressions: [{ type: 'domain', value: 'https://www.acme.de/path' }],
+    });
+    const out = await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      now: NOW,
+    });
+    expect(out).toEqual({ persisted: false, reason: 'suppressed' });
+    expect(updateMany).toHaveBeenCalledTimes(1);
     expect(upsert).not.toHaveBeenCalled();
   });
 

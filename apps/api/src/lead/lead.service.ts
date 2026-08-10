@@ -8,7 +8,11 @@ import {
   LEAD_QUALIFIED_SCHEMA_VERSION,
 } from './lead-qualified-snapshot';
 import { DataRightsService } from '../compliance/data-rights.service';
-import { companyMatchesSuppression } from '../discovery/suppression-value';
+import {
+  canonicalizeSuppressionValue,
+  canonicalizeSuppressionValues,
+  companyMatchesSuppression,
+} from '../discovery/suppression-value';
 import { storageRightsContextForLead } from '../compliance/data-rights.context';
 import { SanctionsScreeningService, reconcileReviewState, matchesFromJson } from '../sanctions/sanctions-screening.service';
 
@@ -156,18 +160,53 @@ export class LeadService {
         if (!company) {
           throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'canonical company not found' } });
         }
-        const companySuppressionRows = await tx.suppressionRecord.findMany({
-          where: { type: { in: ['domain', 'company_name'] } },
+        const suppressionRows = await tx.suppressionRecord.findMany({
+          where: { type: { in: ['domain', 'company_name', 'email'] } },
           select: { type: true, value: true },
         });
-        const matchedSuppression = companyMatchesSuppression(companySuppressionRows, company);
+        const matchedSuppression = companyMatchesSuppression(suppressionRows, company);
         if (matchedSuppression && company.status !== 'SUPPRESSED') {
           await tx.canonicalCompany.update({
             where: { id: company.id },
             data: { status: 'SUPPRESSED', version: { increment: 1 } },
           });
         }
-        const effectiveCompany = matchedSuppression ? { ...company, status: 'SUPPRESSED' } : company;
+        const suppressedEmails = canonicalizeSuppressionValues(
+          'email',
+          suppressionRows.filter((row) => row.type === 'email').map((row) => row.value),
+        );
+        const suppressedContactIds = new Set(
+          company.contacts
+            .filter((contact) =>
+              contact.contactPoints.some((point) => {
+                if (point.type !== 'email') return false;
+                const email = canonicalizeSuppressionValue('email', point.value);
+                return !!email && suppressedEmails.has(email);
+              }),
+            )
+            .map((contact) => contact.id),
+        );
+        const deliverableContacts = company.contacts.filter((contact) => !suppressedContactIds.has(contact.id));
+        const hasDeliverableReachability = deliverableContacts.some((contact) =>
+          contact.contactPoints.some(
+            (point) =>
+              point.type !== 'external_id' &&
+              (point.status === 'VALID' || point.status === 'UNVERIFIED' || point.status === 'RISKY'),
+          ),
+        );
+        if (suppressedContactIds.size > 0 && !hasDeliverableReachability) {
+          throw new ConflictException({
+            error: {
+              code: 'SUPPRESSED_CONTACT_UNREACHABLE',
+              message: 'all reachable contacts are suppressed; re-score or discover a permitted contact before handoff',
+            },
+          });
+        }
+        const effectiveCompany = {
+          ...company,
+          ...(matchedSuppression ? { status: 'SUPPRESSED' } : {}),
+          contacts: deliverableContacts,
+        };
 
         // Suppression/DataRights 必须先于任何会抛错的下游门。命中禁联时先提交公司派生状态与
         // append-only DENY 审计，再由事务外转换为 409；否则 sanctions 异常会回滚禁联状态修复和审计。
