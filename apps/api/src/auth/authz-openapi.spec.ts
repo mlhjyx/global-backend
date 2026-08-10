@@ -95,6 +95,9 @@ describe('OpenAPI authorization scope contract', () => {
       ],
     ).toEqual(['compliance:manage']);
     expect(
+      operation(spec, 'get', '/api/v1/suppressions')['x-required-scopes'],
+    ).toEqual(['acquisition:read', 'compliance:manage', 'personal-data:read']);
+    expect(
       operation(spec, 'get', '/api/v1/canonical-companies/{id}')[
         'x-required-scopes'
       ],

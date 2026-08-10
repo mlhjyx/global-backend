@@ -21,6 +21,9 @@ function fakeTx(
     suppressedContactKeys?: string[];
     suppressedEmails?: string[];
     suppressedDomains?: string[];
+    suppressedCompanyNames?: string[];
+    companyName?: string;
+    companyDomain?: string | null;
   },
 ) {
   const existingKeys = new Set(opts?.existingBlindedKeys ?? []);
@@ -41,8 +44,13 @@ function fakeTx(
     ...(opts?.suppressedContactKeys ?? []).map((value) => ({ type: 'contact_key', value })),
     ...(opts?.suppressedEmails ?? []).map((value) => ({ type: 'email', value })),
     ...(opts?.suppressedDomains ?? []).map((value) => ({ type: 'domain', value })),
+    ...(opts?.suppressedCompanyNames ?? []).map((value) => ({ type: 'company_name', value })),
   ]);
-  const queryRaw = vi.fn(async () => [{ status: opts?.companyStatus ?? 'NEW' }]);
+  const queryRaw = vi.fn(async () => [{
+    status: opts?.companyStatus ?? 'NEW',
+    name: opts?.companyName ?? 'AstraZeneca GmbH',
+    domain: opts?.companyDomain === undefined ? 'astrazeneca.com' : opts.companyDomain,
+  }]);
   const tx = {
     canonicalContact: {
       findMany: vi.fn(async () => candidates),
@@ -256,6 +264,23 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
     expect(res.created).toBe(0);
     expect(res.skippedSuppressed).toBe(2); // 整批跳过
     expect(canonicalUpsert).not.toHaveBeenCalled(); // 未新建任何联系人
+  });
+
+  it('company_name fact 已提交但派生状态尚未对账时，提交闸仍按原始事实阻止 PII', async () => {
+    const { tx, canonicalUpsert } = fakeTx([], {
+      companyStatus: 'NEW',
+      companyName: '  AstraZeneca   GmbH  ',
+      suppressedCompanyNames: ['astrazeneca gmbh'],
+    });
+    const res = await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{ externalId: 'late', fullName: 'Late Person', personalData: true }],
+      suppressedEmails: new Set(),
+    });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
   });
 
   it('长网络调用后新增的 email suppression 在写事务内复读，规范等价候选不入库', async () => {
