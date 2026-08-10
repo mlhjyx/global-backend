@@ -31,6 +31,25 @@ describe('suppression writer/action linearization topology', () => {
     }
   });
 
+  it('all signal-to-company projection writers authorize materialization before canonical reads and writes', () => {
+    for (const path of [
+      'apps/api/src/intent/ted-intent-projection.service.ts',
+      'apps/api/src/intent/openfda-intent-projection.service.ts',
+      'apps/api/src/intent/sam-intent-projection.service.ts',
+    ]) {
+      const source = read(path);
+      const projectOne = source.slice(source.indexOf('private async projectOne'));
+      const gateAt = projectOne.indexOf('companyMayBeMaterialized');
+      expect(gateAt, `${path} must use the shared materialization gate`).toBeGreaterThanOrEqual(0);
+      expect(gateAt, `${path} must authorize before reading canonical state`).toBeLessThan(
+        projectOne.indexOf('canonicalCompany.findUnique'),
+      );
+      expect(gateAt, `${path} must authorize before writing canonical state`).toBeLessThan(
+        projectOne.indexOf('canonicalCompany.upsert'),
+      );
+    }
+  });
+
   it('manual and backlog contact/email paths authorize each adapter or contact before network processing', () => {
     const service = read('apps/api/src/discovery/discovery.service.ts');
     const backlog = read('apps/api/src/temporal/backlog.activities.ts');

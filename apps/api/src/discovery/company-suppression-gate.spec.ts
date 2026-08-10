@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
-import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
+import {
+  companyMayBeMaterialized,
+  companyMayUseExternalProcessing,
+  contactMayUseExternalProcessing,
+} from './company-suppression-gate';
 import { contactSuppressionKeys } from './identity';
 import { blindContactKey } from '../compliance/pii-crypto';
 
@@ -23,6 +27,32 @@ function fakeTx(opts: {
 }
 
 describe('company suppression terminal gate', () => {
+  it('takes the workspace lock and blocks a legacy-normalized name before materialization', async () => {
+    const order: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        order.push('lock');
+        return [{ locked: true }];
+      }),
+      suppressionRecord: {
+        findMany: vi.fn(async () => {
+          order.push('suppression');
+          return [
+            { type: 'company_name', value: ' MÜLLER   PUMPEN GMBH ' },
+          ];
+        }),
+      },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      companyMayBeMaterialized(tx, 'ws-1', {
+        name: 'Müller Pumpen GmbH',
+        domain: null,
+      }),
+    ).resolves.toBe(false);
+    expect(order).toEqual(['lock', 'suppression']);
+  });
+
   it('canonicalizes a legacy URL-shaped domain and repairs the company status before external processing', async () => {
     const { tx, updateMany } = fakeTx({
       company: { id: 'co-1', name: 'Acme GmbH', domain: 'acme.de', status: 'NEW' },
