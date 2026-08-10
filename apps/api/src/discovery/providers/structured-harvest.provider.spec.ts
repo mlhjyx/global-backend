@@ -19,6 +19,15 @@ describe('fetchSitemapUrls — terminal suppression denial', () => {
     await expect(fetchSitemapUrls('acme.example', httpGet)).rejects.toThrow(/suppression_action_gate/);
     expect(httpGet).toHaveBeenCalledOnce();
   });
+
+  it('does not downgrade a machine source-policy denial into sitemap fallback', async () => {
+    const httpGet = vi.fn(async () => {
+      throw new ToolPolicyDenied('http.get', 'suspended');
+    });
+
+    await expect(fetchSitemapUrls('acme.example', httpGet)).rejects.toThrow(/suspended/);
+    expect(httpGet).toHaveBeenCalledOnce();
+  });
 });
 
 describe('结构化收割 · 纯解析器', () => {
