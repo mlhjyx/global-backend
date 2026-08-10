@@ -141,6 +141,13 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function bearerTokenSha256(apiKey: string): string {
+  // This is a compatibility fingerprint for a random opaque provider token,
+  // not a password verifier or credential-storage scheme.
+  // codeql[js/insufficient-password-hash]
+  return createHash("sha256").update(apiKey).digest("hex");
+}
+
 function errnoCode(error: unknown): string | undefined {
   return error && typeof error === "object" && "code" in error
     ? String((error as { code?: unknown }).code)
@@ -704,7 +711,7 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
     credential: {
       purpose: CREDENTIAL_PURPOSE,
       tokenId,
-      bearerTokenSha256: sha256(apiKey),
+      bearerTokenSha256: bearerTokenSha256(apiKey),
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString(),
       quotaMode: "limited" as const,

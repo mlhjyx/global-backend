@@ -1,9 +1,12 @@
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
-  lstatSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -79,6 +82,23 @@ function repository(): string {
   return root;
 }
 
+function readJsonRegularFile(path: string): { mode: number; value: unknown } {
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) throw new Error("TEST_EXPECTED_REGULAR_FILE");
+    return {
+      mode: stat.mode & 0o777,
+      value: JSON.parse(readFileSync(descriptor, "utf8")),
+    };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     chmodSync(root, 0o700);
@@ -104,8 +124,9 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
 
     expect(provision).toHaveBeenCalledOnce();
     expect(cleanup).not.toHaveBeenCalled();
-    expect(lstatSync(secretOutputPath).mode & 0o777).toBe(0o600);
-    const secret = JSON.parse(readFileSync(secretOutputPath, "utf8"));
+    const secretFile = readJsonRegularFile(secretOutputPath);
+    expect(secretFile.mode).toBe(0o600);
+    const secret = secretFile.value as Record<string, unknown>;
     expect(secret.tokenId).toBe(24);
     expect(secret.apiKey).toBe(TEST_API_KEY);
     expect(secret.bearerTokenSha256).toBe("b".repeat(64));
@@ -113,10 +134,9 @@ describe("Copy Sonnet recovery zero-call evidence writer", () => {
       root,
       COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
     );
-    expect(lstatSync(artifactPath).mode & 0o777).toBe(0o644);
-    expect(JSON.parse(readFileSync(artifactPath, "utf8"))).toEqual(
-      fixture().artifact,
-    );
+    const artifactFile = readJsonRegularFile(artifactPath);
+    expect(artifactFile.mode).toBe(0o644);
+    expect(artifactFile.value).toEqual(fixture().artifact);
     expect(JSON.stringify(summary)).not.toContain("writer-test-secret");
     expect(summary).toMatchObject({
       outputPath: COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH,
