@@ -4,7 +4,7 @@
 ## 2026-08-10 · 获客 Suppression/DataRights source 治理
 
 - #375 已以 merge commit `5b588353fba6cdbda3a7e0f5f171a3e2fabbc786` 合入 roles→scopes，并在该 main commit 上通过 CI、Governance、Security、Supply Chain 与 CodeQL push canary；Supply Chain 仍是带 36 项生产依赖遗留风险的 ratchet pass，不是漏洞清零。
-- 当前独立变更集取消 suppression 裸 DELETE：`suppression_record` 保留事实、未知原因 fail-closed 为 LEGAL、只允许 PREFERENCE→LEGAL；类型化 canonicalizer 拒绝无效禁联值，并在新写入、旧值读取、发现匹配、即时公司分块更新、联系人/邮箱/既有 contact point 验证/Lead accept 终极闸共享规范键，避免“201 成功但永不命中”。邮箱验证在 company-name/domain/email 禁联命中时于 provider 路由和 SMTP 前阻断；已 QUALIFIED 的 accept 重试也复核禁联，但不重复写 LeadDecision/LeadQualified。释放和身份纠正只追加带 request/actor/reason/time 的 `suppression_decision`，DB 固定合法语义组合，普通 API 不执行真实 release，法定记录的 release request 持久化拒绝后返回机器合同明确且与统一 filter 一致的 409；审计/PII 列表使用 cursor page envelope 且每页最多 100。
+- 当前独立变更集取消 suppression 裸 DELETE：`suppression_record` 保留事实、未知原因 fail-closed 为 LEGAL、只允许 PREFERENCE→LEGAL；类型化 canonicalizer 拒绝无效禁联值，并在新写入、旧值读取、发现匹配、即时公司分块更新和所有动作门共享规范键，避免“201 成功但永不命中”。fit/enrich/signal/watch/contact/guess 六个自动 backlog 阶段每家出网前直接复核原始 suppression；长网络后的联系人/猜测写入、邮箱验证回写、Lead accept 和 suppression 创建共享 workspace 事务 advisory lock 并在提交前复读。被禁邮箱联系人从 `LeadQualifiedPackage` 排除，过滤后零可达则 accept fail-closed。释放和身份纠正的 `suppression_decision` 分别保留 requested command 与 outcome，同 requestId 的不同原始 reason 返回幂等冲突；DB 固定合法语义组合，普通 API 不执行真实 release。OpenAPI 现显式列出 400/404/409 统一错误 envelope 与 UUID path；审计/PII 列表使用 cursor page envelope 且每页最多 100。
 - DataRights DENY 从“throw 导致日志回滚”改为先在租户事务提交 `policy_decision_log`、再在事务外返回 409；在 DENY 前不执行 Lead CAS、不建 LeadDecision、不发 LeadQualified。隔离无卷 PostgreSQL 空库完成全部 82 migrations，并验证 app_user 禁止删除 suppression、禁止更新/删除 decision、禁止 LEGAL 降级与跨 workspace 关联；测试容器已删除。该证据只属于 source/migration 验证，不代表已部署或真实 pilot。
 
 ## 2026-08-10 · Copy fixed-source 影响治理
