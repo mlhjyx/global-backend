@@ -1,5 +1,25 @@
-import { describe, expect, it } from 'vitest';
-import { parseSitemapXml, pickCareersUrl, tallySections, isBuyingRole, pickJobDetailUrls, slugToTitle } from './structured-harvest.provider';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  fetchSitemapUrls,
+  parseSitemapXml,
+  pickCareersUrl,
+  tallySections,
+  isBuyingRole,
+  pickJobDetailUrls,
+  slugToTitle,
+} from './structured-harvest.provider';
+import { ToolPolicyDenied } from '../../tools/tool-broker';
+
+describe('fetchSitemapUrls — terminal suppression denial', () => {
+  it('does not retry roots or children after the action gate denies a physical request', async () => {
+    const httpGet = vi.fn(async () => {
+      throw new ToolPolicyDenied('http.get', 'suppression_action_gate');
+    });
+
+    await expect(fetchSitemapUrls('acme.example', httpGet)).rejects.toThrow(/suppression_action_gate/);
+    expect(httpGet).toHaveBeenCalledOnce();
+  });
+});
 
 describe('结构化收割 · 纯解析器', () => {
   it('sitemap XML：普通 sitemap 抽 <loc>', () => {

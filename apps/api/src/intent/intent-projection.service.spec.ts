@@ -7,6 +7,7 @@ import {
   IntentEvent,
   IntentProjectionService,
 } from './intent-projection.service';
+import { ToolPolicyDenied } from '../tools/tool-broker';
 
 // 这三个纯函数是 TED P3 / openFDA P3 / web_watch 共享的**幂等基石**——每 sweep 复现同一信号时靠它们判「实质未变」
 // 而不重写 canonical / 不堆 field_evidence。TED P3 实测抓到过 jsonb 键序 bug（DB 取回对象键序被 Postgres 规范化，
@@ -161,5 +162,37 @@ describe('IntentProjectionService — suppression authority materialization gate
     expect(updateMany).toHaveBeenCalledOnce();
     expect(update).not.toHaveBeenCalled();
     expect(evidenceCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntentProjectionService — watch registration terminal suppression denial', () => {
+  it('does not downgrade a sitemap suppression denial into homepage monitor creation', async () => {
+    const create = vi.fn(async () => ({ id: 'monitor-1' }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: unknown) => unknown) =>
+        callback({
+          canonicalCompany: {
+            findUnique: vi.fn(async () => ({ name: 'Acme GmbH', domain: 'acme.example', region: null })),
+          },
+        }),
+      ),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create,
+      },
+    };
+    const broker = {
+      invoke: vi.fn(async () => {
+        throw new ToolPolicyDenied('http.get', 'suppression_action_gate');
+      }),
+    };
+    const service = new IntentProjectionService({ prisma: prisma as never, broker: broker as never });
+
+    await expect(
+      service.registerWatch('workspace-1', 'company-1', {
+        authorizeExternalAction: vi.fn(async () => false),
+      }),
+    ).rejects.toThrow(/suppression_action_gate/);
+    expect(create).not.toHaveBeenCalled();
   });
 });
