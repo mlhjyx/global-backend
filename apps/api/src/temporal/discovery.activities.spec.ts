@@ -119,6 +119,59 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
   });
 });
 
+describe('canonicalizeRun —— suppression authority 线性化', () => {
+  it('在读 suppression 和任何 canonical write 前先取 workspace policy lock', async () => {
+    const order: string[] = [];
+    const tx = {
+      $queryRaw: async () => {
+        order.push('lock');
+        return [{ pg_advisory_xact_lock: null }];
+      },
+      rawSourceRecord: {
+        findMany: async () => [
+          {
+            id: 'raw-1',
+            providerKey: 'wikidata',
+            payload: { name: 'Acme GmbH', domain: 'acme.de', country: 'DE' },
+          },
+        ],
+      },
+      suppressionRecord: {
+        findMany: async () => {
+          order.push('suppression-read');
+          return [];
+        },
+      },
+      canonicalCompany: {
+        upsert: async () => {
+          order.push('canonical-write');
+          return { id: 'company-1' };
+        },
+      },
+      identityLink: {
+        findFirst: async () => ({ id: 'existing-link' }),
+        create: async () => ({}),
+      },
+      fieldEvidence: { create: async () => ({}) },
+    };
+    const prisma = {
+      withWorkspace: async <T>(
+        _workspaceId: string,
+        callback: (client: typeof tx) => Promise<T>,
+      ): Promise<T> => callback(tx),
+    };
+    const activities = createDiscoveryActivities({
+      prisma,
+      providers: {},
+      gateway: {},
+    } as never);
+
+    await activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' });
+
+    expect(order).toEqual(['lock', 'suppression-read', 'canonical-write']);
+  });
+});
+
 describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃重试清账', () => {
   it('富集源打穿 run 预算并被 fail-safe 吞掉 → enrichRun.budgetTruncated=true（不假 DONE）', async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
