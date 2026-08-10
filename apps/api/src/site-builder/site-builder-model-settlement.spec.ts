@@ -37,7 +37,10 @@ function protocolFor(alias: string) {
 
 function routeEntries() {
   return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
-    const target = resolveTaskExecutionTarget(taskId, REVIEWED_RUNTIME_ROUTE_ENV);
+    const target = resolveTaskExecutionTarget(
+      taskId,
+      REVIEWED_RUNTIME_ROUTE_ENV,
+    );
     if (target.kind === 'deterministic_fallback') return [];
     const route = target.route;
     return [route.primary, ...route.fallbacks].map((alias) => ({
@@ -222,6 +225,28 @@ describe('OpenOx pricing family admission', () => {
       productLine: productLineFor(alias),
       currency: 'CNY',
     });
+  });
+
+  it('rejects ambiguous duplicate model or matching group rows', () => {
+    const original = pricingCatalog(['claude-sonnet-5']);
+    const data = original.data as {
+      models: Record<string, unknown>[];
+      groups: Record<string, unknown>[];
+    };
+    for (const ambiguous of [
+      {
+        ...original,
+        data: { ...data, models: [...data.models, { ...data.models[0] }] },
+      },
+      {
+        ...original,
+        data: { ...data, groups: [...data.groups, { ...data.groups[0] }] },
+      },
+    ]) {
+      expect(
+        settlementOpenOxPrice(ambiguous, 'claude-sonnet-5', 'special'),
+      ).toBeNull();
+    }
   });
 });
 

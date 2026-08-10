@@ -526,7 +526,11 @@ function deriveOpenOxPrice(
 ) {
   const rows = catalogRows(catalog);
   if (!rows) return null;
-  const model = rows.models.find((entry) => entry.model_id === modelId);
+  const matchingModels = rows.models.filter(
+    (entry) => entry.model_id === modelId,
+  );
+  if (matchingModels.length !== 1) return null;
+  const model = matchingModels[0];
   if (
     !model ||
     model.status !== 'enabled' ||
@@ -534,10 +538,12 @@ function deriveOpenOxPrice(
   ) {
     return null;
   }
-  const group = rows.groups.find(
+  const matchingGroups = rows.groups.filter(
     (entry) =>
       entry.name === groupName && entry.product_line === model.product_line,
   );
+  if (matchingGroups.length !== 1) return null;
+  const group = matchingGroups[0];
   const currency = pricingCurrency(model.product_line);
   if (!group || !currency) return null;
 
