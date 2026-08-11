@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-recovery-zero-call-preflight-stopped-evidence/2026-08-11-v2",
+  "artifactId": "site-builder-copy-sonnet-recovery-v20-zero-call-preflight-stopped/2026-08-11-v1",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "executionHead": "8a3cf586ad8a9e86fe49c753b408a043b70feca6",
+  "mergeProvenance": {
+    "pullRequest": 391,
+    "mergeCommit": "8a3cf586ad8a9e86fe49c753b408a043b70feca6"
+  },
+  "observedAt": "2026-08-11T14:45:05.000Z",
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopPhase": "post_create_bearer_model_inventory_readback",
+  "sourceObservation": {
+    "authority": "tool_broker",
+    "toolId": "openox.pricing_catalog",
+    "endpoint": "/api/public/pricing-catalog",
+    "upstreamHost": "openox.tech",
+    "transportOutcome": "OK",
+    "latencyMs": 2975,
+    "modelCostCents": 0
+  },
+  "failureObservation": {
+    "authority": "new_api_bearer",
+    "endpoint": "/v1/models",
+    "httpStatus": 403,
+    "code": "COPY_SONNET_RECOVERY_CONTROL_PLANE_HTTP_403_NEW_API_BEARER_V1_MODELS",
+    "responseBodyRead": false
+  },
+  "nonOccurrence": {
+    "trackedPreflightArtifactCreated": false,
+    "bearerModelInventoryReadbackIssued": true,
+    "bearerModelRequestIssued": false,
+    "modelWireCalls": 0,
+    "modelCost": { "CNY": 0, "USD": 0 }
+  },
+  "controlPlaneReadback": {
+    "route": {
+      "channelId": 20,
+      "status": "DISABLED",
+      "channelType": 14,
+      "baseUrl": "https://openox.tech",
+      "model": "claude-sonnet-5",
+      "group": "special",
+      "modelMapping": "IDENTITY"
+    },
+    "retiredV16Token": { "tokenId": 24, "status": "DISABLED" },
+    "retiredV17Token": { "tokenId": 25, "status": "DISABLED" },
+    "retiredV19Token": { "tokenId": 26, "status": "DISABLED" },
+    "stoppedV20Token": {
+      "tokenId": 27,
+      "status": "DISABLED",
+      "purpose": "site_builder_copy_sonnet_recovery",
+      "model": "claude-sonnet-5",
+      "group": "special"
+    }
+  },
+  "requiredRecovery": [
+    "do not reuse, mutate, or delete retired v16 token 24, v17 token 25, v19 token 26, or stopped v20 token 27",
+    "do not retry this consumed v20 authorization or create a successor token without new explicit authorization",
+    "causally diagnose and restore the New API bearer model-inventory readback before any new zero-call preflight authorization",
+    "obtain separate explicit authorization before any model dispatch"
+  ],
+  "artifactDigest": "da007abccfae53498fe611bf1f75219c19206e24d1d19fd829868bc6e416a847"
+}
