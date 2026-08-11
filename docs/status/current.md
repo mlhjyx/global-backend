@@ -8,7 +8,7 @@
 
 本页只保留当前 main、在途工作、阻塞、最新运行事实和下一次产品决策。完成史、旧验证数字、模型评测流水与 Site Builder 日期化实施细节已经迁到 [追加式 changelog](../roadmap/changelog.md) 和 [evidence 索引](../evidence/README.md)，不再在 current 页重复。
 
-> **2026-08-11 Copy Sonnet recovery 当前状态**：`origin/main@673772b529b0bc719acefddaabad64b7326f4904` 已包含 #387 的 v19 successor 合同。获授权的单次 v19 **零调用** preflight 已通过 ToolBroker 读取 OpenOx public pricing source（0 cost），随后在 token #26 创建后的 bearer/control-plane readback 遇到 `COPY_SONNET_RECOVERY_CONTROL_PLANE_UNAVAILABLE` 并 fail closed；official cleanup 已使 #26 disabled。冻结、脱敏事实见 [`v19 stopped evidence`](../evidence/site-builder/m1-g-copy-sonnet-recovery-v19-zero-call-preflight-stopped-evidence.json)：route #20、v16 #24、v17 #25 与 #26 均为 disabled，不存在成功 artifact，且没有 bearer model request、模型 wire 或模型费用。v19 授权已消费；不得重试、创建 successor 或推导 capability/quality/promotion/route adoption。模型 dispatch 仍需新的明确授权。
+> **2026-08-11 Copy Sonnet recovery 当前状态**：`origin/main@eb24889d38d9eadc9794a29feb64bc075dca6b37` 已包含 #387 的 v19 successor 合同、#388 的 stopped evidence 与 #389 的 endpoint-safe preflight failure diagnosis。v19 **零调用** preflight 已通过 ToolBroker 读取 OpenOx public pricing source（0 cost），随后在 token #26 创建后的 bearer/control-plane readback 遇到泛化 `COPY_SONNET_RECOVERY_CONTROL_PLANE_UNAVAILABLE` 并 fail closed；#389 只使未来 preflight 对首个非 2xx 或 admin envelope 拒绝输出安全端点/状态身份，不能反向诊断已消费的 v19。route #20、v16 #24、v17 #25 与 #26 均为 disabled，不存在成功 artifact、bearer model request、模型 wire 或模型费用。用户已对 v20 successor 给出精确的**零调用**授权；在 v20 create-only 合同经 PR/CI/review/merge 后，才可从 clean main 创建一次新 token 并执行 route/scope/quota/OpenOx price/request-bound settlement preflight。v19 不得重试或复用；模型 dispatch 仍需新的明确授权。
 
 ## 1. 当前基线
 
