@@ -101,6 +101,12 @@ function liveFetch(options: {
   duplicatePricingModel?: boolean;
   duplicatePricingGroup?: boolean;
   controlPlaneRedirect?: { status: 307 | 308; location: string };
+  controlPlaneHttpFailure?: {
+    path: "/api/usage/token/" | "/v1/models" | "/api/log/token";
+    status: 401 | 403 | 500;
+    body: "json" | "html";
+  };
+  controlPlaneEnvelopeFailure?: { path: "/api/channel/" | "/api/token/" };
 } = {}) {
   const observed: Array<{ method: string; path: string }> = [];
   const tokens: Array<Record<string, unknown>> = [
@@ -141,6 +147,27 @@ function liveFetch(options: {
         status: options.controlPlaneRedirect.status,
         headers: { location: options.controlPlaneRedirect.location },
       });
+    }
+    if (
+      options.controlPlaneHttpFailure &&
+      url.pathname === options.controlPlaneHttpFailure.path
+    ) {
+      if (options.controlPlaneHttpFailure.body === "html") {
+        return new Response("<html>redacted failure</html>", {
+          status: options.controlPlaneHttpFailure.status,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return json(
+        { success: false, message: "redacted failure" },
+        options.controlPlaneHttpFailure.status,
+      );
+    }
+    if (
+      options.controlPlaneEnvelopeFailure &&
+      url.pathname === options.controlPlaneEnvelopeFailure.path
+    ) {
+      return json({ success: false, message: "redacted failure" });
     }
     if (url.pathname === "/api/channel/") {
         return json({
@@ -472,6 +499,46 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     ).rejects.toThrow("COPY_SONNET_RECOVERY_CONTROL_PLANE_REDIRECT_REJECTED");
     expect(live.fetchMock).toHaveBeenCalledOnce();
     expect(live.fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+  });
+
+  it("identifies a rejected admin envelope without creating a token", async () => {
+    const live = liveFetch({
+      controlPlaneEnvelopeFailure: { path: "/api/channel/" },
+    });
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(pricingBroker().broker),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow(
+      "COPY_SONNET_RECOVERY_CONTROL_PLANE_ENVELOPE_REJECTED_NEW_API_ADMIN_API_CHANNEL",
+    );
+    expect(live.observed).not.toContainEqual({
+      method: "POST",
+      path: "/api/token/",
+    });
+  });
+
+  it.each([
+    ["/api/usage/token/", 401, "API_USAGE_TOKEN"],
+    ["/v1/models", 403, "V1_MODELS"],
+    ["/api/log/token", 500, "API_LOG_TOKEN"],
+  ] as const)("identifies a failed bearer readback %s by safe endpoint label and HTTP status", async (path, status, label) => {
+    const live = liveFetch({
+      controlPlaneHttpFailure: {
+        path,
+        status,
+        body: "html",
+      },
+    });
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(pricingBroker().broker),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow(
+      `COPY_SONNET_RECOVERY_CONTROL_PLANE_HTTP_${status}_NEW_API_BEARER_${label}`,
+    );
   });
 
   it("rejects channel transport, OpenOx base URL, or model-mapping drift before token creation", async () => {

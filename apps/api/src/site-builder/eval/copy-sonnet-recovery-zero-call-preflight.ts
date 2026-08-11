@@ -298,6 +298,25 @@ function adminHeaders(input: CopySonnetRecoveryZeroCallPreflightInput) {
   };
 }
 
+function controlPlanePathLabel(pathname: string): string {
+  const label = pathname
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => segment.replace(/[^a-zA-Z0-9]/gu, "_"))
+    .join("_")
+    .toUpperCase();
+  if (!label) fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_RESPONSE_INVALID");
+  return label;
+}
+
+function controlPlaneHttpFailureCode(
+  response: Response,
+  authority: ObservedRequest["authority"],
+  pathname: string,
+): string {
+  return `COPY_SONNET_RECOVERY_CONTROL_PLANE_HTTP_${response.status}_${authority.toUpperCase()}_${controlPlanePathLabel(pathname)}`;
+}
+
 async function requestJson(
   fetchImpl: typeof fetch,
   url: string,
@@ -321,15 +340,19 @@ async function requestJson(
   if (response.status >= 300 && response.status < 400) {
     fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_REDIRECT_REJECTED");
   }
+  if (!response.ok) {
+    fail(controlPlaneHttpFailureCode(response, authority, parsed.pathname));
+  }
   const body = await boundedJson(response, onBodySha256);
-  if (!response.ok) fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_UNAVAILABLE");
   if (
     authority === "new_api_admin" &&
     (!body ||
       typeof body !== "object" ||
       (body as ApiEnvelope).success !== true)
   ) {
-    fail("COPY_SONNET_RECOVERY_CONTROL_PLANE_UNAVAILABLE");
+    fail(
+      `COPY_SONNET_RECOVERY_CONTROL_PLANE_ENVELOPE_REJECTED_${authority.toUpperCase()}_${controlPlanePathLabel(parsed.pathname)}`,
+    );
   }
   return body;
 }
