@@ -96,6 +96,7 @@ function liveFetch(options: {
   duplicateChannels?: boolean;
   invalidLogShape?: boolean;
   postCreatePrefixToken?: boolean;
+  postCreateRetiredV16Status?: 1 | 2;
   invalidModelLimitValue?: boolean;
   malformedModelInventory?: boolean;
   missingPageTotal?: "channel" | "token";
@@ -115,7 +116,7 @@ function liveFetch(options: {
     ...(options.existingPurposeToken
       ? [{ id: 19, name: "Site Builder Copy Sonnet Recovery v17", status: 1 }]
       : []),
-    ...(options.retiredV16Token
+    ...(options.retiredV16Token !== false
       ? [{ id: 24, name: "Site Builder Copy Sonnet Recovery v16", status: 2 }]
       : []),
     ...(options.retiredV17Token !== false
@@ -197,6 +198,15 @@ function liveFetch(options: {
             name: "Site Builder Copy Sonnet Recovery v20-race",
             status: 1,
           });
+        }
+        if (
+          options.postCreateRetiredV16Status &&
+          tokens.some(({ id }) => id === 27)
+        ) {
+          const retiredV16 = tokens.find(({ id }) => id === 24);
+          if (retiredV16) {
+            retiredV16.status = options.postCreateRetiredV16Status;
+          }
         }
         return json({
           success: true,
@@ -428,6 +438,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     for (const options of [
       { existingPurposeToken: true },
       { retiredV18Token: true },
+      { retiredV16Token: false },
       { activeV16Token: true },
       { retiredV19Token: false },
       { retiredV19Status: 1 },
@@ -446,6 +457,29 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
         ),
       ).toBe(false);
     }
+  });
+
+  it("fails and cleans up when retained v16 audit state drifts after v20 creation", async () => {
+    const live = liveFetch({ postCreateRetiredV16Status: 1 });
+
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_POST_CREATE_DRIFT");
+    expect(
+      live.observed.some(
+        ({ method, path }) => method === "PUT" && path === "/api/token/",
+      ),
+    ).toBe(true);
+    expect(
+      live.observed.some(({ path }) =>
+        ["/v1/messages", "/v1/chat/completions", "/v1/responses"].includes(
+          path,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("routes every OpenOx catalog read through the injected ToolBroker and records the broker authority", async () => {
