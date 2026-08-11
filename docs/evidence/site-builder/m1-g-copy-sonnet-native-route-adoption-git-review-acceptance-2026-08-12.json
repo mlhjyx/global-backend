@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-native-route-adoption-git-review-acceptance/2026-08-12-v1",
+  "artifactId": "site-builder-copy-sonnet-native-route-adoption-git-review-acceptance/2026-08-12-v1",
+  "classification": "GIT_REVIEWED_SOURCE_ROUTE_ADOPTION",
+  "acceptedRouteAdoption": {
+    "promotionAcceptanceArtifact": {
+      "path": "docs/evidence/site-builder/m1-g-copy-sonnet-native-promotion-git-review-acceptance-2026-08-12.json",
+      "fileSha256": "bd9cb0332a4cf6ec349a2f48bcc2ba7e0645281ec167cd243d782894be0633bf",
+      "artifactDigest": "0e51ccc43fa5446b750a6744144d46bcc35ff59b56cdd1303738850b3d19995c"
+    },
+    "route": {
+      "taskId": "site_builder.copy",
+      "primary": "claude-sonnet-5",
+      "transport": "anthropic-messages",
+      "reasoningEffort": "medium",
+      "fallbacks": []
+    },
+    "rollback": {
+      "env": "SITE_BUILDER_MODEL_ROLLBACK_COPY=true",
+      "primary": "deepseek-v4-pro",
+      "fallbacks": [
+        "glm-5.2"
+      ],
+      "reasoningEffort": "low"
+    }
+  },
+  "gitReview": {
+    "pullRequest": 398,
+    "reviewedHeadCommit": "f571922ebe8a74012b14f06214e2e303e7a41ae0",
+    "mergeCommit": "7f856ce36e0b841ddcda56dc683f38f4856cb9f5",
+    "mergeMethod": "MERGE_COMMIT",
+    "requiredChecks": [
+      "build · typecheck · test",
+      "contracts · drift · lint · breaking",
+      "gitleaks 密钥扫描",
+      "governance · traceability · release",
+      "nontechnical decision card freshness"
+    ],
+    "requiredChecksResult": "PASS",
+    "unresolvedReviewThreads": 0,
+    "requiredApprovingReviewCount": 0
+  },
+  "acceptedBoundary": {
+    "sourceLevelProductionRouteAdoption": "GIT_REVIEWED",
+    "deploymentOrRuntimeEvidence": "NOT_PROVIDED",
+    "releaseBundle": "NOT_PROVIDED",
+    "newModelDispatch": false,
+    "rawSecretsOrRequestsCommitted": false
+  },
+  "artifactDigest": "bffbfc8e76800fd43c71f5c486179038aa4080a51000a72de5552750e29d9bf7"
+}
