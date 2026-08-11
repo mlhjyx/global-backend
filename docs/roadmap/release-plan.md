@@ -5,7 +5,7 @@
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md)。
 > 2026-07-10 v2（获客合流定稿）；**2026-07-27 模型候选重基线更新**。历史实施日志见 [changelog.md](changelog.md)。
 
-> **2026-08-12 Copy Sonnet native capability（当前覆盖顺序）**：基于 `origin/main@d5e53eca8fdb1b67492536f0788c9593482c4845`，用户授权启用 New API channel #20 并仅以 `claude-sonnet-5 × Anthropic Messages × special` 运行 1 execution / 最多 2 wires / 最多 1 repair。实际首调被当前 Copy 合同以 `MARKDOWN_CODE_FENCE` 拒绝；唯一 repair 通过事实槽位和生产 validator 硬门，随后 purpose-specific token 被禁用。结果见 [native capability evidence](../evidence/site-builder/m1-g-copy-sonnet-native-capability-2026-08-12.json)，待 Git review。它只证明一个 factual fixture 的 gateway capability，不证明全量 quality matrix、模型 promotion 或生产 route adoption；三道门仍为 `NOT_AUTHORIZED`，不得由本记录自动开启。MiniMax/Doubao 继续 retired。
+> **2026-08-12 Copy Sonnet native capability（当前覆盖顺序）**：基于 `origin/main@d5e53eca8fdb1b67492536f0788c9593482c4845`，用户授权启用 New API channel #20 并仅以 `claude-sonnet-5 × Anthropic Messages × special` 运行 1 execution / 最多 2 wires / 最多 1 repair。实际首调被当前 Copy 合同以 `MARKDOWN_CODE_FENCE` 拒绝；唯一 repair 通过事实槽位和生产 validator 硬门，随后 purpose-specific token 被禁用。结果见 [native capability evidence](../evidence/site-builder/m1-g-copy-sonnet-native-capability-2026-08-12.json) 与其 [Git-review acceptance](../evidence/site-builder/m1-g-copy-sonnet-native-capability-git-review-acceptance-2026-08-12.json)。它只证明一个 factual fixture 的 gateway capability，不证明全量 quality matrix、模型 promotion 或生产 route adoption；三道门仍为 `NOT_AUTHORIZED`，不得由本记录自动开启。MiniMax/Doubao 继续 retired。
 
 > **历史停止与安全待办**：v16 #24、v17 #25、v19 #26、v20 #27 及先前失败 token 均保持 disabled 的不可复用审计记录；v20 stopped evidence 与 credential security hold 不删除、不改写。后者是独立 credential-hygiene 待办；本次有界授权运行不构成已轮换、已修复或可扩大控制面权限的证明。
 

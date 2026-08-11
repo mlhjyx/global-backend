@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-native-capability-git-review-acceptance/2026-08-12-v1",
+  "artifactId": "site-builder-copy-sonnet-native-capability-git-review-acceptance/2026-08-12-v1",
+  "classification": "GIT_REVIEWED_NATIVE_GATEWAY_CAPABILITY_EVIDENCE",
+  "acceptedEvidence": {
+    "path": "docs/evidence/site-builder/m1-g-copy-sonnet-native-capability-2026-08-12.json",
+    "fileSha256": "e7616e46cc8cc36292766ae0a374b50fbc741010b45b127d427d97cf237c962a",
+    "artifactDigest": "80e7d50d94454ad72f61d91b5371e8eb262ab5f30b136154c5019a60bbd30ce7"
+  },
+  "gitReview": {
+    "pullRequest": 394,
+    "reviewedHeadCommit": "f3d160aa62eb37ba30042f6d63ae875d38b74384",
+    "mergeCommit": "8dad2766539a1b0f0dd6dc40a7fd18564937bc54",
+    "mergeMethod": "MERGE_COMMIT",
+    "requiredChecks": [
+      "build · typecheck · test",
+      "gitleaks 密钥扫描",
+      "nontechnical decision card freshness"
+    ],
+    "requiredChecksResult": "PASS",
+    "unresolvedReviewThreads": 0,
+    "requiredApprovingReviewCount": 0
+  },
+  "acceptedBoundary": {
+    "capability": "One factual site_builder.copy fixture passed after one closed repair over a total of two Sonnet Messages wires.",
+    "qualityMatrix": "NOT_AUTHORIZED",
+    "modelPromotion": "NOT_AUTHORIZED",
+    "productionRouteAdoption": "NOT_AUTHORIZED",
+    "rawSecretsOrRequestsCommitted": false
+  },
+  "artifactDigest": "01eb6a01e69dd295cd96a185d81f4a7f7f5a0a5471d7daf5d1251e2a960130fa"
+}
