@@ -525,7 +525,7 @@ function assertNoPriorPurposeToken(tokens: Token[]): void {
     (token) => token.name === RETIRED_V19_TOKEN_NAME,
   );
   if (
-    retiredV16Tokens.length > 1 ||
+    retiredV16Tokens.length !== 1 ||
     retiredV16Tokens.some((token) => !isExactRetiredV16Token(token)) ||
     retiredV17Tokens.length !== 1 ||
     retiredV17Tokens.some((token) => !isExactRetiredV17Token(token)) ||
@@ -859,8 +859,13 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
     postPrice.pricingVersion !== price.pricingVersion ||
     postPricing.responseSha256 !== catalogResponseSha256 ||
     postTokens.filter(isV20PurposeToken).length !== 1 ||
+    postTokens.filter((token) => token.name === RETIRED_V16_TOKEN_NAME).length !== 1 ||
     postTokens.filter((token) => token.name === RETIRED_V17_TOKEN_NAME).length !== 1 ||
     postTokens.filter((token) => token.name === RETIRED_V19_TOKEN_NAME).length !== 1 ||
+    postTokens.some(
+      (token) =>
+        token.name === RETIRED_V16_TOKEN_NAME && !isExactRetiredV16Token(token),
+    ) ||
     postTokens.some(
       (token) =>
         token.name === RETIRED_V17_TOKEN_NAME && !isExactRetiredV17Token(token),

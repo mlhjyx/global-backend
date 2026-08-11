@@ -96,6 +96,7 @@ function liveFetch(options: {
   duplicateChannels?: boolean;
   invalidLogShape?: boolean;
   postCreatePrefixToken?: boolean;
+  postCreateRetiredV16Status?: 1 | 2;
   invalidModelLimitValue?: boolean;
   malformedModelInventory?: boolean;
   missingPageTotal?: "channel" | "token";
@@ -197,6 +198,13 @@ function liveFetch(options: {
             name: "Site Builder Copy Sonnet Recovery v20-race",
             status: 1,
           });
+        }
+        if (
+          options.postCreateRetiredV16Status &&
+          tokens.some(({ id }) => id === 27)
+        ) {
+          const retiredV16 = tokens.find(({ id }) => id === 24);
+          if (retiredV16) retiredV16.status = options.postCreateRetiredV16Status;
         }
         return json({
           success: true,
@@ -310,7 +318,7 @@ function runtimeDeps(fetchMock: typeof fetch) {
 
 describe("Copy Sonnet recovery zero-model-call preflight", () => {
   it("creates one 24h exact-scope finite token and attests route, quota, price and resolver readiness without dispatch", async () => {
-    const live = liveFetch();
+    const live = liveFetch({ retiredV16Token: true });
     const result = await provisionAndAttestCopySonnetRecoveryZeroCall(
       input(),
       runtimeDeps(live.fetchMock),
@@ -428,6 +436,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     for (const options of [
       { existingPurposeToken: true },
       { retiredV18Token: true },
+      { retiredV16Token: false },
       { activeV16Token: true },
       { retiredV19Token: false },
       { retiredV19Status: 1 },
@@ -449,7 +458,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
   });
 
   it("routes every OpenOx catalog read through the injected ToolBroker and records the broker authority", async () => {
-    const live = liveFetch();
+    const live = liveFetch({ retiredV16Token: true });
     const pricing = pricingBroker();
     const result = await provisionAndAttestCopySonnetRecoveryZeroCall(
       input(pricing.broker),
@@ -481,7 +490,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
   });
 
   it("uses manual redirect handling for every local control-plane request", async () => {
-    const live = liveFetch();
+    const live = liveFetch({ retiredV16Token: true });
     await provisionAndAttestCopySonnetRecoveryZeroCall(
       input(pricingBroker().broker),
       runtimeDeps(live.fetchMock),
@@ -532,6 +541,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     ["/api/log/token", 500, "API_LOG_TOKEN"],
   ] as const)("identifies a failed bearer readback %s by safe endpoint label and HTTP status", async (path, status, label) => {
     const live = liveFetch({
+      retiredV16Token: true,
       controlPlaneHttpFailure: {
         path,
         status,
@@ -642,7 +652,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
       { invalidModelLimitValue: true },
       { malformedModelInventory: true },
     ]) {
-      const live = liveFetch(options);
+      const live = liveFetch({ retiredV16Token: true, ...options });
       await expect(
         provisionAndAttestCopySonnetRecoveryZeroCall(
           input(),
@@ -667,7 +677,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
   });
 
   it("disables every active purpose-prefix token when a duplicate appears during creation", async () => {
-    const live = liveFetch({ postCreatePrefixToken: true });
+    const live = liveFetch({ retiredV16Token: true, postCreatePrefixToken: true });
     await expect(
       provisionAndAttestCopySonnetRecoveryZeroCall(
         input(),
@@ -688,8 +698,33 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     ).toBe(false);
   });
 
+  it("fails and cleans up when a retained v16 audit token drifts after v20 creation", async () => {
+    const live = liveFetch({
+      retiredV16Token: true,
+      postCreateRetiredV16Status: 1,
+    });
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_POST_CREATE_DRIFT");
+    expect(
+      live.observed.some(
+        ({ method, path }) => method === "PUT" && path === "/api/token/",
+      ),
+    ).toBe(true);
+    expect(
+      live.observed.some(({ path }) =>
+        ["/v1/messages", "/v1/chat/completions", "/v1/responses"].includes(
+          path,
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it("rejects authorization, wire-count, lifetime, digest or secret-bearing artifact drift", async () => {
-    const live = liveFetch();
+    const live = liveFetch({ retiredV16Token: true });
     const { artifact } = await provisionAndAttestCopySonnetRecoveryZeroCall(
       input(),
       runtimeDeps(live.fetchMock),
