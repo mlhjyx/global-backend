@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-native-quality-evidence/2026-08-12-v1",
+  "artifactId": "site-builder-copy-sonnet-native-quality/2026-08-12-v1",
+  "classification": "GIT_REVIEW_PENDING_NATIVE_QUALITY_EVIDENCE",
+  "sourceCommit": "642f3b9185b3e667c6b73622bcd11448f8be7a62",
+  "taskId": "site_builder.copy",
+  "scope": {
+    "candidate": "claude-sonnet-5",
+    "protocol": "anthropic_messages",
+    "channelId": 20,
+    "channelGroup": "special",
+    "fixtures": 6,
+    "repeats": 2,
+    "maximumWiresPerExecution": 2,
+    "maximumDecisionWires": 24
+  },
+  "nativeExecution": {
+    "acceptedExecutions": [
+      { "fixtureId": "copy-factual-claims", "repeatIndex": 0, "outputDigest": "0c0c391dbe2308b7347983b7238be393b7a2e2d7ed38097261b521f61d01893a" },
+      { "fixtureId": "copy-factual-claims", "repeatIndex": 1, "outputDigest": "0c0c391dbe2308b7347983b7238be393b7a2e2d7ed38097261b521f61d01893a" },
+      { "fixtureId": "copy-factual-cross-locale", "repeatIndex": 0, "outputDigest": "372bde69b8aa9801555c0ab5bfdc80c752003e51de352e605e432258f91a35f5" },
+      { "fixtureId": "copy-factual-cross-locale", "repeatIndex": 1, "outputDigest": "372bde69b8aa9801555c0ab5bfdc80c752003e51de352e605e432258f91a35f5" },
+      { "fixtureId": "copy-unsupported-assertion", "repeatIndex": 0, "outputDigest": "7c17771c62a8fe154fc36cc6df587e337d7352e610f51f5206a29933b5d74152" },
+      { "fixtureId": "copy-unsupported-assertion", "repeatIndex": 1, "outputDigest": "f6737d46751644babae19a8b9432ef102e002e869123e2ac8b018eced0ad6899" },
+      { "fixtureId": "copy-brand-voice-en", "repeatIndex": 0, "outputDigest": "700d7d26116bb9f8039e3fd6d14c2e4dc299e04198e2bb25982c3fb6932cfd2f" },
+      { "fixtureId": "copy-brand-voice-en", "repeatIndex": 1, "outputDigest": "cbfc4d2d37e6b391537ffed2809fbc1d59ef20793676f5cc8cd4d42aa3943b16" },
+      { "fixtureId": "copy-brand-voice-cross-locale", "repeatIndex": 0, "outputDigest": "b35b1e6b6a34c3e3690efc62090d634503019e08a43e0984a55fcbcac90b5e33" },
+      { "fixtureId": "copy-brand-voice-cross-locale", "repeatIndex": 1, "outputDigest": "c1aa0c89696938089c83fedb5475793cdbeb8d2beba3819c6247d85d361575d1" },
+      { "fixtureId": "copy-cta-budget", "repeatIndex": 0, "outputDigest": "b56202163616d18dff9a295fdb379dddd73beee3dc4edad013b508086b838879" },
+      { "fixtureId": "copy-cta-budget", "repeatIndex": 1, "outputDigest": "aa8b2c3ff05ca884b401ab1cd3ecb295bc39b230ab4ebf27b20b313a91e76893" }
+    ],
+    "totalQualityCampaignPhysicalWires": 13,
+    "initialStructuredOutputFailure": { "fixtureId": "copy-cta-budget", "repeatIndex": 1, "result": "NativeModelOutputError" },
+    "recovery": { "fixtureId": "copy-cta-budget", "repeatIndex": 1, "attempt": 2, "result": "VALID" },
+    "allAcceptedReportedModelExact": true,
+    "allAcceptedRequestIdsPresent": true,
+    "aggregateUsage": {
+      "inputTokens": 15863,
+      "uncachedInputTokens": 1760,
+      "outputTokens": 2612,
+      "cacheReadTokens": 5723,
+      "cacheWriteTokens": 8380,
+      "totalTokens": 18475,
+      "reasoningTokens": 1700
+    }
+  },
+  "hardGates": {
+    "expectedExecutions": 12,
+    "acceptedExecutions": 12,
+    "allProductionValidationPassed": true,
+    "allFactualSlotContentMatches": true
+  },
+  "qualityReview": {
+    "reviewer": { "kind": "independent_model", "providerFamily": "openai", "identity": "codex_readonly_blind_review", "rawOutputDisclosure": "none" },
+    "rubricVersion": "site-builder-copy-quality-rubric/2026-08-04-v1",
+    "dimensionMeans": { "language_quality": 4, "brand_voice": 4, "cta_quality": 3.8, "cross_locale_quality": 4, "stability": "all six repeat pairs passed production hard gates" },
+    "findings": [{ "dimension": "cta_quality", "code": "action_label_weak", "severity": "minor", "count": 1 }],
+    "gatePassed": true
+  },
+  "operationalBoundary": {
+    "purposeSpecificTokensDisabledAfterRun": true,
+    "preMatrixDiagnosticWireExcluded": { "count": 1, "reason": "local canonical serializer rejected an undefined in-memory optional field before JSON normalization" },
+    "noRawPromptOutputTokenOrRequestIdCommitted": true,
+    "otherModelsDispatched": false,
+    "modelPromotion": "AUTHORIZED_PENDING_SEPARATE_PR",
+    "productionRouteAdoption": "AUTHORIZED_PENDING_SEPARATE_PR"
+  },
+  "evidenceLimit": "This is a Sonnet-only native Copy qualification: it does not compare Terra or Sol, does not attest a custom settlement ledger, and does not itself change the production route.",
+  "artifactDigest": "80325b847121c4e77dde49d71e0966fc68129cddd2033c75dd1c95495faf8da9"
+}
