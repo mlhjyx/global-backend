@@ -86,6 +86,7 @@ function pricingBroker(options: {
 
 function liveFetch(options: {
   existingPurposeToken?: boolean;
+  retiredV18Token?: boolean;
   retiredV16Token?: boolean;
   retiredV17Token?: boolean;
   activeV16Token?: boolean;
@@ -111,6 +112,9 @@ function liveFetch(options: {
       : []),
     ...(options.retiredV17Token !== false
       ? [{ id: 25, name: "Site Builder Copy Sonnet Recovery v17", status: 2 }]
+      : []),
+    ...(options.retiredV18Token
+      ? [{ id: 26, name: "Site Builder Copy Sonnet Recovery v18", status: 2 }]
       : []),
     ...(options.activeV16Token
       ? [{ id: 24, name: "Site Builder Copy Sonnet Recovery v16", status: 1 }]
@@ -388,9 +392,10 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     expect(live.observed).not.toContainEqual({ method: "PUT", path: "/api/token/" });
   });
 
-  it("fails before creation when a purpose token already exists or route identity is ambiguous", async () => {
+  it("fails before creation when any v18/v19 purpose token exists or route identity is ambiguous", async () => {
     for (const options of [
       { existingPurposeToken: true },
+      { retiredV18Token: true },
       { activeV16Token: true },
       { duplicateChannels: true },
     ]) {
