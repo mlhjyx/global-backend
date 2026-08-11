@@ -87,6 +87,8 @@ function pricingBroker(options: {
 function liveFetch(options: {
   existingPurposeToken?: boolean;
   retiredV18Token?: boolean;
+  retiredV19Token?: boolean;
+  retiredV19Status?: 1 | 2;
   retiredV16Token?: boolean;
   retiredV17Token?: boolean;
   activeV16Token?: boolean;
@@ -94,6 +96,7 @@ function liveFetch(options: {
   duplicateChannels?: boolean;
   invalidLogShape?: boolean;
   postCreatePrefixToken?: boolean;
+  postCreateRetiredV16Status?: 1 | 2;
   invalidModelLimitValue?: boolean;
   malformedModelInventory?: boolean;
   missingPageTotal?: "channel" | "token";
@@ -113,7 +116,7 @@ function liveFetch(options: {
     ...(options.existingPurposeToken
       ? [{ id: 19, name: "Site Builder Copy Sonnet Recovery v17", status: 1 }]
       : []),
-    ...(options.retiredV16Token
+    ...(options.retiredV16Token !== false
       ? [{ id: 24, name: "Site Builder Copy Sonnet Recovery v16", status: 2 }]
       : []),
     ...(options.retiredV17Token !== false
@@ -121,6 +124,9 @@ function liveFetch(options: {
       : []),
     ...(options.retiredV18Token
       ? [{ id: 26, name: "Site Builder Copy Sonnet Recovery v18", status: 2 }]
+      : []),
+    ...(options.retiredV19Token !== false
+      ? [{ id: 26, name: "Site Builder Copy Sonnet Recovery v19", status: options.retiredV19Status ?? 2 }]
       : []),
     ...(options.activeV16Token
       ? [{ id: 24, name: "Site Builder Copy Sonnet Recovery v16", status: 1 }]
@@ -183,15 +189,24 @@ function liveFetch(options: {
       if (url.pathname === "/api/token/" && method === "GET") {
         if (
           options.postCreatePrefixToken &&
-          tokens.some(({ id }) => id === 26) &&
-          !tokens.some(({ id }) => id === 27)
+          tokens.some(({ id }) => id === 27) &&
+          !tokens.some(({ id }) => id === 28)
         ) {
           tokens.push({
-            ...tokens.find(({ id }) => id === 26),
-            id: 27,
-            name: "Site Builder Copy Sonnet Recovery v19-race",
+            ...tokens.find(({ id }) => id === 27),
+            id: 28,
+            name: "Site Builder Copy Sonnet Recovery v20-race",
             status: 1,
           });
+        }
+        if (
+          options.postCreateRetiredV16Status &&
+          tokens.some(({ id }) => id === 27)
+        ) {
+          const retiredV16 = tokens.find(({ id }) => id === 24);
+          if (retiredV16) {
+            retiredV16.status = options.postCreateRetiredV16Status;
+          }
         }
         return json({
           success: true,
@@ -206,7 +221,7 @@ function liveFetch(options: {
       if (url.pathname === "/api/token/" && method === "POST") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         expect(body).toMatchObject({
-          name: "Site Builder Copy Sonnet Recovery v19",
+          name: "Site Builder Copy Sonnet Recovery v20",
           remain_quota: 186_080,
           unlimited_quota: false,
           model_limits_enabled: true,
@@ -215,7 +230,7 @@ function liveFetch(options: {
           cross_group_retry: false,
         });
         expect(body.expired_time).toBe(1_786_428_000);
-        tokens.push({ id: tokens.some(({ id }) => id === 25) ? 26 : 25, status: 1, ...body });
+        tokens.push({ id: tokens.some(({ id }) => id === 26) ? 27 : 25, status: 1, ...body });
         return json({ success: true });
       }
       if (url.pathname === "/api/token/" && method === "PUT") {
@@ -225,12 +240,12 @@ function liveFetch(options: {
           status: number;
         };
         expect(body.status).toBe(2);
-        expect([25, 26, 27]).toContain(body.id);
+        expect([25, 26, 27, 28]).toContain(body.id);
         const token = tokens.find(({ id }) => id === body.id);
         if (token) token.status = body.status;
         return json({ success: true });
       }
-      if (["/api/token/25/key", "/api/token/26/key"].includes(url.pathname) && method === "POST") {
+      if (["/api/token/25/key", "/api/token/27/key"].includes(url.pathname) && method === "POST") {
         return json({ success: true, data: { key: "one-time-secret" } });
       }
       if (url.pathname === "/api/usage/token/") {
@@ -312,15 +327,15 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     );
 
     expect(COPY_SONNET_RECOVERY_ZERO_CALL_PREFLIGHT_OUTPUT_PATH).toBe(
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v19.json",
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-zero-call-preflight-v20.json",
     );
-    expect(result.secret.tokenId).toBe(26);
+    expect(result.secret.tokenId).toBe(27);
     expect(result.secret.apiKey).toBe(["sk", "one", "time", "secret"].join("-"));
     expect(result.artifact).toMatchObject({
       schemaVersion:
-        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v19-v1",
+        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v20-v1",
       artifactId:
-        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v19-v1",
+        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v20-v1",
       classification: "CONTROL_PLANE_ATTESTATION_ONLY",
       executionHeadCommit: "ca16c5336a51f5ada152aff5c39e57ba8ff4589a",
       preflightOnly: true,
@@ -339,7 +354,7 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
       },
       credential: {
         purpose: "site_builder_copy_sonnet_recovery",
-        tokenId: 26,
+        tokenId: 27,
         bearerTokenSha256:
           "e98839495b40726d4193460951a0e4ee0d76f0e9772619275ded5db4d0017a9b",
         expiresAt: "2026-08-11T06:00:00.000Z",
@@ -408,22 +423,25 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
     );
   });
 
-  it("permits only the retained disabled v16 and v17 failure tokens before creating its v19 successor", async () => {
-    const live = liveFetch({ retiredV16Token: true, retiredV17Token: true });
+  it("permits only the retained disabled v16, v17, and v19 failure tokens before creating its v20 successor", async () => {
+    const live = liveFetch({ retiredV16Token: true, retiredV17Token: true, retiredV19Token: true });
     const result = await provisionAndAttestCopySonnetRecoveryZeroCall(
       input(),
       runtimeDeps(live.fetchMock),
     );
 
-    expect(result.secret.tokenId).toBe(26);
+    expect(result.secret.tokenId).toBe(27);
     expect(live.observed).not.toContainEqual({ method: "PUT", path: "/api/token/" });
   });
 
-  it("fails before creation when any v18/v19 purpose token exists or route identity is ambiguous", async () => {
+  it("fails before creation when any v18/v20 purpose token exists, retained audits drift, or route identity is ambiguous", async () => {
     for (const options of [
       { existingPurposeToken: true },
       { retiredV18Token: true },
+      { retiredV16Token: false },
       { activeV16Token: true },
+      { retiredV19Token: false },
+      { retiredV19Status: 1 },
       { duplicateChannels: true },
     ]) {
       const live = liveFetch(options);
@@ -439,6 +457,29 @@ describe("Copy Sonnet recovery zero-model-call preflight", () => {
         ),
       ).toBe(false);
     }
+  });
+
+  it("fails and cleans up when retained v16 audit state drifts after v20 creation", async () => {
+    const live = liveFetch({ postCreateRetiredV16Status: 1 });
+
+    await expect(
+      provisionAndAttestCopySonnetRecoveryZeroCall(
+        input(),
+        runtimeDeps(live.fetchMock),
+      ),
+    ).rejects.toThrow("COPY_SONNET_RECOVERY_POST_CREATE_DRIFT");
+    expect(
+      live.observed.some(
+        ({ method, path }) => method === "PUT" && path === "/api/token/",
+      ),
+    ).toBe(true);
+    expect(
+      live.observed.some(({ path }) =>
+        ["/v1/messages", "/v1/chat/completions", "/v1/responses"].includes(
+          path,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("routes every OpenOx catalog read through the injected ToolBroker and records the broker authority", async () => {

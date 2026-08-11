@@ -53,11 +53,13 @@ export {
 } from "./copy-sonnet-recovery-zero-call-preflight-artifact";
 export type { CopySonnetRecoveryZeroCallPreflightArtifact } from "./copy-sonnet-recovery-zero-call-preflight-artifact";
 
-const TOKEN_NAME = "Site Builder Copy Sonnet Recovery v19";
+const TOKEN_NAME = "Site Builder Copy Sonnet Recovery v20";
 const RETIRED_V16_TOKEN_ID = 24;
 const RETIRED_V16_TOKEN_NAME = "Site Builder Copy Sonnet Recovery v16";
 const RETIRED_V17_TOKEN_ID = 25;
 const RETIRED_V17_TOKEN_NAME = "Site Builder Copy Sonnet Recovery v17";
+const RETIRED_V19_TOKEN_ID = 26;
+const RETIRED_V19_TOKEN_NAME = "Site Builder Copy Sonnet Recovery v19";
 const DISABLED_TOKEN_STATUS = 2;
 const PAGE_SIZE = 100;
 const MAXIMUM_PAGES = 100;
@@ -65,7 +67,7 @@ const MAXIMUM_RESPONSE_BYTES = 1_048_576;
 const CONTROL_PLANE_TIMEOUT_MS = 5_000;
 const PREFLIGHT_LOCK_PATH = join(
   tmpdir(),
-  "global-site-builder-copy-sonnet-recovery-zero-call-preflight-v19.lock",
+  "global-site-builder-copy-sonnet-recovery-zero-call-preflight-v20.lock",
 );
 const SHA256 = /^[0-9a-f]{64}$/u;
 const GIT_COMMIT = /^[0-9a-f]{40}$/u;
@@ -519,18 +521,24 @@ function assertNoPriorPurposeToken(tokens: Token[]): void {
   const retiredV17Tokens = tokens.filter(
     (token) => token.name === RETIRED_V17_TOKEN_NAME,
   );
+  const retiredV19Tokens = tokens.filter(
+    (token) => token.name === RETIRED_V19_TOKEN_NAME,
+  );
   if (
-    retiredV16Tokens.length > 1 ||
+    retiredV16Tokens.length !== 1 ||
     retiredV16Tokens.some((token) => !isExactRetiredV16Token(token)) ||
     retiredV17Tokens.length !== 1 ||
     retiredV17Tokens.some((token) => !isExactRetiredV17Token(token)) ||
+    retiredV19Tokens.length !== 1 ||
+    retiredV19Tokens.some((token) => !isExactRetiredV19Token(token)) ||
     tokens.some(
       (token) =>
-        isV19PurposeToken(token) ||
+        isV20PurposeToken(token) ||
         (typeof token.name === "string" &&
           token.name.startsWith("Site Builder Copy Sonnet Recovery") &&
           token.name !== RETIRED_V16_TOKEN_NAME &&
-          token.name !== RETIRED_V17_TOKEN_NAME),
+          token.name !== RETIRED_V17_TOKEN_NAME &&
+          token.name !== RETIRED_V19_TOKEN_NAME),
     )
   ) {
     fail("COPY_SONNET_RECOVERY_TOKEN_EXISTS");
@@ -541,7 +549,7 @@ function isPurposeToken(token: Token): boolean {
   return token.name === TOKEN_NAME;
 }
 
-function isV19PurposeToken(token: Token): boolean {
+function isV20PurposeToken(token: Token): boolean {
   return typeof token.name === "string" && token.name.startsWith(TOKEN_NAME);
 }
 
@@ -561,6 +569,14 @@ function isExactRetiredV17Token(token: Token): boolean {
   );
 }
 
+function isExactRetiredV19Token(token: Token): boolean {
+  return (
+    token.id === RETIRED_V19_TOKEN_ID &&
+    token.name === RETIRED_V19_TOKEN_NAME &&
+    token.status === DISABLED_TOKEN_STATUS
+  );
+}
+
 export async function disableCopySonnetRecoveryPurposeTokens(
   input: CopySonnetRecoveryZeroCallPreflightInput,
   fetchImpl: typeof fetch,
@@ -575,7 +591,7 @@ export async function disableCopySonnetRecoveryPurposeTokens(
     timeoutMs,
   );
   const matches = tokens.filter(
-    (token) => isV19PurposeToken(token) && token.status === 1,
+    (token) => isV20PurposeToken(token) && token.status === 1,
   );
   for (const token of matches) {
     if (!Number.isSafeInteger(token.id) || (token.id as number) <= 0) {
@@ -603,7 +619,7 @@ export async function disableCopySonnetRecoveryPurposeTokens(
   );
   if (
     readback.some(
-      (token) => isV19PurposeToken(token) && token.status === 1,
+      (token) => isV20PurposeToken(token) && token.status === 1,
     )
   ) {
     fail("COPY_SONNET_RECOVERY_TOKEN_CLEANUP_FAILED");
@@ -701,7 +717,7 @@ async function readOpenOxCatalog(
     COPY_SONNET_RECOVERY_OPENOX_PRICING_TOOL_ID,
     {},
     {
-      workspaceId: "site-builder-copy-sonnet-recovery-v19",
+      workspaceId: "site-builder-copy-sonnet-recovery-v20",
       purpose: CREDENTIAL_PURPOSE,
     },
   );
@@ -842,11 +858,21 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
     !postPrice ||
     postPrice.pricingVersion !== price.pricingVersion ||
     postPricing.responseSha256 !== catalogResponseSha256 ||
-    postTokens.filter(isV19PurposeToken).length !== 1 ||
+    postTokens.filter(isV20PurposeToken).length !== 1 ||
+    postTokens.filter((token) => token.name === RETIRED_V16_TOKEN_NAME).length !== 1 ||
     postTokens.filter((token) => token.name === RETIRED_V17_TOKEN_NAME).length !== 1 ||
+    postTokens.filter((token) => token.name === RETIRED_V19_TOKEN_NAME).length !== 1 ||
+    postTokens.some(
+      (token) =>
+        token.name === RETIRED_V16_TOKEN_NAME && !isExactRetiredV16Token(token),
+    ) ||
     postTokens.some(
       (token) =>
         token.name === RETIRED_V17_TOKEN_NAME && !isExactRetiredV17Token(token),
+    ) ||
+    postTokens.some(
+      (token) =>
+        token.name === RETIRED_V19_TOKEN_NAME && !isExactRetiredV19Token(token),
     )
   ) {
     fail("COPY_SONNET_RECOVERY_POST_CREATE_DRIFT");
@@ -950,7 +976,7 @@ async function provisionAndAttestCopySonnetRecoveryZeroCallUnlocked(
       prohibitedModelEndpointCalls: 0 as const,
     },
     requiredFollowup: [
-      "SEPARATE_V19_DISPATCH_AUTHORIZATION",
+      "SEPARATE_V20_DISPATCH_AUTHORIZATION",
       "REQUEST_BOUND_SETTLEMENT_PER_PHYSICAL_WIRE",
       "GIT_REVIEWED_CAPABILITY_EVIDENCE",
     ] as const,
