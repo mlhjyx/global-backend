@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-native-capability-evidence/2026-08-12-v1",
+  "artifactId": "site-builder-copy-sonnet-native-capability/2026-08-12-v1",
+  "classification": "GIT_REVIEW_PENDING_NATIVE_GATEWAY_CAPABILITY_EVIDENCE",
+  "sourceCommit": "d5e53eca8fdb1b67492536f0788c9593482c4845",
+  "taskId": "site_builder.copy",
+  "scope": {
+    "model": "claude-sonnet-5",
+    "protocol": "anthropic_messages",
+    "channelId": 20,
+    "channelGroup": "special",
+    "maximumWireCalls": 2,
+    "maximumRepairCalls": 1
+  },
+  "execution": {
+    "fixtureId": "copy-factual-claims",
+    "requestConstruction": "current COPY_TASK prompt and factual fixture",
+    "wireCount": 2,
+    "initialWire": {
+      "result": "MODEL_RESPONSE_CONTRACT_INVALID",
+      "reason": "MARKDOWN_CODE_FENCE",
+      "usage": {
+        "inputTokens": 1003,
+        "outputTokens": 122,
+        "cacheCreationInputTokens": 4,
+        "cacheReadInputTokens": 93
+      }
+    },
+    "repairWire": {
+      "result": "VALIDATED",
+      "usage": {
+        "inputTokens": 1188,
+        "outputTokens": 117,
+        "cacheCreationInputTokens": 4,
+        "cacheReadInputTokens": 93
+      }
+    },
+    "nativeGatewayLog": {
+      "recordCount": 2,
+      "allRequestIdsPresent": true
+    }
+  },
+  "validation": {
+    "valid": true,
+    "exactCanonicalOutput": true,
+    "hardGatePassed": true,
+    "creativeContentPreserved": true,
+    "productionValidationPassed": true,
+    "factualSlotContentMatches": true,
+    "rejectedSlotKeys": [],
+    "validatedSlots": [
+      {
+        "key": "home.hero.headline",
+        "contentLength": 30,
+        "claimRefs": ["claim-pressure"]
+      },
+      {
+        "key": "home.hero.certification",
+        "contentLength": 26,
+        "claimRefs": ["claim-cert"]
+      },
+      {
+        "key": "home.hero.cta.label",
+        "contentLength": 12,
+        "claimRefs": []
+      }
+    ]
+  },
+  "operationalBoundary": {
+    "purposeSpecificTokenDisabledAfterRun": true,
+    "otherModelsDispatched": false,
+    "rawPromptsOrOutputsCommitted": false,
+    "productionRouteChanged": false,
+    "modelPromotion": "NOT_AUTHORIZED",
+    "productionRouteAdoption": "NOT_AUTHORIZED"
+  },
+  "evidenceLimit": "This direct native protocol run proves one factual Copy fixture and one closed repair. It is not a copy-real-capability-runner receipt, a quality matrix, promotion evidence, or production-route evidence.",
+  "artifactDigest": "80e7d50d94454ad72f61d91b5371e8eb262ab5f30b136154c5019a60bbd30ce7"
+}
