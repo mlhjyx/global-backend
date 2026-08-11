@@ -33,7 +33,7 @@ function fixture() {
     secret: { tokenId: 25, apiKey: TEST_API_KEY },
     artifact: {
       artifactId:
-        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v18-v1",
+        "site-builder-copy-sonnet-recovery-zero-call-preflight/2026-08-10-v19-v1",
       artifactDigest: "a".repeat(64),
       dispatchAuthorization: "NOT_AUTHORIZED",
       dispatchCapable: false,
