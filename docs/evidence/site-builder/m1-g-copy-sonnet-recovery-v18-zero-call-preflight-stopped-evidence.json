@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-recovery-zero-call-preflight-stopped-evidence/2026-08-11-v1",
+  "artifactId": "site-builder-copy-sonnet-recovery-v18-zero-call-preflight-stopped/2026-08-11-v1",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "executionHead": "cee647bfeb543014b93784caa49bb27a95077532",
+  "mergeProvenance": {
+    "pullRequest": 385,
+    "mergeCommit": "cee647bfeb543014b93784caa49bb27a95077532"
+  },
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopPhase": "public_pricing_before_token_creation",
+  "sourceObservation": {
+    "authority": "tool_broker",
+    "toolId": "openox.pricing_catalog",
+    "endpoint": "/api/public/pricing-catalog",
+    "upstreamHost": "openox.tech",
+    "transportOutcomes": ["ipv4_connect_timeout", "ipv6_network_unreachable"],
+    "modelCostCents": 0
+  },
+  "nonOccurrence": {
+    "v18TokenCreated": false,
+    "trackedPreflightArtifactCreated": false,
+    "bearerModelRequestIssued": false,
+    "modelWireCalls": 0,
+    "modelCost": { "CNY": 0, "USD": 0 }
+  },
+  "controlPlaneReadback": {
+    "route": {
+      "channelId": 20,
+      "status": "DISABLED",
+      "channelType": 14,
+      "baseUrl": "https://openox.tech",
+      "model": "claude-sonnet-5",
+      "group": "special",
+      "modelMapping": "IDENTITY"
+    },
+    "successorV18Token": {
+      "namePrefix": "Site Builder Copy Sonnet Recovery v18",
+      "status": "ABSENT"
+    },
+    "retiredV16Token": { "tokenId": 24, "status": "DISABLED" },
+    "retiredV17Token": { "tokenId": 25, "status": "DISABLED" }
+  },
+  "requiredRecovery": [
+    "do not reuse, mutate, or delete retired v16 token 24 or v17 token 25",
+    "do not retry this consumed v18 authorization or create a successor token without new explicit authorization",
+    "restore and independently verify OpenOx public pricing reachability before any new zero-call preflight authorization",
+    "obtain separate explicit authorization before any model dispatch"
+  ],
+  "artifactDigest": "7da3a1df18475fe896f0da971bbb719250489e56067ed5867d0ad5b97f2deb00"
+}
