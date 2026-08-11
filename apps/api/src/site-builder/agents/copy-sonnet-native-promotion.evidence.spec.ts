@@ -19,7 +19,7 @@ function sha256(bytes: Buffer): string {
 }
 
 describe('Copy Sonnet native quality promotion approval', () => {
-  it('binds the Git-reviewed 12/12 quality evidence without adopting the route', () => {
+  it('binds the Git-reviewed 12/12 quality evidence that predates separate route adoption', () => {
     const evidence = COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE;
     const bytes = artifactBytes(evidence.acceptanceArtifactPath);
     const acceptance = JSON.parse(bytes.toString('utf8')) as {
@@ -76,7 +76,7 @@ describe('Copy Sonnet native quality promotion approval', () => {
     });
   });
 
-  it('approves only Sonnet Messages with no fallback while the active Copy route stays unchanged', () => {
+  it('keeps the approved Sonnet Messages route immutable for the separate adoption gate', () => {
     expect(
       modelPolicyRegistry.getApprovedTaskPromotion('site_builder.copy'),
     ).toEqual({
@@ -84,15 +84,15 @@ describe('Copy Sonnet native quality promotion approval', () => {
       profile: 'copy.premium',
       route: { primary: 'claude-sonnet-5', fallbacks: [] },
       transport: 'anthropic-messages',
+      reasoningEffort: 'medium',
       promotionEvidenceId:
         'site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1',
-      routeAdoption: 'not_adopted',
+      routeAdoption: 'active',
     });
 
-    expect(resolveTaskRoute('site_builder.copy')).toMatchObject({
-      primary: 'deepseek-v4-pro',
-      fallbacks: ['glm-5.2'],
-      policy: { routeState: 'currentRoute', source: 'registry' },
+    expect(resolveTaskRoute('site_builder.copy').policy).toMatchObject({
+      promotionEvidenceId:
+        'site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1',
     });
   });
 });

@@ -244,14 +244,14 @@ as-built 已落地 **7 个 task id**（`task-routes.ts`：`brand_profile / copy 
 
 2026-07-27 起，非运行时候选由 ADR-021 与 `site-builder-model-candidate-baseline/2026-08-07-v3` 接管；本节标题保留旧 anchor 以兼容历史设计稿链接。
 
-> **代码事实优先**：`task-routes.ts` 是现役唯一真值；7 个文本 task 中只有 BrandProfile 经真实 endpoint 协议探针、同形 6×2 Golden、成本/质量、失败门和 rollback 成为代码级 `promotedRoute`，其余仍是 `currentRoute`。非运行时候选唯一看 ADR-021 的 `site-builder-model-candidate-baseline/2026-08-07-v3` 与[生成文档](model-candidate-baseline.md)；ADR-020 和 [10-model-selection-study.md](10-model-selection-study.md) 只保留历史决策/实测 provenance，不再复制当前候选表。
+> **代码事实优先**：`task-routes.ts` 是现役唯一真值；BrandProfile 与 `site_builder.copy` 各自经独立逐任务 quality、promotion、失败门和 rollback 后成为代码级 `promotedRoute`：Copy 精确为 Sonnet/Messages/`medium`/no-fallback。其余 task 仍是 `currentRoute` 或 `deterministicFallback`。非运行时候选唯一看 ADR-021 的 `site-builder-model-candidate-baseline/2026-08-07-v3` 与[生成文档](model-candidate-baseline.md)；ADR-020 和 [10-model-selection-study.md](10-model-selection-study.md) 只保留历史决策/实测 provenance，不再复制当前候选表。
 
 **active route（as-built）**：
 
 | task                          | primary                      | fallback                          | state                                  |
 | ----------------------------- | ---------------------------- | --------------------------------- | -------------------------------------- |
 | `brand_profile`               | `gpt-5.6-terra`（Responses） | `claude-sonnet-5`（Messages）     | `promotedRoute`；可回 DeepSeek Pro→GLM |
-| `copy`                        | `deepseek-v4-pro`            | `glm-5.2`                         | `currentRoute`                         |
+| `site_builder.copy`           | `claude-sonnet-5`（Messages） | —                                 | `promotedRoute`；`medium`；可回 DeepSeek Pro→GLM/`low` |
 | `design_spec`                 | `safe-blueprint`             | —                                 | `deterministicFallback`                |
 | `assemble` / `assembly_fix`   | `safe-blueprint`             | —                                 | `deterministicFallback`                |
 | `qa_summarize` / `seo_review` | `rule-summary`               | —                                 | `deterministicFallback`                |

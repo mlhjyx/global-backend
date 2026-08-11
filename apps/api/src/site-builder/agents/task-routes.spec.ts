@@ -40,11 +40,16 @@ describe('resolveTaskRoute — 逐任务生产策略', () => {
     });
   });
 
-  it('copy：deepseek-v4-pro + 🔴 reasoning_effort=low（评测实证：不压 effort 时延迟不可用）', () => {
+  it('copy：已采用 Sonnet Messages/medium；旧 DeepSeek low 只在显式 rollback 生效', () => {
     const route = resolveTaskRoute('site_builder.copy');
-    expect(route.primary).toBe('deepseek-v4-pro');
-    expect(route.reasoningEffort).toBe('low');
-    expect(route.fallbacks).toEqual(['glm-5.2']);
+    expect(route.primary).toBe('claude-sonnet-5');
+    expect(route.reasoningEffort).toBe('medium');
+    expect(route.fallbacks).toEqual([]);
+    expect(route.policy).toMatchObject({
+      routeState: 'promotedRoute',
+      promotionEvidenceId:
+        'site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1',
+    });
   });
 
   it('only BrandProfile and Copy remain generative while the other five task IDs stay deterministic', () => {
@@ -223,8 +228,8 @@ describe('resolveTaskRoute — env 覆盖（通道接入后翻配置即切换，
       } as NodeJS.ProcessEnv),
     ).toThrow(/must be true or false/);
     expect(() =>
-      resolveTaskRoute('site_builder.copy', {
-        SITE_BUILDER_MODEL_ROLLBACK_COPY: 'true',
+      resolveTaskRoute('site_builder.design_spec', {
+        SITE_BUILDER_MODEL_ROLLBACK_DESIGN_SPEC: 'true',
       } as NodeJS.ProcessEnv),
     ).toThrow(/has no promoted route/);
   });
@@ -315,7 +320,12 @@ describe('MODEL-0 profile binding and MODEL-1 per-task promotion isolation', () 
         ]),
       ),
     ).toMatchObject({
-      'site_builder.copy': { route: { fallbacks: ['glm-5.2'] } },
+      'site_builder.copy': {
+        state: 'promotedRoute',
+        route: { primary: 'claude-sonnet-5', fallbacks: [] },
+        promotionEvidenceId:
+          'site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1',
+      },
       'site_builder.design_spec': {
         state: 'deterministicFallback',
         fallback: { id: 'safe-blueprint' },

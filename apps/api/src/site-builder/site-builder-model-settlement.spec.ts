@@ -27,9 +27,7 @@ const API_KEY = 'test-runtime-token';
 const NOW = new Date('2026-07-29T06:00:00.000Z');
 const GATEWAY_ORIGIN = 'https://gateway.example.test';
 const CHANNEL_ID = 17;
-const REVIEWED_RUNTIME_ROUTE_ENV = {
-  SITE_BUILDER_FALLBACKS_COPY: 'glm-5.2',
-} satisfies NodeJS.ProcessEnv;
+const REVIEWED_RUNTIME_ROUTE_ENV = {} satisfies NodeJS.ProcessEnv;
 
 function protocolFor(alias: string) {
   return VERIFIED_GATEWAY_MODEL_TRANSPORTS[alias] ?? 'openai-chat-completions';
@@ -421,7 +419,7 @@ describe('Site Builder zero-generation model preflight', () => {
   it('denies a current alias that is absent from the OpenOx catalog', async () => {
     const { attestation, entries, prices } = fixture();
     const dispatch = entries.find(
-      (entry) => entry.alias === 'deepseek-v4-pro',
+      (entry) => entry.alias === 'gpt-5.6-terra',
     )!;
     const missingCatalog = structuredClone(prices);
     missingCatalog.data!.models = (

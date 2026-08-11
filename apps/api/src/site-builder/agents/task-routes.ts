@@ -45,7 +45,7 @@ export interface TaskRoute {
   dataPolicy: ModelDataPolicy;
   /** Resolved production-policy snapshot for audit/replay. */
   policy: ModelExecutionPolicySnapshot;
-  /** 🔴 reasoning 模型护栏：v4-pro 做 copy 必配 low（评测实证，02 §6）。 */
+  /** 🔴 reasoning 模型护栏：active promotion 必须绑定已评测的 effort；Copy legacy rollback 为 low。 */
   reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
@@ -79,6 +79,53 @@ export class TaskRouteConfigurationError extends Error {
 type TaskRouteBinding = SiteBuilderTaskRouteBinding & {
   profile: SiteBuilderModelProfileId;
 };
+
+function sameRoute(
+  left: { primary: string; fallbacks: readonly string[] },
+  right: { primary: string; fallbacks: readonly string[] },
+): boolean {
+  return (
+    left.primary === right.primary &&
+    left.fallbacks.length === right.fallbacks.length &&
+    left.fallbacks.every((fallback, index) => fallback === right.fallbacks[index])
+  );
+}
+
+function resolveApprovedPromotionReasoningEffort(
+  taskId: SiteBuilderTaskId,
+  binding: TaskRouteBinding,
+  activePolicy: ReturnType<typeof modelPolicyRegistry.getActiveTaskPolicy>,
+  selectedRoute: { primary: string; fallbacks: readonly string[] },
+  emergencyOverride: boolean,
+  rollback: boolean,
+): TaskRouteBinding['reasoningEffort'] {
+  if (
+    emergencyOverride ||
+    rollback ||
+    activePolicy.state !== 'promotedRoute'
+  ) {
+    return binding.reasoningEffort;
+  }
+  const approval = modelPolicyRegistry.getApprovedTaskPromotion(taskId);
+  if (!approval) {
+    if (modelPolicyRegistry.requiresApprovedTaskPromotion(taskId)) {
+      throw new TaskRouteConfigurationError(
+        `PROMOTION_ROUTE_ADOPTION_MISSING: ${taskId}`,
+      );
+    }
+    return binding.reasoningEffort;
+  }
+  if (
+    approval.routeAdoption !== 'active' ||
+    approval.promotionEvidenceId !== activePolicy.promotionEvidenceId ||
+    !sameRoute(approval.route, selectedRoute)
+  ) {
+    throw new TaskRouteConfigurationError(
+      `PROMOTION_ROUTE_ADOPTION_MISMATCH: ${taskId}`,
+    );
+  }
+  return approval.reasoningEffort;
+}
 
 /** taskId → env 后缀：site_builder.brand_profile → BRAND_PROFILE。 */
 function envSuffix(taskId: SiteBuilderTaskId): string {
@@ -184,6 +231,14 @@ export function resolveTaskExecutionTarget(
   // promotion report.
   const routeState =
     emergencyOverride || rollback ? 'currentRoute' : selectedPolicy.state;
+  const reasoningEffort = resolveApprovedPromotionReasoningEffort(
+    taskId,
+    binding,
+    selectedPolicy,
+    selectedRoute,
+    emergencyOverride,
+    rollback,
+  );
   const policy: ModelExecutionPolicySnapshot = {
     policyVersion: modelPolicyRegistry.getPolicyVersion(),
     profile,
@@ -212,6 +267,7 @@ export function resolveTaskExecutionTarget(
       profile,
       primary: resolvedPrimary,
       fallbacks: [...resolvedFallbacks],
+      reasoningEffort,
       dataPolicy: { ...profileDefinition.dataPolicy },
       policy,
     },

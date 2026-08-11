@@ -142,17 +142,15 @@ function build(
 }
 
 describe('current-route zero-model recovery preparation', () => {
-  it('derives only the two generative tasks and four exact aliases from the registry', () => {
+  it('derives only the two generative tasks and the three exact route dispatches from the registry', () => {
     const report = build();
 
     expect(new Set(report.dispatches.map(({ taskId }) => taskId)).size).toBe(2);
-    expect(report.dispatches).toHaveLength(4);
-    expect(report.aliases).toHaveLength(4);
+    expect(report.dispatches).toHaveLength(3);
+    expect(report.aliases).toHaveLength(2);
     expect(report.status).toBe('READY_FOR_RUNTIME_ATTESTATION_DECISION');
     expect(report.credential.requiredModelAllowlist).toEqual([
       'claude-sonnet-5',
-      'deepseek-v4-pro',
-      'glm-5.2',
       'gpt-5.6-terra',
     ]);
     expect(report.blockers).toEqual([]);
@@ -200,7 +198,7 @@ describe('current-route zero-model recovery preparation', () => {
       weight: 0,
     });
     const catalog = sourceBundle();
-    const missing = ['deepseek-v4-pro'];
+    const missing = ['gpt-5.6-terra'];
     catalog.modelIds = catalog.modelIds.filter(
       (alias) => !missing.includes(alias),
     );
@@ -226,7 +224,7 @@ describe('current-route zero-model recovery preparation', () => {
       'OPENOX_PRICE_MISSING',
     ]);
     expect(
-      report.aliases.find(({ alias }) => alias === 'deepseek-v4-pro'),
+      report.aliases.find(({ alias }) => alias === 'gpt-5.6-terra'),
     ).toMatchObject({
       channelSelection: 'unique',
       openOxPricing: null,

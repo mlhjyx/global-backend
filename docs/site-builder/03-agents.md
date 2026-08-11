@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 当前事实来源：`task-routes.ts`、受控组装服务、[状态](../status/current.md)与候选基线 `site-builder-model-candidate-baseline/2026-08-07-v3`。
 > 配套 [02-architecture.md](02-architecture.md)（§4 编排、§6 模型路由）。本文件是站点生产 agent 的实现级设计：每张卡给足 职责/输入输出/执行流程/prompt 内化来源/工具/护栏/降级，可直接照卡开发。**卡 1 planner 已按 D13 砍（v1 不实现），余 8 张为生产 agent（对应 as-built 7 个 task id，见 §0.4）。**
-> Agent 卡**只绑定 `modelProfile`，不绑定供应商型号**。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 active route 为准（见 §0.4）；非运行时候选只认[生成候选基线](model-candidate-baseline.md)，只有 BrandProfile 已经逐任务评测成为代码级 `promotedRoute`，其余仍待。换型号只改 ModelPolicyRegistry，并保存 model snapshot；不得散落回卡片。
+> Agent 卡**只绑定 `modelProfile`，不绑定供应商型号**。as-built 真值以 `apps/api/src/site-builder/agents/task-routes.ts` 的 active route 为准（见 §0.4）；非运行时候选只认[生成候选基线](model-candidate-baseline.md)。BrandProfile 与 `site_builder.copy` 已各自逐任务评测/审批成为代码级 `promotedRoute`；其余仍待。换型号只改 ModelPolicyRegistry，并保存 model snapshot；不得散落回卡片。
 > **卡 1 planner 已按 D13 砍**——职责拆分归位（编排/预算/增量范围 → 「编排/增量规划」确定性零模型；"该有哪些页/每页什么结构" → 卡 6 designSpec；用户自由意图改站 → M2 预留），**v1 不实现，卡片保留仅作历史与 M2 参考**。
 
 ## 0. 统一运行时契约（AiTask 基类，所有 agent 共用）
@@ -36,7 +36,7 @@ AiTask<I, O>：
 
 task 只引用稳定的 **`modelProfile`**（17 档：`deterministic` / `structured.default` / `structured.workspace_materials` / `reasoning.high` / `copy.premium` / `text.bulk` / `multimodal.review` / `text.summary` / `image.precise_edit` / `image.bulk.creative` / `image.premium.design` / `video.primary` / `video.premium` / `speech.production` / `transcription` / `moderation.media` / `embedding.private`），由 registry 映射到当下 snapshot。换型号不改 Agent 卡；所有 alias 运行时解析到 snapshot，ReleaseManifest 存 snapshot 以支持历史重放与回归定位。
 
-候选 alias、状态、预期协议与 task/Profile 评测池不在 Agent 卡重复抄写，只认基线 `site-builder-model-candidate-baseline/2026-08-07-v3`。该基线独立于 execution policy v3，profile candidate 不是整档自动切换指令；目前只有 BrandProfile 完成逐 task 晋级。
+候选 alias、状态、预期协议与 task/Profile 评测池不在 Agent 卡重复抄写，只认基线 `site-builder-model-candidate-baseline/2026-08-07-v3`。该基线独立于 execution policy v3，profile candidate 不是整档自动切换指令；BrandProfile 与 `site_builder.copy` 的逐 task 晋级均不从候选可见性自动推导。
 
 ### 0.3 每次执行记录（可观测，v3.2 §5.3 回写）
 
@@ -49,7 +49,7 @@ task 只引用稳定的 **`modelProfile`**（17 档：`deterministic` / `structu
 | task id                      | 对应卡      | active primary                   | fallbacks                    | state / maxTokens / timeout                 |
 | ---------------------------- | ----------- | -------------------------------- | ---------------------------- | ------------------------------------------- |
 | `site_builder.brand_profile` | 卡2         | gpt-5.6-terra（Responses）       | claude-sonnet-5（Messages）  | promoted；12k / 240s；可回 DeepSeek Pro→GLM |
-| `site_builder.copy`          | 卡4         | deepseek-v4-pro（reasoning low） | glm-5.2                      | currentRoute；4k / 120s                     |
+| `site_builder.copy`          | 卡4         | claude-sonnet-5（Messages）      | —                            | promotedRoute；medium；4k / 120s；可回 DeepSeek Pro→GLM/low |
 | `site_builder.design_spec`   | 卡6         | safe-blueprint（deterministic）  | —                            | deterministicFallback；零模型调用           |
 | `site_builder.assemble`      | 卡7（组装） | safe-blueprint（deterministic）  | —                            | deterministicFallback；零模型调用           |
 | `site_builder.assembly_fix`  | 卡7（修复） | safe-blueprint（deterministic）  | —                            | deterministicFallback；零模型调用           |

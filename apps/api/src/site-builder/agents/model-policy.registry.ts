@@ -36,6 +36,7 @@ export interface ApprovedTaskPromotion {
   profile: SiteBuilderModelProfileId;
   route: ModelRouteSnapshot;
   transport: 'anthropic-messages';
+  reasoningEffort: 'medium';
   promotionEvidenceId: string;
   routeAdoption: 'not_adopted' | 'active';
 }
@@ -116,6 +117,7 @@ export const COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE = Object.freeze({
     fallbacks: Object.freeze([]),
   }),
   transport: 'anthropic-messages' as const,
+  reasoningEffort: 'medium' as const,
   acceptanceArtifactPath:
     'docs/evidence/site-builder/m1-g-copy-sonnet-native-quality-git-review-acceptance-2026-08-12.json',
   acceptanceArtifactSha256:
@@ -126,11 +128,16 @@ export const COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE = Object.freeze({
     '7c897904a7b62b9f7687abf7b926efff6645f4a9c5a06beba89075d14245d12e',
   qualityArtifactDigest:
     '80325b847121c4e77dde49d71e0966fc68129cddd2033c75dd1c95495faf8da9',
-  routeAdoption: 'not_adopted' as const,
+  routeAdoption: 'active' as const,
 });
 
-/** Only BrandProfile currently has an active task-shaped promoted route. */
-const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
+type ActiveTaskPolicy = ModelActiveRoute & {
+  /** An active route that must retain its separate approved-promotion record. */
+  approvalRequired?: true;
+};
+
+/** Task-shaped promotions become active only in their separate route-adoption PR. */
+const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ActiveTaskPolicy> = {
   'site_builder.brand_profile': {
     state: 'promotedRoute',
     lifecycle: 'active',
@@ -141,9 +148,11 @@ const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
     promotionEvidenceId: BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE.id,
   },
   'site_builder.copy': {
-    state: 'currentRoute',
+    state: 'promotedRoute',
     lifecycle: 'active',
-    route: { primary: 'deepseek-v4-pro', fallbacks: ['glm-5.2'] },
+    route: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.route,
+    promotionEvidenceId: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.id,
+    approvalRequired: true,
   },
   'site_builder.design_spec': {
     state: 'deterministicFallback',
@@ -196,6 +205,8 @@ const APPROVED_TASK_PROMOTIONS: Partial<
     profile: 'copy.premium',
     route: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.route,
     transport: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.transport,
+    reasoningEffort:
+      COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.reasoningEffort,
     promotionEvidenceId: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.id,
     routeAdoption: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.routeAdoption,
   },
@@ -444,6 +455,7 @@ function cloneApprovedTaskPromotion(
     profile: promotion.profile,
     route: cloneRoute(promotion.route),
     transport: promotion.transport,
+    reasoningEffort: promotion.reasoningEffort,
     promotionEvidenceId: promotion.promotionEvidenceId,
     routeAdoption: promotion.routeAdoption,
   };
@@ -454,6 +466,10 @@ function cloneApprovedTaskPromotion(
  * MODEL-0: candidate evaluation and traffic promotion belong to MODEL-1/2.
  */
 export class ModelPolicyRegistry {
+  requiresApprovedTaskPromotion(taskId: SiteBuilderTaskId): boolean {
+    return ACTIVE_TASK_POLICIES[taskId].approvalRequired === true;
+  }
+
   getApprovedTaskPromotion(
     taskId: SiteBuilderTaskId,
   ): ApprovedTaskPromotion | null {

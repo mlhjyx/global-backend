@@ -664,7 +664,7 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
     });
   });
 
-  it('Claude Messages sends native headers, separates system text, and excludes thinking from output', async () => {
+  it('Claude Messages sends the evaluated native schema/reasoning shape and excludes thinking from output', async () => {
     const messages = new OpenAICompatibleProvider({
       id: 'gateway',
       baseUrl: 'http://gw.test/v1',
@@ -680,7 +680,7 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
           type: 'thinking',
           thinking: 'private reasoning must not enter the artifact',
         },
-        { type: 'text', text: '```json\n{"ok":true}\n```' },
+        { type: 'tool_use', name: 'json', input: { ok: true } },
       ],
       usage: { input_tokens: 99, output_tokens: 55 },
     });
@@ -690,6 +690,7 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       prompt: 'p',
       schema: {},
       maxTokens: 456,
+      reasoningEffort: 'medium',
     });
 
     expect(result).toMatchObject({
@@ -707,8 +708,44 @@ describe('OpenAICompatibleProvider — explicit native gateway transports', () =
       model: 'claude-sonnet-5',
       max_tokens: 456,
       messages: [{ role: 'user', content: 'p' }],
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'medium' },
+      tools: [
+        {
+          name: 'json',
+          description: 'Respond with a JSON object.',
+          input_schema: {},
+        },
+      ],
+      tool_choice: { type: 'any', disable_parallel_tool_use: true },
     });
-    expect(lastRequestBody().system).toContain('只返回符合以下 JSON Schema');
+    expect(lastRequestBody()).not.toHaveProperty('system');
+  });
+
+  it('rejects text JSON when a native Anthropic structured call did not return the required JSON tool', async () => {
+    const messages = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'claude-sonnet-5',
+      modelTransports: { 'claude-sonnet-5': 'anthropic-messages' },
+    });
+    mockChatResponse({
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: '{"ok":true}' }],
+      usage: { input_tokens: 99, output_tokens: 55 },
+    });
+
+    await expect(
+      messages.generateStructured({
+        task: 't',
+        prompt: 'p',
+        schema: {},
+        maxTokens: 456,
+        reasoningEffort: 'medium',
+      }),
+    ).rejects.toThrow('Anthropic structured response missing JSON tool output');
   });
 
   it.each(['max_tokens', 'model_context_window_exceeded'])(

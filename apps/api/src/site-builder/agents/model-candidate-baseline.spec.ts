@@ -241,8 +241,8 @@ describe('Site Builder model candidate baseline', () => {
         fallbacks: ['claude-sonnet-5'],
       },
       'site_builder.copy': {
-        primary: 'deepseek-v4-pro',
-        fallbacks: ['glm-5.2'],
+        primary: 'claude-sonnet-5',
+        fallbacks: [],
       },
     });
     for (const taskId of [
@@ -285,6 +285,12 @@ describe('Site Builder model candidate baseline', () => {
         promotionEvidenceId: 'model1-brand-profile-20260719-v20',
       },
     );
+    expect(resolveTaskRoute('site_builder.copy').policy).toMatchObject({
+      policyVersion: 'site-builder-model-policy/v3',
+      routeState: 'promotedRoute',
+      promotionEvidenceId:
+        'site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1',
+    });
   });
 
   it('keeps legacy-only and unavailable candidates out of active routing', () => {

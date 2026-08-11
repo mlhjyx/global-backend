@@ -65,9 +65,9 @@ describe('buildGatewayProvider — verified production model transports', () => 
 
   it('Sonnet uses the verified native Messages endpoint and headers', async () => {
     mockResponse({
-      stop_reason: 'end_turn',
+      stop_reason: 'tool_use',
       model: 'claude-sonnet-5',
-      content: [{ type: 'text', text: '{"ok":true}' }],
+      content: [{ type: 'tool_use', name: 'json', input: { ok: true } }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
     const provider = buildGatewayProvider(providerEnv());

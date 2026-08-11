@@ -282,7 +282,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   async generateStructured<T = unknown>(input: GenerateStructuredInput, ctx: AiContext): Promise<ModelResult<T>> {
     const model = input.model ?? this.cfg.model;
-    const system = `${input.system ?? ''}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(input.schema)}`;
+    const transport = this.cfg.modelTransports?.[model] ?? 'openai-chat-completions';
+    const system =
+      transport === 'anthropic-messages'
+        ? input.system ?? ''
+        : `${input.system ?? ''}\n只返回符合以下 JSON Schema 的合法 JSON，不要任何多余文本或解释：\n${JSON.stringify(input.schema)}`;
     const {
       content,
       usage,
@@ -298,6 +302,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         maxTokens: input.maxTokens,
         temperature: 0,
         json: true,
+        outputSchema: input.schema,
         reasoningEffort: input.reasoningEffort,
         signal: input.signal,
       },
@@ -405,6 +410,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       maxTokens?: number;
       temperature?: number;
       json?: boolean;
+      outputSchema?: Record<string, unknown>;
       reasoningEffort?: 'low' | 'medium' | 'high';
       signal?: AbortSignal;
     },
@@ -547,6 +553,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       maxTokens?: number;
       temperature?: number;
       json?: boolean;
+      outputSchema?: Record<string, unknown>;
       reasoningEffort?: 'low' | 'medium' | 'high';
       signal?: AbortSignal;
     },
@@ -1076,6 +1083,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       maxTokens?: number;
       temperature?: number;
       json?: boolean;
+      outputSchema?: Record<string, unknown>;
       reasoningEffort?: 'low' | 'medium' | 'high';
       signal?: AbortSignal;
     },
@@ -1152,6 +1160,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       maxTokens?: number;
       temperature?: number;
       json?: boolean;
+      outputSchema?: Record<string, unknown>;
       reasoningEffort?: 'low' | 'medium' | 'high';
       signal?: AbortSignal;
     },
@@ -1191,6 +1200,24 @@ export class OpenAICompatibleProvider implements ModelProvider {
         messages: conversation,
         max_tokens: opts.maxTokens,
         temperature: opts.temperature ?? 0.2,
+        ...(opts.reasoningEffort
+          ? {
+              thinking: { type: 'adaptive' },
+              output_config: { effort: opts.reasoningEffort },
+            }
+          : {}),
+        ...(opts.outputSchema
+          ? {
+              tools: [
+                {
+                  name: 'json',
+                  description: 'Respond with a JSON object.',
+                  input_schema: opts.outputSchema,
+                },
+              ],
+              tool_choice: { type: 'any', disable_parallel_tool_use: true },
+            }
+          : {}),
       }),
     });
     if (!res.ok) {
@@ -1198,7 +1225,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
     const settlementUsage = await this.settledUsage(res, undefined, ctx);
     const json = await this.parseResponseJson<{
-      content?: { type?: string; text?: string }[];
+      content?: { type?: string; text?: string; name?: string; input?: unknown }[];
       stop_reason?: string;
       usage?: { input_tokens?: number; output_tokens?: number };
       model?: string;
@@ -1217,8 +1244,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
         },
       );
     }
+    const toolOutput = (json.content ?? [])
+      .filter((item) => item.type === 'tool_use' && item.name === 'json')
+      .map((item) => JSON.stringify(item.input))
+      .join('');
+    if (opts.outputSchema && !toolOutput) {
+      throw new ProviderOutputError(
+        `${this.id} ${opts.model}: Anthropic structured response missing JSON tool output`,
+        usage,
+        { provider: this.id, ...resolutionProvenance(opts.model, json.model?.trim() || undefined) },
+      );
+    }
     return {
-      content: (json.content ?? [])
+      content: toolOutput || (json.content ?? [])
         .filter((item) => item.type === 'text' && typeof item.text === 'string')
         .map((item) => item.text ?? '')
         .join(''),

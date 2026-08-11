@@ -80,6 +80,15 @@ const LEGACY_CONTEXT =
 const ACTIVE_PROMOTED_ALIASES = new Set(['gpt-5.6-terra', 'claude-sonnet-5']);
 const BRAND_PROFILE_CONTEXT =
   /\bsite_builder\.brand_profile\b|\bbrand_profile\b|\bBrandProfile\b|品牌画像/i;
+const COPY_CONTEXT = /\bsite_builder\.copy\b/;
+
+function hasApprovedActivePromotionContext(alias, text) {
+  if (alias === 'gpt-5.6-terra') return BRAND_PROFILE_CONTEXT.test(text);
+  if (alias === 'claude-sonnet-5') {
+    return BRAND_PROFILE_CONTEXT.test(text) || COPY_CONTEXT.test(text);
+  }
+  return false;
+}
 
 function escapeCell(value) {
   return String(value).replaceAll('|', '\\|').replaceAll('\n', '<br>');
@@ -149,11 +158,13 @@ function hasUnnegatedPromotionClaim(line, alias) {
   return false;
 }
 
-function hasNonBrandTaskContext(text) {
+function hasOutOfScopeTaskContext(alias, text) {
   const taskIds = text.match(/\bsite_builder\.[a-z0-9_.-]+\b/gi) ?? [];
-  return taskIds.some(
-    (taskId) => taskId.toLowerCase() !== 'site_builder.brand_profile',
-  );
+  const allowedTaskIds =
+    alias === 'claude-sonnet-5'
+      ? new Set(['site_builder.brand_profile', 'site_builder.copy'])
+      : new Set(['site_builder.brand_profile']);
+  return taskIds.some((taskId) => !allowedTaskIds.has(taskId.toLowerCase()));
 }
 
 export function loadModelCandidateBaseline(root) {
@@ -575,8 +586,8 @@ export function checkModelNarrativeDrift(baseline, contentsByPath) {
               PROMOTED_CONTEXT.test(line) &&
               nextLine.includes(alias))) &&
           hasUnnegatedPromotionClaim(adjacentWindow, alias) &&
-          (!BRAND_PROFILE_CONTEXT.test(adjacentWindow) ||
-            hasNonBrandTaskContext(adjacentWindow))
+          (!hasApprovedActivePromotionContext(alias, adjacentWindow) ||
+            hasOutOfScopeTaskContext(alias, adjacentWindow))
         ) {
           const issueKey = `active-task:${path}:${alias}:${index}`;
           if (reported.has(issueKey)) continue;
@@ -584,7 +595,7 @@ export function checkModelNarrativeDrift(baseline, contentsByPath) {
           issues.push({
             code: 'MODEL_ACTIVE_PROMOTION_TASK_DRIFT',
             path,
-            detail: `line ${index + 1}: ${alias} promotion must remain scoped to site_builder.brand_profile`,
+            detail: `line ${index + 1}: ${alias} promotion is outside its reviewed task scope`,
           });
         }
       }

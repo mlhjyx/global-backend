@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-native-promotion-git-review-acceptance/2026-08-12-v1",
+  "artifactId": "site-builder-copy-sonnet-native-promotion-git-review-acceptance/2026-08-12-v1",
+  "classification": "GIT_REVIEWED_MODEL_PROMOTION",
+  "acceptedPromotion": {
+    "promotionEvidenceId": "site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1",
+    "qualityAcceptanceArtifact": {
+      "path": "docs/evidence/site-builder/m1-g-copy-sonnet-native-quality-git-review-acceptance-2026-08-12.json",
+      "fileSha256": "a3cd5fc1028162b3c52601c1b917843f40d9d5e3bf4a9882fecfdbc51d01e7b3",
+      "artifactDigest": "803c9b29eb3de6eb185746a42dcfc720e8fe6f5cd7fbe76e5cb79a48599cde61"
+    },
+    "candidate": {
+      "alias": "claude-sonnet-5",
+      "transportProtocol": "anthropic-messages",
+      "reasoningEffort": "medium",
+      "route": {
+        "primary": "claude-sonnet-5",
+        "fallbacks": []
+      }
+    }
+  },
+  "gitReview": {
+    "pullRequest": 397,
+    "reviewedHeadCommit": "d48cb916408301463182102c00044e3e0ade63f9",
+    "mergeCommit": "99572fb099c304d60c8e0ee84f255a34118edf46",
+    "mergeMethod": "MERGE_COMMIT",
+    "requiredChecks": [
+      "build · typecheck · test",
+      "contracts · drift · lint · breaking",
+      "gitleaks 密钥扫描",
+      "governance · traceability · release",
+      "nontechnical decision card freshness"
+    ],
+    "requiredChecksResult": "PASS",
+    "unresolvedReviewThreads": 0,
+    "requiredApprovingReviewCount": 0
+  },
+  "acceptedBoundary": {
+    "productionRouteAdoption": "PENDING_CURRENT_PR",
+    "deploymentOrRuntimeEvidence": "NOT_PROVIDED",
+    "newModelDispatch": false,
+    "rawSecretsOrRequestsCommitted": false
+  },
+  "artifactDigest": "0e51ccc43fa5446b750a6744144d46bcc35ff59b56cdd1303738850b3d19995c"
+}

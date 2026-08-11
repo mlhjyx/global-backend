@@ -1526,7 +1526,7 @@ VideoBrief 必须版本化并继承 TemplateFamily.motionPolicy，至少包含�
 
 ## 23. 模型重选、路由治理与 Agent 绑定
 
-> **2026-07-18 supersession note**：本文是 dated proposal；本节以下的候选池、价格优先原则、通道状态和“未终选”措辞只保留历史 provenance，不再拥有现役或目标路由权威。active route 只认 `task-routes.ts`；已批准的质量优先 target portfolio 只认 ADR-020、[02 §6](02-architecture.md#6-模型路由currentroute-与-adr-020-目标组合分层) 与 [10 §0A](10-model-selection-study.md#0a-2026-07-17-已批准方案-1质量优先目标组合adr-020)。2026-07-18 只有 BrandProfile 经同形 6×2 评测成为代码级 promotedRoute=Terra/Responses→Sonnet/Messages，其他 task 仍是原 currentRoute。BGE-M3 模型/1024 维/`embed_version` 不变；#140 合并后，Ubuntu 开发环境应用已通过私有别名 + 专用模型受限令牌经 new-api 调用，并完成真实客户端 1024 维验证，但不代表生产部署。三个 Gemini 图片/Omni 型号当前不可调用，不能写成 as-built。其余 ADR-020 组合仍逐 task 受 ADR-016 的 capability probe、Golden Set、失败门与回滚门约束；真实外部流量/高风险部署前再进入 shadow/canary。
+> **2026-07-18 supersession note**：本文是 dated proposal；本节以下的候选池、价格优先原则、通道状态和“未终选”措辞只保留历史 provenance，不再拥有现役或目标路由权威。active route 只认 `task-routes.ts`；已批准的质量优先 target portfolio 只认 ADR-020、[02 §6](02-architecture.md#6-模型路由currentroute-与-adr-020-目标组合分层) 与 [10 §0A](10-model-selection-study.md#0a-2026-07-17-已批准方案-1质量优先目标组合adr-020)。2026-07-18 只有 BrandProfile 经同形 6×2 评测成为代码级 promotedRoute=Terra/Responses→Sonnet/Messages，其他 task 当时仍是原 currentRoute。**2026-08-12 Copy 已另行完成质量与 promotion；当前 source-level route-adoption PR 将采用 Sonnet/Messages/`medium`/no-fallback，DeepSeek Pro→GLM/`low` 只作 rollback，且仍不代表部署。**BGE-M3 模型/1024 维/`embed_version` 不变；#140 合并后，Ubuntu 开发环境应用已通过私有别名 + 专用模型受限令牌经 new-api 调用，并完成真实客户端 1024 维验证，但不代表生产部署。三个 Gemini 图片/Omni 型号当前不可调用，不能写成 as-built。其余 ADR-020 组合仍逐 task 受 ADR-016 的 capability probe、Golden Set、失败门与回滚门约束；真实外部流量/高风险部署前再进入 shadow/canary。
 
 ### 23.1 四种状态，不再把文档候选写成“终选”
 
