@@ -107,13 +107,13 @@ test('legacy-only model requires current, rollback, baseline, or legacy context'
   );
 });
 
-test('active promoted aliases remain scoped to BrandProfile', () => {
+test('active promoted aliases remain constrained to their reviewed task scope', () => {
   const path = baseline.documentationPolicy.activeRouteDocuments[0];
   for (const claim of [
-    'site_builder.copy now uses claude-sonnet-5 as its promotedRoute.',
     'site_builder.qa_summarize 已晋级 gpt-5.6-terra 为生产主路。',
     'BrandProfile and site_builder.new_task now use gpt-5.6-terra as promotedRoute.',
     'BrandProfile 与 site_builder.nope 已晋级 claude-sonnet-5 为生产主路。',
+    'site_builder.copy now uses gpt-5.6-terra as its promotedRoute.',
   ]) {
     assert.equal(
       checkModelNarrativeDrift(baseline, new Map([[path, claim]]))[0]?.code,
@@ -127,6 +127,18 @@ test('active promoted aliases remain scoped to BrandProfile', () => {
         [
           path,
           'site_builder.brand_profile uses gpt-5.6-terra with claude-sonnet-5 as its promotedRoute.',
+        ],
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    checkModelNarrativeDrift(
+      baseline,
+      new Map([
+        [
+          path,
+          'site_builder.copy uses claude-sonnet-5 as its promotedRoute after its independent Git-reviewed quality and promotion gates.',
         ],
       ]),
     ),
