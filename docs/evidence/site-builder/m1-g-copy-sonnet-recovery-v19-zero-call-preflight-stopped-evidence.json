@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-recovery-zero-call-preflight-stopped-evidence/2026-08-11-v1",
+  "artifactId": "site-builder-copy-sonnet-recovery-v19-zero-call-preflight-stopped/2026-08-11-v1",
+  "classification": "diagnostic_only",
+  "promotionEligible": false,
+  "executionHead": "673772b529b0bc719acefddaabad64b7326f4904",
+  "mergeProvenance": {
+    "pullRequest": 387,
+    "mergeCommit": "673772b529b0bc719acefddaabad64b7326f4904"
+  },
+  "result": "STOPPED_FAIL_CLOSED",
+  "stopPhase": "post_create_control_plane_readback",
+  "sourceObservation": {
+    "authority": "tool_broker",
+    "toolId": "openox.pricing_catalog",
+    "endpoint": "/api/public/pricing-catalog",
+    "upstreamHost": "openox.tech",
+    "transportOutcome": "OK",
+    "latencyMs": 739,
+    "modelCostCents": 0
+  },
+  "failureObservation": {
+    "authority": "new_api_control_plane",
+    "code": "COPY_SONNET_RECOVERY_CONTROL_PLANE_UNAVAILABLE",
+    "phase": "post_create_bearer_and_control_plane_readback"
+  },
+  "nonOccurrence": {
+    "trackedPreflightArtifactCreated": false,
+    "bearerModelRequestIssued": false,
+    "modelWireCalls": 0,
+    "modelCost": { "CNY": 0, "USD": 0 }
+  },
+  "controlPlaneReadback": {
+    "route": {
+      "channelId": 20,
+      "status": "DISABLED",
+      "channelType": 14,
+      "baseUrl": "https://openox.tech",
+      "model": "claude-sonnet-5",
+      "group": "special",
+      "modelMapping": "IDENTITY"
+    },
+    "retiredV16Token": { "tokenId": 24, "status": "DISABLED" },
+    "retiredV17Token": { "tokenId": 25, "status": "DISABLED" },
+    "stoppedV19Token": {
+      "tokenId": 26,
+      "status": "DISABLED",
+      "purpose": "site_builder_copy_sonnet_recovery",
+      "model": "claude-sonnet-5",
+      "group": "special"
+    }
+  },
+  "requiredRecovery": [
+    "do not reuse, mutate, or delete retired v16 token 24, v17 token 25, or stopped v19 token 26",
+    "do not retry this consumed v19 authorization or create a successor token without new explicit authorization",
+    "independently diagnose and restore New API control-plane reachability before any new zero-call preflight authorization",
+    "obtain separate explicit authorization before any model dispatch"
+  ],
+  "artifactDigest": "80e0cab51ee2ede7f509377fcd87d991e340053df0ac519b659b1d619bdca19d"
+}
