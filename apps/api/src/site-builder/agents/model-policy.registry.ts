@@ -26,6 +26,20 @@ interface ProfilePolicy {
   deterministicFallback: DeterministicFallback;
 }
 
+/**
+ * A Git-reviewed task-level promotion may be approved before traffic adopts
+ * it.  Keeping that decision separate prevents a quality evidence merge from
+ * silently changing a production route.
+ */
+export interface ApprovedTaskPromotion {
+  taskId: SiteBuilderTaskId;
+  profile: SiteBuilderModelProfileId;
+  route: ModelRouteSnapshot;
+  transport: 'anthropic-messages';
+  promotionEvidenceId: string;
+  routeAdoption: 'not_adopted' | 'active';
+}
+
 export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
   id: 'model1-brand-profile-20260719-v20',
   taskId: 'site_builder.brand_profile',
@@ -93,7 +107,29 @@ export const BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE = Object.freeze({
   }),
 });
 
-/** Only BrandProfile has completed a task-shaped MODEL-1 promotion gate. */
+export const COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE = Object.freeze({
+  id: 'site-builder-copy-sonnet-native-quality-promotion/2026-08-12-v1',
+  taskId: 'site_builder.copy',
+  profile: 'copy.premium',
+  route: Object.freeze({
+    primary: 'claude-sonnet-5',
+    fallbacks: Object.freeze([]),
+  }),
+  transport: 'anthropic-messages' as const,
+  acceptanceArtifactPath:
+    'docs/evidence/site-builder/m1-g-copy-sonnet-native-quality-git-review-acceptance-2026-08-12.json',
+  acceptanceArtifactSha256:
+    'a3cd5fc1028162b3c52601c1b917843f40d9d5e3bf4a9882fecfdbc51d01e7b3',
+  qualityArtifactPath:
+    'docs/evidence/site-builder/m1-g-copy-sonnet-native-quality-2026-08-12.json',
+  qualityArtifactSha256:
+    '7c897904a7b62b9f7687abf7b926efff6645f4a9c5a06beba89075d14245d12e',
+  qualityArtifactDigest:
+    '80325b847121c4e77dde49d71e0966fc68129cddd2033c75dd1c95495faf8da9',
+  routeAdoption: 'not_adopted' as const,
+});
+
+/** Only BrandProfile currently has an active task-shaped promoted route. */
 const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
   'site_builder.brand_profile': {
     state: 'promotedRoute',
@@ -149,6 +185,19 @@ const ACTIVE_TASK_POLICIES: Record<SiteBuilderTaskId, ModelActiveRoute> = {
       id: 'rule-summary',
       description: 'Return deterministic findings without a model summary.',
     },
+  },
+};
+
+const APPROVED_TASK_PROMOTIONS: Partial<
+  Record<SiteBuilderTaskId, ApprovedTaskPromotion>
+> = {
+  'site_builder.copy': {
+    taskId: 'site_builder.copy',
+    profile: 'copy.premium',
+    route: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.route,
+    transport: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.transport,
+    promotionEvidenceId: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.id,
+    routeAdoption: COPY_SONNET_NATIVE_QUALITY_PROMOTION_EVIDENCE.routeAdoption,
   },
 };
 
@@ -387,11 +436,31 @@ function cloneRollbackTarget(target: ModelRollbackTarget): ModelRollbackTarget {
   return { kind: target.kind, fallback: { ...target.fallback } };
 }
 
+function cloneApprovedTaskPromotion(
+  promotion: ApprovedTaskPromotion,
+): ApprovedTaskPromotion {
+  return {
+    taskId: promotion.taskId,
+    profile: promotion.profile,
+    route: cloneRoute(promotion.route),
+    transport: promotion.transport,
+    promotionEvidenceId: promotion.promotionEvidenceId,
+    routeAdoption: promotion.routeAdoption,
+  };
+}
+
 /**
  * A deliberately read-only policy registry. There is no promotion mutator in
  * MODEL-0: candidate evaluation and traffic promotion belong to MODEL-1/2.
  */
 export class ModelPolicyRegistry {
+  getApprovedTaskPromotion(
+    taskId: SiteBuilderTaskId,
+  ): ApprovedTaskPromotion | null {
+    const promotion = APPROVED_TASK_PROMOTIONS[taskId];
+    return promotion ? cloneApprovedTaskPromotion(promotion) : null;
+  }
+
   resolveActiveTaskRoute(taskId: SiteBuilderTaskId): ModelRouteSnapshot {
     const policy = ACTIVE_TASK_POLICIES[taskId];
     if (policy.state === 'deterministicFallback') {

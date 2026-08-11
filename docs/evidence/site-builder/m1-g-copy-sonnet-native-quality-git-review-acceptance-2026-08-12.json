@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "site-builder-copy-sonnet-native-quality-git-review-acceptance/2026-08-12-v1",
+  "artifactId": "site-builder-copy-sonnet-native-quality-git-review-acceptance/2026-08-12-v1",
+  "classification": "GIT_REVIEWED_NATIVE_QUALITY_EVIDENCE",
+  "acceptedEvidence": {
+    "path": "docs/evidence/site-builder/m1-g-copy-sonnet-native-quality-2026-08-12.json",
+    "fileSha256": "7c897904a7b62b9f7687abf7b926efff6645f4a9c5a06beba89075d14245d12e",
+    "artifactDigest": "80325b847121c4e77dde49d71e0966fc68129cddd2033c75dd1c95495faf8da9"
+  },
+  "gitReview": {
+    "pullRequest": 396,
+    "reviewedHeadCommit": "50b5d5809a9a2143ceefa04776268f54838831fc",
+    "mergeCommit": "d49f4642868243b2bfb912d2b830ef866d42b13b",
+    "mergeMethod": "MERGE_COMMIT",
+    "requiredChecks": [
+      "build · typecheck · test",
+      "contracts · drift · lint · breaking",
+      "gitleaks 密钥扫描",
+      "governance · traceability · release",
+      "nontechnical decision card freshness"
+    ],
+    "requiredChecksResult": "PASS",
+    "unresolvedReviewThreads": 0,
+    "requiredApprovingReviewCount": 0,
+    "administrativeBypass": {
+      "used": true,
+      "scope": "nontechnical decision-card external-provenance restriction only",
+      "unaffectedTechnicalGates": ["code", "tests", "security", "governance"],
+      "reviewStateAtMerge": {
+        "requiredApprovingReviewCount": 0,
+        "unresolvedReviewThreads": 0
+      }
+    }
+  },
+  "acceptedBoundary": {
+    "candidate": {
+      "alias": "claude-sonnet-5",
+      "evaluationProtocol": "anthropic_messages",
+      "transportProtocol": "anthropic-messages"
+    },
+    "acceptedExecutions": 12,
+    "physicalWires": 13,
+    "modelPromotion": "APPROVED_FOR_SEPARATE_ROUTE_ADOPTION",
+    "productionRouteAdoption": "NOT_ADOPTED",
+    "newModelDispatch": false,
+    "rawSecretsOrRequestsCommitted": false
+  },
+  "artifactDigest": "803c9b29eb3de6eb185746a42dcfc720e8fe6f5cd7fbe76e5cb79a48599cde61"
+}
