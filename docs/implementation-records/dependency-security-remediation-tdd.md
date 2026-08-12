@@ -1,8 +1,8 @@
-# Production dependency High 漏洞处置 TDD 记录
+# Production dependency 与 coverage closeout TDD 记录
 
 > 基线：`origin/main@412716a2a78ed6adfd3e605053f3f310651f9777`
 >
-> 本地实现：`codex/deps-security-remediation`，核心实现 checkpoint `7bbc8d80`；最终实现与测试候选在复审清理后绑定 clean exact `41f0103471a5b7557d63044bc027cf70e6296665` / tree `d890b4429805ed13249e086ecd028f0dba8bf6e5`，本文档收口为其 docs-only 后继；尚未 push、建 PR、合并或部署。
+> 本地实现：`codex/deps-security-remediation`。第一批 High 处置 checkpoint 为 `7bbc8d80`，第二批依赖与覆盖率实现 checkpoint 为 clean exact `9d6f867f4a1cb2679c814305dcb0518a3c6b66e6`；本文档收口为其 docs-only 后继。尚未 push、建 PR、合并或部署。
 >
 > 边界：本文记录本地源码、官方 npm audit、确定性测试与 renderer 视觉回归。它不是 GitHub Security alert readback、hosted CI、RuntimeEvidence、Release Bundle 或真实试点证据。
 
@@ -10,7 +10,7 @@
 
 基线 lock SHA-256 为 `d98a61553ffa6ea3bca177f47c7c2a82362f774697ffd4c89fa299465072e868`。2026-08-12 使用 npm 官方 registry 的 production-only audit 返回 36 项：18 high、14 moderate、4 low、0 critical。GitHub vulnerability alerts 当时处于 disabled，不能把网页上看不到告警解释为依赖安全。
 
-本轮只处置可有界验证的 High：
+第一批先处置可有界验证的 High：
 
 1. S1：`brace-expansion`、`fast-uri`、`ip-address`、`js-yaml`、`nanoid`、`postcss` 的 registry-only 传递依赖安全线；
 2. S2：Multer 与 `path-to-regexp`，删除未使用的 `@nestjs/serve-static` 与 preview static seam，并让历史预览 verifier 使用最小 loopback `node:http`；
@@ -35,7 +35,7 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 
 这个 guard 仍不是对同 Unix UID 恶意并发替换的强不可变绑定：Node 当前 promotion 仍通过路径字符串执行最终 `rm/rename`，第二次 admission 与系统调用之间存在极短 TOCTOU 窗口。当前 renderer 只接收仓内构造的 preview/一次性根，未暴露为 tenant 路径输入；若未来把本地目录账本或 renderer promotion 提升为受控试点恢复边界，仍须使用 retained directory handle / no-follow child traversal 或等价的受信 helper 进一步硬化。本文不把二次复核冒充为同 UID 防篡改证明。
 
-## 最终本地验证
+## 第一批本地验证（历史 checkpoint）
 
 | 验证                                                           | 结果                                                               | 证明边界                                            |
 | -------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------- |
@@ -52,12 +52,35 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 | `pnpm docs:verify`                                             | 0 errors / 1 条既有表格 warning                                    | governance/docs 总门通过                            |
 | Copy fixed-source impact                                       | `COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH`                           | 本候选必须 HOLD；不得编辑旧 receipt 或推导 dispatch |
 
-最终 lock SHA-256 为 `6a434ccc41ad560798a589c571f989684e38dad70d7e96df48f1f6670d7c53c2`。同一 production-only 官方 audit 返回 7 项：0 critical、0 high、6 moderate、1 low；High 从 18 降为 0。
+该 checkpoint 的 lock SHA-256 为 `6a434ccc41ad560798a589c571f989684e38dad70d7e96df48f1f6670d7c53c2`。同一 production-only 官方 audit 返回 7 项：0 critical、0 high、6 moderate、1 low；High 从 18 降为 0。该数字已被下述第二批结果覆盖，不能再作为当前候选真值。
+
+## 第二批 RED → GREEN 与当前本地验证
+
+第二批没有通过排除未覆盖源码或降低阈值来制造覆盖率。`vitest.config.ts` 明确以 `src/**/*.ts` 作为生产源码库存，排除构建产物 `dist/**`；从未被测试 import 的源码仍以零覆盖计入。
+
+| 阶段 | RED checkpoint | GREEN checkpoint 与关闭内容 |
+| --- | --- | --- |
+| C1 | `a35a4f01`、`fa569d8f`：暴露 `dist` 污染与未加载源码被漏计 | `622679c6`、`bf404791`：只统计完整 `src/**/*.ts` inventory |
+| C2 | `4c7b9003`、`96d27f33`、`69a7389c`、`e57f809f`：暴露 intent 重放、副作用、Temporal/compliance/acquisition 原始异常泄漏 | `e64fa565`、`c95bcb6c`、`c5fa75b1`、`5f6fa483`：幂等 evidence、闭合错误码与 SHA diagnostic token |
+| D1 | `b6f7733b`：锁定 `body-parser` / `qs` 漏洞与真实 parser 边界 | `c2e810ff`：`body-parser@1.20.6`、`qs@6.15.3`，无外部 source override |
+| D2 | `3c43c3a5`：锁定 XML parser 安全线 | `f46350a8`：`fast-xml-parser@5.7.1`，OFAC/EU parser 行为回归通过 |
+| D3 | `2dc2ca96`：锁定 Lighthouse/OpenTelemetry 链 | `2687839c`、`916d53ac`、`9d6f867f`：`lighthouse@13.4.1` 并将仓库 Node floor 提升到 `>=22.19.0` |
+| D4 | `bd3494b8`：锁定 Nest/Express/`file-type` 链 | `4784714d`：Nest common/core/platform-express `11.1.29`、CLI `11.0.24`，Express 5 与 patched file-type 闭合 |
+
+| 验证 | 当前结果 | 证明边界 |
+| --- | --- | --- |
+| `pnpm audit --prod --registry=https://registry.npmjs.org --json` | 839 production dependencies；0 critical / 0 high / 0 moderate / 0 low | 本地 lock 的官方 registry audit 清零；不等于 GitHub alert/Dependency Review/CodeQL readback |
+| `pnpm install --frozen-lockfile --offline` | PASS | 当前 lock 可从本机缓存重放 |
+| API full Vitest | 327 files；4901 PASS / 2 skipped | 功能回归全绿；不代表 PostgreSQL/Temporal/外部 provider 运行证据 |
+| API build / lint | PASS；0 errors / 19 existing warnings | Nest 11 与类型/静态合同未回退 |
+| 完整 `src/**/*.ts` coverage | statements 78.40%、branches 73.43%、functions 81.53%、lines 80.24% | Lines/functions 已过 80%，statements/branches 未过；整体 coverage gate 仍 HOLD |
+| Copy fixed-source impact | `COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH` | 旧 receipt 不代表本候选；必须独立 rebase/review/授权 |
+
+当前 lock SHA-256 为 `2a81b6b63e67c100a69b5d18b4a849ee10f78160a615ee7becf1dc6ecb8167f4`。依赖清零和两项覆盖维度过线是本地 source/test 事实，不是 hosted CI、RuntimeEvidence、Release Bundle 或 pilot 证据。
 
 ## 仍未完成
 
-- Moderate：Nest Core、`file-type`、`fast-xml-parser`、`qs`、OpenTelemetry；Low：`body-parser`。Nest/file-type/OpenTelemetry 涉及 framework/生态或 major compatibility，必须拆成下一批 TDD，不能用无验证 override 强压。
-- 全局 API coverage 未达到 80%，当前 candidate 不是可合并完成态。
-- dependency audit/Dependency Review/CodeQL 尚未在本 candidate 的 hosted CI 上运行，GitHub vulnerability alerts 也没有被本轮修改或重新启用。
+- 官方 production-only audit 已清零，但 Dependency Review、CodeQL、production audit ratchet 尚未在该 exact candidate 的 hosted CI 上运行；GitHub vulnerability alerts 也没有被本轮修改或重新启用。
+- 全量 API 的 statements 与 branches 仍未达到 80%，当前 candidate 不是 coverage closeout 完成态。
 - Copy fixed-source fingerprint 不匹配，旧 receipt 不代表当前依赖图；需要单独 fixed-source rebase/review/授权。
 - 没有部署、目标环境 readback、RuntimeEvidence、Release Bundle、真实外部源/模型调用或试点。
