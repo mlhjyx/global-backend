@@ -83,7 +83,7 @@
 | `CON-FE-P2-013` | 常驻 AI 是否能绕过结构化对象/权限 | `RESOLVED` 产品原则 | `OWN-PRODUCT` | `DEC-FE-P4-006` 已批准：Global AI 只表达/解释并落结构化对象，不能绕过权限/批准 |
 | `CON-FE-P2-014` | Workspace 权限与数据范围合同缺失 | `CONTRACT_BLOCKED` | `OWN-SAAS-PLATFORM` | [当前权限规范](../frontend/06-permissions-and-data-visibility.md)已定义模型；服务端合同仍缺 |
 | `CON-FE-P2-015` | 管理员是否默认读取个人工作数据 | `RESOLVED_WITH_REMEDIATION` | `OWN-DATA-PRIVACY` | `DEC-FE-P4-004` 已批准“不自动可读”；具体政策、告知和审计合同仍缺 |
-| `CON-FE-P2-016` | Buyer Intelligence 冻结但产品地图需保留 | `RESOLVED`；历史裁决已被 `DEC-FE-POSTGATE-001` 取代 | `OWN-PRODUCT` | IA 继续保留；M1 前只准备、M1 后恢复实现；日常可见性仍由 capability/entitlement 决定 |
+| `CON-FE-P2-016` | Buyer Intelligence 冻结但产品地图需保留 | `RESOLVED`；历史裁决已被 `DEC-FE-POSTGATE-001` 取代，且 M1 条件已满足 | `OWN-PRODUCT` | IA 继续保留；恢复任务按当前审计与明确 owner 选择，日常可见性仍由 capability/entitlement 决定 |
 | `CON-FE-P2-017` | Campaign/Conversation/Opportunity SoR 与旧原型冲突 | `RESOLVED` 边界 / `INPUT_BLOCKED` 实现 | `OWN-SAAS-PLATFORM` | 归 SaaS；正式 repo/Owner 仍缺 |
 | `CON-FE-P2-018` | Inquiry 原始接收与 SaaS 投影 ownership | `OPEN_DECISION` | `OWN-PRODUCT` | M2 前 ADR/PDR + privacy/retention contract |
 | `CON-FE-P2-019` | 成功定义被 Build success/Mock 数字替代 | `RESOLVED` 方向 / `INPUT_BLOCKED` 数据 | `OWN-PRODUCT` | 指标+反指标获批；baseline/event/privacy Owner 未定 |
@@ -162,6 +162,8 @@
 | Decision ID | 推荐决定 | 状态 | Owner |
 |---|---|---|---|
 | `DEC-FE-POSTGATE-001` | 2026-08-02 提前解除 Buyer Intelligence 新增开发冻结；M1 收口前允许只读审计、研究、规划与排期，M1 收口后才恢复实现。旧 backlog/owner/worktree、默认禁用 provider、历史验证与前端状态均不自动恢复或升级 | `APPROVED` | `OWN-PRODUCT` |
+
+`DEC-FE-POSTGATE-001` 的文字保留获批时的阶段条件，不回写历史裁决；M1 现已完成阶段收口。该条件满足只移除旧时间门，旧 backlog、owner、provider 状态和验证仍不自动恢复，当前任务继续按 status/release-plan 与 live 审计选择。
 
 ## 9. Gate 7 已批准决策
 

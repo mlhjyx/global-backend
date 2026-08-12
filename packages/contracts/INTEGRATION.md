@@ -1,6 +1,6 @@
 # Global 后端 · 前端/服务端接入说明
 
-> 本文档给 SaaS 平台前端/服务端开发者，覆盖 **Site Builder（当前在途施工）** 与已提前解除冻结的获客能力。M1 收口前获客侧只做接入审计、研究、规划和排期，M1 收口后才按重审范围恢复实现。REST 契约以 `openapi/openapi.json`（code-first 导出）为准；本文只解释调用顺序，不覆盖生成契约。
+> 本文档给 SaaS 平台前端/服务端开发者，覆盖已完成 M1 阶段收口的 **Site Builder** 与已解除冻结的获客能力。任何新施工仍须按当前代码、owner、合规、成本和验收门重新选择；解冻与 M1 收口都不自动恢复旧 backlog、旧验证或实施授权。REST 契约以 `openapi/openapi.json`（code-first 导出）为准；本文只解释调用顺序，不覆盖生成契约。
 >
 > **统一接口门户（推荐前端入口）**：`http://<host>:3000/api/portal` —— 自托管 Scalar，一个地址浏览 + 在线调试全部端点。
 > 另有 Swagger UI `http://<host>:3000/api/docs`（内部调试）。契约由 `--export-openapi` 从代码生成，代码即事实源。
@@ -55,7 +55,7 @@
 
 **SiteSpec / DQ-1**：`@global/contracts` 导出的 `SiteSpec` 1.0.0 是 API 生产端与 Astro Renderer 的唯一共享 TypeScript 真值；前端若需要编辑/物化 Spec，应等待相应 REST 端点进入 OpenAPI，不能直接把内部类型等同于已发布 API。DQ-1 是 type-only；运行时 Zod 与 1.1.0 仍是后续。
 
-## 3. 获客能力 · 端到端调用顺序（M1 前仅供接入审计，M1 后按重审恢复）
+## 3. 获客能力 · 端到端调用顺序（冻结已解除；实施仍须当前重审与明确授权）
 
 ### 阶段 0：企业理解（Understand）
 

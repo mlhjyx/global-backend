@@ -3,23 +3,23 @@
 > 文档 ID：`DOC-PRODUCT-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：[当前状态](status/current.md) · [as-built 架构](architecture/current.md) · [路线](roadmap/release-plan.md)
-> 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001~012/OD-01~06）三方收敛 + 双员对抗审查。
+> 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001 至 TA-012 / OD-01 至 OD-06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [roadmap/release-plan.md](roadmap/release-plan.md)。
 > **2026-08-04 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。获客侧冻结已解除，Site Builder M1 也已完成阶段收口；下一施工任务须重新审计后选择，产品边界不变。Site Builder 范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。
 
 ## 0. 术语表
 
-| 术语 | 意思 |
-|---|---|
-| **ICP** | 理想客户画像——客户告诉系统「我要找什么样的买家」（行业/国家/规模/排除条件/买家委员会角色） |
-| **Lead / 线索** | 「某家公司 × 某个 ICP」的候选评估对象，带六维评分与四队列（推荐/待确认/拒绝/禁止） |
+| 术语                     | 意思                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| **ICP**                  | 理想客户画像——客户告诉系统「我要找什么样的买家」（行业/国家/规模/排除条件/买家委员会角色）                          |
+| **Lead / 线索**          | 「某家公司 × 某个 ICP」的候选评估对象，带六维评分与四队列（推荐/待确认/拒绝/禁止）                                  |
 | **LeadQualifiedPackage** | 本仓最终交付物：一条合格线索的**不可变快照包**（公司是谁+证据+评分+联系人+合规结论+建议动作），以事件发给 SaaS 平台 |
-| **QGO** | 合格增长商机（北极星单位）——SaaS 平台把合格线索确认成的「值得销售跟进的机会」 |
-| **SAO** | 销售接受的商机——销售正式认领 QGO 并开始推进 |
-| **Suppression** | 全局禁联名单——退订/投诉/删除请求过的对象，任何对外动作前第一道检查 |
-| **Reachability** | 可达性——有没有验证过的联系方式；联系不上的公司分再高也不进推荐队列 |
-| **Evidence / 证据** | 每个关键字段都记录「从哪来、什么时候、什么许可、多可信」，可回溯可删除 |
-| **DSR** | 数据主体请求——欧盟个人依法要求查看/删除其数据，必须能精确执行 |
+| **QGO**                  | 合格增长商机（北极星单位）——SaaS 平台把合格线索确认成的「值得销售跟进的机会」                                       |
+| **SAO**                  | 销售接受的商机——销售正式认领 QGO 并开始推进                                                                         |
+| **Suppression**          | 全局禁联名单——退订/投诉/删除请求过的对象，任何对外动作前第一道检查                                                  |
+| **Reachability**         | 可达性——有没有验证过的联系方式；联系不上的公司分再高也不进推荐队列                                                  |
+| **Evidence / 证据**      | 每个关键字段都记录「从哪来、什么时候、什么许可、多可信」，可回溯可删除                                              |
+| **DSR**                  | 数据主体请求——欧盟个人依法要求查看/删除其数据，必须能精确执行                                                       |
 
 ## 1. 产品是什么
 
@@ -95,10 +95,10 @@ Goal（业务目标：如进入德国市场）
 
 ## 6. 团队 ownership 与三接缝
 
-| 方 | 拥有 |
-|---|---|
-| A（SaaS 平台） | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing |
-| B（接口层，同库） | JWKS 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射 |
+| 方                                     | 拥有                                                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| A（SaaS 平台）                         | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing                     |
+| B（接口层，同库）                      | JWKS 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射                             |
 | Codex（本仓当前开发主体；用户 C 拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规 |
 
 三接缝：① **JWKS**——A 签发登录凭证、我们只验签解出租户；② **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK；③ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封）在实现前先经 B/A 评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
@@ -125,7 +125,7 @@ Goal（业务目标：如进入德国市场）
 **已拍板**【用户】：① 边界止于 LeadQualifiedPackage（QGO 归 SaaS）；② 身份归属维持 A（+ADR-011 两条硬规矩）；③ 设计类产出先评审后进仓；④ 收敛方案与交付包合流。
 **与交付包裁决对照**：TA-001/002/004/008/009 采纳；TA-003=PDR-002；TA-005 逻辑 Schema=演进方向；TA-006/OD-01/OD-02 按身份拍板修正采纳；TA-007/OD-03=ADR-001；TA-010/011/OD-05=PDR-003；TA-012/OD-06=本次文档迁移；OD-04（Policy 宿主=横向平台模块）方向认可，现阶段以本仓 PolicyPort/DataRightsService 为其获客侧实现。
 **本稿裁定**：北极星保 QGO、SAO 作商业验证层；研究域最小版列 R3 可选；Docling/Langfuse 不进封版 Gate。
-**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧已提前解除冻结，M1 收口前可规划但不启动实现，M1 收口后任何事项进入施工序前仍须重新核验当前价值、代码与服务状态、合规、成本、依赖和验收证据。
+**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧冻结已解除且 Site Builder M1 已完成阶段收口。任何事项进入施工序前仍须重新核验当前价值、代码与服务状态、owner、合规、成本、依赖和验收证据，解冻本身不构成实现、费用、部署、发布或合并授权。
 
 ---
 
