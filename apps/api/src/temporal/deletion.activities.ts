@@ -16,6 +16,7 @@ import {
   SuppressionEntry,
 } from '../compliance/deletion.types';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 /**
  * 收口⑥ PR-B 删除编排（GDPR Art.17）的 Temporal 活动。deletionWorkflow 四步：
@@ -300,7 +301,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             id: args.deletionRequestId,
             status: { notIn: ['COMPLETED', 'FAILED'] },
           },
-          data: { status: 'FAILED', error: args.error.slice(0, 500) },
+          data: { status: 'FAILED', error: diagnosticErrorToken(args.error) },
         }),
       );
     },
