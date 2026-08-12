@@ -41,8 +41,8 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 | -------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------- |
 | `pnpm install --frozen-lockfile --offline`                     | PASS                                                               | lock 可离线重放；不证明 registry/CI 可用性          |
 | Prisma validate/generate、Contracts build/lint、API build/lint | PASS；Spectral 0 error / 15 条既有 tag warning                     | schema、类型、构建和 OpenAPI lint 未回退            |
-| API `vitest run --coverage`                                    | 311 files；4664 PASS / 2 skipped                                   | 功能全绿；全局覆盖率仍低于项目 80% 门               |
-| API coverage                                                   | statements 70.75%、branches 64.65%、functions 74.22%、lines 72.49% | 必须保持 merge HOLD，不能用依赖修复掩盖覆盖率债务   |
+| API `vitest run --coverage`                                    | 311 files；4665 PASS / 2 skipped                                   | 功能全绿；全局覆盖率仍低于项目 80% 门               |
+| API coverage                                                   | statements 70.77%、branches 64.68%、functions 74.22%、lines 72.51% | 必须保持 merge HOLD，不能用依赖修复掩盖覆盖率债务   |
 | API renderer-build spec                                        | 12/12 PASS                                                         | Astro 7 子进程、跨文件系统构建与输出目标 admission  |
 | site-renderer contracts                                        | 4 files / 26 PASS                                                  | renderer 组件合同未回退                             |
 | renderer fixtures                                              | 86/86 PASS                                                         | 所有固定 renderer fixture 可构建                    |
