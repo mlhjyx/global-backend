@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dirname, join, resolve } from "node:path";
@@ -26,6 +27,24 @@ function composeServiceNames(compose) {
   }
   return names;
 }
+
+test("governance changes preserve the active Copy fixed-source boundary", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/copy-fixed-source-impact.mjs"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: process.env,
+    },
+  );
+
+  assert.equal(
+    result.status,
+    0,
+    [result.stdout, result.stderr].filter(Boolean).join("\n"),
+  );
+});
 
 test("AGENTS.md remains a stable entrypoint without versioned current-state mirrors", () => {
   const agents = read("AGENTS.md");
