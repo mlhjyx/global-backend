@@ -92,12 +92,12 @@ describe("runAstroBuild — cross-filesystem output", () => {
       await expect(
         assertRendererOutputTarget(path.parse(root).root, root),
       ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
-      await expect(
-        assertRendererOutputTarget(root, root),
-      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
-      await expect(
-        assertRendererOutputTarget(tmpdir(), root),
-      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+      await expect(assertRendererOutputTarget(root, root)).rejects.toThrow(
+        "RENDERER_OUTPUT_TARGET_UNSAFE",
+      );
+      await expect(assertRendererOutputTarget(tmpdir(), root)).rejects.toThrow(
+        "RENDERER_OUTPUT_TARGET_UNSAFE",
+      );
       await expect(
         assertRendererOutputTarget(process.cwd(), root),
       ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
@@ -335,6 +335,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
     const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       expect(input.publicAssetDir).toBe("/tmp/overlay");
+      expect(input.outputRoot).toBe(path.dirname(outDir));
       await writeFile(path.join(input.outDir, "index.html"), "<h1>ok</h1>");
     });
     try {
@@ -342,6 +343,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         { safe: true },
         {
           outDir,
+          outputRoot: path.dirname(outDir),
           basePath: "/",
           siteOrigin: SITE_ORIGIN,
           publicAssetDir: "/tmp/overlay",
