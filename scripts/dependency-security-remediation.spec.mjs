@@ -106,6 +106,12 @@ test("the API XML parser uses the patched major line", async () => {
   assert.equal(apiManifest.dependencies?.["fast-xml-parser"], "5.7.1");
 });
 
+test("the browser quality runner uses the current Lighthouse security line", async () => {
+  const apiManifest = JSON.parse(await readFile("apps/api/package.json", "utf8"));
+
+  assert.equal(apiManifest.dependencies?.lighthouse, "13.4.1");
+});
+
 test("the renderer uses the current Astro security line and runtime floor", async () => {
   const [
     rootManifestText,
