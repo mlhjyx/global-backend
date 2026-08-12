@@ -10,6 +10,7 @@ const EXPECTED_SECURITY_OVERRIDES = Object.freeze({
   "js-yaml@>=3.0.0 <4.0.0": "3.15.1",
   "js-yaml@>=4.0.0 <5.0.0": "4.3.1",
   "js-yaml@>=5.0.0 <6.0.0": "5.2.2",
+  "multer@>=2.0.0 <3.0.0": "2.2.0",
   "nanoid@>=3.0.0 <4.0.0": "3.3.17",
   "postcss@>=8.0.0 <9.0.0": "8.5.23",
 });
@@ -23,13 +24,15 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "js-yaml@4.2.0",
   "js-yaml@4.3.0",
   "js-yaml@5.2.1",
+  "multer@2.0.2",
   "nanoid@3.3.15",
   "nanoid@3.3.16",
   "postcss@8.5.16",
   "postcss@8.5.19",
+  "path-to-regexp@0.2.5",
 ]);
 
-test("S1 production security floors are explicit and major-scoped", async () => {
+test("production security floors are explicit and major-scoped", async () => {
   const manifest = JSON.parse(await readFile("package.json", "utf8"));
 
   assert.deepEqual(manifest.pnpm?.overrides, EXPECTED_SECURITY_OVERRIDES);
@@ -38,7 +41,7 @@ test("S1 production security floors are explicit and major-scoped", async () => 
   }
 });
 
-test("the lockfile contains none of the S1 vulnerable snapshots", async () => {
+test("the lockfile contains none of the remediated vulnerable snapshots", async () => {
   const lockfile = await readFile("pnpm-lock.yaml", "utf8");
 
   for (const snapshot of FORBIDDEN_LOCKFILE_SNAPSHOTS) {
@@ -50,4 +53,36 @@ test("the lockfile contains none of the S1 vulnerable snapshots", async () => {
       `${snapshot} must not remain in the resolved dependency graph`,
     );
   }
+});
+
+test("the API has no production serve-static or multipart controller surface", async () => {
+  const [apiManifestText, m0Verifier, previewStatic, apiSourceInventory] =
+    await Promise.all([
+      readFile("apps/api/package.json", "utf8"),
+      readFile("apps/api/scripts/verify-site-builder-m0.mts", "utf8"),
+      readFile("apps/api/src/site-builder/preview-static.ts", "utf8"),
+      import("node:child_process").then(
+        ({ execFileSync }) =>
+          execFileSync(
+            "git",
+            [
+              "grep",
+              "-nE",
+              "FileInterceptor|FilesInterceptor|AnyFilesInterceptor|MulterModule",
+              "--",
+              "apps/api/src",
+            ],
+            { encoding: "utf8" },
+          ),
+      ).catch((error) => {
+        if (error?.status === 1 && error?.stdout === "") return "";
+        throw error;
+      }),
+    ]);
+  const apiManifest = JSON.parse(apiManifestText);
+
+  assert.equal(apiManifest.dependencies?.["@nestjs/serve-static"], undefined);
+  assert.doesNotMatch(m0Verifier, /@nestjs\/serve-static/u);
+  assert.doesNotMatch(previewStatic, /@nestjs\/serve-static/u);
+  assert.equal(apiSourceInventory, "");
 });
