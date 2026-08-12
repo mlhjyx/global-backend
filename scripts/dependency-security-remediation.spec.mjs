@@ -96,11 +96,18 @@ test("the API has no production serve-static or multipart controller surface", a
 });
 
 test("the renderer uses the current Astro security line and runtime floor", async () => {
-  const [rootManifestText, rendererManifestText, rendererConfig, reservedFetch] =
+  const [
+    rootManifestText,
+    rendererManifestText,
+    rendererConfig,
+    playwrightConfig,
+    reservedFetch,
+  ] =
     await Promise.all([
       readFile("package.json", "utf8"),
       readFile("apps/site-renderer/package.json", "utf8"),
       readFile("apps/site-renderer/astro.config.mjs", "utf8"),
+      readFile("apps/site-renderer/playwright.config.ts", "utf8"),
       readFile("apps/site-renderer/src/fetch.ts", "utf8").then(
         () => true,
         (error) => {
@@ -116,4 +123,5 @@ test("the renderer uses the current Astro security line and runtime floor", asyn
   assert.equal(rendererManifest.dependencies?.astro, "7.2.1");
   assert.equal(reservedFetch, false);
   assert.doesNotMatch(rendererConfig, /\bexperimental\s*:/u);
+  assert.match(playwrightConfig, /ASTRO_DEV_BACKGROUND=0 pnpm dev/u);
 });
