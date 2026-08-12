@@ -118,7 +118,7 @@ test("the API uses the patched Nest and Express platform line", async () => {
   assert.equal(apiManifest.dependencies?.["@nestjs/common"], "11.1.29");
   assert.equal(apiManifest.dependencies?.["@nestjs/core"], "11.1.29");
   assert.equal(apiManifest.dependencies?.["@nestjs/platform-express"], "11.1.29");
-  assert.equal(apiManifest.devDependencies?.["@nestjs/cli"], "11.0.16");
+  assert.equal(apiManifest.devDependencies?.["@nestjs/cli"], "11.0.24");
 });
 
 test("the renderer uses the current Astro security line and runtime floor", async () => {
