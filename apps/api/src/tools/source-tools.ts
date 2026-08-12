@@ -327,12 +327,15 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
         costCents: 0,
       };
     }
-    return {
-      data: {
-        notices: await searchContractNotices(input.params, beforeRequest),
-      },
-      costCents: 0,
-    };
+    if (input.kind === 'contract') {
+      return {
+        data: {
+          notices: await searchContractNotices(input.params, beforeRequest),
+        },
+        costCents: 0,
+      };
+    }
+    throw new Error(`ted.search: unsupported kind ${String((input as { kind?: unknown }).kind)}`);
   },
 };
 
@@ -376,12 +379,15 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
         costCents: 0,
       };
     }
-    return {
-      data: {
-        clearances: await search510kClearances(input.params, beforeRequest),
-      },
-      costCents: 0,
-    };
+    if (input.kind === '510k') {
+      return {
+        data: {
+          clearances: await search510kClearances(input.params, beforeRequest),
+        },
+        costCents: 0,
+      };
+    }
+    throw new Error(`openfda.search: unsupported kind ${String((input as { kind?: unknown }).kind)}`);
   },
 };
 

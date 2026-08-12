@@ -13,6 +13,8 @@
  * 本客户端只请求 🟢 绿字段，**绝不请求 winner-email 等 🔴 具名联系点**（个人数据，走隔离路径）。
  */
 
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
+
 const SEARCH_URL = process.env.TED_API_URL ?? 'https://api.ted.europa.eu/v3/notices/search';
 const MAX_LIMIT = 250; // API 硬上限（500 报 "exceeds maximum allowed value (250)"）
 const THROTTLE_MS = 1100; // 自限 ~1 req/s（WAF 无限流头，spec §1.6）
@@ -104,12 +106,16 @@ export interface TedContractNotice {
 
 /** expert query 串（过滤 + 排序一体）。空 CPV 抛错（绝不裸拉全库）。 */
 export function buildAwardQuery(p: AwardQueryParams): string {
-  if (!p.cpvCodes.length) {
-    throw new Error('buildAwardQuery: cpvCodes required (TED 发现必须带 CPV 分类过滤)');
-  }
+  const cpvCodes = requireNonBlankValues(
+    p.cpvCodes,
+    'buildAwardQuery: cpvCodes required (TED 发现必须带 CPV 分类过滤)',
+  );
   const sinceDays = p.sinceDays ?? 30;
+  if (!Number.isInteger(sinceDays) || sinceDays < 0) {
+    throw new Error('buildAwardQuery: sinceDays must be a non-negative integer');
+  }
   const noticeType = p.noticeType ?? 'can-standard';
-  const parts = [clause('classification-cpv', p.cpvCodes)];
+  const parts = [clause('classification-cpv', cpvCodes)];
   const countries = (p.buyerCountries ?? []).map((c) => c.toUpperCase()).filter(Boolean);
   if (countries.length) parts.push(clause('buyer-country', countries));
   parts.push(`notice-type=${noticeType}`);
@@ -174,11 +180,14 @@ export function tedDateToIso(raw?: string): string | undefined {
   const s = raw.trim();
   // 契约「不可解析 → undefined」对**含 T 的串同样兜底**：畸形但含 T 的值（'2026-07-08Tx'）若原样透传，
   // 下游 `at = iso ?? now` 因其已定义而不回退 → Date.parse=NaN → recencyDecay=0 → Intent 静默不得分（正是本函数要防的）。
-  if (s.includes('T')) return Number.isNaN(Date.parse(s)) ? undefined : s;
+  if (s.includes('T')) {
+    const calendarDate = s.slice(0, 10);
+    return isIsoCalendarDate(calendarDate) && !Number.isNaN(Date.parse(s)) ? s : undefined;
+  }
   const m = s.match(/^(\d{4}-\d{2}-\d{2})(Z|[+-]\d{2}:\d{2})?$/);
   if (!m) return undefined;
   const iso = `${m[1]}T00:00:00${m[2] ?? 'Z'}`;
-  return Number.isNaN(Date.parse(iso)) ? undefined : iso; // 兜住 '2026-13-40' 这类合规格式但非法日期
+  return isIsoCalendarDate(m[1]) && !Number.isNaN(Date.parse(iso)) ? iso : undefined;
 }
 
 /**
@@ -277,7 +286,10 @@ interface TedSearchResponse {
 
 async function tedPost(body: Record<string, unknown>, beforeRequest?: () => Promise<void>): Promise<TedSearchResponse> {
   const res = await tedFetch(body, 30_000, beforeRequest);
-  if (!res.ok) throw new Error(`ted ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const responseBody = await res.text();
+    throw new Error(`ted ${res.status}: ${diagnosticErrorToken(responseBody)}`);
+  }
   return (await res.json()) as TedSearchResponse;
 }
 
@@ -345,6 +357,26 @@ function unpackMultilang(v: unknown): string[] {
 function firstString(v: unknown): string | undefined {
   const arr = typeof v === 'object' && v !== null && !Array.isArray(v) ? unpackMultilang(v) : asStringArray(v);
   return arr[0];
+}
+
+function requireNonBlankValues(values: string[], message: string): string[] {
+  if (!Array.isArray(values) || !values.length) throw new Error(message);
+  const normalized = values.map((value) => (typeof value === 'string' ? value.trim() : ''));
+  if (normalized.some((value) => !value)) throw new Error(message);
+  return normalized;
+}
+
+function isIsoCalendarDate(value: string): boolean {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const [, year, month, day] = match;
+  const date = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() + 1 === Number(month) &&
+    date.getUTCDate() === Number(day)
+  );
 }
 
 function backoff(attempt: number): number {
