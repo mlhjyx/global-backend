@@ -2,7 +2,7 @@
 
 > 基线：`origin/main@412716a2a78ed6adfd3e605053f3f310651f9777`
 >
-> 本地实现：`codex/deps-security-remediation`，实现 checkpoint `7bbc8d80`；尚未 push、建 PR、合并或部署。
+> 本地实现：`codex/deps-security-remediation`，核心实现 checkpoint `7bbc8d80`；最终实现与测试候选在复审清理后绑定 clean exact `41f0103471a5b7557d63044bc027cf70e6296665` / tree `d890b4429805ed13249e086ecd028f0dba8bf6e5`，本文档收口为其 docs-only 后继；尚未 push、建 PR、合并或部署。
 >
 > 边界：本文记录本地源码、官方 npm audit、确定性测试与 renderer 视觉回归。它不是 GitHub Security alert readback、hosted CI、RuntimeEvidence、Release Bundle 或真实试点证据。
 
