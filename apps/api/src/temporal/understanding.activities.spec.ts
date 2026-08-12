@@ -53,3 +53,39 @@ describe('understanding.activities — unified runtime telemetry', () => {
     }));
   });
 });
+
+describe('understanding.activities — untrusted diagnostics and model output', () => {
+  it('does not synthesize a business claim from a stub or malformed model result', async () => {
+    const generateStructured = vi.fn(async () => ({
+      data: { claims: null },
+      provider: 'stub',
+      model: 'test',
+      usage: {},
+    }));
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured } as unknown as ModelGateway,
+    });
+
+    await expect(acts.extractClaims({ workspaceId: 'ws-1', text: 'catalog' })).resolves.toEqual({ claims: [] });
+  });
+
+  it('hashes a failed subpage diagnostic instead of logging its URL or response text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const sensitive = 'Fiona <fiona@example.com> password=secret';
+    const broker = {
+      invoke: vi.fn(async () => {
+        throw new Error(sensitive);
+      }),
+    } as unknown as ExecutionBroker;
+    const acts = createUnderstandingActivities({ prisma: {} as PrismaService, gateway: {} as ModelGateway, broker });
+
+    await expect(
+      acts.crawlPages({ workspaceId: 'ws-1', urls: ['https://private.example/contact'] }),
+    ).resolves.toEqual({ pages: [] });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ERROR_TEXT_SHA256:[a-f0-9]{64}$/));
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Fiona');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private.example');
+    warn.mockRestore();
+  });
+});
