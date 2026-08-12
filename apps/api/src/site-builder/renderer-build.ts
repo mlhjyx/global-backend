@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { constants, existsSync, readFileSync } from "node:fs";
 import {
   cp,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -377,14 +378,54 @@ function resolveNodeExecutable(): string {
   throw new Error("RENDERER_NODE_EXECUTABLE_UNAVAILABLE");
 }
 
+export async function assertRendererOutputTarget(
+  outDir: string,
+): Promise<string> {
+  const target = path.resolve(outDir);
+  const parsed = path.parse(target);
+  if (target === parsed.root || path.basename(target) === "") {
+    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  }
+
+  const parent = path.dirname(target);
+  let parentStat;
+  try {
+    parentStat = await lstat(parent);
+  } catch {
+    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  }
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  }
+
+  try {
+    const targetStat = await lstat(target);
+    if (!targetStat.isDirectory() || targetStat.isSymbolicLink()) {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return target;
+    }
+    throw error;
+  }
+
+  return target;
+}
+
 /** 用已解析的 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
 export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   const { rendererRoot, astroCli } = resolveRendererEntrypoint();
+  const outDir = await assertRendererOutputTarget(input.outDir);
   const buildDir = await mkdtemp(
     path.join(rendererRoot, ".site-builder-render-"),
   );
   const cacheDir = `${buildDir}.astro-cache`;
-  const targetParent = path.dirname(input.outDir);
+  const targetParent = path.dirname(outDir);
   let deliveryDir: string | null = null;
   try {
     await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
@@ -422,8 +463,8 @@ export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
       throw new Error("RENDERER_OUTPUT_COPY_MISMATCH");
     }
 
-    await rm(input.outDir, { recursive: true, force: true });
-    await rename(deliveryDir, input.outDir);
+    await rm(outDir, { recursive: true, force: true });
+    await rename(deliveryDir, outDir);
     deliveryDir = null;
   } finally {
     if (deliveryDir !== null) {

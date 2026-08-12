@@ -1,10 +1,12 @@
 import {
   access,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
   stat,
   writeFile,
+  symlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +15,7 @@ import {
   buildRendererEnv,
   buildSiteSpecWithTemporaryFile,
   assertRendererOutputMatches,
+  assertRendererOutputTarget,
   assertRenderedOutboundDomains,
   resolveRendererEntrypoint,
   runAstroBuild,
@@ -76,6 +79,33 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
 });
 
 describe("runAstroBuild — cross-filesystem output", () => {
+  it("rejects broad, missing-parent, and symlink output targets before promotion", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "m1-renderer-target-"));
+    const safeParent = path.join(root, "parent");
+    const realTarget = path.join(root, "real-target");
+    const symlinkTarget = path.join(root, "symlink-target");
+    try {
+      await expect(
+        assertRendererOutputTarget(path.parse(root).root),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+      await expect(
+        assertRendererOutputTarget(path.join(root, "missing", "out")),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+
+      await mkdir(safeParent);
+      await mkdir(realTarget);
+      await symlink(realTarget, symlinkTarget, "dir");
+      await expect(assertRendererOutputTarget(symlinkTarget)).rejects.toThrow(
+        "RENDERER_OUTPUT_TARGET_UNSAFE",
+      );
+      await expect(
+        assertRendererOutputTarget(path.join(safeParent, "out")),
+      ).resolves.toBe(path.join(safeParent, "out"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("builds a real fixture when OUT_DIR is on the operating-system temp filesystem", async () => {
     const outDir = await mkdtemp(path.join(tmpdir(), "m1-renderer-cross-fs-"));
     const specPath = path.resolve(
