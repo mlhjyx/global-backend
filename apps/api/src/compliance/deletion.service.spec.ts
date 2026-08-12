@@ -175,4 +175,3 @@ describe('DeletionService', () => {
     await expect(service.getRequest(WS, 'missing')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
-

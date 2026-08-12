@@ -198,4 +198,3 @@ describe('CompanyService', () => {
     await expect(service.listOfferings(ctx, 'missing')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
-

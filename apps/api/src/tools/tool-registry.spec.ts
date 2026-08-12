@@ -90,4 +90,3 @@ describe('ToolRegistry deterministic routing', () => {
     expect(registry.all()).toHaveLength(1);
   });
 });
-

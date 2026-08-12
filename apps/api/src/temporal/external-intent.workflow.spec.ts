@@ -133,7 +133,8 @@ describe('externalIntentSweepWorkflow — fail-safe 分支', () => {
 
     expect(out.swept).toBe(2);
     expect(out.results).toHaveLength(2);
-    expect(out.results[0].error).toContain('project boom');
+    expect(out.results[0].error).toBe('EXTERNAL_INTENT_PROJECTION_FAILED');
+    expect(out.results[0].error).not.toContain('project boom');
     expect(out.results[1].error).toBeUndefined();
     expect(out.tenderEvents).toBe(4); // 仅成功目标计入
   });
@@ -149,7 +150,8 @@ describe('externalIntentSweepWorkflow — fail-safe 分支', () => {
     const ingestArg = acts.ingestExternalSignals.mock.calls[0][0] as { targets: Array<Record<string, unknown>> };
     expect(ingestArg.targets).toHaveLength(2);
     expect(ingestArg.targets[0]).toMatchObject({ workspaceId: 'ws-1', cpvCodes: [], buyerCountries: [], fdaProductCodes: [] });
-    expect(ingestArg.targets[0].error).toContain('resolve boom');
+    expect(ingestArg.targets[0].error).toBe('EXTERNAL_TARGET_RESOLUTION_FAILED');
+    expect(ingestArg.targets[0].error).not.toContain('resolve boom');
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(2); // 两个 resolved 条目仍投影
   });
 
@@ -159,7 +161,8 @@ describe('externalIntentSweepWorkflow — fail-safe 分支', () => {
 
     const out = await externalIntentSweepWorkflow({});
 
-    expect(out.ingest?.errors?.[0]).toContain('ingest boom');
+    expect(out.ingest?.errors?.[0]).toBe('EXTERNAL_SIGNAL_INGEST_FAILED');
+    expect(out.ingest?.errors?.[0]).not.toContain('ingest boom');
     expect(out.ingest).toMatchObject({ tedSpecs: 0, fdaSpecs: 0, signalsUpserted: 0, budgetExceeded: false });
     expect(acts.liveProviderState).toHaveBeenCalledTimes(1);
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(2);
@@ -200,7 +203,8 @@ describe('externalIntentSweepWorkflow — 过期后 intent 复算 + patched 版�
 
     const out = await externalIntentSweepWorkflow({});
 
-    expect(out.recompute?.error).toContain('recompute boom');
+    expect(out.recompute?.error).toBe('EXTERNAL_INTENT_RECOMPUTE_FAILED');
+    expect(out.recompute?.error).not.toContain('recompute boom');
     expect(acts.projectExternalIntentForIcp).toHaveBeenCalledTimes(1); // 复算失败不阻断投影
     expect(out.swept).toBe(1);
   });

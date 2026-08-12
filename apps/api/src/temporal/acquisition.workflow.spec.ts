@@ -39,7 +39,8 @@ describe('acquisitionSweepWorkflow', () => {
 
     expect(out.swept).toBe(2);
     expect(out.results[0]).toMatchObject({ sourceId: 's1', status: 'FAILED', total: 0 });
-    expect(out.results[0].error).toContain('acquire boom');
+    expect(out.results[0].error).toBe('ACQUISITION_ACTIVITY_FAILED');
+    expect(out.results[0].error).not.toContain('acquire boom');
     expect(out.results[1].error).toBeUndefined();
   });
 

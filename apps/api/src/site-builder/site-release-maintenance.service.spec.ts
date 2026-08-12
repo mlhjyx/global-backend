@@ -50,7 +50,6 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.SITE_RELEASE_GC_ENABLED;
 });
-
 describe('SiteReleaseMaintenanceService', () => {
   it('does nothing while the irreversible GC gate is disabled', async () => {
     delete process.env.SITE_RELEASE_GC_ENABLED;
@@ -112,4 +111,3 @@ describe('SiteReleaseMaintenanceService', () => {
     await expect(fenced.service.sweep()).rejects.toThrow('SITE_RELEASE_GC_SETTLE_FENCED');
   });
 });
-

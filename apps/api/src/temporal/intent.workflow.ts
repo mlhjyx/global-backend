@@ -1,6 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { IntentActivities } from './intent.activities';
 import type { WatchResult } from '../intent/website-watch.service';
+import { safeTemporalErrorCode } from './safe-error-code';
 
 const acts = proxyActivities<IntentActivities>({
   startToCloseTimeout: '10 minutes', // 一个源可能有多页 × crawl4ai 渲染（每页可达数十秒）
@@ -31,7 +32,7 @@ export async function intentSweepWorkflow(input?: { limit?: number }): Promise<I
     } catch (err) {
       results.push({
         sourceId, status: 'FAILED', pagesFetched: 0, pagesMissed: 0, added: 0, changed: 0, intentEvents: 0,
-        error: String(err).slice(0, 200),
+        error: safeTemporalErrorCode(err, 'INTENT_WATCH_FAILED'),
       });
     }
   }

@@ -34,7 +34,6 @@ vi.mock('../discovery/icp-to-fda', async (importOriginal) => {
     ]),
   };
 });
-
 const ctx = {
   workspaceId: '11111111-1111-4111-8111-111111111111',
   userId: 'operator-1',
@@ -452,4 +451,3 @@ describe('IcpService', () => {
     await expect(service.listQueryPlans(ctx, 'icp-1')).resolves.toEqual([{ id: 'plan-1' }]);
   });
 });
-

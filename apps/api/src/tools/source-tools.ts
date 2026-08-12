@@ -335,7 +335,7 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
         costCents: 0,
       };
     }
-    throw new Error(`ted.search: unsupported kind ${String((input as { kind?: unknown }).kind)}`);
+    throw new Error('ted.search: unsupported kind');
   },
 };
 
@@ -387,7 +387,7 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
         costCents: 0,
       };
     }
-    throw new Error(`openfda.search: unsupported kind ${String((input as { kind?: unknown }).kind)}`);
+    throw new Error('openfda.search: unsupported kind');
   },
 };
 

@@ -62,7 +62,9 @@ describe('ted.search 工具边界', () => {
   it('运行时未知 kind fail-closed，绝不误路由到 contract', async () => {
     const malformed = { kind: 'unknown', params: { cpvCodes: ['42120000'] } } as never;
 
-    await expect(tedSearchTool.execute(malformed, context)).rejects.toThrow(/ted\.search.*kind/);
+    await expect(tedSearchTool.execute(malformed, context)).rejects.toThrow(
+      /^ted\.search: unsupported kind$/u,
+    );
     expect(adapterMocks.searchAwardNotices).not.toHaveBeenCalled();
     expect(adapterMocks.searchContractNotices).not.toHaveBeenCalled();
   });
@@ -115,7 +117,9 @@ describe('openfda.search 工具边界', () => {
   it('运行时未知 kind fail-closed，绝不误路由到 510k', async () => {
     const malformed = { kind: 'unknown', params: { productCodes: ['OHT'] } } as never;
 
-    await expect(openFdaSearchTool.execute(malformed, context)).rejects.toThrow(/openfda\.search.*kind/);
+    await expect(openFdaSearchTool.execute(malformed, context)).rejects.toThrow(
+      /^openfda\.search: unsupported kind$/u,
+    );
     expect(adapterMocks.searchRegistrations).not.toHaveBeenCalled();
     expect(adapterMocks.search510kClearances).not.toHaveBeenCalled();
   });

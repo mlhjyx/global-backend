@@ -4,12 +4,17 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const bodyParser = require("../node_modules/.pnpm/body-parser@1.20.6/node_modules/body-parser");
-const qs = require("../node_modules/.pnpm/qs@6.15.3/node_modules/qs");
+const apiRequire = createRequire(new URL("../apps/api/package.json", import.meta.url));
+const platformExpressRequire = createRequire(
+  apiRequire.resolve("@nestjs/platform-express/package.json"),
+);
+const expressRequire = createRequire(platformExpressRequire.resolve("express/package.json"));
+const bodyParser = expressRequire("body-parser");
+const qs = expressRequire("qs");
 
 test("parser behavior tests resolve the current production dependency graph", async () => {
   const source = await readFile(new URL(import.meta.url), "utf8");
-  assert.doesNotMatch(source, /node_modules\/\.pnpm/u);
+  assert.equal(source.includes(["node_modules", ".pnpm"].join("/")), false);
   assert.match(source, /@nestjs\/platform-express/u);
 });
 

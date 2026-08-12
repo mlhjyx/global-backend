@@ -1,6 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
+import { safeTemporalErrorCode } from './safe-error-code';
 
 const acts = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '2 minutes',
@@ -38,7 +39,11 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       if (r.budgetTruncated) discoveryBudgetTruncated = true;
     } catch (err) {
       failures += 1;
-      perSource[query.source_class] = { rawCount: 0, provider: null, error: String(err).slice(0, 200) };
+      perSource[query.source_class] = {
+        rawCount: 0,
+        provider: null,
+        error: safeTemporalErrorCode(err, 'DISCOVERY_QUERY_FAILED'),
+      };
     }
   }
 
