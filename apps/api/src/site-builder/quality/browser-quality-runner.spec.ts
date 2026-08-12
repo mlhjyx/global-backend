@@ -134,7 +134,10 @@ async function requestThroughProxy(
 
 describe("bounded browser quality runner", () => {
   it("accepts the real approved Renderer output at the deterministic SEO seam", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "m1f-real-renderer-"));
+    const outputRoot = await mkdtemp(
+      path.join(tmpdir(), "m1f-real-renderer-"),
+    );
+    const root = path.join(outputRoot, "output");
     let cleanupAssets: (() => Promise<void>) | undefined;
     try {
       const { spec, designBrief, validation } = await loadFixture();
@@ -154,6 +157,7 @@ describe("bounded browser quality runner", () => {
       cleanupAssets = overlay.cleanup;
       const outputManifest = await buildSiteSpecWithTemporaryFile(spec, {
         outDir: root,
+        outputRoot,
         basePath: "/preview/quality/",
         siteOrigin: SITE_ORIGIN,
         publicAssetDir: overlay.publicDir,
@@ -192,7 +196,7 @@ describe("bounded browser quality runner", () => {
       );
     } finally {
       await cleanupAssets?.();
-      await rm(root, { recursive: true, force: true });
+      await rm(outputRoot, { recursive: true, force: true });
     }
   }, 180_000);
 

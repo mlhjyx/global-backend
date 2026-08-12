@@ -10,6 +10,7 @@ import {
   opendir,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -48,6 +49,7 @@ export interface RendererOutputManifestV1 {
 export interface RendererBuildInput {
   specPath: string;
   outDir: string;
+  outputRoot: string;
   basePath: string;
   siteOrigin: string;
   publicAssetDir?: string;
@@ -380,22 +382,48 @@ function resolveNodeExecutable(): string {
 
 export async function assertRendererOutputTarget(
   outDir: string,
+  outputRoot: string,
 ): Promise<string> {
   const target = path.resolve(outDir);
+  const admittedRoot = path.resolve(outputRoot);
   const parsed = path.parse(target);
-  if (target === parsed.root || path.basename(target) === "") {
+  if (
+    target === parsed.root ||
+    admittedRoot === path.parse(admittedRoot).root ||
+    target === admittedRoot ||
+    !target.startsWith(`${admittedRoot}${path.sep}`)
+  ) {
+    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  }
+
+  let rootStat;
+  try {
+    rootStat = await lstat(admittedRoot);
+    if (
+      !rootStat.isDirectory() ||
+      rootStat.isSymbolicLink() ||
+      (await realpath(admittedRoot)) !== admittedRoot
+    ) {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+  } catch {
     throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
   }
 
   const parent = path.dirname(target);
-  let parentStat;
-  try {
-    parentStat = await lstat(parent);
-  } catch {
-    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
-  }
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  const relativeParent = path.relative(admittedRoot, parent);
+  let cursor = admittedRoot;
+  for (const component of relativeParent.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, component);
+    let componentStat;
+    try {
+      componentStat = await lstat(cursor);
+    } catch {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+    if (!componentStat.isDirectory() || componentStat.isSymbolicLink()) {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
   }
 
   try {
@@ -420,7 +448,10 @@ export async function assertRendererOutputTarget(
 /** 用已解析的 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
 export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   const { rendererRoot, astroCli } = resolveRendererEntrypoint();
-  const outDir = await assertRendererOutputTarget(input.outDir);
+  const outDir = await assertRendererOutputTarget(
+    input.outDir,
+    input.outputRoot,
+  );
   const buildDir = await mkdtemp(
     path.join(rendererRoot, ".site-builder-render-"),
   );
@@ -463,6 +494,7 @@ export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
       throw new Error("RENDERER_OUTPUT_COPY_MISMATCH");
     }
 
+    await assertRendererOutputTarget(outDir, input.outputRoot);
     await rm(outDir, { recursive: true, force: true });
     await rename(deliveryDir, outDir);
     deliveryDir = null;
@@ -580,6 +612,7 @@ export async function buildSiteSpecWithTemporaryFile(
   spec: unknown,
   output: {
     outDir: string;
+    outputRoot: string;
     basePath: string;
     siteOrigin: string;
     publicAssetDir?: string;
@@ -600,6 +633,7 @@ export async function buildSiteSpecWithTemporaryFile(
     await execute({
       specPath,
       outDir: output.outDir,
+      outputRoot: output.outputRoot,
       basePath: output.basePath,
       siteOrigin: output.siteOrigin,
       publicAssetDir: output.publicAssetDir,

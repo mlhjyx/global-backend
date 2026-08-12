@@ -40,6 +40,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
     const env = buildRendererEnv({
       specPath: "/tmp/spec.json",
       outDir: "/tmp/out",
+      outputRoot: "/tmp",
       basePath: "/preview/acme/",
       siteOrigin: SITE_ORIGIN,
     });
@@ -68,6 +69,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       buildRendererEnv({
         specPath: "/tmp/spec.json",
         outDir: "/tmp/out",
+        outputRoot: "/tmp",
         basePath: "/",
         siteOrigin: SITE_ORIGIN,
         publicAssetDir: "/tmp/overlay",
@@ -142,6 +144,7 @@ describe("runAstroBuild — cross-filesystem output", () => {
         runAstroBuild({
           specPath,
           outDir,
+          outputRoot: path.dirname(outDir),
           outputRoot,
           basePath: "/",
           siteOrigin: SITE_ORIGIN,
@@ -313,6 +316,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         { safe: true },
         {
           outDir,
+          outputRoot: path.dirname(outDir),
           basePath: "/preview/acme/",
           siteOrigin: SITE_ORIGIN,
         },
@@ -366,6 +370,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
           { tenant: "content" },
           {
             outDir,
+            outputRoot: path.dirname(outDir),
             basePath: "/preview/acme/",
             siteOrigin: SITE_ORIGIN,
           },

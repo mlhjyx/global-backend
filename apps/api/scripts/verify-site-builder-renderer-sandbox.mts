@@ -21,7 +21,8 @@ function check(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '../../..');
 const fixturePath = path.join(repoRoot, 'apps/site-renderer/fixtures/demo-spec.json');
-const outDir = await mkdtemp(path.join(tmpdir(), 'global-renderer-verify-'));
+const outputRoot = await mkdtemp(path.join(tmpdir(), 'global-renderer-verify-'));
+const outDir = path.join(outputRoot, 'output');
 const siteOrigin = 'https://preview.example.test';
 
 process.env.DATABASE_URL = 'must-not-reach-renderer';
@@ -34,6 +35,7 @@ try {
   const env = buildRendererEnv({
     specPath: fixturePath,
     outDir,
+    outputRoot,
     basePath: '/preview/r1-safety/',
     siteOrigin,
   });
@@ -48,6 +50,7 @@ try {
   const spec = JSON.parse(await readFile(fixturePath, 'utf8')) as unknown;
   await buildSiteSpecWithTemporaryFile(spec, {
     outDir,
+    outputRoot,
     basePath: '/preview/r1-safety/',
     siteOrigin,
   });
@@ -69,5 +72,5 @@ try {
   delete process.env.S3_SECRET_KEY;
   delete process.env.NEW_API_KEY;
   delete process.env.NODE_OPTIONS;
-  await rm(outDir, { recursive: true, force: true });
+  await rm(outputRoot, { recursive: true, force: true });
 }

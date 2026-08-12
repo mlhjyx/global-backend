@@ -1144,6 +1144,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     try {
       rendererManifest = await renderSiteSpec(doc, {
         outDir,
+        outputRoot: previewRoot(),
         basePath: previewBasePath(state.site.slug),
         siteOrigin: previewOrigin(state.site.slug),
         publicAssetDir: overlay.publicDir,
@@ -1329,6 +1330,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     try {
       manifest = await renderSiteSpec(input.spec, {
         outDir: repairRoot,
+        outputRoot: previewRoot(),
         basePath: input.candidate.basePath,
         siteOrigin: input.candidate.siteOrigin,
         publicAssetDir: overlay.publicDir,
@@ -1689,6 +1691,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       await mkdir(outDir, { recursive: true });
       await renderSiteSpec(doc, {
         outDir,
+        outputRoot: previewRoot(),
         basePath: previewBasePath(claimed.site.slug),
         siteOrigin: previewOrigin(claimed.site.slug),
       });
@@ -3441,6 +3444,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       assertReleaseContract(doc, DEMO_SPEC_VERSION);
       await renderSiteSpec(doc, {
         outDir,
+        outputRoot: previewRoot(),
         basePath: previewBasePath(site.slug),
         siteOrigin: previewOrigin(site.slug),
       });
