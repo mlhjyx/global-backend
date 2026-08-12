@@ -112,6 +112,15 @@ test("the browser quality runner uses the current Lighthouse security line", asy
   assert.equal(apiManifest.dependencies?.lighthouse, "13.4.1");
 });
 
+test("the API uses the patched Nest and Express platform line", async () => {
+  const apiManifest = JSON.parse(await readFile("apps/api/package.json", "utf8"));
+
+  assert.equal(apiManifest.dependencies?.["@nestjs/common"], "11.1.29");
+  assert.equal(apiManifest.dependencies?.["@nestjs/core"], "11.1.29");
+  assert.equal(apiManifest.dependencies?.["@nestjs/platform-express"], "11.1.29");
+  assert.equal(apiManifest.devDependencies?.["@nestjs/cli"], "11.0.16");
+});
+
 test("the renderer uses the current Astro security line and runtime floor", async () => {
   const [
     rootManifestText,
