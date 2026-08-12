@@ -10,5 +10,10 @@ export default defineConfig({
     env: {
       PII_ENCRYPTION_KEY: '0'.repeat(64),
     },
+    coverage: {
+      // Some source-verification tests intentionally import compiled runtime
+      // artifacts. Count the TypeScript source once; dist is generated output.
+      exclude: ['dist/**'],
+    },
   },
 });
