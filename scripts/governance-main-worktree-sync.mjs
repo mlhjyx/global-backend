@@ -110,10 +110,21 @@ export function assertGitCommandAllowed(args) {
   }
 }
 
+export function createSafeGitEnvironment(environment = process.env) {
+  const safeEnvironment = Object.fromEntries(
+    Object.entries(environment).filter(([key]) => !key.startsWith("GIT_")),
+  );
+  return {
+    ...safeEnvironment,
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
+
 async function defaultGit(args, { cwd = EXPECTED_MAIN_WORKTREE } = {}) {
   assertGitCommandAllowed(args);
   return execFile("git", args, {
     cwd,
+    env: createSafeGitEnvironment(),
     maxBuffer: 16 * 1024 * 1024,
   });
 }
@@ -319,6 +330,32 @@ async function locateCanonicalMain(git, resolveRealpath) {
   return undefined;
 }
 
+async function locateCanonicalInvocation(invocationCwd, resolveRealpath) {
+  let expectedRealpath;
+  let invokedRealpath;
+  try {
+    [expectedRealpath, invokedRealpath] = await Promise.all([
+      resolveRealpath(EXPECTED_MAIN_WORKTREE),
+      resolveRealpath(invocationCwd),
+    ]);
+  } catch (error) {
+    return baseResult({
+      state: "CLI_CWD_UNAVAILABLE_HOLD",
+      invokedFrom: invocationCwd,
+      error: errorText(error),
+    });
+  }
+
+  if (invokedRealpath !== expectedRealpath) {
+    return baseResult({
+      state: "WRONG_CLI_CWD_HOLD",
+      invokedFrom: invocationCwd,
+    });
+  }
+
+  return undefined;
+}
+
 async function inspectStatus(git, { remoteFreshness, resolveRealpath }) {
   const locationHold = await locateCanonicalMain(git, resolveRealpath);
   if (locationHold) return locationHold;
@@ -483,9 +520,21 @@ export async function getMainWorktreeSyncStatus({
 
 export async function applyMainWorktreeSync({
   git = defaultGit,
+  invocationCwd = process.cwd(),
   resolveRealpath = realpath,
 } = {}) {
   try {
+    const invocationHold = await locateCanonicalInvocation(
+      invocationCwd,
+      resolveRealpath,
+    );
+    if (invocationHold) {
+      return publicResult({
+        remoteFreshness: "NOT_FETCHED_INVOCATION_HOLD",
+        ...invocationHold,
+      });
+    }
+
     const locationHold = await locateCanonicalMain(git, resolveRealpath);
     if (locationHold) {
       return publicResult({
@@ -663,7 +712,7 @@ async function runCli() {
   if (action === "status") {
     result = await getMainWorktreeSyncStatus();
   } else if (action === "apply") {
-    result = await applyMainWorktreeSync();
+    result = await applyMainWorktreeSync({ invocationCwd: process.cwd() });
   } else {
     result = baseResult({
       state: "INVALID_ACTION_HOLD",

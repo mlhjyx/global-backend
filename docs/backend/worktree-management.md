@@ -65,6 +65,8 @@ pnpm main:sync    # fetch origin --prune，解析 origin/main 为精确 commit�
 
 `main:sync` 不要求根目录必须整体 clean：本地现场若与 `HEAD..<fetch 后解析出的 origin/main commit>` 的入站路径完全无交集，Git 对同一对 commit 干跑也证明可快进，则可以在不动这些文件的情况下跟随。工具在快进前后逐字节比较完整 status，确保 tracked deletion、untracked/ignored 文件和其他本地状态未被改写。
 
+`main:sync` 的调用目录也受机器门约束：只有当前目录的 realpath 等于 `/global/backend` 才能进入 fetch；从功能 worktree、临时 checkout 或其他路径调用会在任何 Git 命令前返回 `WRONG_CLI_CWD_HOLD`。Git 子进程同时清除调用环境继承的 `GIT_*` 仓库、worktree、index、对象库、配置与 transport 覆盖，只保留脚本设置的非交互提示门，避免外部环境把固定 root 重定向到另一现场。
+
 以下任一情况必须 HOLD，只报告不修复：
 
 - `/global/backend` 不是唯一绑定 `refs/heads/main` 的 root worktree，或处于 detached/locked/prunable 状态；

@@ -5,14 +5,22 @@ import { fileURLToPath } from "node:url";
 
 import {
   EXPECTED_MAIN_WORKTREE,
-  applyMainWorktreeSync,
+  applyMainWorktreeSync as applyMainWorktreeSyncImplementation,
   assertGitCommandAllowed,
+  createSafeGitEnvironment,
   getCliExitCode,
   getMainWorktreeSyncStatus,
 } from "./governance-main-worktree-sync.mjs";
 
 const MAIN_HEAD = "1111111111111111111111111111111111111111";
 const REMOTE_HEAD = "2222222222222222222222222222222222222222";
+
+function applyMainWorktreeSync(options = {}) {
+  return applyMainWorktreeSyncImplementation({
+    invocationCwd: EXPECTED_MAIN_WORKTREE,
+    ...options,
+  });
+}
 
 function nul(paths) {
   return paths.length === 0 ? "" : `${paths.join("\0")}\0`;
@@ -226,6 +234,21 @@ test("apply fetches and preserves non-colliding tracked dirt byte-for-byte", asy
       git.calls.findIndex(({ args }) => args[0] === "merge"),
     true,
   );
+});
+
+test("apply refuses a noncanonical invocation directory before any Git command", async () => {
+  const git = createFakeExecutor({ behind: 1, incoming: ["src/new.ts"] });
+
+  const result = await applyMainWorktreeSync({
+    git: git.run,
+    invocationCwd: "/global/backend/.codex/worktrees/topic",
+    resolveRealpath: fakeRealpath,
+  });
+
+  assert.equal(result.state, "WRONG_CLI_CWD_HOLD");
+  assert.equal(result.canApply, false);
+  assert.equal(result.invokedFrom, "/global/backend/.codex/worktrees/topic");
+  assert.deepEqual(git.calls, []);
 });
 
 test("apply fails closed when fetch fails", async () => {
@@ -534,6 +557,36 @@ test("the exact command allowlist rejects unneeded reads and every other mutatio
   }
   assert.doesNotThrow(() =>
     assertGitCommandAllowed(["merge", "--ff-only", REMOTE_HEAD]),
+  );
+});
+
+test("Git execution strips inherited repository and transport overrides", () => {
+  const safe = createSafeGitEnvironment({
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: "/tmp/objects",
+    GIT_ASKPASS: "/tmp/askpass",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "core.sshCommand",
+    GIT_CONFIG_VALUE_0: "/tmp/ssh",
+    GIT_DIR: "/tmp/repository.git",
+    GIT_INDEX_FILE: "/tmp/index",
+    GIT_OBJECT_DIRECTORY: "/tmp/object-directory",
+    GIT_SSH_COMMAND: "/tmp/ssh-command",
+    GIT_TERMINAL_PROMPT: "1",
+    GIT_WORK_TREE: "/tmp/worktree",
+    HOME: "/safe/home",
+    PATH: "/safe/bin",
+    PRESERVED: "yes",
+  });
+
+  assert.equal(safe.HOME, "/safe/home");
+  assert.equal(safe.PATH, "/safe/bin");
+  assert.equal(safe.PRESERVED, "yes");
+  assert.equal(safe.GIT_TERMINAL_PROMPT, "0");
+  assert.deepEqual(
+    Object.keys(safe).filter(
+      (key) => key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT",
+    ),
+    [],
   );
 });
 
