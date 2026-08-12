@@ -60,7 +60,7 @@ pnpm code-intelligence:runtime:status
 3. **集成门**：运行身份与 roles→scopes source slice 已合入，但仍须在批准的 release checkout/目标环境上用真实 JWKS token、受限 role map 和跨 workspace 负例形成运行证据。当前 Suppression/DataRights/逐 wire 变更虽已通过本地全量测试，仍须完成 exact-head 独立 review、真实 PostgreSQL 新锁路径并发、hosted CI 与主线合并；`APP_DATABASE_URL` 非 owner/non-superuser/non-BYPASSRLS 启动 admission 仍属于下一独立切片。
 4. **仓库设置门**：仓内已声明 required contexts 与 review 规则，但 GitHub ruleset/branch protection 是外部状态，必须由有权限的人实际配置并回读验证。
 5. **供应链安全门**：本地候选已把 official production audit 的 High 从 18 收敛为 0，但仍有 6 moderate、1 low；Dependency Review、production audit ratchet 与 CodeQL 尚未在该 exact candidate 的 hosted CI 运行，也未进入 live required ruleset。Container/Compose/IaC 门仍缺失，不能用 ratchet 或 Gitleaks 替代。
-6. **覆盖率门**：本地全量 API 为 4665 PASS / 2 skipped，但 statements 70.77%、branches 64.68%、functions 74.22%、lines 72.51%，未达到项目 80% 门；本候选继续 HOLD。
+6. **覆盖率门**：本地全量 API 为 4665 PASS / 2 skipped，但 statements 70.76%、branches 64.63%、functions 74.24%、lines 72.50%，未达到项目 80% 门；本候选继续 HOLD。
 7. **Copy fixed-source 门**：当前依赖图/renderer 变化使 required verifier 返回 `COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH`。旧 receipt 不代表本树；只能由单独 fixed-source rebase、review 与授权关闭，禁止手改 JSON。
 8. **产品门**：首个 pilot 的 capability、租户/数据范围、允许 provider、成功指标、退出条件、运行 Owner 与用户授权尚未形成有效 Release Bundle。
 
