@@ -144,7 +144,6 @@ describe("runAstroBuild — cross-filesystem output", () => {
         runAstroBuild({
           specPath,
           outDir,
-          outputRoot: path.dirname(outDir),
           outputRoot,
           basePath: "/",
           siteOrigin: SITE_ORIGIN,
