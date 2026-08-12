@@ -62,7 +62,7 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 | --- | --- | --- |
 | C1 | `a35a4f01`、`fa569d8f`：暴露 `dist` 污染与未加载源码被漏计 | `622679c6`、`bf404791`：只统计完整 `src/**/*.ts` inventory |
 | C2 | `4c7b9003`、`96d27f33`、`69a7389c`、`e57f809f`：暴露 intent 重放、副作用、Temporal/compliance/acquisition 原始异常泄漏 | `e64fa565`、`c95bcb6c`、`c5fa75b1`、`5f6fa483`：幂等 evidence、闭合错误码与 SHA diagnostic token |
-| C3 | `4a6d927d`：独立复审暴露 stale pnpm parser 路径与 workflow history 仍含自由文本 | `06116e37`：parser 测试沿真实 Nest→Express 图解析；所有 workflow error evidence 为闭合码，未知 kind 不回显输入 |
+| C3 | `4a6d927d`：独立复审暴露 stale pnpm parser 路径与 workflow 主动写入的 error evidence 仍含自由文本 | `06116e37`：parser 测试沿真实 Nest→Express 图解析；workflow 主动写入的 fail-safe result/error evidence 字段为闭合码，未知 kind 不回显输入；Temporal activity failure event 与 terminal rethrow history 不在本证明范围 |
 | D1 | `b6f7733b`：锁定 `body-parser` / `qs` 漏洞与真实 parser 边界 | `c2e810ff`：过渡期将 1.x 收敛到 `body-parser@1.20.6`、`qs@6.15.3`；随后 D4 由 Express 5 生产图替换为 `body-parser@2.3.0` |
 | D2 | `3c43c3a5`：锁定 XML parser 安全线 | `f46350a8`：`fast-xml-parser@5.7.1`，OFAC/EU parser 行为回归通过 |
 | D3 | `2dc2ca96`：锁定 Lighthouse/OpenTelemetry 链 | `2687839c`、`916d53ac`、`9d6f867f`：`lighthouse@13.4.1` 并将仓库 Node floor 提升到 `>=22.19.0` |
