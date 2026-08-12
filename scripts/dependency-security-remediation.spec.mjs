@@ -145,7 +145,7 @@ test("the renderer uses the current Astro security line and runtime floor", asyn
   const rootManifest = JSON.parse(rootManifestText);
   const rendererManifest = JSON.parse(rendererManifestText);
 
-  assert.equal(rootManifest.engines?.node, ">=22.12.0");
+  assert.equal(rootManifest.engines?.node, ">=22.19.0");
   assert.equal(rendererManifest.dependencies?.astro, "7.2.1");
   assert.equal(reservedFetch, false);
   assert.doesNotMatch(rendererConfig, /\bexperimental\s*:/u);
