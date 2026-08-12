@@ -11,6 +11,9 @@ export default defineConfig({
       PII_ENCRYPTION_KEY: '0'.repeat(64),
     },
     coverage: {
+      // Force never-imported production modules into the denominator. Without
+      // an explicit inventory, an uncovered file can disappear from the report.
+      include: ['src/**/*.ts'],
       // Some source-verification tests intentionally import compiled runtime
       // artifacts. Count the TypeScript source once; dist is generated output.
       exclude: ['dist/**'],
