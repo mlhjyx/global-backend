@@ -15,6 +15,7 @@ import {
   assertRendererOutputMatches,
   assertRenderedOutboundDomains,
   resolveRendererEntrypoint,
+  runAstroBuild,
   writeRendererOutputManifest,
   type RendererBuildInput,
 } from "./renderer-build";
@@ -46,6 +47,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       TZ: "UTC",
       SITESPEC_PATH: "/tmp/spec.json",
       OUT_DIR: "/tmp/out",
+      ASTRO_CACHE_DIR: "/tmp/out.astro-cache",
       BASE_PATH: "/preview/acme/",
       SITE_ORIGIN,
       ASTRO_TELEMETRY_DISABLED: "1",
@@ -71,6 +73,33 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       PUBLIC_ASSET_DIR: "/tmp/overlay",
     });
   });
+});
+
+describe("runAstroBuild — cross-filesystem output", () => {
+  it("builds a real fixture when OUT_DIR is on the operating-system temp filesystem", async () => {
+    const outDir = await mkdtemp(path.join(tmpdir(), "m1-renderer-cross-fs-"));
+    const specPath = path.resolve(
+      process.cwd(),
+      "..",
+      "site-renderer",
+      "fixtures",
+      "technical-baseline-spec.json",
+    );
+    try {
+      await expect(
+        runAstroBuild({
+          specPath,
+          outDir,
+          basePath: "/",
+          siteOrigin: SITE_ORIGIN,
+        }),
+      ).resolves.toBeUndefined();
+      await expectMissing(`${outDir}.astro-cache`);
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+      await rm(`${outDir}.astro-cache`, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("rendered outbound-domain gate", () => {
