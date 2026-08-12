@@ -11,12 +11,10 @@
  */
 import 'dotenv/config';
 import 'reflect-metadata';
-import { Module } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
 import { PrismaClient } from '@prisma/client';
-import { ServeStaticModule } from '@nestjs/serve-static';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import path from 'node:path';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { IntakeService } from '../src/site-builder/intake.service';
@@ -113,36 +111,55 @@ async function main(): Promise<void> {
   if (!url) throw new Error('previewUrl null for ready site');
   ok('demo', `built in ${buildMs}ms → ${url}`);
 
-  // ── ③ 预览 HTTP 可访问（最小 ServeStatic 应用 = app.module 同款配置）────
+  // ── ③ 预览 HTTP 可访问（只服务本次随机 slug 的最小 verifier server）────
   console.log('③ 预览 HTTP');
-  @Module({
-    imports: [
-      ServeStaticModule.forRoot({
-        rootPath: previewRoot(),
-        serveRoot: '/preview',
-        serveStaticOptions: { index: ['index.html'], fallthrough: true },
-      }),
-    ],
-  })
-  class PreviewOnlyModule {}
-  const app = await NestFactory.create(PreviewOnlyModule, { logger: false });
-  await app.listen(PREVIEW_TEST_PORT);
-  const res = await fetch(`http://localhost:${PREVIEW_TEST_PORT}/preview/${previewSlug}/`);
-  const body = await res.text();
-  if (res.status !== 200 || !body.includes('Verify Pump Co., Ltd.')) {
-    throw new Error(`preview HTTP failed: ${res.status}`);
-  }
-  // 子路径回归守卫：所有根绝对 href/src 必须带 /preview/{slug} base，且逐个可 200
-  const assetPaths = [...body.matchAll(/(?:href|src)="(\/[^"]+)"/g)].map((m) => m[1]);
-  for (const p of assetPaths) {
-    if (!p.startsWith(`/preview/${previewSlug}`)) {
-      throw new Error(`root-absolute link escapes preview base (would 404): ${p}`);
+  const previewPrefix = `/preview/${previewSlug}`;
+  const previewDirectory = path.join(previewRoot(), previewSlug);
+  const server = createServer(async (request, response) => {
+    const requestPath = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+    if (request.method !== 'GET' || !requestPath.startsWith(`${previewPrefix}/`)) {
+      response.writeHead(404).end();
+      return;
     }
-    const r = await fetch(`http://localhost:${PREVIEW_TEST_PORT}${p}`);
-    if (r.status !== 200) throw new Error(`preview asset ${r.status}: ${p}`);
+    const relativePath = requestPath.slice(previewPrefix.length + 1) || 'index.html';
+    const target = path.resolve(previewDirectory, relativePath);
+    if (target !== previewDirectory && !target.startsWith(`${previewDirectory}${path.sep}`)) {
+      response.writeHead(404).end();
+      return;
+    }
+    try {
+      response.writeHead(200).end(await readFile(target));
+    } catch {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PREVIEW_TEST_PORT, '127.0.0.1', resolve);
+  });
+  let assetCount = 0;
+  try {
+    const res = await fetch(`http://127.0.0.1:${PREVIEW_TEST_PORT}/preview/${previewSlug}/`);
+    const body = await res.text();
+    if (res.status !== 200 || !body.includes('Verify Pump Co., Ltd.')) {
+      throw new Error(`preview HTTP failed: ${res.status}`);
+    }
+    // 子路径回归守卫：所有根绝对 href/src 必须带 /preview/{slug} base，且逐个可 200
+    const assetPaths = [...body.matchAll(/(?:href|src)="(\/[^"]+)"/g)].map((m) => m[1]);
+    assetCount = assetPaths.length;
+    for (const p of assetPaths) {
+      if (!p.startsWith(`/preview/${previewSlug}`)) {
+        throw new Error(`root-absolute link escapes preview base (would 404): ${p}`);
+      }
+      const r = await fetch(`http://127.0.0.1:${PREVIEW_TEST_PORT}${p}`);
+      if (r.status !== 200) throw new Error(`preview asset ${r.status}: ${p}`);
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
-  await app.close();
-  ok('preview', `GET /preview/${previewSlug}/ → 200；${assetPaths.length} 个站内资产/链接全部 200`);
+  ok('preview', `GET /preview/${previewSlug}/ → 200；${assetCount} 个站内资产/链接全部 200`);
 
   // ── ④ 素材直传 → commit 安全闸 → KB → 语义检索 ─────────────────────────
   console.log('④ 素材 + KB（真 MinIO + 真 BGE-M3）');

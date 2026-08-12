@@ -56,11 +56,17 @@ test("the lockfile contains none of the remediated vulnerable snapshots", async 
 });
 
 test("the API has no production serve-static or multipart controller surface", async () => {
-  const [apiManifestText, m0Verifier, previewStatic, apiSourceInventory] =
+  const [apiManifestText, m0Verifier, previewStaticTracked, apiSourceInventory] =
     await Promise.all([
       readFile("apps/api/package.json", "utf8"),
       readFile("apps/api/scripts/verify-site-builder-m0.mts", "utf8"),
-      readFile("apps/api/src/site-builder/preview-static.ts", "utf8"),
+      readFile("apps/api/src/site-builder/preview-static.ts", "utf8").then(
+        () => true,
+        (error) => {
+          if (error?.code === "ENOENT") return false;
+          throw error;
+        },
+      ),
       import("node:child_process").then(
         ({ execFileSync }) =>
           execFileSync(
@@ -83,6 +89,6 @@ test("the API has no production serve-static or multipart controller surface", a
 
   assert.equal(apiManifest.dependencies?.["@nestjs/serve-static"], undefined);
   assert.doesNotMatch(m0Verifier, /@nestjs\/serve-static/u);
-  assert.doesNotMatch(previewStatic, /@nestjs\/serve-static/u);
+  assert.equal(previewStaticTracked, false);
   assert.equal(apiSourceInventory, "");
 });
