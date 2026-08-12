@@ -30,6 +30,8 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "postcss@8.5.16",
   "postcss@8.5.19",
   "path-to-regexp@0.2.5",
+  "astro@5.18.2",
+  "sharp@0.34.5",
 ]);
 
 test("production security floors are explicit and major-scoped", async () => {
@@ -91,4 +93,27 @@ test("the API has no production serve-static or multipart controller surface", a
   assert.doesNotMatch(m0Verifier, /@nestjs\/serve-static/u);
   assert.equal(previewStaticTracked, false);
   assert.equal(apiSourceInventory, "");
+});
+
+test("the renderer uses the current Astro security line and runtime floor", async () => {
+  const [rootManifestText, rendererManifestText, rendererConfig, reservedFetch] =
+    await Promise.all([
+      readFile("package.json", "utf8"),
+      readFile("apps/site-renderer/package.json", "utf8"),
+      readFile("apps/site-renderer/astro.config.mjs", "utf8"),
+      readFile("apps/site-renderer/src/fetch.ts", "utf8").then(
+        () => true,
+        (error) => {
+          if (error?.code === "ENOENT") return false;
+          throw error;
+        },
+      ),
+    ]);
+  const rootManifest = JSON.parse(rootManifestText);
+  const rendererManifest = JSON.parse(rendererManifestText);
+
+  assert.equal(rootManifest.engines?.node, ">=22.12.0");
+  assert.equal(rendererManifest.dependencies?.astro, "7.2.1");
+  assert.equal(reservedFetch, false);
+  assert.doesNotMatch(rendererConfig, /\bexperimental\s*:/u);
 });
