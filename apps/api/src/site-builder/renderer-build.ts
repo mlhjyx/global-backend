@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants, existsSync } from "node:fs";
+import { constants, existsSync, readFileSync } from "node:fs";
 import {
+  cp,
+  mkdir,
   mkdtemp,
   open,
   opendir,
@@ -310,6 +312,7 @@ export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
     TZ: "UTC",
     SITESPEC_PATH: input.specPath,
     OUT_DIR: input.outDir,
+    ASTRO_CACHE_DIR: `${input.outDir}.astro-cache`,
     BASE_PATH: input.basePath,
     SITE_ORIGIN: siteOrigin,
     ...(input.publicAssetDir ? { PUBLIC_ASSET_DIR: input.publicAssetDir } : {}),
@@ -333,9 +336,27 @@ export function resolveRendererEntrypoint(cwd = process.cwd()): {
       const astroPackage = requireFromCwd.resolve("astro/package.json", {
         paths: [rendererRoot],
       });
+      const astroRoot = path.dirname(astroPackage);
+      const packageManifest = JSON.parse(
+        readFileSync(astroPackage, "utf8"),
+      ) as {
+        bin?: string | Record<string, string>;
+      };
+      const bin =
+        typeof packageManifest.bin === "string"
+          ? packageManifest.bin
+          : packageManifest.bin?.astro;
+      if (typeof bin !== "string" || bin.length === 0) continue;
+      const astroCli = path.resolve(astroRoot, bin);
+      if (
+        !astroCli.startsWith(`${astroRoot}${path.sep}`) ||
+        !existsSync(astroCli)
+      ) {
+        continue;
+      }
       return {
         rendererRoot,
-        astroCli: path.join(path.dirname(astroPackage), "astro.js"),
+        astroCli,
       };
     } catch {
       // Try the next supported monorepo working directory shape.
@@ -359,17 +380,58 @@ function resolveNodeExecutable(): string {
 /** 用已解析的 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
 export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   const { rendererRoot, astroCli } = resolveRendererEntrypoint();
-  await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
-    cwd: rendererRoot,
-    env: buildRendererEnv(input),
-    timeout: BUILD_TIMEOUT_MS,
-    maxBuffer: MAX_BUILD_OUTPUT_BYTES,
-  });
-  await assertRenderedOutboundDomains(
-    input.outDir,
-    input.allowedOutboundDomains ?? [],
-    input.siteOrigin,
+  const buildDir = await mkdtemp(
+    path.join(rendererRoot, ".site-builder-render-"),
   );
+  const cacheDir = `${buildDir}.astro-cache`;
+  const targetParent = path.dirname(input.outDir);
+  let deliveryDir: string | null = null;
+  try {
+    await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
+      cwd: rendererRoot,
+      env: buildRendererEnv({ ...input, outDir: buildDir }),
+      timeout: BUILD_TIMEOUT_MS,
+      maxBuffer: MAX_BUILD_OUTPUT_BYTES,
+    });
+    await assertRenderedOutboundDomains(
+      buildDir,
+      input.allowedOutboundDomains ?? [],
+      input.siteOrigin,
+    );
+    const builtTree = await collectRendererOutputTree(buildDir);
+
+    await mkdir(targetParent, { recursive: true });
+    deliveryDir = await mkdtemp(
+      path.join(targetParent, `.${path.basename(input.outDir)}.render-`),
+    );
+    for (const entry of await readdir(buildDir)) {
+      await cp(path.join(buildDir, entry), path.join(deliveryDir, entry), {
+        recursive: true,
+        dereference: false,
+        errorOnExist: true,
+        force: false,
+        verbatimSymlinks: true,
+      });
+    }
+    const deliveredTree = await collectRendererOutputTree(deliveryDir);
+    if (
+      deliveredTree.treeDigest !== builtTree.treeDigest ||
+      deliveredTree.fileCount !== builtTree.fileCount ||
+      deliveredTree.totalBytes !== builtTree.totalBytes
+    ) {
+      throw new Error("RENDERER_OUTPUT_COPY_MISMATCH");
+    }
+
+    await rm(input.outDir, { recursive: true, force: true });
+    await rename(deliveryDir, input.outDir);
+    deliveryDir = null;
+  } finally {
+    if (deliveryDir !== null) {
+      await rm(deliveryDir, { recursive: true, force: true });
+    }
+    await rm(buildDir, { recursive: true, force: true });
+    await rm(cacheDir, { recursive: true, force: true });
+  }
 }
 
 const SCANNED_RENDER_EXTENSIONS = new Set([
