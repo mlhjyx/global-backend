@@ -22,6 +22,7 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "brace-expansion@1.1.16",
   "brace-expansion@2.1.2",
   "fast-uri@3.1.3",
+  "fast-xml-parser@4.5.7",
   "ip-address@10.2.0",
   "js-yaml@3.15.0",
   "js-yaml@4.2.0",
@@ -97,6 +98,12 @@ test("the API has no production serve-static or multipart controller surface", a
   assert.doesNotMatch(m0Verifier, /@nestjs\/serve-static/u);
   assert.equal(previewStaticTracked, false);
   assert.equal(apiSourceInventory, "");
+});
+
+test("the API XML parser uses the patched major line", async () => {
+  const apiManifest = JSON.parse(await readFile("apps/api/package.json", "utf8"));
+
+  assert.equal(apiManifest.dependencies?.["fast-xml-parser"], "5.7.1");
 });
 
 test("the renderer uses the current Astro security line and runtime floor", async () => {
