@@ -777,6 +777,52 @@ test("trusted source policy rejects direct dependency fetches before install", a
   };
   assert.deepEqual(validateDependencySourcePolicy(safeInput).issues, []);
 
+  const scopedRegistryOverrides = validateDependencySourcePolicy({
+    ...safeInput,
+    manifests: safeInput.manifests.map((manifest) =>
+      manifest.path === "package.json"
+        ? {
+            ...manifest,
+            document: {
+              ...manifest.document,
+              pnpm: {
+                overrides: {
+                  "fast-uri@>=3.0.0 <4.0.0": "3.1.5",
+                  "@scope/runtime@^2.0.0": "2.3.4",
+                },
+              },
+            },
+          }
+        : manifest,
+    ),
+  });
+  assert.deepEqual(scopedRegistryOverrides.issues, []);
+
+  for (const selector of [
+    "fast-uri>child",
+    "fast-uri@https://attacker.invalid/runtime.tgz",
+    "@scope/runtime@file:../../outside",
+  ]) {
+    const result = validateDependencySourcePolicy({
+      ...safeInput,
+      manifests: safeInput.manifests.map((manifest) =>
+        manifest.path === "package.json"
+          ? {
+              ...manifest,
+              document: {
+                ...manifest.document,
+                pnpm: { overrides: { [selector]: "3.1.5" } },
+              },
+            }
+          : manifest,
+      ),
+    });
+    assert.ok(
+      issueCodes(result).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      selector,
+    );
+  }
+
   for (const auditConfig of [
     { ignoreGhsas: ["GHSA-aaaa-bbbb-cccc"] },
     { ignoreCves: ["CVE-2026-0001"] },
