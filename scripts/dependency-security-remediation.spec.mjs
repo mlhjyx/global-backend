@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const EXPECTED_SECURITY_OVERRIDES = Object.freeze({
+  "body-parser@>=1.0.0 <2.0.0": "1.20.6",
   "brace-expansion@>=1.0.0 <2.0.0": "1.1.18",
   "brace-expansion@>=2.0.0 <3.0.0": "2.1.4",
   "fast-uri@>=3.0.0 <4.0.0": "3.1.5",
@@ -13,9 +14,11 @@ const EXPECTED_SECURITY_OVERRIDES = Object.freeze({
   "multer@>=2.0.0 <3.0.0": "2.2.0",
   "nanoid@>=3.0.0 <4.0.0": "3.3.17",
   "postcss@>=8.0.0 <9.0.0": "8.5.23",
+  "qs@>=6.0.0 <7.0.0": "6.15.3",
 });
 
 const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
+  "body-parser@1.20.4",
   "brace-expansion@1.1.16",
   "brace-expansion@2.1.2",
   "fast-uri@3.1.3",
@@ -29,6 +32,7 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "nanoid@3.3.16",
   "postcss@8.5.16",
   "postcss@8.5.19",
+  "qs@6.14.2",
   "path-to-regexp@0.2.5",
   "astro@5.18.2",
   "sharp@0.34.5",
