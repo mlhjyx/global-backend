@@ -2,7 +2,7 @@
 
 > 基线：`origin/main@412716a2a78ed6adfd3e605053f3f310651f9777`
 >
-> 本地实现：`codex/deps-security-remediation`，实现 checkpoint `f30892b9`；尚未 push、建 PR、合并或部署。
+> 本地实现：`codex/deps-security-remediation`，实现 checkpoint `7bbc8d80`；尚未 push、建 PR、合并或部署。
 >
 > 边界：本文记录本地源码、官方 npm audit、确定性测试与 renderer 视觉回归。它不是 GitHub Security alert readback、hosted CI、RuntimeEvidence、Release Bundle 或真实试点证据。
 
@@ -27,10 +27,13 @@
 | S3-A | `64339e36`、`7bc24608`：Astro/Sharp/Node floor 与 Codex 环境后台 server 生命周期先失败 | `60eb75ed`：Astro 7.2.1、Sharp 0.35.3、Node >=22.12.0；视觉 server 固定 foreground                    |
 | S3-B | `51b19cd6`：Astro 7 package bin 和 `/tmp` 跨文件系统真实生产构建先失败                 | `f4db016d`：从 package manifest 解析 CLI；同文件系统 staging 构建，校验、复制、复算 digest 后原子提升 |
 | S3-C | 工作区复审发现 renderer promote 前缺少 `outDir` admission guard                        | `f30892b9`：拒绝 root、缺父目录、父目录 symlink、目标 symlink 或非目录目标后才允许 rm/rename promote  |
+| S3-D | `cfc12974`：复审证明 generic guard 仍会接受 `/tmp`、仓库根与中间目录 symlink           | `7bbc8d80`：输出必须是显式受控根的后代，逐层拒绝 symlink，并在 rm/rename 前重新 admission             |
 
 Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer cwd 的 `.astro`，随后以 `rename(2)` 搬运；仓库与 `/tmp` 分属不同文件系统时会 `EXDEV`。最终实现不把 workspace 依赖解析 cwd 移到 `/tmp`，而是在 renderer 根下创建每次构建独有 staging，执行现有 file-count/depth/regular-file/no-symlink/单文件与总字节上限及 outbound-domain gate，再复制到目标文件系统 sibling 临时目录、复算 tree digest，最后同文件系统 rename。失败路径不写 release manifest，并清除 build/cache/delivery staging。
 
-复审补充的 promote admission guard 在任何 Astro 子进程启动前执行：`outDir` 必须解析为非根路径，父目录必须已存在且不是 symlink，已有目标只能是普通目录且不能是 symlink。该 guard 不把输出限制死到 preview root，因为 browser-quality runner 仍需要受控临时目录；它只防止 renderer 边界在低信任输入下触发 broad recursive delete 或 symlink target promote。
+复审补充的 promote admission guard 在任何 Astro 子进程启动前执行：每个调用方必须显式提供受控 `outputRoot`，`outDir` 必须是它的严格后代；root 自身和路径中的每个中间组件都必须是现存普通目录且不能是 symlink，已有目标也只能是普通目录。真实 Temporal 活动固定到 `previewRoot()`，browser-quality / sandbox verifier 则各自创建一次性随机根。复制与 digest 复核结束后、递归删除与 rename 前会再次执行同一 admission，阻断明显的路径漂移。
+
+这个 guard 仍不是对同 Unix UID 恶意并发替换的强不可变绑定：Node 当前 promotion 仍通过路径字符串执行最终 `rm/rename`，第二次 admission 与系统调用之间存在极短 TOCTOU 窗口。当前 renderer 只接收仓内构造的 preview/一次性根，未暴露为 tenant 路径输入；若未来把本地目录账本或 renderer promotion 提升为受控试点恢复边界，仍须使用 retained directory handle / no-follow child traversal 或等价的受信 helper 进一步硬化。本文不把二次复核冒充为同 UID 防篡改证明。
 
 ## 最终本地验证
 
