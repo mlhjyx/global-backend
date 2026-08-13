@@ -429,6 +429,77 @@ test("comparable audit subjects bind exact clean commits and reject untracked de
   }
 });
 
+test("graph delta CLI rejects untrusted dependency sources even when the graph is reported identical", async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "supply-chain-identical-source-policy-"),
+  );
+  const git = (...arguments_) => {
+    const execution = spawnSync("git", arguments_, {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(
+      execution.status,
+      0,
+      `${arguments_.join(" ")} failed: ${execution.stderr}`,
+    );
+    return execution.stdout.trim();
+  };
+
+  try {
+    git("init", "--initial-branch=main", "--quiet");
+    git("config", "user.email", "governance@example.invalid");
+    git("config", "user.name", "Governance Test");
+    await writeFile(
+      join(directory, "package.json"),
+      JSON.stringify(
+        {
+          name: "fixture",
+          dependencies: {
+            runtime: "https://attacker.invalid/runtime.tgz",
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(directory, "pnpm-workspace.yaml"),
+      'packages:\n  - "packages/*"\n',
+    );
+    await writeFile(
+      join(directory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    git("add", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml");
+    git("commit", "--quiet", "-m", "fixture untrusted source");
+    const head = git("rev-parse", "HEAD");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        new URL("scripts/supply-chain-audit.mjs", repositoryRoot).pathname,
+        "graph-delta",
+        "--trusted-base",
+        head,
+        "--candidate",
+        head,
+        "--relation",
+        "IDENTICAL_TO_TRUSTED_BASE",
+        "--trusted-base-root",
+        directory,
+        "--candidate-root",
+        directory,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(execution.status, 0, execution.stdout);
+    assert.match(execution.stderr, /repository dependency sources are not trusted/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("dependency graph proof compares exact trusted-base and head, never their merge base", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supply-chain-graph-delta-"));
   const git = (...arguments_) => {
