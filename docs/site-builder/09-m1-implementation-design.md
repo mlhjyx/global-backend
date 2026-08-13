@@ -370,7 +370,7 @@ M1 只做**确定性动效 token**（Ken Burns/轻微视差/数字递增/Marquee
 9. 🔴 **搜索上线检查**（别处无家）：preview `noindex` 与 published `indexable` **必须互斥验证**；sitemap/hreflang/canonical/structured data 在域名切换后复扫。
 10. **询盘交付可靠性**：邮件/CRM 失败可重试；Inquiry 表是数据真相；反垃圾不误删原始审计（[06](06-security-abuse.md)）。
 11. **可访问性持续性**：人工编辑和实验变体也过 a11y，不只初始 AI 生成（[08](08-eval-testing.md)）。
-12. **获客恢复、共享核心仍隔离**：获客冻结已提前解除，但 M1 收口前不启动获客实现，获客任务不得混入 Site Builder PR；Company/Claim/Offering/Outbox/Usage 共享域继续单一真值、按明确 ownership 修改，不复制/破坏。
+12. **获客恢复、共享核心仍隔离**：获客冻结已解除且 M1 已完成阶段收口，但旧 backlog、owner 和验证不自动恢复；获客任务不得混入 Site Builder PR。Company/Claim/Offering/Outbox/Usage 共享域继续单一真值、按明确 ownership 修改，不复制/破坏。
 13. **权威与时间漂移**：每 PR 记 asBuilt SHA/决策版本/消费者；设计稿"当前"不覆盖后续合并事实。
 14. **单源设计支配**：规则多源聚合 + 过视觉/结构/代码相似度门；任一 Tier B 来源不主导可识别模板（ADR-019 / [13](13-design-domain-model.md)）。
 15. **训练与运行数据混用**：DesignObservation/生产 DesignRule/训练语料/用户站点数据各有 retention/trainingAllowed；默认不因"可访问"推"可训练"。

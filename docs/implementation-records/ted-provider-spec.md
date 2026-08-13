@@ -1,4 +1,4 @@
-> 【Implementation Record 2026-08-02 更新】P1 中标发现 / P2 ICP→CPV / P3 招标 intent / P5 Schedule 已完成（PR #30/#31/#33/#38）；SAM.gov Sources Sought P4 后续也已由 PR #99 落地、默认 `DISABLED`。获客开发冻结已提前解除，但 M1 收口前不恢复实现，旧验证、旧优先级和 provider 状态也不会自动恢复；规格正文以「§8 审查修正」+ 现有代码为准，不再是 build-ready 待实施稿。
+> 【Implementation Record 2026-08-12 当前边界】P1 中标发现 / P2 ICP→CPV / P3 招标 intent / P5 Schedule 已完成（PR #30/#31/#33/#38）；SAM.gov Sources Sought P4 后续也已由 PR #99 落地、默认 `DISABLED`。获客开发冻结已解除且 M1 已完成阶段收口，但旧验证、旧优先级和 provider 状态不会自动恢复；规格正文以「§8 审查修正」+ 现有代码为准，不再是 build-ready 待实施稿。
 > 【现行流程覆盖】正文中旧的 `docs/feat` 分支、自审、自合并等表述只记录当时过程；当前统一使用 `codex/<topic>` + PR + CI/Codex 审查，合并须用户明确确认，权威规则见 [../../AGENTS.md](../../AGENTS.md) §8。
 
 # TED v3 招投标 Provider — 落地规格（build-ready）

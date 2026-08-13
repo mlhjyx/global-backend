@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import "./governance-ci-topology.spec.mjs";
+import "./governance-document-drift.spec.mjs";
+import "./governance-main-worktree-sync.spec.mjs";
 import "./copy-fixed-source-impact.spec.mjs";
 import "./supply-chain-gates.spec.mjs";
 
