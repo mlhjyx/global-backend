@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   EXPECTED_MAIN_WORKTREE,
+  TRUSTED_GIT_EXECUTABLE,
   applyMainWorktreeSync as applyMainWorktreeSyncImplementation,
   assertGitCommandAllowed,
+  createGitExecutor,
   createSafeGitEnvironment,
   getCliExitCode,
   getMainWorktreeSyncStatus,
@@ -560,7 +562,7 @@ test("the exact command allowlist rejects unneeded reads and every other mutatio
   );
 });
 
-test("Git execution strips inherited repository and transport overrides", () => {
+test("Git execution uses a closed environment instead of ambient executable and config state", async () => {
   const safe = createSafeGitEnvironment({
     GIT_ALTERNATE_OBJECT_DIRECTORIES: "/tmp/objects",
     GIT_ASKPASS: "/tmp/askpass",
@@ -576,18 +578,34 @@ test("Git execution strips inherited repository and transport overrides", () => 
     HOME: "/safe/home",
     PATH: "/safe/bin",
     PRESERVED: "yes",
+    XDG_CONFIG_HOME: "/safe/xdg",
   });
 
-  assert.equal(safe.HOME, "/safe/home");
-  assert.equal(safe.PATH, "/safe/bin");
-  assert.equal(safe.PRESERVED, "yes");
+  assert.equal(safe.HOME, "/var/empty/global-backend-main-sync");
+  assert.equal(safe.PATH, "/usr/bin:/bin");
+  assert.equal(safe.XDG_CONFIG_HOME, "/var/empty/global-backend-main-sync/xdg");
+  assert.equal(safe.GH_CONFIG_DIR, "/root/.config/gh");
+  assert.equal(safe.GH_PROMPT_DISABLED, "1");
+  assert.equal(safe.GIT_CONFIG_GLOBAL, "/dev/null");
+  assert.equal(safe.GIT_CONFIG_NOSYSTEM, "1");
+  assert.equal(safe.GIT_CONFIG_COUNT, "7");
   assert.equal(safe.GIT_TERMINAL_PROMPT, "0");
-  assert.deepEqual(
-    Object.keys(safe).filter(
-      (key) => key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT",
-    ),
-    [],
-  );
+  assert.equal(safe.PRESERVED, undefined);
+
+  const calls = [];
+  const git = createGitExecutor({
+    execFileImpl: async (file, args, options) => {
+      calls.push({ file, args, options });
+      return { stdout: `${MAIN_HEAD}\n`, stderr: "" };
+    },
+  });
+
+  await git(["rev-parse", "HEAD"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, TRUSTED_GIT_EXECUTABLE);
+  assert.deepEqual(calls[0].args, ["rev-parse", "HEAD"]);
+  assert.equal(calls[0].options.cwd, EXPECTED_MAIN_WORKTREE);
+  assert.deepEqual(calls[0].options.env, safe);
 });
 
 test("CLI exits zero only for the explicitly safe states of each action", () => {

@@ -9,6 +9,19 @@ import { promisify } from "node:util";
 const execFile = promisify(execFileCallback);
 
 export const EXPECTED_MAIN_WORKTREE = "/global/backend";
+export const TRUSTED_GIT_EXECUTABLE = "/usr/bin/git";
+
+const ISOLATED_HOME = "/var/empty/global-backend-main-sync";
+const TRUSTED_GH_CONFIG_DIR = "/root/.config/gh";
+const TRUSTED_GIT_CONFIG = Object.freeze([
+  ["core.hooksPath", "/dev/null"],
+  ["core.attributesFile", "/dev/null"],
+  ["credential.interactive", "never"],
+  ["credential.https://github.com.helper", ""],
+  ["credential.https://github.com.helper", "!/usr/bin/gh auth git-credential"],
+  ["protocol.file.allow", "never"],
+  ["protocol.ext.allow", "never"],
+]);
 
 const MAIN_BRANCH = "refs/heads/main";
 const REMOTE_MAIN = "refs/remotes/origin/main";
@@ -110,24 +123,40 @@ export function assertGitCommandAllowed(args) {
   }
 }
 
-export function createSafeGitEnvironment(environment = process.env) {
-  const safeEnvironment = Object.fromEntries(
-    Object.entries(environment).filter(([key]) => !key.startsWith("GIT_")),
-  );
-  return {
-    ...safeEnvironment,
+export function createSafeGitEnvironment() {
+  const environment = {
+    GH_CONFIG_DIR: TRUSTED_GH_CONFIG_DIR,
+    GH_PROMPT_DISABLED: "1",
+    GIT_CONFIG_COUNT: String(TRUSTED_GIT_CONFIG.length),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_PAGER: "cat",
     GIT_TERMINAL_PROMPT: "0",
+    HOME: ISOLATED_HOME,
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    PATH: "/usr/bin:/bin",
+    XDG_CONFIG_HOME: `${ISOLATED_HOME}/xdg`,
+  };
+  for (const [index, [key, value]] of TRUSTED_GIT_CONFIG.entries()) {
+    environment[`GIT_CONFIG_KEY_${index}`] = key;
+    environment[`GIT_CONFIG_VALUE_${index}`] = value;
+  }
+  return Object.freeze(environment);
+}
+
+export function createGitExecutor({ execFileImpl = execFile } = {}) {
+  return async function runGit(args, { cwd = EXPECTED_MAIN_WORKTREE } = {}) {
+    assertGitCommandAllowed(args);
+    return execFileImpl(TRUSTED_GIT_EXECUTABLE, args, {
+      cwd,
+      env: createSafeGitEnvironment(),
+      maxBuffer: 16 * 1024 * 1024,
+    });
   };
 }
 
-async function defaultGit(args, { cwd = EXPECTED_MAIN_WORKTREE } = {}) {
-  assertGitCommandAllowed(args);
-  return execFile("git", args, {
-    cwd,
-    env: createSafeGitEnvironment(),
-    maxBuffer: 16 * 1024 * 1024,
-  });
-}
+const defaultGit = createGitExecutor();
 
 function outputBytes(value) {
   return Buffer.isBuffer(value) ? value : Buffer.from(value ?? "", "utf8");

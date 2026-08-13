@@ -65,7 +65,7 @@ node scripts/governance-main-worktree-sync.mjs apply   # fetch origin --prune，
 
 同步脚本的 `apply` 不要求根目录必须整体 clean：本地现场若与 `HEAD..<fetch 后解析出的 origin/main commit>` 的入站路径完全无交集，Git 对同一对 commit 干跑也证明可快进，则可以在不动这些文件的情况下跟随。工具在快进前后逐字节比较完整 status，确保 tracked deletion、untracked/ignored 文件和其他本地状态未被改写。
 
-同步脚本 `apply` 的调用目录也受机器门约束：只有当前目录的 realpath 等于 `/global/backend` 才能进入 fetch；从功能 worktree、临时 checkout 或其他路径调用会在任何 Git 命令前返回 `WRONG_CLI_CWD_HOLD`。Git 子进程同时清除调用环境继承的 `GIT_*` 仓库、worktree、index、对象库、配置与 transport 覆盖，只保留脚本设置的非交互提示门，避免外部环境把固定 root 重定向到另一现场。
+同步脚本 `apply` 的调用目录也受机器门约束：只有当前目录的 realpath 等于 `/global/backend` 才能进入 fetch；从功能 worktree、临时 checkout 或其他路径调用会在任何 Git 命令前返回 `WRONG_CLI_CWD_HOLD`。Git 子进程固定使用 `/usr/bin/git`，不从调用方继承 `PATH`、`HOME`、`XDG_CONFIG_HOME`、`GH_*` 或 `GIT_*`；它使用闭合的 `/usr/bin:/bin`、隔离的 HOME/XDG、禁用 system/global Git config 与交互提示，并以 command-scope 配置禁用 hooks、全局 attributes、`file`/`ext` protocol。私有 GitHub fetch 只允许固定 `/usr/bin/gh auth git-credential` 从 `/root/.config/gh` 读取现有凭据，脚本不打印或复制凭据。该边界隔离调用环境和用户级配置；canonical repository 自身的 tracked attributes 与 local config 仍属于被审计的根 Git 现场，不应表述为对恶意改写 `.git/config` 的独立沙箱。
 
 以下任一情况必须 HOLD，只报告不修复：
 
