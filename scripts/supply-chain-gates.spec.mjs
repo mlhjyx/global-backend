@@ -230,14 +230,70 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
     candidate: candidateCommit,
   });
 
-  const changed = evaluateDependencyGraphDelta({
+  const changedWithoutComparableAudit = evaluateDependencyGraphDelta({
     trustedBase: BASE_COMMIT,
     candidate: candidateCommit,
     relation: "CHANGED",
   });
-  assert.equal(changed.ok, false);
-  assert.equal(changed.result, "AUDIT_SNAPSHOT_INCONCLUSIVE");
-  assert.ok(issueCodes(changed).includes("DEPENDENCY_GRAPH_CHANGED"));
+  assert.equal(changedWithoutComparableAudit.ok, false);
+  assert.equal(
+    changedWithoutComparableAudit.result,
+    "AUDIT_SNAPSHOT_INCONCLUSIVE",
+  );
+  assert.ok(
+    issueCodes(changedWithoutComparableAudit).includes(
+      "DEPENDENCY_GRAPH_CHANGED",
+    ),
+  );
+
+  const changedWithComparableAudit = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: candidateCommit,
+    relation: "CHANGED",
+    trustedBaseAudit: pnpmAudit([]),
+    candidateAudit: pnpmAudit([]),
+    baseline: baseline([]),
+    now: NOW,
+  });
+  assert.equal(changedWithComparableAudit.ok, true);
+  assert.equal(changedWithComparableAudit.result, "COMPARABLE_AUDIT_PASS");
+  assert.equal(changedWithComparableAudit.current_advisories, 0);
+  assert.deepEqual(changedWithComparableAudit.resolved_advisories, []);
+  assert.deepEqual(
+    buildDependencyGraphDeltaReceipt(changedWithComparableAudit, {
+      trustedBaseAuditDigest: `sha256:${"f".repeat(64)}`,
+      candidateAuditDigest: `sha256:${"1".repeat(64)}`,
+    }),
+    {
+      schema_version: "production-dependency-graph-delta-result/v1",
+      result: "COMPARABLE_AUDIT_PASS",
+      trusted_base: BASE_COMMIT,
+      candidate: candidateCommit,
+      current_advisories: 0,
+      resolved_advisories: [],
+      trusted_base_audit_digest: `sha256:${"f".repeat(64)}`,
+      candidate_audit_digest: `sha256:${"1".repeat(64)}`,
+      registry: "https://registry.npmjs.org/",
+    },
+  );
+
+  const changedWithNewAdvisory = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: candidateCommit,
+    relation: "CHANGED",
+    trustedBaseAudit: pnpmAudit([]),
+    candidateAudit: pnpmAudit([advisory()]),
+    baseline: baseline([]),
+    now: NOW,
+  });
+  assert.equal(changedWithNewAdvisory.ok, false);
+  assert.equal(
+    changedWithNewAdvisory.result,
+    "AUDIT_SNAPSHOT_INCONCLUSIVE",
+  );
+  assert.ok(
+    issueCodes(changedWithNewAdvisory).includes("AUDIT_NEW_ADVISORY"),
+  );
   assert.equal(
     evaluateDependencyGraphDelta({
       trustedBase: "not-a-sha",
@@ -826,7 +882,16 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
     /pnpm audit --prod --registry=https:\/\/registry\.npmjs\.org --json/,
   );
   assert.match(workflow, /node "\$TRUSTED_VERIFIER" graph-delta/);
+  assert.match(
+    workflow,
+    /graph-delta[\s\S]+--trusted-base-root "\$TRUSTED_BASE_WORKTREE"/,
+  );
+  assert.match(
+    workflow,
+    /graph-delta[\s\S]+--candidate-root "\$GITHUB_WORKSPACE"/,
+  );
   assert.match(auditScript, /DEPENDENCY_GRAPH_DELTA_PROTOCOL/);
+  assert.match(auditScript, /COMPARABLE_AUDIT_PASS/);
   assert.match(auditScript, /AUDIT_SNAPSHOT_INCONCLUSIVE/);
   for (const canaryContext of [
     "dependency review · canary",
