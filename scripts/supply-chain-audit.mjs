@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -51,6 +52,58 @@ function isNonEmptyString(value) {
 
 function validDate(value) {
   return isNonEmptyString(value) && Number.isFinite(Date.parse(value));
+}
+
+function runReadOnlyGit(root, arguments_) {
+  const execution = spawnSync(
+    "git",
+    ["-c", "core.fsmonitor=false", ...arguments_],
+    {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: MAX_INPUT_BYTES,
+      timeout: 10_000,
+    },
+  );
+  if (
+    execution.error ||
+    execution.signal ||
+    execution.status !== 0 ||
+    typeof execution.stdout !== "string"
+  ) {
+    throw new Error("DEPENDENCY_AUDIT_SUBJECT_UNREADABLE");
+  }
+  return execution.stdout.trim();
+}
+
+export function assertRepositoryAuditSubject(repositoryRoot, expectedCommit) {
+  if (!SHA_40.test(expectedCommit ?? "")) {
+    throw new Error("DEPENDENCY_AUDIT_SUBJECT_MISMATCH");
+  }
+  const root = resolve(repositoryRoot);
+  let canonicalRoot;
+  try {
+    canonicalRoot = realpathSync(root);
+  } catch {
+    throw new Error("DEPENDENCY_AUDIT_SUBJECT_UNREADABLE");
+  }
+  if (
+    canonicalRoot !== root ||
+    runReadOnlyGit(root, ["rev-parse", "--show-toplevel"]) !== root ||
+    runReadOnlyGit(root, ["rev-parse", "--verify", "HEAD"]) !== expectedCommit
+  ) {
+    throw new Error("DEPENDENCY_AUDIT_SUBJECT_MISMATCH");
+  }
+  if (
+    runReadOnlyGit(root, [
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all",
+    ]) !== ""
+  ) {
+    throw new Error("DEPENDENCY_AUDIT_SUBJECT_DIRTY");
+  }
+  return Object.freeze({ root, commit: expectedCommit });
 }
 
 function advisoryIdentity(advisory) {
@@ -882,7 +935,7 @@ export function evaluateDependencyGraphDelta({
 
 export function buildDependencyGraphDeltaReceipt(
   result,
-  { trustedBaseAuditDigest, candidateAuditDigest } = {},
+  { trustedBaseAuditDigest, candidateAuditDigest, observedAt } = {},
 ) {
   if (
     !isObject(result) ||
@@ -907,7 +960,8 @@ export function buildDependencyGraphDeltaReceipt(
       result.current_advisories < 0 ||
       !Array.isArray(result.resolved_advisories) ||
       !SHA256.test(trustedBaseAuditDigest ?? "") ||
-      !SHA256.test(candidateAuditDigest ?? "")
+      !SHA256.test(candidateAuditDigest ?? "") ||
+      !validDate(observedAt)
     ) {
       throw new Error("cannot build a comparable dependency audit receipt");
     }
@@ -920,6 +974,7 @@ export function buildDependencyGraphDeltaReceipt(
       resolved_advisories: Object.freeze([...result.resolved_advisories]),
       trusted_base_audit_digest: trustedBaseAuditDigest,
       candidate_audit_digest: candidateAuditDigest,
+      observed_at: new Date(observedAt).toISOString(),
       registry: OFFICIAL_REGISTRY,
     });
   }
@@ -1189,16 +1244,24 @@ function parseCliArguments(argv) {
 async function main() {
   const options = parseCliArguments(process.argv.slice(2));
   if (options.command === "graph-delta") {
+    if (!options.trustedBaseRoot || !options.candidateRoot) {
+      throw new Error(
+        "dependency graph proof requires exact base and candidate roots",
+      );
+    }
+    const trustedBaseSubject = assertRepositoryAuditSubject(
+      options.trustedBaseRoot,
+      options.trustedBase,
+    );
+    const candidateSubject = assertRepositoryAuditSubject(
+      options.candidateRoot,
+      options.candidate,
+    );
     let auditInputs = Object.freeze({});
     let receiptInputs = Object.freeze({});
     if (options.relation === "CHANGED") {
-      if (!options.trustedBaseRoot || !options.candidateRoot) {
-        throw new Error(
-          "changed dependency graph requires exact base and candidate roots",
-        );
-      }
-      const trustedBaseRoot = resolve(options.trustedBaseRoot);
-      const candidateRoot = resolve(options.candidateRoot);
+      const trustedBaseRoot = trustedBaseSubject.root;
+      const candidateRoot = candidateSubject.root;
       for (const root of [trustedBaseRoot, candidateRoot]) {
         const sourcePolicy = await validateRepositoryDependencySources(root);
         if (!sourcePolicy.ok) {
@@ -1220,6 +1283,7 @@ async function main() {
       receiptInputs = Object.freeze({
         trustedBaseAuditDigest: trustedBaseAudit.digest,
         candidateAuditDigest: candidateAudit.digest,
+        observedAt: new Date().toISOString(),
       });
     }
     const result = evaluateDependencyGraphDelta({ ...options, ...auditInputs });
