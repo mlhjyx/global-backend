@@ -19,7 +19,8 @@ const GRAPH_DELTA_SCHEMA = "production-dependency-graph-delta-result/v1";
 const FRESHNESS_SCHEMA = "production-dependency-baseline-freshness-result/v1";
 // This exact marker is deliberately used by the workflow to select the
 // trusted-base verifier after the one-time protocol bootstrap has merged.
-const DEPENDENCY_GRAPH_DELTA_PROTOCOL = "dependency-graph-delta/v1";
+const DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL =
+  "dependency-graph-comparable-audit/v2";
 const AUDIT_COMMAND =
   "pnpm audit --prod --registry=https://registry.npmjs.org --json";
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
