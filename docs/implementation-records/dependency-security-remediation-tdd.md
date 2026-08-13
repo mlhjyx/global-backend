@@ -79,7 +79,7 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 | `pnpm audit --prod --registry=https://registry.npmjs.org --json` | 839 production dependencies；0 critical / 0 high / 0 moderate / 0 low | 本地 lock 的官方 registry audit 清零；不等于 GitHub alert/Dependency Review/CodeQL readback |
 | `pnpm install --frozen-lockfile --offline` | PASS | 当前 lock 可从本机缓存重放 |
 | API full Vitest / coverage | 370 files；5401 PASS / 2 skipped | 功能回归全绿；不代表 PostgreSQL/Temporal/外部 provider 运行证据 |
-| 完整 `src/**/*.ts` coverage | statements 85.72%（23145/26999）、branches 80.09%（18081/22574）、functions 88.06%（4584/5205）、lines 87.02%（21344/24527） | 未排除未加载源码、未计入 `dist/**`；include/exclude 精确闭合且生产源码禁 coverage-ignore pragma；四维本地门均已关闭 |
+| 完整 `src/**/*.ts` coverage | 原依赖分支为 statements 85.72%（23145/26999）、branches 80.09%（18081/22574）、functions 88.06%（4584/5205）、lines 87.02%（21344/24527）；PR #400 合成提交 `51910082…` 复跑为 statements 85.72%（23144/26999）、branches 80.09%（18081/22574）、functions 88.04%（4583/5205）、lines 87.01%（21343/24527） | 未排除未加载源码、未计入 `dist/**`；include/exclude 精确闭合且生产源码禁 coverage-ignore pragma；四维本地门均已关闭，且没有把第二父统计值冒充合成树结果 |
 | `pnpm audit --prod --registry=https://registry.npmjs.org --json`（最终重跑） | 0 critical / 0 high / 0 moderate / 0 low；0 advisories；报告不含 `extract-zip` / `GHSA-jmr9-qjv8-65gv` | 当前 lock 的官方 registry production audit；不等于 PR #400 重基、GitHub alert 或 hosted CI readback |
 | Prisma validate/generate、Contracts build、API build/lint | PASS；lint 0 errors / 108 warnings | schema、生成物、类型和构建未回退；warnings 主要来自测试 mock，未冒充零 warning |
 | Governance / docs / Gitleaks | governance PASS；docs 0 errors / 1 existing warning；Gitleaks no leaks | M1 恢复口径 guard 覆盖 product/status/architecture/release-plan/core-object-register；不证明远端规则或目标环境 |
