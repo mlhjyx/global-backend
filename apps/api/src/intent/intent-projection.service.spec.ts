@@ -165,6 +165,104 @@ describe('IntentProjectionService — suppression authority materialization gate
   });
 });
 
+function projectionHarness(priorIntent?: IntentAttr) {
+  const company = {
+    id: 'company-1',
+    name: 'Acme GmbH',
+    domain: 'acme.example',
+    dedupeKey: 'domain:acme.example',
+    status: 'ACTIVE',
+    attributes: priorIntent ? { retained: 'yes', intent: priorIntent } : { retained: 'yes' },
+  };
+  const evidence: Record<string, unknown>[] = [];
+  const update = vi.fn(async ({ data }: { data: { attributes: Record<string, unknown> } }) => {
+    company.attributes = data.attributes as typeof company.attributes;
+    return { id: company.id };
+  });
+  const evidenceCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    evidence.push(data);
+    return { id: `evidence-${evidence.length}` };
+  });
+  const tx = {
+    $queryRaw: vi.fn(async () => [{ locked: true }]),
+    canonicalCompany: {
+      findUnique: vi.fn(async () => company),
+      update,
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    suppressionRecord: { findMany: vi.fn(async () => []) },
+    fieldEvidence: { create: evidenceCreate },
+  };
+  const prisma = {
+    sourceEntityChange: {
+      findMany: vi.fn(async () => [
+        {
+          changeType: 'NEW_PRODUCTS',
+          createdAt: new Date('2026-08-07T12:00:00.000Z'),
+          detail: {
+            strength: 0.7,
+            page_kind: 'products',
+            url: 'https://acme.example/products/pump',
+            evidence: { added: ['pump'] },
+          },
+          source: { config: { company: { name: company.name, domain: company.domain } } },
+        },
+      ]),
+    },
+    withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
+  };
+  return {
+    service: new IntentProjectionService({ prisma: prisma as never }),
+    company,
+    evidence,
+    update,
+    evidenceCreate,
+  };
+}
+
+describe('IntentProjectionService — website intent replay and evidence scope', () => {
+  it('treats a replayed platform change as a no-op', async () => {
+    const harness = projectionHarness();
+
+    await expect(harness.service.projectIntent('workspace-1')).resolves.toEqual({
+      companiesTouched: 1,
+      eventsProjected: 1,
+    });
+    await expect(harness.service.projectIntent('workspace-1')).resolves.toEqual({
+      companiesTouched: 0,
+      eventsProjected: 0,
+    });
+    expect(harness.update).toHaveBeenCalledOnce();
+    expect(harness.evidenceCreate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps cross-source intent in canonical attributes but excludes it from web-watch evidence', async () => {
+    const priorIntent = mergeIntent(undefined, [
+      {
+        type: 'TENDER_PUBLISHED',
+        at: '2026-08-06T12:00:00.000Z',
+        strength: 0.9,
+        evidence: { notice: 'ted-1' },
+      },
+    ]);
+    const harness = projectionHarness(priorIntent);
+
+    await harness.service.projectIntent('workspace-1');
+
+    expect((harness.company.attributes.intent as IntentAttr).events.map((event) => event.type)).toEqual([
+      'NEW_PRODUCTS',
+      'TENDER_PUBLISHED',
+    ]);
+    expect(harness.evidence).toHaveLength(1);
+    expect(harness.evidence[0]).toMatchObject({
+      field: 'intent.website_change',
+      providerKey: 'web_watch',
+      value: { events: [expect.objectContaining({ type: 'NEW_PRODUCTS' })] },
+    });
+    expect(JSON.stringify(harness.evidence[0])).not.toContain('TENDER_PUBLISHED');
+  });
+});
+
 describe('IntentProjectionService — watch registration terminal suppression denial', () => {
   it('does not downgrade a sitemap suppression denial into homepage monitor creation', async () => {
     const create = vi.fn(async () => ({ id: 'monitor-1' }));

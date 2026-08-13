@@ -11,6 +11,8 @@
  * 官方限流约束宽松，本客户端逐条请求、带超时、404 视为「未申报」优雅降级。
  */
 
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
+
 const BASE = process.env.GLEIF_API_URL ?? 'https://api.gleif.org/api/v1';
 const ACCEPT = 'application/vnd.api+json';
 const MAX_RETRIES = 2; // 瞬时抖动/限流下不静默丢富集
@@ -97,7 +99,7 @@ export async function searchLeiRecords(params: {
   qs.set('page[size]', String(Math.min(limit, 50)));
 
   const res = await gleifFetch(`${BASE}/lei-records?${qs.toString()}`, 25_000, beforeRequest);
-  if (!res.ok) throw new Error(`gleif ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) throw new Error(`gleif ${res.status}: ${diagnosticErrorToken(await res.text())}`);
   const json = (await res.json()) as { data?: JsonApiEntity[] };
   return (json.data ?? []).map(mapRecord).filter((r): r is GleifRecord => r !== null);
 }
@@ -115,7 +117,7 @@ export async function getUltimateParent(lei: string, beforeRequest?: () => Promi
 async function fetchParent(url: string, beforeRequest?: () => Promise<void>): Promise<GleifParent | null> {
   const res = await gleifFetch(url, 25_000, beforeRequest);
   if (res.status === 404) return null; // 未申报母公司（例外原因或本就无母公司）
-  if (!res.ok) throw new Error(`gleif parent ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  if (!res.ok) throw new Error(`gleif parent ${res.status}: ${diagnosticErrorToken(await res.text())}`);
   const json = (await res.json()) as { data?: JsonApiEntity };
   const rec = json.data ? mapRecord(json.data) : null;
   if (!rec) return null;

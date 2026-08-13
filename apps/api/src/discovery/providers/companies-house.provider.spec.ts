@@ -17,13 +17,14 @@ function fakeBroker(handlers: {
   search?: () => ChCompanyHit[];
   officers?: () => ChOfficer[];
   throwOn?: 'search' | 'officers';
+  errorMessage?: string;
 }): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
   const invokeMock = vi.fn(async (_toolId: string, input: CompaniesHouseInput): Promise<ToolResult<CompaniesHouseOutput>> => {
     if (input.op === 'search') {
-      if (handlers.throwOn === 'search') throw new Error('gate denied');
+      if (handlers.throwOn === 'search') throw new Error(handlers.errorMessage ?? 'gate denied');
       return { data: { companies: handlers.search?.() ?? [] }, costCents: 0 };
     }
-    if (handlers.throwOn === 'officers') throw new Error('gate denied');
+    if (handlers.throwOn === 'officers') throw new Error(handlers.errorMessage ?? 'gate denied');
     return { data: { officers: handlers.officers?.() ?? [] }, costCents: 0 };
   });
   return {
@@ -140,8 +141,14 @@ describe('CH · discoverContacts', () => {
   });
 
   it('fail-safe：闸门拒绝（invoke 抛）→ 空、不抛穿', async () => {
-    const broker = fakeBroker({ throwOn: 'search' });
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const broker = fakeBroker({ throwOn: 'search', errorMessage: sensitive });
     const res = await new CompaniesHouseContactProvider({ broker }).discoverContacts(ukCompany, CTX);
     expect(res.contacts).toEqual([]);
+    const diagnostic = warn.mock.calls.flat().join(' ');
+    expect(diagnostic).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(diagnostic).not.toContain(sensitive);
+    warn.mockRestore();
   });
 });

@@ -100,9 +100,16 @@ function parseRequest(raw: Buffer, jobDir: string): ChildRequest {
   return value as unknown as RenderRequest;
 }
 
-async function main(): Promise<void> {
-  const requestPath = process.argv[2];
-  const resultPath = process.argv[3];
+/**
+ * Testable child entrypoint. Keeping process argv/env at the thin executable seam lets the
+ * security parser and file-boundary checks run in-process under coverage without weakening the
+ * production child-process boundary.
+ */
+export async function runImagePipelineChild(
+  requestPath = process.argv[2],
+  resultPath = process.argv[3],
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
   if (!requestPath || !resultPath) throw new Error('request and result paths are required');
   const jobDir = path.dirname(requestPath);
   if (
@@ -112,7 +119,7 @@ async function main(): Promise<void> {
   ) {
     throw new Error('child control paths are invalid');
   }
-  if (process.env.VIPS_BLOCK_UNTRUSTED !== '1') {
+  if (env.VIPS_BLOCK_UNTRUSTED !== '1') {
     throw new Error('VIPS_BLOCK_UNTRUSTED must be enabled');
   }
   sharp.cache(false);
@@ -152,7 +159,11 @@ async function main(): Promise<void> {
   );
 }
 
-void main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+// The runner executes this compiled file directly. Imports (including unit tests) must never start
+// codec work as a side effect.
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  void runImagePipelineChild().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

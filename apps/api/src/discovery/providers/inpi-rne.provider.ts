@@ -10,6 +10,7 @@ import {
 } from '../provider-contract';
 import { pickBestByName } from '../name-match';
 import { normalizePersonName } from '../person-name';
+import { diagnosticErrorToken } from '../../common/diagnostic-error-token';
 
 const ANNUAIRE_BASE = 'https://annuaire-entreprises.data.gouv.fr/entreprise/';
 // 🔴 公司对齐门（比公司发现门 0.72 更严）：贴错公司 = 把 A 公司负责人挂到 B 公司，危害大。
@@ -134,7 +135,7 @@ export class InpiRneContactProvider implements ContactDiscoveryAdapter {
       return { contacts, costCents: 0 };
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
-      this.log(`discover failed: ${String(err).slice(0, 150)}`);
+      this.log(`discover failed: ${diagnosticErrorToken(err)}`);
       return { contacts: [], costCents: 0 };
     }
   }

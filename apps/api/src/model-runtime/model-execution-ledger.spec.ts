@@ -1,5 +1,6 @@
 import {
   appendFile,
+  chmod,
   mkdtemp,
   readFile,
   rm,
@@ -252,5 +253,254 @@ describe("AppendOnlyModelExecutionLedger", () => {
         },
       }),
     ).rejects.toThrow("MODEL_EXECUTION_LEDGER_BUSY");
+  });
+
+  it.each([
+    {
+      patch: { campaignId: "x" },
+      code: "MODEL_EXECUTION_CAMPAIGN_INVALID",
+    },
+    {
+      patch: { taskId: "x" },
+      code: "MODEL_EXECUTION_CAMPAIGN_INVALID",
+    },
+    {
+      patch: { planDigest: "not-a-digest" },
+      code: "MODEL_EXECUTION_CAMPAIGN_INVALID",
+    },
+    {
+      patch: { maximumExecutions: 0 },
+      code: "MODEL_EXECUTION_CAMPAIGN_INVALID",
+    },
+    {
+      patch: { maximumExecutions: 2, maximumWireCalls: 1 },
+      code: "MODEL_EXECUTION_CAMPAIGN_INVALID",
+    },
+  ])("rejects invalid campaign contracts before creating a ledger", async ({ patch, code }) => {
+    const ledgerPath = await temporaryLedgerPath();
+    await expect(
+      AppendOnlyModelExecutionLedger.openTestOnly({
+        ledgerPath,
+        campaign: {
+          campaignId: "copy-pilot-test",
+          taskId: "site_builder.copy",
+          planDigest: "a".repeat(64),
+          maximumExecutions: 2,
+          maximumWireCalls: 4,
+          ...patch,
+        },
+      }),
+    ).rejects.toThrow(code);
+  });
+
+  it("rejects relative paths and campaign drift on reopen", async () => {
+    await expect(
+      AppendOnlyModelExecutionLedger.openTestOnly({
+        ledgerPath: "relative-ledger.jsonl",
+        campaign: {
+          campaignId: "copy-pilot-test",
+          taskId: "site_builder.copy",
+          planDigest: "a".repeat(64),
+          maximumExecutions: 1,
+          maximumWireCalls: 1,
+        },
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_LEDGER_UNSAFE");
+
+    const ledger = await openLedger();
+    await expect(
+      AppendOnlyModelExecutionLedger.openTestOnly({
+        ledgerPath: ledger.ledgerPath,
+        campaign: {
+          ...ledger.campaign,
+          planDigest: "f".repeat(64),
+        },
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_CAMPAIGN_MISMATCH");
+  });
+
+  it("validates execution, wire and digest identifiers at every boundary", async () => {
+    const ledger = await openLedger();
+    await expect(
+      ledger.claimExecution({ executionId: "x", planDigest: "b".repeat(64) }),
+    ).rejects.toThrow("MODEL_EXECUTION_ID_INVALID");
+    await expect(
+      ledger.claimExecution({ executionId: "copy-terra", planDigest: "bad" }),
+    ).rejects.toThrow("MODEL_EXECUTION_PLAN_DIGEST_INVALID");
+    await expect(
+      ledger.claimWire({ executionId: "copy-terra", wireId: "x", requestDigest: "c".repeat(64) }),
+    ).rejects.toThrow("MODEL_EXECUTION_WIRE_ID_INVALID");
+    await expect(
+      ledger.claimWire({ executionId: "copy-terra", wireId: "copy-terra:1", requestDigest: "bad" }),
+    ).rejects.toThrow("MODEL_EXECUTION_REQUEST_DIGEST_INVALID");
+    await expect(
+      ledger.freezeExecution("x", "operator freeze"),
+    ).rejects.toThrow("MODEL_EXECUTION_ID_INVALID");
+    await expect(
+      ledger.freezeExecution("copy-terra", "   "),
+    ).rejects.toThrow("MODEL_EXECUTION_FREEZE_REASON_INVALID");
+  });
+
+  it("fails closed for unclaimed, unsettled and completed wire transitions", async () => {
+    const ledger = await openLedger({ maximumWireCalls: 4 });
+    await expect(
+      ledger.claimWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        requestDigest: "c".repeat(64),
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_NOT_CLAIMED");
+
+    await ledger.claimExecution({ executionId: "copy-terra", planDigest: "b".repeat(64) });
+    await ledger.claimWire({
+      executionId: "copy-terra",
+      wireId: "copy-terra:1",
+      requestDigest: "c".repeat(64),
+    });
+    await expect(
+      ledger.claimWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:2",
+        requestDigest: "d".repeat(64),
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_WIRE_UNSETTLED");
+    await expect(
+      ledger.completeExecution({ executionId: "copy-terra", outputDigest: "e".repeat(64) }),
+    ).rejects.toThrow("MODEL_EXECUTION_WIRE_UNSETTLED");
+
+    await ledger.observeWire({
+      executionId: "copy-terra",
+      wireId: "copy-terra:1",
+      settlement: "known",
+      requestId: "request-copy-terra",
+      requestedAlias: "gpt-5.6-terra",
+      resolvedAlias: "gpt-5.6-terra",
+      reportedModel: "gpt-5.6-terra",
+      protocol: "openai_responses",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      outputDigest: "e".repeat(64),
+    });
+    await expect(
+      ledger.completeExecution({ executionId: "copy-terra", outputDigest: "f".repeat(64) }),
+    ).rejects.toThrow("MODEL_EXECUTION_COMPLETION_MISMATCH");
+    await ledger.completeExecution({ executionId: "copy-terra", outputDigest: "e".repeat(64) });
+    await expect(
+      ledger.claimWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:2",
+        requestDigest: "d".repeat(64),
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_ALREADY_COMPLETED");
+  });
+
+  it("validates known and unknown settlement payloads before persistence", async () => {
+    const makeClaimed = async () => {
+      const ledger = await openLedger();
+      await ledger.claimExecution({ executionId: "copy-terra", planDigest: "b".repeat(64) });
+      await ledger.claimWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        requestDigest: "c".repeat(64),
+      });
+      return ledger;
+    };
+    const known = {
+      executionId: "copy-terra",
+      wireId: "copy-terra:1",
+      settlement: "known" as const,
+      requestId: "request-copy-terra",
+      requestedAlias: "gpt-5.6-terra",
+      resolvedAlias: "gpt-5.6-terra",
+      reportedModel: "gpt-5.6-terra",
+      protocol: "openai_responses" as const,
+      usage: { inputTokens: 1, outputTokens: 1 },
+      outputDigest: "d".repeat(64),
+    };
+
+    for (const [patch, code] of [
+      [{ requestId: "x" }, "MODEL_EXECUTION_REQUEST_ID_INVALID"],
+      [{ requestedAlias: "x" }, "MODEL_EXECUTION_ALIAS_INVALID"],
+      [{ resolvedAlias: "x" }, "MODEL_EXECUTION_ALIAS_INVALID"],
+      [{ reportedModel: "x" }, "MODEL_EXECUTION_MODEL_INVALID"],
+      [{ outputDigest: "bad" }, "MODEL_EXECUTION_OUTPUT_DIGEST_INVALID"],
+      [{ usage: { inputTokens: -1, outputTokens: 1 } }, "MODEL_EXECUTION_USAGE_INVALID"],
+      [{ responseShape: { schemaVersion: "wrong" } }, "MODEL_EXECUTION_RESPONSE_SHAPE_INVALID"],
+    ] as const) {
+      const ledger = await makeClaimed();
+      await expect(ledger.observeWire({ ...known, ...patch } as never)).rejects.toThrow(code);
+    }
+
+    const unknown = await makeClaimed();
+    await expect(
+      unknown.observeWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        settlement: "unknown",
+        requestId: null,
+        reason: " ",
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_UNKNOWN_REASON_INVALID");
+    await expect(
+      unknown.observeWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        settlement: "unknown",
+        requestId: null,
+        reason: "x".repeat(161),
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_UNKNOWN_REASON_INVALID");
+  });
+
+  it("rejects observation identity drift and duplicate observations", async () => {
+    const ledger = await openLedger();
+    await ledger.claimExecution({ executionId: "copy-terra", planDigest: "b".repeat(64) });
+    await ledger.claimWire({
+      executionId: "copy-terra",
+      wireId: "copy-terra:1",
+      requestDigest: "c".repeat(64),
+    });
+    await expect(
+      ledger.observeWire({
+        executionId: "copy-other",
+        wireId: "copy-terra:1",
+        settlement: "unknown",
+        requestId: null,
+        reason: "transport_failed",
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_WIRE_NOT_CLAIMED");
+    const event = {
+      executionId: "copy-terra",
+      wireId: "copy-terra:1",
+      settlement: "unknown" as const,
+      requestId: null,
+      reason: " transport_failed ",
+    };
+    await ledger.observeWire(event);
+    await expect(ledger.observeWire(event)).rejects.toThrow(
+      "MODEL_EXECUTION_WIRE_ALREADY_OBSERVED",
+    );
+    await ledger.freezeExecution("copy-terra", "second freeze is idempotent");
+    expect((await ledger.summary()).unknownWireSettlements).toBe(1);
+  });
+
+  it("rejects insecure permissions and truncated ledger files", async () => {
+    const ledger = await openLedger();
+    await chmod(ledger.ledgerPath, 0o644);
+    await expect(ledger.summary()).rejects.toThrow("MODEL_EXECUTION_LEDGER_UNSAFE");
+
+    const truncatedPath = await temporaryLedgerPath();
+    await writeFile(truncatedPath, '{"partial":true}', { mode: 0o600 });
+    await expect(
+      AppendOnlyModelExecutionLedger.openTestOnly({
+        ledgerPath: truncatedPath,
+        campaign: {
+          campaignId: "copy-truncated-test",
+          taskId: "site_builder.copy",
+          planDigest: "a".repeat(64),
+          maximumExecutions: 1,
+          maximumWireCalls: 1,
+        },
+      }),
+    ).rejects.toThrow("MODEL_EXECUTION_LEDGER_INVALID");
   });
 });

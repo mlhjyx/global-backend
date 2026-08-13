@@ -1,5 +1,6 @@
 import { log, proxyActivities } from '@temporalio/workflow';
 import type { createSiteBuilderActivities } from './site-builder.activities';
+import { safeTemporalErrorCode } from './safe-error-code';
 
 type SiteBuilderActivities = ReturnType<typeof createSiteBuilderActivities>;
 
@@ -56,7 +57,7 @@ export async function kbRecoverySweepWorkflow(input?: {
         try {
           return { candidate, result: await processingActivities.processKbAsset(candidate) };
         } catch (err) {
-          return { candidate, error: String(err).slice(0, 300) };
+          return { candidate, error: safeTemporalErrorCode(err, 'KB_RECOVERY_FAILED') };
         }
       }),
     );

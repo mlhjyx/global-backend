@@ -35,7 +35,9 @@ export default defineConfig({
     use: { viewport: { width, height } },
   })),
   webServer: {
-    command: `SITESPEC_PATH=${siteSpecPath} SITE_ORIGIN=http://127.0.0.1:4325 pnpm dev --host 127.0.0.1 --port 4325`,
+    // Astro 7 auto-backgrounds dev servers when it detects an agent. Playwright
+    // must retain the foreground child so lifecycle and cleanup remain bounded.
+    command: `SITESPEC_PATH=${siteSpecPath} SITE_ORIGIN=http://127.0.0.1:4325 ASTRO_DEV_BACKGROUND=0 pnpm dev --host 127.0.0.1 --port 4325`,
     url: "http://127.0.0.1:4325",
     reuseExistingServer:
       !process.env.CI &&

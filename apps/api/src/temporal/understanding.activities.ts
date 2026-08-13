@@ -8,6 +8,7 @@ import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links'
 import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -104,7 +105,7 @@ export function createUnderstandingActivities(deps: {
           pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
         } else if (s.status === 'rejected') {
 
-          console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
+          console.warn(`[understanding] subpage crawl failed: ${diagnosticErrorToken(s.reason)}`);
         }
       });
       return { pages };
@@ -125,11 +126,9 @@ export function createUnderstandingActivities(deps: {
         { telemetry: deps.runtimeTelemetry },
       );
       const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
-      // Stub gateway returns { claims: null }; synthesize a deterministic sample
-      // so the loop is observable end-to-end until a real model is registered.
-      const claims: ExtractedClaim[] = Array.isArray(fromModel)
-        ? fromModel
-        : [{ type: 'capability', statement: 'Stub-extracted capability claim', evidence: '(stub)', confidence: 0.5 }];
+      // A stub or malformed model response is not a business fact. The task
+      // receipt remains observable, but no synthetic claim may enter storage.
+      const claims: ExtractedClaim[] = Array.isArray(fromModel) ? fromModel : [];
       return { claims };
     },
 

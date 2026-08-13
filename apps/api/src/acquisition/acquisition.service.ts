@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SourceAdapterRegistry } from './source-adapter';
 import { cleanEntity, CleanedEntity } from './clean';
 import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 const PARSER_VERSION = 'acquisition/v1';
 const CHUNK = 50;
@@ -46,7 +47,7 @@ export class AcquisitionService {
 
     // ── 抓取（事务外，网络）+ 清洗 ──
     let cleaned: CleanedEntity[];
-    let truncated = false; // raw 达到抓取上限 → 快照可能不完整
+    let truncated: boolean; // raw 达到抓取上限 → 快照可能不完整
     try {
       const config = { ...(source.config as Record<string, unknown>), sourceKey: source.sourceKey };
       const configLimit = Number((source.config as Record<string, unknown>)?.fetchLimit);
@@ -60,11 +61,21 @@ export class AcquisitionService {
       }
       cleaned = [...byExt.values()];
     } catch (err) {
+      const errorToken = diagnosticErrorToken(err);
       await prisma.sourceFetch.update({
         where: { id: fetch.id },
-        data: { status: 'FAILED', error: String(err).slice(0, 300), finishedAt: new Date() },
+        data: { status: 'FAILED', error: errorToken, finishedAt: new Date() },
       });
-      return { sourceId, status: 'FAILED', total: 0, added: 0, updated: 0, removed: 0, unchanged: 0, reason: String(err).slice(0, 200) };
+      return {
+        sourceId,
+        status: 'FAILED',
+        total: 0,
+        added: 0,
+        updated: 0,
+        removed: 0,
+        unchanged: 0,
+        reason: errorToken,
+      };
     }
 
     // ── diff vs 现有快照 ──

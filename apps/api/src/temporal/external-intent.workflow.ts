@@ -1,5 +1,6 @@
 import { proxyActivities, patched } from '@temporalio/workflow';
 import type { ExternalIntentActivities, ExternalIntentIcpResult, ExternalIntentRecomputeSummary, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
+import { safeTemporalErrorCode } from './safe-error-code';
 
 const acts = proxyActivities<ExternalIntentActivities>({
   // 摄取活动对**全部** ACTIVE ICP 的唯一 TED/openFDA 指纹逐个有界分页——查询面多的 workspace 下时长可观，
@@ -53,7 +54,14 @@ export async function externalIntentSweepWorkflow(
     try {
       resolved.push(await acts.resolveExternalIntentTarget(t));
     } catch (err) {
-      resolved.push({ ...t, cpvCodes: [], buyerCountries: [], fdaProductCodes: [], naicsCodes: [], error: String(err).slice(0, 200) });
+      resolved.push({
+        ...t,
+        cpvCodes: [],
+        buyerCountries: [],
+        fdaProductCodes: [],
+        naicsCodes: [],
+        error: safeTemporalErrorCode(err, 'EXTERNAL_TARGET_RESOLUTION_FAILED'),
+      });
     }
   }
 
@@ -62,7 +70,16 @@ export async function externalIntentSweepWorkflow(
     agg.ingest = await acts.ingestExternalSignals({ targets: resolved, tedEnabled, openfdaEnabled, samgovEnabled });
   } catch (err) {
     // 摄取整体失败 fail-safe：投影仍可吃此前窗口已落库的信号。
-    agg.ingest = { tedSpecs: 0, fdaSpecs: 0, samSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
+    agg.ingest = {
+      tedSpecs: 0,
+      fdaSpecs: 0,
+      samSpecs: 0,
+      fetches: 0,
+      ledgerHits: 0,
+      signalsUpserted: 0,
+      budgetExceeded: false,
+      errors: [safeTemporalErrorCode(err, 'EXTERNAL_SIGNAL_INGEST_FAILED')],
+    };
   }
 
   // 过期后 intent **复算收敛**（#56 P2）：expireStaleSignals 只翻转信号状态，增量投影只加不删——已写进
@@ -76,7 +93,13 @@ export async function externalIntentSweepWorkflow(
       agg.recompute = await acts.recomputeExpiredIntent({ targets: resolved });
     } catch (err) {
       // fail-safe：复算失败不阻断本轮投影（过期事件仍会随评分新近度衰减，非硬失效）。
-      agg.recompute = { workspacesRecomputed: 0, companiesRebuilt: 0, companiesCleared: 0, truncated: 0, error: String(err).slice(0, 200) };
+      agg.recompute = {
+        workspacesRecomputed: 0,
+        companiesRebuilt: 0,
+        companiesCleared: 0,
+        truncated: 0,
+        error: safeTemporalErrorCode(err, 'EXTERNAL_INTENT_RECOMPUTE_FAILED'),
+      };
     }
   }
 
@@ -99,7 +122,14 @@ export async function externalIntentSweepWorkflow(
     try {
       r = await acts.projectExternalIntentForIcp({ ...t, tedEnabled, openfdaEnabled, samgovEnabled, live });
     } catch (err) {
-      r = { workspaceId: t.workspaceId, icpId: t.icpId, cpvCodes: 0, fdaProductCodes: 0, naicsCodes: 0, error: String(err).slice(0, 200) };
+      r = {
+        workspaceId: t.workspaceId,
+        icpId: t.icpId,
+        cpvCodes: 0,
+        fdaProductCodes: 0,
+        naicsCodes: 0,
+        error: safeTemporalErrorCode(err, 'EXTERNAL_INTENT_PROJECTION_FAILED'),
+      };
     }
     agg.results.push(r);
     agg.swept += 1;

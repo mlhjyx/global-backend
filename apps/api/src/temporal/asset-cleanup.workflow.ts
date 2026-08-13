@@ -34,9 +34,9 @@ export async function runAssetObjectCleanup(input: AssetCleanupCommand, timing: 
   let command: AssetCleanupCommand;
   try {
     command = parseAssetCleanupCommand(input);
-  } catch (error) {
+  } catch {
     throw ApplicationFailure.nonRetryable(
-      error instanceof Error ? error.message : String(error),
+      'asset cleanup payload invalid',
       'ASSET_CLEANUP_PAYLOAD_INVALID',
     );
   }

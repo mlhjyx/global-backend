@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import "./governance-ci-topology.spec.mjs";
@@ -26,6 +27,24 @@ const SHA_C = "c".repeat(40);
 const SHA_D = "d".repeat(40);
 const DIGEST = `sha256:${"e".repeat(64)}`;
 const NOW = new Date("2026-08-07T12:00:00.000Z");
+
+test("M1 completion language cannot regress to the historical preparation-only freeze", async () => {
+  const [releasePlan, coreObjectRegister, productScope, currentStatus, currentArchitecture] = await Promise.all([
+    readFile("docs/roadmap/release-plan.md", "utf8"),
+    readFile("docs/governance/core-object-register.md", "utf8"),
+    readFile("docs/product-scope.md", "utf8"),
+    readFile("docs/status/current.md", "utf8"),
+    readFile("docs/architecture/current.md", "utf8"),
+  ]);
+
+  for (const document of [releasePlan, coreObjectRegister, productScope, currentStatus, currentArchitecture]) {
+    assert.doesNotMatch(document, /M1 收口前只做准备/u);
+  }
+  for (const document of [releasePlan, coreObjectRegister, productScope]) {
+    assert.match(document, /M1 已完成阶段收口/u);
+    assert.match(document, /重新审计/u);
+  }
+});
 
 function issueCodes(result) {
   return result.issues.map((issue) => issue.code);

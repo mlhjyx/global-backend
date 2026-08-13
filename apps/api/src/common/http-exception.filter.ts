@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Response } from 'express';
+import { diagnosticErrorToken } from './diagnostic-error-token';
 
 /**
  * 统一错误模型（PRD 11.15 / packages/contracts README）：
@@ -16,6 +17,10 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
+      if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+        this.respondInternal(res, exception);
+        return;
+      }
       const body = exception.getResponse();
       // 已按契约构造（error 是对象）→ 透传；class-validator 的 error 是字符串 → 归一
       if (
@@ -39,7 +44,11 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    this.logger.error(String(exception instanceof Error ? exception.stack : exception));
+    this.respondInternal(res, exception);
+  }
+
+  private respondInternal(res: Response, exception: unknown): void {
+    this.logger.error(`INTERNAL ${diagnosticErrorToken(exception)}`);
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: { code: 'INTERNAL', message: 'internal server error' },
     });

@@ -1,12 +1,16 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants, existsSync } from "node:fs";
+import { constants, existsSync, readFileSync } from "node:fs";
 import {
+  cp,
+  lstat,
+  mkdir,
   mkdtemp,
   open,
   opendir,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -45,6 +49,7 @@ export interface RendererOutputManifestV1 {
 export interface RendererBuildInput {
   specPath: string;
   outDir: string;
+  outputRoot: string;
   basePath: string;
   siteOrigin: string;
   publicAssetDir?: string;
@@ -310,6 +315,7 @@ export function buildRendererEnv(input: RendererBuildInput): NodeJS.ProcessEnv {
     TZ: "UTC",
     SITESPEC_PATH: input.specPath,
     OUT_DIR: input.outDir,
+    ASTRO_CACHE_DIR: `${input.outDir}.astro-cache`,
     BASE_PATH: input.basePath,
     SITE_ORIGIN: siteOrigin,
     ...(input.publicAssetDir ? { PUBLIC_ASSET_DIR: input.publicAssetDir } : {}),
@@ -333,9 +339,27 @@ export function resolveRendererEntrypoint(cwd = process.cwd()): {
       const astroPackage = requireFromCwd.resolve("astro/package.json", {
         paths: [rendererRoot],
       });
+      const astroRoot = path.dirname(astroPackage);
+      const packageManifest = JSON.parse(
+        readFileSync(astroPackage, "utf8"),
+      ) as {
+        bin?: string | Record<string, string>;
+      };
+      const bin =
+        typeof packageManifest.bin === "string"
+          ? packageManifest.bin
+          : packageManifest.bin?.astro;
+      if (typeof bin !== "string" || bin.length === 0) continue;
+      const astroCli = path.resolve(astroRoot, bin);
+      if (
+        !astroCli.startsWith(`${astroRoot}${path.sep}`) ||
+        !existsSync(astroCli)
+      ) {
+        continue;
+      }
       return {
         rendererRoot,
-        astroCli: path.join(path.dirname(astroPackage), "astro.js"),
+        astroCli,
       };
     } catch {
       // Try the next supported monorepo working directory shape.
@@ -356,20 +380,131 @@ function resolveNodeExecutable(): string {
   throw new Error("RENDERER_NODE_EXECUTABLE_UNAVAILABLE");
 }
 
+export async function assertRendererOutputTarget(
+  outDir: string,
+  outputRoot: string,
+): Promise<string> {
+  const target = path.resolve(outDir);
+  const admittedRoot = path.resolve(outputRoot);
+  const parsed = path.parse(target);
+  if (
+    target === parsed.root ||
+    admittedRoot === path.parse(admittedRoot).root ||
+    target === admittedRoot ||
+    !target.startsWith(`${admittedRoot}${path.sep}`)
+  ) {
+    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  }
+
+  let rootStat;
+  try {
+    rootStat = await lstat(admittedRoot);
+    if (
+      !rootStat.isDirectory() ||
+      rootStat.isSymbolicLink() ||
+      (await realpath(admittedRoot)) !== admittedRoot
+    ) {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+  } catch {
+    throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+  }
+
+  const parent = path.dirname(target);
+  const relativeParent = path.relative(admittedRoot, parent);
+  let cursor = admittedRoot;
+  for (const component of relativeParent.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, component);
+    let componentStat;
+    try {
+      componentStat = await lstat(cursor);
+    } catch {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+    if (!componentStat.isDirectory() || componentStat.isSymbolicLink()) {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+  }
+
+  try {
+    const targetStat = await lstat(target);
+    if (!targetStat.isDirectory() || targetStat.isSymbolicLink()) {
+      throw new Error("RENDERER_OUTPUT_TARGET_UNSAFE");
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return target;
+    }
+    throw error;
+  }
+
+  return target;
+}
+
 /** 用已解析的 Node 可执行文件直启 Astro；不经 shell/pnpm/PATH，参数也不做字符串拼接。 */
 export async function runAstroBuild(input: RendererBuildInput): Promise<void> {
   const { rendererRoot, astroCli } = resolveRendererEntrypoint();
-  await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
-    cwd: rendererRoot,
-    env: buildRendererEnv(input),
-    timeout: BUILD_TIMEOUT_MS,
-    maxBuffer: MAX_BUILD_OUTPUT_BYTES,
-  });
-  await assertRenderedOutboundDomains(
+  const outDir = await assertRendererOutputTarget(
     input.outDir,
-    input.allowedOutboundDomains ?? [],
-    input.siteOrigin,
+    input.outputRoot,
   );
+  const buildDir = await mkdtemp(
+    path.join(rendererRoot, ".site-builder-render-"),
+  );
+  const cacheDir = `${buildDir}.astro-cache`;
+  const targetParent = path.dirname(outDir);
+  let deliveryDir: string | null = null;
+  try {
+    await execFileAsync(resolveNodeExecutable(), [astroCli, "build"], {
+      cwd: rendererRoot,
+      env: buildRendererEnv({ ...input, outDir: buildDir }),
+      timeout: BUILD_TIMEOUT_MS,
+      maxBuffer: MAX_BUILD_OUTPUT_BYTES,
+    });
+    await assertRenderedOutboundDomains(
+      buildDir,
+      input.allowedOutboundDomains ?? [],
+      input.siteOrigin,
+    );
+    const builtTree = await collectRendererOutputTree(buildDir);
+
+    await mkdir(targetParent, { recursive: true });
+    deliveryDir = await mkdtemp(
+      path.join(targetParent, `.${path.basename(input.outDir)}.render-`),
+    );
+    for (const entry of await readdir(buildDir)) {
+      await cp(path.join(buildDir, entry), path.join(deliveryDir, entry), {
+        recursive: true,
+        dereference: false,
+        errorOnExist: true,
+        force: false,
+        verbatimSymlinks: true,
+      });
+    }
+    const deliveredTree = await collectRendererOutputTree(deliveryDir);
+    if (
+      deliveredTree.treeDigest !== builtTree.treeDigest ||
+      deliveredTree.fileCount !== builtTree.fileCount ||
+      deliveredTree.totalBytes !== builtTree.totalBytes
+    ) {
+      throw new Error("RENDERER_OUTPUT_COPY_MISMATCH");
+    }
+
+    await assertRendererOutputTarget(outDir, input.outputRoot);
+    await rm(outDir, { recursive: true, force: true });
+    await rename(deliveryDir, outDir);
+    deliveryDir = null;
+  } finally {
+    if (deliveryDir !== null) {
+      await rm(deliveryDir, { recursive: true, force: true });
+    }
+    await rm(buildDir, { recursive: true, force: true });
+    await rm(cacheDir, { recursive: true, force: true });
+  }
 }
 
 const SCANNED_RENDER_EXTENSIONS = new Set([
@@ -477,6 +612,7 @@ export async function buildSiteSpecWithTemporaryFile(
   spec: unknown,
   output: {
     outDir: string;
+    outputRoot: string;
     basePath: string;
     siteOrigin: string;
     publicAssetDir?: string;
@@ -497,6 +633,7 @@ export async function buildSiteSpecWithTemporaryFile(
     await execute({
       specPath,
       outDir: output.outDir,
+      outputRoot: output.outputRoot,
       basePath: output.basePath,
       siteOrigin: output.siteOrigin,
       publicAssetDir: output.publicAssetDir,

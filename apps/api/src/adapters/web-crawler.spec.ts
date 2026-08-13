@@ -3,6 +3,7 @@ import { crawlHtml, crawlUrl } from './web-crawler';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('Crawl4AI adapter 的 API 侧入口闸', () => {
@@ -59,4 +60,49 @@ describe('Crawl4AI adapter 的 API 侧入口闸', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+
+  it('crawlUrl uses configured auth, returns bounded markdown, and redacts an upstream body on failure', async () => {
+    vi.stubEnv('CRAWLER_URL', 'http://crawler.test:11235');
+    vi.stubEnv('CRAWLER_TOKEN', 'secret-token');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ markdown: '# Public page' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('client_secret=do-not-log buyer@example.test', { status: 502 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = vi.fn(async (raw: string) => ({
+      url: new URL(raw), ip: '203.0.113.10', family: 4 as const, addresses: [{ address: '203.0.113.10', family: 4 as const }],
+    }));
+
+    await expect(crawlUrl('https://company.example/path', undefined, resolver)).resolves.toEqual({
+      url: 'https://company.example/path',
+      text: '# Public page',
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://crawler.test:11235/md');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer secret-token' },
+    });
+    const error = await crawlUrl('https://company.example/path', undefined, resolver).catch((failure) => failure as Error);
+    expect(error.message).toMatch(/^crawler 502: ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect(error.message).not.toContain('buyer@example.test');
+  });
+
+  it('crawlHtml returns defaults, rejects missing results, and redacts failed bodies', async () => {
+    const resolver = vi.fn(async (raw: string) => ({
+      url: new URL(raw), ip: '203.0.113.10', family: 4 as const, addresses: [{ address: '203.0.113.10', family: 4 as const }],
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{}] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: { error: 'render unavailable' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('token=hidden', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(crawlHtml('https://company.example', undefined, resolver)).resolves.toEqual({
+      url: 'https://company.example/', html: '', headers: {},
+    });
+    await expect(crawlHtml('https://company.example', undefined, resolver)).rejects.toThrow('render unavailable');
+    const error = await crawlHtml('https://company.example', undefined, resolver).catch((failure) => failure as Error);
+    expect(error.message).toMatch(/^crawler 503: ERROR_TEXT_SHA256:[0-9a-f]{64}$/);
+    expect(error.message).not.toContain('hidden');
+  });
 });

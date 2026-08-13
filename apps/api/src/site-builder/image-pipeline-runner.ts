@@ -37,23 +37,23 @@ export interface ImagePipelineRunner {
   ): Promise<Map<string, RenderedImageVariant>>;
 }
 
-interface ChildOutput {
+export interface ChildOutput {
   recipeHash: string;
   path: string;
   info: RenderedImageVariant['info'];
 }
 
-interface ChildInspectResult {
+export interface ChildInspectResult {
   kind: 'inspect';
   inspection: ImageInspection;
 }
 
-interface ChildRenderResult {
+export interface ChildRenderResult {
   kind: 'render';
   outputs: ChildOutput[];
 }
 
-type ChildResult = ChildInspectResult | ChildRenderResult;
+export type ChildResult = ChildInspectResult | ChildRenderResult;
 
 function configuredConcurrency(): number {
   const raw = process.env.SITE_IMAGE_MAX_CONCURRENCY;
@@ -140,7 +140,8 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function validateInspection(value: unknown): ImageInspection {
+/** @internal Exported so the untrusted child receipt validator has direct regression tests. */
+export function validateImageChildInspection(value: unknown): ImageInspection {
   if (!isRecord(value)) throw new Error('child returned an invalid inspection');
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(String(value.decodedMime))) {
     throw new Error('child returned an invalid decoded MIME');
@@ -297,13 +298,15 @@ async function readRegularFileBounded(
   }
 }
 
-function expectedMime(plan: PlannedImageVariant): RenderedImageVariant['info']['mime'] {
+/** @internal Exact codec-to-MIME contract used for independent child validation. */
+export function expectedImageOutputMime(plan: PlannedImageVariant): RenderedImageVariant['info']['mime'] {
   if (plan.recipe.output.format === 'avif') return 'image/avif';
   if (plan.recipe.output.format === 'jpeg') return 'image/jpeg';
   return `image/${plan.recipe.output.format}` as RenderedImageVariant['info']['mime'];
 }
 
-function sniffOutputMime(data: Buffer): RenderedImageVariant['info']['mime'] | null {
+/** @internal Signature sniffing deliberately independent from child-reported metadata. */
+export function sniffImageOutputMime(data: Buffer): RenderedImageVariant['info']['mime'] | null {
   if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg';
   if (data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
   if (data.length >= 12 && data.subarray(0, 4).toString('latin1') === 'RIFF' && data.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
@@ -317,7 +320,8 @@ function sniffOutputMime(data: Buffer): RenderedImageVariant['info']['mime'] | n
   return null;
 }
 
-function parseChildResult(data: Buffer): ChildResult {
+/** @internal Bounded result envelope parser, exported for adversarial unit coverage. */
+export function parseImageChildResult(data: Buffer): ChildResult {
   let value: unknown;
   try {
     value = JSON.parse(data.toString('utf8'));
@@ -354,7 +358,7 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
       this.execute(input, { action: 'inspect', declaredMime }, signal, async (result) => {
         if (signal?.aborted) throw abortReason(signal);
         if (result.kind !== 'inspect') throw new Error('child returned the wrong result kind');
-        return validateInspection(result.inspection);
+        return validateImageChildInspection(result.inspection);
       }),
     );
   }
@@ -388,7 +392,7 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
           const info = item.info as unknown as RenderedImageVariant['info'];
           if (
             !/^[a-f0-9]{64}$/.test(String(info.contentHash)) ||
-            info.mime !== expectedMime(plan) ||
+            info.mime !== expectedImageOutputMime(plan) ||
             info.width !== plan.recipe.output.width ||
             info.height !== plan.recipe.output.height ||
             !Number.isSafeInteger(info.sizeBytes) ||
@@ -402,7 +406,7 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
           totalBytes += data.length;
           if (totalBytes > MAX_IMAGE_OUTPUT_TOTAL_BYTES) throw new Error('child output set exceeds the total byte limit');
           const hash = createHash('sha256').update(data).digest('hex');
-          if (hash !== info.contentHash || data.length !== info.sizeBytes || sniffOutputMime(data) !== info.mime) {
+          if (hash !== info.contentHash || data.length !== info.sizeBytes || sniffImageOutputMime(data) !== info.mime) {
             throw new Error(`child output bytes failed independent validation for ${item.recipeHash}`);
           }
           byHash.set(item.recipeHash, { data, info });
@@ -436,7 +440,7 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
       if (signal?.aborted) throw abortReason(signal);
       const raw = await readRegularFileBounded(resultPath, dir, 'result.json', MAX_RESULT_BYTES);
       if (signal?.aborted) throw abortReason(signal);
-      const result = parseChildResult(raw);
+      const result = parseImageChildResult(raw);
       return await consume(result, dir);
     } finally {
       await rm(dir, { recursive: true, force: true });

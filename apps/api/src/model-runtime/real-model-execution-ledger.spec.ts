@@ -149,6 +149,118 @@ afterEach(async () => {
 });
 
 describe("RealModelExecutionLedger", () => {
+  it("fails closed for unsafe paths, partial identity state, and an existing writer lock", async () => {
+    const target = await paths();
+    await expect(
+      RealModelExecutionLedger.open({
+        ledgerPath: "relative-ledger.jsonl",
+        authorizationClaimPath: target.authorizationClaimPath,
+        campaign,
+        authorization,
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_LEDGER_UNSAFE");
+    await expect(
+      RealModelExecutionLedger.open({
+        ledgerPath: target.ledgerPath,
+        authorizationClaimPath: target.ledgerPath,
+        campaign,
+        authorization,
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_LEDGER_UNSAFE");
+
+    await writeFile(target.ledgerPath, "orphan", { mode: 0o600 });
+    await expect(openLedger(target)).rejects.toThrow("REAL_MODEL_LEDGER_IDENTITY_MISMATCH");
+    await rm(target.ledgerPath);
+    await writeFile(`${target.ledgerPath}.lock`, "busy", { mode: 0o600 });
+    await expect(openLedger(target)).rejects.toThrow("REAL_MODEL_EXECUTION_LEDGER_BUSY");
+  });
+
+  it("enforces claim, observation, repair, and completion state transitions before appending", async () => {
+    const ledger = await openLedger(await paths());
+    await expect(
+      ledger.claimWire({ executionId: "copy-terra", wireId: "copy-terra:1", requestDigest: digest("7") }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_NOT_CLAIMED");
+    await ledger.claimExecution({ executionId: "copy-terra", planDigest: campaign.planDigest });
+    await expect(
+      ledger.claimExecution({ executionId: "copy-terra", planDigest: campaign.planDigest }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_ALREADY_CLAIMED");
+    await expect(
+      ledger.planRepair({
+        executionId: "copy-terra",
+        wireId: "copy-terra:2",
+        bindingDigest: digest("d"),
+        priorOutputDigest: digest("9"),
+        findingsDigest: digest("e"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_REPAIR_UNSETTLED");
+
+    await ledger.claimWire({ executionId: "copy-terra", wireId: "copy-terra:1", requestDigest: digest("7") });
+    await expect(
+      ledger.completeExecution({ executionId: "copy-terra", outputDigest: digest("9") }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_COMPLETION_MISMATCH");
+    await expect(
+      ledger.observeWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        settlement: "known",
+        requestId: "req-1",
+        requestedAlias: "gpt-5.6-terra",
+        resolvedAlias: "gpt-5.6-terra",
+        reportedModel: "gpt-5.6-terra",
+        protocol: "openai_responses",
+        usage: { inputTokens: -1, outputTokens: 0 },
+        outputDigest: digest("9"),
+        receiptDigest: digest("b"),
+        quota: 0,
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_OBSERVATION_INVALID");
+    await expect(
+      ledger.observeWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        settlement: "unknown",
+        requestId: null,
+        reason: "   ",
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_UNKNOWN_REASON_INVALID");
+
+    await ledger.observeWire({
+      executionId: "copy-terra",
+      wireId: "copy-terra:1",
+      settlement: "known",
+      requestId: "req-copy-terra-1",
+      requestedAlias: "gpt-5.6-terra",
+      resolvedAlias: "gpt-5.6-terra",
+      reportedModel: "gpt-5.6-terra",
+      protocol: "openai_responses",
+      usage: { inputTokens: 120, outputTokens: 30 },
+      outputDigest: digest("9"),
+      receiptDigest: digest("b"),
+      quota: 1_250,
+    });
+    await expect(
+      ledger.observeWire({
+        executionId: "copy-terra",
+        wireId: "copy-terra:1",
+        settlement: "unknown",
+        requestId: null,
+        reason: "later duplicate",
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_WIRE_ALREADY_OBSERVED");
+    await expect(
+      ledger.claimWire({ executionId: "copy-terra", wireId: "copy-terra:2", requestDigest: digest("8") }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_REPAIR_NOT_PLANNED");
+    await expect(
+      ledger.planRepair({
+        executionId: "copy-terra",
+        wireId: "copy-terra:2",
+        bindingDigest: digest("d"),
+        priorOutputDigest: digest("0"),
+        findingsDigest: digest("e"),
+      }),
+    ).rejects.toThrow("REAL_MODEL_EXECUTION_REPAIR_INVALID");
+  });
+
   it("claims one authorization and reservation, then resumes the same durable campaign", async () => {
     const target = await paths();
     const first = await openLedger(target);

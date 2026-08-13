@@ -132,9 +132,30 @@ async function requestThroughProxy(
   });
 }
 
+async function rawProxyRequest(
+  proxyOrigin: string,
+  method: string,
+  requestPath: string,
+): Promise<{ status: number; body: Buffer }> {
+  const proxy = new URL(proxyOrigin);
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const request = httpRequest(
+      { hostname: proxy.hostname, port: Number(proxy.port), method, path: requestPath },
+      (response) => {
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.once("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks) }));
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
+}
+
 describe("bounded browser quality runner", () => {
   it("accepts the real approved Renderer output at the deterministic SEO seam", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "m1f-real-renderer-"));
+    const outputRoot = await mkdtemp(path.join(tmpdir(), "m1f-real-renderer-"));
+    const root = path.join(outputRoot, "output");
     let cleanupAssets: (() => Promise<void>) | undefined;
     try {
       const { spec, designBrief, validation } = await loadFixture();
@@ -154,6 +175,7 @@ describe("bounded browser quality runner", () => {
       cleanupAssets = overlay.cleanup;
       const outputManifest = await buildSiteSpecWithTemporaryFile(spec, {
         outDir: root,
+        outputRoot,
         basePath: "/preview/quality/",
         siteOrigin: SITE_ORIGIN,
         publicAssetDir: overlay.publicDir,
@@ -192,7 +214,7 @@ describe("bounded browser quality runner", () => {
       );
     } finally {
       await cleanupAssets?.();
-      await rm(root, { recursive: true, force: true });
+      await rm(outputRoot, { recursive: true, force: true });
     }
   }, 180_000);
 
@@ -312,6 +334,65 @@ describe("bounded browser quality runner", () => {
         ]) {
           expect(await requestThroughProxy(proxy.origin, target)).toBe(403);
         }
+      } finally {
+        await proxy.close();
+        await staticServer.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("validates static roots/base paths and serves only bounded GET/HEAD artifacts", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "m1f-static-edges-"));
+    const rootFile = path.join(root, "not-a-directory");
+    try {
+      await writeFile(rootFile, "x");
+      await expect(startLoopbackStaticServer(rootFile)).rejects.toThrow("build root");
+      for (const invalid of ["preview", "/preview", "/preview//x/", "/preview/../x/", "/preview\\x/"]) {
+        await expect(startLoopbackStaticServer(root, invalid)).rejects.toThrow("basePath");
+      }
+
+      await mkdir(path.join(root, "docs"));
+      await writeFile(path.join(root, "index.html"), "<html><body>missing head</body></html>");
+      await writeFile(path.join(root, "docs", "index.html"), "<html><head></head><body>docs</body></html>");
+      await writeFile(path.join(root, "asset.js"), "globalThis.ok = true");
+      await writeFile(path.join(root, "large.bin"), Buffer.alloc(16 * 1024 * 1024 + 1));
+      const server = await startLoopbackStaticServer(root, "/preview/");
+      try {
+        expect((await fetch(`${server.origin}/`)).status).toBe(404);
+        expect((await fetch(`${server.origin}/preview/`)).status).toBe(422);
+        expect((await fetch(`${server.origin}/preview/docs`)).status).toBe(200);
+        expect((await fetch(`${server.origin}/preview/docs/`)).status).toBe(200);
+        const script = await fetch(`${server.origin}/preview/asset.js`, { method: "HEAD" });
+        expect(script.status).toBe(200);
+        expect(script.headers.get("content-type")).toContain("text/javascript");
+        expect(await script.text()).toBe("");
+        expect((await fetch(`${server.origin}/preview/large.bin`)).status).toBe(404);
+        expect((await fetch(`${server.origin}/preview/%E0%A4%A`)).status).toBe(404);
+        expect((await fetch(`${server.origin}/preview/a%5Cb`)).status).toBe(404);
+        expect((await fetch(`${server.origin}/preview/docs`, { method: "POST" })).status).toBe(405);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("validates the proxy allowlist and rejects malformed/mutating/tunnel requests", async () => {
+    for (const origin of ["https://127.0.0.1:1234", "http://localhost:1234", "http://127.0.0.1"] as const) {
+      await expect(startLoopbackOnlyProxy(origin)).rejects.toThrow("proxy allowlist");
+    }
+    const root = await mkdtemp(path.join(tmpdir(), "m1f-proxy-edges-"));
+    try {
+      await writeFile(path.join(root, "index.html"), "<html><head></head><body>ok</body></html>");
+      const staticServer = await startLoopbackStaticServer(root);
+      const proxy = await startLoopbackOnlyProxy(staticServer.origin);
+      try {
+        expect((await rawProxyRequest(proxy.origin, "POST", `${staticServer.origin}/`)).status).toBe(405);
+        expect((await rawProxyRequest(proxy.origin, "GET", "/relative-only")).status).toBe(400);
+        expect((await rawProxyRequest(proxy.origin, "HEAD", `${staticServer.origin}/missing`)).status).toBe(404);
       } finally {
         await proxy.close();
         await staticServer.close();

@@ -18,6 +18,8 @@
  *  - 开放网关**自动排除** entreprises non-diffusibles（选择不公示者不返回）——合规内建。
  */
 
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
+
 const BASE_URL = process.env.INPI_RNE_API_URL ?? 'https://recherche-entreprises.api.gouv.fr';
 const THROTTLE_MS = 300; // 自限（7 req/s 上限，留大余量）
 const MAX_RETRIES = 2; // 429/5xx/网络抖动退避
@@ -145,7 +147,7 @@ async function rneGet(
         continue;
       }
       if (res.status === 404) return {}; // 无命中 → 空（不抛）
-      if (!res.ok) throw new Error(`inpi-rne ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      if (!res.ok) throw new Error(`inpi-rne ${res.status}: ${diagnosticErrorToken(await res.text())}`);
       return (await res.json()) as RneResponse;
     } catch (err) {
       lastErr = err;

@@ -17,9 +17,10 @@ const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
 function fakeBroker(handlers: {
   search?: () => FrCompanyHit[];
   throwOn?: boolean;
+  errorMessage?: string;
 }): ExecutionBroker & { invokeMock: ReturnType<typeof vi.fn> } {
   const invokeMock = vi.fn(async (_toolId: string, _input: InpiRneInput): Promise<ToolResult<InpiRneOutput>> => {
-    if (handlers.throwOn) throw new Error('gate denied');
+    if (handlers.throwOn) throw new Error(handlers.errorMessage ?? 'gate denied');
     return { data: { companies: handlers.search?.() ?? [] }, costCents: 0 };
   });
   return {
@@ -163,8 +164,14 @@ describe('inpi_rne · discoverContacts', () => {
   });
 
   it('fail-safe：闸门拒绝（invoke 抛）→ 空、不抛穿', async () => {
-    const broker = fakeBroker({ throwOn: true });
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const broker = fakeBroker({ throwOn: true, errorMessage: sensitive });
     const res = await new InpiRneContactProvider({ broker }).discoverContacts(frCompany, CTX);
     expect(res.contacts).toEqual([]);
+    const diagnostic = warn.mock.calls.flat().join(' ');
+    expect(diagnostic).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(diagnostic).not.toContain(sensitive);
+    warn.mockRestore();
   });
 });

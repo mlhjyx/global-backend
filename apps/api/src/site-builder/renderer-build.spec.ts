@@ -1,10 +1,12 @@
 import {
   access,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
   stat,
   writeFile,
+  symlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,8 +15,10 @@ import {
   buildRendererEnv,
   buildSiteSpecWithTemporaryFile,
   assertRendererOutputMatches,
+  assertRendererOutputTarget,
   assertRenderedOutboundDomains,
   resolveRendererEntrypoint,
+  runAstroBuild,
   writeRendererOutputManifest,
   type RendererBuildInput,
 } from "./renderer-build";
@@ -36,6 +40,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
     const env = buildRendererEnv({
       specPath: "/tmp/spec.json",
       outDir: "/tmp/out",
+      outputRoot: "/tmp",
       basePath: "/preview/acme/",
       siteOrigin: SITE_ORIGIN,
     });
@@ -46,6 +51,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       TZ: "UTC",
       SITESPEC_PATH: "/tmp/spec.json",
       OUT_DIR: "/tmp/out",
+      ASTRO_CACHE_DIR: "/tmp/out.astro-cache",
       BASE_PATH: "/preview/acme/",
       SITE_ORIGIN,
       ASTRO_TELEMETRY_DISABLED: "1",
@@ -63,6 +69,7 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       buildRendererEnv({
         specPath: "/tmp/spec.json",
         outDir: "/tmp/out",
+        outputRoot: "/tmp",
         basePath: "/",
         siteOrigin: SITE_ORIGIN,
         publicAssetDir: "/tmp/overlay",
@@ -71,6 +78,83 @@ describe("buildRendererEnv — Renderer 子进程最小环境", () => {
       PUBLIC_ASSET_DIR: "/tmp/overlay",
     });
   });
+});
+
+describe("runAstroBuild — cross-filesystem output", () => {
+  it("rejects broad, missing-parent, and symlink output targets before promotion", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "m1-renderer-target-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "m1-renderer-outside-"));
+    const safeParent = path.join(root, "parent");
+    const realTarget = path.join(root, "real-target");
+    const symlinkTarget = path.join(root, "symlink-target");
+    const intermediateLink = path.join(root, "intermediate-link");
+    try {
+      await expect(
+        assertRendererOutputTarget(path.parse(root).root, root),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+      await expect(assertRendererOutputTarget(root, root)).rejects.toThrow(
+        "RENDERER_OUTPUT_TARGET_UNSAFE",
+      );
+      await expect(assertRendererOutputTarget(tmpdir(), root)).rejects.toThrow(
+        "RENDERER_OUTPUT_TARGET_UNSAFE",
+      );
+      await expect(
+        assertRendererOutputTarget(process.cwd(), root),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+      await expect(
+        assertRendererOutputTarget(path.join(root, "missing", "out"), root),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+
+      await mkdir(safeParent);
+      await mkdir(realTarget);
+      await symlink(realTarget, symlinkTarget, "dir");
+      await symlink(outside, intermediateLink, "dir");
+      await expect(
+        assertRendererOutputTarget(symlinkTarget, root),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+      await expect(
+        assertRendererOutputTarget(
+          path.join(intermediateLink, "escaped-output"),
+          root,
+        ),
+      ).rejects.toThrow("RENDERER_OUTPUT_TARGET_UNSAFE");
+      await expect(
+        assertRendererOutputTarget(path.join(safeParent, "out"), root),
+      ).resolves.toBe(path.join(safeParent, "out"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("builds a real fixture when OUT_DIR is on the operating-system temp filesystem", async () => {
+    const outputRoot = await mkdtemp(
+      path.join(tmpdir(), "m1-renderer-cross-fs-"),
+    );
+    const outDir = path.join(outputRoot, "output");
+    const specPath = path.resolve(
+      process.cwd(),
+      "..",
+      "site-renderer",
+      "fixtures",
+      "technical-baseline-spec.json",
+    );
+    try {
+      await expect(
+        runAstroBuild({
+          specPath,
+          outDir,
+          outputRoot,
+          basePath: "/",
+          siteOrigin: SITE_ORIGIN,
+        }),
+      ).resolves.toBeUndefined();
+      await expectMissing(`${outDir}.astro-cache`);
+    } finally {
+      await rm(outputRoot, { recursive: true, force: true });
+      await rm(`${outDir}.astro-cache`, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("rendered outbound-domain gate", () => {
@@ -231,6 +315,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         { safe: true },
         {
           outDir,
+          outputRoot: path.dirname(outDir),
           basePath: "/preview/acme/",
           siteOrigin: SITE_ORIGIN,
         },
@@ -249,6 +334,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
     const outDir = await mkdtemp(path.join(tmpdir(), "m1f-render-out-"));
     const execute = vi.fn(async (input: RendererBuildInput) => {
       expect(input.publicAssetDir).toBe("/tmp/overlay");
+      expect(input.outputRoot).toBe(path.dirname(outDir));
       await writeFile(path.join(input.outDir, "index.html"), "<h1>ok</h1>");
     });
     try {
@@ -256,6 +342,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
         { safe: true },
         {
           outDir,
+          outputRoot: path.dirname(outDir),
           basePath: "/",
           siteOrigin: SITE_ORIGIN,
           publicAssetDir: "/tmp/overlay",
@@ -284,6 +371,7 @@ describe("buildSiteSpecWithTemporaryFile — 临时 SiteSpec 生命周期", () =
           { tenant: "content" },
           {
             outDir,
+            outputRoot: path.dirname(outDir),
             basePath: "/preview/acme/",
             siteOrigin: SITE_ORIGIN,
           },

@@ -99,47 +99,42 @@ describe("M1-f aesthetic MODEL-1 fixtures", () => {
     }
   });
 
-  it(
-    "creates deterministic, dimension-preserving seeded degradations",
-    async () => {
-      const cases = await loadAestheticEvalCases(repositoryRoot);
-      for (const degraded of cases.filter(
-        (
-          item,
-        ): item is AestheticEvalCase & {
-          expectedIssue: NonNullable<AestheticEvalCase["expectedIssue"]>;
-        } => item.kind === "degraded" && item.expectedIssue !== null,
-      )) {
-        const baseline = cases.find(
-          (item) =>
-            item.familyId === degraded.familyId &&
-            item.kind === "baseline",
+  it("creates deterministic, dimension-preserving seeded degradations", async () => {
+    const cases = await loadAestheticEvalCases(repositoryRoot);
+    for (const degraded of cases.filter(
+      (
+        item,
+      ): item is AestheticEvalCase & {
+        expectedIssue: NonNullable<AestheticEvalCase["expectedIssue"]>;
+      } => item.kind === "degraded" && item.expectedIssue !== null,
+    )) {
+      const baseline = cases.find(
+        (item) =>
+          item.familyId === degraded.familyId && item.kind === "baseline",
+      );
+      expect(baseline).toBeDefined();
+      for (let index = 0; index < degraded.images.length; index += 1) {
+        const original = baseline!.images[index];
+        const expected = degraded.images[index];
+        const repeated = await degradeAestheticScreenshot(
+          original.bytes,
+          degraded.expectedIssue,
+          original.target.breakpoint,
         );
-        expect(baseline).toBeDefined();
-        for (let index = 0; index < degraded.images.length; index += 1) {
-          const original = baseline!.images[index];
-          const expected = degraded.images[index];
-          const repeated = await degradeAestheticScreenshot(
-            original.bytes,
-            degraded.expectedIssue,
-            original.target.breakpoint,
-          );
-          expect(digest(repeated)).toBe(expected.sha256);
-          const originalMetadata = await sharp(original.bytes).metadata();
-          const degradedMetadata = await sharp(repeated).metadata();
-          expect(degradedMetadata.width).toBe(originalMetadata.width);
-          expect(degradedMetadata.height).toBe(originalMetadata.height);
-          if (
-            degraded.expectedIssue !== "AESTHETIC_MOBILE_COMPOSITION" ||
-            original.target.breakpoint === 375
-          ) {
-            expect(digest(repeated)).not.toBe(original.sha256);
-          }
+        expect(digest(repeated)).toBe(expected.sha256);
+        const originalMetadata = await sharp(original.bytes).metadata();
+        const degradedMetadata = await sharp(repeated).metadata();
+        expect(degradedMetadata.width).toBe(originalMetadata.width);
+        expect(degradedMetadata.height).toBe(originalMetadata.height);
+        if (
+          degraded.expectedIssue !== "AESTHETIC_MOBILE_COMPOSITION" ||
+          original.target.breakpoint === 375
+        ) {
+          expect(digest(repeated)).not.toBe(original.sha256);
         }
       }
-    },
-    15_000,
-  );
+    }
+  }, 15_000);
 });
 
 describe("M1-f aesthetic review closed output", () => {
@@ -183,6 +178,7 @@ describe("M1-f aesthetic review closed output", () => {
         assertAestheticReviewOutput(output, evalCase.images),
       ).toThrow("AESTHETIC_REVIEW_OUTPUT_INVALID");
     },
+    30_000,
   );
 
   it("rejects foreign evidence and inconsistent pass/fail semantics", async () => {
@@ -234,9 +230,7 @@ describe("M1-f aesthetic review closed output", () => {
       expect(
         evalCase.images.map((image) => image.artifactId).join(" "),
       ).not.toMatch(/\b(?:approved|baseline|degraded)\b/i);
-      expect(evalCase.qualification).toBe(
-        "deterministic_render_baseline",
-      );
+      expect(evalCase.qualification).toBe("deterministic_render_baseline");
     }
     const goodResult = assertAestheticReviewOutput(
       validOutput(baseline.images),

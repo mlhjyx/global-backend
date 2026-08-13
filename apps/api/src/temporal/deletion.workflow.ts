@@ -1,6 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DeletionActivities } from './deletion.activities';
 import type { DeletionWorkflowInput, ErasureCounts } from '../compliance/deletion.types';
+import { safeTemporalErrorCode } from './safe-error-code';
 
 const acts = proxyActivities<DeletionActivities>({
   startToCloseTimeout: '5 minutes',
@@ -21,7 +22,7 @@ export async function deletionWorkflow(input: DeletionWorkflowInput): Promise<Er
     await acts.failDeletion({
       workspaceId: input.workspaceId,
       deletionRequestId: input.deletionRequestId,
-      error: String(err),
+      error: safeTemporalErrorCode(err, 'DELETION_WORKFLOW_FAILED'),
     });
     throw err;
   }

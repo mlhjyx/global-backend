@@ -46,7 +46,8 @@ describe('intentSweepWorkflow', () => {
     const out = await intentSweepWorkflow({});
 
     expect(out.results[0]).toMatchObject({ sourceId: 's1', status: 'FAILED', intentEvents: 0 });
-    expect(out.results[0].error).toContain('watch boom');
+    expect(out.results[0].error).toBe('INTENT_WATCH_FAILED');
+    expect(out.results[0].error).not.toContain('watch boom');
     expect(out.results[1].error).toBeUndefined();
     expect(out.swept).toBe(2);
   });

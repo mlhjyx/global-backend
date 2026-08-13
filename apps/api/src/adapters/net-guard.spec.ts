@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isPrivateIp, resolvePublicIp, type HostResolver } from './net-guard';
 
 describe('SSRF 出网护栏', () => {
+  afterEach(() => vi.unstubAllGlobals());
   it('isPrivateIp：所有非全局地址与 IPv6 过渡形态均拒绝', () => {
     for (const ip of [
       '10.0.0.1',
@@ -112,5 +113,114 @@ describe('SSRF 出网护栏', () => {
     });
 
     expect(result).toMatchObject({ safe: false, reason: 'non_global_address' });
+  });
+
+  it.each(['', 'a'.repeat(254), 'localhost', 'api.localhost', 'LOCALHOST.'])(
+    'rejects malformed or locally-scoped hostname %j before DNS',
+    async (host) => {
+      const systemLookup: HostResolver = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }]);
+      const result = await resolvePublicIp(host, { systemLookup });
+      expect(result.safe).toBe(false);
+      expect(systemLookup).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails closed for resolver errors and empty answer sets', async () => {
+    await expect(
+      resolvePublicIp('failed.example', {
+        systemLookup: async () => {
+          throw new Error('resolver private diagnostic');
+        },
+      }),
+    ).resolves.toEqual({ safe: false, reason: 'dns_lookup_failed' });
+    await expect(
+      resolvePublicIp('empty.example', { systemLookup: async () => [] }),
+    ).resolves.toEqual({ safe: false, reason: 'no_address' });
+    await expect(
+      resolvePublicIp('fake.example', {
+        systemLookup: async () => [{ address: '198.18.0.2', family: 4 }],
+        dohLookup: async () => [],
+      }),
+    ).resolves.toEqual({ safe: false, reason: 'no_address' });
+  });
+
+  it.each([
+    { answers: [{ address: 'not-an-ip', family: 4 as const }] },
+    { answers: [{ address: '8.8.8.8', family: 6 as const }] },
+    { answers: [{ address: '::ffff:127.0.0.1', family: 6 as const }] },
+  ])('rejects invalid, mismatched, and mapped-private resolver answers', async ({ answers }) => {
+    await expect(
+      resolvePublicIp('invalid-answer.example', { systemLookup: async () => answers }),
+    ).resolves.toEqual({ safe: false, reason: 'non_global_address' });
+  });
+
+  it('deduplicates validated answers while preserving resolver order', async () => {
+    const result = await resolvePublicIp('duplicate.example', {
+      systemLookup: async () => [
+        { address: '8.8.8.8', family: 4 },
+        { address: '8.8.8.8', family: 4 },
+        { address: '2001:4860:4860::8888', family: 6 },
+      ],
+    });
+    expect(result).toMatchObject({
+      safe: true,
+      ip: '8.8.8.8',
+      family: 4,
+      addresses: [
+        { address: '8.8.8.8', family: 4 },
+        { address: '2001:4860:4860::8888', family: 6 },
+      ],
+    });
+  });
+
+  it('uses the fixed DoH endpoint for all-fake system answers and filters malformed DNS JSON records', async () => {
+    const fetchMock = vi.fn(async (url: URL) => {
+      const type = url.searchParams.get('type');
+      return new Response(
+        JSON.stringify({
+          Status: 0,
+          Answer:
+            type === 'A'
+              ? [
+                  { type: 28, data: '2001:4860:4860::8888' },
+                  { type: 1, data: 7 },
+                  { type: 1, data: 'not-an-ip' },
+                  { type: 1, data: '8.8.8.8' },
+                ]
+              : [{ type: 28, data: '2001:4860:4860::8888' }],
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      resolvePublicIp('doh.example', {
+        systemLookup: async () => [{ address: '198.18.0.9', family: 4 }],
+      }),
+    ).resolves.toMatchObject({
+      safe: true,
+      addresses: [
+        { address: '8.8.8.8', family: 4 },
+        { address: '2001:4860:4860::8888', family: 6 },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, options] of fetchMock.mock.calls) {
+      expect(String(url)).toMatch(/^https:\/\/cloudflare-dns\.com\/dns-query\?/u);
+      expect(options).toMatchObject({ headers: { Accept: 'application/dns-json' } });
+    }
+  });
+
+  it.each([
+    [new Response('unavailable', { status: 503 })],
+    [new Response(JSON.stringify({ Status: 2 }), { status: 200 })],
+    [new Response(JSON.stringify({ Status: 3, Answer: [] }), { status: 200 })],
+  ])('fails closed when the default DoH response is unusable', async (response) => {
+    vi.stubGlobal('fetch', vi.fn(async () => response.clone()));
+    await expect(
+      resolvePublicIp('doh-failure.example', {
+        systemLookup: async () => [{ address: '198.18.0.10', family: 4 }],
+      }),
+    ).resolves.toEqual({ safe: false, reason: 'dns_lookup_failed' });
   });
 });

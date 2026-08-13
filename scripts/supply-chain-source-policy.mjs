@@ -175,9 +175,28 @@ function trustedRegistrySpecifier(specifier) {
   return REGISTRY_VERSION_SPECIFIER.test(specifier);
 }
 
+function trustedDependencySelector(name, allowVersionedSelector) {
+  if (PACKAGE_NAME.test(name)) return true;
+  if (!allowVersionedSelector) return false;
+
+  const versionSeparator = name.lastIndexOf("@");
+  const packageName = name.slice(0, versionSeparator);
+  const versionRange = name.slice(versionSeparator + 1);
+  return (
+    versionSeparator > 0 &&
+    PACKAGE_NAME.test(packageName) &&
+    REGISTRY_VERSION_SPECIFIER.test(versionRange)
+  );
+}
+
 function validateDependencyMap(
   map,
-  { workspaceNames, requireWorkspaceTarget, issues },
+  {
+    workspaceNames,
+    requireWorkspaceTarget,
+    allowVersionedSelector = false,
+    issues,
+  },
 ) {
   if (!isObject(map)) {
     issues.push(
@@ -189,7 +208,10 @@ function validateDependencyMap(
     return;
   }
   for (const [name, specifier] of Object.entries(map)) {
-    if (!PACKAGE_NAME.test(name) || !trustedRegistrySpecifier(specifier)) {
+    if (
+      !trustedDependencySelector(name, allowVersionedSelector) ||
+      !trustedRegistrySpecifier(specifier)
+    ) {
       issues.push(
         issue(
           "DEPENDENCY_SOURCE_NOT_TRUSTED",
@@ -481,6 +503,7 @@ export function validateDependencySourcePolicy(input) {
       validateDependencyMap(manifest.document.pnpm.overrides, {
         workspaceNames,
         requireWorkspaceTarget: false,
+        allowVersionedSelector: true,
         issues,
       });
     }

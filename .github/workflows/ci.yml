@@ -140,8 +140,8 @@ jobs:
       - name: Build（nest build = tsc 全量类型检查）
         run: pnpm --filter @global/api build
 
-      - name: Test（vitest 纯单测）
-        run: pnpm --filter @global/api test
+      - name: Test and enforce complete API source coverage
+        run: pnpm --filter @global/api test:coverage
 
       - name: Evaluate Copy fixed-source impact
         id: copy-impact

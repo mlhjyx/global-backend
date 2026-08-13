@@ -210,7 +210,10 @@ try {
           rendererFinishedResolve();
           return;
         }
-        await buildSiteSpecWithTemporaryFile(spec, output);
+        await buildSiteSpecWithTemporaryFile(spec, {
+          ...output,
+          outputRoot: previewRoot(),
+        });
       },
     }),
   });

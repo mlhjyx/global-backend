@@ -18,6 +18,7 @@ import {
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -198,7 +199,9 @@ export class DiscoveryService {
         });
       } catch (err) {
         // 单 adapter fail-safe：不阻断其余源——但**留痕**（交互端点不静默退化为 0 联系人）
-        console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
+        console.warn(
+          `[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${diagnosticErrorToken(err)}`,
+        );
       }
     }
 

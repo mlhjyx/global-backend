@@ -28,7 +28,7 @@ function composeServiceNames(compose) {
   return names;
 }
 
-test("governance changes preserve the active Copy fixed-source boundary", () => {
+test("the integrated dependency graph keeps Copy fail-closed until a separately authorized rebase", () => {
   const result = spawnSync(
     process.execPath,
     ["scripts/copy-fixed-source-impact.mjs"],
@@ -41,9 +41,19 @@ test("governance changes preserve the active Copy fixed-source boundary", () => 
 
   assert.equal(
     result.status,
-    0,
+    1,
     [result.stdout, result.stderr].filter(Boolean).join("\n"),
   );
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr.trim(), "COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH");
+
+  for (const document of [
+    read("docs/status/current.md"),
+    read("docs/roadmap/release-plan.md"),
+  ]) {
+    assert.match(document, /COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH/u);
+    assert.match(document, /HOLD/u);
+  }
 });
 
 test("AGENTS.md remains a stable entrypoint without versioned current-state mirrors", () => {
