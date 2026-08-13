@@ -53,6 +53,29 @@ git rev-list --count HEAD..origin/main
 
 输出必须为 `0`，才能把该 worktree 当作当前事实基线。若有 origin-only 提交，停止以该路径输出当前结论；从刚 fetch 的 `origin/main` 新建正式 worktree，或先受控同步后重做核验。这个门检查的是远端是否领先，不以本分支自己的功能提交为“已同步”证据。
 
+### 2.2 根 `main` 受控跟随
+
+`worktree:new` 保证新施工分支从刚 fetch 的 `origin/main` 创建，但它不会推进 `/global/backend` 的本地 `main`。远端 PR 合入后，用下列独立入口收口本地跟随：
+
+```bash
+cd /global/backend
+node scripts/governance-main-worktree-sync.mjs status  # 只读；不 fetch，origin/main 标记为本地 cached ref
+node scripts/governance-main-worktree-sync.mjs apply   # fetch origin --prune，解析 origin/main 为精确 commit，过门后只执行 merge --ff-only <commit>
+```
+
+同步脚本的 `apply` 不要求根目录必须整体 clean：本地现场若与 `HEAD..<fetch 后解析出的 origin/main commit>` 的入站路径完全无交集，Git 对同一对 commit 干跑也证明可快进，则可以在不动这些文件的情况下跟随。工具在快进前后逐字节比较完整 status，确保 tracked deletion、untracked/ignored 文件和其他本地状态未被改写。
+
+同步脚本 `apply` 的调用目录也受机器门约束：只有当前目录的 realpath 等于 `/global/backend` 才能进入 fetch；从功能 worktree、临时 checkout 或其他路径调用会在任何 Git 命令前返回 `WRONG_CLI_CWD_HOLD`。Git 子进程同时清除调用环境继承的 `GIT_*` 仓库、worktree、index、对象库、配置与 transport 覆盖，只保留脚本设置的非交互提示门，避免外部环境把固定 root 重定向到另一现场。
+
+以下任一情况必须 HOLD，只报告不修复：
+
+- `/global/backend` 不是唯一绑定 `refs/heads/main` 的 root worktree，或处于 detached/locked/prunable 状态；
+- fetch 失败、`origin/main` 无法验证为 commit、本地 `main` ahead 或 diverged；
+- 入站路径与本地 tracked、untracked 或 ignored 路径冲突，或 `git read-tree -n -u -m <local commit> <target commit>` 不通过；
+- fast-forward 后 `HEAD != <target commit>`、当前 `origin/main != <target commit>`、ahead/behind 非 `0/0`，或本地 status 与操作前不同。
+
+该命令不读取 GitHub PR 状态，不 push、rebase、stash、reset、clean、checkout 或删分支/worktree。远端 PR/CI/review/用户合并授权与本地 root fast-forward 是两个分离的责任门。
+
 ## 3. legacy `/global/wt` 迁移判定
 
 迁移按单个 worktree 决策，禁止批量搬运。

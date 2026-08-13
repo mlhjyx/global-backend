@@ -1,5 +1,5 @@
 > 【定位职能已移交 2026-07-10】本文件的「定位/边界/分工」职能已由 [../product-scope.md](../product-scope.md) 取代；backlog 状态表已过时（TED/openFDA/水位修复等已完成，见 [../status/current.md](../status/current.md)）。**2026-07-16 起本仓当前开发主体改为 Codex**；下文旧分工只保留背景，当前 ownership 以 product-scope/AGENTS 为准。
-> 文中的“C+Claude / 未来 Claude 会话”只记录当时分工。获客开发冻结已于 2026-08-02 提前解除，但 M1 收口前不恢复实现；本文仍是历史研究输入，不得据历史 owner、旧优先级或旧验证自动开工。
+> 文中的“C+Claude / 未来 Claude 会话”只记录当时分工。获客开发冻结已解除且 M1 已完成阶段收口；本文仍是历史研究输入，不得据历史 owner、旧优先级、旧验证或解冻本身自动开工。
 
 # 定位、现阶段范围与获客 Backlog（权威梳理）
 

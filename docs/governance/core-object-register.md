@@ -29,7 +29,7 @@
 | `OBJ-FE-006` | Claim / 企业事实声明 | 本仓企业事实域 | `OWN-TRUTH-BE` | `AS_BUILT`；公开审核入口不完整 | 企业与信任 / 公开候选 | `LC-CLAIM-001` |
 | `OBJ-FE-007` | Evidence / 证据 | 本仓企业/数据域 | `OWN-TRUTH-BE` | `AS_BUILT` | 企业与信任 / 来源与权利敏感 | 绑定 Claim、来源、hash、quote、时间和 Asset |
 | `OBJ-FE-008` | Asset、AssetVariant / 素材、派生版本 | Site Builder DB + 对象存储 | `OWN-SITE-BE` | `AS_BUILT` | 企业与信任/Site / 权利与公开范围敏感 | `LC-ASSET-001` |
-| `OBJ-FE-009` | ICP / 理想客户画像 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发 / Workspace 共享 | M1 收口后按重审范围恢复施工；前端仍未接 |
+| `OBJ-FE-009` | ICP / 理想客户画像 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发 / Workspace 共享 | 冻结已解除、M1 已收口；施工仍须当前审计与明确 owner，前端仍未接 |
 | `OBJ-FE-010` | CanonicalCompany、Lead / 买家公司、线索 | 本仓 Buyer Intelligence | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发 / 公司共享、联系人受限 | Lead 是 ICP×Company，不回写公司级 fit |
 | `OBJ-FE-011` | LeadQualifiedPackage / 合格线索包 | 本仓不可变快照 + Outbox | `OWN-BUYER-BE` | `AS_BUILT` | 客户开发→SaaS / 交付快照 | `LC-LEAD-PACKAGE-001` |
 | `OBJ-FE-012` | Site / 独立站 | 本仓 Site Builder | `OWN-SITE-BE` | `AS_BUILT` | 独立站管理 / Workspace 共享 | `LC-SITE-001`；不能代替 Build/Release/Publish 状态 |
@@ -152,7 +152,7 @@ ICP × CanonicalCompany → qualification → immutable package → outbox deliv
 
 - 推荐必须满足总分门和 Reachability；不可只用高 Fit。
 - 本仓交付不可变快照后停止，不在本仓创建 Opportunity。
-- 后端能力冻结已提前解除；M1 收口前只做准备，收口后按重审范围恢复，正式前端仍未接。
+- 后端能力冻结已解除且 M1 已完成阶段收口；这不自动恢复旧 backlog、owner 或验证，正式前端仍未接。
 
 ## 5. 目标态生命周期，不得冒充 as-built
 

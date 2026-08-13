@@ -1,6 +1,6 @@
 # SAM.gov Sources Sought — P4 设计（美国联邦「早数月」意图源）
 
-> **后续实施状态（2026-08-02 更新）**：本文设计已由 PR #99（merge `bf16467`）落地，provider 保持默认 `DISABLED`；获客开发冻结已提前解除，但 M1 收口前不恢复实现，也不得据此自动启用 provider。下文“设计待认可 / 未动代码”是立项时快照，只作实施 provenance，当前状态以代码与 [../status/current.md](../status/current.md) 为准。
+> **后续实施状态（2026-08-12 当前边界）**：本文设计已由 PR #99（merge `bf16467`）落地，provider 保持默认 `DISABLED`；获客开发冻结已解除且 M1 已完成阶段收口，但不得据此自动启用 provider。下文“设计待认可 / 未动代码”是立项时快照，只作实施 provenance，当前状态以代码与 [../status/current.md](../status/current.md) 为准。
 >
 > 状态：**设计待认可**（2026-07-14）。方向已拍板（AskUserQuestion）：**纯 Intent 信号**（镜像 TED P3，非可直接成单的联邦线索）+ **CSV 优先 keyless** 摄取。
 > 承重假设已**真探证实**（见 §2），未动任何代码。落地走 TDD + 真测 + 对抗复审 + PR，功能默认 **DISABLED**（见 §5/§6）。
