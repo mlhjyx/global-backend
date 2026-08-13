@@ -77,6 +77,17 @@ function runReadOnlyGit(root, arguments_) {
   return execution.stdout.trim();
 }
 
+async function assertTrustedDependencySources(root) {
+  try {
+    const sourcePolicy = await validateRepositoryDependencySources(root);
+    if (!sourcePolicy.ok) {
+      throw new Error("source policy returned issues");
+    }
+  } catch {
+    throw new Error("repository dependency sources are not trusted");
+  }
+}
+
 export function assertRepositoryAuditSubject(repositoryRoot, expectedCommit) {
   if (!SHA_40.test(expectedCommit ?? "")) {
     throw new Error("DEPENDENCY_AUDIT_SUBJECT_MISMATCH");
@@ -1258,17 +1269,13 @@ async function main() {
       options.candidateRoot,
       options.candidate,
     );
+    for (const root of [trustedBaseSubject.root, candidateSubject.root])
+      await assertTrustedDependencySources(root);
     let auditInputs = Object.freeze({});
     let receiptInputs = Object.freeze({});
     if (options.relation === "CHANGED") {
       const trustedBaseRoot = trustedBaseSubject.root;
       const candidateRoot = candidateSubject.root;
-      for (const root of [trustedBaseRoot, candidateRoot]) {
-        const sourcePolicy = await validateRepositoryDependencySources(root);
-        if (!sourcePolicy.ok) {
-          throw new Error("repository dependency sources are not trusted");
-        }
-      }
       const trustedBaseAudit = runPnpmProductionAudit(trustedBaseRoot);
       const candidateAudit = runPnpmProductionAudit(candidateRoot);
       auditInputs = Object.freeze({
@@ -1298,10 +1305,7 @@ async function main() {
     }
     return;
   }
-  const sourcePolicy = await validateRepositoryDependencySources(process.cwd());
-  if (!sourcePolicy.ok) {
-    throw new Error("repository dependency sources are not trusted");
-  }
+  await assertTrustedDependencySources(process.cwd());
   const baseline = await readBoundedJson(resolve(options.baseline));
   if (options.command === "baseline-freshness") {
     const audit = await readBoundedJson(resolve(options.auditFile));

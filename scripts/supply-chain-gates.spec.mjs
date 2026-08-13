@@ -494,7 +494,10 @@ test("graph delta CLI rejects untrusted dependency sources even when the graph i
       { encoding: "utf8" },
     );
     assert.notEqual(execution.status, 0, execution.stdout);
-    assert.match(execution.stderr, /repository dependency sources are not trusted/);
+    assert.match(
+      execution.stderr,
+      /repository dependency sources are not trusted/,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -1140,7 +1143,7 @@ test("package-manager network trust is isolated before install and audit", async
   );
   assert.match(
     auditScript,
-    /validateRepositoryDependencySources\(process\.cwd\(\)\)/,
+    /async function assertTrustedDependencySources\(root\)[\s\S]+validateRepositoryDependencySources\(root\)[\s\S]+await assertTrustedDependencySources\(process\.cwd\(\)\)/,
     "the verifier CLI must independently enforce source admission",
   );
 });
