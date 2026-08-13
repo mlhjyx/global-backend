@@ -15,11 +15,11 @@ const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
 const FIXED_NOW = (): number => Date.UTC(2026, 0, 15); // 固定时钟 → currentYear 2026, fromYear 2021
 
 /** 假 Broker：返回 patents，或抛错（闸门拒绝/工具失败）。 */
-function fakeBroker(opts: { patents?: () => PatentRecord[]; throwErr?: boolean }): ExecutionBroker & {
+function fakeBroker(opts: { patents?: () => PatentRecord[]; throwErr?: boolean; errorMessage?: string }): ExecutionBroker & {
   invokeMock: ReturnType<typeof vi.fn>;
 } {
   const invokeMock = vi.fn(async (_toolId: string, _input: GooglePatentsInput): Promise<ToolResult<GooglePatentsOutput>> => {
-    if (opts.throwErr) throw new Error('gate denied');
+    if (opts.throwErr) throw new Error(opts.errorMessage ?? 'gate denied');
     return { data: { patents: opts.patents?.() ?? [] }, costCents: 0 };
   });
   return {
@@ -188,9 +188,15 @@ describe('GooglePatents · discoverContacts', () => {
   });
 
   it('fail-safe：闸门拒绝（invoke 抛）→ 空、不抛穿', async () => {
-    const broker = fakeBroker({ throwErr: true });
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const broker = fakeBroker({ throwErr: true, errorMessage: sensitive });
     const res = await new GooglePatentsInventorProvider({ broker, now: FIXED_NOW, mode: 'direct' }).discoverContacts(company, CTX);
     expect(res.contacts).toEqual([]);
+    const diagnostic = warn.mock.calls.flat().join(' ');
+    expect(diagnostic).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(diagnostic).not.toContain(sensitive);
+    warn.mockRestore();
   });
 
   it('无命中专利 → 空', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { WikidataDiscoveryProvider } from './wikidata.provider';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 
@@ -29,5 +29,28 @@ describe('governed discovery providers 传本次调用用途（#51 tool-broker �
       { workspaceId: 'w', runId: 'r', correlationId: 'c' },
     );
     expect(last()?.purpose).toBe('discovery');
+  });
+
+  it('wikidata 单源失败只记录不可逆诊断 token，不泄露 provider 响应正文', async () => {
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const broker: ExecutionBroker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: async () => {
+        throw new Error(sensitive);
+      },
+    };
+
+    await expect(
+      new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+        { keywords: [], filters: { _industryQids: ['Q1'] }, limit: 10, sourceClass: 'industry_data' } as never,
+        { workspaceId: 'w', runId: 'r' },
+      ),
+    ).resolves.toEqual({ records: [], costCents: 0 });
+
+    const diagnostic = warn.mock.calls.flat().join(' ');
+    expect(diagnostic).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(diagnostic).not.toContain(sensitive);
+    warn.mockRestore();
   });
 });

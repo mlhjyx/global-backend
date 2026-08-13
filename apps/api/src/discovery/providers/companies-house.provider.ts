@@ -9,6 +9,7 @@ import {
   ProviderContactRecord,
 } from '../provider-contract';
 import { pickBestByName } from '../name-match';
+import { diagnosticErrorToken } from '../../common/diagnostic-error-token';
 
 const CH_FIND_BASE = 'https://find-and-update.company-information.service.gov.uk/company/';
 const OFFICER_SCHEME = 'uk-ch-officer';
@@ -124,7 +125,7 @@ export class CompaniesHouseContactProvider implements ContactDiscoveryAdapter {
       return { contacts, costCents: 0 };
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
-      this.log(`discover failed: ${String(err).slice(0, 150)}`);
+      this.log(`discover failed: ${diagnosticErrorToken(err)}`);
       return { contacts: [], costCents: 0 };
     }
   }

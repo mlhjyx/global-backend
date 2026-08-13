@@ -5,7 +5,7 @@
 > 当前事实来源：[当前状态](status/current.md) · [as-built 架构](architecture/current.md) · [路线](roadmap/release-plan.md)
 > 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001~012/OD-01~06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [roadmap/release-plan.md](roadmap/release-plan.md)。
-> **2026-08-04 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。获客侧冻结已解除，Site Builder M1 也已完成阶段收口；下一施工任务须重新审计后选择，产品边界不变。Site Builder 范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。
+> **2026-08-04 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。获客侧冻结已解除，Site Builder M1 已完成阶段收口；下一施工任务须重新审计后选择，产品边界不变。Site Builder 范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。
 
 ## 0. 术语表
 
@@ -125,7 +125,7 @@ Goal（业务目标：如进入德国市场）
 **已拍板**【用户】：① 边界止于 LeadQualifiedPackage（QGO 归 SaaS）；② 身份归属维持 A（+ADR-011 两条硬规矩）；③ 设计类产出先评审后进仓；④ 收敛方案与交付包合流。
 **与交付包裁决对照**：TA-001/002/004/008/009 采纳；TA-003=PDR-002；TA-005 逻辑 Schema=演进方向；TA-006/OD-01/OD-02 按身份拍板修正采纳；TA-007/OD-03=ADR-001；TA-010/011/OD-05=PDR-003；TA-012/OD-06=本次文档迁移；OD-04（Policy 宿主=横向平台模块）方向认可，现阶段以本仓 PolicyPort/DataRightsService 为其获客侧实现。
 **本稿裁定**：北极星保 QGO、SAO 作商业验证层；研究域最小版列 R3 可选；Docling/Langfuse 不进封版 Gate。
-**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧已提前解除冻结，M1 收口前可规划但不启动实现，M1 收口后任何事项进入施工序前仍须重新核验当前价值、代码与服务状态、合规、成本、依赖和验收证据。
+**当前待办与待拍板**：统一见 [status/current.md](status/current.md)；获客侧冻结已经解除、Site Builder M1 已完成阶段收口，但旧任务不会自动恢复。任何事项进入施工序前仍须重新审计当前价值、代码与服务状态、合规、成本、依赖和验收证据，并明确唯一 owner 与用户授权。
 
 ---
 

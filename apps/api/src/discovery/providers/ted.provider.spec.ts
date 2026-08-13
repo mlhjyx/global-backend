@@ -132,12 +132,18 @@ describe('§8.8 合规门（收口②：Broker 单点 fail-closed，provider 不
   const gq = q({ cpv: '42120000', buyer_country: 'DEU' });
 
   it('Broker 拒绝（SUSPENDED/未登记/用途门 → invoke 抛错）→ fail-safe 空结果', async () => {
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const broker = fakeBroker(async () => {
-      throw new Error('tool ted.search denied: source_policy unregistered: api.ted.europa.eu');
+      throw new Error(sensitive);
     });
     const p = new TedDiscoveryProvider({ broker });
     expect(await p.discoverCompanies(gq, CTX)).toEqual({ records: [], costCents: 0 });
     expect(broker.invokeMock).toHaveBeenCalledOnce(); // 拒绝发生在 Broker 内（单点），provider 只管 fail-safe
+    const diagnostic = warn.mock.calls.flat().join(' ');
+    expect(diagnostic).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(diagnostic).not.toContain(sensitive);
+    warn.mockRestore();
   });
 
   it('无 broker → fail-closed：空且零出网（旧「无 reader fail-open」缺陷已反转）', async () => {

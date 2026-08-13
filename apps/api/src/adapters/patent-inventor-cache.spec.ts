@@ -373,11 +373,15 @@ describe('refreshPatentCache（Step 2c 编排）', () => {
   });
 
   it('BQ 扫描抛错 → audit FAILED，不穿透', async () => {
+    const sensitive = 'buyer@example.test bearer=provider-secret';
     const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
-    const bq = fakeScanner([], null, new Error('quota exceeded'));
+    const bq = fakeScanner([], null, new Error(sensitive));
     const res = await refreshPatentCache({ db, bq, now: () => NOW });
     expect(res.status).toBe('FAILED');
     expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
+    const detail = String(db._audits.find((a) => a.status === 'FAILED')?.detail);
+    expect(detail).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(detail).not.toContain(sensitive);
   });
 });
 
@@ -476,14 +480,18 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
   });
 
   it('P2-7 wrap：扫描成功但 upsert 抛错 → audit FAILED（不卡 RUNNING、不留悬挂）', async () => {
+    const sensitive = 'buyer@example.test bearer=provider-secret';
     const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).patentInventorCache.upsert = async () => { throw new Error('boom'); };
+    (db as any).patentInventorCache.upsert = async () => { throw new Error(sensitive); };
     const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'SCHMIDT, HANS' }]);
     const res = await refreshPatentCache({ db, bq, now: () => NOW });
     expect(res.status).toBe('FAILED');
     expect(db._audits.some((a) => a.status === 'FAILED')).toBe(true);
     expect(db._audits.some((a) => a.status === 'RUNNING' && !a.finishedAt)).toBe(false); // 无悬挂 RUNNING
+    const detail = String(db._audits.find((a) => a.status === 'FAILED')?.detail);
+    expect(detail).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(detail).not.toContain(sensitive);
   });
 
   it('P2-7 wrap（复审 HIGH）：墓碑 findMany 抛错（如 rolling deploy 表未及应用）→ audit FAILED，不卡 RUNNING、不重扫', async () => {

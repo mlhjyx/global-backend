@@ -68,6 +68,10 @@ describe('GlobalHttpExceptionFilter', () => {
       expect(JSON.stringify(response.json.mock.calls)).not.toContain('internal marker');
       expect(JSON.stringify(response.json.mock.calls)).not.toContain('private-marker');
       expect(logger).toHaveBeenCalledOnce();
+      const logged = JSON.stringify(logger.mock.calls);
+      expect(logged).toMatch(/INTERNAL ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+      expect(logged).not.toContain('internal marker');
+      expect(logged).not.toContain('private-marker');
     },
   );
 });

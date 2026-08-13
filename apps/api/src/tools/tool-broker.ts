@@ -15,6 +15,7 @@ import {
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 /**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
@@ -323,7 +324,7 @@ export class ToolBroker implements ExecutionBroker {
         } else if (reservation) {
           this.budget.settle(reservation, 0); // legacy non-site behavior
         }
-        this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
+        this.trace(ctx, tool, 'ERROR', diagnosticErrorToken(err), 0, now() - started);
         throw err;
       }
 

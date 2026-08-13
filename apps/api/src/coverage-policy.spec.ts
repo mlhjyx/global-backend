@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import apiVitestConfig from '../vitest.config';
@@ -23,13 +23,35 @@ describe('API coverage policy', () => {
   it('does not count generated dist JavaScript as a second copy of TypeScript source', () => {
     const config = apiVitestConfig as CoveragePolicy;
 
-    expect(config.test?.coverage?.exclude).toContain('dist/**');
+    expect(config.test?.coverage?.exclude).toEqual(['dist/**']);
   });
 
   it('counts every API TypeScript source file, including modules no test imports yet', () => {
     const config = apiVitestConfig as CoveragePolicy;
 
-    expect(config.test?.coverage?.include).toContain('src/**/*.ts');
+    expect(config.test?.coverage?.include).toEqual(['src/**/*.ts']);
+  });
+
+  it('forbids source-level coverage ignore pragmas from shrinking the complete inventory', () => {
+    const sourceRoot = path.resolve(__dirname);
+    const pending = [sourceRoot];
+    const productionFiles: string[] = [];
+    while (pending.length > 0) {
+      const directory = pending.pop();
+      if (!directory) continue;
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) pending.push(absolute);
+        else if (entry.name.endsWith('.ts') && !entry.name.includes('.spec.') && !entry.name.includes('.test.')) {
+          productionFiles.push(absolute);
+        }
+      }
+    }
+
+    const violations = productionFiles.filter((file) =>
+      /(?:v8|c8|istanbul)\s+ignore/i.test(readFileSync(file, 'utf8')),
+    );
+    expect(violations).toEqual([]);
   });
 
   it('fails the complete source inventory unless every coverage dimension reaches 80 percent', () => {

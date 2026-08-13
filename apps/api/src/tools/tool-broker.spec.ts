@@ -124,15 +124,19 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
   });
 
   it('执行失败不计费（settle 0），预算退还', async () => {
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const traces: { status: string; reason?: string }[] = [];
     const budget = new BudgetLedger();
     const failing = fakeTool('t.fail', 10);
     failing.execute = async () => {
-      throw new Error('boom');
+      throw new Error(sensitive);
     };
-    const { broker } = makeBroker(failing, { budget });
+    const { broker } = makeBroker(failing, { budget, traceRecorder: (trace) => traces.push(trace) });
     budget.open('run1', 10);
-    await expect(broker.invoke('t.fail', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow('boom');
+    await expect(broker.invoke('t.fail', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow(sensitive);
     expect(budget.remainingCents('run1')).toBe(10); // 全额退还
+    expect(traces.at(-1)?.reason).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(traces.at(-1)?.reason).not.toContain(sensitive);
   });
 });
 

@@ -38,13 +38,19 @@ describe('OpenFdaDiscoveryProvider.discoverCompanies —— fail-safe + §8.8 �
   });
 
   it('Broker 拒绝（SUSPENDED/未登记/用途门 → invoke 抛错）→ fail-safe 空结果', async () => {
+    const sensitive = 'buyer@example.test bearer=provider-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const broker = fakeBroker(async () => {
-      throw new Error('tool openfda.search denied: source_policy SUSPENDED: api.fda.gov');
+      throw new Error(sensitive);
     });
     const p = new OpenFdaDiscoveryProvider({ broker });
     const res = await p.discoverCompanies({ sourceClass: 'public_intelligence', filters: { product_code: 'LLZ' }, keywords: [], limit: 50 }, CTX);
     expect(res.records).toEqual([]);
     expect(broker.invokeMock).toHaveBeenCalledOnce();
+    const diagnostic = warn.mock.calls.flat().join(' ');
+    expect(diagnostic).toMatch(/ERROR_TEXT_SHA256:[a-f0-9]{64}/);
+    expect(diagnostic).not.toContain(sensitive);
+    warn.mockRestore();
   });
 
   it('Broker 放行 → 经 openfda.search 工具（kind=registration）拉取，透传真 workspace/run', async () => {

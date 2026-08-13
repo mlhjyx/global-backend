@@ -20,4 +20,19 @@ describe('diagnosticErrorToken', () => {
   ])('normalizes the %s branch deterministically', (_label, value, normalized) => {
     expect(diagnosticErrorToken(value)).toBe(digest(normalized as string));
   });
+
+  it('preserves an existing diagnostic token so cross-boundary correlation stays stable', () => {
+    const token = digest('provider echoed private input');
+    expect(diagnosticErrorToken(token)).toBe(token);
+  });
+
+  it('fails closed when an arbitrary thrown value has a hostile toString', () => {
+    const hostile = {
+      toString(): string {
+        throw new Error('sensitive toString failure');
+      },
+    };
+    expect(() => diagnosticErrorToken(hostile)).not.toThrow();
+    expect(diagnosticErrorToken(hostile)).toBe(digest('unprintable'));
+  });
 });

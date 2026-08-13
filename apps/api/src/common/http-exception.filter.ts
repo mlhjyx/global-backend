@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Response } from 'express';
+import { diagnosticErrorToken } from './diagnostic-error-token';
 
 /**
  * 统一错误模型（PRD 11.15 / packages/contracts README）：
@@ -39,7 +40,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    this.logger.error(String(exception instanceof Error ? exception.stack : exception));
+    this.logger.error(`INTERNAL ${diagnosticErrorToken(exception)}`);
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: { code: 'INTERNAL', message: 'internal server error' },
     });

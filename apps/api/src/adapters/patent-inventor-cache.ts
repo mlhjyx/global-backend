@@ -29,6 +29,7 @@ import {
 import { normForMatch } from '../discovery/name-match';
 import { foldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
 import { encryptPii, decryptPii, blindContactKey, piiKeyConfigured } from '../compliance/pii-crypto';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 /** §8.8 治理域（与 googlePatentsSearchTool.compliance.policyDomain 一致）。 */
 export const PATENT_POLICY_DOMAIN = 'bigquery.googleapis.com';
@@ -389,7 +390,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   } catch (err) {
     await db.patentCacheRefreshAudit.update({
       where: { id: audit.id },
-      data: { finishedAt: new Date(), status: 'FAILED', detail: String(err).slice(0, 300) },
+      data: { finishedAt: new Date(), status: 'FAILED', detail: diagnosticErrorToken(err) },
     });
     return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0 };
   }
@@ -487,7 +488,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   } catch (err) {
     await db.patentCacheRefreshAudit.update({
       where: { id: audit.id },
-      data: { finishedAt: new Date(), rowCount, status: 'FAILED', detail: `persist failed: ${String(err).slice(0, 260)}` },
+      data: { finishedAt: new Date(), rowCount, status: 'FAILED', detail: `persist failed: ${diagnosticErrorToken(err)}` },
     });
     return { status: 'FAILED', anchorCount: anchors.length, rowCount, bytesScanned: scan.bytesScanned, purged, cached: 0, empty: 0 };
   }
