@@ -945,7 +945,11 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
     workflow,
     /graph-delta[\s\S]+--candidate-root "\$GITHUB_WORKSPACE"/,
   );
-  assert.match(auditScript, /DEPENDENCY_GRAPH_DELTA_PROTOCOL/);
+  assert.match(auditScript, /DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL/);
+  assert.match(
+    workflow,
+    /git show "\$PR_BASE_SHA:scripts\/supply-chain-audit\.mjs" \| grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL"/,
+  );
   assert.match(auditScript, /COMPARABLE_AUDIT_PASS/);
   assert.match(auditScript, /AUDIT_SNAPSHOT_INCONCLUSIVE/);
   for (const canaryContext of [
