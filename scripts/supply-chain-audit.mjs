@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -797,6 +798,10 @@ export function evaluateDependencyGraphDelta({
   trustedBase,
   candidate,
   relation,
+  trustedBaseAudit,
+  candidateAudit,
+  baseline,
+  now = new Date(),
 } = {}) {
   const issues = [];
   if (!SHA_40.test(trustedBase ?? "") || !SHA_40.test(candidate ?? "")) {
@@ -833,6 +838,34 @@ export function evaluateDependencyGraphDelta({
       issues: Object.freeze([]),
     });
   }
+  if (
+    trustedBaseAudit !== undefined &&
+    candidateAudit !== undefined &&
+    baseline !== undefined
+  ) {
+    const comparison = evaluateProductionAudit(candidateAudit, baseline, {
+      now,
+      comparisonAudit: trustedBaseAudit,
+    });
+    if (comparison.ok) {
+      return Object.freeze({
+        ok: true,
+        result: "COMPARABLE_AUDIT_PASS",
+        trusted_base: trustedBase,
+        candidate,
+        current_advisories: comparison.current_advisories,
+        resolved_advisories: comparison.resolved_advisories,
+        issues: Object.freeze([]),
+      });
+    }
+    return Object.freeze({
+      ok: false,
+      result: "AUDIT_SNAPSHOT_INCONCLUSIVE",
+      trusted_base: trustedBase,
+      candidate,
+      issues: comparison.issues,
+    });
+  }
   return Object.freeze({
     ok: false,
     result: "AUDIT_SNAPSHOT_INCONCLUSIVE",
@@ -847,18 +880,48 @@ export function evaluateDependencyGraphDelta({
   });
 }
 
-export function buildDependencyGraphDeltaReceipt(result) {
+export function buildDependencyGraphDeltaReceipt(
+  result,
+  { trustedBaseAuditDigest, candidateAuditDigest } = {},
+) {
   if (
     !isObject(result) ||
     !SHA_40.test(result.trusted_base ?? "") ||
     !SHA_40.test(result.candidate ?? "") ||
-    !["IDENTICAL_TO_TRUSTED_BASE", "AUDIT_SNAPSHOT_INCONCLUSIVE"].includes(
-      result.result,
-    ) ||
+    ![
+      "IDENTICAL_TO_TRUSTED_BASE",
+      "COMPARABLE_AUDIT_PASS",
+      "AUDIT_SNAPSHOT_INCONCLUSIVE",
+    ].includes(result.result) ||
     !Array.isArray(result.issues) ||
-    result.ok !== (result.result === "IDENTICAL_TO_TRUSTED_BASE")
+    result.ok !==
+      ["IDENTICAL_TO_TRUSTED_BASE", "COMPARABLE_AUDIT_PASS"].includes(
+        result.result,
+      )
   ) {
     throw new Error("cannot build a dependency graph delta receipt");
+  }
+  if (result.result === "COMPARABLE_AUDIT_PASS") {
+    if (
+      !Number.isInteger(result.current_advisories) ||
+      result.current_advisories < 0 ||
+      !Array.isArray(result.resolved_advisories) ||
+      !SHA256.test(trustedBaseAuditDigest ?? "") ||
+      !SHA256.test(candidateAuditDigest ?? "")
+    ) {
+      throw new Error("cannot build a comparable dependency audit receipt");
+    }
+    return Object.freeze({
+      schema_version: GRAPH_DELTA_SCHEMA,
+      result: result.result,
+      trusted_base: result.trusted_base,
+      candidate: result.candidate,
+      current_advisories: result.current_advisories,
+      resolved_advisories: Object.freeze([...result.resolved_advisories]),
+      trusted_base_audit_digest: trustedBaseAuditDigest,
+      candidate_audit_digest: candidateAuditDigest,
+      registry: OFFICIAL_REGISTRY,
+    });
   }
   return Object.freeze({
     schema_version: GRAPH_DELTA_SCHEMA,
@@ -971,8 +1034,9 @@ async function readBoundedJson(path) {
   return JSON.parse(await readBoundedRegularText(path, MAX_INPUT_BYTES));
 }
 
-function runPnpmProductionAudit() {
-  assertNoRepositoryNpmrc(listTrackedRepositoryNpmrc(process.cwd()));
+function runPnpmProductionAudit(repositoryRoot = process.cwd()) {
+  const root = resolve(repositoryRoot);
+  assertNoRepositoryNpmrc(listTrackedRepositoryNpmrc(root));
   const execution = spawnSync(
     "pnpm",
     ["audit", "--prod", "--registry=https://registry.npmjs.org", "--json"],
@@ -980,6 +1044,7 @@ function runPnpmProductionAudit() {
       encoding: "utf8",
       maxBuffer: MAX_INPUT_BYTES,
       env: buildTrustedPnpmEnvironment(),
+      cwd: root,
     },
   );
   if (
@@ -991,7 +1056,13 @@ function runPnpmProductionAudit() {
       "pnpm production audit did not complete with a parseable status",
     );
   }
-  return JSON.parse(execution.stdout);
+  const audit = JSON.parse(execution.stdout);
+  return Object.freeze({
+    audit,
+    digest: `sha256:${createHash("sha256")
+      .update(execution.stdout)
+      .digest("hex")}`,
+  });
 }
 
 function parseOptionPairs(tokens, allowedOptions) {
@@ -1025,7 +1096,13 @@ function parseCliArguments(argv) {
   if (command === "graph-delta") {
     const values = parseOptionPairs(
       tokens,
-      new Set(["--trusted-base", "--candidate", "--relation"]),
+      new Set([
+        "--trusted-base",
+        "--candidate",
+        "--relation",
+        "--trusted-base-root",
+        "--candidate-root",
+      ]),
     );
     requireOptions(values, ["--trusted-base", "--candidate", "--relation"]);
     return Object.freeze({
@@ -1033,6 +1110,8 @@ function parseCliArguments(argv) {
       trustedBase: values["--trusted-base"],
       candidate: values["--candidate"],
       relation: values["--relation"],
+      trustedBaseRoot: values["--trusted-base-root"],
+      candidateRoot: values["--candidate-root"],
     });
   }
   if (command === "baseline-freshness") {
@@ -1110,8 +1189,43 @@ function parseCliArguments(argv) {
 async function main() {
   const options = parseCliArguments(process.argv.slice(2));
   if (options.command === "graph-delta") {
-    const result = evaluateDependencyGraphDelta(options);
-    console.log(JSON.stringify(buildDependencyGraphDeltaReceipt(result)));
+    let auditInputs = Object.freeze({});
+    let receiptInputs = Object.freeze({});
+    if (options.relation === "CHANGED") {
+      if (!options.trustedBaseRoot || !options.candidateRoot) {
+        throw new Error(
+          "changed dependency graph requires exact base and candidate roots",
+        );
+      }
+      const trustedBaseRoot = resolve(options.trustedBaseRoot);
+      const candidateRoot = resolve(options.candidateRoot);
+      for (const root of [trustedBaseRoot, candidateRoot]) {
+        const sourcePolicy = await validateRepositoryDependencySources(root);
+        if (!sourcePolicy.ok) {
+          throw new Error("repository dependency sources are not trusted");
+        }
+      }
+      const trustedBaseAudit = runPnpmProductionAudit(trustedBaseRoot);
+      const candidateAudit = runPnpmProductionAudit(candidateRoot);
+      auditInputs = Object.freeze({
+        trustedBaseAudit: trustedBaseAudit.audit,
+        candidateAudit: candidateAudit.audit,
+        baseline: await readBoundedJson(
+          resolve(
+            trustedBaseRoot,
+            "docs/security/production-dependency-audit-baseline.json",
+          ),
+        ),
+      });
+      receiptInputs = Object.freeze({
+        trustedBaseAuditDigest: trustedBaseAudit.digest,
+        candidateAuditDigest: candidateAudit.digest,
+      });
+    }
+    const result = evaluateDependencyGraphDelta({ ...options, ...auditInputs });
+    console.log(
+      JSON.stringify(buildDependencyGraphDeltaReceipt(result, receiptInputs)),
+    );
     if (!result.ok) {
       for (const item of result.issues)
         console.error(`[${item.code}] ${item.message}`);
@@ -1143,7 +1257,7 @@ async function main() {
   }
   const audit = options.auditFile
     ? await readBoundedJson(resolve(options.auditFile))
-    : runPnpmProductionAudit();
+    : runPnpmProductionAudit().audit;
   const comparisonAudit = options.comparisonAuditFile
     ? await readBoundedJson(resolve(options.comparisonAuditFile))
     : undefined;

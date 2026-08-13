@@ -1011,7 +1011,7 @@ test("package-manager network trust is isolated before install and audit", async
   }
   assert.match(
     auditScript,
-    /assertNoRepositoryNpmrc\(listTrackedRepositoryNpmrc\(process\.cwd\(\)\)\);[\s\S]+spawnSync\(/,
+    /function runPnpmProductionAudit\(repositoryRoot = process\.cwd\(\)\)[\s\S]+listTrackedRepositoryNpmrc\(root\)[\s\S]+spawnSync\(/,
   );
   assert.match(
     auditScript,
@@ -1183,7 +1183,7 @@ test("trusted source policy rejects direct dependency fetches before install", a
     "trusted source policy must run before graph proof and main install",
   );
   const baseSourceValidation = workflow.indexOf(
-    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "${{ runner.temp }}/trusted-pr-base"',
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$TRUSTED_BASE_WORKTREE"',
   );
   assert.ok(
     baseSourceValidation > trustedSourcePolicy,
@@ -1191,7 +1191,7 @@ test("trusted source policy rejects direct dependency fetches before install", a
   );
   assert.match(
     workflow,
-    /git worktree add --detach "\$\{\{ runner\.temp \}\}\/trusted-pr-base" "\$PR_BASE_SHA"/,
+    /git worktree add --detach "\$TRUSTED_BASE_WORKTREE" "\$PR_BASE_SHA"/,
   );
   assert.doesNotMatch(
     workflow,
