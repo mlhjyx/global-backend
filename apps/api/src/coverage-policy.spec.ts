@@ -7,6 +7,12 @@ type CoveragePolicy = {
     coverage?: {
       include?: readonly string[];
       exclude?: readonly string[];
+      thresholds?: {
+        statements?: number;
+        branches?: number;
+        functions?: number;
+        lines?: number;
+      };
     };
   };
 };
@@ -22,5 +28,16 @@ describe('API coverage policy', () => {
     const config = apiVitestConfig as CoveragePolicy;
 
     expect(config.test?.coverage?.include).toContain('src/**/*.ts');
+  });
+
+  it('fails the complete source inventory unless every coverage dimension reaches 80 percent', () => {
+    const config = apiVitestConfig as CoveragePolicy;
+
+    expect(config.test?.coverage?.thresholds).toEqual({
+      statements: 80,
+      branches: 80,
+      functions: 80,
+      lines: 80,
+    });
   });
 });
