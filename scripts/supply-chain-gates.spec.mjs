@@ -290,13 +290,8 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
     now: NOW,
   });
   assert.equal(changedWithNewAdvisory.ok, false);
-  assert.equal(
-    changedWithNewAdvisory.result,
-    "AUDIT_SNAPSHOT_INCONCLUSIVE",
-  );
-  assert.ok(
-    issueCodes(changedWithNewAdvisory).includes("AUDIT_NEW_ADVISORY"),
-  );
+  assert.equal(changedWithNewAdvisory.result, "AUDIT_SNAPSHOT_INCONCLUSIVE");
+  assert.ok(issueCodes(changedWithNewAdvisory).includes("AUDIT_NEW_ADVISORY"));
   assert.equal(
     evaluateDependencyGraphDelta({
       trustedBase: "not-a-sha",
