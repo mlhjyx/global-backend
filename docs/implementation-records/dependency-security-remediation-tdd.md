@@ -4,7 +4,7 @@
 >
 > 本地实现：`codex/deps-security-remediation`。第一批 High 处置 checkpoint 为 `7bbc8d80`，第二批依赖、覆盖率与复审修复 checkpoint 为 `06116e377407c90e3e7fe078980b61ab3e6ab42d`，完整 inventory coverage、failure redaction、`extract-zip` 回归门与 M1 文档漂移门的首个 clean implementation checkpoint 为 `0860c41d8d6eb97606c18f847904ecc18222a462`；独立复审后的不可绕过 coverage policy、剩余诊断脱敏与五份权威页 drift guard checkpoint 为 `a3c7b0373f771a95d35f1fc398e953c8bbb1eaf7`；所有 5xx `HttpException` 统一 fail-closed 的最终实现 checkpoint 为 `5bca79e1`。本文档收口为其 docs-only 后继。尚未 push、建 PR、合并或部署。
 >
-> 集成状态：用户已授权在独占 worktree 中，以 PR #400 head `bfa4c4e76afcb712703921623f97160861618578` 为第一父、本文档所属 clean head `12b7972c0a793f685349fbdd4103ef917a87fbca` 为第二父形成本地 merge candidate。该合成尚未 push，也尚未更新 PR #400；只有新 exact head 的完整验证和独立复审可支持后续单独申请 push，不能把本文历史 PASS 自动重绑为 hosted CI。
+> 集成状态：旧本地合成 `5191008276914ba6508631cb0856cc6e5f4a1bc4`（`bfa4c4e7… + 12b7972c…`）只保留为历史 checkpoint。`origin/main` 前进后，用户授权在独占 worktree 中以 PR #400 当前 head `c7bd71c5d8869a3312892f883104042800f50b0b` 为第一父、`origin/main@4c1cfd5faf8d3cff4ce03b98e875e5a03dcfdee5` 为第二父形成本地 successor；实现 merge checkpoint 为 `825368d44e26b4b23688d50c7f128f54c37cb71f`。本文是其 docs-only 收口后继。该 successor 尚未 push，也尚未更新 PR #400；只有最终 clean exact head 的完整验证和独立复审可支持后续单独申请 push，不能把本文历史 PASS 自动重绑为 hosted CI。
 >
 > 边界：本文记录本地源码、官方 npm audit、确定性测试与 renderer 视觉回归。它不是 GitHub Security alert readback、hosted CI、RuntimeEvidence、Release Bundle 或真实试点证据。
 
@@ -79,8 +79,8 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 | `pnpm audit --prod --registry=https://registry.npmjs.org --json` | 839 production dependencies；0 critical / 0 high / 0 moderate / 0 low | 本地 lock 的官方 registry audit 清零；不等于 GitHub alert/Dependency Review/CodeQL readback |
 | `pnpm install --frozen-lockfile --offline` | PASS | 当前 lock 可从本机缓存重放 |
 | API full Vitest / coverage | 370 files；5401 PASS / 2 skipped | 功能回归全绿；不代表 PostgreSQL/Temporal/外部 provider 运行证据 |
-| 完整 `src/**/*.ts` coverage | 原依赖分支为 statements 85.72%（23145/26999）、branches 80.09%（18081/22574）、functions 88.06%（4584/5205）、lines 87.02%（21344/24527）；PR #400 合成提交 `51910082…` 复跑为 statements 85.72%（23144/26999）、branches 80.09%（18081/22574）、functions 88.04%（4583/5205）、lines 87.01%（21343/24527） | 未排除未加载源码、未计入 `dist/**`；include/exclude 精确闭合且生产源码禁 coverage-ignore pragma；四维本地门均已关闭，且没有把第二父统计值冒充合成树结果 |
-| `pnpm audit --prod --registry=https://registry.npmjs.org --json`（最终重跑） | 0 critical / 0 high / 0 moderate / 0 low；0 advisories；报告不含 `extract-zip` / `GHSA-jmr9-qjv8-65gv` | 当前 lock 的官方 registry production audit；不等于 PR #400 重基、GitHub alert 或 hosted CI readback |
+| 完整 `src/**/*.ts` coverage | 原依赖分支为 statements 85.72%（23145/26999）、branches 80.09%（18081/22574）、functions 88.06%（4584/5205）、lines 87.02%（21344/24527）；旧合成 `51910082…` 为 85.72% / 80.09% / 88.04% / 87.01%；当前 successor 实现 checkpoint `825368d…` 为 statements 85.73%（23147/26999）、branches 80.11%（18086/22574）、functions 88.04%（4583/5205）、lines 87.03%（21346/24527） | 未排除未加载源码、未计入 `dist/**`；include/exclude 精确闭合且生产源码禁 coverage-ignore pragma；四维本地门均已关闭，且没有把父提交统计值冒充当前合成树结果 |
+| `pnpm audit --prod --registry=https://registry.npmjs.org --json`（successor 最终重跑） | `825368d…` 的当前 lock：839 production dependencies；0 critical / 0 high / 0 moderate / 0 low；0 advisories；报告不含 `extract-zip` / `GHSA-jmr9-qjv8-65gv`；仓库 ratchet 为 `PASS_CLEAR` | 当前 lock 的官方 registry production audit；未 dismiss、未扩 baseline；不等于 GitHub alert、Dependency Review、CodeQL 或 hosted CI readback |
 | Prisma validate/generate、Contracts build、API build/lint | PASS；lint 0 errors / 108 warnings | schema、生成物、类型和构建未回退；warnings 主要来自测试 mock，未冒充零 warning |
 | Governance / docs / Gitleaks | governance PASS；docs 0 errors / 1 existing warning；Gitleaks no leaks | M1 恢复口径 guard 覆盖 product/status/architecture/release-plan/core-object-register；不证明远端规则或目标环境 |
 | Copy fixed-source impact | `COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH` | 旧 receipt 不代表本候选；必须独立 rebase/review/授权 |
@@ -89,7 +89,7 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 
 ## 仍未完成
 
-- 官方 production-only audit 已清零，`extract-zip` 已从当前生产图结构性消失；但 Dependency Review、CodeQL、production audit ratchet 尚未在该 exact candidate 的 hosted CI 上运行，PR #400 也尚未基于本提交重建。GitHub vulnerability alerts 没有被本轮修改或重新启用。
+- 官方 production-only audit 已在 `825368d…` 清零，`extract-zip` 已从当前生产图结构性消失，仓库 ratchet 返回 `PASS_CLEAR`；但 Dependency Review、CodeQL 与 hosted production audit 尚未在最终 docs-only successor 上运行，PR #400 也尚未更新。GitHub vulnerability alerts 没有被本轮修改或重新启用。
 - 全量 API 四项 coverage 已在完整 `src/**/*.ts` inventory 上达到 80%，policy 同时禁止新增源码 exclude 与 coverage-ignore pragma；仍须由最终 clean exact head 与 hosted required CI 复核，不能推导合并授权。
 - Copy fixed-source fingerprint 不匹配，旧 receipt 不代表当前依赖图；需要单独 fixed-source rebase/review/授权。
 - 没有部署、目标环境 readback、RuntimeEvidence、Release Bundle、真实外部源/模型调用或试点。

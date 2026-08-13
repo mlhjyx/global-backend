@@ -56,6 +56,29 @@ test("the integrated dependency graph keeps Copy fail-closed until a separately 
   }
 });
 
+test("current authorities bind the PR 400 successor to the refreshed main snapshot", () => {
+  const current = read("docs/status/current.md");
+  const releasePlan = read("docs/roadmap/release-plan.md");
+  const implementationRecord = read(
+    "docs/implementation-records/dependency-security-remediation-tdd.md",
+  );
+
+  for (const document of [current, releasePlan, implementationRecord]) {
+    assert.match(document, /825368d44e26b4b23688d50c7f128f54c37cb71f/u);
+    assert.match(document, /4c1cfd5faf8d3cff4ce03b98e875e5a03dcfdee5/u);
+    assert.match(document, /c7bd71c5d8869a3312892f883104042800f50b0b/u);
+  }
+
+  for (const authority of [current, releasePlan]) {
+    assert.doesNotMatch(
+      authority,
+      /当前[^\n]*bfa4c4e76afcb712703921623f97160861618578[^\n]*12b7972c0a793f685349fbdd4103ef917a87fbca/u,
+    );
+    assert.match(authority, /尚未 push/u);
+    assert.match(authority, /hosted CI[^\n]*未运行/u);
+  }
+});
+
 test("AGENTS.md remains a stable entrypoint without versioned current-state mirrors", () => {
   const agents = read("AGENTS.md");
   const lines = agents.trimEnd().split("\n");
