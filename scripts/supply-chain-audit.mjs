@@ -13,6 +13,11 @@ import {
 
 const BASELINE_SCHEMA = "production-dependency-audit-baseline/v1";
 const EXPOSURE_SCHEMA = "production-dependency-exposure/v1";
+const GRAPH_DELTA_SCHEMA = "production-dependency-graph-delta-result/v1";
+const FRESHNESS_SCHEMA = "production-dependency-baseline-freshness-result/v1";
+// This exact marker is deliberately used by the workflow to select the
+// trusted-base verifier after the one-time protocol bootstrap has merged.
+const DEPENDENCY_GRAPH_DELTA_PROTOCOL = "dependency-graph-delta/v1";
 const AUDIT_COMMAND =
   "pnpm audit --prod --registry=https://registry.npmjs.org --json";
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
@@ -788,6 +793,158 @@ export function evaluateProductionAudit(
   });
 }
 
+export function evaluateDependencyGraphDelta({
+  trustedBase,
+  candidate,
+  relation,
+} = {}) {
+  const issues = [];
+  if (!SHA_40.test(trustedBase ?? "") || !SHA_40.test(candidate ?? "")) {
+    issues.push(
+      issue(
+        "DEPENDENCY_GRAPH_IDENTITY_INVALID",
+        "dependency graph delta requires exact trusted-base and candidate commits",
+      ),
+    );
+  }
+  if (!["IDENTICAL_TO_TRUSTED_BASE", "CHANGED"].includes(relation ?? "")) {
+    issues.push(
+      issue(
+        "DEPENDENCY_GRAPH_RELATION_INVALID",
+        "dependency graph relation must be IDENTICAL_TO_TRUSTED_BASE or CHANGED",
+      ),
+    );
+  }
+  if (issues.length > 0) {
+    return Object.freeze({
+      ok: false,
+      result: "AUDIT_INVALID_HOLD",
+      trusted_base: trustedBase ?? null,
+      candidate: candidate ?? null,
+      issues: Object.freeze(issues),
+    });
+  }
+  if (relation === "IDENTICAL_TO_TRUSTED_BASE") {
+    return Object.freeze({
+      ok: true,
+      result: relation,
+      trusted_base: trustedBase,
+      candidate,
+      issues: Object.freeze([]),
+    });
+  }
+  return Object.freeze({
+    ok: false,
+    result: "AUDIT_SNAPSHOT_INCONCLUSIVE",
+    trusted_base: trustedBase,
+    candidate,
+    issues: Object.freeze([
+      issue(
+        "DEPENDENCY_GRAPH_CHANGED",
+        "changed dependency graph requires a comparable external audit snapshot",
+      ),
+    ]),
+  });
+}
+
+export function buildDependencyGraphDeltaReceipt(result) {
+  if (
+    !isObject(result) ||
+    !SHA_40.test(result.trusted_base ?? "") ||
+    !SHA_40.test(result.candidate ?? "") ||
+    !["IDENTICAL_TO_TRUSTED_BASE", "AUDIT_SNAPSHOT_INCONCLUSIVE"].includes(
+      result.result,
+    ) ||
+    !Array.isArray(result.issues) ||
+    result.ok !== (result.result === "IDENTICAL_TO_TRUSTED_BASE")
+  ) {
+    throw new Error("cannot build a dependency graph delta receipt");
+  }
+  return Object.freeze({
+    schema_version: GRAPH_DELTA_SCHEMA,
+    result: result.result,
+    trusted_base: result.trusted_base,
+    candidate: result.candidate,
+  });
+}
+
+export function evaluateProductionAuditBaselineFreshness(
+  audit,
+  baseline,
+  options = {},
+) {
+  const ratchet = evaluateProductionAudit(audit, baseline, options);
+  const issueCodes = new Set(ratchet.issues.map((item) => item.code));
+  const result = ratchet.ok
+    ? "FRESH"
+    : issueCodes.has("AUDIT_CRITICAL_ADVISORY")
+      ? "CRITICAL_ADVISORY_HOLD"
+      : [
+            "AUDIT_EXPOSURE_NOT_BASELINED",
+            "AUDIT_NEW_ADVISORY",
+            "AUDIT_REINTRODUCED_ADVISORY",
+            "AUDIT_EXPOSURE_EXPANDED",
+            "AUDIT_SEVERITY_ESCALATED",
+            "AUDIT_ADVISORY_METADATA_DRIFT",
+          ].some((code) => issueCodes.has(code))
+        ? "BASELINE_STALE"
+        : "AUDIT_INVALID_HOLD";
+  return Object.freeze({
+    ...ratchet,
+    result,
+  });
+}
+
+export function buildProductionAuditBaselineFreshnessReceipt(
+  result,
+  {
+    subjectCommit,
+    lockfileDigest,
+    verifierDigest,
+    sourcePolicyDigest,
+    auditDigest,
+    observedAt,
+  } = {},
+) {
+  if (
+    !isObject(result) ||
+    ![
+      "FRESH",
+      "BASELINE_STALE",
+      "CRITICAL_ADVISORY_HOLD",
+      "AUDIT_INVALID_HOLD",
+    ].includes(result.result) ||
+    !Number.isInteger(result.current_advisories) ||
+    result.current_advisories < 0 ||
+    !Array.isArray(result.resolved_advisories) ||
+    !Array.isArray(result.issues) ||
+    !SHA_40.test(subjectCommit ?? "") ||
+    ![lockfileDigest, verifierDigest, sourcePolicyDigest, auditDigest].every(
+      (digest) => SHA256.test(digest ?? ""),
+    ) ||
+    !validDate(observedAt)
+  ) {
+    throw new Error("freshness provenance is invalid");
+  }
+  return Object.freeze({
+    schema_version: FRESHNESS_SCHEMA,
+    result: result.result,
+    hold: result.result !== "FRESH",
+    current_advisories: result.current_advisories,
+    resolved_advisories: Object.freeze([...result.resolved_advisories]),
+    issues: Object.freeze(result.issues.map((item) => item.code)),
+    provenance: Object.freeze({
+      subject_commit: subjectCommit,
+      lockfile_digest: lockfileDigest,
+      verifier_digest: verifierDigest,
+      source_policy_digest: sourcePolicyDigest,
+      audit_digest: auditDigest,
+      observed_at: new Date(observedAt).toISOString(),
+      registry: OFFICIAL_REGISTRY,
+    }),
+  });
+}
+
 export function buildProductionAuditReceipt(result) {
   if (
     !isObject(result) ||
@@ -837,22 +994,106 @@ function runPnpmProductionAudit() {
   return JSON.parse(execution.stdout);
 }
 
+function parseOptionPairs(tokens, allowedOptions) {
+  if (tokens.length % 2 !== 0) {
+    throw new Error(`missing value for ${tokens.at(-1) ?? "argument"}`);
+  }
+  const options = Object.create(null);
+  for (let index = 0; index < tokens.length; index += 2) {
+    const option = tokens[index];
+    const value = tokens[index + 1];
+    if (!allowedOptions.has(option)) {
+      throw new Error(`unsupported argument: ${option}`);
+    }
+    if (!value) throw new Error(`missing value for ${option}`);
+    if (Object.hasOwn(options, option)) {
+      throw new Error(`duplicate argument: ${option}`);
+    }
+    options[option] = value;
+  }
+  return options;
+}
+
+function requireOptions(options, names) {
+  for (const name of names) {
+    if (!options[name]) throw new Error(`missing required argument: ${name}`);
+  }
+}
+
 function parseCliArguments(argv) {
   const [command = "", ...tokens] = argv;
-  if (command !== "verify") {
-    throw new Error("expected command: verify");
+  if (command === "graph-delta") {
+    const values = parseOptionPairs(
+      tokens,
+      new Set(["--trusted-base", "--candidate", "--relation"]),
+    );
+    requireOptions(values, ["--trusted-base", "--candidate", "--relation"]);
+    return Object.freeze({
+      command,
+      trustedBase: values["--trusted-base"],
+      candidate: values["--candidate"],
+      relation: values["--relation"],
+    });
   }
+  if (command === "baseline-freshness") {
+    const values = parseOptionPairs(
+      tokens,
+      new Set([
+        "--baseline",
+        "--audit-file",
+        "--subject-commit",
+        "--lockfile-digest",
+        "--verifier-digest",
+        "--source-policy-digest",
+        "--audit-digest",
+        "--observed-at",
+      ]),
+    );
+    requireOptions(values, [
+      "--baseline",
+      "--audit-file",
+      "--subject-commit",
+      "--lockfile-digest",
+      "--verifier-digest",
+      "--source-policy-digest",
+      "--audit-digest",
+      "--observed-at",
+    ]);
+    return Object.freeze({
+      command,
+      baseline: values["--baseline"],
+      auditFile: values["--audit-file"],
+      subjectCommit: values["--subject-commit"],
+      lockfileDigest: values["--lockfile-digest"],
+      verifierDigest: values["--verifier-digest"],
+      sourcePolicyDigest: values["--source-policy-digest"],
+      auditDigest: values["--audit-digest"],
+      observedAt: values["--observed-at"],
+    });
+  }
+  if (command !== "verify")
+    throw new Error(
+      "expected command: verify, graph-delta, or baseline-freshness",
+    );
   const options = {
+    command,
     baseline: "docs/security/production-dependency-audit-baseline.json",
     auditFile: null,
     comparisonAuditFile: null,
     expectedBootstrapBase: undefined,
     expectedSourceLockfileDigest: undefined,
   };
-  for (let index = 0; index < tokens.length; index += 2) {
-    const option = tokens[index];
-    const value = tokens[index + 1];
-    if (!value) throw new Error(`missing value for ${option ?? "argument"}`);
+  const values = parseOptionPairs(
+    tokens,
+    new Set([
+      "--baseline",
+      "--audit-file",
+      "--comparison-audit-file",
+      "--expected-bootstrap-base",
+      "--expected-source-lockfile-digest",
+    ]),
+  );
+  for (const [option, value] of Object.entries(values)) {
     if (option === "--baseline") options.baseline = value;
     else if (option === "--audit-file") options.auditFile = value;
     else if (option === "--comparison-audit-file") {
@@ -868,11 +1109,38 @@ function parseCliArguments(argv) {
 
 async function main() {
   const options = parseCliArguments(process.argv.slice(2));
+  if (options.command === "graph-delta") {
+    const result = evaluateDependencyGraphDelta(options);
+    console.log(JSON.stringify(buildDependencyGraphDeltaReceipt(result)));
+    if (!result.ok) {
+      for (const item of result.issues)
+        console.error(`[${item.code}] ${item.message}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   const sourcePolicy = await validateRepositoryDependencySources(process.cwd());
   if (!sourcePolicy.ok) {
     throw new Error("repository dependency sources are not trusted");
   }
   const baseline = await readBoundedJson(resolve(options.baseline));
+  if (options.command === "baseline-freshness") {
+    const audit = await readBoundedJson(resolve(options.auditFile));
+    const result = evaluateProductionAuditBaselineFreshness(audit, baseline, {
+      expectedSourceLockfileDigest: options.lockfileDigest,
+    });
+    const receipt = buildProductionAuditBaselineFreshnessReceipt(
+      result,
+      options,
+    );
+    console.log(JSON.stringify(receipt));
+    if (!result.ok) {
+      for (const item of result.issues)
+        console.error(`[${item.code}] ${item.message}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   const audit = options.auditFile
     ? await readBoundedJson(resolve(options.auditFile))
     : runPnpmProductionAudit();
