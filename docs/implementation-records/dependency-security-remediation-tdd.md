@@ -2,7 +2,7 @@
 
 > 基线：`origin/main@412716a2a78ed6adfd3e605053f3f310651f9777`
 >
-> 本地实现：`codex/deps-security-remediation`。第一批 High 处置 checkpoint 为 `7bbc8d80`，第二批依赖、覆盖率与复审修复实现 checkpoint 为 clean exact `06116e377407c90e3e7fe078980b61ab3e6ab42d`；本文档收口为其 docs-only 后继。尚未 push、建 PR、合并或部署。
+> 本地实现：`codex/deps-security-remediation`。第一批 High 处置 checkpoint 为 `7bbc8d80`，第二批依赖、覆盖率与复审修复 checkpoint 为 `06116e377407c90e3e7fe078980b61ab3e6ab42d`，完整 inventory coverage、failure redaction、`extract-zip` 回归门与 M1 文档漂移门的 clean implementation checkpoint 为 `0860c41d8d6eb97606c18f847904ecc18222a462`；本文档收口为其 docs-only 后继。尚未 push、建 PR、合并或部署。
 >
 > 边界：本文记录本地源码、官方 npm audit、确定性测试与 renderer 视觉回归。它不是 GitHub Security alert readback、hosted CI、RuntimeEvidence、Release Bundle 或真实试点证据。
 
@@ -67,21 +67,26 @@ Astro 7 在外部 `OUT_DIR` 上会把 prerender 中间文件回退到 renderer c
 | D2 | `3c43c3a5`：锁定 XML parser 安全线 | `f46350a8`：`fast-xml-parser@5.7.1`，OFAC/EU parser 行为回归通过 |
 | D3 | `2dc2ca96`：锁定 Lighthouse/OpenTelemetry 链 | `2687839c`、`916d53ac`、`9d6f867f`：`lighthouse@13.4.1` 并将仓库 Node floor 提升到 `>=22.19.0` |
 | D4 | `bd3494b8`：锁定 Nest/Express/`file-type` 链 | `4784714d`：Nest common/core/platform-express `11.1.29`、CLI `11.0.24`，Express 5.2.1 / body-parser 2.3.0 与 patched file-type 闭合 |
+| C4 | 完整 inventory 证明 statements/branches 仍未过 80%，且复审发现多个 adapter/provider 会把不可信 response body 或自由文本异常写入错误/日志 | `0860c41d`：只补现行合同和 fail-closed 分支；外部错误改为闭合码/SHA-256 diagnostic token；coverage 四维均过 80% |
+| D5 | PR #400 hosted canary 报告 `GHSA-jmr9-qjv8-65gv` / `extract-zip@2.0.1` 为未登记新暴露 | 当前 lock 中 Lighthouse 13.4.1 使用 `puppeteer-core@25.6.0 → @puppeteer/browsers@3.2.0 → yauzl@2.10.0`，不再包含 `extract-zip`；加入旧快照禁止回归断言，未 dismiss、未扩 baseline |
 
 | 验证 | 当前结果 | 证明边界 |
 | --- | --- | --- |
 | `pnpm audit --prod --registry=https://registry.npmjs.org --json` | 839 production dependencies；0 critical / 0 high / 0 moderate / 0 low | 本地 lock 的官方 registry audit 清零；不等于 GitHub alert/Dependency Review/CodeQL readback |
 | `pnpm install --frozen-lockfile --offline` | PASS | 当前 lock 可从本机缓存重放 |
-| API full Vitest | 328 files；4902 PASS / 2 skipped | 功能回归全绿；不代表 PostgreSQL/Temporal/外部 provider 运行证据 |
+| API full Vitest / coverage | 370 files；5395 PASS / 2 skipped | 功能回归全绿；不代表 PostgreSQL/Temporal/外部 provider 运行证据 |
 | API build / lint | PASS；0 errors / 19 existing warnings | Nest 11 与类型/静态合同未回退 |
-| 完整 `src/**/*.ts` coverage | statements 78.39%、branches 73.42%、functions 81.53%、lines 80.23% | Lines/functions 已过 80%，statements/branches 未过；整体 coverage gate 仍 HOLD |
+| 完整 `src/**/*.ts` coverage | statements 85.71%（23134/26990）、branches 80.09%（18079/22572）、functions 88.06%（4583/5204）、lines 87.01%（21334/24519） | 未排除未加载源码、未计入 `dist/**`；四维本地门均已关闭 |
+| `pnpm audit --prod --registry=https://registry.npmjs.org --json`（最终重跑） | 0 critical / 0 high / 0 moderate / 0 low；0 advisories；报告不含 `extract-zip` / `GHSA-jmr9-qjv8-65gv` | 当前 lock 的官方 registry production audit；不等于 PR #400 重基、GitHub alert 或 hosted CI readback |
+| Prisma validate/generate、Contracts build、API build/lint | PASS；lint 0 errors / 108 warnings | schema、生成物、类型和构建未回退；warnings 主要来自测试 mock，未冒充零 warning |
+| Governance / docs / Gitleaks | governance PASS；docs 0 errors / 1 existing warning；Gitleaks 87.95 MB / no leaks | M1 恢复口径有机器 drift guard；不证明远端规则或目标环境 |
 | Copy fixed-source impact | `COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH` | 旧 receipt 不代表本候选；必须独立 rebase/review/授权 |
 
 当前 lock SHA-256 为 `2a81b6b63e67c100a69b5d18b4a849ee10f78160a615ee7becf1dc6ecb8167f4`。依赖清零和两项覆盖维度过线是本地 source/test 事实，不是 hosted CI、RuntimeEvidence、Release Bundle 或 pilot 证据。
 
 ## 仍未完成
 
-- 官方 production-only audit 已清零，但 Dependency Review、CodeQL、production audit ratchet 尚未在该 exact candidate 的 hosted CI 上运行；GitHub vulnerability alerts 也没有被本轮修改或重新启用。
-- 全量 API 的 statements 与 branches 仍未达到 80%，当前 candidate 不是 coverage closeout 完成态。
+- 官方 production-only audit 已清零，`extract-zip` 已从当前生产图结构性消失；但 Dependency Review、CodeQL、production audit ratchet 尚未在该 exact candidate 的 hosted CI 上运行，PR #400 也尚未基于本提交重建。GitHub vulnerability alerts 没有被本轮修改或重新启用。
+- 全量 API 四项 coverage 已在完整 `src/**/*.ts` inventory 上达到 80%；仍须由最终 clean exact head 与 hosted required CI 复核，不能推导合并授权。
 - Copy fixed-source fingerprint 不匹配，旧 receipt 不代表当前依赖图；需要单独 fixed-source rebase/review/授权。
 - 没有部署、目标环境 readback、RuntimeEvidence、Release Bundle、真实外部源/模型调用或试点。
