@@ -931,6 +931,101 @@ test("trusted source policy rejects direct dependency fetches before install", a
   );
 });
 
+test("trusted source policy admits only registry version-scoped pnpm overrides", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  const inputFor = (rootDocument) => ({
+    manifests: [
+      {
+        path: "package.json",
+        document: { name: "root", ...rootDocument },
+      },
+      {
+        path: "packages/workspace/package.json",
+        document: { name: "workspace" },
+      },
+    ],
+    workspaceText: 'packages:\n  - "packages/*"\n',
+    lockfileText:
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      workspace:\n        specifier: workspace:*\n        version: link:packages/workspace\n",
+  });
+
+  const accepted = validateDependencySourcePolicy(
+    inputFor({
+      pnpm: {
+        overrides: {
+          "fast-uri@>=3.0.0 <4.0.0": "3.1.5",
+          "@scope/runtime@^2.0.0": "2.3.4",
+        },
+      },
+    }),
+  );
+  assert.deepEqual(accepted.issues, []);
+
+  for (const selector of [
+    "fast-uri>child-runtime",
+    "fast-uri@>=3.0.0 <4.0.0>child-runtime",
+    "fast-uri@\n>=3.0.0 <4.0.0",
+    "fast-uri@>=3.0.0\n<4.0.0",
+    "fast-uri@>=3.0.0 <4.0.0\t",
+    "fast-uri@1.0.0 ||\n2.0.0",
+    "fast-uri@\u00a0>=3.0.0 <4.0.0",
+    "fast-uri@https://attacker.invalid/runtime.tgz",
+    "@scope/runtime@file:../../outside",
+    `fast-uri@${"1 ".repeat(300)}1`,
+    `fast-uri@${"1.0.0 ".repeat(72)}>x`,
+    `fast-uri@${"1.0.0 || ".repeat(55)}>x`,
+  ]) {
+    const rejected = validateDependencySourcePolicy(
+      inputFor({ pnpm: { overrides: { [selector]: "3.1.5" } } }),
+    );
+    assert.ok(
+      issueCodes(rejected).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      selector,
+    );
+  }
+
+  for (const nonOverrideDeclaration of [
+    { dependencies: { "fast-uri@^3.0.0": "3.1.5" } },
+    { resolutions: { "fast-uri@^3.0.0": "3.1.5" } },
+    {
+      pnpm: {
+        packageExtensions: {
+          "root@1.0.0": {
+            dependencies: { "fast-uri@^3.0.0": "3.1.5" },
+          },
+        },
+      },
+    },
+  ]) {
+    const rejected = validateDependencySourcePolicy(
+      inputFor(nonOverrideDeclaration),
+    );
+    assert.ok(
+      issueCodes(rejected).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      JSON.stringify(nonOverrideDeclaration),
+    );
+  }
+
+  for (const untrustedValue of [
+    "https://attacker.invalid/runtime.tgz",
+    "git+https://attacker.invalid/runtime.git",
+    "file:../../outside",
+  ]) {
+    const rejected = validateDependencySourcePolicy(
+      inputFor({
+        pnpm: {
+          overrides: { "fast-uri@>=3.0.0 <4.0.0": untrustedValue },
+        },
+      }),
+    );
+    assert.ok(
+      issueCodes(rejected).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      untrustedValue,
+    );
+  }
+});
+
 test("Dependabot keeps coordinated majors separate and groups maintenance by domain", async () => {
   const config = await readRepositoryFile(".github/dependabot.yml");
   for (const group of [
