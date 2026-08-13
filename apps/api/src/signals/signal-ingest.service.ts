@@ -16,6 +16,7 @@ import {
   windowKeyFor,
 } from './signal-query';
 import { MapOutcome, mapFdaClearance, mapSamSourcesSought, mapTedNotice } from './signal-mappers';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 
 /**
  * 平台层信号摄取（收口⑤ ingest-once）：外部源 → source_signal 一等事实，**拉取一次服务所有租户**。
@@ -187,10 +188,10 @@ export class SignalIngestService {
       });
     } catch (err) {
       if (err instanceof BudgetExceededError) throw err; // 预算真拦截透传（绝不吞成 ERROR 账本行）
-      const msg = String(err).slice(0, 300);
-      await this.writeLedgerError(spec, fingerprint, windowKey, msg);
-      console.warn(`[signal-ingest] fetch failed provider=${spec.provider}: ${msg.slice(0, 150)}`);
-      return { ...base, error: msg.slice(0, 150) };
+      const diagnostic = diagnosticErrorToken(err);
+      await this.writeLedgerError(spec, fingerprint, windowKey, 'SIGNAL_FETCH_FAILED');
+      console.warn(`[signal-ingest] fetch failed provider=${spec.provider}: ${diagnostic}`);
+      return { ...base, error: 'signal_fetch_failed' };
     }
 
     const { upserted, skipped } = await this.persistSignals(fetched.outcomes);

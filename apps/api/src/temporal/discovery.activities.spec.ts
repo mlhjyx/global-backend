@@ -117,6 +117,152 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     expect(r.budgetTruncated).toBe(false);
     expect(r.rawCount).toBe(1);
   });
+
+  it('按 source_hint 收窄源，注入 taxonomy 规范码，去重 raw 并记录实际成本', async () => {
+    const createMany = vi.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length }));
+    const createUsage = vi.fn(async () => ({}));
+    const discover = vi.fn(async (query: { filters: Record<string, unknown> }, _ctx: unknown, policy: unknown) => ({
+      records: [REC, REC, { ...REC, externalId: undefined, name: 'No id' }, { ...REC, externalId: undefined, name: 'No id' }],
+      costCents: 25,
+      query,
+      policy,
+    }));
+    const ignored = vi.fn();
+    const tx = {
+      rawSourceRecord: { createMany },
+      usageLedger: { create: createUsage },
+    };
+    const prisma = {
+      sourcePolicy: { findMany: vi.fn(async () => [{ domain: 'blocked.example' }]) },
+      withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>): Promise<T> => fn(tx),
+    };
+    const taxonomy = {
+      resolveMany: vi.fn(async () => [
+        { code: 'C28', wikidataQid: 'Q190117', osmTags: [{ k: 'industrial', v: 'machine_shop' }] },
+      ]),
+      resolve: vi.fn(async () => ({ code: 'DE', wikidataQid: 'Q183' })),
+    };
+    const providers = {
+      routeCompanyDiscovery: vi.fn(async () => [
+        { key: 'wikidata', discoverCompanies: discover },
+        { key: 'public_web', discoverCompanies: ignored },
+      ]),
+    };
+    const acts = createDiscoveryActivities({ prisma, providers, taxonomy, gateway: {} } as never);
+
+    const result = await acts.executeQuery({
+      workspaceId: 'ws-1',
+      runId: 'run-ok-x',
+      query: {
+        source_class: 'public_intelligence',
+        filters: { source_hint: 'wiki', industry: 'Maschinenbau', country: 'Deutschland' },
+        keywords: ['pump'],
+        priority: 1,
+      },
+    });
+
+    expect(ignored).not.toHaveBeenCalled();
+    expect(discover).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 25,
+        filters: expect.objectContaining({
+          _industryQids: ['Q190117'],
+          _industryCodes: ['C28'],
+          _countryQid: 'Q183',
+          _countryCode: 'DE',
+        }),
+      }),
+      expect.objectContaining({ workspaceId: 'ws-1', runId: 'run-ok-x' }),
+      { blockedDomains: ['blocked.example'] },
+    );
+    expect(createMany.mock.calls[0]?.[0].data).toHaveLength(2);
+    expect(createUsage).toHaveBeenCalledWith({
+      data: expect.objectContaining({ quantity: 2, costUsd: 0.25, meta: expect.objectContaining({ providers: ['wikidata'] }) }),
+    });
+    expect(result).toEqual({
+      rawCount: 2,
+      costCents: 25,
+      provider: 'wikidata',
+      budgetTruncated: false,
+    });
+  });
+
+  it('source_hint 过滤掉全部适配器时不打开预算也不写 raw', async () => {
+    const deps = makeDeps([okAdapter('wikidata', [REC])]);
+    const result = await createDiscoveryActivities(deps).executeQuery({
+      workspaceId: 'ws-1',
+      runId: 'run-ok-x',
+      query: { ...QUERY, filters: { source_hint: 'not-registered' } },
+    });
+    expect(result).toEqual({ rawCount: 0, costCents: 0, provider: null, budgetTruncated: false });
+  });
+});
+
+describe('loadPlanQueries / finalizeRun —— 计划状态与收口事件', () => {
+  it('仅接受 READY/EXECUTED，并以缺省优先级 99 稳定排序', async () => {
+    const queries = [
+      { ...QUERY, priority: 3 },
+      { ...QUERY, priority: 1 },
+      { ...QUERY, priority: undefined },
+    ];
+    const plan = { status: 'READY', queries };
+    const tx = { discoveryQueryPlan: { findUnique: vi.fn(async () => plan) } };
+    const prisma = { withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx) };
+    const acts = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
+
+    await expect(acts.loadPlanQueries({ workspaceId: 'ws-1', planId: 'plan-1' })).resolves.toEqual({
+      queries: [queries[1], queries[0], queries[2]],
+    });
+    plan.status = 'DRAFT';
+    await expect(acts.loadPlanQueries({ workspaceId: 'ws-1', planId: 'plan-1' })).rejects.toThrow(
+      'must be READY',
+    );
+    tx.discoveryQueryPlan.findUnique.mockResolvedValueOnce(null as never);
+    await expect(acts.loadPlanQueries({ workspaceId: 'ws-1', planId: 'missing' })).rejects.toThrow('not found');
+  });
+
+  it('DONE 更新计划并发出完成与评分事件；FAILED 只发完成事件', async () => {
+    const runUpdate = vi.fn(async () => ({}));
+    const planUpdate = vi.fn(async () => ({}));
+    const eventCreate = vi.fn(async () => ({}));
+    const tx = {
+      discoveryRun: { update: runUpdate },
+      discoveryQueryPlan: { update: planUpdate },
+      outboxEvent: { create: eventCreate },
+    };
+    const prisma = { withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx) };
+    const acts = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
+
+    await acts.finalizeRun({
+      workspaceId: 'ws-1',
+      runId: 'run-ok-x',
+      planId: 'plan-1',
+      icpId: 'icp-1',
+      status: 'DONE',
+      stats: { raw: 2 },
+    });
+    expect(planUpdate).toHaveBeenCalledOnce();
+    expect(eventCreate).toHaveBeenCalledTimes(2);
+    expect(eventCreate.mock.calls[1]?.[0]).toEqual({
+      data: expect.objectContaining({ eventType: 'QualifyRequested', aggregateId: 'icp-1' }),
+    });
+
+    planUpdate.mockClear();
+    eventCreate.mockClear();
+    await acts.finalizeRun({
+      workspaceId: 'ws-1',
+      runId: 'run-ok-x',
+      planId: 'plan-1',
+      icpId: 'icp-1',
+      status: 'FAILED',
+      stats: { failures: 1 },
+    });
+    expect(planUpdate).not.toHaveBeenCalled();
+    expect(eventCreate).toHaveBeenCalledTimes(1);
+    expect(eventCreate.mock.calls[0]?.[0]).toEqual({
+      data: expect.objectContaining({ eventType: 'DiscoveryRunCompleted' }),
+    });
+  });
 });
 
 describe('canonicalizeRun —— suppression authority 线性化', () => {
@@ -221,6 +367,103 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
     expect(linkCreate).not.toHaveBeenCalled();
     expect(evidenceCreate).not.toHaveBeenCalled();
   });
+
+  it('规范化完整 raw 记录、拦截 exact suppression，并一次写入字段 evidence', async () => {
+    const evidence: unknown[] = [];
+    const links: unknown[] = [];
+    const upserts: unknown[] = [];
+    const raws = [
+      { id: 'raw-skip', providerKey: 'directory', fetchedAt: null, payload: {} },
+      {
+        id: 'raw-1',
+        providerKey: 'ted',
+        fetchedAt: new Date('2026-08-08T00:00:00.000Z'),
+        payload: {
+          name: 'Acme Pumps',
+          legalName: 'Acme Pumpen GmbH',
+          domain: 'acme.example',
+          country: 'DE',
+          region: 'EU',
+          industry: 'pumps',
+          employeeCount: 10,
+          revenueUsd: 100,
+          attributes: { products: ['pump'] },
+          identifier: { scheme: 'vat', value: 'DE123' },
+          sharedGroupAmbiguity: true,
+          license: 'CC-BY-4.0',
+        },
+      },
+      {
+        id: 'raw-suppressed',
+        providerKey: 'directory',
+        fetchedAt: null,
+        payload: { name: 'Suppressed Corp', country: 'DE' },
+      },
+    ];
+    const tx = {
+      $queryRaw: async () => [{ locked: true }],
+      rawSourceRecord: { findMany: async () => raws },
+      suppressionRecord: { findMany: async () => [{ type: 'company_name', value: 'Suppressed Corp' }] },
+      canonicalCompany: {
+        findUnique: async () => null,
+        updateMany: async () => ({ count: 0 }),
+        upsert: async (input: unknown) => {
+          upserts.push(input);
+          return { id: 'co-1' };
+        },
+      },
+      identityLink: {
+        findFirst: async () => null,
+        create: async (input: unknown) => links.push(input),
+      },
+      fieldEvidence: { create: async (input: unknown) => evidence.push(input) },
+    };
+    const deps = {
+      prisma: { withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx) },
+      providers: {},
+      gateway: {},
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+
+    await expect(
+      createDiscoveryActivities(deps).canonicalizeRun({ workspaceId: 'ws', runId: 'run' }),
+    ).resolves.toEqual({ companies: 1, suppressed: 1 });
+    expect(upserts).toHaveLength(1);
+    expect(links).toHaveLength(1);
+    expect(evidence.length).toBeGreaterThan(5);
+    expect(JSON.stringify(upserts[0])).toContain('"status":"NEW"');
+    expect(JSON.stringify(evidence)).toContain('"allowedActions":["display","match"]');
+  });
+
+  it('已有 raw identity link 时不重复写 link 或 evidence', async () => {
+    const evidence: unknown[] = [];
+    const linkCreate = vi.fn();
+    const tx = {
+      $queryRaw: async () => [{ locked: true }],
+      rawSourceRecord: {
+        findMany: async () => [
+          { id: 'raw-1', providerKey: 'directory', fetchedAt: null, payload: { name: 'Acme', domain: 'acme.example' } },
+        ],
+      },
+      suppressionRecord: { findMany: async () => [] },
+      canonicalCompany: {
+        findUnique: async () => null,
+        updateMany: async () => ({ count: 0 }),
+        upsert: async () => ({ id: 'co-1' }),
+      },
+      identityLink: { findFirst: async () => ({ id: 'link-1' }), create: linkCreate },
+      fieldEvidence: { create: async (input: unknown) => evidence.push(input) },
+    };
+    const deps = {
+      prisma: { withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx) },
+      providers: {},
+      gateway: {},
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+    await expect(
+      createDiscoveryActivities(deps).canonicalizeRun({ workspaceId: 'ws', runId: 'run' }),
+    ).resolves.toMatchObject({ companies: 1 });
+    expect(linkCreate).not.toHaveBeenCalled();
+    expect(evidence).toEqual([]);
+  });
 });
 
 describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃重试清账', () => {
@@ -256,6 +499,145 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃
     expect(budgetLedger.wasExhausted('run-leak')).toBe(true);
     await acts.resetRunBudget({ runId: 'run-leak' });
     expect(budgetLedger.wasExhausted('run-leak')).toBe(false);
+  });
+
+  it('合并互补富集、跳过已有 namespace，并且不为 null 属性写 evidence', async () => {
+    const updates: unknown[] = [];
+    const evidence: unknown[] = [];
+    const calls: string[] = [];
+    const companies = [
+      {
+        id: 'co-1',
+        name: 'Existing',
+        domain: 'existing.example',
+        country: 'DE',
+        region: 'EU',
+        attributes: { gleif: { lei: 'LEI' } },
+        status: 'NEW',
+      },
+      {
+        id: 'co-2',
+        name: 'New',
+        domain: null,
+        country: null,
+        region: null,
+        attributes: null,
+        status: 'NEW',
+      },
+    ];
+    const tx = {
+      $queryRaw: async () => [{ locked: true }],
+      rawSourceRecord: { findMany: async () => [{ id: 'raw-1' }] },
+      identityLink: { findMany: async () => companies.map((company) => ({ canonicalId: company.id })) },
+      suppressionRecord: { findMany: async () => [] },
+      canonicalCompany: {
+        findMany: async () => companies,
+        findUnique: async ({ where }: { where: { id: string } }) => companies.find((company) => company.id === where.id),
+        updateMany: async (input: unknown) => {
+          updates.push(input);
+          return { count: 1 };
+        },
+      },
+      fieldEvidence: { create: async (input: unknown) => evidence.push(input) },
+    };
+    const enrichers = [
+      {
+        key: 'gleif',
+        enrichCompany: async (company: { name: string }) => {
+          calls.push(`gleif:${company.name}`);
+          return { matched: false };
+        },
+      },
+      {
+        key: 'wikidata',
+        enrichCompany: async (company: { name: string }) => {
+          calls.push(`wikidata:${company.name}`);
+          return {
+            matched: true,
+            confidence: 0.9,
+            attributes: { industry: 'pumps', absent: null },
+            provenance: { fetchedAt: '2026-08-08T00:00:00.000Z' },
+          };
+        },
+      },
+      { key: 'broken', enrichCompany: async () => Promise.reject(new Error('provider down')) },
+    ];
+    const deps = {
+      prisma: {
+        sourcePolicy: { findMany: async () => [] },
+        withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx),
+      },
+      providers: { routeEnrichment: async () => enrichers },
+      gateway: {},
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+
+    const result = await createDiscoveryActivities(deps).enrichRun({
+      workspaceId: 'ws',
+      runId: 'run-enrich-hit',
+      icpId: 'icp',
+    });
+    expect(result).toMatchObject({ enriched: 2, matched: 2, provider: 'wikidata', budgetTruncated: false });
+    expect(calls).not.toContain('gleif:Existing');
+    expect(calls).toContain('gleif:New');
+    expect(updates).toHaveLength(2);
+    expect(evidence).toHaveLength(2);
+    budgetLedger.close('run-enrich-hit', { force: true });
+  });
+
+  it('信号富集遵守 suspension 与 TTL，只提交过期且命中的 namespace', async () => {
+    const updates: unknown[] = [];
+    const evidence: unknown[] = [];
+    const calls: string[] = [];
+    const companies = [
+      { id: 'blocked', name: 'Blocked', domain: 'blocked.example', country: 'DE', region: null, attributes: {}, status: 'NEW' },
+      { id: 'fresh', name: 'Fresh', domain: 'fresh.example', country: 'DE', region: null, attributes: { signal: { _ts: new Date().toISOString() } }, status: 'NEW' },
+      { id: 'stale', name: 'Stale', domain: 'stale.example', country: null, region: null, attributes: { signal: { _ts: '2020-01-01T00:00:00.000Z' } }, status: 'NEW' },
+    ];
+    const tx = {
+      $queryRaw: async () => [{ locked: true }],
+      rawSourceRecord: { findMany: async () => [{ id: 'raw-1' }] },
+      identityLink: { findMany: async () => companies.map((company) => ({ canonicalId: company.id })) },
+      suppressionRecord: { findMany: async () => [] },
+      canonicalCompany: {
+        findMany: async () => companies,
+        findUnique: async ({ where }: { where: { id: string } }) => companies.find((company) => company.id === where.id),
+        updateMany: async (input: unknown) => {
+          updates.push(input);
+          return { count: 1 };
+        },
+      },
+      fieldEvidence: { create: async (input: unknown) => evidence.push(input) },
+    };
+    const deps = {
+      prisma: {
+        sourcePolicy: { findMany: async () => [{ domain: 'BLOCKED.EXAMPLE' }] },
+        withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx),
+      },
+      providers: {
+        routeSignalEnrichment: async () => [
+          {
+            key: 'signal',
+            enrichCompany: async (company: { name: string }) => {
+              calls.push(company.name);
+              return { matched: true, confidence: 1, attributes: { hiring: 2, empty: null } };
+            },
+          },
+          { key: 'broken', enrichCompany: async () => Promise.reject(new Error('down')) },
+        ],
+      },
+      gateway: {},
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+
+    const result = await createDiscoveryActivities(deps).enrichSignalsRun({
+      workspaceId: 'ws',
+      runId: 'run-signal-hit',
+      icpId: 'icp',
+    });
+    expect(result).toMatchObject({ enriched: 2, matched: 1, provider: 'signal', budgetTruncated: false });
+    expect(calls).toEqual(['Stale']);
+    expect(updates).toHaveLength(1);
+    expect(evidence).toHaveLength(1);
+    budgetLedger.close('run-signal-hit', { force: true });
   });
 });
 
@@ -309,5 +691,42 @@ describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
     const res = await acts.enqueuePatentLookupsForRun({ workspaceId: 'ws', runId: 'run', icpId: 'icp' });
     expect(res).toEqual({ candidates: 1, enqueued: 1 });
     expect(upserts).toHaveLength(1);
+  });
+});
+
+describe('registerWatchesForRun —— domain eligibility 与 best-effort registration', () => {
+  it('只注册带域名且未存在的 watch，单家公司失败不阻断本批', async () => {
+    const created: unknown[] = [];
+    const tx = {
+      $queryRaw: async () => [{ locked: true }],
+      rawSourceRecord: { findMany: async () => [{ id: 'raw-1' }] },
+      identityLink: { findMany: async () => [{ canonicalId: 'co-1' }, { canonicalId: 'co-2' }] },
+      canonicalCompany: {
+        findMany: async () => [{ id: 'co-1' }, { id: 'co-2' }],
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          where.id === 'co-1'
+            ? { id: 'co-1', name: 'Acme', domain: 'acme.example', region: 'DE', status: 'NEW' }
+            : { id: 'co-2', name: 'No Domain', domain: null, region: null, status: 'NEW' },
+      },
+      suppressionRecord: { findMany: async () => [] },
+    };
+    const deps = {
+      prisma: {
+        withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>) => fn(tx),
+        monitoredSource: {
+          findUnique: async () => null,
+          create: async (input: unknown) => {
+            created.push(input);
+            return { id: 'watch-1' };
+          },
+        },
+      },
+      providers: {},
+      gateway: {},
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+    await expect(
+      createDiscoveryActivities(deps).registerWatchesForRun({ workspaceId: 'ws', runId: 'run', icpId: 'icp' }),
+    ).resolves.toEqual({ candidates: 2, registered: 1 });
+    expect(created).toHaveLength(1);
   });
 });

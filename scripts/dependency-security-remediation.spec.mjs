@@ -36,6 +36,7 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze([
   "qs@6.14.2",
   "path-to-regexp@0.2.5",
   "astro@5.18.2",
+  "extract-zip@2.0.1",
   "sharp@0.34.5",
 ]);
 

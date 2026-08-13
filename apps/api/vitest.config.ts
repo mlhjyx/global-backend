@@ -17,6 +17,12 @@ export default defineConfig({
       // Some source-verification tests intentionally import compiled runtime
       // artifacts. Count the TypeScript source once; dist is generated output.
       exclude: ['dist/**'],
+      thresholds: {
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+      },
     },
   },
 });

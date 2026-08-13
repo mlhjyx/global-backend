@@ -13,6 +13,7 @@ import type { TradeFairAlgoliaInput } from '../../tools/source-tools';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { selectFairs, TradeFairTemplate } from '../trade-fairs';
 import { normalizeDomain } from '../identity';
+import { diagnosticErrorToken } from '../../common/diagnostic-error-token';
 
 const PARSER_VERSION = 'trade_fair/v1';
 const PER_FAIR_LIMIT = 400; // 单展会拉取上限（护栏；尊重 Algolia 限流）
@@ -67,7 +68,7 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
       try {
         records = await this.pullFair(broker, toolCtx, fair, perFair, query.sourceClass);
       } catch (err) {
-        this.log(`skip ${fair.slug}: ${String(err).slice(0, 100)}`);
+        this.log(`skip ${fair.slug}: ${diagnosticErrorToken(err)}`);
         continue; // 单展会失败/闸门拒绝不影响其余（如 key 换届失效、SUSPENDED）
       }
       for (const rec of records) {

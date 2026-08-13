@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import apiVitestConfig from '../vitest.config';
 
@@ -39,5 +41,18 @@ describe('API coverage policy', () => {
       functions: 80,
       lines: 80,
     });
+  });
+
+  it('wires the complete-source coverage command into the required CI job', () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'),
+    ) as { scripts?: Record<string, string> };
+    const workflow = readFileSync(
+      path.resolve(__dirname, '../../../.github/workflows/ci.yml'),
+      'utf8',
+    );
+
+    expect(packageJson.scripts?.['test:coverage']).toBe('vitest run --coverage');
+    expect(workflow).toContain('pnpm --filter @global/api test:coverage');
   });
 });

@@ -18,6 +18,7 @@ import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { diagnosticErrorToken } from '../../common/diagnostic-error-token';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -164,7 +165,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         );
         text = crawled.data.text.slice(0, 60_000);
       } catch (err) {
-        this.log(`skip ${pageUrl}: crawl failed (${String(err).slice(0, 80)})`);
+        this.log(`skip ${pageUrl}: crawl failed (${diagnosticErrorToken(err)})`);
         break;
       }
       if (text.trim().length < 200) break;
@@ -232,7 +233,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       );
       return result.data;
     } catch (err) {
-      this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
+      this.log(`extract failed ${url}: ${diagnosticErrorToken(err)}`);
       return null;
     }
   }

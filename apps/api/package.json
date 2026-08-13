@@ -8,6 +8,7 @@
     "build": "nest build",
     "worker": "node dist/temporal/worker.js",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "mg:check": "node scripts/mg-check.cjs",
     "new-api:ensure-embeddings": "node --import tsx scripts/ensure-new-api-embeddings.mts",
     "prepare:site-builder:current-route-recovery": "node --import tsx scripts/prepare-site-builder-current-route-recovery.mts",

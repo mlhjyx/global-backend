@@ -825,6 +825,115 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
     });
   const visionProvider = () => visionProviderFor();
 
+  it.each([
+    ['unknown top-level field', (input: Record<string, unknown>) => (input.unreviewed = true)],
+    ['unsupported task', (input: Record<string, unknown>) => (input.task = 'site_builder.unreviewed')],
+    ['invalid model token', (input: Record<string, unknown>) => (input.model = 'bad model')],
+    ['empty prompt', (input: Record<string, unknown>) => (input.prompt = '')],
+    ['oversized prompt', (input: Record<string, unknown>) => (input.prompt = 'p'.repeat(32_001))],
+    ['invalid system', (input: Record<string, unknown>) => (input.system = 7)],
+    ['oversized system', (input: Record<string, unknown>) => (input.system = 's'.repeat(16_001))],
+    ['missing schema', (input: Record<string, unknown>) => (input.schema = null)],
+    ['array schema', (input: Record<string, unknown>) => (input.schema = [])],
+    ['fractional max tokens', (input: Record<string, unknown>) => (input.maxTokens = 1.5)],
+    ['zero max tokens', (input: Record<string, unknown>) => (input.maxTokens = 0)],
+    ['oversized max tokens', (input: Record<string, unknown>) => (input.maxTokens = 16_001)],
+    ['fractional max cost', (input: Record<string, unknown>) => (input.maxCostCents = 1.5)],
+    ['zero max cost', (input: Record<string, unknown>) => (input.maxCostCents = 0)],
+    ['oversized max cost', (input: Record<string, unknown>) => (input.maxCostCents = 101)],
+    ['non-array images', (input: Record<string, unknown>) => (input.images = {})],
+    ['empty images', (input: Record<string, unknown>) => (input.images = [])],
+    [
+      'excess images',
+      (input: Record<string, unknown>) => {
+        const images = input.images as unknown[];
+        input.images = [...images, structuredClone(images[0])];
+      },
+    ],
+  ])('rejects %s before any provider wire call', async (label, mutate) => {
+    const input = structuredClone(visionInput()) as unknown as Record<string, unknown>;
+    mutate(input);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(visionProvider().reviewVision(input as never)).rejects.toThrow(
+      label === 'missing schema' || label === 'array schema'
+        ? 'MODEL_OUTPUT_SCHEMA_INVALID'
+        : 'VISION_REVIEW_INPUT_INVALID',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['remote URL field', (image: Record<string, unknown>) => (image.url = 'https://example.test/a.png'), 'VISION_REVIEW_REMOTE_OR_PATH_INPUT_FORBIDDEN'],
+    ['unknown image field', (image: Record<string, unknown>) => (image.unreviewed = true), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['invalid material class', (image: Record<string, unknown>) => (image.materialClass = 'uploaded_asset'), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['workspace on eval fixture', (image: Record<string, unknown>) => (image.workspaceId = 'workspace-1'), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['invalid artifact id', (image: Record<string, unknown>) => (image.artifactId = 'bad artifact'), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['invalid digest shape', (image: Record<string, unknown>) => (image.sha256 = 'bad'), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['invalid MIME type', (image: Record<string, unknown>) => (image.mimeType = 'image/jpeg'), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['non-byte payload', (image: Record<string, unknown>) => (image.bytes = [1, 2, 3]), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['short byte payload', (image: Record<string, unknown>) => (image.bytes = new Uint8Array(2)), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['oversized byte payload', (image: Record<string, unknown>) => (image.bytes = new Uint8Array(2 * 1024 * 1024 + 1)), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['invalid PNG signature', (image: Record<string, unknown>) => (image.bytes = new Uint8Array(8)), 'VISION_REVIEW_IMAGE_INVALID'],
+    ['missing target', (image: Record<string, unknown>) => (image.target = null), 'VISION_REVIEW_IMAGE_INVALID'],
+    [
+      'unknown target field',
+      (image: Record<string, unknown>) => {
+        (image.target as Record<string, unknown>).unreviewed = true;
+      },
+      'VISION_REVIEW_IMAGE_INVALID',
+    ],
+    [
+      'invalid locale',
+      (image: Record<string, unknown>) => {
+        (image.target as Record<string, unknown>).locale = 'bad locale';
+      },
+      'VISION_REVIEW_IMAGE_INVALID',
+    ],
+    [
+      'invalid page id',
+      (image: Record<string, unknown>) => {
+        (image.target as Record<string, unknown>).pageId = 'bad page';
+      },
+      'VISION_REVIEW_IMAGE_INVALID',
+    ],
+    [
+      'invalid breakpoint',
+      (image: Record<string, unknown>) => {
+        (image.target as Record<string, unknown>).breakpoint = 1024;
+      },
+      'VISION_REVIEW_IMAGE_INVALID',
+    ],
+  ])('rejects %s without dispatch', async (_label, mutate, code) => {
+    const input = structuredClone(visionInput()) as unknown as Record<string, unknown>;
+    const image = (input.images as Array<Record<string, unknown>>)[0];
+    mutate(image);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(visionProvider().reviewVision(input as never)).rejects.toThrow(code);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate fixtures, byte-digest drift and an unregistered fixture', async () => {
+    const duplicate = structuredClone(visionInput());
+    duplicate.images[1].artifactId = duplicate.images[0].artifactId;
+    await expect(visionProvider().reviewVision(duplicate)).rejects.toThrow(
+      'VISION_REVIEW_IMAGE_INVALID',
+    );
+
+    const digestDrift = structuredClone(visionInput());
+    digestDrift.images[0].bytes[8] ^= 1;
+    await expect(visionProvider().reviewVision(digestDrift)).rejects.toThrow(
+      'VISION_REVIEW_IMAGE_DIGEST_MISMATCH',
+    );
+
+    const unauthorized = structuredClone(visionInput());
+    unauthorized.images[0].artifactId = 'case-home-unregistered';
+    await expect(visionProvider().reviewVision(unauthorized)).rejects.toThrow(
+      'VISION_REVIEW_EVAL_FIXTURE_UNAUTHORIZED',
+    );
+  });
+
   it('sends at most three controlled PNGs as local data payloads and proves exact model provenance', async () => {
     mockChatResponse({
       model: 'gemini-3.5-flash',
@@ -1381,6 +1490,57 @@ describe('OpenAICompatibleProvider — bounded vision review', () => {
       provider: 'gateway',
       model: 'gemini-3.5-flash',
     });
+  });
+});
+
+describe('OpenAICompatibleProvider — explicit capability boundaries', () => {
+  it('advertises only configured operations and reports a non-secret health detail', async () => {
+    expect(provider.supports('generateText')).toBe(true);
+    expect(provider.supports('generateStructured')).toBe(true);
+    expect(provider.supports('embed')).toBe(false);
+    expect(provider.supports('reviewVision')).toBe(false);
+    await expect(provider.health()).resolves.toEqual({
+      healthy: true,
+      detail: 'default-model',
+    });
+  });
+
+  it('fails closed when embeddings are not configured', async () => {
+    await expect(provider.embed({ input: ['hello'] })).rejects.toThrow(
+      'gateway: embeddings not configured',
+    );
+  });
+
+  it('maps a configured embedding response and rejects HTTP failures without echoing input', async () => {
+    const embeddingProvider = new OpenAICompatibleProvider({
+      id: 'gateway',
+      baseUrl: 'http://gw.test/v1',
+      apiKey: 'k',
+      model: 'default-model',
+      embedModel: 'embedding-model',
+    });
+    expect(embeddingProvider.supports('embed')).toBe(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ data: [{ embedding: [0.25, 0.75] }] }), {
+          status: 200,
+        }),
+      ),
+    );
+    await expect(embeddingProvider.embed({ input: ['hello'] })).resolves.toMatchObject({
+      data: [[0.25, 0.75]],
+      model: 'embedding-model',
+      modelResolutionSource: 'requested_fallback',
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('bounded failure', { status: 503 })),
+    );
+    await expect(embeddingProvider.embed({ input: ['private input'] })).rejects.toThrow(
+      'gateway embed 503: bounded failure',
+    );
   });
 });
 

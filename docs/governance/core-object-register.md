@@ -152,7 +152,7 @@ ICP × CanonicalCompany → qualification → immutable package → outbox deliv
 
 - 推荐必须满足总分门和 Reachability；不可只用高 Fit。
 - 本仓交付不可变快照后停止，不在本仓创建 Opportunity。
-- 后端能力冻结已提前解除；M1 收口前只做准备，收口后按重审范围恢复，正式前端仍未接。
+- M1 已完成阶段收口，后端能力的历史冻结条件已经解除；恢复实现仍须按当前 main 重新审计、明确唯一 owner、验收和用户授权，正式前端仍未接。
 
 ## 5. 目标态生命周期，不得冒充 as-built
 

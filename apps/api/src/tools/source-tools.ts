@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
+import { diagnosticErrorToken } from '../common/diagnostic-error-token';
 import { assertToolExternalActionAuthorized, Tool, ToolContext } from './tool-contract';
 import { ToolRegistry } from './tool-registry';
 import { crawlHtml, CrawlHtmlResult } from '../adapters/web-crawler';
@@ -632,7 +633,7 @@ export const mapYourShowFetchTool: Tool<MapYourShowFetchInput, { hits: MysRawHit
       },
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) throw new Error(`mapyourshow ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    if (!res.ok) throw new Error(`mapyourshow ${res.status}: ${diagnosticErrorToken(await res.text())}`);
     const json = (await res.json()) as {
       DATA?: { results?: { exhibitor?: { hit?: MysRawHit[] } } };
     };
