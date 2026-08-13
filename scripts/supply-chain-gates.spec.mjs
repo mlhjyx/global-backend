@@ -204,6 +204,7 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
     buildProductionAuditBaselineFreshnessReceipt,
     evaluateDependencyGraphDelta,
     evaluateProductionAuditBaselineFreshness,
+    assertRepositoryAuditSubject,
   } = await import("./supply-chain-audit.mjs");
   const candidateCommit = "b".repeat(40);
   const provenance = {
@@ -263,6 +264,7 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
     buildDependencyGraphDeltaReceipt(changedWithComparableAudit, {
       trustedBaseAuditDigest: `sha256:${"f".repeat(64)}`,
       candidateAuditDigest: `sha256:${"1".repeat(64)}`,
+      observedAt: NOW.toISOString(),
     }),
     {
       schema_version: "production-dependency-graph-delta-result/v1",
@@ -273,6 +275,7 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
       resolved_advisories: [],
       trusted_base_audit_digest: `sha256:${"f".repeat(64)}`,
       candidate_audit_digest: `sha256:${"1".repeat(64)}`,
+      observed_at: NOW.toISOString(),
       registry: "https://registry.npmjs.org/",
     },
   );
@@ -377,6 +380,58 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
       }),
     /freshness provenance is invalid/,
   );
+});
+
+test("comparable audit subjects bind exact clean commits and reject untracked dependency configuration", async () => {
+  const { assertRepositoryAuditSubject } =
+    await import("./supply-chain-audit.mjs");
+  const directory = await mkdtemp(join(tmpdir(), "supply-chain-audit-root-"));
+  const git = (...arguments_) => {
+    const execution = spawnSync("git", arguments_, {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(execution.status, 0, execution.stderr);
+    return execution.stdout.trim();
+  };
+
+  try {
+    git("init", "--initial-branch=main", "--quiet");
+    git("config", "user.email", "governance@example.invalid");
+    git("config", "user.name", "Governance Test");
+    await writeFile(join(directory, "package.json"), '{"name":"fixture"}\n');
+    await writeFile(
+      join(directory, "pnpm-workspace.yaml"),
+      'packages:\n  - "packages/*"\n',
+    );
+    await writeFile(
+      join(directory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    git("add", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml");
+    git("commit", "--quiet", "-m", "fixture dependency graph");
+    const head = git("rev-parse", "HEAD");
+
+    assert.deepEqual(assertRepositoryAuditSubject(directory, head), {
+      root: directory,
+      commit: head,
+    });
+    assert.throws(
+      () => assertRepositoryAuditSubject(directory, "f".repeat(40)),
+      /DEPENDENCY_AUDIT_SUBJECT_MISMATCH/u,
+    );
+
+    await writeFile(
+      join(directory, ".npmrc"),
+      "registry=https://attacker.invalid/\n",
+    );
+    assert.throws(
+      () => assertRepositoryAuditSubject(directory, head),
+      /DEPENDENCY_AUDIT_SUBJECT_DIRTY/u,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("dependency graph proof compares exact trusted-base and head, never their merge base", async () => {
