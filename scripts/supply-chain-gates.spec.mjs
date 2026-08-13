@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -195,6 +196,201 @@ test("audit receipt distinguishes legacy-risk ratchet pass from a clear result",
     }).result,
     "PASS_CLEAR",
   );
+});
+
+test("dependency graph delta and baseline freshness keep immutable graph proof separate from advisory freshness", async () => {
+  const {
+    buildDependencyGraphDeltaReceipt,
+    buildProductionAuditBaselineFreshnessReceipt,
+    evaluateDependencyGraphDelta,
+    evaluateProductionAuditBaselineFreshness,
+  } = await import("./supply-chain-audit.mjs");
+  const candidateCommit = "b".repeat(40);
+  const provenance = {
+    subjectCommit: BASE_COMMIT,
+    lockfileDigest: LOCKFILE_DIGEST,
+    verifierDigest: `sha256:${"c".repeat(64)}`,
+    sourcePolicyDigest: `sha256:${"d".repeat(64)}`,
+    auditDigest: `sha256:${"e".repeat(64)}`,
+    observedAt: "2026-08-09T12:00:00.000Z",
+  };
+
+  const identical = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: candidateCommit,
+    relation: "IDENTICAL_TO_TRUSTED_BASE",
+  });
+  assert.equal(identical.ok, true);
+  assert.equal(identical.result, "IDENTICAL_TO_TRUSTED_BASE");
+  assert.deepEqual(identical.issues, []);
+  assert.deepEqual(buildDependencyGraphDeltaReceipt(identical), {
+    schema_version: "production-dependency-graph-delta-result/v1",
+    result: "IDENTICAL_TO_TRUSTED_BASE",
+    trusted_base: BASE_COMMIT,
+    candidate: candidateCommit,
+  });
+
+  const changed = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: candidateCommit,
+    relation: "CHANGED",
+  });
+  assert.equal(changed.ok, false);
+  assert.equal(changed.result, "AUDIT_SNAPSHOT_INCONCLUSIVE");
+  assert.ok(issueCodes(changed).includes("DEPENDENCY_GRAPH_CHANGED"));
+  assert.equal(
+    evaluateDependencyGraphDelta({
+      trustedBase: "not-a-sha",
+      candidate: candidateCommit,
+      relation: "IDENTICAL_TO_TRUSTED_BASE",
+    }).ok,
+    false,
+  );
+
+  const fresh = evaluateProductionAuditBaselineFreshness(
+    pnpmAudit([advisory()]),
+    baseline([advisory()]),
+    { now: NOW },
+  );
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.result, "FRESH");
+
+  const lockMismatch = evaluateProductionAuditBaselineFreshness(
+    pnpmAudit([advisory()]),
+    baseline([advisory()]),
+    { now: NOW, expectedSourceLockfileDigest: `sha256:${"f".repeat(64)}` },
+  );
+  assert.equal(lockMismatch.ok, false);
+  assert.equal(lockMismatch.result, "AUDIT_INVALID_HOLD");
+  assert.ok(issueCodes(lockMismatch).includes("BASELINE_SOURCE_LOCK_MISMATCH"));
+
+  const stale = evaluateProductionAuditBaselineFreshness(
+    pnpmAudit([
+      advisory(),
+      advisory({
+        ghsa_id: "GHSA-neww-vuln-0001",
+        package: "new-runtime",
+        url: "https://github.com/advisories/GHSA-neww-vuln-0001",
+      }),
+    ]),
+    baseline([advisory()]),
+    { now: NOW },
+  );
+  assert.equal(stale.ok, false);
+  assert.equal(stale.result, "BASELINE_STALE");
+  assert.ok(issueCodes(stale).includes("AUDIT_NEW_ADVISORY"));
+  assert.deepEqual(
+    buildProductionAuditBaselineFreshnessReceipt(stale, provenance),
+    {
+      schema_version: "production-dependency-baseline-freshness-result/v1",
+      result: "BASELINE_STALE",
+      hold: true,
+      current_advisories: 2,
+      resolved_advisories: [],
+      issues: ["AUDIT_EXPOSURE_NOT_BASELINED", "AUDIT_NEW_ADVISORY"],
+      provenance: {
+        subject_commit: BASE_COMMIT,
+        lockfile_digest: LOCKFILE_DIGEST,
+        verifier_digest: `sha256:${"c".repeat(64)}`,
+        source_policy_digest: `sha256:${"d".repeat(64)}`,
+        audit_digest: `sha256:${"e".repeat(64)}`,
+        observed_at: "2026-08-09T12:00:00.000Z",
+        registry: "https://registry.npmjs.org/",
+      },
+    },
+  );
+
+  const critical = evaluateProductionAuditBaselineFreshness(
+    pnpmAudit([
+      advisory({
+        ghsa_id: "GHSA-crit-ical-0001",
+        severity: "critical",
+        url: "https://github.com/advisories/GHSA-crit-ical-0001",
+      }),
+    ]),
+    baseline([]),
+    { now: NOW },
+  );
+  assert.equal(critical.ok, false);
+  assert.equal(critical.result, "CRITICAL_ADVISORY_HOLD");
+  assert.throws(
+    () =>
+      buildProductionAuditBaselineFreshnessReceipt(stale, {
+        ...provenance,
+        lockfileDigest: "sha256:invalid",
+      }),
+    /freshness provenance is invalid/,
+  );
+});
+
+test("dependency graph proof compares exact trusted-base and head, never their merge base", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "supply-chain-graph-delta-"));
+  const git = (...arguments_) => {
+    const execution = spawnSync("git", arguments_, {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(
+      execution.status,
+      0,
+      `${arguments_.join(" ")} failed: ${execution.stderr}`,
+    );
+    return execution.stdout.trim();
+  };
+
+  try {
+    git("init", "--initial-branch=main", "--quiet");
+    git("config", "user.email", "governance@example.invalid");
+    git("config", "user.name", "Governance Test");
+    await writeFile(
+      join(directory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    git("add", "pnpm-lock.yaml");
+    git("commit", "--quiet", "-m", "root dependency graph");
+    const staleHead = git("rev-parse", "HEAD");
+
+    await writeFile(
+      join(directory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\npackages:\n  example@2.0.0: {}\n",
+    );
+    git("commit", "--quiet", "-am", "trusted base graph change");
+    const trustedBase = git("rev-parse", "HEAD");
+
+    const tripleDot = spawnSync(
+      "git",
+      [
+        "diff",
+        "--quiet",
+        `${trustedBase}...${staleHead}`,
+        "--",
+        "pnpm-lock.yaml",
+      ],
+      { cwd: directory, encoding: "utf8" },
+    );
+    const exactEndpoints = spawnSync(
+      "git",
+      ["diff", "--quiet", trustedBase, staleHead, "--", "pnpm-lock.yaml"],
+      { cwd: directory, encoding: "utf8" },
+    );
+    assert.equal(
+      tripleDot.status,
+      0,
+      "three-dot hides trusted-base-only drift",
+    );
+    assert.equal(exactEndpoints.status, 1, "exact endpoints detect the drift");
+
+    const workflow = await readRepositoryFile(
+      ".github/workflows/supply-chain.yml",
+    );
+    assert.match(
+      workflow,
+      /git diff --quiet "\$PR_BASE_SHA" "\$PR_HEAD_SHA" --[\s\S]+pnpm-lock\.yaml/,
+    );
+    assert.doesNotMatch(workflow, /\$PR_BASE_SHA\.\.\.\$PR_HEAD_SHA/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("a resolved advisory cannot reappear relative to the PR base audit", async () => {
@@ -559,7 +755,7 @@ test("bounded dependency input reader rejects a final-component symlink", async 
   }
 });
 
-test("dependency review and production audit are pinned, bounded canaries", async () => {
+test("dependency graph delta and baseline freshness are pinned, bounded canaries", async () => {
   const [workflow, requiredContextsText, auditScript] = await Promise.all([
     readRepositoryFile(".github/workflows/supply-chain.yml"),
     readRepositoryFile(".github/required-contexts.json"),
@@ -581,45 +777,61 @@ test("dependency review and production audit are pinned, bounded canaries", asyn
   assert.doesNotMatch(workflow, /continue-on-error:/);
   assert.match(
     workflow,
-    /git show "\$PR_BASE_SHA:\$BASELINE_PATH" > "\$TRUSTED_BASELINE"/,
+    /git diff --no-renames --name-only -z "\$PR_BASE_SHA" "\$PR_HEAD_SHA"/,
   );
-  assert.match(workflow, /--expected-bootstrap-base "\$PR_BASE_SHA"/);
+  assert.match(workflow, /^  production-audit-delta:$/m);
+  assert.match(workflow, /^    name: production dependency delta · canary$/m);
+  assert.match(workflow, /^    if: github\.event_name == 'pull_request'$/m);
   assert.match(
     workflow,
-    /--expected-source-lockfile-digest "\$base_lock_digest"/,
+    /^          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}$/m,
   );
+  assert.match(workflow, /^  baseline-freshness:$/m);
   assert.match(
     workflow,
-    /git diff --no-renames --name-only -z "\$PR_BASE_SHA\.\.\.\$GITHUB_SHA"/,
+    /^    name: production advisory baseline freshness · canary$/m,
   );
-  assert.match(workflow, /pnpm audit --prod[^\n]+> "\$BASE_AUDIT"/);
-  assert.match(workflow, /--comparison-audit-file "\$BASE_AUDIT"/);
+  assert.match(workflow, /^    if: github\.event_name != 'pull_request'$/m);
+  assert.match(
+    workflow,
+    /git diff --quiet "\$PR_BASE_SHA" "\$PR_HEAD_SHA" --[\s\S]+package\.json[\s\S]+pnpm-lock\.yaml[\s\S]+patches\/\*/,
+  );
+  assert.doesNotMatch(workflow, /\$PR_BASE_SHA\.\.\.\$PR_HEAD_SHA/);
+  assert.match(workflow, /graph-delta[\s\S]+--trusted-base "\$PR_BASE_SHA"/);
+  assert.match(
+    workflow,
+    /baseline-freshness[\s\S]+--baseline "\$BASELINE_PATH"/,
+  );
+  assert.doesNotMatch(workflow, /--comparison-audit-file/);
   assert.match(workflow, /^          version: 9\.15\.9$/m);
   assert.ok(
     workflow.match(
       /pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile/g,
-    )?.length >= 2,
+    )?.length >= 1,
   );
-  for (const protectedBootstrapPath of [
-    "package.json | */package.json",
-    "pnpm-lock.yaml | pnpm-workspace.yaml",
-    ".npmrc | */.npmrc",
-    ".pnpmfile.cjs | */.pnpmfile.cjs",
+  for (const protectedGraphInput of [
+    "package.json ':(glob)**/package.json'",
+    "pnpm-lock.yaml pnpm-workspace.yaml",
+    ".npmrc ':(glob)**/.npmrc'",
+    ".pnpmfile.cjs ':(glob)**/.pnpmfile.cjs'",
     "patches/*",
   ]) {
     assert.ok(
-      workflow.includes(protectedBootstrapPath),
-      `bootstrap dependency scope must include ${protectedBootstrapPath}`,
+      workflow.includes(protectedGraphInput),
+      `dependency graph scope must include ${protectedGraphInput}`,
     );
   }
   assert.match(
     auditScript,
     /pnpm audit --prod --registry=https:\/\/registry\.npmjs\.org --json/,
   );
-  assert.match(workflow, /node "\$TRUSTED_VERIFIER" "\$\{audit_args\[@\]\}"/);
+  assert.match(workflow, /node "\$TRUSTED_VERIFIER" graph-delta/);
+  assert.match(auditScript, /DEPENDENCY_GRAPH_DELTA_PROTOCOL/);
+  assert.match(auditScript, /AUDIT_SNAPSHOT_INCONCLUSIVE/);
   for (const canaryContext of [
     "dependency review · canary",
-    "production dependency audit · canary",
+    "production dependency delta · canary",
+    "production advisory baseline freshness · canary",
   ]) {
     assert.ok(!requiredContexts.required_contexts.includes(canaryContext));
   }
@@ -682,22 +894,14 @@ test("package-manager network trust is isolated before install and audit", async
       readRepositoryFile(".github/required-contexts.json"),
     ]);
   const requiredContexts = JSON.parse(requiredContextsText);
-  const configGuard = workflow.indexOf(
-    "Reject repository package-manager network overrides",
-  );
-  const auditStep = workflow.indexOf(
-    "Audit production dependencies against the trusted ratchet",
-  );
-  assert.ok(configGuard >= 0 && configGuard < auditStep);
-  assert.match(workflow, /git ls-files -z[^\n]+\.npmrc/);
   assert.ok(
     workflow.match(
       /pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https:\/\/registry\.npmjs\.org/g,
-    )?.length >= 2,
+    )?.length >= 1,
   );
   assert.ok(
     workflow.match(/^\s+env -i \\$/gm)?.length >= 2,
-    "both head and base installs must start from an environment allowlist",
+    "the main install and audit must start from an environment allowlist",
   );
   for (const safeOverride of [
     "NPM_CONFIG_REGISTRY=https://registry.npmjs.org/",
@@ -945,36 +1149,130 @@ test("trusted source policy rejects direct dependency fetches before install", a
   const headSourceValidation = workflow.indexOf(
     'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"',
   );
-  const headInstall = workflow.indexOf(
+  const mainSourceValidation = workflow.indexOf(
+    'node scripts/supply-chain-source-policy.mjs validate-sources --repository-root "$GITHUB_WORKSPACE"',
+  );
+  const mainInstall = workflow.indexOf(
     "pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org",
-    headSourceValidation,
+    mainSourceValidation,
   );
   assert.ok(
     trustedSourcePolicy >= 0 &&
       headSourceValidation > trustedSourcePolicy &&
-      headInstall > headSourceValidation,
-    "trusted base source policy must run before the head install",
+      mainSourceValidation > headSourceValidation &&
+      mainInstall > mainSourceValidation,
+    "trusted source policy must run before graph proof and main install",
   );
   const baseSourceValidation = workflow.indexOf(
-    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$BASE_CHECKOUT"',
-  );
-  const baseInstall = workflow.indexOf(
-    "pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org",
-    baseSourceValidation,
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "${{ runner.temp }}/trusted-pr-base"',
   );
   assert.ok(
-    baseSourceValidation > trustedSourcePolicy &&
-      baseInstall > baseSourceValidation,
-    "trusted source policy must run before the base install",
+    baseSourceValidation > trustedSourcePolicy,
+    "trusted source policy must validate the exact base dependency inputs",
   );
   assert.match(
     workflow,
-    /git worktree add --detach "\$BASE_CHECKOUT" "\$PR_BASE_SHA"/,
+    /git worktree add --detach "\$\{\{ runner\.temp \}\}\/trusted-pr-base" "\$PR_BASE_SHA"/,
   );
   assert.doesNotMatch(
     workflow,
-    /git archive "\$PR_BASE_SHA" \| tar -xf - -C "\$BASE_CHECKOUT"/,
+    /git archive "\$PR_BASE_SHA" \| tar -xf - -C "\$\{\{ runner\.temp \}\}\/trusted-pr-base"/,
   );
+});
+
+test("trusted source policy admits only registry version-scoped pnpm overrides", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  const inputFor = (rootDocument) => ({
+    manifests: [
+      {
+        path: "package.json",
+        document: { name: "root", ...rootDocument },
+      },
+      {
+        path: "packages/workspace/package.json",
+        document: { name: "workspace" },
+      },
+    ],
+    workspaceText: 'packages:\n  - "packages/*"\n',
+    lockfileText:
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      workspace:\n        specifier: workspace:*\n        version: link:packages/workspace\n",
+  });
+
+  const accepted = validateDependencySourcePolicy(
+    inputFor({
+      pnpm: {
+        overrides: {
+          "fast-uri@>=3.0.0 <4.0.0": "3.1.5",
+          "@scope/runtime@^2.0.0": "2.3.4",
+        },
+      },
+    }),
+  );
+  assert.deepEqual(accepted.issues, []);
+
+  for (const selector of [
+    "fast-uri>child-runtime",
+    "fast-uri@>=3.0.0 <4.0.0>child-runtime",
+    "fast-uri@\n>=3.0.0 <4.0.0",
+    "fast-uri@>=3.0.0\n<4.0.0",
+    "fast-uri@>=3.0.0 <4.0.0\t",
+    "fast-uri@1.0.0 ||\n2.0.0",
+    "fast-uri@\u00a0>=3.0.0 <4.0.0",
+    "fast-uri@https://attacker.invalid/runtime.tgz",
+    "@scope/runtime@file:../../outside",
+    `fast-uri@${"1 ".repeat(300)}1`,
+    `fast-uri@${"1.0.0 ".repeat(72)}>x`,
+    `fast-uri@${"1.0.0 || ".repeat(55)}>x`,
+  ]) {
+    const rejected = validateDependencySourcePolicy(
+      inputFor({ pnpm: { overrides: { [selector]: "3.1.5" } } }),
+    );
+    assert.ok(
+      issueCodes(rejected).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      selector,
+    );
+  }
+
+  for (const nonOverrideDeclaration of [
+    { dependencies: { "fast-uri@^3.0.0": "3.1.5" } },
+    { resolutions: { "fast-uri@^3.0.0": "3.1.5" } },
+    {
+      pnpm: {
+        packageExtensions: {
+          "root@1.0.0": {
+            dependencies: { "fast-uri@^3.0.0": "3.1.5" },
+          },
+        },
+      },
+    },
+  ]) {
+    const rejected = validateDependencySourcePolicy(
+      inputFor(nonOverrideDeclaration),
+    );
+    assert.ok(
+      issueCodes(rejected).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      JSON.stringify(nonOverrideDeclaration),
+    );
+  }
+
+  for (const untrustedValue of [
+    "https://attacker.invalid/runtime.tgz",
+    "git+https://attacker.invalid/runtime.git",
+    "file:../../outside",
+  ]) {
+    const rejected = validateDependencySourcePolicy(
+      inputFor({
+        pnpm: {
+          overrides: { "fast-uri@>=3.0.0 <4.0.0": untrustedValue },
+        },
+      }),
+    );
+    assert.ok(
+      issueCodes(rejected).includes("DEPENDENCY_SOURCE_NOT_TRUSTED"),
+      untrustedValue,
+    );
+  }
 });
 
 test("Dependabot keeps coordinated majors separate and groups maintenance by domain", async () => {

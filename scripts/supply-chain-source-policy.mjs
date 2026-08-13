@@ -7,8 +7,14 @@ import { pathToFileURL } from "node:url";
 export const OFFICIAL_REGISTRY = "https://registry.npmjs.org/";
 
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
+const MAX_DEPENDENCY_SELECTOR_LENGTH = 512;
+const MAX_VERSION_SELECTOR_BRANCHES = 16;
+const MAX_VERSION_SELECTOR_COMPARATORS = 32;
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const REGISTRY_VERSION_SPECIFIER = /^[a-z0-9*.+<>=~^| -]+$/i;
+const SEMVER_VERSION =
+  /^(?:0|[1-9][0-9]*|[xX*])(?:\.(?:0|[1-9][0-9]*|[xX*])){0,2}(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+const SEMVER_COMPARATOR = /^(?:<=|>=|<|>|=|~|\^)?(.+)$/u;
 const WORKSPACE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 const EXTERNAL_SOURCE_MARKER =
   /(?:^|[\s'"{,\[])(?:https?:\/\/|git\+|git:\/\/|ssh:\/\/|github:|git@|(?:[a-z0-9._-]+@)?[a-z0-9.-]+\.[a-z]{2,}:[^\s'"},\]]+|file:|portal:|tarball\s*:|repo\s*:|commit\s*:|directory\s*:|type\s*:\s*(?:git|directory))/i;
@@ -175,17 +181,48 @@ function trustedRegistrySpecifier(specifier) {
   return REGISTRY_VERSION_SPECIFIER.test(specifier);
 }
 
+function trustedRegistryVersionSelector(selector) {
+  const branches = selector.split("||");
+  if (
+    branches.length === 0 ||
+    branches.length > MAX_VERSION_SELECTOR_BRANCHES
+  ) {
+    return false;
+  }
+
+  return branches.every((rawBranch) => {
+    if (/[^\x20-\x7e]/u.test(rawBranch)) return false;
+    const branch = rawBranch.replace(/^ +| +$/gu, "");
+    if (branch.length === 0) return false;
+
+    const hyphenParts = branch.split(" - ");
+    if (hyphenParts.length === 2) {
+      return hyphenParts.every((version) => SEMVER_VERSION.test(version));
+    }
+    if (hyphenParts.length > 2) return false;
+
+    const comparators = branch.split(/ +/u);
+    return (
+      comparators.length <= MAX_VERSION_SELECTOR_COMPARATORS &&
+      comparators.every((comparator) => {
+        const match = comparator.match(SEMVER_COMPARATOR);
+        return match !== null && SEMVER_VERSION.test(match[1]);
+      })
+    );
+  });
+}
+
 function trustedDependencySelector(name, allowVersionedSelector) {
   if (PACKAGE_NAME.test(name)) return true;
-  if (!allowVersionedSelector) return false;
+  if (!allowVersionedSelector || name.length > MAX_DEPENDENCY_SELECTOR_LENGTH) {
+    return false;
+  }
 
-  const versionSeparator = name.lastIndexOf("@");
-  const packageName = name.slice(0, versionSeparator);
-  const versionRange = name.slice(versionSeparator + 1);
+  const separator = name.lastIndexOf("@");
   return (
-    versionSeparator > 0 &&
-    PACKAGE_NAME.test(packageName) &&
-    REGISTRY_VERSION_SPECIFIER.test(versionRange)
+    separator > 0 &&
+    PACKAGE_NAME.test(name.slice(0, separator)) &&
+    trustedRegistryVersionSelector(name.slice(separator + 1))
   );
 }
 
@@ -194,8 +231,8 @@ function validateDependencyMap(
   {
     workspaceNames,
     requireWorkspaceTarget,
-    allowVersionedSelector = false,
     issues,
+    allowVersionedSelector = false,
   },
 ) {
   if (!isObject(map)) {
@@ -503,8 +540,8 @@ export function validateDependencySourcePolicy(input) {
       validateDependencyMap(manifest.document.pnpm.overrides, {
         workspaceNames,
         requireWorkspaceTarget: false,
-        allowVersionedSelector: true,
         issues,
+        allowVersionedSelector: true,
       });
     }
     if (manifest.document.pnpm?.auditConfig !== undefined) {
