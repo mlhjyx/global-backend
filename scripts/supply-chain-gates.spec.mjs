@@ -204,6 +204,7 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
     buildProductionAuditBaselineFreshnessReceipt,
     evaluateDependencyGraphDelta,
     evaluateProductionAuditBaselineFreshness,
+    assertRepositoryAuditSubject,
   } = await import("./supply-chain-audit.mjs");
   const candidateCommit = "b".repeat(40);
   const provenance = {
@@ -230,14 +231,67 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
     candidate: candidateCommit,
   });
 
-  const changed = evaluateDependencyGraphDelta({
+  const changedWithoutComparableAudit = evaluateDependencyGraphDelta({
     trustedBase: BASE_COMMIT,
     candidate: candidateCommit,
     relation: "CHANGED",
   });
-  assert.equal(changed.ok, false);
-  assert.equal(changed.result, "AUDIT_SNAPSHOT_INCONCLUSIVE");
-  assert.ok(issueCodes(changed).includes("DEPENDENCY_GRAPH_CHANGED"));
+  assert.equal(changedWithoutComparableAudit.ok, false);
+  assert.equal(
+    changedWithoutComparableAudit.result,
+    "AUDIT_SNAPSHOT_INCONCLUSIVE",
+  );
+  assert.ok(
+    issueCodes(changedWithoutComparableAudit).includes(
+      "DEPENDENCY_GRAPH_CHANGED",
+    ),
+  );
+
+  const changedWithComparableAudit = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: candidateCommit,
+    relation: "CHANGED",
+    trustedBaseAudit: pnpmAudit([]),
+    candidateAudit: pnpmAudit([]),
+    baseline: baseline([]),
+    now: NOW,
+  });
+  assert.equal(changedWithComparableAudit.ok, true);
+  assert.equal(changedWithComparableAudit.result, "COMPARABLE_AUDIT_PASS");
+  assert.equal(changedWithComparableAudit.current_advisories, 0);
+  assert.deepEqual(changedWithComparableAudit.resolved_advisories, []);
+  assert.deepEqual(
+    buildDependencyGraphDeltaReceipt(changedWithComparableAudit, {
+      trustedBaseAuditDigest: `sha256:${"f".repeat(64)}`,
+      candidateAuditDigest: `sha256:${"1".repeat(64)}`,
+      observedAt: NOW.toISOString(),
+    }),
+    {
+      schema_version: "production-dependency-graph-delta-result/v1",
+      result: "COMPARABLE_AUDIT_PASS",
+      trusted_base: BASE_COMMIT,
+      candidate: candidateCommit,
+      current_advisories: 0,
+      resolved_advisories: [],
+      trusted_base_audit_digest: `sha256:${"f".repeat(64)}`,
+      candidate_audit_digest: `sha256:${"1".repeat(64)}`,
+      observed_at: NOW.toISOString(),
+      registry: "https://registry.npmjs.org/",
+    },
+  );
+
+  const changedWithNewAdvisory = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: candidateCommit,
+    relation: "CHANGED",
+    trustedBaseAudit: pnpmAudit([]),
+    candidateAudit: pnpmAudit([advisory()]),
+    baseline: baseline([]),
+    now: NOW,
+  });
+  assert.equal(changedWithNewAdvisory.ok, false);
+  assert.equal(changedWithNewAdvisory.result, "AUDIT_SNAPSHOT_INCONCLUSIVE");
+  assert.ok(issueCodes(changedWithNewAdvisory).includes("AUDIT_NEW_ADVISORY"));
   assert.equal(
     evaluateDependencyGraphDelta({
       trustedBase: "not-a-sha",
@@ -321,6 +375,132 @@ test("dependency graph delta and baseline freshness keep immutable graph proof s
       }),
     /freshness provenance is invalid/,
   );
+});
+
+test("comparable audit subjects bind exact clean commits and reject untracked dependency configuration", async () => {
+  const { assertRepositoryAuditSubject } =
+    await import("./supply-chain-audit.mjs");
+  const directory = await mkdtemp(join(tmpdir(), "supply-chain-audit-root-"));
+  const git = (...arguments_) => {
+    const execution = spawnSync("git", arguments_, {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(execution.status, 0, execution.stderr);
+    return execution.stdout.trim();
+  };
+
+  try {
+    git("init", "--initial-branch=main", "--quiet");
+    git("config", "user.email", "governance@example.invalid");
+    git("config", "user.name", "Governance Test");
+    await writeFile(join(directory, "package.json"), '{"name":"fixture"}\n');
+    await writeFile(
+      join(directory, "pnpm-workspace.yaml"),
+      'packages:\n  - "packages/*"\n',
+    );
+    await writeFile(
+      join(directory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    git("add", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml");
+    git("commit", "--quiet", "-m", "fixture dependency graph");
+    const head = git("rev-parse", "HEAD");
+
+    assert.deepEqual(assertRepositoryAuditSubject(directory, head), {
+      root: directory,
+      commit: head,
+    });
+    assert.throws(
+      () => assertRepositoryAuditSubject(directory, "f".repeat(40)),
+      /DEPENDENCY_AUDIT_SUBJECT_MISMATCH/u,
+    );
+
+    await writeFile(
+      join(directory, ".npmrc"),
+      "registry=https://attacker.invalid/\n",
+    );
+    assert.throws(
+      () => assertRepositoryAuditSubject(directory, head),
+      /DEPENDENCY_AUDIT_SUBJECT_DIRTY/u,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("graph delta CLI rejects untrusted dependency sources even when the graph is reported identical", async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "supply-chain-identical-source-policy-"),
+  );
+  const git = (...arguments_) => {
+    const execution = spawnSync("git", arguments_, {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(
+      execution.status,
+      0,
+      `${arguments_.join(" ")} failed: ${execution.stderr}`,
+    );
+    return execution.stdout.trim();
+  };
+
+  try {
+    git("init", "--initial-branch=main", "--quiet");
+    git("config", "user.email", "governance@example.invalid");
+    git("config", "user.name", "Governance Test");
+    await writeFile(
+      join(directory, "package.json"),
+      JSON.stringify(
+        {
+          name: "fixture",
+          dependencies: {
+            runtime: "https://attacker.invalid/runtime.tgz",
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(directory, "pnpm-workspace.yaml"),
+      'packages:\n  - "packages/*"\n',
+    );
+    await writeFile(
+      join(directory, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+    );
+    git("add", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml");
+    git("commit", "--quiet", "-m", "fixture untrusted source");
+    const head = git("rev-parse", "HEAD");
+
+    const execution = spawnSync(
+      process.execPath,
+      [
+        new URL("scripts/supply-chain-audit.mjs", repositoryRoot).pathname,
+        "graph-delta",
+        "--trusted-base",
+        head,
+        "--candidate",
+        head,
+        "--relation",
+        "IDENTICAL_TO_TRUSTED_BASE",
+        "--trusted-base-root",
+        directory,
+        "--candidate-root",
+        directory,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(execution.status, 0, execution.stdout);
+    assert.match(
+      execution.stderr,
+      /repository dependency sources are not trusted/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("dependency graph proof compares exact trusted-base and head, never their merge base", async () => {
@@ -826,7 +1006,20 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
     /pnpm audit --prod --registry=https:\/\/registry\.npmjs\.org --json/,
   );
   assert.match(workflow, /node "\$TRUSTED_VERIFIER" graph-delta/);
-  assert.match(auditScript, /DEPENDENCY_GRAPH_DELTA_PROTOCOL/);
+  assert.match(
+    workflow,
+    /graph-delta[\s\S]+--trusted-base-root "\$TRUSTED_BASE_WORKTREE"/,
+  );
+  assert.match(
+    workflow,
+    /graph-delta[\s\S]+--candidate-root "\$GITHUB_WORKSPACE"/,
+  );
+  assert.match(auditScript, /DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL/);
+  assert.match(
+    workflow,
+    /git show "\$PR_BASE_SHA:scripts\/supply-chain-audit\.mjs" \| grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL"/,
+  );
+  assert.match(auditScript, /COMPARABLE_AUDIT_PASS/);
   assert.match(auditScript, /AUDIT_SNAPSHOT_INCONCLUSIVE/);
   for (const canaryContext of [
     "dependency review · canary",
@@ -946,11 +1139,11 @@ test("package-manager network trust is isolated before install and audit", async
   }
   assert.match(
     auditScript,
-    /assertNoRepositoryNpmrc\(listTrackedRepositoryNpmrc\(process\.cwd\(\)\)\);[\s\S]+spawnSync\(/,
+    /function runPnpmProductionAudit\(repositoryRoot = process\.cwd\(\)\)[\s\S]+listTrackedRepositoryNpmrc\(root\)[\s\S]+spawnSync\(/,
   );
   assert.match(
     auditScript,
-    /validateRepositoryDependencySources\(process\.cwd\(\)\)/,
+    /async function assertTrustedDependencySources\(root\)[\s\S]+validateRepositoryDependencySources\(root\)[\s\S]+await assertTrustedDependencySources\(process\.cwd\(\)\)/,
     "the verifier CLI must independently enforce source admission",
   );
 });
@@ -1118,7 +1311,7 @@ test("trusted source policy rejects direct dependency fetches before install", a
     "trusted source policy must run before graph proof and main install",
   );
   const baseSourceValidation = workflow.indexOf(
-    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "${{ runner.temp }}/trusted-pr-base"',
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$TRUSTED_BASE_WORKTREE"',
   );
   assert.ok(
     baseSourceValidation > trustedSourcePolicy,
@@ -1126,7 +1319,7 @@ test("trusted source policy rejects direct dependency fetches before install", a
   );
   assert.match(
     workflow,
-    /git worktree add --detach "\$\{\{ runner\.temp \}\}\/trusted-pr-base" "\$PR_BASE_SHA"/,
+    /git worktree add --detach "\$TRUSTED_BASE_WORKTREE" "\$PR_BASE_SHA"/,
   );
   assert.doesNotMatch(
     workflow,

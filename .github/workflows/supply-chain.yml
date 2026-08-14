@@ -58,15 +58,16 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TRUSTED_VERIFIER: ${{ runner.temp }}/supply-chain-audit.mjs
           TRUSTED_SOURCE_POLICY: ${{ runner.temp }}/supply-chain-source-policy.mjs
+          TRUSTED_BASE_WORKTREE: ${{ runner.temp }}/trusted-pr-base
           BOOTSTRAP_DIFF: ${{ runner.temp }}/supply-chain-bootstrap-paths.txt
         run: |
           set -euo pipefail
           git show "$PR_BASE_SHA:scripts/supply-chain-source-policy.mjs" > "$TRUSTED_SOURCE_POLICY"
           node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"
-          git worktree add --detach "${{ runner.temp }}/trusted-pr-base" "$PR_BASE_SHA"
-          node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "${{ runner.temp }}/trusted-pr-base"
+          git worktree add --detach "$TRUSTED_BASE_WORKTREE" "$PR_BASE_SHA"
+          node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$TRUSTED_BASE_WORKTREE"
 
-          if git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" | grep -Fq "DEPENDENCY_GRAPH_DELTA_PROTOCOL"; then
+          if git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" | grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL"; then
             git show "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" > "$TRUSTED_VERIFIER"
           else
             # A self-hosting protocol bootstrap is admitted only when it cannot
@@ -100,7 +101,9 @@ jobs:
           node "$TRUSTED_VERIFIER" graph-delta \
             --trusted-base "$PR_BASE_SHA" \
             --candidate "$PR_HEAD_SHA" \
-            --relation "$relation"
+            --relation "$relation" \
+            --trusted-base-root "$TRUSTED_BASE_WORKTREE" \
+            --candidate-root "$GITHUB_WORKSPACE"
 
   baseline-freshness:
     name: production advisory baseline freshness · canary
