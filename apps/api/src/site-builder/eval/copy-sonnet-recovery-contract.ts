@@ -9,6 +9,14 @@ export const COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID =
   "site-builder-copy-sonnet-recovery-runtime/2026-08-10-v16-v1" as const;
 export const COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID =
   "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v16-v1" as const;
+// v16 is immutable historical provenance. A fixed-source rebase gets a new
+// binding identity; it never rewrites this artifact or its recovery plan.
+export const COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_OUTPUT_PATH =
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v22.json" as const;
+export const COPY_SONNET_RECOVERY_V22_RUNTIME_MANIFEST_ID =
+  "site-builder-copy-sonnet-recovery-runtime/2026-08-15-v22-v1" as const;
+export const COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_ARTIFACT_ID =
+  "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-15-v22-v1" as const;
 export const COPY_SONNET_RECOVERY_V16_IDENTITY_PREFIXES = Object.freeze({
   campaignId: "copy-sonnet-recovery-v16-campaign-" as const,
   globalAuthorizationId:
