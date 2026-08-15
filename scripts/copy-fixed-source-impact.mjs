@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { appendFile, open } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { appendFile, open, rename, unlink } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -28,9 +28,9 @@ const ELIGIBILITY_KEYS = Object.freeze(
 export const COPY_RUNTIME_ELIGIBILITY_PATH =
   "docs/evidence/site-builder/copy-runtime-eligibility.json";
 export const ACTIVE_COPY_RUNTIME_BINDING_PATH =
-  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json";
+  "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v22.json";
 export const ACTIVE_COPY_RUNTIME_BINDING_SHA256 =
-  "a0b04862b538ae601b352a37d42eb8999ab67011d712d7d4dd765e6fa27ff6af";
+  "135ff0a6166d30b2257de48048b5c6c093a277ace5ef376a6e3dac1582a58bcd";
 const ALLOWED_STALE_PATHS = Object.freeze(["packages/db/prisma/schema.prisma"]);
 
 function fail(code) {
@@ -306,15 +306,16 @@ export function evaluateCopyFixedSourceImpact({
     fail("COPY_FIXED_SOURCE_CURRENT_FILES_INVALID");
   }
 
-  const sourceFingerprint = buildCopySourceFingerprint(current);
+  const expectedReceipt = buildCopyRuntimeEligibilityReceipt({
+    binding,
+    currentFiles: current,
+  });
+  const sourceFingerprint = expectedReceipt.current_source_fingerprint;
   if (eligibility.current_source_fingerprint !== sourceFingerprint) {
     fail("COPY_FIXED_SOURCE_FINGERPRINT_MISMATCH");
   }
-  const driftedPaths = current
-    .filter((entry, index) => entry.sha256 !== boundFiles[index].sha256)
-    .map(({ path }) => path);
-
-  const expectedStatus = driftedPaths.length === 0 ? "CURRENT" : "STALE_HOLD";
+  const driftedPaths = expectedReceipt.drifted_paths;
+  const expectedStatus = expectedReceipt.status;
   if (eligibility.status !== expectedStatus) {
     fail("COPY_FIXED_SOURCE_STATUS_INVALID");
   }
@@ -327,19 +328,10 @@ export function evaluateCopyFixedSourceImpact({
   ) {
     fail("COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH");
   }
-  const expectedStaleScope =
-    expectedStatus === "CURRENT" ? "NONE" : "PRISMA_SCHEMA_EVOLUTION";
-  if (
-    eligibility.stale_scope !== expectedStaleScope ||
-    driftedPaths.some((path) => !ALLOWED_STALE_PATHS.includes(path))
-  ) {
+  if (eligibility.stale_scope !== expectedReceipt.stale_scope) {
     fail("COPY_FIXED_SOURCE_STALE_SCOPE_INVALID");
   }
-  const expectedFollowup =
-    expectedStatus === "CURRENT"
-      ? "SEPARATE_DISPATCH_AUTHORIZATION"
-      : "REBASE_FIXED_SOURCE_BEFORE_DISPATCH";
-  if (eligibility.required_followup !== expectedFollowup) {
+  if (eligibility.required_followup !== expectedReceipt.required_followup) {
     fail("COPY_FIXED_SOURCE_FOLLOWUP_INVALID");
   }
 
@@ -347,6 +339,43 @@ export function evaluateCopyFixedSourceImpact({
     status: expectedStatus,
     driftedPaths,
     sourceFingerprint,
+  });
+}
+
+export function buildCopyRuntimeEligibilityReceipt({ binding, currentFiles }) {
+  const boundFiles = validateBinding(binding);
+  const current = canonicalSourceFiles(
+    currentFiles,
+    "COPY_FIXED_SOURCE_CURRENT_FILES_INVALID",
+  );
+  if (
+    current.length !== boundFiles.length ||
+    current.some((entry, index) => entry.path !== boundFiles[index]?.path)
+  ) {
+    fail("COPY_FIXED_SOURCE_CURRENT_FILES_INVALID");
+  }
+  const driftedPaths = current
+    .filter((entry, index) => entry.sha256 !== boundFiles[index].sha256)
+    .map(({ path }) => path);
+  const status = driftedPaths.length === 0 ? "CURRENT" : "STALE_HOLD";
+  if (driftedPaths.some((path) => !ALLOWED_STALE_PATHS.includes(path))) {
+    fail("COPY_FIXED_SOURCE_STALE_SCOPE_INVALID");
+  }
+  return Object.freeze({
+    schema_version: "site-builder-copy-runtime-eligibility/v1",
+    active_binding_path: ACTIVE_COPY_RUNTIME_BINDING_PATH,
+    active_binding_artifact_id: binding.artifactId,
+    active_binding_source_bundle_digest: binding.sourceBundle.digest,
+    status,
+    current_source_fingerprint: buildCopySourceFingerprint(current),
+    drifted_paths: driftedPaths,
+    dispatch_authorization: "NOT_AUTHORIZED",
+    pilot_eligibility: "BLOCKED",
+    required_followup:
+      status === "CURRENT"
+        ? "SEPARATE_DISPATCH_AUTHORIZATION"
+        : "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
+    stale_scope: status === "CURRENT" ? "NONE" : "PRISMA_SCHEMA_EVOLUTION",
   });
 }
 
@@ -361,17 +390,8 @@ async function parseJsonFile(root, path) {
   }
 }
 
-async function evaluateRepository(root) {
-  let totalBytes = 0;
-  const eligibilityFile = await parseJsonFile(
-    root,
-    COPY_RUNTIME_ELIGIBILITY_PATH,
-  );
-  const eligibility = eligibilityFile.value;
-  totalBytes = accountCopySourceBytes(totalBytes, eligibilityFile.bytes.length);
-  if (eligibility.active_binding_path !== ACTIVE_COPY_RUNTIME_BINDING_PATH) {
-    fail("COPY_FIXED_SOURCE_SAFETY_BOUNDARY_INVALID");
-  }
+async function readActiveBindingAndCurrentFiles(root, initialTotalBytes = 0) {
+  let totalBytes = initialTotalBytes;
   const bindingBytes = await readAnchoredRepositoryFile(
     root,
     ACTIVE_COPY_RUNTIME_BINDING_PATH,
@@ -405,12 +425,81 @@ async function evaluateRepository(root) {
       sha256: createHash("sha256").update(bytes).digest("hex"),
     });
   }
+  return Object.freeze({ binding, currentFiles: Object.freeze(currentFiles) });
+}
+
+export async function prepareCopyRuntimeEligibilityReceiptFromRepository(root) {
+  return buildCopyRuntimeEligibilityReceipt(
+    await readActiveBindingAndCurrentFiles(root),
+  );
+}
+
+export async function writeCopyRuntimeEligibilityReceiptFromRepository(root) {
+  const receipt =
+    await prepareCopyRuntimeEligibilityReceiptFromRepository(root);
+  const outputPath = resolve(root, COPY_RUNTIME_ELIGIBILITY_PATH);
+  const temporaryPath = resolve(
+    dirname(outputPath),
+    `.${COPY_RUNTIME_ELIGIBILITY_PATH.split("/").at(-1)}.${process.pid}.tmp`,
+  );
+  let output;
+  try {
+    output = await open(
+      temporaryPath,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      0o600,
+    );
+    await output.writeFile(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+    await output.sync();
+    await output.close();
+    output = undefined;
+    await rename(temporaryPath, outputPath);
+  } catch (error) {
+    await output?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+  return receipt;
+}
+
+async function evaluateRepository(root) {
+  const eligibilityFile = await parseJsonFile(
+    root,
+    COPY_RUNTIME_ELIGIBILITY_PATH,
+  );
+  const eligibility = eligibilityFile.value;
+  if (eligibility.active_binding_path !== ACTIVE_COPY_RUNTIME_BINDING_PATH) {
+    fail("COPY_FIXED_SOURCE_SAFETY_BOUNDARY_INVALID");
+  }
+  const { binding, currentFiles } = await readActiveBindingAndCurrentFiles(
+    root,
+    accountCopySourceBytes(0, eligibilityFile.bytes.length),
+  );
   return evaluateCopyFixedSourceImpact({ binding, eligibility, currentFiles });
 }
 
 async function main(argv) {
   const root = process.cwd();
-  const result = await evaluateRepository(root);
+  const writeEligibility =
+    argv.length === 1 && argv[0] === "--write-eligibility";
+  const result = writeEligibility
+    ? await writeCopyRuntimeEligibilityReceiptFromRepository(root)
+    : await evaluateRepository(root);
+  if (writeEligibility) {
+    process.stdout.write(
+      `${JSON.stringify({
+        result: result.status,
+        active_binding_path: result.active_binding_path,
+        active_binding_artifact_id: result.active_binding_artifact_id,
+        dispatch_authorization: result.dispatch_authorization,
+        pilot_eligibility: result.pilot_eligibility,
+      })}\n`,
+    );
+    return;
+  }
   const outputIndex = argv.indexOf("--github-output");
   if (outputIndex !== -1) {
     const outputPath = argv[outputIndex + 1];

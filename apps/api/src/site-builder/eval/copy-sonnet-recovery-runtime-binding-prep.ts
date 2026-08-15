@@ -536,7 +536,7 @@ export async function prepareCopySonnetRecoveryRuntimeBindingFromRepository(
   }
   const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
     fixedSourceCommit,
-    preparationHeadCommit: fixedSourceCommit,
+    preparationHeadCommit: preparationCheckoutCommit,
     sourceFiles,
     recoveryManifestBytes,
     compiledRuntimeExpectation,

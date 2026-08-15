@@ -389,6 +389,21 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     expect(sources).not.toMatch(/\bfetch\b|process\.env|apiKey|credentialRef/u);
   });
 
+  it("records the clean preparation checkout separately from an ancestor fixed source", () => {
+    const source = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "copy-sonnet-recovery-runtime-binding-prep.ts",
+      ),
+      "utf8",
+    );
+
+    expect(source).toMatch(
+      /preparationHeadCommit: preparationCheckoutCommit,/u,
+    );
+    expect(source).not.toMatch(/preparationHeadCommit: fixedSourceCommit,/u);
+  });
+
   it("matches the generated v13 create-only runtime binding exactly", () => {
     const recoveryManifestBytes = readFileSync(
       resolve(REPOSITORY_ROOT, HISTORICAL_V13_MANIFEST_PATH),
