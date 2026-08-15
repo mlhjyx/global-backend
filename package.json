@@ -5,6 +5,11 @@
   "engines": {
     "node": ">=22"
   },
+  "pnpm": {
+    "overrides": {
+      "nanoid@>=3.0.0 <4.0.0": "3.3.18"
+    }
+  },
   "scripts": {
     "api:dev": "pnpm --filter @global/api start:dev",
     "api:build": "pnpm --filter @global/api build",

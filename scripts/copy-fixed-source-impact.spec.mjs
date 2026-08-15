@@ -8,6 +8,7 @@ import {
   ACTIVE_COPY_RUNTIME_BINDING_PATH,
   ACTIVE_COPY_RUNTIME_BINDING_SHA256,
   accountCopySourceBytes,
+  buildCopyRuntimeEligibilityReceipt,
   buildCopySourceFingerprint,
   evaluateCopyFixedSourceImpact,
   readAnchoredRepositoryFile,
@@ -34,7 +35,7 @@ function regularStat(overrides = {}) {
 function binding() {
   return {
     artifactId:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v16-v1",
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-15-v22-v1",
     fixedSourceCommit: "f".repeat(40),
     dispatchAuthorization: "NOT_AUTHORIZED",
     sourceBundle: {
@@ -54,10 +55,8 @@ function eligibility(overrides = {}) {
   ];
   return {
     schema_version: "site-builder-copy-runtime-eligibility/v1",
-    active_binding_path:
-      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json",
-    active_binding_artifact_id:
-      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-10-v16-v1",
+    active_binding_path: ACTIVE_COPY_RUNTIME_BINDING_PATH,
+    active_binding_artifact_id: binding().artifactId,
     active_binding_source_bundle_digest: SHA_A,
     status: "CURRENT",
     current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
@@ -73,11 +72,11 @@ function eligibility(overrides = {}) {
 test("Copy impact stays CURRENT only when every bound source byte matches", () => {
   assert.equal(
     ACTIVE_COPY_RUNTIME_BINDING_PATH,
-    "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json",
+    "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v22.json",
   );
   assert.equal(
     ACTIVE_COPY_RUNTIME_BINDING_SHA256,
-    "a0b04862b538ae601b352a37d42eb8999ab67011d712d7d4dd765e6fa27ff6af",
+    "135ff0a6166d30b2257de48048b5c6c093a277ace5ef376a6e3dac1582a58bcd",
   );
   const result = evaluateCopyFixedSourceImpact({
     binding: binding(),
@@ -92,6 +91,29 @@ test("Copy impact stays CURRENT only when every bound source byte matches", () =
     status: "CURRENT",
     driftedPaths: [],
     sourceFingerprint: eligibility().current_source_fingerprint,
+  });
+});
+
+test("Copy eligibility receipt is derived from the active binding without dispatch", () => {
+  const receipt = buildCopyRuntimeEligibilityReceipt({
+    binding: binding(),
+    currentFiles: binding().sourceBundle.files,
+  });
+
+  assert.deepEqual(receipt, {
+    schema_version: "site-builder-copy-runtime-eligibility/v1",
+    active_binding_path: ACTIVE_COPY_RUNTIME_BINDING_PATH,
+    active_binding_artifact_id: binding().artifactId,
+    active_binding_source_bundle_digest: binding().sourceBundle.digest,
+    status: "CURRENT",
+    current_source_fingerprint: buildCopySourceFingerprint(
+      binding().sourceBundle.files,
+    ),
+    drifted_paths: [],
+    dispatch_authorization: "NOT_AUTHORIZED",
+    pilot_eligibility: "BLOCKED",
+    required_followup: "SEPARATE_DISPATCH_AUTHORIZATION",
+    stale_scope: "NONE",
   });
 });
 

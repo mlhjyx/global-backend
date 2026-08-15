@@ -28,8 +28,10 @@ import {
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
   COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
   COPY_SONNET_RECOVERY_RUNTIME_SOURCE_FILE_SPECS,
+  COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_IDENTITY,
   buildCopySonnetRecoveryRuntimeBindingArtifact,
   prepareCopySonnetRecoveryRuntimeBindingFromRepository,
+  prepareCopySonnetRecoveryV22RuntimeBindingFromRepository,
   validateCopySonnetRecoveryRuntimeBindingArtifact,
   writeCopySonnetRecoveryRuntimeBindingCreateOnly,
 } from "./copy-sonnet-recovery-runtime-binding-prep";
@@ -192,6 +194,34 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
     );
   });
 
+  it("creates a v22 successor without changing the historical v16 identity", () => {
+    const input = fixture();
+    const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
+      fixedSourceCommit: input.fixedSourceCommit,
+      preparationHeadCommit: input.fixedSourceCommit,
+      sourceFiles: input.sourceFiles,
+      recoveryManifestBytes: input.recoveryBytes,
+      compiledRuntimeExpectation: input.compiledRuntimeExpectation,
+      fixedCommitReachableFromOriginMainAtPreparation: false,
+      identity: COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_IDENTITY,
+    });
+
+    expect(COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH).toBe(
+      "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v16.json",
+    );
+    expect(artifact.artifactId).toBe(
+      "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-15-v22-v1",
+    );
+    expect(artifact.manifest.manifestId).toBe(
+      "site-builder-copy-sonnet-recovery-runtime/2026-08-15-v22-v1",
+    );
+    expect(artifact.dispatchAuthorization).toBe("NOT_AUTHORIZED");
+    expect(artifact.dispatchCapable).toBe(false);
+    expect(prepareCopySonnetRecoveryV22RuntimeBindingFromRepository).toBeTypeOf(
+      "function",
+    );
+  });
+
   it("guards every recovery runtime module in the compiled expectation", () => {
     const fixedSourceSpecs = buildCopyRealCapabilitySourceFileSpecs([
       "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
@@ -347,9 +377,31 @@ describe("Copy Sonnet recovery fixed-source runtime binding", () => {
         ),
         "utf8",
       ),
+      readFileSync(
+        resolve(
+          import.meta.dirname,
+          "../../../scripts/prepare-site-builder-copy-sonnet-recovery-v22-runtime-binding.mts",
+        ),
+        "utf8",
+      ),
     ].join("\n");
 
     expect(sources).not.toMatch(/\bfetch\b|process\.env|apiKey|credentialRef/u);
+  });
+
+  it("records the clean preparation checkout separately from an ancestor fixed source", () => {
+    const source = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "copy-sonnet-recovery-runtime-binding-prep.ts",
+      ),
+      "utf8",
+    );
+
+    expect(source).toMatch(
+      /preparationHeadCommit: preparationCheckoutCommit,/u,
+    );
+    expect(source).not.toMatch(/preparationHeadCommit: fixedSourceCommit,/u);
   });
 
   it("matches the generated v13 create-only runtime binding exactly", () => {

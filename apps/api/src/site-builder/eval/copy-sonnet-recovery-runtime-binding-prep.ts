@@ -21,6 +21,9 @@ import {
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
   COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
   COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+  COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_ARTIFACT_ID,
+  COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_OUTPUT_PATH,
+  COPY_SONNET_RECOVERY_V22_RUNTIME_MANIFEST_ID,
 } from "./copy-sonnet-recovery-contract";
 import {
   validateCopySonnetRecoveryManifestArtifact,
@@ -42,7 +45,28 @@ const VERIFIED_PREPARATION_ARTIFACTS = new WeakSet<object>();
 export {
   COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
   COPY_SONNET_RECOVERY_SOURCE_MANIFEST_PATH,
+  COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_OUTPUT_PATH,
 };
+
+export interface CopySonnetRecoveryRuntimeBindingIdentity {
+  outputPath: string;
+  manifestId: string;
+  artifactId:
+    | typeof COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID
+    | typeof COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_ARTIFACT_ID;
+}
+
+export const COPY_SONNET_RECOVERY_V16_RUNTIME_BINDING_IDENTITY = Object.freeze({
+  outputPath: COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH,
+  manifestId: COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
+  artifactId: COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID,
+} satisfies CopySonnetRecoveryRuntimeBindingIdentity);
+
+export const COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_IDENTITY = Object.freeze({
+  outputPath: COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_OUTPUT_PATH,
+  manifestId: COPY_SONNET_RECOVERY_V22_RUNTIME_MANIFEST_ID,
+  artifactId: COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_ARTIFACT_ID,
+} satisfies CopySonnetRecoveryRuntimeBindingIdentity);
 
 const RECOVERY_SOURCE_FILE_SPECS = Object.freeze([
   Object.freeze({
@@ -88,7 +112,9 @@ export const COPY_SONNET_RECOVERY_RUNTIME_ARTIFACT_PATHS = Object.freeze(
 
 export interface CopySonnetRecoveryRuntimeBindingArtifact {
   schemaVersion: "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1";
-  artifactId: typeof COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID;
+  artifactId:
+    | typeof COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID
+    | typeof COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_ARTIFACT_ID;
   classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME";
   fixedSourceCommit: string;
   preparationHeadCommit: string;
@@ -132,6 +158,15 @@ export interface CopySonnetRecoveryRuntimeBindingArtifact {
     "NEVER_REUSE_V11_V12_V13_V14_OR_V15_AUTHORIZATION_OR_WIRE",
   ];
   artifactDigest: string;
+}
+
+export interface CopySonnetRecoveryRuntimeBindingPreparationOptions {
+  /**
+   * Rebuild an already-reviewed binding from its immutable source commit. The
+   * commit must remain an ancestor of the clean preparation checkout; every
+   * bound working-tree byte is still compared with that commit before build.
+   */
+  fixedSourceCommit?: string;
 }
 
 function fail(code: string): never {
@@ -231,7 +266,10 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
   recoveryManifestBytes: Uint8Array;
   compiledRuntimeExpectation: CompiledRuntimeExpectation;
   fixedCommitReachableFromOriginMainAtPreparation: boolean;
+  identity?: CopySonnetRecoveryRuntimeBindingIdentity;
 }): CopySonnetRecoveryRuntimeBindingArtifact {
+  const identity =
+    input.identity ?? COPY_SONNET_RECOVERY_V16_RUNTIME_BINDING_IDENTITY;
   if (
     !GIT_COMMIT.test(input.fixedSourceCommit) ||
     !GIT_COMMIT.test(input.preparationHeadCommit) ||
@@ -295,7 +333,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
   const manifest = Object.freeze({
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-manifest/2026-08-08-v1" as const,
-    manifestId: COPY_SONNET_RECOVERY_RUNTIME_MANIFEST_ID,
+    manifestId: identity.manifestId,
     recoveryManifestArtifactDigest: recoveryArtifact.artifactDigest,
     recoveryManifestDigest: recoveryManifestReference.manifestDigest,
     fixedSourceCommit: input.fixedSourceCommit,
@@ -311,7 +349,7 @@ export function buildCopySonnetRecoveryRuntimeBindingArtifact(input: {
   const withoutDigest = {
     schemaVersion:
       "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-08-v1" as const,
-    artifactId: COPY_SONNET_RECOVERY_RUNTIME_BINDING_ARTIFACT_ID,
+    artifactId: identity.artifactId,
     classification: "FIXED_SOURCE_CREATE_ONLY_SONNET_RECOVERY_RUNTIME" as const,
     fixedSourceCommit: input.fixedSourceCommit,
     preparationHeadCommit: input.preparationHeadCommit,
@@ -363,6 +401,15 @@ export function validateCopySonnetRecoveryRuntimeBindingArtifact(
       throw new Error();
     }
     const artifact = value as CopySonnetRecoveryRuntimeBindingArtifact;
+    const identity = [
+      COPY_SONNET_RECOVERY_V16_RUNTIME_BINDING_IDENTITY,
+      COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_IDENTITY,
+    ].find(
+      (candidate) =>
+        candidate.artifactId === artifact.artifactId &&
+        candidate.manifestId === artifact.manifest.manifestId,
+    );
+    if (!identity) throw new Error();
     const rebuilt = buildCopySonnetRecoveryRuntimeBindingArtifact({
       fixedSourceCommit: artifact.fixedSourceCommit,
       preparationHeadCommit: artifact.preparationHeadCommit,
@@ -372,6 +419,7 @@ export function validateCopySonnetRecoveryRuntimeBindingArtifact(
       fixedCommitReachableFromOriginMainAtPreparation:
         artifact.preparationVerification
           .fixedCommitReachableFromOriginMainAtPreparation,
+      identity,
     });
     if (canonicalDigest(rebuilt) !== canonicalDigest(artifact)) {
       throw new Error();
@@ -408,6 +456,8 @@ function gitAncestor(
 
 export async function prepareCopySonnetRecoveryRuntimeBindingFromRepository(
   repositoryRoot: string,
+  identity: CopySonnetRecoveryRuntimeBindingIdentity = COPY_SONNET_RECOVERY_V16_RUNTIME_BINDING_IDENTITY,
+  options: CopySonnetRecoveryRuntimeBindingPreparationOptions = {},
 ): Promise<CopySonnetRecoveryRuntimeBindingArtifact> {
   const root = realpathSync(repositoryRoot);
   if (
@@ -415,8 +465,13 @@ export async function prepareCopySonnetRecoveryRuntimeBindingFromRepository(
   ) {
     fail("COPY_SONNET_RECOVERY_PREPARATION_WORKTREE_DIRTY");
   }
-  const fixedSourceCommit = gitText(root, ["rev-parse", "HEAD"]);
+  const preparationCheckoutCommit = gitText(root, ["rev-parse", "HEAD"]);
+  const fixedSourceCommit =
+    options.fixedSourceCommit ?? preparationCheckoutCommit;
   if (!GIT_COMMIT.test(fixedSourceCommit)) {
+    fail("COPY_SONNET_RECOVERY_FIXED_SOURCE_INVALID");
+  }
+  if (!gitAncestor(root, fixedSourceCommit, preparationCheckoutCommit)) {
     fail("COPY_SONNET_RECOVERY_FIXED_SOURCE_INVALID");
   }
   const trackedTransitivePaths = gitText(root, [
@@ -474,14 +529,14 @@ export async function prepareCopySonnetRecoveryRuntimeBindingFromRepository(
     buildCommands: COPY_PILOT_COMPILED_BUILD_COMMANDS,
   });
   if (
-    gitText(root, ["rev-parse", "HEAD"]) !== fixedSourceCommit ||
+    gitText(root, ["rev-parse", "HEAD"]) !== preparationCheckoutCommit ||
     gitText(root, ["status", "--porcelain", "--untracked-files=all"]) !== ""
   ) {
     fail("COPY_SONNET_RECOVERY_PREPARATION_SNAPSHOT_DRIFT");
   }
   const artifact = buildCopySonnetRecoveryRuntimeBindingArtifact({
     fixedSourceCommit,
-    preparationHeadCommit: fixedSourceCommit,
+    preparationHeadCommit: preparationCheckoutCommit,
     sourceFiles,
     recoveryManifestBytes,
     compiledRuntimeExpectation,
@@ -490,9 +545,21 @@ export async function prepareCopySonnetRecoveryRuntimeBindingFromRepository(
       fixedSourceCommit,
       "origin/main",
     ),
+    identity,
   });
   VERIFIED_PREPARATION_ARTIFACTS.add(artifact);
   return artifact;
+}
+
+export async function prepareCopySonnetRecoveryV22RuntimeBindingFromRepository(
+  repositoryRoot: string,
+  options: CopySonnetRecoveryRuntimeBindingPreparationOptions = {},
+): Promise<CopySonnetRecoveryRuntimeBindingArtifact> {
+  return prepareCopySonnetRecoveryRuntimeBindingFromRepository(
+    repositoryRoot,
+    COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_IDENTITY,
+    options,
+  );
 }
 
 export async function writeCopySonnetRecoveryRuntimeBindingCreateOnly(
@@ -502,11 +569,17 @@ export async function writeCopySonnetRecoveryRuntimeBindingCreateOnly(
   if (!VERIFIED_PREPARATION_ARTIFACTS.has(artifact)) {
     fail("COPY_SONNET_RECOVERY_PREPARATION_NOT_VERIFIED");
   }
-  const root = await realpath(repositoryRoot);
-  const parent = resolve(
-    root,
-    dirname(COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH),
+  const identity = [
+    COPY_SONNET_RECOVERY_V16_RUNTIME_BINDING_IDENTITY,
+    COPY_SONNET_RECOVERY_V22_RUNTIME_BINDING_IDENTITY,
+  ].find(
+    (candidate) =>
+      candidate.artifactId === artifact.artifactId &&
+      candidate.manifestId === artifact.manifest.manifestId,
   );
+  if (!identity) fail("COPY_SONNET_RECOVERY_PREPARATION_NOT_VERIFIED");
+  const root = await realpath(repositoryRoot);
+  const parent = resolve(root, dirname(identity.outputPath));
   const parentMetadata = await lstat(parent);
   if (parentMetadata.isSymbolicLink() || !parentMetadata.isDirectory()) {
     fail("COPY_SONNET_RECOVERY_OUTPUT_PARENT_INVALID");
@@ -541,10 +614,7 @@ export async function writeCopySonnetRecoveryRuntimeBindingCreateOnly(
       fail("COPY_SONNET_RECOVERY_OUTPUT_PARENT_INVALID");
     }
     output = await open(
-      join(
-        descriptorPath,
-        basename(COPY_SONNET_RECOVERY_RUNTIME_BINDING_OUTPUT_PATH),
-      ),
+      join(descriptorPath, basename(identity.outputPath)),
       constants.O_WRONLY |
         constants.O_CREAT |
         constants.O_EXCL |
