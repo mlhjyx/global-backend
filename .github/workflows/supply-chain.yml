@@ -88,6 +88,24 @@ jobs:
           fi
 
           node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"
+          install_trusted_production_dependencies() {
+            local target_root="$1"
+            (
+              cd "$target_root"
+              env -i \
+                HOME="$HOME" \
+                PATH="$PATH" \
+                CI=true \
+                NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
+                NPM_CONFIG_USERCONFIG=/dev/null \
+                NPM_CONFIG_GLOBALCONFIG=/dev/null \
+                NPM_CONFIG_IGNORE_PNPMFILE=true \
+                NPM_CONFIG_IGNORE_SCRIPTS=true \
+                pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https://registry.npmjs.org
+            )
+          }
+          install_trusted_production_dependencies "$TRUSTED_BASE_WORKTREE"
+          install_trusted_production_dependencies "$GITHUB_WORKSPACE"
           if git diff --quiet "$PR_BASE_SHA" "$PR_HEAD_SHA" -- \
             package.json ':(glob)**/package.json' \
             pnpm-lock.yaml pnpm-workspace.yaml \

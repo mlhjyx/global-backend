@@ -1030,6 +1030,73 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
   }
 });
 
+test("comparable PR audits materialize both exact subjects before auditing", async () => {
+  const workflow = await readRepositoryFile(
+    ".github/workflows/supply-chain.yml",
+  );
+  const productionAuditDelta = workflow.slice(
+    workflow.indexOf("  production-audit-delta:\n"),
+    workflow.indexOf("  baseline-freshness:\n"),
+  );
+
+  assert.match(
+    productionAuditDelta,
+    /install_trusted_production_dependencies\(\) \{[\s\S]+target_root="\$1"[\s\S]+cd "\$target_root"[\s\S]+env -i[\s\S]+NPM_CONFIG_REGISTRY=https:\/\/registry\.npmjs\.org\/[\s\S]+NPM_CONFIG_USERCONFIG=\/dev\/null[\s\S]+NPM_CONFIG_GLOBALCONFIG=\/dev\/null[\s\S]+NPM_CONFIG_IGNORE_PNPMFILE=true[\s\S]+NPM_CONFIG_IGNORE_SCRIPTS=true[\s\S]+pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --registry=https:\/\/registry\.npmjs\.org/,
+    "the comparable-audit job must materialize each subject through a trusted, scriptless pnpm environment",
+  );
+
+  const baseValidation = productionAuditDelta.indexOf(
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$TRUSTED_BASE_WORKTREE"',
+  );
+  const candidateValidation = productionAuditDelta.lastIndexOf(
+    'node "$TRUSTED_SOURCE_POLICY" validate-sources --repository-root "$GITHUB_WORKSPACE"',
+  );
+  const baseInstall = productionAuditDelta.indexOf(
+    'install_trusted_production_dependencies "$TRUSTED_BASE_WORKTREE"',
+  );
+  const candidateInstall = productionAuditDelta.indexOf(
+    'install_trusted_production_dependencies "$GITHUB_WORKSPACE"',
+  );
+  const installCalls = [
+    ...productionAuditDelta.matchAll(
+      /install_trusted_production_dependencies "\$(TRUSTED_BASE_WORKTREE|GITHUB_WORKSPACE)"/g,
+    ),
+  ].map((match) => match[0]);
+  const graphDelta = productionAuditDelta.indexOf(
+    'node "$TRUSTED_VERIFIER" graph-delta',
+  );
+
+  assert.ok(
+    baseValidation >= 0,
+    "the exact base must be source-policy validated",
+  );
+  assert.ok(
+    candidateValidation >= 0,
+    "the exact candidate must be source-policy validated by the trusted base policy",
+  );
+  assert.ok(
+    baseInstall > baseValidation && baseInstall < graphDelta,
+    "the exact base must be materialized after validation and before audit",
+  );
+  assert.ok(
+    candidateInstall > candidateValidation && candidateInstall < graphDelta,
+    "the exact candidate must be materialized after validation and before audit",
+  );
+  assert.deepEqual(
+    installCalls,
+    [
+      'install_trusted_production_dependencies "$TRUSTED_BASE_WORKTREE"',
+      'install_trusted_production_dependencies "$GITHUB_WORKSPACE"',
+    ],
+    "the comparable-audit job must install each exact audit subject once",
+  );
+  assert.doesNotMatch(
+    productionAuditDelta,
+    /DEPENDENCY_GRAPH_DELTA_PROTOCOL/,
+    "the comparable-audit job must not fall back to the legacy graph-delta protocol",
+  );
+});
+
 test("package-manager network trust is isolated before install and audit", async () => {
   const {
     assertNoRepositoryNpmrc,
