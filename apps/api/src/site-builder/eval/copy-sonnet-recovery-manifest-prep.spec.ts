@@ -265,70 +265,109 @@ describe("Copy Sonnet-only recovery create-only manifest", () => {
   });
 
   it.runIf(process.env.COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST === "1")(
-    "rebuilds the fixed-source bundle from a clean current preparation head",
+    "rebuilds the immutable v16 bundle only from its clean fixed-source checkout",
     async () => {
       const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: REPOSITORY_ROOT,
         encoding: "utf8",
       }).trim();
-      const artifact =
-        await prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT);
+      // The live successor must not make historical v16 appear current. The
+      // preparation path checks every bound byte against its fixed commit.
+      await expect(
+        prepareCopySonnetRecoveryManifestFromRepository(REPOSITORY_ROOT),
+      ).rejects.toThrow("COPY_SONNET_RECOVERY_TRACKED_BYTES_MISMATCH");
 
-      expect(artifact).toMatchObject({
-        fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
-        preparationHeadCommit: currentCommit,
-        dispatchAuthorization: "NOT_AUTHORIZED",
-        dispatchCapable: false,
-        observedNetworkCalls: 0,
-        observedModelWireCalls: 0,
-        observedModelCost: { CNY: 0, USD: 0 },
-      });
-      const sourcePaths = artifact.sourceBundle.files.map(({ path }) => path);
-      expect(sourcePaths).toEqual([...sourcePaths].sort());
-      expect(new Set(sourcePaths).size).toBe(sourcePaths.length);
-      expect(sourcePaths.length).toBeGreaterThanOrEqual(
-        COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.length,
+      const fixedSourceRoot = mkdtempSync(
+        join(tmpdir(), "copy-sonnet-recovery-fixed-source-"),
       );
-      expect(artifact.sourceBundle.files).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: "apps/api/src/model-runtime/types.ts",
-          }),
-          expect.objectContaining({
-            path: "apps/api/src/model-runtime/adapters/ai-sdk-adapter-result.ts",
-          }),
-          expect.objectContaining({
-            path: "apps/api/src/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.ts",
-          }),
-          expect.objectContaining({
-            path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
-          }),
-          expect.objectContaining({
-            path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
-          }),
-        ]),
-      );
-      const outputRoot = mkdtempSync(
-        join(tmpdir(), "copy-sonnet-recovery-manifest-write-"),
-      );
+      rmSync(fixedSourceRoot, { recursive: true, force: true });
+      let worktreeCreated = false;
       try {
-        mkdirSync(resolve(outputRoot, "docs/evidence/site-builder"), {
-          recursive: true,
+        execFileSync(
+          "git",
+          [
+            "worktree",
+            "add",
+            "--detach",
+            fixedSourceRoot,
+            COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
+          ],
+          { cwd: REPOSITORY_ROOT },
+        );
+        worktreeCreated = true;
+        const artifact =
+          await prepareCopySonnetRecoveryManifestFromRepository(
+            fixedSourceRoot,
+          );
+
+        expect(artifact).toMatchObject({
+          fixedSourceCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
+          preparationHeadCommit: COPY_SONNET_RECOVERY_FIXED_SOURCE_COMMIT,
+          dispatchAuthorization: "NOT_AUTHORIZED",
+          dispatchCapable: false,
+          observedNetworkCalls: 0,
+          observedModelWireCalls: 0,
+          observedModelCost: { CNY: 0, USD: 0 },
         });
-        await writeCopySonnetRecoveryManifestCreateOnly(outputRoot, artifact);
-        const outputPath = resolve(
-          outputRoot,
-          COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH,
+        expect(artifact.preparationHeadCommit).not.toBe(currentCommit);
+        const sourcePaths = artifact.sourceBundle.files.map(({ path }) => path);
+        expect(sourcePaths).toEqual([...sourcePaths].sort());
+        expect(new Set(sourcePaths).size).toBe(sourcePaths.length);
+        expect(sourcePaths.length).toBeGreaterThanOrEqual(
+          COPY_REAL_CAPABILITY_MANIFEST_SOURCE_FILES.length,
         );
-        expect(JSON.parse(readFileSync(outputPath, "utf8"))).toStrictEqual(
-          artifact,
+        expect(artifact.sourceBundle.files).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              path: "apps/api/src/model-runtime/types.ts",
+            }),
+            expect.objectContaining({
+              path: "apps/api/src/model-runtime/adapters/ai-sdk-adapter-result.ts",
+            }),
+            expect.objectContaining({
+              path: "apps/api/src/model-runtime/adapters/ai-sdk-anthropic-messages.adapter.ts",
+            }),
+            expect.objectContaining({
+              path: "apps/api/src/model-runtime/real-model-execution-ledger.ts",
+            }),
+            expect.objectContaining({
+              path: "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
+            }),
+          ]),
         );
-        expect(statSync(outputPath).mode & 0o777).toBe(0o600);
-        await expect(
-          writeCopySonnetRecoveryManifestCreateOnly(outputRoot, artifact),
-        ).rejects.toMatchObject({ code: "EEXIST" });
+        const outputRoot = mkdtempSync(
+          join(tmpdir(), "copy-sonnet-recovery-manifest-write-"),
+        );
+        try {
+          mkdirSync(resolve(outputRoot, "docs/evidence/site-builder"), {
+            recursive: true,
+          });
+          await writeCopySonnetRecoveryManifestCreateOnly(outputRoot, artifact);
+          const outputPath = resolve(
+            outputRoot,
+            COPY_SONNET_RECOVERY_MANIFEST_OUTPUT_PATH,
+          );
+          expect(JSON.parse(readFileSync(outputPath, "utf8"))).toStrictEqual(
+            artifact,
+          );
+          expect(statSync(outputPath).mode & 0o777).toBe(0o600);
+          await expect(
+            writeCopySonnetRecoveryManifestCreateOnly(outputRoot, artifact),
+          ).rejects.toMatchObject({ code: "EEXIST" });
+        } finally {
+          rmSync(outputRoot, { recursive: true, force: true });
+        }
       } finally {
-        rmSync(outputRoot, { recursive: true, force: true });
+        if (worktreeCreated) {
+          execFileSync(
+            "git",
+            ["worktree", "remove", "--force", fixedSourceRoot],
+            {
+              cwd: REPOSITORY_ROOT,
+            },
+          );
+        }
+        rmSync(fixedSourceRoot, { recursive: true, force: true });
       }
     },
     30_000,
