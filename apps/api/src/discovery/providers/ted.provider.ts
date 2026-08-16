@@ -118,6 +118,12 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
       });
       const idValue = w.identifier?.trim();
       const country = toAlpha2(w.country); // §8.3：ISO-3(DEU)→alpha-2(DE)，复用于国别字段 + §8.4 id scheme 国别限定
+      const identifier = idValue
+        ? {
+            scheme: country ? `${TED_ID_SCHEME}:${country.toLowerCase()}` : TED_ID_SCHEME,
+            value: idValue,
+          }
+        : undefined;
       return {
         externalId: `ted:${notice.publicationNumber ?? 'na'}:${i}`,
         name: w.name.trim(),
@@ -125,12 +131,8 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         country,
         // §8.4：winner-identifier 是**国别**税号/注册号（仅国内唯一）→ scheme 按国别限定，防不同国
         // 同号的不同法人跨境误并（审查修正 · 绝不贴错身份）；无国别时退回裸 scheme（罕见）。
-        identifier: idValue
-          ? {
-              scheme: country ? `${TED_ID_SCHEME}:${country.toLowerCase()}` : TED_ID_SCHEME,
-              value: idValue,
-            }
-          : undefined,
+        identifier,
+        identifiers: identifier ? [identifier] : undefined,
         license: TED_LICENSE, // §8.5 绿事实 CC BY 4.0 署名义务（写入 field_evidence.license）
         attributes: { ted },
         provenance: {

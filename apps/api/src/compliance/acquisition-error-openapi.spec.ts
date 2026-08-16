@@ -29,6 +29,9 @@ describe('acquisition compliance error OpenAPI', () => {
       'SUPPRESSED_CONTACT_UNREACHABLE',
       'STORAGE_RIGHTS_NOT_GRANTED',
       'SANCTIONS_HOLD_UNRESOLVED',
+      'IDENTITY_CONFLICT_OPEN',
+      'IDENTITY_LEAD_CONFLICT',
+      'IDENTITY_CHANGE_PENDING',
       'CONFLICT',
     ]);
   });

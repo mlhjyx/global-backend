@@ -7,12 +7,17 @@ import {
   DISCOVERY_WORKFLOW,
   ASSET_OBJECT_CLEANUP_WORKFLOW,
   QUALIFY_WORKFLOW,
+  ORGANIZATION_IDENTITY_REPLAY_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from '../temporal/understanding.constants';
 import { matchesAssetCleanupPayload, parseAssetCleanupCommand } from '../temporal/asset-cleanup.contract';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { seedSanctions } from '../sanctions/sanctions-seed';
+import {
+  RUNTIME_HEARTBEAT_INTERVAL_MS,
+  RuntimeComponentLease,
+} from '../health/runtime-component-lease';
 import { INTEGRATION_EVENTS, INTERNAL_COMMANDS, PULL_SINK, WEBHOOK_SINK, toEnvelope } from './event-registry';
 
 /**
@@ -83,7 +88,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('OutboxRelay');
   private readonly db: PrismaClient;
   private readonly fetchFn: FetchLike;
+  private readonly runtimeLease: RuntimeComponentLease;
   private timer?: NodeJS.Timeout;
+  private heartbeatTimer?: NodeJS.Timeout;
   private running = false;
   private expireCounter = 0;
 
@@ -95,6 +102,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   ) {
     this.db = db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
     this.fetchFn = fetchFn ?? ((url, init) => fetch(url, init));
+    this.runtimeLease = new RuntimeComponentLease(this.db, 'OUTBOX_RELAY');
   }
 
   async onModuleInit(): Promise<void> {
@@ -117,6 +125,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         'SAAS_WEBHOOK_URL 已配置但 webhook sink 拒绝启用：需同时配 SAAS_WEBHOOK_SECRET 且 URL 为 https://（dev 例外：localhost/127.0.0.1）。当前不建 webhook 交付行、不派送。',
       );
     }
+    await this.runtimeLease.start({ loop: 'polling', interval_ms: 2_000 });
+    this.startHeartbeatTimer();
     this.timer = setInterval(() => {
       void this.tick();
     }, 2000);
@@ -124,12 +134,32 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
-    await this.db.$disconnect();
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    try {
+      await this.runtimeLease.stop({ loop: 'stopped' });
+    } finally {
+      await this.db.$disconnect();
+    }
+  }
+
+  private startHeartbeatTimer(): void {
+    this.heartbeatTimer = setInterval(() => {
+      // Keep process evidence fresh while a bounded slow batch is actively
+      // making progress. Idle cycles still renew only after tick() succeeds.
+      if (!this.running) return;
+      void this.runtimeLease
+        .renew({ loop: 'polling', tick_state: 'running' })
+        .catch((err) =>
+          this.logger.error(`relay heartbeat renewal failed: ${String(err)}`),
+        );
+    }, RUNTIME_HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref();
   }
 
   async tick(): Promise<void> {
     if (this.running) return; // avoid overlapping ticks
     this.running = true;
+    let tickSucceeded = false;
     try {
       await this.expireDueClaims();
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
@@ -145,9 +175,15 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       if (this.webhookEnabled()) {
         await this.pumpWebhookDeliveries(new Date());
       }
+      tickSucceeded = true;
     } catch (err) {
       this.logger.error(`relay tick failed: ${String(err)}`);
     } finally {
+      if (tickSucceeded) {
+        await this.runtimeLease
+          .renew({ loop: 'polling', last_tick: 'ok' })
+          .catch((err) => this.logger.error(`relay heartbeat renewal failed: ${String(err)}`));
+      }
       this.running = false;
     }
   }
@@ -472,6 +508,21 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `deletion workflow for request ${ev.aggregateId}`,
+      );
+    }
+    if (ev.eventType === 'OrganizationIdentityReplayRequested') {
+      const payload = (ev.payload ?? {}) as { replayId?: string };
+      if (payload.replayId !== ev.aggregateId) {
+        throw new NonRetryableOutboxCommandError('identity replay payload replayId must match aggregateId');
+      }
+      await this.startWorkflowIdempotent(
+        ORGANIZATION_IDENTITY_REPLAY_WORKFLOW,
+        {
+          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          workflowId: `organization-identity-replay-${ev.aggregateId}`,
+          args: [{ workspaceId: ev.workspaceId, replayId: ev.aggregateId }],
+        },
+        `organization identity replay ${ev.aggregateId}`,
       );
     }
     if (ev.eventType === 'AssetObjectCleanupRequested') {

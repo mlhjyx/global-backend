@@ -17,12 +17,14 @@ export interface CrawlResult {
 export async function crawlUrl(url: string,
   authorizeExternalAction?: () => Promise<void>,
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
+  onRequestStarted?: () => void,
 ): Promise<CrawlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
   const base = process.env.CRAWLER_URL ?? 'http://localhost:11235';
   const token = process.env.CRAWLER_TOKEN ?? '';
   await authorizeExternalAction?.();
+  onRequestStarted?.();
   const res = await fetch(`${base}/md`, {
     method: 'POST',
     headers: {
@@ -54,12 +56,14 @@ export async function crawlHtml(
   url: string,
   authorizeExternalAction?: () => Promise<void>,
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
+  onRequestStarted?: () => void,
 ): Promise<CrawlHtmlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
   const base = process.env.CRAWLER_URL ?? 'http://localhost:11235';
   const token = process.env.CRAWLER_TOKEN ?? '';
   await authorizeExternalAction?.();
+  onRequestStarted?.();
   const res = await fetch(`${base}/crawl`, {
     method: 'POST',
     headers: {

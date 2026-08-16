@@ -49,10 +49,29 @@ export async function loadMaterializableCompanyState(
 ) {
   if (options?.policyLock) assertWorkspaceSuppressionPolicyLock(options.policyLock, workspaceId);
   else await lockWorkspaceSuppressionPolicy(tx, workspaceId);
-  const prior = await tx.canonicalCompany.findUnique({
+  const matchedPrior = await tx.canonicalCompany.findUnique({
     where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
     select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
   });
+  let prior = matchedPrior;
+  let relatedCompanies = matchedPrior ? [matchedPrior] : [];
+  if (matchedPrior && tx.organizationCanonicalMapping) {
+    const sourceMapping = await tx.organizationCanonicalMapping.findFirst({
+      where: { workspaceId, sourceCompanyId: matchedPrior.id, status: 'ACTIVE' },
+      select: { canonicalCompanyId: true },
+    });
+    const rootCompanyId = sourceMapping?.canonicalCompanyId ?? matchedPrior.id;
+    const aliases = await tx.organizationCanonicalMapping.findMany({
+      where: { workspaceId, canonicalCompanyId: rootCompanyId, status: 'ACTIVE' },
+      select: { sourceCompanyId: true },
+    });
+    const relatedIds = [...new Set([rootCompanyId, ...aliases.map((mapping) => mapping.sourceCompanyId)])];
+    relatedCompanies = await tx.canonicalCompany.findMany({
+      where: { id: { in: relatedIds } },
+      select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
+    });
+    prior = relatedCompanies.find((company) => company.id === rootCompanyId) ?? matchedPrior;
+  }
   const suppressions =
     options?.knownSuppressions ??
     (await tx.suppressionRecord.findMany({
@@ -60,9 +79,22 @@ export async function loadMaterializableCompanyState(
       select: { type: true, value: true },
     }));
   const sourceSuppressed = companyMatchesSuppression(suppressions, sourceCompany);
-  const canonicalSuppressed = prior ? companyMatchesSuppression(suppressions, prior) : false;
-  const blocked = prior?.status === 'SUPPRESSED' || sourceSuppressed || canonicalSuppressed;
-  if (prior && blocked) await repairSuppressedCompany(tx, prior);
+  const canonicalSuppressed = relatedCompanies.some(
+    (company) => company.status === 'SUPPRESSED' || companyMatchesSuppression(suppressions, company),
+  );
+  const identityConflicted =
+    relatedCompanies.length > 0 && tx.organizationIdentityConflictParty
+      ? (await tx.organizationIdentityConflictParty.count({
+          where: {
+            workspaceId,
+            companyId: { in: relatedCompanies.map((company) => company.id) },
+            conflict: { status: { in: ['OPEN', 'RESOLVING'] } },
+          },
+        })) > 0
+      : false;
+  const suppressionBlocked = sourceSuppressed || canonicalSuppressed;
+  const blocked = suppressionBlocked || identityConflicted;
+  if (prior && suppressionBlocked) await repairSuppressedCompany(tx, prior);
   return { allowed: !blocked, prior } as const;
 }
 
@@ -109,11 +141,17 @@ export async function loadCompanyForSuppressionSafeWrite(
   tx: Prisma.TransactionClient,
   workspaceId: string,
   companyId: string,
-): Promise<{ id: string; attributes: Record<string, unknown> } | null> {
+): Promise<{
+  id: string;
+  name: string;
+  domain: string | null;
+  dedupeKey: string;
+  attributes: Record<string, unknown>;
+} | null> {
   await lockWorkspaceSuppressionPolicy(tx, workspaceId);
   const company = await tx.canonicalCompany.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, domain: true, status: true, attributes: true },
+    select: { id: true, name: true, domain: true, dedupeKey: true, status: true, attributes: true },
   });
   if (!company) return null;
 
@@ -142,9 +180,21 @@ export async function loadCompanyForSuppressionSafeWrite(
   );
   const mailboxSuppressed =
     !!mailbox && (suppressedEmails.has(mailbox) || (!!mailboxDomain && suppressedDomains.has(mailboxDomain)));
-  if (!mailboxSuppressed) return { id: company.id, attributes };
+  if (!mailboxSuppressed) return {
+    id: company.id,
+    name: company.name,
+    domain: company.domain,
+    dedupeKey: company.dedupeKey,
+    attributes,
+  };
   const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
-  return { id: company.id, attributes: safeAttributes };
+  return {
+    id: company.id,
+    name: company.name,
+    domain: company.domain,
+    dedupeKey: company.dedupeKey,
+    attributes: safeAttributes,
+  };
 }
 
 /**

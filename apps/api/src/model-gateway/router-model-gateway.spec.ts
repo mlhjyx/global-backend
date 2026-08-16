@@ -118,6 +118,34 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     expect(r.data).toEqual({});
   });
 
+  it('maxPhysicalCalls=1 只预留一次并在结构错误时禁止修复调用', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 10);
+    const provider = fakeProvider();
+    (provider.generateStructured as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: {} as never,
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 8, outputTokens: 2 },
+    });
+    const gw = gatewayWith(provider, budget);
+
+    await expect(
+      gw.generateStructured(
+        {
+          task: QUALIFY_TASK,
+          prompt: 'p',
+          schema: { type: 'object', required: ['verdict'] },
+          maxCostCents: 10,
+          maxPhysicalCalls: 1,
+        },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toThrow(/repair disabled|maxPhysicalCalls/i);
+
+    expect(provider.generateStructured).toHaveBeenCalledTimes(1);
+  });
+
   it('generateStructured 修复重试且无 usage → settle 按**两次**调用兜底（修复不被少记、硬上界不被绕过，#82 P2）', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 40); // 恰两次上限

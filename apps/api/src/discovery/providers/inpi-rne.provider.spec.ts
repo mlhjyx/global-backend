@@ -117,6 +117,8 @@ describe('inpi_rne · discoverContacts', () => {
     expect(res.contacts).toHaveLength(2);
     expect(res.contacts.map((c) => c.fullName)).toEqual(['Olivier Andriès', 'Anne Aubert']);
     expect(res.contacts.every((c) => c.personalData && c.license === 'Licence-Ouverte-2.0')).toBe(true);
+    expect(res.organizationIdentifiers).toEqual([{ scheme: 'siren', jurisdiction: 'FR', value: '562082909' }]);
+    expect(res.organizationMatchConfidence).toBe(1);
     // 🔴 §8.8 用途门绑定：必须走 required 工具 inpi_rne.search（policyDomain=recherche-entreprises.api.gouv.fr）
     //    且以公司名（非域名）为查询、purpose='discovery' 贯穿——否则用途门/对齐会错。
     expect(broker.invokeMock.mock.calls[0][0]).toBe('inpi_rne.search');

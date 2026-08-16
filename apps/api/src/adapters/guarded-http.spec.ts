@@ -21,6 +21,143 @@ afterEach(async () => {
 });
 
 describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () => {
+  it('pins a POST connection, writes the exact body, and gates the physical request once', async () => {
+    let receivedMethod = '';
+    let receivedBody = '';
+    let executeContentLength = 0;
+    const server = createServer((req, res) => {
+      receivedMethod = req.method ?? '';
+      executeContentLength = Number(req.headers['content-length'] ?? 0);
+      req.setEncoding('utf8');
+      req.on('data', (chunk: string) => {
+        receivedBody += chunk;
+      });
+      req.on('end', () => res.end('accepted'));
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind');
+    const resolver: PublicUrlResolver = vi.fn(async (raw) => ({
+      url: new URL(raw),
+      ip: '127.0.0.1',
+      family: 4,
+      addresses: [{ address: '127.0.0.1', family: 4 }],
+    }));
+    const beforeRequest = vi.fn(async () => undefined);
+    const onRequestStarted = vi.fn();
+    const body = JSON.stringify({ filters: { keywords: ['pump'] } });
+
+    const response = await requestPublicHttp(
+      `http://post.example:${address.port}/api/search`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body },
+      { resolver, beforeRequest, onRequestStarted },
+    );
+
+    expect(response.text).toBe('accepted');
+    expect(receivedMethod).toBe('POST');
+    expect(receivedBody).toBe(body);
+    expect(executeContentLength).toBe(Buffer.byteLength(body));
+    expect(resolver).toHaveBeenCalledOnce();
+    expect(beforeRequest).toHaveBeenCalledOnce();
+    expect(onRequestStarted).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an oversized POST body before DNS resolution or a physical request', async () => {
+    const resolver: PublicUrlResolver = vi.fn();
+    const executePinned = vi.fn();
+    const onRequestStarted = vi.fn();
+
+    await expect(requestPublicHttp(
+      'https://api.example/upload',
+      { method: 'POST', body: Buffer.alloc(1_000_001) },
+      { resolver, executePinned, onRequestStarted },
+    )).rejects.toMatchObject({ code: 'request_body_too_large' });
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(executePinned).not.toHaveBeenCalled();
+    expect(onRequestStarted).not.toHaveBeenCalled();
+  });
+
+  it('re-resolves, re-pins, and re-gates every physical request across a 307 redirect', async () => {
+    const resolver: PublicUrlResolver = vi.fn(async (raw) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4,
+      addresses: [{ address: '93.184.216.34', family: 4 }],
+    }));
+    const executePinned = vi.fn()
+      .mockResolvedValueOnce({
+        status: 307,
+        headers: { location: 'https://api.example/final' },
+        body: Buffer.alloc(0),
+        text: '',
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: Buffer.from('ok'),
+        text: 'ok',
+      });
+    const beforeRequest = vi.fn(async () => undefined);
+    const onRequestStarted = vi.fn();
+    const body = '{"query":"pump"}';
+
+    await requestPublicHttp(
+      'https://api.example/start',
+      { method: 'POST', body },
+      { resolver, executePinned, beforeRequest, onRequestStarted },
+    );
+
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(executePinned).toHaveBeenCalledTimes(2);
+    expect(beforeRequest).toHaveBeenCalledTimes(2);
+    expect(onRequestStarted).toHaveBeenCalledTimes(2);
+    expect(executePinned.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({ method: 'POST', body: Buffer.from(body) }),
+      expect.objectContaining({ method: 'POST', body: Buffer.from(body) }),
+    ]);
+  });
+
+  it('converts POST to GET on a 302 redirect without forwarding body headers', async () => {
+    const resolver: PublicUrlResolver = vi.fn(async (raw) => ({
+      url: new URL(raw),
+      ip: '93.184.216.34',
+      family: 4,
+      addresses: [{ address: '93.184.216.34', family: 4 }],
+    }));
+    const executePinned = vi.fn()
+      .mockResolvedValueOnce({
+        status: 302,
+        headers: { location: 'https://api.example/final' },
+        body: Buffer.alloc(0),
+        text: '',
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: Buffer.from('ok'),
+        text: 'ok',
+      });
+
+    await requestPublicHttp(
+      'https://api.example/start',
+      {
+        method: 'POST',
+        body: '{"query":"pump"}',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer retained-same-origin' },
+      },
+      { resolver, executePinned },
+    );
+
+    expect(executePinned.mock.calls[1][1]).toEqual(expect.objectContaining({
+      method: 'GET',
+      body: undefined,
+      headers: { authorization: 'Bearer retained-same-origin' },
+    }));
+  });
+
   it('rechecks acquisition authorization before every redirect hop and starts no second wire after denial', async () => {
     const authorizeExternalAction = vi
       .fn<() => Promise<boolean>>()

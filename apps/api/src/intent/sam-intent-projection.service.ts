@@ -166,7 +166,7 @@ export class SamIntentProjectionService {
         sam_disclaimer: SAM_DISCLAIMER,
       };
       const saved = await tx.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: prior?.dedupeKey ?? dedupeKey } },
         create: {
           workspaceId,
           name: demand.name,

@@ -1,6 +1,35 @@
 import { AiTaskContract } from './task-contract';
 import { resolveTaskRoute } from '../site-builder/agents/task-routes';
 
+const DEFAULT_DISCOVERY_FIT_MODEL = 'deepseek-v4-pro';
+
+export function resolveDiscoveryFitModel(
+  env: { DISCOVERY_FIT_MODEL?: string } = process.env,
+): string {
+  return env.DISCOVERY_FIT_MODEL?.trim() || DEFAULT_DISCOVERY_FIT_MODEL;
+}
+
+export function resolveDiscoveryFitMaxTokens(
+  env: { DISCOVERY_FIT_MAX_TOKENS?: string } = process.env,
+): number | undefined {
+  const value = Number(env.DISCOVERY_FIT_MAX_TOKENS);
+  return Number.isSafeInteger(value) && value >= 128 && value <= 4_096 ? value : undefined;
+}
+
+export function resolveDiscoveryFitMaxCostCents(
+  env: { DISCOVERY_FIT_MAX_COST_CENTS?: string } = process.env,
+): number | undefined {
+  const value = Number(env.DISCOVERY_FIT_MAX_COST_CENTS);
+  return Number.isSafeInteger(value) && value >= 1 && value <= 20 ? value : undefined;
+}
+
+export function resolveDiscoveryFitMaxPhysicalCalls(
+  env: { DISCOVERY_FIT_MAX_PHYSICAL_CALLS?: string } = process.env,
+): 1 | 2 | undefined {
+  const value = Number(env.DISCOVERY_FIT_MAX_PHYSICAL_CALLS);
+  return value === 1 || value === 2 ? value : undefined;
+}
+
 /**
  * Registry of domain AI Tasks (PRD 9.3 catalog). Each new task in the AI 获客
  * spine — market research, ICP design, lead research, lead qualification, intent
@@ -188,10 +217,50 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
   },
 
+  'discovery.propose_company_candidates': {
+    id: 'discovery.propose_company_candidates',
+    allowedTools: [],
+    maxCostCents: 3,
+    timeoutMs: 60_000,
+    description:
+      '根据给定行业、产品关键词和目标市场，提出最多 5 个可能相关的组织名称作为搜索假设。输出不是外部事实、不是企业记录、不得直接进入身份/Lead；不得输出个人，后续必须用搜索结果与组织官网独立验证。无法合理提出时返回空数组。',
+    outputSchema: {
+      type: 'object',
+      required: ['candidates'],
+      additionalProperties: false,
+      properties: {
+        candidates: {
+          type: 'array',
+          maxItems: 5,
+          items: {
+            type: 'object',
+            required: ['name'],
+            additionalProperties: false,
+            properties: {
+              name: { type: 'string', minLength: 1, maxLength: 160 },
+              country: { type: 'string', maxLength: 80 },
+            },
+          },
+        },
+      },
+    },
+    model: 'deepseek-v4-flash',
+    risk: 'medium',
+    // No human gate is needed because the hypotheses cannot persist or qualify;
+    // exact web/site verification remains mandatory downstream.
+    humanGate: false,
+  },
+
   'discovery.extract_company': {
     id: 'discovery.extract_company',
     // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②：白名单真实生效）。
-    allowedTools: ['searxng.search', 'crawl4ai.fetch'],
+    allowedTools: [
+      'searxng.search',
+      'serper.search',
+      'brave.search',
+      'crawl4ai.fetch',
+      'crawl4ai.render',
+    ],
     maxCostCents: 15,
     timeoutMs: 180000,
     description:
@@ -337,8 +406,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // 额度耗尽（429）→ 改 deepseek-v4-pro（同为 pro 档强推理，已用于 icp.design/query_plan）。
     // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：官方已宣布 2026-07-24 彻底关停二别名（过渡期透传 v4-flash），
     // 用了既撞关停又重蹈 flash 召回过宽。全仓一律显式 deepseek-v4-pro / deepseek-v4-flash。
-    // 额度恢复后可切回 gemini-2.5-pro。
-    model: 'deepseek-v4-pro',
+    // 实验环境可用目的限定的 DISCOVERY_FIT_MODEL 覆盖；未配置时保持既有生产路由。
+    // 覆盖只影响获客 fit judge，不会把 MODEL_DEFAULT_MODEL 误当成全系统“主模型”。
+    model: resolveDiscoveryFitModel(),
     risk: 'low',
     humanGate: false,
   },
@@ -349,7 +419,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxCostCents: 40,
     timeoutMs: 180000,
     description:
-      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（可用 filters.source_hint 精确路由，省略=该类全跑）：\n- public_intelligence → public_web（SearXNG 官网挖掘，关键词驱动）、ted（欧盟招投标中标发现：需 filters.cpv + filters.buyer_country；CPV 由系统按 ICP 冷路径确定性注入，勿自行臆造码）\n- company_registry → wikidata（结构化：按行业+国家零爬取查公司+官网+员工数）\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索。',
+      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（一般可用 filters.source_hint 精确路由，省略=该类全跑；声明强制精确路由的源不得省略）：\n- public_intelligence → public_web；ted（需系统注入 CPV）；world_bank_procurement（国际项目采购需求/实施机构）；uk_find_a_tender（英国当前买方需求）；uk_contracts_finder（英国低金额采购买方补充，严格 buyer-only，只有同时提供精确 source_hint=uk_contracts_finder、英国 country、非空 keywords 与显式 procurement_role=buyer 时才可选择）。usaspending_awards 已启用，但只有在用户明确要求美国联邦历史授标研究时才可选，且仅支持 procurement_role=buyer；不得解释为当前商机。Recipient Name 在缺少实体类型证明前不得用于供应商/竞品发现。brazil_pncp 与 singapore_gebiz 默认关闭，不得在普通计划中选择；singapore_gebiz 只有历史中标供应商，属于尚未分流出 Lead 的市场情报，当前不得选择。采购源必须同时给出明确 country、非空 keywords、精确 source_hint 和 procurement_role=buyer。只有用户明确要求竞品/供应商研究、且渠道契约允许时，才可用 procurement_role=supplier。\n- company_registry → wikidata；fr_company（仅法国组织）；nppes（仅美国 healthcare 且只接纳活动 NPI-2 组织）；ror（默认关闭且不参加普通 fan-out；仅在用户明确研究机构或资助机构、管理员临时启用后选择，必须精确 source_hint=ror、ISO-2 country、一个官方 organization_types 枚举，并用非空组织名称或已知外部标识作为 keywords）；sec_edgar（默认关闭且不参加普通 fan-out；仅可显式 source_hint=sec_edgar，以精确 ticker 或精确规范名查询，limit 必须为 1..5。submissions 只能在已有目录 CIK 后以 enrichment 验证 operating 组织，不得单独创建企业；还必须由服务端配置真实可监控联系邮箱的 User-Agent）；fmcsa_qcmobile（默认关闭且不参加普通 fan-out；只可显式 source_hint=fmcsa_qcmobile、country=US、精确 organization_name，并需服务端 WebKey）。\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web。\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索；ROR 的 keywords 只能是组织名称或已知外部标识，不得当作产品或行业全文检索。不得编造 source_hint、国家、CPV、NPI、ROR ID、CIK、USDOT 或其他企业标识。',
     outputSchema: {
       type: 'object',
       required: ['queries', 'estimated_volume'],
@@ -368,11 +438,15 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
               filters: {
                 type: 'object',
                 description:
-                  '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；可选 source_hint（public_web|wikidata|openstreetmap|ted）精确路由；TED 专用 filters：cpv（逗号分隔 8 位 CPV 前缀码）+ buyer_country（ISO-3，如 DEU/FRA，均由系统冷路径注入）；可选 area_name/hs_code 等。',
+                  '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；可选 source_hint（public_web|wikidata|openstreetmap|ted|world_bank_procurement|uk_find_a_tender|uk_contracts_finder|usaspending_awards|fr_company|nppes|ror|sec_edgar|fmcsa_qcmobile）精确路由。采购源必须显式 country + keywords + procurement_role；默认 procurement_role=buyer，只有用户明确要求且渠道契约允许历史中标供应商/竞品研究时才可用 supplier。uk_contracts_finder 严格 buyer-only，必须同时显式给出 source_hint=uk_contracts_finder、英国 country、非空 keywords 与 procurement_role=buyer；usaspending_awards 已启用但仅支持 buyer，限用户明确的美国联邦历史授标研究，不得解释为当前商机；TED 专用 filters：cpv（逗号分隔 8 位 CPV 前缀码）+ buyer_country（ISO-3，如 DEU/FRA，均由系统冷路径注入）；NPPES 必须 country=US 且 healthcare=true；ROR 默认关闭，只能精确 source_hint=ror，并同时给 ISO-2 country、恰好一个 organization_types 官方枚举和组织名称或已知外部标识 keywords；SEC 默认关闭，只能精确 source_hint=sec_edgar，以精确 ticker 或精确规范名查询，limit 必须为 1..5；FMCSA 默认关闭，只能精确 source_hint=fmcsa_qcmobile、country=US 和精确 organization_name；可选 area_name/hs_code 等。',
               },
               keywords: { type: 'array', items: { type: 'string' }, description: '检索关键词（含本地语言变体）' },
               rationale: { type: 'string', description: '为什么选这个源、这些条件' },
               priority: { type: 'number', description: '执行顺序，1 最先（低成本源在前，PRD 7.4.8）' },
+              limit: {
+                type: 'number',
+                description: '可选的单源小批量上限；运行时强制收敛到 1..25，用于金丝雀验证。',
+              },
             },
           },
         },

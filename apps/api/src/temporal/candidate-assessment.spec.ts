@@ -108,6 +108,12 @@ function companyMatches(store: Store, c: FakeCompany, where: any): boolean {
 function makeTx(store: Store) {
   return {
     $queryRaw: async () => [{ locked: true }],
+    organizationCanonicalMapping: {
+      findFirst: async () => null,
+      findMany: async () => [],
+    },
+    organizationIdentifier: { findMany: async () => [] },
+    organizationIdentityConflictParty: { count: async () => 0 },
     icpDefinition: { findUnique: async () => ({ id: ICP_A, company: null }) },
     rawSourceRecord: {
       findMany: async ({ where }: { where: { runId: string } }) =>
@@ -144,6 +150,7 @@ function makeTx(store: Store) {
       },
     },
     suppressionRecord: { findMany: async () => store.suppressions },
+    fieldEvidence: { findMany: async () => [] },
     lead: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       findUnique: async ({ where }: any) => {
@@ -253,6 +260,70 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
 });
 
 describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立判同一存量公司', () => {
+  it('root 的 active alias 已有已判 Lead 时推进游标但不调用模型', async () => {
+    const tx = {
+      $queryRaw: async () => [{ locked: true }],
+      icpDefinition: { findUnique: async () => null },
+      canonicalCompany: {
+        findMany: async () => [
+          { id: 'root-b', name: 'Root B', domain: 'root.example', country: 'DE', industry: null, attributes: {}, status: 'NEW' },
+        ],
+      },
+      organizationCanonicalMapping: {
+        findMany: async ({ where }: { where: Record<string, unknown> }) =>
+          'canonicalCompanyId' in where ? [{ sourceCompanyId: 'alias-a', canonicalCompanyId: 'root-b' }] : [],
+      },
+      organizationIdentifier: { findMany: async () => [] },
+      lead: {
+        findMany: async () => [{ id: 'lead-a', canonicalCompanyId: 'alias-a', fitVerdict: 'match' }],
+      },
+      fieldEvidence: { findMany: async () => [] },
+    };
+    const acts = createBacklogActivities({
+      prisma: { withWorkspace: async (_ws: string, fn: (client: typeof tx) => unknown) => fn(tx) },
+      providers: {},
+      gateway: {},
+      ownerDb: {},
+    } as never);
+
+    const result = await acts.qualifyFitBacklog({ workspaceId: WS, icpId: ICP_A, limit: 1 });
+
+    expect(result).toEqual({ scanned: 1, judged: 0, verdicts: { match: 0, weak: 0, mismatch: 0 }, nextCursor: 'root-b' });
+    expect(judgeFitMock).not.toHaveBeenCalled();
+  });
+
+  it('identity group 已有多条同 ICP Lead 时 fail closed，不调用模型', async () => {
+    const tx = {
+      icpDefinition: { findUnique: async () => null },
+      canonicalCompany: {
+        findMany: async () => [
+          { id: 'root-b', name: 'Root B', domain: 'root.example', country: 'DE', industry: null, attributes: {}, status: 'NEW' },
+        ],
+      },
+      organizationCanonicalMapping: {
+        findMany: async ({ where }: { where: Record<string, unknown> }) =>
+          'canonicalCompanyId' in where ? [{ sourceCompanyId: 'alias-a', canonicalCompanyId: 'root-b' }] : [],
+      },
+      lead: {
+        findMany: async () => [
+          { id: 'lead-a', canonicalCompanyId: 'alias-a', fitVerdict: null },
+          { id: 'lead-b', canonicalCompanyId: 'root-b', fitVerdict: null },
+        ],
+      },
+    };
+    const acts = createBacklogActivities({
+      prisma: { withWorkspace: async (_ws: string, fn: (client: typeof tx) => unknown) => fn(tx) },
+      providers: {},
+      gateway: {},
+      ownerDb: {},
+    } as never);
+
+    await expect(acts.qualifyFitBacklog({ workspaceId: WS, icpId: ICP_A })).rejects.toMatchObject({
+      code: 'IDENTITY_GROUP_LEAD_CONFLICT',
+    });
+    expect(judgeFitMock).not.toHaveBeenCalled();
+  });
+
   it('ICP-A match、ICP-B mismatch → 两条独立 Lead（存量投影公司的多 ICP 场景）', async () => {
     // 存量场景：公司经租户投影进来、不属于任何 run（无 raw/link）——backlog 直接扫 canonical。
     const store: Store = {

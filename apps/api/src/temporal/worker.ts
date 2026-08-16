@@ -21,6 +21,7 @@ import { createIntentActivities } from "./intent.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
 import { createDeletionActivities } from "./deletion.activities";
+import { createOrganizationIdentityReplayActivities } from "./organization-identity-replay.activities";
 import { createPatentsCacheActivities } from "./patents-cache.activities";
 import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities";
 import { createSiteBuilderActivities } from "./site-builder.activities";
@@ -39,6 +40,7 @@ import { Crawl4aiPageFetcher } from "../intent/page-fetcher";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
 import {
   buildToolBroker,
+  providerStatusReaderFrom,
   sourcePolicyReaderFrom,
 } from "../tools/tool-broker.factory";
 import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
@@ -55,6 +57,10 @@ import { ClosedRepairService } from "../site-builder/quality/closed-repair.servi
 import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
 import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
+import {
+  RUNTIME_HEARTBEAT_INTERVAL_MS,
+  RuntimeComponentLease,
+} from "../health/runtime-component-lease";
 
 /**
  * Standalone worker process (apps/worker-ai equivalent). Builds the deps it needs
@@ -156,8 +162,10 @@ async function main(): Promise<void> {
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
+  const providerStatusReader = providerStatusReaderFrom(prisma);
   const broker = buildToolBroker({
     sourcePolicyReader,
+    providerStatusReader,
     paidLedger: costLedger,
   });
   const taxonomy = new TaxonomyResolver(
@@ -197,6 +205,7 @@ async function main(): Promise<void> {
       }),
       ...createDiscoveryActivities({
         prisma,
+        ownerDb,
         providers,
         gateway,
         taxonomy,
@@ -226,6 +235,7 @@ async function main(): Promise<void> {
       ...createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker }),
       // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
       ...createDeletionActivities({ prisma }),
+      ...createOrganizationIdentityReplayActivities({ prisma }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({ ownerDb }),
       // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
@@ -267,10 +277,43 @@ async function main(): Promise<void> {
   console.log(
     `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
   );
+  const runtimeLease = new RuntimeComponentLease(ownerDb, "WORKER");
+  const runPromise = worker.run();
+  const leaseMetadata = () => {
+    const status = worker.getStatus();
+    return {
+      temporal_state: status.runState,
+      workflow_poller: status.workflowPollerState,
+      activity_poller: status.activityPollerState,
+      task_queue: UNDERSTANDING_TASK_QUEUE,
+      namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+    };
+  };
+  await runtimeLease.start(leaseMetadata());
+  const heartbeatTimer = setInterval(() => {
+    const status = worker.getStatus();
+    if (
+      status.runState !== "RUNNING" ||
+      status.workflowPollerState === "FAILED" ||
+      status.activityPollerState === "FAILED"
+    ) {
+      return;
+    }
+    void runtimeLease
+      .renew(leaseMetadata())
+      .catch((err) =>
+        console.error(`[worker] heartbeat renewal FAILED: ${String(err)}`),
+      );
+  }, RUNTIME_HEARTBEAT_INTERVAL_MS);
   try {
-    await worker.run();
+    await runPromise;
   } finally {
-    await runtimeTelemetry.shutdown();
+    clearInterval(heartbeatTimer);
+    try {
+      await runtimeLease.stop(leaseMetadata());
+    } finally {
+      await runtimeTelemetry.shutdown();
+    }
   }
 }
 

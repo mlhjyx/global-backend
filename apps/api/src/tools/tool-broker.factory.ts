@@ -2,11 +2,12 @@ import { PrismaClient } from '@prisma/client';
 import { ToolRegistry } from './tool-registry';
 import { registerBuiltinTools } from './builtin-tools';
 import { registerSourceTools } from './source-tools';
-import { ToolBroker, ToolTrace } from './tool-broker';
+import { ToolBroker, ToolTrace, type ProviderStatusReader } from './tool-broker';
 import type { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
 
 /** source_policy 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type SourcePolicyDb = { sourcePolicy: PrismaClient['sourcePolicy'] };
+type ProviderStatusDb = { dataProvider: PrismaClient['dataProvider'] };
 
 /** Broker 用的 source_policy 读取器：按域名查（SUSPENDED + 用途）。未登记 → null（无策略）。 */
 export type SourcePolicyReader = (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
@@ -30,6 +31,14 @@ export function sourcePolicyReaderFrom(db: SourcePolicyDb): SourcePolicyReader {
   };
 }
 
+/** Provider-backed tools use the platform kill-switch and admit only exact ENABLED. */
+export function providerStatusReaderFrom(db: ProviderStatusDb): ProviderStatusReader {
+  return async (providerKey: string) => db.dataProvider.findUnique({
+    where: { key: providerKey },
+    select: { status: true },
+  });
+}
+
 /**
  * 平台级 ToolBroker（注册全部内置工具 + source_policy 读取）。邮箱验证 SMTP 出网等
  * 原始出网统一经此闸门（allowedTools 白名单 + source_policy + 预算 + 限流 + 幂等 + Trace）。
@@ -37,6 +46,7 @@ export function sourcePolicyReaderFrom(db: SourcePolicyDb): SourcePolicyReader {
  */
 export function buildToolBroker(deps?: {
   sourcePolicyReader?: SourcePolicyReader;
+  providerStatusReader?: ProviderStatusReader;
   traceRecorder?: (t: ToolTrace) => void;
   paidLedger?: SiteBuildCostLedger;
 }): ToolBroker {
@@ -49,6 +59,7 @@ export function buildToolBroker(deps?: {
   return new ToolBroker({
     registry,
     sourcePolicyReader: deps?.sourcePolicyReader,
+    providerStatusReader: deps?.providerStatusReader,
     traceRecorder,
     paidLedger: deps?.paidLedger,
   });

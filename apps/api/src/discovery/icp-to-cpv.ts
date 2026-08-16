@@ -112,6 +112,7 @@ export interface PlanQueryShape {
   keywords: string[];
   rationale: string;
   priority: number;
+  limit?: number;
 }
 
 /**

@@ -13,6 +13,7 @@ export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([
   'QualifyRequested',
   'DeletionRequested', // 收口⑥ PR-B：relay dispatch → 起 deletionWorkflow（Art.17 擦除编排）
   'AssetObjectCleanupRequested', // R2-A4 staging + MF0-B strict canonical/Variant cleanup
+  'OrganizationIdentityReplayRequested',
 ]);
 
 /** 外部集成事件：路由进 outbox_delivery，SaaS 经 GET /events 拉取或 webhook 推送。 */

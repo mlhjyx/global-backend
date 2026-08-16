@@ -7,11 +7,16 @@ import {
   ExecutionContext,
   externalActionAuthorized,
 } from '../provider-contract';
-import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import {
+  isTerminalExternalActionPolicyDenied,
+  type ExecutionBroker,
+  type ToolContext,
+} from '../../tools/tool-contract';
+import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import { isAllowedByRobots } from '../../adapters/robots';
 
-const PARSER_VERSION = 'digital-footprint/v1';
+export const DIGITAL_FOOTPRINT_PARSER_VERSION = 'digital-footprint/v3';
 
 /**
  * 数字足迹指纹 Provider（v3.0 意图/富集层，signal 源 → 只写 attributes，不建 canonical）。
@@ -27,7 +32,16 @@ const PARSER_VERSION = 'digital-footprint/v1';
 export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
   readonly key = 'digital_footprint';
 
-  constructor(private readonly deps: { broker?: ExecutionBroker } = {}) {}
+  constructor(
+    private readonly deps: {
+      broker?: ExecutionBroker;
+      robotsAllowed?: (
+        url: string,
+        ctx: ExecutionContext,
+      ) => Promise<boolean>;
+      sitemapUrls?: (domain: string, ctx: ToolContext) => Promise<string[]>;
+    } = {},
+  ) {}
 
   async enrichCompany(input: CompanyEnrichmentInput, ctx: ExecutionContext): Promise<EnrichmentResult> {
     if (!input.domain) return miss();
@@ -37,23 +51,120 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
       return miss();
     }
     const base = `https://${input.domain}/`;
+    const robotsAllowedFor = async (url: string): Promise<boolean> => {
+      try {
+        return this.deps.robotsAllowed
+          ? await this.deps.robotsAllowed(url, ctx)
+          : await isAllowedByRobots(url, {
+              authorizeExternalAction: ctx.authorizeExternalAction,
+            });
+      } catch (error) {
+        if (isTerminalExternalActionPolicyDenied(error)) throw error;
+        return false;
+      }
+    };
     // robots 早跳过（robots.ts 有缓存；crawl4ai.render 工具内亦权威强制）
-    if (
-      !(await isAllowedByRobots(base, {
-        authorizeExternalAction: ctx.authorizeExternalAction,
-      }).catch(() => false))
-    )
+    const robotsAllowed = await robotsAllowedFor(base);
+    if (!robotsAllowed)
       return miss();
 
     const toolCtx: ToolContext = { ...ctx };
-    const page = await this.deps.broker
-      .invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>('crawl4ai.render', { url: base }, toolCtx)
-      .catch(() => null);
-    if (!page || page.data.robotsBlocked) return miss();
-    const { html, headers } = page.data;
-    if (html.length < 200) return miss();
+    let page: { html: string; headers: Record<string, string>; sourceUrl: string } | null = null;
+    try {
+      const rendered = await this.deps.broker.invoke<
+        { url: string },
+        CrawlHtmlResult & { robotsBlocked?: boolean }
+      >('crawl4ai.render', { url: base }, toolCtx);
+      if (!rendered.data.robotsBlocked) {
+        page = {
+          html: rendered.data.html,
+          headers: rendered.data.headers,
+          sourceUrl: rendered.data.url || base,
+        };
+      }
+    } catch (error) {
+      if (isTerminalExternalActionPolicyDenied(error)) throw error;
+      // 本地渲染器不可用时，仍通过同一 ToolBroker 闸门读静态首页。
+      // 这不绕过 robots/SSRF/source policy，只是放弃 JS 渲染能力的有界降级。
+      try {
+        const fallback = await this.deps.broker.invoke<HttpGetInput, HttpGetOutput>(
+          'http.get',
+          { url: base, method: 'GET', timeoutMs: 15_000 },
+          toolCtx,
+        );
+        if (fallback.data.ok && !fallback.data.blocked) {
+          page = {
+            html: fallback.data.text,
+            headers: {},
+            sourceUrl: fallback.data.finalUrl ?? base,
+          };
+        }
+      } catch (fallbackError) {
+        if (isTerminalExternalActionPolicyDenied(fallbackError)) throw fallbackError;
+      }
+    }
+    if (!page || page.html.length < 200) return miss();
 
-    const jsonld = extractJsonLd(html);
+    let jsonld = extractJsonLd(page.html);
+    if (input.purpose === 'fit_evidence' && jsonld.products.length === 0 && this.deps.sitemapUrls) {
+      let sitemapUrls: string[] = [];
+      try {
+        sitemapUrls = await this.deps.sitemapUrls(input.domain, toolCtx);
+      } catch (error) {
+        if (isTerminalExternalActionPolicyDenied(error)) throw error;
+      }
+      for (const productUrl of pickProductPageUrls(sitemapUrls, input.domain).slice(0, 3)) {
+        try {
+          // robots 规则按 URL path 生效：首页允许并不代表 /products/* 允许。
+          // 查询失败也必须 fail closed，绝不能用 http.get 绕过未知/拒绝结论。
+          if (!(await robotsAllowedFor(productUrl))) continue;
+          const productPage = await this.deps.broker.invoke<HttpGetInput, HttpGetOutput>(
+            'http.get',
+            { url: productUrl, method: 'GET', timeoutMs: 12_000 },
+            toolCtx,
+          );
+          if (!productPage.data.ok || productPage.data.blocked || productPage.data.text.length < 200) continue;
+          const resolvedProductUrl = productPage.data.finalUrl ?? productUrl;
+          if (!isSameSitePageUrl(resolvedProductUrl, input.domain)) continue;
+          const candidateFacts = extractJsonLd(productPage.data.text);
+          if (!candidateFacts.products.length) continue;
+          page = {
+            html: productPage.data.text,
+            headers: {},
+            sourceUrl: resolvedProductUrl,
+          };
+          jsonld = candidateFacts;
+          break;
+        } catch (error) {
+          if (isTerminalExternalActionPolicyDenied(error)) throw error;
+        }
+      }
+    }
+
+    // 资格门前只收业务事实。广告像素、技术栈、MX 都不能冒充产品/工艺证据。
+    if (input.purpose === 'fit_evidence') {
+      if (!jsonld.products.length) return miss();
+      return {
+        matched: true,
+        confidence: 1,
+        attributes: {
+          structured_products: jsonld.products.slice(0, 12),
+          ...(jsonld.businessModels.length
+            ? { business_model: jsonld.businessModels.slice(0, 12) }
+            : {}),
+          fit_evidence_version: DIGITAL_FOOTPRINT_PARSER_VERSION,
+        },
+        provenance: {
+          sourceUrl: page.sourceUrl,
+          fetchedAt: new Date().toISOString(),
+          contentHash: createHash('sha256').update(page.html).digest('hex'),
+          parserVersion: DIGITAL_FOOTPRINT_PARSER_VERSION,
+        },
+        costCents: 0,
+      };
+    }
+
+    const { html, headers } = page;
     const pixels = detectAdPixels(html);
     const platforms = detectPlatform(html, headers);
     const markets = detectServedMarkets(html);
@@ -73,6 +184,7 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
         : undefined,
       structured_org: jsonld.organization,
       structured_products: jsonld.products.length ? jsonld.products.slice(0, 12) : undefined,
+      business_model: jsonld.businessModels.length ? jsonld.businessModels.slice(0, 12) : undefined,
       email_provider: emailProvider,
     });
     if (Object.keys(attributes).length === 0) return miss();
@@ -82,10 +194,10 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
       confidence: 1,
       attributes,
       provenance: {
-        sourceUrl: base,
+        sourceUrl: page.sourceUrl,
         fetchedAt: new Date().toISOString(),
         contentHash: createHash('sha256').update(html).digest('hex'),
-        parserVersion: PARSER_VERSION,
+        parserVersion: DIGITAL_FOOTPRINT_PARSER_VERSION,
       },
       costCents: 0,
     };
@@ -94,16 +206,80 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
 
 // ─────────────────────── 纯解析器（可测，不触网） ───────────────────────
 
+const PRODUCT_PATH_SEGMENTS = new Set([
+  'product',
+  'products',
+  'produkt',
+  'produkte',
+  'produits',
+  'productos',
+  'prodotti',
+  'catalog',
+  'catalogue',
+  'portfolio',
+  'solution',
+  'solutions',
+]);
+const NON_PRODUCT_PATH_SEGMENTS = new Set([
+  'blog',
+  'news',
+  'career',
+  'careers',
+  'jobs',
+  'category',
+  'categories',
+  'tag',
+  'search',
+]);
+
+/** sitemap 只提供候选导航：同站、有具体 slug 的产品/解决方案页才能进入最多 3 页取证。 */
+export function pickProductPageUrls(urls: readonly string[], domain: string): string[] {
+  const found = new Set<string>();
+  const expectedDomain = domain.toLowerCase();
+  for (const raw of urls) {
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (!isSameSitePageUrl(parsed.toString(), expectedDomain)) continue;
+    const segments = parsed.pathname.split('/').filter(Boolean).map((segment) => segment.toLowerCase());
+    if (segments.some((segment) => NON_PRODUCT_PATH_SEGMENTS.has(segment))) continue;
+    const marker = segments.findIndex((segment) => PRODUCT_PATH_SEGMENTS.has(segment));
+    if (marker < 0 || marker >= segments.length - 1) continue;
+    if (/\.(?:xml|pdf|jpe?g|png|gif|webp|svg|zip)$/iu.test(parsed.pathname)) continue;
+    parsed.hash = '';
+    parsed.search = '';
+    found.add(parsed.toString());
+  }
+  return [...found];
+}
+
+function isSameSitePageUrl(raw: string, domain: string): boolean {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    const host = parsed.hostname.toLowerCase();
+    const expectedDomain = domain.toLowerCase();
+    if (host !== expectedDomain && !host.endsWith(`.${expectedDomain}`)) return false;
+    return !/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(host) && !host.includes(':');
+  } catch {
+    return false;
+  }
+}
+
 export interface JsonLdFacts {
   organization?: Record<string, unknown>;
   products: string[];
+  businessModels: string[];
   jobPostings: { title: string; datePosted?: string }[];
   types: string[];
 }
 
 /** 解析页面内所有 schema.org JSON-LD（含 @graph / 数组），抽 Organization/Product/JobPosting。 */
 export function extractJsonLd(html: string): JsonLdFacts {
-  const out: JsonLdFacts = { products: [], jobPostings: [], types: [] };
+  const out: JsonLdFacts = { products: [], businessModels: [], jobPostings: [], types: [] };
   const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   const nodes: Record<string, unknown>[] = [];
   let m: RegExpExecArray | null;
@@ -121,6 +297,11 @@ export function extractJsonLd(html: string): JsonLdFacts {
         : [parsed];
     for (const n of graph) if (n && typeof n === 'object') nodes.push(n as Record<string, unknown>);
   }
+  const nodesById = new Map<string, Record<string, unknown>>();
+  for (const node of nodes) {
+    const id = str(node['@id']);
+    if (id && !nodesById.has(id)) nodesById.set(id, node);
+  }
   for (const n of nodes) {
     const types = ([] as unknown[]).concat(n['@type'] ?? []).map(String);
     out.types.push(...types);
@@ -135,7 +316,27 @@ export function extractJsonLd(html: string): JsonLdFacts {
         same_as: Array.isArray(n.sameAs) ? (n.sameAs as unknown[]).map(String).slice(0, 8) : undefined,
       });
     }
-    if (types.some((t) => /^Product$/i.test(t)) && str(n.name)) out.products.push(str(n.name)!.trim());
+    if (types.some((t) => /^Product$/i.test(t)) && str(n.name)) {
+      out.products.push(str(n.name)!.trim());
+      for (const name of entityNames(n.manufacturer, nodesById)) {
+        out.businessModels.push(`manufacturer:${name}`);
+      }
+      for (const name of entityNames(n.seller, nodesById)) {
+        out.businessModels.push(`seller:${name}`);
+      }
+      let hasExplicitOffer = false;
+      for (const rawOffer of asArray(n.offers)) {
+        const offer = resolveSchemaNode(rawOffer, nodesById);
+        if (!offer) continue;
+        const offerTypes = asArray(offer['@type']).map(String);
+        if (!offerTypes.some((type) => /^(?:Offer|AggregateOffer)$/iu.test(type))) continue;
+        hasExplicitOffer = true;
+        for (const name of entityNames(offer.seller, nodesById)) {
+          out.businessModels.push(`seller:${name}`);
+        }
+      }
+      if (hasExplicitOffer) out.businessModels.push('official_product_offer');
+    }
     if (types.some((t) => /JobPosting/i.test(t)) && str(n.title)) {
       out.jobPostings.push(
         prune({
@@ -146,8 +347,38 @@ export function extractJsonLd(html: string): JsonLdFacts {
     }
   }
   out.products = [...new Set(out.products)].slice(0, 20);
+  out.businessModels = [...new Set(out.businessModels)].slice(0, 20);
   out.types = [...new Set(out.types)];
   return out;
+}
+
+function asArray(value: unknown): unknown[] {
+  return value == null ? [] : Array.isArray(value) ? value : [value];
+}
+
+function resolveSchemaNode(
+  value: unknown,
+  nodesById: ReadonlyMap<string, Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const node = value as Record<string, unknown>;
+  const id = str(node['@id']);
+  return (id ? nodesById.get(id) : undefined) ?? node;
+}
+
+function entityNames(
+  value: unknown,
+  nodesById: ReadonlyMap<string, Record<string, unknown>>,
+): string[] {
+  const names = new Set<string>();
+  for (const raw of asArray(value)) {
+    const direct = str(raw);
+    const node = resolveSchemaNode(raw, nodesById);
+    const candidate = direct ?? str(node?.name);
+    if (!candidate || /^https?:\/\//iu.test(candidate)) continue;
+    names.add(candidate.trim().slice(0, 240));
+  }
+  return [...names];
 }
 
 const PIXEL_SIGS: { key: string; re: RegExp }[] = [

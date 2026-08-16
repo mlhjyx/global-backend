@@ -164,6 +164,130 @@ describe('scoreLead — Intent 维接入真实网站变更信号 (#4)', () => {
     expect(r.detail.notes.some((n) => n.includes('关键词代理'))).toBe(true);
     expect(r.scores.intent).toBeCloseTo(0.5, 1); // 命中 '扩产'
   });
+
+  it('历史采购事实可用于账户研究，但不冒充当前购买意向', () => {
+    const procurementIcp: IcpForScoring = { ...icp, triggerSignals: ['industrial pump'] };
+    const r = scoreLead(company({
+      attributes: {
+        source_role: 'buyer',
+        signal_stage: 'historical_award_buyer',
+        procurement: { description: 'historical industrial pump maintenance award' },
+      },
+    }), procurementIcp, { nowMs: NOW });
+
+    expect(r.scores.intent).toBe(0);
+    expect(r.scores.demandProof).toBe(0);
+    expect(r.detail.matchedSignals).toEqual([]);
+  });
+
+  it('纯历史授标买方即使 Fit、联系人和其他维度足够，也只能进入 needs_review', () => {
+    const procurementIcp: IcpForScoring = { ...icp, triggerSignals: ['industrial pump'] };
+    const r = scoreLead(company({
+      attributes: {
+        source_role: 'buyer',
+        signal_stage: 'historical_award_buyer',
+        procurement: { description: 'historical industrial pump maintenance award' },
+      },
+      contacts: [
+        { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+        { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+      ],
+    }), procurementIcp, { nowMs: NOW, authoritativeFit: 'match' });
+
+    expect(r.totalScore).toBeGreaterThanOrEqual(0.55);
+    expect(r.queue).toBe('needs_review');
+    expect(r.detail.notes).toContain('历史采购事实仅用于账户研究；缺少独立当前意向证据，不进入推荐队列');
+  });
+
+  it('历史采购企业另有真实当前意向证据时，不由研究队列门误拦', () => {
+    const r = scoreLead(company({
+      attributes: {
+        source_role: 'buyer',
+        signal_stage: 'historical_award_buyer',
+        procurement: { description: 'historical industrial pump maintenance award' },
+        intent: {
+          last_change_at: daysAgo(3),
+          intent_score: 1,
+          events: [{ type: 'SOURCING_OPENED', at: daysAgo(3), strength: 1, evidence: { page: 1 } }],
+        },
+      },
+      contacts: [
+        { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+        { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+      ],
+    }), icp, { nowMs: NOW, authoritativeFit: 'match' });
+
+    expect(r.scores.intent).toBeGreaterThan(0);
+    expect(r.queue).toBe('recommended');
+  });
+
+  it('十年前的极小残余意向分不能解除历史采购研究门', () => {
+    const contacts = [
+      { title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] },
+      { title: 'Head of Procurement', seniority: 'director', contactPoints: [{ type: 'email', status: 'VALID' }] },
+    ];
+    const historical = {
+      source_role: 'buyer',
+      signal_stage: 'historical_award_buyer',
+      procurement: { description: 'historical industrial pump maintenance award' },
+    };
+    const eventResult = scoreLead(company({
+      attributes: {
+        ...historical,
+        intent: {
+          last_change_at: daysAgo(3650),
+          intent_score: 1,
+          events: [{ type: 'SOURCING_OPENED', at: daysAgo(3650), strength: 1, evidence: { page: 1 } }],
+        },
+      },
+      contacts,
+    }), icp, { nowMs: NOW, authoritativeFit: 'match' });
+    const summaryResult = scoreLead(company({
+      attributes: {
+        ...historical,
+        intent: { last_change_at: daysAgo(3650), intent_score: 1, events: [] },
+      },
+      contacts,
+    }), icp, { nowMs: NOW, authoritativeFit: 'match' });
+
+    for (const result of [eventResult, summaryResult]) {
+      expect(result.scores.intent).toBe(0);
+      expect(result.queue).toBe('needs_review');
+      expect(result.detail.notes).toContain('历史采购事实仅用于账户研究；缺少独立当前意向证据，不进入推荐队列');
+      expect(result.detail.notes.some((note) => note.includes('realIntent=0'))).toBe(false);
+    }
+  });
+
+  it('历史采购的阶段标签本身也不能伪造购买意向', () => {
+    const historicalIcp: IcpForScoring = { ...icp, triggerSignals: ['historical award'] };
+    const r = scoreLead(company({
+      attributes: { source_role: 'buyer', signal_stage: 'historical_award_buyer' },
+    }), historicalIcp, { nowMs: NOW });
+    expect(r.scores.intent).toBe(0);
+    expect(r.detail.matchedSignals).toEqual([]);
+  });
+
+  it('当前开放采购仍可使用白名单采购描述作为弱意向代理', () => {
+    const procurementIcp: IcpForScoring = { ...icp, triggerSignals: ['industrial pump'] };
+    const r = scoreLead(company({
+      attributes: {
+        source_role: 'buyer', signal_stage: 'open_for_proposals',
+        procurement: { title: 'Industrial pump purchase', deadline: '2026-09-01' },
+      },
+    }), procurementIcp, { nowMs: NOW });
+    expect(r.scores.intent).toBe(1);
+    expect(r.detail.matchedSignals).toEqual(['industrial pump']);
+  });
+
+  it('静态 NPPES 注册事实不构成购买意向', () => {
+    const nppesIcp: IcpForScoring = { ...icp, triggerSignals: ['official NPI-2 registry presence'] };
+    const r = scoreLead(company({
+      attributes: { nppes: { entity_type: 'NPI-2', status: 'A' } },
+    }), nppesIcp, { nowMs: NOW });
+    expect(r.scores.intent).toBe(0);
+    expect(r.scores.demandProof).toBe(0);
+    expect(r.detail.matchedSignals).toEqual([]);
+  });
 });
 
 // ── 权威资格门（LLM 四门 fit_verdict）→ 只覆盖 Fit 维 + 队列走阈值/Reachability 硬底 ──

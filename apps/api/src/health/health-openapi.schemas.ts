@@ -7,6 +7,16 @@ const COMPONENT_SCHEMA: SchemaObject = {
   properties: {
     status: { type: "string", enum: ["ok", "failed", "not_proven"] },
     code: { type: "string" },
+    evidence: {
+      type: "object",
+      additionalProperties: false,
+      required: ["source", "heartbeat_at", "age_ms"],
+      properties: {
+        source: { type: "string", enum: ["postgresql_lease"] },
+        heartbeat_at: { type: "string", format: "date-time" },
+        age_ms: { type: "integer", minimum: 0 },
+      },
+    },
   },
 };
 

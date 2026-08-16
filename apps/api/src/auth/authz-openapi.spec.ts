@@ -116,6 +116,15 @@ describe('OpenAPI authorization scope contract', () => {
     ]);
   });
 
+  it('locks the provider control plane to the exact ops read scope', () => {
+    const spec = document();
+    expect(
+      operation(spec, 'get', '/api/v1/provider-control-plane')[
+        'x-required-scopes'
+      ],
+    ).toEqual(['ops:read']);
+  });
+
   it('keeps infrastructure health probes public', () => {
     const spec = document();
     for (const path of [

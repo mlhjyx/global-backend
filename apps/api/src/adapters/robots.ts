@@ -21,10 +21,21 @@ interface RobotsRule {
 const cache = new Map<string, RobotsRule>();
 const TTL_MS = 60 * 60 * 1000; // 1h（生产可对齐 SourcePolicy）
 
+class RobotsRequestAuthorizationError extends Error {
+  constructor(readonly original: unknown) {
+    super('robots_request_not_authorized');
+    this.name = 'RobotsRequestAuthorizationError';
+  }
+}
+
 export interface RobotsDependencies {
   request?: typeof requestPublicHttp;
   resolve?: PublicUrlResolver;
   authorizeExternalAction?: () => Promise<boolean>;
+  /** Re-check Provider/SourcePolicy immediately before a robots.txt wire request. */
+  beforeRequest?: () => Promise<void>;
+  /** Mark every robots.txt request only after its final authorization succeeds. */
+  onRequestStarted?: () => void;
 }
 
 async function loadRobots(
@@ -45,6 +56,9 @@ async function loadRobots(
     }
     // 4xx/无 robots → 视为无限制（RFC 惯例）
   } catch (error) {
+    if (error instanceof RobotsRequestAuthorizationError) {
+      throw error.original;
+    }
     const workspaceActionDenied =
       error instanceof ExternalHttpActionDeniedError ||
       (error instanceof Error && error.name === 'ExternalHttpActionDeniedError');
@@ -97,10 +111,28 @@ export async function isAllowedByRobots(url: string, dependencies: RobotsDepende
     return false;
   }
   const request = dependencies.request
-    ? dependencies.request
+    ? async (raw: string, options: Parameters<typeof requestPublicHttp>[1]) => {
+        try {
+          await dependencies.beforeRequest?.();
+        } catch (error) {
+          throw new RobotsRequestAuthorizationError(error);
+        }
+        dependencies.onRequestStarted?.();
+        return dependencies.request!(raw, options);
+      }
     : (raw: string, options: Parameters<typeof requestPublicHttp>[1]) =>
         requestPublicHttp(raw, options, {
           authorizeExternalAction: dependencies.authorizeExternalAction,
+          beforeRequest: dependencies.beforeRequest
+            ? async () => {
+                try {
+                  await dependencies.beforeRequest!();
+                } catch (error) {
+                  throw new RobotsRequestAuthorizationError(error);
+                }
+              }
+            : undefined,
+          onRequestStarted: dependencies.onRequestStarted,
         });
   const rule = await loadRobots(u.origin, request);
   const path = u.pathname || '/';

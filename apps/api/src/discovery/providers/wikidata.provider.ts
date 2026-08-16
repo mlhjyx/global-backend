@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
@@ -10,6 +11,8 @@ import {
 import type { WikidataCompany } from '../../adapters/wikidata';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { mapIndustryToQids, mapCountryToQid } from '../vocab';
+import { authorityProfileForProvider } from '../organization-identity-authority';
+import { normalizeAuthorityIdentifiers } from '../organization-identity-v2';
 
 /**
  * Wikidata 结构化发现 Provider（零爬取，CC0 开放数据）。
@@ -37,6 +40,7 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
 
     const industryQids = mapIndustries(query);
     if (!industryQids.length) return { records: [], costCents: 0 }; // 无法映射行业 → 该源无产出（词表欠账时预期）
+    const industryTerms = queryIndustryTerms(query);
     const countryQid = mapCountry(query);
 
     let companies: WikidataCompany[];
@@ -52,34 +56,89 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
       );
       companies = res.data.companies ?? [];
     } catch (err) {
-      // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
-       
+      // 不在 Provider 层把超时/闸门拒绝伪装成「正常零结果」。上层 activity 用
+      // Promise.allSettled 隔离单源失败，并将失败计数带入 run 终态；这里必须保留失败语义。
       console.warn(`[wikidata] discover failed: ${String(err).slice(0, 150)}`);
-      return { records: [], costCents: 0 };
+      throw err;
     }
 
     const now = new Date().toISOString();
-    const records: ProviderCompanyRecord[] = companies.map((c) => ({
-      externalId: `wikidata:${c.qid}`,
-      name: c.name,
-      domain: c.website ? normalizeToDomain(c.website) : undefined,
-      country: c.countryCode,
-      employeeCount: c.employees,
-      attributes: {
-        wikidata_qid: c.qid,
-        latitude: c.latitude,
-        longitude: c.longitude,
-        source_class: query.sourceClass,
-      },
-      provenance: {
-        sourceUrl: `https://www.wikidata.org/wiki/${c.qid}`,
-        fetchedAt: now,
-        contentHash: c.qid,
-        parserVersion: 'wikidata/1',
-      },
-    }));
+    const records: ProviderCompanyRecord[] = companies.flatMap((c) => {
+      const qid = normalizeQid(c.qid);
+      if (!qid || !c.name.trim()) return [];
+      const lei = normalizeAuthorizedLei(c.lei);
+      const identifiers: NonNullable<ProviderCompanyRecord['identifiers']> = [
+        { scheme: 'wikidata-qid', jurisdiction: 'GLOBAL', value: qid },
+      ];
+      if (lei) identifiers.push({ scheme: 'lei', jurisdiction: 'GLOBAL', value: lei });
+      return [
+        {
+          externalId: `wikidata:${qid}`,
+          name: c.name,
+          domain: c.website ? normalizeToDomain(c.website) : undefined,
+          country: c.countryCode,
+          employeeCount: c.employees,
+          identifiers,
+          license: 'CC0-1.0',
+          attributes: {
+            wikidata_qid: qid,
+            ...(c.lei ? { wikidata_lei_claim: c.lei } : {}),
+            latitude: c.latitude,
+            longitude: c.longitude,
+            source_class: query.sourceClass,
+            // SPARQL 结果是因为命中这些行业 QID 才返回的。这是来源可验证的命中证据，
+            // 不是模型推测；保留在 attributes 内，避免把宽查询词冒充 canonical industry。
+            discovery_match: {
+              industries: industryTerms,
+              industry_qids: industryQids,
+            },
+          },
+          provenance: {
+            sourceUrl: `https://www.wikidata.org/wiki/${qid}`,
+            fetchedAt: now,
+            contentHash: wikidataCompanyContentHash({ ...c, qid }),
+            parserVersion: 'wikidata/2',
+          },
+        },
+      ];
+    });
     return { records, costCents: 0 };
   }
+}
+
+const WIKIDATA_AUTHORITY = authorityProfileForProvider('wikidata');
+
+function normalizeQid(value: string): string | null {
+  const normalized = value.trim().toLocaleUpperCase('en-US');
+  return /^Q[1-9]\d*$/u.test(normalized) ? normalized : null;
+}
+
+function normalizeAuthorizedLei(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return normalizeAuthorityIdentifiers(WIKIDATA_AUTHORITY, [
+      { scheme: 'lei', jurisdiction: 'GLOBAL', value },
+    ])[0]?.normalizedValue ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function wikidataCompanyContentHash(company: WikidataCompany): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        company.qid,
+        company.name,
+        company.website ?? null,
+        company.countryCode ?? null,
+        company.employees ?? null,
+        company.lei ?? null,
+        company.latitude ?? null,
+        company.longitude ?? null,
+      ]),
+    )
+    .digest('hex');
 }
 
 function mapIndustries(query: CompanyDiscoveryQuery): string[] {
@@ -90,6 +149,16 @@ function mapIndustries(query: CompanyDiscoveryQuery): string[] {
   const raw = [f.industry, f.sub_industry].flat().filter(Boolean).map(String);
   const kw = (query.keywords ?? []).map(String);
   return mapIndustryToQids([...raw, ...kw]);
+}
+
+function queryIndustryTerms(query: CompanyDiscoveryQuery): string[] {
+  const f = query.filters ?? {};
+  return [f.industry, f.sub_industry]
+    .flat()
+    .filter(Boolean)
+    .map(String)
+    .map((term) => term.trim())
+    .filter(Boolean);
 }
 
 function mapCountry(query: CompanyDiscoveryQuery): string | undefined {

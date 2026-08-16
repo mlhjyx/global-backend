@@ -9,25 +9,20 @@ import { persistGuessedEmail } from './email-guess-persist';
 import { buildGuessTargets } from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
-import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis,
-} from './compliance/email-verification-gate';
-import {
-  canonicalizeSuppressionValue,
-  canonicalizeSuppressionValues,
-  companyMatchesSuppression,
-} from './suppression-value';
+import { evaluateEmailGate, resolveEmailVerificationPolicy, stampLawfulBasis } from './compliance/email-verification-gate';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues, companyMatchesSuppression } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
-import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
+import { contactMayUseExternalProcessing } from './company-suppression-gate';
+import {
+  organizationMayUseExternalProcessing as companyMayUseExternalProcessing,
+  resolveOrganizationRoot,
+} from './organization-identity-root';
+import { bindOrganizationEnrichmentIdentifiers } from './organization-identity-enrichment';
+import type { CompanyIdentifier } from './identity';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
-export const SUPPRESSION_DECISION_REASONS = [
-  'USER_PREFERENCE_CHANGED',
-  'BOUNCE_CLASSIFICATION_ERROR',
-  'IDENTITY_MISASSOCIATION',
-  'DUPLICATE_RECORD',
-  'OTHER',
-] as const;
+export const SUPPRESSION_DECISION_REASONS = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER'] as const;
 
 export type SuppressionDecisionRequest = {
   requestId: string;
@@ -47,13 +42,18 @@ export class DiscoveryService {
   /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
   async executePlan(ctx: RequestContext, planId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: planId },
+      const plan = await tx.discoveryQueryPlan.findUnique({
+        where: { id: planId },
       });
-      if (!plan) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'query plan not found' },
+      if (!plan)
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'query plan not found' },
         });
       if (plan.status !== 'READY') {
         throw new ConflictException({
-          error: { code: 'INVALID_STATE', message: `plan is ${plan.status}; confirm it (READY) before executing`,
+          error: {
+            code: 'INVALID_STATE',
+            message: `plan is ${plan.status}; confirm it (READY) before executing`,
           },
         });
       }
@@ -74,9 +74,7 @@ export class DiscoveryService {
   }
 
   async getRun(ctx: RequestContext, runId: string) {
-    const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.discoveryRun.findUnique({ where: { id: runId } }),
-    );
+    const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) => tx.discoveryRun.findUnique({ where: { id: runId } }));
     if (!run)
       throw new NotFoundException({
         error: { code: 'NOT_FOUND', message: 'run not found' },
@@ -87,7 +85,10 @@ export class DiscoveryService {
   listCanonicalCompanies(ctx: RequestContext, opts: { status?: string; limit: number; cursor?: string }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.canonicalCompany.findMany({
-        where: opts.status ? { status: opts.status } : {},
+        where: {
+          ...(opts.status ? { status: opts.status } : {}),
+          identitySourceMappings: { none: { status: 'ACTIVE' } },
+        },
         take: opts.limit + 1,
         ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -104,19 +105,66 @@ export class DiscoveryService {
 
   async getCanonicalCompany(ctx: RequestContext, id: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const aliasMapping = await tx.organizationCanonicalMapping.findFirst({
+        where: { sourceCompanyId: id, status: 'ACTIVE' },
+      });
+      const rootId = aliasMapping?.canonicalCompanyId ?? id;
       const company = await tx.canonicalCompany.findUnique({
-        where: { id },
-        include: { contacts: { include: { contactPoints: true } } },
+        where: { id: rootId },
+        include: {
+          organizationIdentifiers: {
+            where: { status: 'ACTIVE' },
+            orderBy: [{ scheme: 'asc' }, { normalizedValue: 'asc' }],
+          },
+          identitySourceMappings: { where: { status: 'ACTIVE' } },
+          identityCanonicalMappings: { where: { status: 'ACTIVE' } },
+        },
       });
       if (!company)
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'company not found' },
         });
-      const evidence = await tx.fieldEvidence.findMany({
-        where: { entityType: 'company', entityId: id },
-        orderBy: { fetchedAt: 'desc' },
-      });
-      return { company, evidence };
+      const relatedCompanyIds = [rootId, ...company.identityCanonicalMappings.map((mapping) => mapping.sourceCompanyId)];
+      const [contacts, evidence, pendingConflictRows, activeIdentifiers] = await Promise.all([
+        tx.canonicalContact.findMany({
+          where: { companyId: { in: relatedCompanyIds } },
+          include: { contactPoints: true },
+        }),
+        tx.fieldEvidence.findMany({
+          where: {
+            entityType: 'company',
+            entityId: { in: relatedCompanyIds },
+          },
+          orderBy: { fetchedAt: 'desc' },
+        }),
+        tx.organizationIdentityConflictParty.findMany({
+          where: {
+            companyId: { in: relatedCompanyIds },
+            conflict: { status: { in: ['OPEN', 'RESOLVING'] } },
+          },
+          distinct: ['conflictId'],
+          select: { conflictId: true },
+        }),
+        tx.organizationIdentifier.findMany({
+          where: { companyId: { in: relatedCompanyIds }, status: 'ACTIVE' },
+          orderBy: [{ scheme: 'asc' }, { jurisdiction: 'asc' }, { normalizedValue: 'asc' }],
+        }),
+      ]);
+      const pendingConflictCount = pendingConflictRows.length;
+      return {
+        company: { ...company, contacts },
+        evidence,
+        identity: {
+          requestedCompanyId: id,
+          rootCompanyId: rootId,
+          isAlias: Boolean(aliasMapping),
+          requestedMapping: aliasMapping,
+          activeIdentifiers,
+          mappings: company.identityCanonicalMappings,
+          pendingConflictCount,
+          identityVersion: company.version + pendingConflictCount + company.identityCanonicalMappings.reduce((sum, mapping) => sum + mapping.revision, 0),
+        },
+      };
     });
   }
 
@@ -128,8 +176,10 @@ export class DiscoveryService {
    */
   async discoverContacts(ctx: RequestContext, companyId: string) {
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const identity = await resolveOrganizationRoot(tx, ctx.workspaceId, companyId);
+      const rootId = identity.rootCompanyId;
       const company = await tx.canonicalCompany.findUnique({
-        where: { id: companyId },
+        where: { id: rootId },
       });
       if (!company)
         throw new NotFoundException({
@@ -139,7 +189,28 @@ export class DiscoveryService {
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
       });
-      if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
+      const aliases = await tx.canonicalCompany.findMany({
+        where: {
+          id: {
+            in: identity.relatedCompanyIds.filter((id) => id !== rootId),
+          },
+        },
+      });
+      const hasIdentityConflict = await tx.organizationIdentityConflictParty.count({
+        where: {
+          companyId: { in: [rootId, ...aliases.map((alias) => alias.id)] },
+          conflict: { status: { in: ['OPEN', 'RESOLVING'] } },
+        },
+      });
+      if (hasIdentityConflict) {
+        throw new ConflictException({
+          error: {
+            code: 'IDENTITY_CONFLICT_OPEN',
+            message: 'company has an unresolved identity conflict',
+          },
+        });
+      }
+      if ([company, ...aliases].some((item) => item.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, item))) {
         throw new ConflictException({
           error: {
             code: 'SUPPRESSED',
@@ -160,7 +231,12 @@ export class DiscoveryService {
         'email',
         (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
       );
-      return { company, adapters, suppressedEmails };
+      return {
+        company,
+        adapters,
+        suppressedEmails,
+        relatedCompanyIds: identity.relatedCompanyIds,
+      };
     });
 
     // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
@@ -169,10 +245,12 @@ export class DiscoveryService {
       key: string;
       contacts: ProviderContactRecord[];
       costCents: number;
+      organizationIdentifiers?: CompanyIdentifier[];
+      organizationMatchConfidence?: number;
     }[] = [];
     const authorizeExternalAction = () =>
       this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-        companyMayUseExternalProcessing(tx, ctx.workspaceId, companyId),
+        companyMayUseExternalProcessing(tx, ctx.workspaceId, loaded.company.id),
       );
     for (const adapter of loaded.adapters) {
       try {
@@ -187,7 +265,7 @@ export class DiscoveryService {
           // 收口②：真租户贯穿（LLM/抓取按 workspace 归属 trace/预算）
           {
             workspaceId: ctx.workspaceId,
-            correlationId: companyId,
+            correlationId: loaded.company.id,
             authorizeExternalAction,
           },
         );
@@ -195,10 +273,12 @@ export class DiscoveryService {
           key: adapter.key,
           contacts: result.contacts,
           costCents: result.costCents,
+          organizationIdentifiers: result.organizationIdentifiers,
+          organizationMatchConfidence: result.organizationMatchConfidence,
         });
       } catch (err) {
         // 单 adapter fail-safe：不阻断其余源——但**留痕**（交互端点不静默退化为 0 联系人）
-        console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
+        console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${loaded.company.id}: ${String(err).slice(0, 150)}`);
       }
     }
 
@@ -207,7 +287,24 @@ export class DiscoveryService {
       // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
       let skippedSuppressed = 0;
       let skippedInvalid = 0;
-      for (const pa of perAdapter) {
+      const identityBinding = await bindOrganizationEnrichmentIdentifiers(tx, {
+        workspaceId: ctx.workspaceId,
+        companyId: loaded.company.id,
+        claims: perAdapter
+          .filter((item) => (item.organizationIdentifiers?.length ?? 0) > 0)
+          .map((item) => ({
+            providerKey: item.key,
+            confidence: item.organizationMatchConfidence ?? 0,
+            identifiers: item.organizationIdentifiers ?? [],
+          })),
+      });
+      const canPersist =
+        identityBinding.kind === 'bound' &&
+        (await companyMayUseExternalProcessing(tx, ctx.workspaceId, loaded.company.id));
+      if (!canPersist) {
+        skippedSuppressed = perAdapter.reduce((sum, item) => sum + item.contacts.length, 0);
+      }
+      for (const pa of canPersist ? perAdapter : []) {
         const res = await persistDiscoveredContacts(tx, {
           workspaceId: ctx.workspaceId,
           company: {
@@ -235,10 +332,15 @@ export class DiscoveryService {
         }
       }
       const contacts = await tx.canonicalContact.findMany({
-        where: { companyId: loaded.company.id },
+        where: { companyId: { in: loaded.relatedCompanyIds } },
         include: { contactPoints: true },
       });
-      return { contacts, skippedSuppressed, skippedInvalid };
+      return {
+        contacts,
+        skippedSuppressed,
+        skippedInvalid,
+        ...(identityBinding.kind === 'conflict' ? { identityConflictId: identityBinding.conflictId } : {}),
+      };
     });
   }
 
@@ -261,8 +363,9 @@ export class DiscoveryService {
     },
   ) {
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const identity = await resolveOrganizationRoot(tx, ctx.workspaceId, companyId);
       const company = await tx.canonicalCompany.findUnique({
-        where: { id: companyId },
+        where: { id: identity.rootCompanyId },
       });
       if (!company)
         throw new NotFoundException({
@@ -272,7 +375,10 @@ export class DiscoveryService {
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
       });
-      if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
+      const relatedCompanies = await tx.canonicalCompany.findMany({
+        where: { id: { in: identity.relatedCompanyIds } },
+      });
+      if (relatedCompanies.some((item) => item.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, item))) {
         throw new ConflictException({
           error: {
             code: 'SUPPRESSED',
@@ -298,7 +404,7 @@ export class DiscoveryService {
         });
       }
       const contacts = await tx.canonicalContact.findMany({
-        where: { companyId },
+        where: { companyId: { in: identity.relatedCompanyIds } },
         include: { contactPoints: true },
       });
       const suppressedEmails = canonicalizeSuppressionValues(
@@ -307,6 +413,7 @@ export class DiscoveryService {
       );
       return {
         company,
+        rootCompanyId: identity.rootCompanyId,
         domain: company.domain,
         adapter: adapters[0],
         contacts,
@@ -317,11 +424,7 @@ export class DiscoveryService {
     const domain = loaded.domain;
     // 格式学习样本（同域非-RISKY，全公司合并）+ 缺邮箱决策人（有界，默认 25）——与 backlog 阶段⑤b 共用
     // 纯件 buildGuessTargets（复审 MEDIUM：消 service/backlog 逐字重复漂移 + 统一 per-company cap）。
-    const {
-      knownSamples,
-      emailless: targets,
-      emaillessTotal,
-    } = buildGuessTargets(loaded.contacts, domain, opts?.maxContacts);
+    const { knownSamples, emailless: targets, emaillessTotal } = buildGuessTargets(loaded.contacts, domain, opts?.maxContacts);
 
     // 事务外：逐人 SMTP 猜测（adapter 单例不绑 tx）
     const guesser = new EmailGuesser(loaded.adapter);
@@ -331,7 +434,8 @@ export class DiscoveryService {
       result: GuessResult;
     }[] = [];
     for (const c of targets) {
-      const authorized = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      const authorized = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) =>
+        (await companyMayUseExternalProcessing(tx, ctx.workspaceId, loaded.rootCompanyId)) &&
         contactMayUseExternalProcessing(tx, {
           workspaceId: ctx.workspaceId,
           contactId: c.contactId,
@@ -360,12 +464,13 @@ export class DiscoveryService {
           maxProbe: opts?.maxProbe,
           suppressedEmails: loaded.suppressedEmails,
           authorizeCandidate: (email) =>
-            this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+            this.prisma.withWorkspace(ctx.workspaceId, async (tx) =>
+              (await companyMayUseExternalProcessing(tx, ctx.workspaceId, loaded.rootCompanyId)) &&
               contactMayUseExternalProcessing(tx, {
-                workspaceId: ctx.workspaceId,
-                contactId: c.contactId,
-                email,
-              }),
+                  workspaceId: ctx.workspaceId,
+                  contactId: c.contactId,
+                  email,
+                }),
             ),
         },
       );
@@ -425,11 +530,7 @@ export class DiscoveryService {
    * 禁联名单命中一律 BLOCKED。门在**服务层、先于选择/调用任何验证器**裁决（provider 无关，防 kill-switch
    * 落到忽略 ctx 的 public_web/sandbox 绕过）。每次验证写 field_evidence 留痕（含所依据的合法性基础）。
    */
-  async verifyContactPoint(
-    ctx: RequestContext,
-    pointId: string,
-    opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean },
-  ) {
+  async verifyContactPoint(ctx: RequestContext, pointId: string, opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean }) {
     // 短事务①：载入 point + 分级 + 禁联命中 + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经
     // ToolBroker 走 SMTP 出网（含限流等待 + 最长 8s 探测），持 DB 连接跨这段会拖垮连接池/触发事务超时。
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -482,11 +583,7 @@ export class DiscoveryService {
           data: { status: 'SUPPRESSED', version: { increment: 1 } },
         });
       }
-      const suppressed =
-        company.status === 'SUPPRESSED' ||
-        matchedCompanySuppression ||
-        (!!emailKey && suppressedEmails.has(emailKey)) ||
-        (!!domainKey && suppressedDomains.has(domainKey));
+      const suppressed = company.status === 'SUPPRESSED' || matchedCompanySuppression || (!!emailKey && suppressedEmails.has(emailKey)) || (!!domainKey && suppressedDomains.has(domainKey));
       // 禁联先于 provider 路由和任何外部处理；BLOCKED 路径不需要发现/选择 SMTP adapter。
       const adapters = suppressed ? [] : await this.providers.routeEmailVerification(tx as never);
       return {
@@ -511,9 +608,7 @@ export class DiscoveryService {
     const gateKind = gate.kind === 'invalid' ? undefined : gate.kind;
     // 将被落库的合法性基础统一补断言人/时间——覆盖操作者显式断言的**与开关合成的**（后者无 who/when），
     // 否则 override 路径的审计记录缺断言人（Codex #13 P2）。
-    const recordedBasis = gate.lawfulBasis
-      ? stampLawfulBasis(gate.lawfulBasis, ctx.userId, new Date().toISOString())
-      : undefined;
+    const recordedBasis = gate.lawfulBasis ? stampLawfulBasis(gate.lawfulBasis, ctx.userId, new Date().toISOString()) : undefined;
 
     // 事务外：门放行才做网络验证（adapter 单例，不绑 tx，失败诚实降级为 verdict，不抛，§5 fail-safe）；
     // 门拦截则合成 BLOCKED，**不路由/不触任何验证器**（即便 smtp_self 被 kill-switch 关掉也不绕过）。
@@ -701,11 +796,7 @@ export class DiscoveryService {
     // action admissions cannot interleave with mailbox/status repair. The authority fact remains
     // committed even if this best-effort derived projection later fails.
     if (entry.type === 'domain' || entry.type === 'company_name' || entry.type === 'email') {
-      await this.reconcileCanonicalSuppression(
-        ctx.workspaceId,
-        entry.type as 'domain' | 'company_name' | 'email',
-        canonicalValue,
-      );
+      await this.reconcileCanonicalSuppression(ctx.workspaceId, entry.type as 'domain' | 'company_name' | 'email', canonicalValue);
     }
     return rec;
   }
@@ -741,11 +832,7 @@ export class DiscoveryService {
     });
   }
 
-  private async reconcileCanonicalSuppression(
-    workspaceId: string,
-    type: 'domain' | 'company_name' | 'email',
-    canonicalValue: string,
-  ): Promise<void> {
+  private async reconcileCanonicalSuppression(workspaceId: string, type: 'domain' | 'company_name' | 'email', canonicalValue: string): Promise<void> {
     const batchSize = 50;
     let afterId: string | undefined;
     for (;;) {
@@ -757,31 +844,27 @@ export class DiscoveryService {
             ...(afterId ? { where: { id: { gt: afterId } } } : {}),
             orderBy: { id: 'asc' },
             take: batchSize,
-            select: { id: true, domain: true, name: true, status: true, attributes: true },
+            select: {
+              id: true,
+              domain: true,
+              name: true,
+              status: true,
+              attributes: true,
+            },
           });
           for (const row of page) {
             const attributes = jsonRecord(row.attributes);
-            const mailbox = canonicalizeSuppressionValue(
-              'email',
-              typeof attributes.contact_email === 'string' ? attributes.contact_email : '',
-            );
+            const mailbox = canonicalizeSuppressionValue('email', typeof attributes.contact_email === 'string' ? attributes.contact_email : '');
             const mailboxDomain = mailbox ? canonicalizeSuppressionValue('domain', mailbox.split('@')[1]) : null;
-            const companyMatches =
-              type !== 'email' &&
-              canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) ===
-                canonicalValue;
-            const mailboxMatches =
-              (type === 'email' && mailbox === canonicalValue) ||
-              (type === 'domain' && mailboxDomain === canonicalValue);
+            const companyMatches = type !== 'email' && canonicalizeSuppressionValue(type, type === 'domain' ? (row.domain ?? '') : row.name) === canonicalValue;
+            const mailboxMatches = (type === 'email' && mailbox === canonicalValue) || (type === 'domain' && mailboxDomain === canonicalValue);
             if (!companyMatches && !mailboxMatches) continue;
             const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
             await tx.canonicalCompany.updateMany({
               where: { id: row.id },
               data: {
                 ...(companyMatches ? { status: 'SUPPRESSED' as const } : {}),
-                ...(mailboxMatches || companyMatches
-                  ? { attributes: safeAttributes as Prisma.InputJsonValue }
-                  : {}),
+                ...(mailboxMatches || companyMatches ? { attributes: safeAttributes as Prisma.InputJsonValue } : {}),
                 version: { increment: 1 },
               },
             });
@@ -910,10 +993,7 @@ function assertSameSuppressionCommand(
   },
 ): void {
   const same =
-    record.suppressionId === expected.id &&
-    record.requestedDecision === expected.request.decision &&
-    record.requestedReasonCode === expected.request.reasonCode &&
-    record.actorId === expected.actorId;
+    record.suppressionId === expected.id && record.requestedDecision === expected.request.decision && record.requestedReasonCode === expected.request.reasonCode && record.actorId === expected.actorId;
   if (!same) {
     throw new ConflictException({
       error: {
@@ -954,13 +1034,8 @@ function validateSuppressionDecisionRequest(request: SuppressionDecisionRequest)
     });
   }
   const correctionReason = ['IDENTITY_MISASSOCIATION', 'DUPLICATE_RECORD', 'OTHER'].includes(request.reasonCode);
-  const releaseReason = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER'].includes(
-    request.reasonCode,
-  );
-  if (
-    (request.decision === 'IDENTITY_CORRECTION_REQUESTED' && !correctionReason) ||
-    (request.decision === 'RELEASE_REQUESTED' && !releaseReason)
-  ) {
+  const releaseReason = ['USER_PREFERENCE_CHANGED', 'BOUNCE_CLASSIFICATION_ERROR', 'OTHER'].includes(request.reasonCode);
+  if ((request.decision === 'IDENTITY_CORRECTION_REQUESTED' && !correctionReason) || (request.decision === 'RELEASE_REQUESTED' && !releaseReason)) {
     throw new BadRequestException({
       error: {
         code: 'INVALID_REASON',

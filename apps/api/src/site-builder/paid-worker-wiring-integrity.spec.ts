@@ -19,7 +19,7 @@ describe("R4-B production worker paid-ledger wiring", () => {
     );
     expect(worker).toContain("gateway.paidLedger = costLedger");
     expect(worker).toMatch(
-      /buildToolBroker\(\{\s*sourcePolicyReader,\s*paidLedger: costLedger,\s*\}\)/,
+      /buildToolBroker\(\{\s*sourcePolicyReader,\s*providerStatusReader,\s*paidLedger: costLedger,\s*\}\)/,
     );
     expect(worker).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?\}\)/,

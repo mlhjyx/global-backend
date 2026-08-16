@@ -153,13 +153,30 @@ export class RouterModelGateway extends ModelGateway {
         try {
           return validateTaskOutput(first);
         } catch (error) {
-          if (!input.repairTaskOutput || !(error instanceof TaskOutputValidationError)) {
+          if (
+            input.maxPhysicalCalls === 1 ||
+            !input.repairTaskOutput ||
+            !(error instanceof TaskOutputValidationError)
+          ) {
             throw error;
           }
           repairKind = '任务确定性硬门';
           repairReason = error.message;
         }
       } else {
+        if (input.maxPhysicalCalls === 1) {
+          throw new ProviderOutputError(
+            `structured output failed schema validation; repair disabled by maxPhysicalCalls=1: ${(check.errors ?? []).join('; ')}`,
+            first.usage,
+            {
+              callCount: 1,
+              provider: first.provider,
+              model: first.model,
+              reportedModel: first.reportedModel,
+              modelResolutionSource: first.modelResolutionSource,
+            },
+          );
+        }
         repairKind = 'JSON Schema';
         repairReason = (check.errors ?? []).join('\n');
       }
@@ -302,6 +319,7 @@ export class RouterModelGateway extends ModelGateway {
       task: string;
       model?: string;
       maxCostCents?: number;
+      maxPhysicalCalls?: 1 | 2;
       maxTokens?: number;
       prompt?: string;
       system?: string;
@@ -322,7 +340,7 @@ export class RouterModelGateway extends ModelGateway {
     const baseCents = input.maxCostCents ?? registeredTask?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
     // generateStructured 可能做一次校验-修复重试（第二次模型调用，见下）——预留**两次**上限，否则账户仅够
     // 一次时修复仍会执行、settle 后把账户打成负数（#51 P2）。settle 兜底仍用单次 baseCents（无 usage 时不高估）。
-    const reserveCents = op === 'generateStructured' ? baseCents * 2 : baseCents;
+    const reserveCents = op === 'generateStructured' && input.maxPhysicalCalls !== 1 ? baseCents * 2 : baseCents;
     if (ctx.paidCost) {
       return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }
@@ -428,6 +446,7 @@ export class RouterModelGateway extends ModelGateway {
       task: string;
       model?: string;
       maxCostCents?: number;
+      maxPhysicalCalls?: 1 | 2;
       maxTokens?: number;
       prompt?: string;
       system?: string;

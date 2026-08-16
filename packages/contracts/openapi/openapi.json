@@ -289,6 +289,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -309,6 +334,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -329,6 +379,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -349,6 +424,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -369,6 +469,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         }
@@ -438,6 +563,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -458,6 +608,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -478,6 +653,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -498,6 +698,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         },
@@ -518,6 +743,31 @@
                             },
                             "code": {
                               "type": "string"
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "source",
+                                "heartbeat_at",
+                                "age_ms"
+                              ],
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "postgresql_lease"
+                                  ]
+                                },
+                                "heartbeat_at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "age_ms": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              }
                             }
                           }
                         }
@@ -1994,6 +2244,223 @@
         ]
       }
     },
+    "/api/v1/discovery-runs/{runId}/adaptive-query-plan-suggestions": {
+      "post": {
+        "operationId": "AdaptiveQueryPlanController_suggest_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdaptiveQueryPlanSuggestionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AdaptiveQueryPlanSuggestionDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "runId 或轮次参数校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少获客写权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 DiscoveryRun 或其原查询计划",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "任务状态、采集事实或同 run 幂等内容冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_STATE",
+                            "ADAPTIVE_FACTS_UNAVAILABLE",
+                            "IDEMPOTENCY_CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "根据已完成采集轮次生成下一轮 DRAFT 查询建议（不会自动确认或执行）",
+        "tags": [
+          "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
     "/api/v1/query-plans/{planId}/execute": {
       "post": {
         "operationId": "DiscoveryController_execute_v1",
@@ -2256,6 +2723,125 @@
                       "type": "object",
                       "additionalProperties": true,
                       "description": "CanonicalCompany（归一视图 + 联系人 + 字段级 Evidence）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径、查询、请求体或 If-Match 格式校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少身份审核权限或认证上下文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该身份资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
                     }
                   }
                 }
@@ -3255,6 +3841,1302 @@
         ]
       }
     },
+    "/api/v1/organization-identity-conflicts": {
+      "get": {
+        "operationId": "OrganizationIdentityController_list_v1",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "open",
+                "resolving",
+                "resolved"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径、查询、请求体或 If-Match 格式校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少身份审核权限或认证上下文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "身份冲突工作队列",
+        "tags": [
+          "Organization Identity"
+        ],
+        "x-required-scopes": [
+          "acquisition:identity:review"
+        ]
+      }
+    },
+    "/api/v1/organization-identity-conflicts/{id}": {
+      "get": {
+        "operationId": "OrganizationIdentityController_get_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径、查询、请求体或 If-Match 格式校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少身份审核权限或认证上下文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该身份资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "身份冲突事实、候选企业、标识与裁决历史",
+        "tags": [
+          "Organization Identity"
+        ],
+        "x-required-scopes": [
+          "acquisition:identity:review"
+        ]
+      }
+    },
+    "/api/v1/organization-identity-conflicts/{id}/decisions": {
+      "post": {
+        "operationId": "OrganizationIdentityController_decide_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "GET 冲突详情返回的强 ETag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径、查询、请求体或 If-Match 格式校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少身份审核权限或认证上下文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该身份资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等事实、候选企业、映射或已交付商业事实冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDEMPOTENCY_CONFLICT",
+                            "COMMERCIAL_FACTS_IMMUTABLE",
+                            "NO_CANDIDATES",
+                            "IDENTITY_MERGE_REQUIRES_MULTIPLE_COMPANIES",
+                            "INVALID_CANONICAL_COMPANY",
+                            "IDENTITY_MAPPING_REQUIRES_REROOT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match 已过期，须重新读取当前资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDENTITY_REVISION_CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少必需的 If-Match",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PRECONDITION_REQUIRED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "合并或保持分离；决定与 replay outbox 同事务写入",
+        "tags": [
+          "Organization Identity"
+        ],
+        "x-required-scopes": [
+          "acquisition:identity:review"
+        ]
+      }
+    },
+    "/api/v1/organization-identity-mappings/{id}": {
+      "get": {
+        "operationId": "OrganizationIdentityController_getMapping_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径、查询、请求体或 If-Match 格式校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少身份审核权限或认证上下文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该身份资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "可逆企业映射详情（用于取得 split ETag）",
+        "tags": [
+          "Organization Identity"
+        ],
+        "x-required-scopes": [
+          "acquisition:identity:review"
+        ]
+      }
+    },
+    "/api/v1/organization-identity-mappings/{id}/split-decisions": {
+      "post": {
+        "operationId": "OrganizationIdentityController_split_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "GET 映射详情返回的强 ETag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentitySplitDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "路径、查询、请求体或 If-Match 格式校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少身份审核权限或认证上下文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_REQUIRED",
+                            "AUTH_CONTEXT_MISSING",
+                            "SCOPE_METADATA_MISSING"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该身份资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等事实、候选企业、映射或已交付商业事实冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDEMPOTENCY_CONFLICT",
+                            "COMMERCIAL_FACTS_IMMUTABLE",
+                            "IDENTITY_SPLIT_ALREADY_PENDING",
+                            "IDENTITY_MERGE_PROJECTION_UNSETTLED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match 已过期，须重新读取当前资源",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "IDENTITY_REVISION_CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少必需的 If-Match",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "PRECONDITION_REQUIRED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "撤销别名映射并请求确定性重放",
+        "tags": [
+          "Organization Identity"
+        ],
+        "x-required-scopes": [
+          "acquisition:identity:review"
+        ]
+      }
+    },
+    "/api/v1/provider-quality-rankings": {
+      "get": {
+        "operationId": "ProviderQualityController_rank_v1",
+        "parameters": [
+          {
+            "name": "windowDays",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 30,
+              "minimum": 1,
+              "maximum": 365
+            }
+          },
+          {
+            "name": "minRuns",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "metric",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "bound_rate",
+                "conflict_rate",
+                "failure_rate",
+                "duplicate_rate"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProviderQualityRankingDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "时间窗、最小样本或排名指标无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token 缺失或无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少 acquisition:read 权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "渠道质量事实排名（只读；小样本与未知字段不授予名次）",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
     "/api/v1/icps/{icpId}/qualify": {
       "post": {
         "operationId": "LeadController_qualify_v1",
@@ -3677,6 +5559,9 @@
                             "SUPPRESSED_CONTACT_UNREACHABLE",
                             "STORAGE_RIGHTS_NOT_GRANTED",
                             "SANCTIONS_HOLD_UNRESOLVED",
+                            "IDENTITY_CONFLICT_OPEN",
+                            "IDENTITY_LEAD_CONFLICT",
+                            "IDENTITY_CHANGE_PENDING",
                             "CONFLICT"
                           ]
                         },
@@ -8478,6 +10363,645 @@
           "acquisition:write"
         ]
       }
+    },
+    "/api/v1/provider-control-plane": {
+      "get": {
+        "operationId": "ProviderControlPlaneController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "headers": {
+              "Cache-Control": {
+                "description": "Sensitive configuration metadata must not be cached.",
+                "schema": {
+                  "type": "string",
+                  "example": "no-store"
+                }
+              }
+            },
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "scope",
+                        "providers"
+                      ],
+                      "properties": {
+                        "scope": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "platform",
+                            "workspace"
+                          ],
+                          "properties": {
+                            "platform": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "workspace": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "providers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "key",
+                              "displayName",
+                              "registration",
+                              "credentialPresence",
+                              "searchBackends",
+                              "enablement",
+                              "sourcePolicies",
+                              "route",
+                              "live",
+                              "persisted",
+                              "evidenceRail",
+                              "allowedActions"
+                            ],
+                            "properties": {
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9_]+$"
+                              },
+                              "displayName": {
+                                "type": "string"
+                              },
+                              "registration": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "status",
+                                  "exposure",
+                                  "region",
+                                  "category"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "IMPLEMENTED",
+                                      "PARTIAL"
+                                    ]
+                                  },
+                                  "exposure": {
+                                    "enum": [
+                                      "REAL",
+                                      "TEST_ONLY"
+                                    ]
+                                  },
+                                  "region": {
+                                    "type": "string"
+                                  },
+                                  "category": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "credentialPresence": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "requirement",
+                                  "status",
+                                  "fields"
+                                ],
+                                "properties": {
+                                  "requirement": {
+                                    "enum": [
+                                      "NOT_REQUIRED",
+                                      "OPTIONAL",
+                                      "REQUIRED"
+                                    ]
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "NOT_REQUIRED",
+                                      "CONFIGURED",
+                                      "MISSING",
+                                      "LEGACY_EXTERNAL",
+                                      "UNKNOWN"
+                                    ]
+                                  },
+                                  "fields": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "key",
+                                        "label",
+                                        "configured",
+                                        "secret",
+                                        "writeOnly"
+                                      ],
+                                      "properties": {
+                                        "key": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": "string"
+                                        },
+                                        "configured": {
+                                          "type": "boolean"
+                                        },
+                                        "secret": {
+                                          "type": "boolean"
+                                        },
+                                        "writeOnly": {
+                                          "type": "boolean"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "searchBackends": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "id",
+                                    "displayName",
+                                    "kind",
+                                    "credentialStatus",
+                                    "policyStatus",
+                                    "routingStatus"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "enum": [
+                                        "searxng.search",
+                                        "serper.search",
+                                        "brave.search"
+                                      ]
+                                    },
+                                    "displayName": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "enum": [
+                                        "SELF_HOSTED",
+                                        "BYOK"
+                                      ]
+                                    },
+                                    "credentialStatus": {
+                                      "enum": [
+                                        "NOT_REQUIRED",
+                                        "CONFIGURED",
+                                        "MISSING"
+                                      ]
+                                    },
+                                    "policyStatus": {
+                                      "enum": [
+                                        "READY",
+                                        "MISSING",
+                                        "SUSPENDED",
+                                        "TERMS_UNREVIEWED",
+                                        "TERMS_RESTRICTED",
+                                        "ROBOTS_RESTRICTED",
+                                        "ROBOTS_UNREVIEWED",
+                                        "PURPOSE_BLOCKED",
+                                        "NOT_REQUIRED",
+                                        "UNKNOWN"
+                                      ]
+                                    },
+                                    "routingStatus": {
+                                      "enum": [
+                                        "DEFAULT",
+                                        "OPT_IN_READY",
+                                        "BLOCKED"
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
+                              "enablement": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "status"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "ENABLED",
+                                      "DISABLED",
+                                      "MISSING"
+                                    ]
+                                  }
+                                }
+                              },
+                              "sourcePolicies": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "mode",
+                                  "status",
+                                  "domains"
+                                ],
+                                "properties": {
+                                  "mode": {
+                                    "enum": [
+                                      "NONE",
+                                      "ADVISORY",
+                                      "REQUIRED"
+                                    ]
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "READY",
+                                      "MISSING",
+                                      "SUSPENDED",
+                                      "TERMS_UNREVIEWED",
+                                      "TERMS_RESTRICTED",
+                                      "ROBOTS_RESTRICTED",
+                                      "ROBOTS_UNREVIEWED",
+                                      "PURPOSE_BLOCKED",
+                                      "NOT_REQUIRED",
+                                      "UNKNOWN"
+                                    ]
+                                  },
+                                  "domains": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "domain",
+                                        "reviewStatus",
+                                        "allowedPurpose",
+                                        "robotsStatus",
+                                        "termsStatus",
+                                        "personalData",
+                                        "updatedAt"
+                                      ],
+                                      "properties": {
+                                        "domain": {
+                                          "type": "string"
+                                        },
+                                        "reviewStatus": {
+                                          "type": "string"
+                                        },
+                                        "allowedPurpose": {
+                                          "type": "array",
+                                          "nullable": true,
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "robotsStatus": {
+                                          "type": "string"
+                                        },
+                                        "termsStatus": {
+                                          "type": "string"
+                                        },
+                                        "personalData": {
+                                          "type": "boolean"
+                                        },
+                                        "updatedAt": {
+                                          "type": "string",
+                                          "format": "date-time"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "route": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "status",
+                                  "lanes",
+                                  "descriptor",
+                                  "runtimeHealth"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "DECLARED",
+                                      "TEST_ONLY"
+                                    ]
+                                  },
+                                  "lanes": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "descriptor": {
+                                    "type": "string"
+                                  },
+                                  "runtimeHealth": {
+                                    "enum": [
+                                      "NOT_EVALUATED"
+                                    ]
+                                  }
+                                }
+                              },
+                              "live": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "status",
+                                  "reasonCode"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "UNKNOWN",
+                                      "NEVER_TESTED"
+                                    ]
+                                  },
+                                  "reasonCode": {
+                                    "enum": [
+                                      "CONNECTION_PROBE_NOT_IMPLEMENTED"
+                                    ]
+                                  }
+                                }
+                              },
+                              "persisted": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "status",
+                                  "latestRunId",
+                                  "terminalStatus",
+                                  "completedAt",
+                                  "rawCount",
+                                  "acceptedCount",
+                                  "boundCount",
+                                  "domainCount",
+                                  "authorityCount",
+                                  "conflictCount",
+                                  "duplicateCount"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "AVAILABLE",
+                                      "UNKNOWN"
+                                    ]
+                                  },
+                                  "latestRunId": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "terminalStatus": {
+                                    "type": "string",
+                                    "enum": [
+                                      "DONE",
+                                      "PARTIAL",
+                                      "FAILED"
+                                    ],
+                                    "nullable": true
+                                  },
+                                  "completedAt": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "nullable": true
+                                  },
+                                  "rawCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  },
+                                  "acceptedCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  },
+                                  "boundCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  },
+                                  "domainCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  },
+                                  "authorityCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  },
+                                  "conflictCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  },
+                                  "duplicateCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "nullable": true
+                                  }
+                                }
+                              },
+                              "evidenceRail": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "raw",
+                                  "canonicalBinding",
+                                  "evidence",
+                                  "lead",
+                                  "outbox",
+                                  "replay"
+                                ],
+                                "properties": {
+                                  "raw": {
+                                    "enum": [
+                                      "PROVEN",
+                                      "ZERO_RESULT",
+                                      "UNKNOWN"
+                                    ]
+                                  },
+                                  "canonicalBinding": {
+                                    "enum": [
+                                      "PROVEN",
+                                      "ZERO_RESULT",
+                                      "UNKNOWN"
+                                    ]
+                                  },
+                                  "evidence": {
+                                    "enum": [
+                                      "UNAVAILABLE"
+                                    ]
+                                  },
+                                  "lead": {
+                                    "enum": [
+                                      "UNAVAILABLE"
+                                    ]
+                                  },
+                                  "outbox": {
+                                    "enum": [
+                                      "UNAVAILABLE"
+                                    ]
+                                  },
+                                  "replay": {
+                                    "enum": [
+                                      "UNAVAILABLE"
+                                    ]
+                                  }
+                                }
+                              },
+                              "allowedActions": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "canConfigureCredential",
+                                  "canEnable",
+                                  "canDisable",
+                                  "canTestConnection",
+                                  "reasonCodes"
+                                ],
+                                "properties": {
+                                  "canConfigureCredential": {
+                                    "type": "boolean",
+                                    "enum": [
+                                      false
+                                    ]
+                                  },
+                                  "canEnable": {
+                                    "type": "boolean",
+                                    "enum": [
+                                      false
+                                    ]
+                                  },
+                                  "canDisable": {
+                                    "type": "boolean",
+                                    "enum": [
+                                      false
+                                    ]
+                                  },
+                                  "canTestConnection": {
+                                    "type": "boolean",
+                                    "enum": [
+                                      false
+                                    ]
+                                  },
+                                  "reasonCodes": {
+                                    "type": "array",
+                                    "items": {
+                                      "enum": [
+                                        "FORMAL_SAAS_CONTROL_PLANE_UNAVAILABLE",
+                                        "SECRET_STORE_UNAVAILABLE",
+                                        "CONNECTION_PROBE_NOT_IMPLEMENTED",
+                                        "PLATFORM_MUTATION_NOT_EXPOSED"
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer token 缺失或无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少 ops:read 权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Provider 只读控制视图（注册、配置存在性、开关、策略、路由声明与证据分轨）",
+        "tags": [
+          "Provider Control Plane"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ]
+      }
     }
   },
   "info": {
@@ -8501,6 +11025,14 @@
     },
     {
       "name": "Discovery",
+      "description": ""
+    },
+    {
+      "name": "Organization Identity",
+      "description": ""
+    },
+    {
+      "name": "Provider Control Plane",
       "description": ""
     },
     {
@@ -9418,6 +11950,64 @@
           "createdAt"
         ]
       },
+      "AdaptiveQueryPlanSuggestionDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "CONVERGED"
+            ]
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "true 表示同一 run 的幂等重试，返回既有草案"
+          },
+          "convergenceReason": {
+            "type": "string",
+            "enum": [
+              "MAX_ROUNDS_REACHED",
+              "NO_SAFE_ADAPTATION",
+              "NO_ADAPTATION_NEEDED"
+            ],
+            "nullable": true
+          },
+          "plan": {
+            "nullable": true,
+            "description": "仅 outcome=DRAFT 时存在，且状态固定为 DRAFT",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueryPlanDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "outcome",
+          "replayed",
+          "convergenceReason",
+          "plan"
+        ]
+      },
+      "CreateAdaptiveQueryPlanSuggestionDto": {
+        "type": "object",
+        "properties": {
+          "currentRound": {
+            "type": "number",
+            "minimum": 1,
+            "example": 1,
+            "description": "兼容字段；真实轮次由源计划 trace 推导，提供时必须完全一致"
+          },
+          "maxRounds": {
+            "type": "number",
+            "minimum": 1,
+            "default": 3,
+            "description": "初始轮可设；后续轮继承源计划 trace，提供时必须完全一致"
+          }
+        }
+      },
       "VerifyContactPointDto": {
         "type": "object",
         "properties": {
@@ -9555,6 +12145,317 @@
           "requestId",
           "decision",
           "reasonCode"
+        ]
+      },
+      "IdentityDecisionDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "merge",
+              "keep_separate"
+            ]
+          },
+          "canonicalCompanyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "requestId",
+          "decision",
+          "reasonCode"
+        ]
+      },
+      "IdentitySplitDto": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "requestId",
+          "reasonCode"
+        ]
+      },
+      "ProviderQualityWindowDto": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "days": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 365
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "days"
+        ]
+      },
+      "ProviderQualityMetricsDto": {
+        "type": "object",
+        "properties": {
+          "attempts": {
+            "type": "number",
+            "minimum": 1
+          },
+          "successes": {
+            "type": "number",
+            "minimum": 0
+          },
+          "zeroResults": {
+            "type": "number",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "number",
+            "minimum": 0
+          },
+          "processed": {
+            "type": "number",
+            "minimum": 0
+          },
+          "raw": {
+            "type": "number",
+            "minimum": 0
+          },
+          "accepted": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0
+          },
+          "bound": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0
+          },
+          "domain": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0
+          },
+          "authority": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0
+          },
+          "conflicts": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "attempts",
+          "successes",
+          "zeroResults",
+          "failures",
+          "processed",
+          "raw",
+          "accepted",
+          "bound",
+          "domain",
+          "authority",
+          "conflicts",
+          "duplicates"
+        ]
+      },
+      "ProviderQualityRatesDto": {
+        "type": "object",
+        "properties": {
+          "bound": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "domain": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "authority": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "conflict": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "failure": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "duplicate": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "bound",
+          "domain",
+          "authority",
+          "conflict",
+          "failure",
+          "duplicate"
+        ]
+      },
+      "ProviderQualityRankingRowDto": {
+        "type": "object",
+        "properties": {
+          "providerKey": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "attemptedRuns": {
+            "type": "number",
+            "minimum": 1,
+            "description": "所选时间窗中实际尝试过该渠道的 DiscoveryRun 数"
+          },
+          "failedRuns": {
+            "type": "number",
+            "minimum": 0,
+            "description": "其中至少一次 Provider 调用失败的运行数"
+          },
+          "runCount": {
+            "type": "number",
+            "minimum": 1,
+            "deprecated": true,
+            "description": "attemptedRuns 的兼容别名"
+          },
+          "sampleSufficient": {
+            "type": "boolean"
+          },
+          "rank": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 1
+          },
+          "selectedMetric": {
+            "type": "string",
+            "enum": [
+              "bound_rate",
+              "conflict_rate",
+              "failure_rate",
+              "duplicate_rate"
+            ]
+          },
+          "selectedValue": {
+            "type": "object",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/ProviderQualityMetricsDto"
+          },
+          "rates": {
+            "$ref": "#/components/schemas/ProviderQualityRatesDto"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "providerKey",
+          "attemptedRuns",
+          "failedRuns",
+          "runCount",
+          "sampleSufficient",
+          "rank",
+          "selectedMetric",
+          "selectedValue",
+          "metrics",
+          "rates",
+          "warnings"
+        ]
+      },
+      "ProviderQualityRankingDto": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/ProviderQualityWindowDto"
+          },
+          "minimumRunCount": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "rankingMetric": {
+            "type": "string",
+            "enum": [
+              "bound_rate",
+              "conflict_rate",
+              "failure_rate",
+              "duplicate_rate"
+            ]
+          },
+          "interpretation": {
+            "type": "string"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderQualityRankingRowDto"
+            }
+          }
+        },
+        "required": [
+          "window",
+          "minimumRunCount",
+          "rankingMetric",
+          "interpretation",
+          "providers"
         ]
       },
       "AcceptLeadDto": {

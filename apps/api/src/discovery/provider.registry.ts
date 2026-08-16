@@ -14,17 +14,38 @@ import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
+import {
+  FranceOfficialOrganizationDiscoveryProvider,
+  NppesOrganizationDiscoveryProvider,
+  RorOrganizationDiscoveryProvider,
+  SecEdgarOrganizationDiscoveryProvider,
+} from './providers/official-organization.providers';
+import {
+  BrazilPncpDiscoveryProvider,
+  SingaporeGebizDiscoveryProvider,
+  UkContractsFinderDiscoveryProvider,
+  UkFindATenderDiscoveryProvider,
+  UsaSpendingAwardsDiscoveryProvider,
+  WorldBankProcurementDiscoveryProvider,
+} from './providers/public-procurement.providers';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
 import { InpiRneContactProvider } from './providers/inpi-rne.provider';
 import { GooglePatentsInventorProvider } from './providers/bigquery-patents.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
+import { SecEdgarSubmissionEnrichmentProvider } from './providers/sec-edgar-submission-enrichment.provider';
+import { MexicoDenueOrganizationDiscoveryProvider } from './providers/mexico-denue.provider';
+import { FmcsaQcmobileOrganizationDiscoveryProvider } from './providers/fmcsa.provider';
+import { EuEcolabelOrganizationDiscoveryProvider } from './providers/eu-ecolabel.provider';
+import { SbirSttrCompanyDiscoveryProvider } from './providers/sbir-sttr.provider';
+import { KonepsContractBuyerDiscoveryProvider } from './providers/koneps.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
-import { StructuredHarvestProvider } from './providers/structured-harvest.provider';
+import { StructuredHarvestProvider, fetchSitemapUrls } from './providers/structured-harvest.provider';
 import { SelfHostedEmailVerifier } from './providers/email-verify.provider';
 import { ModelGateway } from '../model-gateway/model-gateway';
-import type { ExecutionBroker } from '../tools/tool-contract';
+import type { ExecutionBroker, ToolContext } from '../tools/tool-contract';
+import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import { readPatentCache, enqueuePatentLookup } from '../adapters/patent-inventor-cache';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import providerSourceClassManifest from './provider-source-classes.json';
@@ -110,6 +131,25 @@ export class DiscoveryProviderRegistry {
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
     this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
+    // Country/sector-gated official organization discovery. Both providers
+    // fail closed without a broker and exclude upstream named-person fields.
+    this.discovery.push(new FranceOfficialOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new NppesOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new RorOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new SecEdgarOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new MexicoDenueOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new FmcsaQcmobileOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new EuEcolabelOrganizationDiscoveryProvider({ broker }));
+    this.discovery.push(new SbirSttrCompanyDiscoveryProvider({ broker }));
+    this.discovery.push(new KonepsContractBuyerDiscoveryProvider({ broker }));
+    // Procurement channels are explicit-hint only. Registration alone never
+    // fans them out across every public-intelligence run.
+    this.discovery.push(new WorldBankProcurementDiscoveryProvider({ broker }));
+    this.discovery.push(new UsaSpendingAwardsDiscoveryProvider({ broker }));
+    this.discovery.push(new UkFindATenderDiscoveryProvider({ broker }));
+    this.discovery.push(new BrazilPncpDiscoveryProvider({ broker }));
+    this.discovery.push(new SingaporeGebizDiscoveryProvider({ broker }));
+    this.discovery.push(new UkContractsFinderDiscoveryProvider({ broker }));
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
@@ -128,10 +168,19 @@ export class DiscoveryProviderRegistry {
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
     this.enrichers.push(new GleifEnrichmentProvider({ broker }));
+    this.enrichers.push(new SecEdgarSubmissionEnrichmentProvider({ broker }));
     // 信号类富集（v3.0，**独立长活动 enrichSignalsRun** 跑，不进 enrichRun 的 2 分钟活动）：
     //  数字足迹（官网 HTML/DNS → 技术栈/在投广告/服务市场/邮件商）+ 结构化收割（sitemap → 招聘信号）。
     //  → attributes.digital_footprint.* / .structured_harvest.*，喂 Intent/Reachability 打分。零付费。
-    this.signalEnrichers.push(new DigitalFootprintProvider({ broker }));
+    const sitemapUrls = broker
+      ? (domain: string, toolCtx: ToolContext) =>
+          fetchSitemapUrls(
+            domain,
+            async (input: HttpGetInput) =>
+              (await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, toolCtx)).data,
+          )
+      : undefined;
+    this.signalEnrichers.push(new DigitalFootprintProvider({ broker, sitemapUrls }));
     this.signalEnrichers.push(new StructuredHarvestProvider({ broker }));
 
     if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
@@ -226,6 +275,83 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'openfda', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
+    await db.dataProvider.upsert({
+      where: { key: 'fr_company' },
+      update: {},
+      create: { key: 'fr_company', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'nppes' },
+      update: {},
+      create: { key: 'nppes', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'ror' },
+      update: { status: 'DISABLED' },
+      create: { key: 'ror', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'sec_edgar' },
+      update: { status: 'DISABLED' },
+      create: { key: 'sec_edgar', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'mexico_denue' },
+      update: { status: 'DISABLED' },
+      create: { key: 'mexico_denue', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'fmcsa_qcmobile' },
+      update: { status: 'DISABLED' },
+      create: { key: 'fmcsa_qcmobile', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'eu_ecolabel' },
+      update: { status: 'DISABLED' },
+      create: { key: 'eu_ecolabel', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'sbir_sttr_companies' },
+      update: { status: 'DISABLED' },
+      create: { key: 'sbir_sttr_companies', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'koneps' },
+      update: { status: 'DISABLED' },
+      create: { key: 'koneps', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'world_bank_procurement' },
+      update: {},
+      create: { key: 'world_bank_procurement', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'usaspending_awards' },
+      update: {},
+      create: { key: 'usaspending_awards', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'uk_find_a_tender' },
+      update: {},
+      create: { key: 'uk_find_a_tender', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'brazil_pncp' },
+      // Remain fail-closed until a real positive sample proves the full governed funnel.
+      update: { status: 'DISABLED' },
+      create: { key: 'brazil_pncp', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'singapore_gebiz' },
+      // Research-only supplier awards are hard-disabled until they have a separate non-Lead projection.
+      update: { status: 'DISABLED' },
+      create: { key: 'singapore_gebiz', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'uk_contracts_finder' },
+      update: {},
+      create: { key: 'uk_contracts_finder', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
     // 合规注册（spec §3.3.7）：官方 REST（非爬）；**CC0 公共领域**（署名非义务，与 TED CC BY 不同）；
     // personalData=true —— registrationlisting 记录可能含具名 us_agent/contact（即便走 API），绿事实入库、具名个人 🔴 隔离。
     if (db.sourcePolicy) {
@@ -245,10 +371,238 @@ export class DiscoveryProviderRegistry {
           notes: 'openFDA（api.fda.gov）官方开放数据 API（零鉴权）。CC0 公共领域可商用（署名非义务）；「注册≠核准」文案红线；具名 us_agent/contact 🔴 隔离；MAUDE/FAERS 不摄入。intent=510k FDA_CLEARANCE 投影用途。',
         },
       });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'npiregistry.cms.hhs.gov' },
+        update: {},
+        create: {
+          domain: 'npiregistry.cms.hhs.gov',
+          sourceType: 'company_registry',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes:
+            'CMS NPPES NPI Registry API v2.1。只接纳 NPI-2 organization；authorized official、电话、邮箱和街道地址在 adapter 白名单投影前结构性丢弃。NPI 表示医疗组织或 subpart，不单独证明全球法人同一性。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.ror.org' },
+        update: {
+          sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED', robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK', personalData: false, allowedPurpose: ['discovery'], retentionDays: 365,
+          notes: 'ROR REST API v2 / Schema 2.1，CC0。仅显式 source_hint=ror、ISO-2 国家和官方组织类型可路由；只保留 active 组织事实。ROR ID 经 Crockford Base32 与 ISO/IEC 7064 checksum 验证后作为 ror-id 强身份；reported domains 仅为来源证据。Provider 保持 DISABLED，直至真实持久化闭环与重放验收完成。',
+        },
+        create: {
+          domain: 'api.ror.org', sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS', termsStatus: 'REVIEWED_OK', personalData: false,
+          allowedPurpose: ['discovery'], retentionDays: 365,
+          notes: 'ROR REST API v2 / Schema 2.1，CC0。仅显式 source_hint=ror、ISO-2 国家和官方组织类型可路由；只保留 active 组织事实。ROR ID 经 Crockford Base32 与 ISO/IEC 7064 checksum 验证后作为 ror-id 强身份；reported domains 仅为来源证据。Provider 保持 DISABLED，直至真实持久化闭环与重放验收完成。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'www.sec.gov' },
+        update: {
+          sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED', robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK', personalData: false, allowedPurpose: ['discovery'], retentionDays: 365,
+          notes: 'SEC EDGAR company_tickers_exchange.json 官方目录。仅精确 ticker 或精确规范名、limit 1..5、服务端真实联系 User-Agent 可调用；CIK 作为 US 证券申报命名空间身份，不证明美国住所或商业匹配。Provider 默认 DISABLED。',
+        },
+        create: {
+          domain: 'www.sec.gov', sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS', termsStatus: 'REVIEWED_OK', personalData: false,
+          allowedPurpose: ['discovery'], retentionDays: 365,
+          notes: 'SEC EDGAR company_tickers_exchange.json 官方目录。仅精确 ticker 或精确规范名、limit 1..5、服务端真实联系 User-Agent 可调用；CIK 作为 US 证券申报命名空间身份，不证明美国住所或商业匹配。Provider 默认 DISABLED。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'data.sec.gov' },
+        update: {
+          sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED', robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK', personalData: true, allowedPurpose: ['enrichment'], retentionDays: 365,
+          notes: 'SEC EDGAR submissions JSON 只可 enrichment 已有 company_tickers 目录 CIK，并要求 entityType=operating 与目录名称精确绑定；不得由 submissions 单独创建公司。filings、formerNames、地址、EIN、电话和网站结构性丢弃。Provider 默认 DISABLED。',
+        },
+        create: {
+          domain: 'data.sec.gov', sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS', termsStatus: 'REVIEWED_OK', personalData: true,
+          allowedPurpose: ['enrichment'], retentionDays: 365,
+          notes: 'SEC EDGAR submissions JSON 只可 enrichment 已有 company_tickers 目录 CIK，并要求 entityType=operating 与目录名称精确绑定；不得由 submissions 单独创建公司。filings、formerNames、地址、EIN、电话和网站结构性丢弃。Provider 默认 DISABLED。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'www.inegi.org.mx' },
+        update: {
+          sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED', robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK', personalData: true, allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/app/api/denue/v1/consulta/Nombre/'],
+          notes: 'INEGI DENUE Nombre API。仅显式 source_hint=mexico_denue、MX、州代码 01..32 和单一企业名称可调用；禁止 00/todos/全国批量。只接纳公开 Razon_social 的组织，并在 Raw 前删除电话、邮箱、详细地址、邮编、AGEB、街区和经纬度。Token 仅从进程环境读取且从 provenance/error/trace 移除。CLEE/Id 暂作 establishment 来源证据，不提升为已验证法人强身份。使用需按 INEGI 自由使用条款署名。Provider 默认 DISABLED。',
+        },
+        create: {
+          domain: 'www.inegi.org.mx', sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS', termsStatus: 'REVIEWED_OK', personalData: true,
+          allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/app/api/denue/v1/consulta/Nombre/'],
+          notes: 'INEGI DENUE Nombre API。仅显式 source_hint=mexico_denue、MX、州代码 01..32 和单一企业名称可调用；禁止 00/todos/全国批量。只接纳公开 Razon_social 的组织，并在 Raw 前删除电话、邮箱、详细地址、邮编、AGEB、街区和经纬度。Token 仅从进程环境读取且从 provenance/error/trace 移除。CLEE/Id 暂作 establishment 来源证据，不提升为已验证法人强身份。使用需按 INEGI 自由使用条款署名。Provider 默认 DISABLED。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'mobile.fmcsa.dot.gov' },
+        update: {
+          sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'SUSPENDED', robotsStatus: 'ALLOWS',
+          termsStatus: 'UNREVIEWED', personalData: true, allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/qc/services/carriers/name/'],
+          notes: 'FMCSA QCMobile name API。仅显式 source_hint=fmcsa_qcmobile、US 和单一企业名称可调用；限制在前 50 条小分页，并只接纳有强法律形式或公共机构名称证据的组织承运商。电话、邮箱、详细地址、个体经营者和未知字段在 Raw 前结构性删除。WebKey 仅从进程环境读取且从 provenance/error/trace 移除。usdot-v1 仅接纳当前 1..8 位、无前导零的正十进制 QCMobile dotNumber，不宣称校验和、运营许可或支持未来编号格式。SourcePolicy 保持 SUSPENDED/UNREVIEWED 且 Provider 保持 DISABLED，直至取得 WebKey、完成条款审查及真实持久化闭环与重放验收。',
+        },
+        create: {
+          domain: 'mobile.fmcsa.dot.gov', sourceType: 'company_registry', accessMode: 'api', reviewStatus: 'SUSPENDED',
+          robotsStatus: 'ALLOWS', termsStatus: 'UNREVIEWED', personalData: true,
+          allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/qc/services/carriers/name/'],
+          notes: 'FMCSA QCMobile name API。仅显式 source_hint=fmcsa_qcmobile、US 和单一企业名称可调用；限制在前 50 条小分页，并只接纳有强法律形式或公共机构名称证据的组织承运商。电话、邮箱、详细地址、个体经营者和未知字段在 Raw 前结构性删除。WebKey 仅从进程环境读取且从 provenance/error/trace 移除。usdot-v1 仅接纳当前 1..8 位、无前导零的正十进制 QCMobile dotNumber，不宣称校验和、运营许可或支持未来编号格式。SourcePolicy 保持 SUSPENDED/UNREVIEWED 且 Provider 保持 DISABLED，直至取得 WebKey、完成条款审查及真实持久化闭环与重放验收。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'apps.data.env.service.ec.europa.eu' },
+        update: {
+          sourceType: 'certification', accessMode: 'api', reviewStatus: 'APPROVED', robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK', personalData: true, allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/dataquery/v2/ecolabel/products'],
+          notes: 'European Commission EU Ecolabel public Data Query API v2。仅显式 source_hint=eu_ecolabel、EEA 国家和精确组织名可调用；单 scope 最多 100 行，只请求组织、产品组与产品级 licence 事实。VAT、联系人、地址、坐标、图片、GTIN 和未知字段在 Raw 前结构性删除；licence number 是产品认证证据，不提升为企业身份。复用须署名并说明修改，不授予 EU Ecolabel 商标、Logo、背书或认证使用权。Provider 默认 DISABLED，直至真实持久化闭环与重放验收完成。',
+        },
+        create: {
+          domain: 'apps.data.env.service.ec.europa.eu', sourceType: 'certification', accessMode: 'api',
+          reviewStatus: 'APPROVED', robotsStatus: 'ALLOWS', termsStatus: 'REVIEWED_OK', personalData: true,
+          allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/dataquery/v2/ecolabel/products'],
+          notes: 'European Commission EU Ecolabel public Data Query API v2。仅显式 source_hint=eu_ecolabel、EEA 国家和精确组织名可调用；单 scope 最多 100 行，只请求组织、产品组与产品级 licence 事实。VAT、联系人、地址、坐标、图片、GTIN 和未知字段在 Raw 前结构性删除；licence number 是产品认证证据，不提升为企业身份。复用须署名并说明修改，不授予 EU Ecolabel 商标、Logo、背书或认证使用权。Provider 默认 DISABLED，直至真实持久化闭环与重放验收完成。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.www.sbir.gov' },
+        update: {
+          sourceType: 'gov_award', accessMode: 'api', reviewStatus: 'SUSPENDED', robotsStatus: 'ALLOWS',
+          termsStatus: 'UNREVIEWED', personalData: true, allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/public/api/firm'],
+          notes: 'SBA SBIR/STTR Company API。仅显式 source_hint=sbir_sttr_companies、US 和精确组织名可调用；只保留公司目录、州、历史 award count 与官方 profile 元数据。DUNS、街道地址、联系人、PI、所有权人口属性、公司 URL 和未知字段在 Raw 前结构性删除；UEI 仅保留为来源元数据，不提升身份。官方当前声明 API 维护中，SourcePolicy 保持 SUSPENDED/UNREVIEWED 且 Provider 保持 DISABLED。',
+        },
+        create: {
+          domain: 'api.www.sbir.gov', sourceType: 'gov_award', accessMode: 'api', reviewStatus: 'SUSPENDED',
+          robotsStatus: 'ALLOWS', termsStatus: 'UNREVIEWED', personalData: true,
+          allowedPurpose: ['discovery'], retentionDays: 365, allowedPaths: ['/public/api/firm'],
+          notes: 'SBA SBIR/STTR Company API。仅显式 source_hint=sbir_sttr_companies、US 和精确组织名可调用；只保留公司目录、州、历史 award count 与官方 profile 元数据。DUNS、街道地址、联系人、PI、所有权人口属性、公司 URL 和未知字段在 Raw 前结构性删除；UEI 仅保留为来源元数据，不提升身份。官方当前声明 API 维护中，SourcePolicy 保持 SUSPENDED/UNREVIEWED 且 Provider 保持 DISABLED。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'apis.data.go.kr' },
+        update: {
+          sourceType: 'gov_award', accessMode: 'api', reviewStatus: 'SUSPENDED', robotsStatus: 'ALLOWS',
+          termsStatus: 'UNREVIEWED', personalData: true, allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/1230000/ao/CntrctInfoService/getCntrctInfoListThngPPSSrch'],
+          notes: 'KONEPS 物品合同采购机关 buyer 安全子集。仅显式 source_hint=koneps、KR、精确采购机关名、单一精确品名和最长 31 天窗口可调用；最多 10 页×10 行。只保留采购机关与合同事实，供应商列表、债权人、经办人、部门、电话、传真和未知字段在 Raw 前结构性删除；合同号不是企业身份。serviceKey 仅从进程环境读取并从输入、幂等键、provenance、trace 和错误链移除。官方接口免费且自动审批，但条款仍须人工确认；Provider 保持 DISABLED，直至取得 KONEPS_SERVICE_KEY 并完成真实持久化闭环与重放验收。',
+        },
+        create: {
+          domain: 'apis.data.go.kr', sourceType: 'gov_award', accessMode: 'api', reviewStatus: 'SUSPENDED',
+          robotsStatus: 'ALLOWS', termsStatus: 'UNREVIEWED', personalData: true,
+          allowedPurpose: ['discovery'], retentionDays: 365,
+          allowedPaths: ['/1230000/ao/CntrctInfoService/getCntrctInfoListThngPPSSrch'],
+          notes: 'KONEPS 物品合同采购机关 buyer 安全子集。仅显式 source_hint=koneps、KR、精确采购机关名、单一精确品名和最长 31 天窗口可调用；最多 10 页×10 行。只保留采购机关与合同事实，供应商列表、债权人、经办人、部门、电话、传真和未知字段在 Raw 前结构性删除；合同号不是企业身份。serviceKey 仅从进程环境读取并从输入、幂等键、provenance、trace 和错误链移除。官方接口免费且自动审批，但条款仍须人工确认；Provider 保持 DISABLED，直至取得 KONEPS_SERVICE_KEY 并完成真实持久化闭环与重放验收。',
+        },
+      });
+      const procurementSources = [
+        {
+          domain: 'api.usaspending.gov',
+          sourceType: 'gov_award',
+          personalData: true,
+          notes: 'USAspending federal award API。下属授标机构与历史中标供应商严格分角色；Recipient Name 可能是个人/个体承包商，按可能含个人数据治理。历史授标不表示当前商机，Award ID 仅为商业事件标识，不进入企业强身份。',
+        },
+        {
+          domain: 'search.worldbank.org',
+          sourceType: 'gov_opportunity',
+          personalData: true,
+          notes: 'World Bank Procurement Notices API。只保留采购/实施机构和公告绿事实；联系人字段结构性剔除。CC BY 4.0 署名。',
+        },
+        {
+          domain: 'www.find-tender.service.gov.uk',
+          sourceType: 'gov_opportunity',
+          personalData: true,
+          notes: 'UK Find a Tender OCDS API，OGL v3。买方、历史中标供应商分角色；联系人字段不进入企业绿库。',
+        },
+        {
+          domain: 'pncp.gov.br',
+          sourceType: 'gov_opportunity',
+          personalData: true,
+          notes: 'Brazil PNCP public consultation API。首期只输出采购机关/开放需求；仅在 CNPJ 为纯数字 14 位、校验位正确且与 numeroControlePNCP 前缀完全一致时，才投影为 br-cnpj 强身份。Provider 保持 DISABLED，直至真实正向样本完成治理闭环验收。',
+        },
+        {
+          domain: 'data.gov.sg',
+          sourceType: 'gov_award',
+          personalData: true,
+          notes: 'Singapore data.gov.sg GeBIZ awards dataset。只输出历史中标供应商，采购机关保留为上下文证据；supplier_name 无 UEN/entity type，按可能含个人数据治理。',
+        },
+        {
+          domain: 'www.contractsfinder.service.gov.uk',
+          sourceType: 'gov_opportunity',
+          personalData: true,
+          notes: 'UK Contracts Finder official OCDS GET API，OGL v3。仅用于英国低额采购买方发现，并作为 FTS 的补充。',
+        },
+      ];
+      for (const row of procurementSources) {
+        await db.sourcePolicy.upsert({
+          where: { domain: row.domain },
+          // Correct classification/privacy/identity notes for selected existing installs;
+          // preserve every operational review/kill-switch field and all other provider rows.
+          update: row.domain === 'api.usaspending.gov'
+            || row.domain === 'pncp.gov.br'
+            || row.domain === 'data.gov.sg'
+            || row.domain === 'www.contractsfinder.service.gov.uk'
+            ? { sourceType: row.sourceType, personalData: row.personalData, notes: row.notes }
+            : {},
+          create: {
+            domain: row.domain,
+            sourceType: row.sourceType,
+            accessMode: 'api',
+            reviewStatus: 'APPROVED',
+            robotsStatus: 'ALLOWS',
+            termsStatus: 'REVIEWED_OK',
+            personalData: row.personalData,
+            allowedPurpose: ['discovery'],
+            retentionDays: 365,
+            notes: row.notes,
+          },
+        });
+      }
     }
     // 收口②：required 工具的治理域登记（未登记 fail-closed）。这些行是各直连数据源的
     // **显性合规审查记录**——SUSPENDED 任一行即该源全链停抓（Broker 单点强制）。
     if (db.sourcePolicy) {
+      for (const row of [
+        {
+          domain: 'google.serper.dev',
+          notes: 'Serper Google Search API backend for public_web candidate-domain discovery. BYOK only; no direct company/Lead projection. Keep SUSPENDED until terms review and a bounded real-key acceptance are recorded.',
+        },
+        {
+          domain: 'api.search.brave.com',
+          notes: 'Brave Search API backend for public_web candidate-domain discovery. BYOK only; no direct company/Lead projection. Keep SUSPENDED until terms review and a bounded real-key acceptance are recorded.',
+        },
+      ]) {
+        await db.sourcePolicy.upsert({
+          where: { domain: row.domain },
+          update: {},
+          create: {
+            domain: row.domain,
+            sourceType: 'search_index',
+            accessMode: 'api',
+            reviewStatus: 'SUSPENDED',
+            robotsStatus: 'ALLOWS',
+            termsStatus: 'UNREVIEWED',
+            personalData: false,
+            allowedPurpose: ['discovery'],
+            retentionDays: 30,
+            notes: row.notes,
+          },
+        });
+      }
       const requiredSourceRows = [
         { domain: 'query.wikidata.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'Wikidata SPARQL 端点（CC0）。wikidata.sparql 工具治理域。' },
         { domain: 'www.wikidata.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'Wikidata REST API（CC0）。wikidata.entity 工具治理域（富集）。' },
@@ -459,7 +813,20 @@ export class DiscoveryProviderRegistry {
   /** 当前 ENABLED 的富集适配器（对已归一公司补充结构化属性）。 */
   async routeEnrichment(db: ProviderDb): Promise<CompanyEnrichmentAdapter[]> {
     const enabled = await this.enabledKeys(db);
-    return this.enrichers.filter((a) => enabled.has(a.key));
+    return this.enrichers.filter((a) => a.key !== 'sec_edgar' && enabled.has(a.key));
+  }
+
+  /**
+   * ICP 资格门前的小范围事实路由。这不是新渠道，只是从已登记的富集源中
+   * 选出 Wikidata、GLEIF 法律身份和官网数字足迹；招聘/站点收割仍留在后续阶段。
+   */
+  async routeFitEvidenceEnrichment(db: ProviderDb): Promise<CompanyEnrichmentAdapter[]> {
+    const enabled = await this.enabledKeys(db);
+    return [...this.enrichers, ...this.signalEnrichers].filter(
+      (adapter) =>
+        (adapter.key === 'wikidata' || adapter.key === 'gleif' || adapter.key === 'sec_edgar' || adapter.key === 'digital_footprint') &&
+        enabled.has(adapter.key),
+    );
   }
 
   /** 当前 ENABLED 的**信号类**富集适配器（慢/时变，走独立长活动 + TTL 刷新）。 */

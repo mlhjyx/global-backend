@@ -10,6 +10,7 @@ import type { GleifFetchInput, GleifFetchOutput } from '../../tools/source-tools
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { normForMatch, pickBestByName } from '../name-match';
 import { ELF_LABELS } from '../elf';
+import { countryAlpha2 } from '../country-code';
 
 const PARSER_VERSION = 'gleif/v1';
 const ACCEPT_THRESHOLD = 0.72; // 低于此不贴 LEI（宁缺毋滥，绝不贴错身份）
@@ -36,7 +37,21 @@ export class GleifEnrichmentProvider implements CompanyEnrichmentAdapter {
       return miss();
     }
     const toolCtx: ToolContext = { ...ctx };
-    const country = input.country?.trim();
+    const country = countryAlpha2(input.country);
+    // A name-only LEI is not a safe identity assertion. Keep this provider
+    // fail-closed until a jurisdiction is available.
+    if (!country) return miss();
+    const existingIdentifiers = input.identifiers ?? [];
+    const existingLeis = existingIdentifiers
+      .filter((identifier) => identifier.scheme.toLocaleLowerCase('en-US') === 'lei')
+      .map((identifier) => compact(identifier.value));
+    const unsupportedLegalAnchor = existingIdentifiers.some((identifier) =>
+      !['domain', 'wikidata-qid', 'lei'].includes(identifier.scheme.toLocaleLowerCase('en-US')),
+    );
+    // GLEIF's name endpoint cannot prove that a LEI belongs to a company that
+    // already has another registry number (for example SIREN). Without an
+    // official crosswalk, attaching the LEI would confuse group and subsidiary.
+    if (unsupportedLegalAnchor && existingLeis.length === 0) return miss();
     // 搜索用**核心名**（剥法人后缀）放宽召回：GLEIF 存全称（"Siemens Aktiengesellschaft"），
     // 直接拿 "Siemens AG" 做 contains 过滤会漏掉真身。核心名 "siemens" 召回全部同名实体，
     // 再交给 pickBest + 歧义护栏挑突出者。
@@ -47,13 +62,17 @@ export class GleifEnrichmentProvider implements CompanyEnrichmentAdapter {
     } catch {
       return miss();
     }
-    if (!candidates.length && country) {
+    if (!candidates.length) {
       // 国家过滤可能过严（登记地 ≠ 运营地）；放宽一次仅按名检索
       try {
         candidates = await searchLeiViaBroker(broker, { name: searchName, limit: 15 }, toolCtx);
       } catch {
         return miss();
       }
+    }
+    candidates = candidates.filter((candidate) => countryAlpha2(candidate.country) === country);
+    if (existingLeis.length) {
+      candidates = candidates.filter((candidate) => existingLeis.includes(compact(candidate.lei)));
     }
     if (!candidates.length) return miss();
 
@@ -93,6 +112,7 @@ export class GleifEnrichmentProvider implements CompanyEnrichmentAdapter {
       matched: true,
       confidence: best.score,
       attributes: prune(attributes),
+      identifiers: [{ scheme: 'lei', jurisdiction: 'GLOBAL', value: rec.lei }],
       provenance: {
         sourceUrl: `https://search.gleif.org/#/record/${rec.lei}`,
         fetchedAt: new Date().toISOString(),
@@ -102,6 +122,10 @@ export class GleifEnrichmentProvider implements CompanyEnrichmentAdapter {
       costCents: 0,
     };
   }
+}
+
+function compact(value: string): string {
+  return value.normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, '').toLocaleUpperCase('en-US');
 }
 
 function miss(): EnrichmentResult {

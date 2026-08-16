@@ -82,6 +82,8 @@ export interface GenerateStructuredInput {
    * remains subject to the same schema and task gate; callers must opt in.
    */
   repairTaskOutput?: boolean;
+  /** Hard ceiling for the initial structured generation plus its optional repair. */
+  maxPhysicalCalls?: 1 | 2;
   maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Per-call ceiling from the resolved task policy; takes precedence over legacy registry defaults. */

@@ -6,7 +6,13 @@ import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, Provi
 } from '../discovery/provider-contract';
 import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
+import {
+  IdentityGroupLeadConflictError,
+  findIdentityGroupLeadsForIcp,
+  judgeFitCompany,
+  loadIcpBrief,
+  upsertLeadFit,
+} from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { persistDiscoveredContacts } from '../discovery/contact-persist';
 import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
@@ -17,12 +23,17 @@ import { KnownEmailSample } from '../discovery/email-format-learning';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { normalizeDomain } from '../discovery/identity';
 import { canonicalizeSuppressionValues } from '../discovery/suppression-value';
-import { companyMayUseExternalProcessing,
-  contactMayUseExternalProcessing,
-} from '../discovery/company-suppression-gate';
+import { contactMayUseExternalProcessing } from '../discovery/company-suppression-gate';
+import {
+  organizationMayUseExternalProcessing as companyMayUseExternalProcessing,
+  loadOrganizationIdentitySnapshots,
+  resolveOrganizationIdentityGroups,
+} from '../discovery/organization-identity-root';
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
 import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
+import { bindOrganizationEnrichmentIdentifiers } from '../discovery/organization-identity-enrichment';
+import type { CompanyIdentifier } from '../discovery/identity';
 
 /**
  * 存量对账活动（backlog reconciliation）——漏斗总闸的解锁器。
@@ -206,17 +217,15 @@ export function createBacklogActivities(deps: {
      */
     async qualifyFitBacklog(args: BacklogPage & { icpId: string }): Promise<FitBacklogResult> {
       const limit = args.limit ?? 40;
-      const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+      const { icpBrief, companies, scanned, nextCursor } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
-        const companies = await tx.canonicalCompany.findMany({
+        const pageCompanies = await tx.canonicalCompany.findMany({
           where: {
-            // 尚无「本 ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）→ 才判定（per-ICP，非公司级）。
-            NOT: {
-              leads: {
-                some: { icpId: args.icpId, fitVerdict: { not: null } },
-              },
-            },
             status: { not: 'SUPPRESSED' },
+            identitySourceMappings: { none: { status: 'ACTIVE' } },
+            identityConflictParties: {
+              none: { conflict: { status: { in: ['OPEN', 'RESOLVING'] } } },
+            },
             ...(args.cursor ? { id: { gt: args.cursor } } : {}),
           },
           orderBy: { id: 'asc' },
@@ -230,7 +239,76 @@ export function createBacklogActivities(deps: {
             attributes: true,
           },
         });
-        return { icpBrief, companies };
+        const identityGroups = await resolveOrganizationIdentityGroups(
+          tx,
+          args.workspaceId,
+          pageCompanies.map((company) => company.id),
+        );
+        const existingLeads = await findIdentityGroupLeadsForIcp(tx, args.workspaceId, args.icpId, identityGroups);
+        const identityRootByCompany = new Map<string, string>();
+        for (const group of identityGroups) {
+          for (const companyId of group.relatedCompanyIds) identityRootByCompany.set(companyId, group.rootCompanyId);
+        }
+        const leadsByRoot = new Map<string, typeof existingLeads>();
+        for (const lead of existingLeads) {
+          const rootCompanyId = identityRootByCompany.get(lead.canonicalCompanyId);
+          if (!rootCompanyId) continue;
+          const groupLeads = leadsByRoot.get(rootCompanyId) ?? [];
+          groupLeads.push(lead);
+          leadsByRoot.set(rootCompanyId, groupLeads);
+        }
+        for (const group of identityGroups) {
+          if ((leadsByRoot.get(group.rootCompanyId)?.length ?? 0) > 1) {
+            throw new IdentityGroupLeadConflictError(group.rootCompanyId, args.icpId);
+          }
+        }
+        const candidateGroups = identityGroups.filter((group) => {
+          const lead = leadsByRoot.get(group.rootCompanyId)?.[0];
+          return !lead || lead.fitVerdict === null;
+        });
+        const candidateRootIds = new Set(candidateGroups.map((group) => group.rootCompanyId));
+        const companies = pageCompanies.filter((company) => candidateRootIds.has(company.id));
+        const identitySnapshots = await loadOrganizationIdentitySnapshots(
+          tx,
+          args.workspaceId,
+          companies.map((company) => company.id),
+        );
+        const candidateRootByCompany = new Map<string, string>();
+        for (const group of candidateGroups) {
+          for (const companyId of group.relatedCompanyIds) candidateRootByCompany.set(companyId, group.rootCompanyId);
+        }
+        const evidenceRows = companies.length
+          ? await tx.fieldEvidence.findMany({
+              where: { entityType: 'company', entityId: { in: [...candidateRootByCompany.keys()] } },
+              select: {
+                id: true,
+                entityId: true,
+                field: true,
+                value: true,
+                providerKey: true,
+                allowedActions: true,
+                fetchedAt: true,
+              },
+              orderBy: { fetchedAt: 'desc' },
+            })
+          : [];
+        const evidenceByCompany = new Map<string, typeof evidenceRows>();
+        for (const row of evidenceRows) {
+          const rootCompanyId = candidateRootByCompany.get(row.entityId) ?? row.entityId;
+          const existing = evidenceByCompany.get(rootCompanyId) ?? [];
+          existing.push(row);
+          evidenceByCompany.set(rootCompanyId, existing);
+        }
+        return {
+          icpBrief,
+          companies: companies.map((company) => ({
+            ...company,
+            evidence: evidenceByCompany.get(company.id) ?? [],
+            identityFingerprint: identitySnapshots.get(company.id)?.fingerprint ?? '',
+          })),
+          scanned: pageCompanies.length,
+          nextCursor: pageCompanies.length === limit ? pageCompanies[pageCompanies.length - 1].id : null,
+        };
       });
 
       const verdicts: Record<string, number> = {
@@ -265,11 +343,12 @@ export function createBacklogActivities(deps: {
             throw err;
           }
           if (!judgment) continue; // 单家判别失败不影响其余；本 sweep 不重试（游标只前进），下个 sweep 再来
+          const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment, c.identityFingerprint),
+          );
+          if (!committed) continue;
           verdicts[judgment.verdict] += 1;
           judged += 1;
-          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-            upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
-          );
         }
       } finally {
         budget.close();
@@ -278,17 +357,17 @@ export function createBacklogActivities(deps: {
         // 预算截断的行未获 fitVerdict → 仍在过滤集内，nextCursor 置 null 让本 ICP 本轮就此收手
         // （继续翻页只会连环触发同一账户超限）。
         return {
-          scanned: companies.length,
+          scanned,
           judged,
           verdicts,
           nextCursor: null,
         };
       }
       return {
-        scanned: companies.length,
+        scanned,
         judged,
         verdicts,
-        nextCursor: companies.length === limit ? companies[companies.length - 1].id : null,
+        nextCursor,
       };
     },
 
@@ -301,8 +380,8 @@ export function createBacklogActivities(deps: {
       );
       if (!enrichers.length) return { scanned: 0, attempted: 0, matched: 0, nextCursor: null };
 
-      const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.canonicalCompany.findMany({
+      const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const rows = await tx.canonicalCompany.findMany({
           where: backlogEligibleWhere({
             watermarkField: 'lastEnrichedAt',
             now,
@@ -317,8 +396,18 @@ export function createBacklogActivities(deps: {
             region: true,
             attributes: true,
           },
-        }),
-      );
+        });
+        const identitySnapshots = await loadOrganizationIdentitySnapshots(
+          tx,
+          args.workspaceId,
+          rows.map((row) => row.id),
+        );
+        return rows.map((row) => ({
+          ...row,
+          organizationIdentifiers: identitySnapshots.get(row.id)!.identifiers,
+          identitySnapshot: identitySnapshots.get(row.id)!.fingerprint,
+        }));
+      });
 
       let attempted = 0;
       let matched = 0;
@@ -343,6 +432,7 @@ export function createBacklogActivities(deps: {
                 domain: c.domain ?? undefined,
                 country: c.country ?? undefined,
                 region: c.region ?? undefined,
+                identifiers: c.organizationIdentifiers,
               },
               ctx,
             );
@@ -358,6 +448,7 @@ export function createBacklogActivities(deps: {
             companyId: c.id,
             hits,
             status: 'ENRICHED',
+            expectedIdentitySnapshot: c.identitySnapshot,
           }),
         );
         if (committed) matched += 1;
@@ -387,8 +478,8 @@ export function createBacklogActivities(deps: {
       if (!enrichers.length) return { scanned: 0, attempted: 0, matched: 0, nextCursor: null };
       const suspended = await suspendedDomains();
 
-      const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.canonicalCompany.findMany({
+      const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const rows = await tx.canonicalCompany.findMany({
           where: backlogEligibleWhere({
             watermarkField: 'lastSignalAt',
             now,
@@ -404,8 +495,18 @@ export function createBacklogActivities(deps: {
             region: true,
             attributes: true,
           },
-        }),
-      );
+        });
+        const identitySnapshots = await loadOrganizationIdentitySnapshots(
+          tx,
+          args.workspaceId,
+          rows.map((row) => row.id),
+        );
+        return rows.map((row) => ({
+          ...row,
+          organizationIdentifiers: identitySnapshots.get(row.id)!.identifiers,
+          identitySnapshot: identitySnapshots.get(row.id)!.fingerprint,
+        }));
+      });
 
       let attempted = 0;
       let matched = 0;
@@ -458,6 +559,7 @@ export function createBacklogActivities(deps: {
                   domain: c.domain ?? undefined,
                   country: c.country ?? undefined,
                   region: c.region ?? undefined,
+                  identifiers: c.organizationIdentifiers,
                 },
                 ctx,
               );
@@ -480,6 +582,7 @@ export function createBacklogActivities(deps: {
               companyId: c.id,
               hits,
               signalTimestamp: new Date(nowMs),
+              expectedIdentitySnapshot: c.identitySnapshot,
             }),
           );
           if (committed) matched += 1;
@@ -647,6 +750,8 @@ export function createBacklogActivities(deps: {
           const perAdapter: {
             key: string;
             contacts: ProviderContactRecord[];
+            organizationIdentifiers?: CompanyIdentifier[];
+            organizationMatchConfidence?: number;
           }[] = [];
           for (const adapter of adapters) {
             try {
@@ -665,10 +770,12 @@ export function createBacklogActivities(deps: {
                 },
                 sellerCtx,
               );
-              if (result.contacts.length)
+              if (result.contacts.length || result.organizationIdentifiers?.length)
                 perAdapter.push({
                   key: adapter.key,
                   contacts: result.contacts,
+                  organizationIdentifiers: result.organizationIdentifiers,
+                  organizationMatchConfidence: result.organizationMatchConfidence,
                 });
             } catch {
               // 单 adapter fail-safe：不阻断其余源
@@ -684,6 +791,18 @@ export function createBacklogActivities(deps: {
           if (!perAdapter.length) continue;
           // 同一 tx 内顺序 persist：同一人经 resolvePersonIdentity 跨 adapter 合并（email + officer_id 落同一条）。
           const created = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+            const identityBinding = await bindOrganizationEnrichmentIdentifiers(tx, {
+              workspaceId: args.workspaceId,
+              companyId: c.id,
+              claims: perAdapter
+                .filter((item) => (item.organizationIdentifiers?.length ?? 0) > 0)
+                .map((item) => ({
+                  providerKey: item.key,
+                  confidence: item.organizationMatchConfidence ?? 0,
+                  identifiers: item.organizationIdentifiers ?? [],
+                })),
+            });
+            if (identityBinding.kind === 'conflict') return 0;
             let n = 0;
             for (const pa of perAdapter) {
               const res = await persistDiscoveredContacts(tx, {
@@ -798,21 +917,37 @@ export function createBacklogActivities(deps: {
           }),
           orderBy: backlogEligibleOrderBy('emailGuessAttemptedAt'),
           take: limit,
-          select: { id: true, name: true, domain: true },
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            identityCanonicalMappings: {
+              where: { status: 'ACTIVE' },
+              select: { sourceCompanyId: true },
+            },
+          },
         });
         const suppressedEmails = canonicalizeSuppressionValues(
           'email',
           (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
         );
+        const identityRootByCompany = new Map<string, string>();
+        for (const company of companies) {
+          identityRootByCompany.set(company.id, company.id);
+          for (const mapping of company.identityCanonicalMappings ?? []) {
+            identityRootByCompany.set(mapping.sourceCompanyId, company.id);
+          }
+        }
         const contacts = await tx.canonicalContact.findMany({
-          where: { companyId: { in: companies.map((c) => c.id) } },
+          where: { companyId: { in: [...identityRootByCompany.keys()] } },
           include: { contactPoints: true },
         });
         const byCompany = new Map<string, typeof contacts>();
         for (const ct of contacts) {
-          const arr = byCompany.get(ct.companyId) ?? [];
+          const rootCompanyId = identityRootByCompany.get(ct.companyId) ?? ct.companyId;
+          const arr = byCompany.get(rootCompanyId) ?? [];
           arr.push(ct);
-          byCompany.set(ct.companyId, arr);
+          byCompany.set(rootCompanyId, arr);
         }
         const guessCompanies: GuessTargetCompany[] = [];
         for (const c of companies) {

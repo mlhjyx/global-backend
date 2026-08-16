@@ -104,6 +104,7 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
  */
 export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string): ProviderCompanyRecord {
   const idValue = est.registrationNumber?.trim() || undefined; // 空串注册号当无（?? 不兜空串）
+  const identifier = idValue ? { scheme: FDA_ID_SCHEME, value: idValue } : undefined;
   const fda = prune({
     registration_number: idValue,
     fei_number: est.feiNumber,
@@ -134,7 +135,8 @@ export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string)
       products: est.deviceNames.length ? est.deviceNames : est.productCodes,
     },
     // FDA 注册号全局唯一（非国别税号）→ scheme 不按国别限定。
-    identifier: idValue ? { scheme: FDA_ID_SCHEME, value: idValue } : undefined,
+    identifier,
+    identifiers: identifier ? [identifier] : undefined,
     license: OPENFDA_LICENSE, // 写入 field_evidence.license（CC0，非硬编码 licensed）
     provenance: {
       sourceUrl: idValue ? `${REG_QUERY_BASE}${idValue}` : 'https://open.fda.gov/apis/device/registrationlisting/',

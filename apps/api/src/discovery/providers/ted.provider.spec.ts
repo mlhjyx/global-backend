@@ -60,6 +60,7 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     // §8.5 top-level 记录许可（写入 field_evidence.license）+ §8.4 provider 标识（税号）
     expect(r.license).toBe('CC BY 4.0');
     expect(r.identifier).toEqual({ scheme: 'ted-natid:de', value: 'DE111' }); // §8.4 scheme 国别限定（DEU→de）
+    expect(r.identifiers).toEqual([{ scheme: 'ted-natid:de', value: 'DE111' }]);
   });
 
   it('🔴 合规：绿事实记录里绝不含具名邮箱/个人联系点', () => {
@@ -90,6 +91,7 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     const ted = recs[0].attributes?.ted as Record<string, unknown>;
     expect('winner_identifier' in ted).toBe(false);
     expect(recs[0].identifier).toBeUndefined(); // §8.4 无标识 → 不设 top-level identifier
+    expect(recs[0].identifiers).toBeUndefined();
   });
 
   it('§8.4 identifier scheme 按国别限定 → 不同国同号的不同法人不跨境误并（审查修正）', () => {

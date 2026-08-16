@@ -4,7 +4,7 @@ import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 
 describe('workspace suppression policy lock', () => {
   it('uses a transaction-scoped PostgreSQL advisory lock keyed by the authenticated workspace', async () => {
-    const queryRaw = vi.fn(async () => [{ locked: true }]);
+    const queryRaw = vi.fn(async () => [{ locked: '' }]);
     const receipt = await lockWorkspaceSuppressionPolicy(
       { $queryRaw: queryRaw } as unknown as Prisma.TransactionClient,
       'ws-1',

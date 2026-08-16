@@ -1,4 +1,5 @@
 import { ExecutionBroker,
+  attachToolFailureCost,
   ExternalToolActionDeniedError,
   SourcePolicyDenyReason, Tool, ToolContext, ToolResult,
 } from './tool-contract';
@@ -36,12 +37,18 @@ export class ToolPolicyDenied extends Error {
   }
 }
 
+export type ProviderStatusReader = (
+  providerKey: string,
+) => Promise<{ status: string } | null>;
+
 export interface BrokerDeps {
   registry: ToolRegistry;
   budget?: BudgetLedger;
   limiter?: RateLimiter;
   /** 查某域名的 source_policy（返回 null=未登记；{suspended, allowedPurpose,...}）。 */
   sourcePolicyReader?: (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+  /** Resolve a Provider kill-switch. Bound tools fail closed unless the exact status is ENABLED. */
+  providerStatusReader?: ProviderStatusReader;
   /** 记一条工具调用 Trace（成本/延迟/合规决策）。fire-and-forget。 */
   traceRecorder?: (t: ToolTrace) => void;
   /** now() 注入，便于测试。 */
@@ -152,6 +159,61 @@ export class ToolBroker implements ExecutionBroker {
       if (!allowed.includes(toolId)) {
         this.trace(ctx, tool, 'DENIED', 'not in task allowedTools', 0, now() - started);
         throw new ToolPolicyDenied(toolId, `not in allowedTools of ${ctx.taskContractId}`);
+      }
+    }
+
+    if (
+      tool.compliance.providerKey &&
+      ctx.providerKey &&
+      tool.compliance.providerKey !== ctx.providerKey
+    ) {
+      const reason = `provider binding mismatch: ${tool.compliance.providerKey} != ${ctx.providerKey}`;
+      this.trace(ctx, tool, 'DENIED', reason, 0, now() - started);
+      throw new ToolPolicyDenied(toolId, reason);
+    }
+    const providerKey = tool.compliance.providerKey ?? ctx.providerKey;
+    const reauthorizeProviderStatus = providerKey
+      ? async (): Promise<void> => {
+          if (!this.deps.providerStatusReader) {
+            throw new ToolPolicyDenied(toolId, `provider_status_unavailable: ${providerKey}`);
+          }
+          let provider: { status: string } | null;
+          try {
+            provider = await this.deps.providerStatusReader(providerKey);
+          } catch {
+            throw new ToolPolicyDenied(toolId, `provider_status_unavailable: ${providerKey}`);
+          }
+          if (!provider) {
+            throw new ToolPolicyDenied(toolId, `provider not registered: ${providerKey}`);
+          }
+          if (provider.status !== 'ENABLED') {
+            throw new ToolPolicyDenied(toolId, `provider not enabled: ${providerKey}`);
+          }
+        }
+      : undefined;
+    if (reauthorizeProviderStatus) {
+      try {
+        await reauthorizeProviderStatus();
+      } catch (error) {
+        const reason = error instanceof ToolPolicyDenied ? error.reason : `provider_status_unavailable: ${providerKey}`;
+        this.trace(ctx, tool, 'DENIED', reason, 0, now() - started);
+        throw error;
+      }
+    }
+
+    if (tool.compliance.requiresExplicitPurpose) {
+      const explicitPurposes = typeof ctx.purpose === 'string'
+        ? [ctx.purpose]
+        : Array.isArray(ctx.purpose)
+          ? ctx.purpose
+          : [];
+      if (
+        explicitPurposes.length !== 1 ||
+        !tool.compliance.allowedPurpose.includes(explicitPurposes[0] ?? '')
+      ) {
+        const reason = 'explicit purpose required';
+        this.trace(ctx, tool, 'DENIED', reason, 0, now() - started);
+        throw new ToolPolicyDenied(toolId, reason);
       }
     }
 
@@ -294,8 +356,27 @@ export class ToolBroker implements ExecutionBroker {
         }
       }
       let result: ToolResult<O>;
+      let externalRequestStarted = false;
       try {
-        result = await tool.execute(input, ctx);
+        const wirePolicyDomain = tool.compliance.policyDomain ?? extractDomain(input);
+        const executionContext: ToolContext = {
+          ...ctx,
+          markExternalRequestStarted: () => {
+            externalRequestStarted = true;
+          },
+          ...(reauthorizeProviderStatus ? { reauthorizeProviderStatus } : {}),
+          ...(mode !== 'none' && wirePolicyDomain
+            ? {
+                reauthorizeSourcePolicy: async () => {
+                  const check = await this.checkSourcePolicy(toolId, wirePolicyDomain, ctx.purpose);
+                  if (!check.allowed) {
+                    throw new ToolPolicyDenied(toolId, check.reason ?? 'source policy denied');
+                  }
+                },
+              }
+            : {}),
+        };
+        result = await tool.execute(input, executionContext);
       } catch (err) {
         if (err instanceof ExternalToolActionDeniedError) {
           if (paidScope) {
@@ -311,6 +392,20 @@ export class ToolBroker implements ExecutionBroker {
           this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
           throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
         }
+        if (err instanceof ToolPolicyDenied) {
+          if (paidScope) {
+            await this.settlePersistentOperation({
+              scope: paidScope,
+              status: 'RELEASED',
+              measurement: this.notIncurredMeasurement(),
+              errorCode: 'SOURCE_POLICY_DENIED',
+            });
+          } else if (reservation) {
+            this.budget.settle(reservation, 0);
+          }
+          this.trace(ctx, tool, 'DENIED', err.reason, 0, now() - started);
+          throw err;
+        }
         if (paidScope) {
           await this.settlePersistentOperation({
             scope: paidScope,
@@ -321,10 +416,19 @@ export class ToolBroker implements ExecutionBroker {
             errorCode: 'TOOL_CALL_ERROR',
           });
         } else if (reservation) {
-          this.budget.settle(reservation, 0); // legacy non-site behavior
+          this.budget.settle(
+            reservation,
+            externalRequestStarted ? tool.cost.estimatedCents : 0,
+          );
         }
-        this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
-        throw err;
+        const failureCostCents = externalRequestStarted ? tool.cost.estimatedCents : 0;
+        this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), failureCostCents, now() - started);
+        throw externalRequestStarted && failureCostCents > 0
+          ? attachToolFailureCost(err, {
+              costCents: failureCostCents,
+              basis: 'estimated_unknown',
+            })
+          : err;
       }
 
       // A settlement failure is intentionally outside the execute() catch: the

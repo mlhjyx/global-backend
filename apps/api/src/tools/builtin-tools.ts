@@ -8,6 +8,7 @@ import { discoverCompaniesByIndustry, WikidataCompany } from '../adapters/wikida
 import { discoverByArea, OsmPlace } from '../adapters/openstreetmap';
 import { resolvePublicIp } from '../adapters/net-guard';
 import { smtpRcptProbe, SENDER_DOMAIN } from '../adapters/smtp-probe';
+import { braveSearchTool, serperSearchTool } from './web-search-tools';
 import {
   normalizeEvidenceText,
   sanitizeEvidenceUrl } from '../site-builder/agents/evidence-ref';
@@ -16,7 +17,12 @@ const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
 
 function beforeExternalRequest(ctx: ToolContext): (() => Promise<void>) | undefined {
-  return ctx.authorizeExternalAction ? () => assertToolExternalActionAuthorized(ctx) : undefined;
+  if (!ctx.authorizeExternalAction && !ctx.reauthorizeSourcePolicy && !ctx.reauthorizeProviderStatus) return undefined;
+  return async () => {
+    await ctx.reauthorizeProviderStatus?.();
+    await ctx.reauthorizeSourcePolicy?.();
+    await assertToolExternalActionAuthorized(ctx);
+  };
 }
 
 function publicOrigin(rawUrl: string | undefined): string | null {
@@ -79,7 +85,7 @@ export const searxngSearchTool: Tool<
       return { healthy: false };
     }
   },
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     const results = await searxSearchPaged(
       {
         q: input.q,
@@ -89,6 +95,11 @@ export const searxngSearchTool: Tool<
         timeRange: input.timeRange,
       },
       input.pages ?? 1,
+      30_000,
+      {
+        beforeRequest: beforeExternalRequest(ctx),
+        onRequestStarted: ctx.markExternalRequestStarted,
+      },
     );
     return { data: { results }, costCents: 0 };
   },
@@ -144,9 +155,13 @@ export const crawl4aiFetchTool: Tool<
   },
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
   execute: async (input, ctx) => {
+    // The Provider/SourcePolicy gate must be live at the robots wire as well as
+    // at the subsequent page wire. A cache hit has no robots egress to gate.
     if (
       !(await isAllowedByRobots(input.url, {
         authorizeExternalAction: ctx.authorizeExternalAction,
+        beforeRequest: beforeExternalRequest(ctx),
+        onRequestStarted: ctx.markExternalRequestStarted,
       }))
     ) {
       // robots 禁抓 → 合规放弃（不换 UA）。返回空文本，不计失败。
@@ -155,7 +170,12 @@ export const crawl4aiFetchTool: Tool<
         costCents: 0,
       };
     }
-    const r = await crawlUrl(input.url, () => assertToolExternalActionAuthorized(ctx));
+    const r = await crawlUrl(
+      input.url,
+      beforeExternalRequest(ctx),
+      undefined,
+      ctx.markExternalRequestStarted,
+    );
     const text = r.text.slice(0, Math.min(input.maxChars ?? 40_000, 100_000));
     return {
       data: { url: input.url, text, contentHash: hash(text) },
@@ -176,7 +196,7 @@ export const wikidataTool: Tool<
   { companies: WikidataCompany[] }
 > = {
   id: 'wikidata.sparql',
-  version: '1.0.0',
+  version: '1.1.0',
   category: 'structured_source',
   sourceClass: 'company_registry',
   cost: { unit: 'call', estimatedCents: 0, external: true },
@@ -214,7 +234,7 @@ export const wikidataTool: Tool<
       provenance: {
         sourceUrl: 'https://query.wikidata.org/sparql',
         fetchedAt: new Date().toISOString(),
-        parserVersion: 'wikidata/1',
+        parserVersion: 'wikidata/2',
       },
     };
   },
@@ -360,6 +380,8 @@ export const smtpRcptProbeTool = createSmtpRcptProbeTool();
 /** 注册全部内置工具（启动期调用）。 */
 export function registerBuiltinTools(registry: ToolRegistry): ToolRegistry {
   registry.register(searxngSearchTool as Tool);
+  registry.register(serperSearchTool as Tool);
+  registry.register(braveSearchTool as Tool);
   registry.register(crawl4aiFetchTool as Tool);
   registry.register(wikidataTool as Tool);
   registry.register(osmOverpassTool as Tool);
