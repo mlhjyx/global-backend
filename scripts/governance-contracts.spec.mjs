@@ -84,6 +84,70 @@ function provider(overrides = {}) {
   };
 }
 
+test("provider identity authority contract rejects unknown versions and validators", () => {
+  const context = {
+    seed_providers: [{ key: "public_web", source_class: "public_intelligence", default_enablement: "ENABLED" }],
+    source_class_manifest: { public_web: ["public_intelligence"] },
+    existing_paths: new Set(["apps/api/src/discovery/providers/public-web.provider.spec.ts"]),
+  };
+  const invalid = providerRegistry({
+    providers: [provider({
+      identity_authority: {
+        profile_version: "identity-authority-v3",
+        rules: [{ scheme: "domain", jurisdictions: ["GLOBAL"], validator: "guess-v1" }],
+      },
+    })],
+  });
+  assert.ok(
+    issueCodes(validateProviderRegistry(invalid, context)).includes("PROVIDER_IDENTITY_AUTHORITY_INVALID"),
+  );
+  const malformedJurisdiction = providerRegistry({
+    providers: [provider({
+      identity_authority: {
+        profile_version: "identity-authority-v1",
+        rules: [{ scheme: "domain", jurisdictions: ["unscoped jurisdiction"], validator: "domain-v1" }],
+      },
+    })],
+  });
+  assert.ok(
+    issueCodes(validateProviderRegistry(malformedJurisdiction, context)).includes("PROVIDER_IDENTITY_AUTHORITY_INVALID"),
+  );
+});
+
+test("provider identity authority contract accepts only an explicit empty none profile", () => {
+  const context = {
+    seed_providers: [{ key: "public_web", source_class: "public_intelligence", default_enablement: "ENABLED" }],
+    source_class_manifest: { public_web: ["public_intelligence"] },
+    existing_paths: new Set(["apps/api/src/discovery/providers/public-web.provider.spec.ts"]),
+  };
+  const none = providerRegistry({
+    providers: [provider({
+      identity_authority: {
+        profile_version: "identity-authority-none-v1",
+        rules: [],
+      },
+    })],
+  });
+  assert.ok(
+    !issueCodes(validateProviderRegistry(none, context)).includes("PROVIDER_IDENTITY_AUTHORITY_INVALID"),
+  );
+  assert.match(
+    renderProviderRegistry(none),
+    /identity-authority-none-v1 \(no strong identifiers\)/,
+  );
+  for (const invalidAuthority of [
+    { profile_version: "identity-authority-none-v1", rules: [{ scheme: "domain", jurisdictions: ["GLOBAL"], validator: "domain-v1" }] },
+    { profile_version: "identity-authority-v1", rules: [] },
+  ]) {
+    const invalid = providerRegistry({
+      providers: [provider({ identity_authority: invalidAuthority })],
+    });
+    assert.ok(
+      issueCodes(validateProviderRegistry(invalid, context)).includes("PROVIDER_IDENTITY_AUTHORITY_INVALID"),
+    );
+  }
+});
+
 function providerRegistry(overrides = {}) {
   return {
     schema_version: "provider-registry/v1",

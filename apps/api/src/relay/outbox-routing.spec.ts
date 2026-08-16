@@ -1,7 +1,10 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OutboxRelayService } from './outbox-relay.service';
-import { ASSET_OBJECT_CLEANUP_WORKFLOW } from '../temporal/understanding.constants';
+import {
+  ASSET_OBJECT_CLEANUP_WORKFLOW,
+  ORGANIZATION_IDENTITY_REPLAY_WORKFLOW,
+} from '../temporal/understanding.constants';
 
 /**
  * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等 8 种）
@@ -65,6 +68,23 @@ function makeEvent(over: Partial<EvRow> = {}): EvRow {
     occurredAt: new Date('2026-07-10T08:00:00.000Z'),
     publishedAt: null,
     parkedAt: null,
+    ...over,
+  };
+}
+
+function makeDeliveryRow(over: Partial<DeliveryRow> = {}): DeliveryRow {
+  return {
+    id: 10n,
+    workspaceId: WS,
+    eventId: 'aaaaaaaa-0000-0000-0000-000000000001',
+    sink: 'webhook',
+    status: 'PENDING',
+    attempts: 0,
+    lastError: null,
+    nextAttemptAt: null,
+    deliveredAt: null,
+    ackedAt: null,
+    event: makeEvent(),
     ...over,
   };
 }
@@ -150,6 +170,7 @@ afterEach(() => {
   delete process.env.SAAS_WEBHOOK_URL;
   delete process.env.SAAS_WEBHOOK_SECRET;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('routeEvent — 三分支路由（收口③核心）', () => {
@@ -314,6 +335,30 @@ describe('routeEvent — 三分支路由（收口③核心）', () => {
     expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it('OrganizationIdentityReplayRequested uses replay id as the deterministic workflow id', async () => {
+    const replayId = '55555555-5555-4555-8555-555555555555';
+    const ev = makeEvent({
+      eventType: 'OrganizationIdentityReplayRequested',
+      aggregateType: 'OrganizationIdentityReplay',
+      aggregateId: replayId,
+      payload: { replayId, decisionId: '66666666-6666-4666-8666-666666666666' },
+    });
+    const { db, tx } = makeDb([ev]);
+    const temporal = makeTemporal();
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      ORGANIZATION_IDENTITY_REPLAY_WORKFLOW,
+      expect.objectContaining({
+        workflowId: `organization-identity-replay-${replayId}`,
+        args: [{ workspaceId: WS, replayId }],
+      }),
+    );
+    expect(ev.publishedAt).toBeInstanceOf(Date);
+    expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
+  });
+
   it('internal command dispatch 失败 → 不标 published（下轮重试）', async () => {
     const ev = makeEvent({
       eventType: 'DiscoveryRunRequested',
@@ -472,6 +517,69 @@ describe('tick — 轮询条件（parked 不毒化轮询）', () => {
     expect(db.outboxEvent.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { publishedAt: null, parkedAt: null } }),
     );
+  });
+
+  it('only renews durable relay evidence after a successful polling cycle', async () => {
+    const healthy = makeDb([]);
+    const healthyService = makeService(healthy.db, makeTemporal());
+    healthyService.runtimeLease = { renew: vi.fn(async () => undefined) };
+
+    await healthyService.tick();
+
+    expect(healthyService.runtimeLease.renew).toHaveBeenCalledWith({
+      loop: 'polling',
+      last_tick: 'ok',
+    });
+
+    const broken = makeDb([]);
+    broken.db.outboxEvent.findMany.mockRejectedValueOnce(new Error('database unavailable'));
+    const brokenService = makeService(broken.db, makeTemporal());
+    brokenService.runtimeLease = { renew: vi.fn(async () => undefined) };
+
+    await brokenService.tick();
+
+    expect(brokenService.runtimeLease.renew).not.toHaveBeenCalled();
+  });
+
+  it('renews the durable lease while a legitimate slow webhook tick is still running', async () => {
+    vi.useFakeTimers();
+    process.env.SAAS_WEBHOOK_URL = 'https://saas.example.com/hooks/events';
+    process.env.SAAS_WEBHOOK_SECRET = 'test-secret';
+    const deliveries = [
+      makeDeliveryRow({ id: 20n }),
+      makeDeliveryRow({
+        id: 21n,
+        eventId: 'aaaaaaaa-0000-0000-0000-000000000002',
+        event: makeEvent({
+          id: 2n,
+          eventId: 'aaaaaaaa-0000-0000-0000-000000000002',
+        }),
+      }),
+    ];
+    const { db } = makeDb([], deliveries);
+    const slowFetch = vi.fn(
+      () =>
+        new Promise<{ ok: boolean; status: number }>((resolvePromise) => {
+          setTimeout(() => resolvePromise({ ok: true, status: 200 }), 10_000);
+        }),
+    );
+    const svc = makeService(db, makeTemporal(), slowFetch);
+    const renew = vi.fn(async () => undefined);
+    svc.runtimeLease = { renew };
+    svc.startHeartbeatTimer();
+
+    const tick = svc.tick();
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(slowFetch).toHaveBeenCalledTimes(2);
+    expect(renew).toHaveBeenCalledWith({
+      loop: 'polling',
+      tick_state: 'running',
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await tick;
+    clearInterval(svc.heartbeatTimer);
   });
 });
 
@@ -672,8 +780,22 @@ describe('pumpWebhookDeliveries — 推送 + 指数退避 + DLQ', () => {
 
 describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对（E）', () => {
   const CLAIMS = [
-    { id: 'c-1', workspaceId: WS, companyId: 'co-1', factKey: 'quality_certifications', type: 'certification', version: 4 },
-    { id: 'c-2', workspaceId: WS, companyId: 'co-2', factKey: 'quality_certifications', type: 'certification', version: 7 },
+    {
+      id: 'c-1',
+      workspaceId: WS,
+      companyId: 'co-1',
+      factKey: 'quality_certifications',
+      type: 'certification',
+      version: 4,
+    },
+    {
+      id: 'c-2',
+      workspaceId: WS,
+      companyId: 'co-2',
+      factKey: 'quality_certifications',
+      type: 'certification',
+      version: 7,
+    },
   ];
 
   it('每条 claim 的 CAS + 事件 create 走同一个 interactive transaction', async () => {
@@ -684,9 +806,7 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
 
     await svc['expireDueClaims']();
 
-    const txCalls = (db.$transaction.mock.calls as unknown[][]).filter(
-      (c) => typeof c[0] === 'function',
-    );
+    const txCalls = (db.$transaction.mock.calls as unknown[][]).filter((c) => typeof c[0] === 'function');
     expect(txCalls).toHaveLength(1);
     expect(db.claim.updateMany).toHaveBeenCalledWith({
       where: {
@@ -743,7 +863,11 @@ describe('expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes('c-1'))).toBe(true);
     expect(db.claim.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: 'c-2', status: 'APPROVED', version: 7 }),
+        where: expect.objectContaining({
+          id: 'c-2',
+          status: 'APPROVED',
+          version: 7,
+        }),
       }),
     );
   });

@@ -10,6 +10,8 @@ export { intentSweepWorkflow } from './intent.workflow';
 export { backlogSweepWorkflow } from './backlog.workflow';
 export { externalIntentSweepWorkflow } from './external-intent.workflow';
 export { deletionWorkflow } from './deletion.workflow';
+export { organizationIdentityReplayWorkflow } from './organization-identity-replay.workflow';
+export { rawRetentionSweepWorkflow } from './raw-retention.workflow';
 export { patentsCacheRefreshWorkflow } from './patents-cache.workflow';
 export { sanctionsRefreshWorkflow } from './sanctions-refresh.workflow';
 export { demoV0Workflow } from './site-builder.workflow';

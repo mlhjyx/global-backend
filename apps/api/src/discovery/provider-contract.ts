@@ -70,6 +70,8 @@ export interface ProviderCompanyRecord {
   attributes?: Record<string, unknown>;
   /** provider 侧法人标识（税号/注册号/LEI…）——§8.4 身份消歧：无域名时按此归一，防同名同国误并。 */
   identifier?: CompanyIdentifier;
+  /** Identity v2 多标识输入；identifier 在兼容窗口内继续保留并会与本数组合并去重。 */
+  identifiers?: CompanyIdentifier[];
   /** 该记录字段许可（写入 field_evidence.license）——绿事实源须声明署名义务许可（如 TED='CC BY 4.0'）；缺省回退 providerKey 推断。 */
   license?: string;
   /** 公开采集留痕（PRD 8.11）：来源页/抓取时间/内容指纹/解析版本 */
@@ -84,6 +86,8 @@ export interface ProviderCompanyRecord {
 export interface DiscoveryOptions {
   /** Source Registry 中被 SUSPENDED 的域名 —— 适配器必须在爬取前跳过（DAT-011）。 */
   blockedDomains?: string[];
+  /** Internal-only opaque continuation returned by the same provider. */
+  cursor?: string;
 }
 
 /**
@@ -121,11 +125,31 @@ export interface ProviderContactRecord {
 export interface DiscoveryResult {
   records: ProviderCompanyRecord[];
   costCents: number;
+  /** Exact governed-tool accounting for Providers that fan out internally. */
+  usage?: ProviderCallUsage;
+  /** Opaque provider-owned continuation; never accepted from query-plan filters. */
+  nextCursor?: string;
+}
+
+export interface ProviderCallUsageBreakdown {
+  phase: string;
+  backend: string;
+  callCount: number;
+  completedCount: number;
+  costCents: number;
+}
+
+export interface ProviderCallUsage {
+  callCount: number;
+  breakdown: ProviderCallUsageBreakdown[];
 }
 
 export interface ContactDiscoveryResult {
   contacts: ProviderContactRecord[];
   costCents: number;
+  /** Registry-company identity proven by the same confidence-gated company alignment. */
+  organizationIdentifiers?: CompanyIdentifier[];
+  organizationMatchConfidence?: number;
 }
 
 /** 联系人发现的卖方上下文（用于买家角色分类；可选，缺省则通用分类）。 */
@@ -215,6 +239,27 @@ export interface CompanyEnrichmentInput {
   domain?: string;
   country?: string;
   region?: string;
+  /** 已被 Identity v2 接纳的企业标识；富集源必须用它做法人级交叉验证。 */
+  identifiers?: CompanyIdentifier[];
+  /**
+   * Persisted source facts that authorize a follow-up enrichment call. These
+   * are loaded by the orchestration layer from ACCEPTED Raw + ACTIVE identity
+   * links; providers may use them only to narrow a call and must still fail
+   * closed when the binding is absent or inconsistent.
+   */
+  sourceBindings?: Array<{
+    providerKey: string;
+    rawRecordId: string;
+    externalId: string;
+    name: string;
+    identifier: CompanyIdentifier;
+    sourceUrl: string;
+    parserVersion: string;
+  }>;
+  /** 调用前一致身份图的确定性指纹；提交时变化则整次结果作废。 */
+  identitySnapshot?: string;
+  /** 调用阶段提示；Provider 只可用它收窄取证面，不得绕过 Registry/合规闸门。 */
+  purpose?: 'fit_evidence' | 'deep_enrichment' | 'signal';
 }
 
 /**
@@ -225,11 +270,29 @@ export interface EnrichmentResult {
   matched: boolean;
   confidence: number; // 0..1
   attributes: Record<string, unknown>;
+  /**
+   * Strong/scoped organization identifiers asserted by this matched enrichment result.
+   * They are not copied straight into canonical identity: the commit boundary validates
+   * them against the Provider authority profile and applies Identity v2 conflict guards.
+   */
+  identifiers?: CompanyIdentifier[];
   provenance?: {
     sourceUrl: string;
     fetchedAt: string;
     contentHash: string;
     parserVersion: string;
+  };
+  /**
+   * Sanitized, versioned observation to retain in RawSourceRecord. This is a
+   * positive projection produced after parsing; it must never contain the
+   * upstream wire body. The commit boundary re-runs Raw v2 governance before
+   * linking the observation to an existing organization.
+   */
+  rawObservation?: {
+    externalId: string;
+    sourceClass: SourceClass;
+    license: string;
+    payload: Record<string, unknown>;
   };
   costCents: number;
 }

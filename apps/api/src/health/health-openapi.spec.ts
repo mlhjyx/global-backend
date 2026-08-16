@@ -91,5 +91,12 @@ describe('layered health OpenAPI contract', () => {
         'admission',
       ],
     });
+    expect(
+      success?.properties?.components?.properties?.worker?.properties?.evidence,
+    ).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['source', 'heartbeat_at', 'age_ms'],
+    });
   });
 });

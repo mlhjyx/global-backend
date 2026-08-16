@@ -115,6 +115,10 @@ describe('CH · discoverContacts', () => {
     expect(res.contacts).toHaveLength(1);
     expect(res.contacts[0].fullName).toBe('John Smith');
     expect(res.contacts[0].externalIds).toEqual([{ scheme: 'uk-ch-officer', value: 'OID1' }]);
+    expect(res.organizationIdentifiers).toEqual([
+      { scheme: 'uk-company-number', jurisdiction: 'GB', value: '02723534' },
+    ]);
+    expect(res.organizationMatchConfidence).toBe(1);
     // purpose='discovery' 贯穿（用途门按本次调用判）
     const searchCtx = broker.invokeMock.mock.calls[0][2] as ToolContext;
     expect(searchCtx.purpose).toBe('discovery');

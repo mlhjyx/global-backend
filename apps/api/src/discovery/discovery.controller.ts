@@ -32,6 +32,7 @@ import {
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { LawfulBasisKind } from './provider-contract';
 import { SUPPRESSION_TYPES } from './suppression-value';
+import { ApiOrganizationIdentityErrors } from './organization-identity.openapi';
 
 // eslint-disable-next-line no-control-regex -- boundary contract intentionally rejects ASCII control characters.
 const NO_CONTROL_CHARS = new RegExp('^[^\\u0000-\\u001f\\u007f]*$', 'u');
@@ -305,6 +306,8 @@ export class DiscoveryController {
   @RequireScopes('acquisition:read', 'personal-data:read')
   @ApiOperation({ summary: '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）',
   })
+  @ApiParam({ name: 'id', schema: { type: 'string' } })
+  @ApiOrganizationIdentityErrors({ notFound: true })
   @ApiEnvelope(CANONICAL_COMPANY_SCHEMA)
   async getCompany(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
     return envelope(await this.discovery.getCanonicalCompany(ctx, id));

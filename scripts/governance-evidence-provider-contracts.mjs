@@ -40,6 +40,23 @@ const PROVIDER_EVIDENCE_KINDS = new Set([
   "TEST_ANCHOR",
   "HISTORICAL_EVIDENCE",
 ]);
+const IDENTITY_AUTHORITY_VERSIONS = new Set([
+  "identity-authority-v1",
+  "identity-authority-v2",
+  "identity-authority-none-v1",
+]);
+const IDENTITY_AUTHORITY_VALIDATORS = new Set([
+  "domain-v1",
+  "lei-v1",
+  "siren-v1",
+  "npi-v1",
+  "uk-company-number-v1",
+  "cnpj-v1",
+  "ror-id-v1",
+  "cik-v1",
+  "usdot-v1",
+  "opaque-v1",
+]);
 const MAX_RUNTIME_EVIDENCE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function issue(code, message, path = null) {
@@ -324,6 +341,41 @@ function validateProviderShape(provider, index, existingPaths) {
       issue("PROVIDER_TEST_PATHS_INVALID", `${prefix}test_paths must not be empty`),
     );
   }
+  if (provider.identity_authority !== undefined) {
+    const authority = provider.identity_authority;
+    const noIdentifierAuthority = authority?.profile_version === "identity-authority-none-v1";
+    const validAuthority =
+      isObject(authority) &&
+      Object.keys(authority).every((key) => ["profile_version", "rules"].includes(key)) &&
+      IDENTITY_AUTHORITY_VERSIONS.has(authority.profile_version) &&
+      Array.isArray(authority.rules) &&
+      (noIdentifierAuthority ? authority.rules.length === 0 : authority.rules.length > 0) &&
+      authority.rules.length <= 64 &&
+      authority.rules.every(
+        (rule) =>
+          isObject(rule) &&
+          Object.keys(rule).every((key) => ["scheme", "jurisdictions", "validator"].includes(key)) &&
+          isNonEmptyString(rule.scheme) &&
+          /^[a-z0-9][a-z0-9._:-]*$/.test(rule.scheme) &&
+          Array.isArray(rule.jurisdictions) &&
+          rule.jurisdictions.length > 0 &&
+          uniqueStrings(rule.jurisdictions) &&
+          rule.jurisdictions.every(
+            (jurisdiction) =>
+              isNonEmptyString(jurisdiction) &&
+              /^(?:\*|GLOBAL|[A-Z]{2,3})$/.test(jurisdiction),
+          ) &&
+          IDENTITY_AUTHORITY_VALIDATORS.has(rule.validator),
+      );
+    if (!validAuthority) {
+      issues.push(
+        issue(
+          "PROVIDER_IDENTITY_AUTHORITY_INVALID",
+          `${prefix}identity_authority does not match the supported authority contract`,
+        ),
+      );
+    }
+  }
   for (const testPath of asArray(provider.test_paths)) {
     const normalized = normalizedRepoPath(testPath);
     if (!normalized || !/(?:^|\/)[^/]*(?:spec|test)\.[cm]?[jt]sx?$/.test(normalized)) {
@@ -492,7 +544,15 @@ export function renderProviderRegistry(registry) {
       const evidence = asArray(provider.evidence_refs).map(
         (ref) => `${ref.kind}: ${ref.path}`,
       );
-      return `| \`${markdownCell(provider.key)}\` | \`${markdownCell(provider.status)}\` | ${markdownCell(provider.source_classes)} | ${markdownCell(provider.purpose)} | ${markdownCell(provider.taxonomy)} | ${markdownCell(provider.license?.classification)} — ${markdownCell(provider.license?.note)} | \`${markdownCell(provider.personal_data_class)}\` | \`${markdownCell(provider.default_enablement)}\` | ${markdownCell(provider.call_gates)} | ${markdownCell(provider.test_paths)}<br>${markdownCell(evidence)} |`;
+      const identityRules = asArray(provider.identity_authority?.rules);
+      const identityAuthority = provider.identity_authority
+        ? identityRules.length > 0
+          ? identityRules.map(
+              (rule) => `${rule.scheme} [${asArray(rule.jurisdictions).join(",")}] ${rule.validator}`,
+            )
+          : [`${provider.identity_authority.profile_version} (no strong identifiers)`]
+        : [];
+      return `| \`${markdownCell(provider.key)}\` | \`${markdownCell(provider.status)}\` | ${markdownCell(provider.source_classes)} | ${markdownCell(provider.purpose)} | ${markdownCell(provider.taxonomy)} | ${markdownCell(provider.license?.classification)} — ${markdownCell(provider.license?.note)} | \`${markdownCell(provider.personal_data_class)}\` | \`${markdownCell(provider.default_enablement)}\` | ${markdownCell(provider.call_gates)} | ${markdownCell(identityAuthority)} | ${markdownCell(provider.test_paths)}<br>${markdownCell(evidence)} |`;
     })
     .join("\n");
 
@@ -513,11 +573,12 @@ This page is generated from the machine registry. Edit the JSON source and regen
 - **Personal data class** describes the most sensitive admitted payload, not the licence.
 - **Default enablement** is the seed default; runtime policy can still fail closed.
 - **Call gates** are mandatory pre-call controls. Test and evidence anchors do not prove a current runtime result.
+- **Identity authority** lists only schemes a Provider may assert, with jurisdiction and pinned validator version; an explicit \`identity-authority-none-v1\` means the Provider may assert no strong identifier.
 
 ## Providers
 
-| Key | Status | SourceClass | Purpose | Taxonomy | Licence | Personal data class | Default enablement | Call gates | Tests / evidence |
-|---|---|---|---|---|---|---|---|---|---|
+| Key | Status | SourceClass | Purpose | Taxonomy | Licence | Personal data class | Default enablement | Call gates | Identity authority | Tests / evidence |
+|---|---|---|---|---|---|---|---|---|---|---|
 ${rows}
 `;
 }

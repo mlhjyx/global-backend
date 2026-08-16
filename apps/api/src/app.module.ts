@@ -21,6 +21,7 @@ import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
 import { RuntimeReadinessService } from './health/runtime-readiness.service';
+import { ProviderControlPlaneModule } from './provider-control-plane/provider-control-plane.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -51,6 +52,7 @@ import { RuntimeReadinessService } from './health/runtime-readiness.service';
     ComplianceModule,
     SanctionsModule,
     SiteBuilderModule,
+    ProviderControlPlaneModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [RuntimeReadinessService, { provide: APP_GUARD, useClass: WsThrottlerGuard }],

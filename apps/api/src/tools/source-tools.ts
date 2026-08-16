@@ -27,6 +27,37 @@ import { searchCompanies, listOfficers, ChCompanyHit, ChOfficer } from '../adapt
 import { searchCompaniesWithDirigeants, FrCompanyHit } from '../adapters/inpi-rne';
 import { bigqueryPatents, PatentRecord } from '../adapters/bigquery-patents';
 import { fetchSourcesSought, SamSourcesSought, SamSearchParams } from '../adapters/sam-api';
+import {
+  searchFrenchOrganizations,
+  fetchSecSubmissionOrganization,
+  searchNppesOrganizations,
+  searchRorOrganizations,
+  searchSecCompanyDirectory,
+  type FrenchOrganization,
+  type NppesOrganization,
+  type RorOrganization,
+  type SecOrganization,
+} from '../adapters/official-organization-registries';
+import {
+  searchBrazilPncp,
+  searchContractsFinder,
+  searchSingaporeGebiz,
+  searchUsaSpendingAwards,
+  searchUkFindATender,
+  searchWorldBankProcurement,
+  type BrazilPncpNotice,
+  type ContractsFinderOrganization,
+  type ProcurementPage,
+  type SingaporeGebizAward,
+  type UsaSpendingAward,
+  type UkProcurementOrganization,
+  type WorldBankNotice,
+} from '../adapters/public-procurement';
+import { mexicoDenueSearchTool } from './source-tools-mexico-denue';
+import { fmcsaQcmobileSearchTool } from './source-tools-fmcsa';
+import { euEcolabelProductsSearchTool } from './source-tools-eu-ecolabel';
+import { sbirSttrCompanySearchTool } from './source-tools-sbir';
+import { konepsContractBuyerSearchTool } from './source-tools-koneps';
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -44,7 +75,12 @@ const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
 
 function beforeExternalRequest(ctx: ToolContext): (() => Promise<void>) | undefined {
-  return ctx.authorizeExternalAction ? () => assertToolExternalActionAuthorized(ctx) : undefined;
+  if (!ctx.authorizeExternalAction && !ctx.reauthorizeSourcePolicy && !ctx.reauthorizeProviderStatus) return undefined;
+  return async () => {
+    await ctx.reauthorizeProviderStatus?.();
+    await ctx.reauthorizeSourcePolicy?.();
+    await assertToolExternalActionAuthorized(ctx);
+  };
 }
 
 /** crawl4ai.render —— 渲染后原始 HTML（数字足迹/结构化收割/web_watch 用；robots 在内强制）。 */
@@ -62,9 +98,13 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
   idempotencyKey: (i) => `crawl4ai.render:${hash(i.url)}`,
   healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
   execute: async (input, ctx) => {
+    // Keep the call-level Provider binding live at the robots wire and the page
+    // wire; disabling a shared caller must stop the next physical request.
     if (
       !(await isAllowedByRobots(input.url, {
         authorizeExternalAction: ctx.authorizeExternalAction,
+        beforeRequest: beforeExternalRequest(ctx),
+        onRequestStarted: ctx.markExternalRequestStarted,
       }))
     ) {
       // robots 禁抓 → 合规放弃（不换 UA）。空 HTML 返回，不计费。
@@ -73,7 +113,12 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
         costCents: 0,
       };
     }
-    const r = await crawlHtml(input.url, () => assertToolExternalActionAuthorized(ctx));
+    const r = await crawlHtml(
+      input.url,
+      beforeExternalRequest(ctx),
+      undefined,
+      ctx.markExternalRequestStarted,
+    );
     return {
       data: r,
       costCents: 1,
@@ -145,6 +190,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
         },
         {
           authorizeExternalAction: ctx.authorizeExternalAction,
+          beforeRequest: beforeExternalRequest(ctx),
         },
       );
       // gzip 魔数透明解压（sitemap.xml.gz 常见；与原 fetchText 实现对齐）
@@ -384,6 +430,198 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
     };
   },
 };
+
+export interface FranceCompanySearchInput { query: string; limit: number }
+export interface FranceCompanySearchOutput { organizations: FrenchOrganization[] }
+export interface NppesSearchInput { organizationName?: string; npi?: string; state?: string; limit: number }
+export interface NppesSearchOutput { organizations: NppesOrganization[] }
+export interface RorSearchInput { query: string; country: string; types: [string]; limit: number; page: number }
+export interface RorSearchOutput { organizations: RorOrganization[]; nextCursor?: string; total?: number }
+export interface SecEdgarDirectorySearchInput { query: string; limit: number }
+export interface SecEdgarDirectorySearchOutput { organizations: SecOrganization[] }
+export interface SecEdgarSubmissionFetchInput { cik: string; expectedName: string }
+export interface SecEdgarSubmissionFetchOutput { organizations: SecOrganization[] }
+
+export const franceCompanySearchTool: Tool<FranceCompanySearchInput, FranceCompanySearchOutput> = {
+  id: 'fr-company.search', version: '1.0.0', category: 'structured_source', sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true }, rateLimit: { rps: 1, concurrency: 1 },
+  compliance: { sourcePolicy: 'required', policyDomain: 'recherche-entreprises.api.gouv.fr', providerKey: 'fr_company', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['company'], accepts: ['keywords'] },
+  idempotencyKey: (input) => `fr-company.search:${stableKey(input)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'fr-public-company-search' }),
+  execute: async (input, ctx) => {
+    const response = await searchFrenchOrganizations(input, beforeExternalRequest(ctx));
+    return {
+      data: { organizations: response.records },
+      costCents: 0,
+      provenance: response.provenance,
+    };
+  },
+};
+
+export const nppesSearchTool: Tool<NppesSearchInput, NppesSearchOutput> = {
+  id: 'nppes.search', version: '1.0.0', category: 'structured_source', sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true }, rateLimit: { rps: 1, concurrency: 1 },
+  compliance: { sourcePolicy: 'required', policyDomain: 'npiregistry.cms.hhs.gov', providerKey: 'nppes', respectsRobots: false, personalData: true, allowedPurpose: ['discovery', 'enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['company'], accepts: ['keywords'] },
+  idempotencyKey: (input) => `nppes.search:${stableKey(input)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'nppes-v2.1-organizations-only' }),
+  execute: async (input, ctx) => {
+    const response = await searchNppesOrganizations(input, beforeExternalRequest(ctx));
+    return {
+      data: { organizations: response.records },
+      costCents: 0,
+      provenance: response.provenance,
+    };
+  },
+};
+
+export const rorSearchTool: Tool<RorSearchInput, RorSearchOutput> = {
+  id: 'ror.search', version: '1.0.0', category: 'structured_source', sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true }, rateLimit: { rps: 1, concurrency: 1 },
+  compliance: { sourcePolicy: 'required', policyDomain: 'api.ror.org', providerKey: 'ror', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['company'], accepts: ['keywords'] },
+  idempotencyKey: (input) => `ror.search:${stableKey(input)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'ror-v2.1-organizations' }),
+  execute: async (input, ctx) => {
+    const response = await searchRorOrganizations(input, beforeExternalRequest(ctx));
+    return {
+      data: { organizations: response.records, nextCursor: response.nextCursor, total: response.total },
+      costCents: 0,
+      provenance: response.provenance,
+    };
+  },
+};
+
+export const secEdgarCompanyDirectorySearchTool: Tool<SecEdgarDirectorySearchInput, SecEdgarDirectorySearchOutput> = {
+  id: 'sec-edgar.company-directory.search', version: '1.0.0', category: 'structured_source', sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true }, rateLimit: { rps: 1, concurrency: 1 },
+  compliance: { sourcePolicy: 'required', policyDomain: 'www.sec.gov', providerKey: 'sec_edgar', respectsRobots: false, personalData: false, allowedPurpose: ['discovery'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['company'], accepts: ['keywords'] },
+  idempotencyKey: (input) => `sec-edgar.company-directory.search:${stableKey(input)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'sec-edgar-company-directory' }),
+  execute: async (input, ctx) => {
+    const response = await searchSecCompanyDirectory(input, beforeExternalRequest(ctx));
+    return { data: { organizations: response.records }, costCents: 0, provenance: response.provenance };
+  },
+};
+
+export const secEdgarSubmissionFetchTool: Tool<SecEdgarSubmissionFetchInput, SecEdgarSubmissionFetchOutput> = {
+  id: 'sec-edgar.submission.fetch', version: '1.0.0', category: 'structured_source', sourceClass: 'company_registry',
+  cost: { unit: 'call', estimatedCents: 0, external: true }, rateLimit: { rps: 1, concurrency: 1 },
+  compliance: { sourcePolicy: 'required', policyDomain: 'data.sec.gov', providerKey: 'sec_edgar', requiresExplicitPurpose: true, respectsRobots: false, personalData: true, allowedPurpose: ['enrichment'], reversible: true, authRequired: false, risk: 'low' },
+  capabilities: { produces: ['relation'], accepts: ['cik'], enrichesOnly: true },
+  idempotencyKey: (input) => `sec-edgar.submission.fetch:${stableKey(input)}`,
+  healthCheck: async () => ({ healthy: true, detail: 'sec-edgar-submission-operating-organization' }),
+  execute: async (input, ctx) => {
+    const response = await fetchSecSubmissionOrganization(input, beforeExternalRequest(ctx));
+    return { data: { organizations: response.records }, costCents: 0, provenance: response.provenance };
+  },
+};
+
+export interface WorldBankProcurementInput { keywords: string[]; country: string; offset: number; limit: number }
+export interface UsaSpendingInput { keywords: string[]; startDate: string; endDate: string; page: number; limit: number }
+export interface UkFtsInput {
+  updatedFrom: string;
+  updatedTo?: string;
+  cursor?: string;
+  limit: number;
+  stage: 'planning' | 'tender' | 'award';
+}
+export interface BrazilPncpInput { dateFinal: string; page: number; pageSize: number; uf?: string }
+export interface SingaporeGebizInput { keywords: string[]; offset: number; limit: number }
+export interface UkContractsFinderInput {
+  publishedFrom: string;
+  publishedTo?: string;
+  cursor?: string;
+  limit: number;
+  stage: 'planning' | 'tender' | 'award';
+}
+
+function procurementTool<I, O>(options: {
+  id: string;
+  providerKey: string;
+  policyDomain: string;
+  personalData: boolean;
+  execute: (input: I, beforeRequest?: () => Promise<void>) => Promise<ProcurementPage<O>>;
+}): Tool<I, ProcurementPage<O>> {
+  return {
+    id: options.id,
+    version: '1.0.0',
+    category: 'structured_source',
+    sourceClass: 'public_intelligence',
+    cost: { unit: 'call', estimatedCents: 0, external: true },
+    rateLimit: { rps: 1, concurrency: 1 },
+    compliance: {
+      sourcePolicy: 'required',
+      policyDomain: options.policyDomain,
+      providerKey: options.providerKey,
+      respectsRobots: false,
+      personalData: options.personalData,
+      allowedPurpose: ['discovery'],
+      reversible: true,
+      authRequired: false,
+      risk: 'low',
+    },
+    capabilities: { produces: ['company', 'trade_record'], accepts: ['keywords'] },
+    idempotencyKey: (input) => `${options.id}:${stableKey(input)}`,
+    healthCheck: async () => ({ healthy: true, detail: options.policyDomain }),
+    execute: async (input, ctx) => {
+      const page = await options.execute(input, beforeExternalRequest(ctx));
+      return { data: page, costCents: 0, provenance: page.provenance };
+    },
+  };
+}
+
+export const worldBankProcurementTool = procurementTool<WorldBankProcurementInput, WorldBankNotice>({
+  id: 'worldbank.procurement.search',
+  providerKey: 'world_bank_procurement',
+  policyDomain: 'search.worldbank.org',
+  personalData: true,
+  execute: searchWorldBankProcurement,
+});
+
+export const usaSpendingSearchTool = procurementTool<UsaSpendingInput, UsaSpendingAward>({
+  id: 'usaspending.search',
+  providerKey: 'usaspending_awards',
+  policyDomain: 'api.usaspending.gov',
+  // Recipient Name can represent an individual/sole proprietor even though contact fields are not requested.
+  personalData: true,
+  execute: searchUsaSpendingAwards,
+});
+
+export const ukFtsSearchTool = procurementTool<UkFtsInput, UkProcurementOrganization>({
+  id: 'uk_fts.search',
+  providerKey: 'uk_find_a_tender',
+  policyDomain: 'www.find-tender.service.gov.uk',
+  personalData: true,
+  execute: searchUkFindATender,
+});
+
+export const brazilPncpSearchTool = procurementTool<BrazilPncpInput, BrazilPncpNotice>({
+  id: 'brazil_pncp.search',
+  providerKey: 'brazil_pncp',
+  policyDomain: 'pncp.gov.br',
+  personalData: true,
+  execute: searchBrazilPncp,
+});
+
+export const singaporeGebizSearchTool = procurementTool<SingaporeGebizInput, SingaporeGebizAward>({
+  id: 'singapore_gebiz.search',
+  providerKey: 'singapore_gebiz',
+  policyDomain: 'data.gov.sg',
+  // Free-text supplier names do not carry a verified entity type or UEN.
+  personalData: true,
+  execute: searchSingaporeGebiz,
+});
+
+export const ukContractsFinderSearchTool = procurementTool<UkContractsFinderInput, ContractsFinderOrganization>({
+  id: 'uk_contracts_finder.search',
+  providerKey: 'uk_contracts_finder',
+  policyDomain: 'www.contractsfinder.service.gov.uk',
+  personalData: true,
+  execute: searchContractsFinder,
+});
 
 export type CompaniesHouseInput =
   { op: 'search'; query: string; limit?: number } | { op: 'officers'; companyNumber: string; limit?: number };
@@ -746,6 +984,22 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(gleifFetchTool as Tool);
   registry.register(tedSearchTool as Tool);
   registry.register(openFdaSearchTool as Tool);
+  registry.register(franceCompanySearchTool as Tool);
+  registry.register(nppesSearchTool as Tool);
+  registry.register(rorSearchTool as Tool);
+  registry.register(secEdgarCompanyDirectorySearchTool as Tool);
+  registry.register(secEdgarSubmissionFetchTool as Tool);
+  registry.register(mexicoDenueSearchTool as Tool);
+  registry.register(fmcsaQcmobileSearchTool as Tool);
+  registry.register(euEcolabelProductsSearchTool as Tool);
+  registry.register(sbirSttrCompanySearchTool as Tool);
+  registry.register(konepsContractBuyerSearchTool as Tool);
+  registry.register(worldBankProcurementTool as Tool);
+  registry.register(usaSpendingSearchTool as Tool);
+  registry.register(ukFtsSearchTool as Tool);
+  registry.register(brazilPncpSearchTool as Tool);
+  registry.register(singaporeGebizSearchTool as Tool);
+  registry.register(ukContractsFinderSearchTool as Tool);
   registry.register(tradeFairAlgoliaTool as Tool);
   registry.register(mapYourShowFetchTool as Tool);
   registry.register(companiesHouseSearchTool as Tool);

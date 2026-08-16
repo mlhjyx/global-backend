@@ -110,6 +110,10 @@ export function backlogEligibleWhere(opts: BacklogEligibleOpts): Prisma.Canonica
   return {
     leads: { some: { fitVerdict: 'match' } },
     status: { not: 'SUPPRESSED' },
+    identitySourceMappings: { none: { status: 'ACTIVE' } },
+    identityConflictParties: {
+      none: { conflict: { status: { in: ['OPEN', 'RESOLVING'] } } },
+    },
     ...(opts.requireDomain ? { domain: { not: null } } : {}),
     // 具名/权威联系人 = 任何非 generic switchboard 占位（含 title 为空的具名董事）；仅有 generic
     // public_web 公开联系点（title=switchboard）的公司**仍**算"无决策人"→ 继续被联系人 sweep 捞（#58 P2）。

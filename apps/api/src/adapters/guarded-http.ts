@@ -19,11 +19,13 @@ export interface PublicHttpResponse {
 }
 
 export interface PublicHttpRequestOptions {
-  method?: 'GET' | 'HEAD';
+  method?: 'GET' | 'HEAD' | 'POST';
   headers?: Record<string, string>;
+  body?: string | Buffer;
   timeoutMs?: number;
   maxBytes?: number;
   maxRedirects?: number;
+  redirect?: 'follow' | 'manual';
 }
 
 interface PinnedHttpResult {
@@ -42,8 +44,14 @@ type HappyEyeballsRequestOptions = RequestOptions & {
 
 export type PinnedHttpExecutor = (
   target: PinnedPublicUrl,
-  options: Required<Omit<PublicHttpRequestOptions, 'headers'>> & {
+  options: {
+    method: NonNullable<PublicHttpRequestOptions['method']>;
     headers: Record<string, string>;
+    body?: Buffer;
+    timeoutMs: number;
+    maxBytes: number;
+    maxRedirects: number;
+    redirect: NonNullable<PublicHttpRequestOptions['redirect']>;
   },
 ) => Promise<PinnedHttpResult>;
 
@@ -52,7 +60,13 @@ export interface PublicHttpDependencies {
   executePinned?: PinnedHttpExecutor;
   /** Acquisition suppression admission, rechecked before DNS and every wire hop. */
   authorizeExternalAction?: () => Promise<boolean>;
+  /** Caller policy admission, rechecked exactly once immediately before each physical request. */
+  beforeRequest?: () => Promise<void>;
+  /** Cost observation fired only after all gates/DNS checks and immediately before socket execution. */
+  onRequestStarted?: () => void;
 }
+
+const MAX_PUBLIC_HTTP_REQUEST_BYTES = 1_000_000;
 
 export class ExternalHttpActionDeniedError extends Error {
   readonly decision = 'suppression_action_gate';
@@ -175,11 +189,12 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       request.destroy(new Error('public_http_timeout'));
     }, options.timeoutMs);
     request.once('error', finishReject);
+    if (options.body && options.method !== 'HEAD') request.write(options.body);
     request.end();
   });
 
 /**
- * 只访问公网 URL 的 GET/HEAD：初始 URL 与每一跳 redirect 均重新解析校验，实际连接固定到
+ * 只访问公网 URL 的 GET/HEAD/POST：初始 URL 与每一跳 redirect 均重新解析校验，实际连接固定到
  * 当次校验 IP；响应流按字节上限中止，避免 robots/sitemap 响应先撑爆内存再 slice。
  */
 export async function requestPublicHttp(
@@ -187,24 +202,44 @@ export async function requestPublicHttp(
   options: PublicHttpRequestOptions = {},
   dependencies: PublicHttpDependencies = {},
 ): Promise<PublicHttpResponse> {
+  const body = options.body == null ? undefined : Buffer.from(options.body);
+  if (body && body.length > MAX_PUBLIC_HTTP_REQUEST_BYTES) {
+    throw new EgressBlockedError('request_body_too_large');
+  }
+  let headers = sanitizeRequestHeaders(options.headers);
+  if (body) {
+    headers = Object.fromEntries(
+      Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
+    );
+    headers['content-length'] = String(body.length);
+  }
   const effective = {
     method: options.method ?? 'GET',
-    headers: sanitizeRequestHeaders(options.headers),
+    headers,
+    body,
     timeoutMs: Math.min(Math.max(options.timeoutMs ?? 15_000, 100), 30_000),
-    maxBytes: Math.min(Math.max(options.maxBytes ?? 1_000_000, 1), 5_000_000),
+    maxBytes: Math.min(Math.max(options.maxBytes ?? 1_000_000, 1), 8 * 1024 * 1024),
     maxRedirects: Math.min(Math.max(options.maxRedirects ?? 3, 0), 5),
+    redirect: options.redirect ?? 'follow',
   };
+  if (effective.body && effective.method !== 'POST') throw new EgressBlockedError('request_body_forbidden');
   const resolver = dependencies.resolver ?? resolvePublicHttpUrl;
   const execute = dependencies.executePinned ?? executePinnedHttp;
   let current = raw;
   let currentHeaders = effective.headers;
+  let currentMethod = effective.method;
+  let currentBody = effective.body;
 
   for (let hop = 0; hop <= effective.maxRedirects; hop++) {
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     const target = await resolver(current);
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
+    await dependencies.beforeRequest?.();
+    dependencies.onRequestStarted?.();
     const response = await execute(target, {
       ...effective,
+      method: currentMethod,
+      body: currentBody,
       headers: currentHeaders,
     });
     if (response.status < 300 || response.status >= 400) {
@@ -218,6 +253,9 @@ export async function requestPublicHttp(
     if (!location) {
       return { ...response, ok: false, finalUrl: target.url.toString() };
     }
+    if (effective.redirect === 'manual') {
+      return { ...response, ok: false, finalUrl: target.url.toString() };
+    }
     if (hop === effective.maxRedirects) {
       throw new EgressBlockedError('too_many_redirects');
     }
@@ -228,6 +266,15 @@ export async function requestPublicHttp(
         currentHeaders = Object.fromEntries(
           Object.entries(currentHeaders).filter(
             ([name]) => !['authorization', 'cookie', 'proxy-authorization'].includes(name.toLowerCase()),
+          ),
+        );
+      }
+      if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === 'POST')) {
+        currentMethod = 'GET';
+        currentBody = undefined;
+        currentHeaders = Object.fromEntries(
+          Object.entries(currentHeaders).filter(
+            ([name]) => !['content-length', 'content-type'].includes(name.toLowerCase()),
           ),
         );
       }

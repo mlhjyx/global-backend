@@ -3,7 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
+import { lockWorkspaceOrganizationIdentity } from '../discovery/organization-identity-root';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
+import { resolveOrganizationIdentityForRaw } from '../discovery/organization-identity-resolver';
+import {
+  MonitoredSourceRawBridgeError,
+  persistMonitoredSourceRawBridge,
+  prepareMonitoredSourceRawBridge,
+} from './monitored-source-raw-bridge';
 
 const CHUNK = 100;
 
@@ -22,8 +29,8 @@ export interface ProjectResult {
  * 租户投影：把**平台级共享**的 source_entity 投影进**某租户**的 canonical_company。
  * 平台采集一次服务所有租户；租户按 ICP 选源、把公司拉进自己的获客主线（走 RLS）。
  *
- * 复用 discovery 的确定性身份解析（companyIdentity：域名 > 名称+国家）→ 跨源自动去重
- * （同一家公司来自两个展会 = 一条 canonical），并写 identity_link + field_evidence 留痕。
+ * SourceEntity 先桥接成租户级不可变 RawSourceRecord，再复用 Identity v2 resolver 跨源归一；
+ * SourceEntity.id 永远不能冒充 raw_record_id。
  *
  * 🔴 合规红线：**只投公司事实**（名称/域名/国家/产品/展位——🟢法人公开信息）。
  * source_entity 里的**人名邮箱（personalData=true）不投**，留在平台层隔离，走 LIA 后另议。
@@ -38,10 +45,22 @@ export class TenantProjectionService {
     const source = await prisma.monitoredSource.findUnique({ where: { id: sourceId },
     });
     if (!source) throw new Error(`monitored_source ${sourceId} not found`);
+    if (source.status !== 'ACTIVE') {
+      return {
+        sourceId,
+        sourceKey: source.sourceKey,
+        entities: 0,
+        projected: 0,
+        suppressed: 0,
+        personalContactsWithheld: 0,
+        status: 'SKIPPED',
+        reason: `status=${source.status}`,
+      };
+    }
 
     // 平台级表无 RLS，直接读活跃实体
     const entities = await prisma.sourceEntity.findMany({
-      where: { sourceId, withdrawnAt: null },
+      where: { sourceId, withdrawnAt: null, entityKind: 'company' },
       ...(opts?.limit ? { take: opts.limit } : {}),
     });
     if (!entities.length) {
@@ -57,6 +76,38 @@ export class TenantProjectionService {
       };
     }
 
+    const sourceFetchIds = [...new Set(entities.flatMap((entity) => entity.lastSeenFetchId ? [entity.lastSeenFetchId] : []))];
+    const sourceFetches = await prisma.sourceFetch.findMany({
+      where: {
+        sourceId,
+        id: { in: sourceFetchIds },
+        status: { in: ['DONE', 'PARTIAL'] },
+        parserVersion: { not: null },
+        finishedAt: { not: null },
+      },
+      select: { id: true, status: true, parserVersion: true, finishedAt: true },
+    });
+    const fetchById = new Map(sourceFetches.map((fetch) => [fetch.id, fetch]));
+    const missingProvenance = entities.find(
+      (entity) => !entity.lastSeenFetchId || !fetchById.has(entity.lastSeenFetchId),
+    );
+    if (missingProvenance) {
+      throw new MonitoredSourceRawBridgeError(
+        'MONITORED_SOURCE_FETCH_PROVENANCE_MISSING',
+        `completed fetch provenance is required for source entity ${missingProvenance.id}`,
+      );
+    }
+    const sourcePolicies = await prisma.sourcePolicy.findMany({
+      select: {
+        id: true,
+        domain: true,
+        retentionDays: true,
+        reviewStatus: true,
+        allowedPurpose: true,
+        updatedAt: true,
+      },
+    });
+
     let projected = 0,
       suppressed = 0,
       personalWithheld = 0;
@@ -68,6 +119,7 @@ export class TenantProjectionService {
         // A suppression committed before this chunk admission is visible here;
         // no database transaction is held while the platform source is fetched.
         const policyLock = await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+        await lockWorkspaceOrganizationIdentity(tx, workspaceId);
         const suppressionRows = await tx.suppressionRecord.findMany({
           where: {
             type: { in: ['domain', 'company_name', 'email'] },
@@ -83,6 +135,13 @@ export class TenantProjectionService {
           suppressionRows.filter((row) => row.type === 'email').map((row) => row.value),
         );
         for (const e of chunk) {
+          const entityFetch = fetchById.get(e.lastSeenFetchId!);
+          if (!entityFetch) {
+            throw new MonitoredSourceRawBridgeError(
+              'MONITORED_SOURCE_FETCH_PROVENANCE_MISSING',
+              `completed fetch provenance is required for source entity ${e.id}`,
+            );
+          }
           const cleaned = (e.cleaned ?? {}) as Record<string, unknown>;
           const identity = companyIdentity({
             name: e.name,
@@ -96,7 +155,6 @@ export class TenantProjectionService {
             { name: e.name, domain: e.domain },
             { knownSuppressions: suppressionRows, policyLock },
           );
-          const { prior } = materialization;
           if (!materialization.allowed) {
             suppressed += 1;
             continue;
@@ -118,9 +176,11 @@ export class TenantProjectionService {
               : undefined;
           if (cleaned.email_kind === 'personal') personalWithheld += 1;
 
-          const attributes = pruneUndefined({
+          // Raw contains only immutable source facts. Whether a role mailbox is
+          // currently suppressed is a tenant projection decision and must never
+          // alter the Raw receipt for the same source observation.
+          const rawAttributes = pruneUndefined({
             products: Array.isArray(cleaned.products) ? cleaned.products : undefined,
-            contact_email: roleEmail,
             source_fair: cleaned.source_fair,
             source_kind: cleaned.source_kind,
             stand: cleaned.stand,
@@ -128,79 +188,83 @@ export class TenantProjectionService {
             acquired_via: source.providerKey,
             source_key: source.sourceKey,
           });
+          const canonicalAttributes = pruneUndefined({ ...rawAttributes, contact_email: roleEmail });
 
-          // 先查已有 canonical：存在则**合并 attributes**（不丢弃跨源 products/contact/富集命名空间），
-          // 否则新建。（避免 upsert 的 update 分支覆盖/丢失 attributes —— 下游 fit 门从这里读 products）
-          const canonical = prior
-            ? await tx.canonicalCompany.update({
-                where: { id: prior.id },
-                data: {
-                  // 后到的源只补缺（domain/country），不覆盖已有
-                  ...(e.domain ? { domain: { set: e.domain } } : {}),
-                  ...(e.country ? { country: { set: e.country } } : {}),
-                  attributes: mergeAttributes(
-                    withoutSuppressedContactEmail(
-                      (prior.attributes ?? {}) as Record<string, unknown>,
-                      suppressedEmails,
-                      suppressedDomains,
-                      false,
-                    ),
-                    attributes,
-                  ) as Prisma.InputJsonValue,
-                  version: { increment: 1 },
-                },
-              })
-            : await tx.canonicalCompany.create({
-                data: {
-                  workspaceId,
-                  name: e.name,
-                  domain: e.domain ?? null,
-                  country: e.country ?? null,
-                  attributes: attributes as Prisma.InputJsonValue,
-                  status: 'NEW',
-                  dedupeKey: identity.dedupeKey,
-                },
-              });
+          const preparedBridge = prepareMonitoredSourceRawBridge({
+            workspaceId,
+            source,
+            entity: e,
+            fetch: entityFetch,
+            policies: sourcePolicies,
+            attributes: rawAttributes,
+          });
+          const raw = await persistMonitoredSourceRawBridge(tx, {
+            workspaceId,
+            prepared: preparedBridge,
+          });
+          const resolution = await resolveOrganizationIdentityForRaw(tx, {
+            workspaceId,
+            rawRecordId: raw.id,
+            providerKey: preparedBridge.identityProviderKey,
+            record: preparedBridge.record,
+          });
+          if (resolution.kind === 'conflict') continue;
           projected += 1;
 
-          // identity_link：canonical ↔ source_entity（rawRecordId=source_entity.id），去重
-          const linkExists = await tx.identityLink.findFirst({
-            where: { canonicalId: canonical.id, rawRecordId: e.id },
-            select: { id: true },
+          // Share the canonical-company linearization point with enrichment.
+          // Without this lock, both paths can read a null domain and the later
+          // update silently overwrite the other provider's just-promoted value.
+          await tx.$queryRaw`SELECT id FROM canonical_company WHERE workspace_id = ${workspaceId}::uuid AND id = ${resolution.companyId}::uuid FOR UPDATE`;
+          const canonical = await tx.canonicalCompany.findUnique({
+            where: { id: resolution.companyId },
+            select: { id: true, domain: true, country: true, attributes: true },
           });
-          if (linkExists) continue;
-          await tx.identityLink.create({
+          if (!canonical) {
+            throw new Error('IDENTITY_V2_CANONICAL_NOT_FOUND');
+          }
+          await tx.canonicalCompany.update({
+            where: { id: canonical.id },
             data: {
-              workspaceId,
-              canonicalType: 'company',
-              canonicalId: canonical.id,
-              rawRecordId: e.id,
-              matchRule: identity.matchRule,
-              confidence: identity.matchRule === 'domain_exact' ? 1 : 0.8,
+              ...(!canonical.domain && e.domain ? { domain: { set: e.domain } } : {}),
+              ...(!canonical.country && e.country ? { country: { set: e.country } } : {}),
+              attributes: mergeAttributes(
+                withoutSuppressedContactEmail(
+                  (canonical.attributes ?? {}) as Record<string, unknown>,
+                  suppressedEmails,
+                  suppressedDomains,
+                  false,
+                ),
+                canonicalAttributes,
+              ) as Prisma.InputJsonValue,
             },
           });
-          // 字段级 Evidence：展会公开名录 = public license
+
+          // 字段级 Evidence 只引用真实 RawSourceRecord；数据库唯一键让 active-link replay
+          // 能修复缺失投影，同时不会产生重复 Evidence。
           const fields: [string, unknown][] = [
             ['name', e.name],
             ['domain', e.domain],
             ['country', e.country],
-            ['attributes', attributes],
+            ['attributes', rawAttributes],
           ];
-          for (const [field, value] of fields) {
-            if (value == null) continue;
-            await tx.fieldEvidence.create({
-              data: {
+          const evidenceRows = fields.flatMap(([field, value]) =>
+            value == null
+              ? []
+              : [{
                 workspaceId,
                 entityType: 'company',
                 entityId: canonical.id,
                 field,
                 value: value as Prisma.InputJsonValue,
-                providerKey: source.providerKey,
-                rawRecordId: e.id,
-                license: 'public',
+                providerKey: preparedBridge.identityProviderKey,
+                rawRecordId: raw.id,
+                license: preparedBridge.license,
                 allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
-              },
-            });
+                fetchedAt: preparedBridge.row.fetchedAt ?? undefined,
+              }],
+          );
+          if (evidenceRows.length) {
+            await tx.fieldEvidence.createMany({ data: evidenceRows, skipDuplicates: true });
           }
         }
       });

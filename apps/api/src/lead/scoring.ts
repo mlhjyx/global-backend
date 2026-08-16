@@ -69,6 +69,9 @@ const WEIGHTS = { fit: 0.35, role: 0.15, intent: 0.15, dataQuality: 0.15, reacha
 // 需求证据类事件（收口⑤拍板 + P4 扩）：买方公开采购（TED 招标 / SAM Sources Sought——皆买方侧需求，
 // Sources Sought 为招标前市场调研=最早的买方需求证据）+ 供应商招募页开放；FDA_CLEARANCE 属**卖方侧**上市时机，留 Intent 维不进需求证据。
 const DEMAND_PROOF_EVENT_TYPES = new Set<string>([TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT, 'SOURCING_OPENED']);
+const HISTORICAL_PROCUREMENT_STAGES = new Set([
+  'historical_award_buyer', 'historical_awarded_supplier', 'awarded_historical', 'awarded',
+]);
 const RECOMMEND_THRESHOLD = 0.55;
 const INTENT_HALFLIFE_DAYS = 60; // 意向信号半衰期：B2B 买家信号约 2 月衰减一半（越久越弱，防陈旧信号长期占分）
 const DAY_MS = 86_400_000;
@@ -144,6 +147,8 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const intentDim = intentDimension(attrs, icp.triggerSignals, opts?.nowMs ?? Date.now());
   const intent = intentDim.intent;
   const matchedSignals = intentDim.matchedSignals;
+  const stage = typeof attrs.signal_stage === 'string' ? attrs.signal_stage : '';
+  const historicalResearchOnly = HISTORICAL_PROCUREMENT_STAGES.has(stage) && !intentDim.hasRealIntentEvidence;
   notes.push(intentDim.note);
 
   // DataQuality：关键字段完整度
@@ -199,6 +204,10 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   } else if (company.status === 'SUPPRESSED') queue = 'suppressed';
   else if (fitResult.verdict === 'exclude') queue = 'rejected';
   else if (authoritative === 'mismatch') queue = 'rejected';
+  else if (historicalResearchOnly) {
+    queue = 'needs_review';
+    notes.push('历史采购事实仅用于账户研究；缺少独立当前意向证据，不进入推荐队列');
+  }
   else if (authoritative === 'weak') queue = 'needs_review';
   else if (authoritative === 'match') {
     queue = canRecommend ? 'recommended' : 'needs_review';
@@ -248,7 +257,14 @@ function intentDimension(
   attrs: Record<string, unknown>,
   triggerSignals: string[],
   nowMs: number,
-): { intent: number; demandProof: number; matchedSignals: string[]; intentSignals: string[]; note: string } {
+): {
+  intent: number;
+  demandProof: number;
+  matchedSignals: string[];
+  intentSignals: string[];
+  note: string;
+  hasRealIntentEvidence: boolean;
+} {
   // ① 真实 intent：attributes.intent.events 逐条 strength × 新近度衰减，取最强
   const intentAttr = attrs.intent as IntentAttrLike | undefined;
   let realIntent = 0;
@@ -277,7 +293,13 @@ function intentDimension(
   // ② 关键词代理：ICP triggerSignals ↔ 公司属性文本命中（弱先验兜底）。
   //    **排除 intent 命名空间**——否则触发词会命中 intent 事件自身的元数据（type/page_kind 如 "sourcing"），
   //    对同一信号在 realIntent(已衰减) 之外再计一次未衰减的分（双重计数，且陈旧信号无法真正衰减到底）。
-  const { intent: _omitIntent, ...attrsForKeyword } = attrs;
+  // Historical award facts are useful for fit/account research, but are not current buying intent.
+  // Current tender stages keep their bounded procurement title/description available to the weak proxy.
+  const stage = typeof attrs.signal_stage === 'string' ? attrs.signal_stage : '';
+  const { intent: _omitIntent, nppes: _omitStaticNppesRegistry, ...attrsWithoutIntent } = attrs;
+  const attrsForKeyword = HISTORICAL_PROCUREMENT_STAGES.has(stage)
+    ? Object.fromEntries(Object.entries(attrsWithoutIntent).filter(([key]) => !['procurement', 'source_role', 'signal_stage'].includes(key)))
+    : attrsWithoutIntent;
   const attrText = JSON.stringify(attrsForKeyword).toLowerCase();
   const matchedSignals = triggerSignals.filter((s) => {
     const words = s.toLowerCase().split(/[\s，,、]+/).filter((w) => w.length > 1);
@@ -288,13 +310,22 @@ function intentDimension(
     : 0;
 
   const intent = clamp01(Math.max(realIntent, keywordIntent));
+  const reportedRealIntent = r4(realIntent);
+  const hasRealIntentEvidence = reportedRealIntent > 0;
   // 注/信号来源以**实际决定最终分的项**为准（含仅有 intent_score 概要、无逐事件的兜底路径），
   // 否则概要兜底会被误标成「关键词代理·无真实信号」，与 0.65 的真实分自相矛盾（可审计性）。
-  const usedReal = realIntent > 0 && realIntent >= keywordIntent;
+  const usedReal = hasRealIntentEvidence && realIntent >= keywordIntent;
   const note = usedReal
-    ? `Intent 由真实网站变更信号驱动（${intentSignals.length ? intentSignals.join('/') : 'intent 概要'}；新近度加权 realIntent=${r4(realIntent)}）`
+    ? `Intent 由真实网站变更信号驱动（${intentSignals.length ? intentSignals.join('/') : 'intent 概要'}；新近度加权 realIntent=${reportedRealIntent}）`
     : 'Intent 基于关键词代理（无真实意向信号）';
-  return { intent, demandProof: clamp01(demandProof), matchedSignals, intentSignals, note };
+  return {
+    intent,
+    demandProof: clamp01(demandProof),
+    matchedSignals,
+    intentSignals,
+    note,
+    hasRealIntentEvidence,
+  };
 }
 
 /** 指数衰减：半衰期 INTENT_HALFLIFE_DAYS。刚发生/未来(时钟偏移)→1；越旧越接近 0；

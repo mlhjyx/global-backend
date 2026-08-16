@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { pickBest } from './gleif.provider';
+import { describe, expect, it, vi } from 'vitest';
+import { GleifEnrichmentProvider, pickBest } from './gleif.provider';
+import type { ExecutionBroker } from '../../tools/tool-contract';
 import { GleifRecord } from '../../adapters/gleif';
 
 function rec(lei: string, legalName: string, extra: Partial<GleifRecord> = {}): GleifRecord {
@@ -15,6 +16,60 @@ const TRUMPF_CANDIDATES = [
 ];
 
 describe('GLEIF 最佳匹配 + 置信度 + 歧义护栏（绝不贴错身份）', () => {
+  it('通过匹配门后把 LEI 作为 Identity v2 标识输出，而不只藏在 attributes', async () => {
+    const lei = '529900T8BM49AURSDO55';
+    const broker = {
+      checkSourcePolicy: vi.fn(),
+      invoke: vi.fn(async () => ({ data: { records: [rec(lei, 'Acme GmbH', { country: 'DE' })] }, costCents: 0 })),
+    } as unknown as ExecutionBroker;
+    const result = await new GleifEnrichmentProvider({ broker }).enrichCompany(
+      { name: 'Acme GmbH', country: 'DE' },
+      { workspaceId: 'ws-1' },
+    );
+    expect(result.identifiers).toEqual([{ scheme: 'lei', jurisdiction: 'GLOBAL', value: lei }]);
+  });
+
+  it('把国名归一成 ISO-2，纯名称回退也拒绝跨国同名实体', async () => {
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { records: [] }, costCents: 0 })
+      .mockResolvedValueOnce({
+        data: { records: [rec('5493001KJTIIGC8Y1R12', 'Acme Ltd', { country: 'US' })] },
+        costCents: 0,
+      });
+    const result = await new GleifEnrichmentProvider({ broker: { invoke } as unknown as ExecutionBroker })
+      .enrichCompany({ name: 'Acme Ltd', country: 'Kenya' }, { workspaceId: 'ws-1' });
+
+    expect(invoke.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ country: 'KE' }));
+    expect(result.matched).toBe(false);
+  });
+
+  it('已有另一官方注册号但没有权威交叉表时，不凭名称新增 LEI', async () => {
+    const invoke = vi.fn();
+    const result = await new GleifEnrichmentProvider({ broker: { invoke } as unknown as ExecutionBroker })
+      .enrichCompany({
+        name: 'Schneider Electric',
+        country: 'FR',
+        identifiers: [{ scheme: 'siren', jurisdiction: 'FR', value: '803086586' }],
+      }, { workspaceId: 'ws-1' });
+    expect(result.matched).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('已有 LEI 时只接受同一个 LEI，名称结果不能换绑', async () => {
+    const existingLei = '529900T8BM49AURSDO55';
+    const broker = { invoke: vi.fn(async () => ({
+      data: { records: [rec('5493001KJTIIGC8Y1R12', 'Acme GmbH', { country: 'DE' })] },
+      costCents: 0,
+    })) } as unknown as ExecutionBroker;
+    const result = await new GleifEnrichmentProvider({ broker }).enrichCompany({
+      name: 'Acme GmbH',
+      country: 'DE',
+      identifiers: [{ scheme: 'lei', jurisdiction: 'GLOBAL', value: existingLei }],
+    }, { workspaceId: 'ws-1' });
+    expect(result.matched).toBe(false);
+  });
+
   it('精确规范化名 → 满分命中且甩开次佳', () => {
     const best = pickBest('TRUMPF GmbH + Co. KG', TRUMPF_CANDIDATES);
     expect(best?.record.lei).toBe('EXACTMATCHLEI00000001');

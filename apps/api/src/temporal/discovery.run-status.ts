@@ -9,8 +9,9 @@ export function resolveRunStatus(args: {
   failures: number;
   totalQueries: number;
   budgetTruncated: boolean;
+  dataQualityBlocked?: boolean;
 }): 'DONE' | 'PARTIAL' | 'FAILED' {
-  const { failures, totalQueries, budgetTruncated } = args;
-  if (failures === 0 && !budgetTruncated) return 'DONE';
+  const { failures, totalQueries, budgetTruncated, dataQualityBlocked = false } = args;
+  if (failures === 0 && !budgetTruncated && !dataQualityBlocked) return 'DONE';
   return failures < totalQueries ? 'PARTIAL' : 'FAILED';
 }

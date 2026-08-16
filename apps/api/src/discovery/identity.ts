@@ -33,6 +33,8 @@ export interface IdentityKey {
 export interface CompanyIdentifier {
   scheme: string;
   value: string;
+  /** Identity v2 可选辖区；旧 dedupeKey 仍只使用 scheme/value，最终解析器会校验该字段。 */
+  jurisdiction?: string | null;
 }
 
 /** 归一 provider 标识：scheme 小写 + 值剥非字母数字（"DE 291499156"→"de291499156"）；空值 → null。 */

@@ -52,6 +52,10 @@ export interface ComplianceMeta {
   sourcePolicy: SourcePolicyMode; // Broker 执行前的 source_policy 闸门模式（见上）
   /** required 工具的固定治理域（API 类工具的策略键，如 'api.ted.europa.eu'）；缺省从 input 提取 url/domain。 */
   policyDomain?: string;
+  /** Bound Provider kill-switch. Missing reader/record or any status other than ENABLED denies before execute. */
+  providerKey?: string;
+  /** Require exactly one explicit ctx.purpose that is declared in allowedPurpose. */
+  requiresExplicitPurpose?: boolean;
   respectsRobots: boolean; // true → 抓取前 isAllowedByRobots
   personalData: boolean; // true → 走用途/脱敏门
   allowedPurpose: string[]; // ['discovery','enrichment']
@@ -63,6 +67,8 @@ export interface ComplianceMeta {
 /** 执行上下文——由 Broker 注入，工具只读取，不自造。 */
 export interface ToolContext {
   workspaceId: string;
+  /** Call-level Provider binding for shared tools. ToolBroker owns admission and rejects conflicts with tool metadata. */
+  providerKey?: string;
   /** Required with paidCost so the database ledger can enforce exact BuildRun scope. */
   siteId?: string;
   runId?: string;
@@ -74,6 +80,16 @@ export interface ToolContext {
    * fail-closed and must not execute the tool.
    */
   authorizeExternalAction?: () => Promise<boolean>;
+  /**
+   * Re-check the Broker-owned source policy immediately before every physical
+   * wire request (including redirects and bounded retries). This keeps the
+   * source kill switch effective after the initial invoke admission.
+   */
+  reauthorizeSourcePolicy?: () => Promise<void>;
+  /** Re-check a Provider kill-switch immediately before a physical wire request. */
+  reauthorizeProviderStatus?: () => Promise<void>;
+  /** Broker-owned cost marker. A transport calls this only when a physical request is about to start. */
+  markExternalRequestStarted?: () => void;
   /**
    * 本次调用的用途（'discovery' | 'enrichment' | 'intent' …，可多值=任一允许即放行）。
    * source_policy 用途门优先按它判（须在工具声明集内 + 域策略允许其一）；
@@ -138,6 +154,33 @@ export interface ToolResult<T = unknown> {
   degraded?: boolean; // 走了 fallback / 降级
 }
 
+export interface ToolFailureCost {
+  costCents: number;
+  basis: 'estimated_unknown';
+}
+
+const toolFailureCosts = new WeakMap<object, ToolFailureCost>();
+
+/** Preserve the original error while attaching an in-memory, secret-free cost observation. */
+export function attachToolFailureCost(error: unknown, cost: ToolFailureCost): unknown {
+  const target = error instanceof Error
+    ? error
+    : new Error(typeof error === 'string' ? error : 'tool execution failed', { cause: error });
+  toolFailureCosts.set(target, Object.freeze({ ...cost }));
+  return target;
+}
+
+/** Read a Broker-attached post-wire failure cost without parsing messages. */
+export function readToolFailureCost(error: unknown): ToolFailureCost | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = toolFailureCosts.get(error);
+  if (!candidate) return null;
+  return candidate.basis === 'estimated_unknown' &&
+    typeof candidate.costCents === 'number' && Number.isFinite(candidate.costCents) && candidate.costCents >= 0
+    ? { costCents: candidate.costCents, basis: candidate.basis }
+    : null;
+}
+
 /** source_policy 闸门的拒绝原因（checkSourcePolicy 与 invoke 共用词表）。 */
 export type SourcePolicyDenyReason = 'suspended' | 'purpose_not_allowed' | 'unregistered' | 'policy_unavailable';
 
@@ -162,7 +205,7 @@ export interface Tool<I = unknown, O = unknown> {
   /** 声明消费/产出什么，供确定性 SourceSelector 连接工具图（非运行时 LLM）。 */
   capabilities: {
     produces: ('company' | 'domain' | 'contact' | 'relation' | 'certificate' | 'trade_record')[];
-    accepts: ('keywords' | 'domain' | 'lei' | 'coordinates' | 'hs_code')[];
+    accepts: ('keywords' | 'domain' | 'lei' | 'cik' | 'coordinates' | 'hs_code')[];
     enrichesOnly?: boolean;
   };
   /** 纯函数：由归一化 input 派生稳定幂等键（与 raw_source_record 去重统一）。 */

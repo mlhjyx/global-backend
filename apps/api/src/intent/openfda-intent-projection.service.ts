@@ -164,7 +164,7 @@ export class OpenFdaIntentProjectionService {
       const fda = { ...priorFda, disclaimer: FDA_REGISTRATION_DISCLAIMER };
 
       const saved = await tx.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: prior?.dedupeKey ?? dedupeKey } },
         create: {
           workspaceId,
           name: c.applicant,

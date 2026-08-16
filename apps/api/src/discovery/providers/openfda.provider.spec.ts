@@ -103,6 +103,7 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
   it('FDA 注册号 → identifier scheme=fda-reg（全局唯一，不按国别限定）', () => {
     const rec = mapEstablishmentToRecord(est, NOW);
     expect(rec.identifier).toEqual({ scheme: 'fda-reg', value: '3004512345' });
+    expect(rec.identifiers).toEqual([{ scheme: 'fda-reg', value: '3004512345' }]);
     // 无域名 → dedupeKey 走 id:fda-reg:<值>（比 name_country 更强）
     const key = companyIdentity({ name: rec.name, country: rec.country, identifier: rec.identifier }).dedupeKey;
     expect(key.startsWith('id:fda-reg:')).toBe(true);
@@ -123,6 +124,7 @@ describe('mapEstablishmentToRecord —— 绿事实 + 合规红线', () => {
   it('无注册号 → 回退 name+country 身份 + externalId 含国别（防跨国同名互撞）', () => {
     const rec = mapEstablishmentToRecord({ ...est, registrationNumber: undefined }, NOW);
     expect(rec.identifier).toBeUndefined();
+    expect(rec.identifiers).toBeUndefined();
     expect(rec.externalId).toBe('openfda:Philips Ultrasound LLC:US'); // 含国别，非塌成 name-only
   });
 

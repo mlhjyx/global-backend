@@ -13,6 +13,7 @@ import {
   ExecutionContext,
   externalActionAuthorized,
   GENERIC_CONTACT_TITLE,
+  ProviderCallUsageBreakdown,
   ProviderCompanyRecord,
   ProviderContactRecord,
   SourceClass,
@@ -20,16 +21,27 @@ import {
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
-import type { SearxResult } from '../../adapters/searxng';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts } from '../../adapters/contact-extractor';
-import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
-
-const PARSER_VERSION = 'public_web/v1';
+import {
+  invokePublicWebSearch,
+  resolvePublicWebSearchBackends,
+  type PublicWebSearchResult,
+  type PublicWebSearchToolId,
+} from './public-web-search';
+import {
+  buildVerifiedCandidateSearchQueries,
+  resolveAiCandidateExpansionEnabled,
+  type AiCompanyCandidateHypotheses,
+} from './public-web-ai-candidates';
+import {
+  extractDeterministicPublicWebCompany,
+  PUBLIC_WEB_DETERMINISTIC_PARSER_VERSION,
+} from './public-web-deterministic-company';
 
 /** 搜索结果里永远不是目标公司官网的域名（词典/百科/社媒/平台市场/招聘站…）。 */
 const NOISE_DOMAINS = [
@@ -49,23 +61,30 @@ const NOISE_DOMAINS = [
 const MAX_DOMAINS_PER_QUERY = 14; // 每条计划查询最多深挖的候选域名数（控成本/时长）
 const CRAWL_CONCURRENCY = 5;
 
-interface ExtractedCompany {
-  is_company_site: boolean;
-  name?: string;
-  country?: string;
-  industry?: string;
-  employee_count?: number | null;
-  products?: string[];
-  keywords?: string[];
-  evidence?: string;
-  confidence?: number;
+function aggregateUsage(
+  entries: readonly ProviderCallUsageBreakdown[],
+): ProviderCallUsageBreakdown[] {
+  const aggregate = new Map<string, ProviderCallUsageBreakdown>();
+  for (const entry of entries) {
+    const key = `${entry.phase}\0${entry.backend}`;
+    const current = aggregate.get(key);
+    if (current) {
+      current.callCount += entry.callCount;
+      current.completedCount += entry.completedCount;
+      current.costCents += entry.costCents;
+    } else {
+      aggregate.set(key, { ...entry });
+    }
+  }
+  return [...aggregate.values()];
 }
 
 /**
  * 真实公开数据挖掘 Provider（PRD 7.4.11 Public Intelligence / DAT-013）。
- * 管线：SearXNG 元搜索发现候选 → 噪声域名过滤 + Source Registry SUSPENDED 检查 →
- * Crawl4AI 抓官网 → LLM（gemini-2.5-flash）判站并抽取结构化属性（只取文本中存在的）→
- * 带页面指纹的记录。所有值都可回溯到真实抓取的页面（P-04）。
+ * 管线：受治理搜索后端发现候选（默认仅 SearXNG；显式配置后可降级 Serper/Brave）→
+ * 噪声域名过滤 + Source Registry SUSPENDED 检查 →
+ * Crawl4AI 抓官网 → 同站 schema.org Organization JSON-LD 严格判定 →
+ * 带页面指纹的最小企业记录。冲突、缺 URL 或跨站声明一律 fail-closed，不回退模型。
  *
  * 联系人路径：抓 contact/impressum/about 页 → 确定性正则抽公开邮箱/电话（不做
  * 人名画像 —— 个人数据留给 SourcePolicy/合规门后的版本）。
@@ -76,13 +95,23 @@ export class PublicWebDiscoveryProvider
 {
   readonly key = 'public_web';
   readonly classes: SourceClass[] = ['public_intelligence', 'industry_data'];
+  private readonly searchBackends: readonly PublicWebSearchToolId[];
+  private readonly aiCandidateExpansionEnabled: boolean;
 
   constructor(private readonly deps: {
     gateway: ModelGateway;
     broker?: ExecutionBroker;
     runtimeTelemetry?: RuntimeTelemetry;
+    searchBackends?: readonly PublicWebSearchToolId[];
+    aiCandidateExpansionEnabled?: boolean;
   },
-  ) {}
+  ) {
+    this.searchBackends = deps.searchBackends ?? resolvePublicWebSearchBackends(
+      process.env.PUBLIC_WEB_SEARCH_BACKENDS,
+    );
+    this.aiCandidateExpansionEnabled = deps.aiCandidateExpansionEnabled
+      ?? resolveAiCandidateExpansionEnabled(process.env.PUBLIC_WEB_AI_CANDIDATES);
+  }
 
   private log(msg: string): void {
 
@@ -91,7 +120,7 @@ export class PublicWebDiscoveryProvider
 
   /** 工具出网上下文：真租户/run 归属 + taskContractId 绑定（allowedTools 白名单生效点）。 */
   private toolCtx(ctx: ExecutionContext, taskContractId: string): ToolContext {
-    return { ...ctx, taskContractId };
+    return { ...ctx, taskContractId, providerKey: this.key };
   }
 
   async discoverCompanies(
@@ -106,11 +135,24 @@ export class PublicWebDiscoveryProvider
     }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
+    if (this.aiCandidateExpansionEnabled) {
+      try {
+        searches.push(...await this.proposeCandidateSearches(query, ctx));
+      } catch (error) {
+        // Candidate expansion is optional and can never suppress the bounded,
+        // deterministic search path.
+        this.log(`AI candidate expansion degraded (${String(error).slice(0, 80)})`);
+      }
+    }
     const candidates = new Map<string, { url: string; title: string }>(); // domain → first hit
+    let costCents = 0;
+    const usage: ProviderCallUsageBreakdown[] = [];
 
     for (const q of searches) {
-      const results = await this.search(q, ctx);
-      for (const r of results) {
+      const searchResult = await this.search(q, ctx);
+      costCents += searchResult.costCents;
+      usage.push(...searchResult.usage);
+      for (const r of searchResult.results) {
         const domain = normalizeDomain(r.url);
         if (!domain) continue;
         if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
@@ -127,101 +169,141 @@ export class PublicWebDiscoveryProvider
       const batch = domains.slice(i, i + CRAWL_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
       for (const s of settled) {
-        if (s.status === 'fulfilled' && s.value) records.push(s.value);
+        if (s.status !== 'fulfilled') continue;
+        costCents += s.value.costCents;
+        usage.push(...s.value.usage);
+        if (s.value.record) records.push(s.value.record);
       }
     }
-    return { records, costCents: 0 };
+    const breakdown = aggregateUsage(usage);
+    return {
+      records,
+      costCents,
+      usage: {
+        callCount: breakdown.reduce((sum, entry) => sum + entry.callCount, 0),
+        breakdown,
+      },
+    };
   }
 
-  /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
-  private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
-    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
-      'searxng.search',
-      { q, language: 'en' },
+  /** 受治理搜索后端；外部 quota 后端只有显式配置后才参与降级。 */
+  private async search(q: string, ctx: ExecutionContext): Promise<PublicWebSearchResult> {
+    const result = await invokePublicWebSearch(
+      this.deps.broker!,
+      // Serper's bounded free/BYOK contract rejects `num=20` with HTTP 400 for
+      // some valid keys. Ten is accepted across the configured backends and is
+      // already sufficient for the downstream 14-domain safety cap.
+      { q, language: 'en', count: 10 },
       this.toolCtx(ctx, 'discovery.extract_company'),
+      this.searchBackends,
+      (toolId, error) => this.log(
+        `search backend ${toolId} degraded${error ? ` (${String(error).slice(0, 80)})` : ' (empty)'}`,
+      ),
     );
-    return res.data.results.slice(0, 20);
+    return result;
+  }
+
+  private async proposeCandidateSearches(
+    query: CompanyDiscoveryQuery,
+    ctx: ExecutionContext,
+  ): Promise<string[]> {
+    const contract = getTask('discovery.propose_company_candidates');
+    if (!contract) return [];
+    const result = await executeStructuredTaskWithRuntime<AiCompanyCandidateHypotheses>(
+      this.deps.gateway,
+      {
+        task: contract.id,
+        prompt: `候选发现范围：${JSON.stringify({
+          sourceClass: query.sourceClass,
+          filters: query.filters,
+          keywords: query.keywords,
+        }).slice(0, 2_000)}`,
+        system: contract.description,
+        model: contract.model,
+        schema: contract.outputSchema,
+        maxTokens: 800,
+      },
+      { ...ctx },
+      { telemetry: this.deps.runtimeTelemetry },
+    );
+    return buildVerifiedCandidateSearchQueries(result.data);
   }
 
   private async mineDomain(
     domain: string,
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
-  ): Promise<ProviderCompanyRecord | null> {
+  ): Promise<{
+    record: ProviderCompanyRecord | null;
+    costCents: number;
+    usage: ProviderCallUsageBreakdown[];
+  }> {
     const homeUrl = `https://${domain}/`;
-    // 合规闸门（DAT-011）：robots 禁抓则放弃，不换 UA 硬闯（robots.ts 有缓存；工具内亦权威强制）
-    if (!(await isAllowedByRobots(homeUrl, {
-        authorizeExternalAction: ctx.authorizeExternalAction,
-      }))) {
-      this.log(`skip ${domain}: robots disallow`);
-      return null;
-    }
-    let text: string;
+    let html: string;
+    let crawlCostCents = 0;
     try {
-      const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
-        'crawl4ai.fetch',
+      const crawled = await this.deps.broker!.invoke<
+        { url: string },
+        { url: string; html: string; headers: Record<string, string> }
+      >(
+        'crawl4ai.render',
         { url: homeUrl },
-        // FIX C（Codex P1）：仅在 crawl4ai.fetch 处显式声明用途（toolCtx 与 searxng.search 共享，
-        // searxng 是 sourcePolicy=none 短路放行，不在此加）；精确复现 site_builder 扩宽前的有效集。
         {
           ...this.toolCtx(ctx, 'discovery.extract_company'),
           purpose: ['discovery', 'enrichment'],
         },
       );
-      text = crawled.data.text.slice(0, 30_000);
+      html = crawled.data.html;
+      crawlCostCents = crawled.costCents;
     } catch (err) {
       this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
-      return null; // 站点不可达/闸门拒绝 → 放弃该候选
+      return {
+        record: null,
+        costCents: 0,
+        usage: [{
+          phase: 'crawl',
+          backend: 'crawl4ai.render',
+          callCount: 1,
+          completedCount: 0,
+          costCents: 0,
+        }],
+      }; // 站点不可达/闸门拒绝 → 放弃该候选
     }
-    if (text.trim().length < 200) {
-      this.log(`skip ${domain}: too little text (${text.trim().length})`);
-      return null;
+    const crawlUsage: ProviderCallUsageBreakdown[] = [{
+      phase: 'crawl',
+      backend: 'crawl4ai.render',
+      callCount: 1,
+      completedCount: 1,
+      costCents: crawlCostCents,
+    }];
+    const organization = extractDeterministicPublicWebCompany(html, domain);
+    if (!organization) {
+      this.log(`skip ${domain}: no same-site Organization JSON-LD proof`);
+      return { record: null, costCents: crawlCostCents, usage: crawlUsage };
     }
-
-    const contract = getTask('discovery.extract_company');
-    const result = await executeStructuredTaskWithRuntime<ExtractedCompany>(
-      this.deps.gateway,
-      {
-        task: contract?.id ?? 'discovery.extract_company',
-        prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
-          filters: query.filters,
-          keywords: query.keywords,
-        }).slice(0, 1200)}\n\n网页文本（URL: ${homeUrl}）：\n${text}`,
-        system: contract?.description,
-        model: contract?.model,
-        schema: contract?.outputSchema ?? { required: ['is_company_site'] },
-      },
-      // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-      { ...ctx },
-      { telemetry: this.deps.runtimeTelemetry },
-    );
-    const out = result.data;
-    if (!out?.is_company_site || !out.name?.trim()) {
-      this.log(`skip ${domain}: not a company site (llm)`);
-      return null;
-    }
-    this.log(`✓ ${domain}: ${out.name}`);
+    this.log(`✓ ${domain}: ${organization.name} (same-site JSON-LD)`);
 
     return {
-      externalId: domain,
-      name: out.name.trim(),
-      domain,
-      country: out.country || undefined,
-      industry: out.industry || undefined,
-      employeeCount: typeof out.employee_count === 'number' ? out.employee_count : undefined,
-      attributes: {
-        products: out.products ?? [],
-        keywords: out.keywords ?? [],
-        extraction_evidence: out.evidence ?? null,
-        extraction_confidence: out.confidence ?? null,
-        source_class: query.sourceClass,
+      record: {
+        externalId: domain,
+        name: organization.name,
+        domain,
+        country: organization.country,
+        attributes: {
+          extraction_method: 'jsonld_same_site',
+          organization_type: organization.organizationType,
+          organization_url: organization.organizationUrl,
+          source_class: query.sourceClass,
+        },
+        provenance: {
+          sourceUrl: homeUrl,
+          fetchedAt: new Date().toISOString(),
+          contentHash: createHash('sha256').update(html).digest('hex'),
+          parserVersion: PUBLIC_WEB_DETERMINISTIC_PARSER_VERSION,
+        },
       },
-      provenance: {
-        sourceUrl: homeUrl,
-        fetchedAt: new Date().toISOString(),
-        contentHash: createHash('sha256').update(text).digest('hex'),
-        parserVersion: PARSER_VERSION,
-      },
+      costCents: crawlCostCents,
+      usage: crawlUsage,
     };
   }
 
@@ -234,9 +316,6 @@ export class PublicWebDiscoveryProvider
     if (!company.domain) return { contacts: [], costCents: 0 };
     if (!this.deps.broker) return { contacts: [], costCents: 0 }; // fail-closed：无闸门不出网
     const base = `https://${company.domain}/`;
-    if (!(await isAllowedByRobots(base, {
-        authorizeExternalAction: ctx.authorizeExternalAction,
-      }))) return { contacts: [], costCents: 0 };
     const crawl = (url: string) =>
       this.deps.broker!.invoke<{ url: string }, CrawlResult>('crawl4ai.fetch', { url }, {
         // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及本发现抓取。

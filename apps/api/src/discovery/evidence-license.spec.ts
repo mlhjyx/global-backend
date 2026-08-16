@@ -12,7 +12,10 @@ describe('§8.5 discovery 证据许可归一（resolveEvidenceLicense）', () =>
 
   it('未声明 + 其它 provider → licensed（既有行为字节级不变）', () => {
     expect(resolveEvidenceLicense(undefined, 'wikidata')).toBe('licensed');
-    expect(resolveEvidenceLicense(undefined, 'public_web')).toBe('licensed');
+  });
+
+  it('public_web SOURCE_SPECIFIC 未显式声明时不得伪装成 blanket licensed', () => {
+    expect(resolveEvidenceLicense(undefined, 'public_web')).toBe('SOURCE_SPECIFIC');
   });
 
   it('未声明 + ted → licensed（不因 providerKey 静默假定许可，必须记录显式声明）', () => {

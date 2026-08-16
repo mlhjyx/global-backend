@@ -10,6 +10,7 @@ import { DiscoveryController } from '../discovery/discovery.controller';
 import { EventsController } from '../events/events.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { ProviderControlPlaneController } from '../provider-control-plane/provider-control-plane.controller';
 import { AssetsController } from '../site-builder/assets.controller';
 import { BuildsController } from '../site-builder/builds.controller';
 import { IntakeController } from '../site-builder/intake.controller';
@@ -27,6 +28,7 @@ const PROTECTED_CONTROLLERS = [
   EventsController,
   IcpController,
   LeadController,
+  ProviderControlPlaneController,
   AssetsController,
   BuildsController,
   IntakeController,

@@ -3,7 +3,7 @@ import { ToolRegistry } from './tool-registry';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger, BudgetExceededError } from './budget';
 import { RateLimiter } from './rate-limiter';
-import { Tool } from './tool-contract';
+import { readToolFailureCost, Tool, ToolContext } from './tool-contract';
 
 function fakeTool(id: string, costCents = 5, exec?: () => Promise<unknown>): Tool {
   return {
@@ -133,6 +133,24 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     budget.open('run1', 10);
     await expect(broker.invoke('t.fail', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow('boom');
     expect(budget.remainingCents('run1')).toBe(10); // 全额退还
+  });
+
+  it('物理请求开始后的失败按 unknown estimated cost 结算并标注错误', async () => {
+    const budget = new BudgetLedger();
+    const failing = fakeTool('t.fail-after-wire', 10);
+    failing.execute = async (_input, ctx) => {
+      ctx.markExternalRequestStarted?.();
+      throw new Error('invalid upstream payload');
+    };
+    const { broker } = makeBroker(failing, { budget });
+    budget.open('run1', 10);
+
+    const error = await broker.invoke(failing.id, {}, { workspaceId: 'w', runId: 'run1' })
+      .then(() => null, (caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(readToolFailureCost(error)).toEqual({ costCents: 10, basis: 'estimated_unknown' });
+    expect(budget.remainingCents('run1')).toBe(0);
   });
 });
 
@@ -287,5 +305,139 @@ describe('ToolBroker — source_policy fail-closed（收口②：未登记不放
     await expect(
       broker.invoke('gov.source', {}, { workspaceId: 'w', purpose: ['intent', 'discovery'] }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('ToolBroker — provider status and explicit-purpose admission', () => {
+  function providerTool(exec = vi.fn(async () => ({ ok: true }))): { tool: Tool; exec: typeof exec } {
+    const tool = fakeTool('sec-edgar.submission.fetch', 0, exec);
+    const compliance = tool.compliance as typeof tool.compliance & {
+      providerKey?: string;
+      requiresExplicitPurpose?: boolean;
+    };
+    compliance.providerKey = 'sec_edgar';
+    compliance.requiresExplicitPurpose = true;
+    compliance.allowedPurpose = ['enrichment'];
+    return { tool, exec };
+  }
+
+  it('fails closed before execute when the provider status reader is absent', async () => {
+    const { tool, exec } = providerTool();
+    const { broker } = makeBroker(tool);
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: 'w', purpose: 'enrichment' }),
+    ).rejects.toEqual(expect.objectContaining<ToolPolicyDenied>({
+      name: 'ToolPolicyDenied',
+      reason: 'provider_status_unavailable: sec_edgar',
+    }));
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before execute when the provider record is absent or not exactly ENABLED', async () => {
+    for (const status of [null, { status: 'DISABLED' }, { status: 'enabled' }, { status: 'PAUSED' }]) {
+      const { tool, exec } = providerTool();
+      const { broker } = makeBroker(tool, {
+        providerStatusReader: async () => status,
+      } as never);
+
+      await expect(
+        broker.invoke(tool.id, {}, { workspaceId: 'w', purpose: 'enrichment' }),
+      ).rejects.toBeInstanceOf(ToolPolicyDenied);
+      expect(exec).not.toHaveBeenCalled();
+    }
+  });
+
+  it('fails closed when the provider status reader throws', async () => {
+    const { tool, exec } = providerTool();
+    const { broker } = makeBroker(tool, {
+      providerStatusReader: async () => {
+        throw new Error('database unavailable');
+      },
+    } as never);
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: 'w', purpose: 'enrichment' }),
+    ).rejects.toEqual(expect.objectContaining<ToolPolicyDenied>({
+      reason: 'provider_status_unavailable: sec_edgar',
+    }));
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('requires one explicit, exactly declared purpose before execute', async () => {
+    const providerStatusReader = async () => ({ status: 'ENABLED' });
+    for (const purpose of [undefined, 'discovery', ['enrichment', 'discovery'], []]) {
+      const { tool, exec } = providerTool();
+      const { broker } = makeBroker(tool, { providerStatusReader } as never);
+
+      await expect(
+        broker.invoke(tool.id, {}, { workspaceId: 'w', ...(purpose === undefined ? {} : { purpose }) }),
+      ).rejects.toEqual(expect.objectContaining<ToolPolicyDenied>({
+        reason: 'explicit purpose required',
+      }));
+      expect(exec).not.toHaveBeenCalled();
+    }
+  });
+
+  it('executes only when the provider is ENABLED and the explicit purpose is exact', async () => {
+    const { tool, exec } = providerTool();
+    const { broker } = makeBroker(tool, {
+      providerStatusReader: async () => ({ status: 'ENABLED' }),
+    } as never);
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: 'w', purpose: 'enrichment' }),
+    ).resolves.toBeDefined();
+    expect(exec).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks provider status at the physical-wire boundary', async () => {
+    const wire = vi.fn();
+    const { tool } = providerTool();
+    tool.execute = async (_input, ctx) => {
+      await (ctx as ToolContext & { reauthorizeProviderStatus?: () => Promise<void> })
+        .reauthorizeProviderStatus?.();
+      wire();
+      return { data: { ok: true }, costCents: 0 };
+    };
+    const providerStatusReader = vi
+      .fn<() => Promise<{ status: string } | null>>()
+      .mockResolvedValueOnce({ status: 'ENABLED' })
+      .mockResolvedValueOnce({ status: 'DISABLED' });
+    const { broker } = makeBroker(tool, { providerStatusReader } as never);
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: 'w', purpose: 'enrichment' }),
+    ).rejects.toEqual(expect.objectContaining<ToolPolicyDenied>({
+      reason: 'provider not enabled: sec_edgar',
+    }));
+    expect(providerStatusReader).toHaveBeenCalledTimes(2);
+    expect(wire).not.toHaveBeenCalled();
+  });
+
+  it('binds a shared tool to the call-level provider and blocks its next physical request after disablement', async () => {
+    const wires = vi.fn();
+    const tool = fakeTool('searxng.search', 0);
+    tool.execute = async (_input, ctx) => {
+      await ctx.reauthorizeProviderStatus?.();
+      wires();
+      await ctx.reauthorizeProviderStatus?.();
+      wires();
+      return { data: { ok: true }, costCents: 0 };
+    };
+    const providerStatusReader = vi
+      .fn<() => Promise<{ status: string } | null>>()
+      .mockResolvedValueOnce({ status: 'ENABLED' })
+      .mockResolvedValueOnce({ status: 'ENABLED' })
+      .mockResolvedValueOnce({ status: 'DISABLED' });
+    const { broker } = makeBroker(tool, { providerStatusReader } as never);
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: 'w', providerKey: 'public_web' }),
+    ).rejects.toEqual(expect.objectContaining<ToolPolicyDenied>({
+      reason: 'provider not enabled: public_web',
+    }));
+    expect(providerStatusReader).toHaveBeenCalledTimes(3);
+    expect(wires).toHaveBeenCalledOnce();
   });
 });

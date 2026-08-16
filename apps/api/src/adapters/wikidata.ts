@@ -9,11 +9,14 @@
 const ENDPOINT = process.env.WIKIDATA_SPARQL_URL ?? 'https://query.wikidata.org/sparql';
 const WD_API = process.env.WIKIDATA_API_URL ?? 'https://www.wikidata.org/w/api.php';
 const USER_AGENT = process.env.WIKIDATA_UA ?? 'GlobalDiscoveryBot/1.0 (b2b discovery; contact ops)';
+const MAX_SPARQL_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export interface WikidataCompany {
   qid: string;
   name: string;
   website?: string;
+  lei?: string;
+  siren?: string;
   employees?: number;
   countryCode?: string;
   latitude?: number;
@@ -42,21 +45,32 @@ export async function discoverCompaniesByIndustry(params: {
 
   const values = industryQids.map((q) => `wd:${q}`).join(' ');
   const websiteClause = requireWebsite ? '?company wdt:P856 ?website .' : 'OPTIONAL { ?company wdt:P856 ?website }';
-  const countryClause = countryQid ? `?company wdt:P17 wd:${countryQid} .` : '';
+  // Bind the selected country to the same variable used for the returned ISO
+  // code. A second independent P17 lookup can otherwise choose another country
+  // statement from a multinational company and corrupt the canonical country.
+  const countryClause = countryQid
+    ? `?company wdt:P17 ?country . FILTER(?country = wd:${countryQid})`
+    : 'OPTIONAL { ?company wdt:P17 ?country }';
   const query = `
-SELECT ?company ?companyLabel ?website ?employees ?coord ?countryCode WHERE {
+SELECT DISTINCT ?company ?companyLabel ?website ?employees ?coord ?countryCode ?lei WHERE {
   VALUES ?industry { ${values} }
   ?company wdt:P452 ?industry .
   ${countryClause}
   ${websiteClause}
   OPTIONAL { ?company wdt:P1128 ?employees }
   OPTIONAL { ?company wdt:P625 ?coord }
-  OPTIONAL { ?company wdt:P17 ?country . ?country wdt:P297 ?countryCode }
+  OPTIONAL { ?company wdt:P1278 ?lei }
+  OPTIONAL { ?country wdt:P297 ?countryCode }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de,zh" }
-} LIMIT ${Math.min(limit, 200)}`;
+} ORDER BY STR(?company) STR(?website) STR(?lei) LIMIT ${Math.min(limit, 200)}`;
 
   const rows = await runSparql(query, 40_000, beforeRequest);
-  return rows.map(bindingToCompany).filter((c): c is WikidataCompany => c !== null);
+  const companies = rows.map(bindingToCompany).filter((c): c is WikidataCompany => c !== null);
+  const firstByQid = new Map<string, WikidataCompany>();
+  for (const company of companies) {
+    if (!firstByQid.has(company.qid)) firstByQid.set(company.qid, company);
+  }
+  return [...firstByQid.values()];
 }
 
 /** 通用 SPARQL 执行（供未来更多结构化查询复用）。 */
@@ -74,10 +88,38 @@ export async function runSparql(
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`wikidata ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const json = (await res.json()) as {
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_SPARQL_RESPONSE_BYTES) {
+    throw new Error('wikidata SPARQL response too large');
+  }
+  if (!res.body) throw new Error('wikidata SPARQL empty response');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let body = '';
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    bytes += chunk.value.byteLength;
+    if (bytes > MAX_SPARQL_RESPONSE_BYTES) {
+      await reader.cancel('response too large').catch(() => undefined);
+      throw new Error('wikidata SPARQL response too large');
+    }
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  body += decoder.decode();
+  let json: {
     results?: { bindings?: SparqlBinding[] };
   };
-  return json.results?.bindings ?? [];
+  try {
+    json = JSON.parse(body) as typeof json;
+  } catch (error) {
+    throw new Error('wikidata SPARQL returned invalid JSON', { cause: error });
+  }
+  if (!json.results || !Array.isArray(json.results.bindings)) {
+    throw new Error('wikidata SPARQL schema changed: results.bindings');
+  }
+  return json.results.bindings;
 }
 
 // ── Wikidata REST API（www.wikidata.org/w/api.php）——用于按名富集 ──────────────
@@ -156,6 +198,7 @@ export interface WikidataCompanyFacts {
   parentName?: string;
   subsidiaryCount?: number;
   lei?: string;
+  siren?: string;
   isin?: string;
   countryQid?: string;
   countryName?: string;
@@ -173,6 +216,7 @@ const P = {
   parent: 'P749',
   subsidiary: 'P355',
   lei: 'P1278',
+  siren: 'P1616',
   isin: 'P946',
   website: 'P856',
   country: 'P17',
@@ -264,6 +308,7 @@ export function parseCompanyFacts(
     parentName: lbl(parentQid),
     subsidiaryCount: entityIds(e, P.subsidiary).length || undefined,
     lei,
+    siren: strings(e, P.siren)[0],
     isin: strings(e, P.isin)[0],
     countryQid,
     countryName: lbl(countryQid),
@@ -289,6 +334,7 @@ function bindingToCompany(b: SparqlBinding): WikidataCompany | null {
   const name = b.companyLabel?.value;
   if (!uri || !name) return null;
   const qid = uri.split('/').pop() ?? uri;
+  if (!/^Q[1-9]\d*$/u.test(qid)) return null;
   if (name === qid) return null; // 无标签，跳过
   const coord = b.coord?.value; // "Point(lon lat)"
   let latitude: number | undefined;
@@ -298,12 +344,16 @@ function bindingToCompany(b: SparqlBinding): WikidataCompany | null {
     longitude = Number(m[1]);
     latitude = Number(m[2]);
   }
+  const employees = b.employees?.value ? Number(b.employees.value) : undefined;
+  const countryCode = b.countryCode?.value.trim().toLocaleUpperCase('en-US');
+  const lei = b.lei?.value.trim().toLocaleUpperCase('en-US');
   return {
     qid,
     name,
     website: b.website?.value,
-    employees: b.employees?.value ? Number(b.employees.value) : undefined,
-    countryCode: b.countryCode?.value,
+    employees: employees !== undefined && Number.isFinite(employees) ? employees : undefined,
+    countryCode: countryCode && /^[A-Z]{2}$/u.test(countryCode) ? countryCode : undefined,
+    lei: lei || undefined,
     latitude,
     longitude,
   };

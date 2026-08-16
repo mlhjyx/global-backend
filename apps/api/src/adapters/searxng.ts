@@ -46,12 +46,30 @@ export interface SearxResponse {
   numberOfResults: number;
 }
 
+export interface SearxRequestHooks {
+  /** Re-authorize immediately before every physical SearXNG request. */
+  beforeRequest?: () => Promise<void>;
+  /** Mark only requests that are about to cross the wire. */
+  onRequestStarted?: () => void;
+}
+
+class SearxRequestAuthorizationError extends Error {
+  constructor(readonly original: unknown) {
+    super('searxng_request_not_authorized');
+    this.name = 'SearxRequestAuthorizationError';
+  }
+}
+
 function baseUrl(): string {
   return process.env.SEARXNG_URL ?? 'http://localhost:8081';
 }
 
 /** 一次 SearXNG JSON 搜索。失败抛错（由调用方决定容错）。 */
-export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promise<SearxResponse> {
+export async function searxSearch(
+  query: SearxQuery,
+  timeoutMs = 30_000,
+  hooks: SearxRequestHooks = {},
+): Promise<SearxResponse> {
   const params = new URLSearchParams({ q: query.q, format: 'json' });
   if (query.categories?.length) params.set('categories', query.categories.join(','));
   if (query.engines?.length) params.set('engines', query.engines.join(','));
@@ -60,6 +78,12 @@ export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promis
   if (query.pageno && query.pageno > 1) params.set('pageno', String(query.pageno));
   params.set('safesearch', String(query.safesearch ?? 0));
 
+  try {
+    await hooks.beforeRequest?.();
+  } catch (error) {
+    throw new SearxRequestAuthorizationError(error);
+  }
+  hooks.onRequestStarted?.();
   const res = await fetch(`${baseUrl()}/search?${params.toString()}`, {
     signal: AbortSignal.timeout(timeoutMs),
     headers: { Accept: 'application/json' },
@@ -82,14 +106,20 @@ export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promis
  * 便捷：多页拉取（分页），用于需要更多候选的发现查询。
  * pages=2 通常够；每页 SearXNG 已聚合多引擎结果。
  */
-export async function searxSearchPaged(query: SearxQuery, pages = 1, timeoutMs = 30_000): Promise<SearxResult[]> {
+export async function searxSearchPaged(
+  query: SearxQuery,
+  pages = 1,
+  timeoutMs = 30_000,
+  hooks: SearxRequestHooks = {},
+): Promise<SearxResult[]> {
   const out: SearxResult[] = [];
   const seen = new Set<string>();
   for (let p = 1; p <= pages; p++) {
     let resp: SearxResponse;
     try {
-      resp = await searxSearch({ ...query, pageno: p }, timeoutMs);
-    } catch {
+      resp = await searxSearch({ ...query, pageno: p }, timeoutMs, hooks);
+    } catch (error) {
+      if (error instanceof SearxRequestAuthorizationError) throw error.original;
       break; // 某页失败则停止翻页，返回已得
     }
     for (const r of resp.results) {

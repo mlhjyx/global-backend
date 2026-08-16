@@ -163,7 +163,7 @@ export class TedIntentProjectionService {
       if (prior && priorIntent && sameIntent(priorIntent, intent)) return false;
 
       const saved = await tx.canonicalCompany.upsert({
-        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey } },
+        where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: prior?.dedupeKey ?? dedupeKey } },
         create: {
           workspaceId,
           name: demand.name,

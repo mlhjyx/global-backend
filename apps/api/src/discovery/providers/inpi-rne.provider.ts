@@ -131,7 +131,12 @@ export class InpiRneContactProvider implements ContactDiscoveryAdapter {
         if (contacts.length >= MAX_DIRIGEANTS_PER_COMPANY) break;
       }
       this.log(`✓ ${company.name} → ${best.item.siren} (${best.score.toFixed(2)}): ${contacts.length} dirigeants`);
-      return { contacts, costCents: 0 };
+      return {
+        contacts,
+        costCents: 0,
+        organizationIdentifiers: [{ scheme: 'siren', jurisdiction: 'FR', value: best.item.siren }],
+        organizationMatchConfidence: best.score,
+      };
     } catch (err) {
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
       this.log(`discover failed: ${String(err).slice(0, 150)}`);

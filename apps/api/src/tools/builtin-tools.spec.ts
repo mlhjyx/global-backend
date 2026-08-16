@@ -32,6 +32,16 @@ function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean
  * 空集即拒），故必须声明 site_builder；searxng 是 none（短路放行），加是语义一致/前瞻。
  */
 describe('site_builder 用途门 · searxng/crawl4ai allowedPurpose', () => {
+  it('registers governed Serper and Brave backends under ToolBroker', () => {
+    const registry = registerBuiltinTools(new ToolRegistry());
+    expect(registry.get('serper.search')).toMatchObject({
+      compliance: { providerKey: 'public_web', policyDomain: 'google.serper.dev' },
+    });
+    expect(registry.get('brave.search')).toMatchObject({
+      compliance: { providerKey: 'public_web', policyDomain: 'api.search.brave.com' },
+    });
+  });
+
   it('paid replay drops search titles, snippets, paths and query PII', () => {
     const replay = searxngSearchTool.durableReplayResult?.({
       data: {

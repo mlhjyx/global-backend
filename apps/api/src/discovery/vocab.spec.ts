@@ -8,6 +8,11 @@ describe('规范词表归一（中/英 → 结构化标识）', () => {
     expect(mapIndustryToQids(['automotive'])).toEqual(['Q190117']);
   });
 
+  it('电子与半导体映射到产业条目，不映射到宽泛技术概念', () => {
+    expect(mapIndustryToQids(['electronics'])).toEqual(['Q5358497']);
+    expect(mapIndustryToQids(['semiconductor'])).toEqual(['Q2986369']);
+  });
+
   it('多个行业词去重合并', () => {
     const qids = mapIndustryToQids(['金属加工', 'metalworking', '钣金']);
     expect(qids).toContain('Q19541171'); // 金属加工/metalworking 同 QID

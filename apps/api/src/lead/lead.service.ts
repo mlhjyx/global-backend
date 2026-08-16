@@ -1,24 +1,35 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { RequestContext } from '../auth/request-context';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { RequestContext } from "../auth/request-context";
 import {
   buildLeadQualifiedSnapshot,
   classifyLeadQualified,
   LEAD_QUALIFIED_SCHEMA_VERSION,
-} from './lead-qualified-snapshot';
-import { DataRightsService } from '../compliance/data-rights.service';
+} from "./lead-qualified-snapshot";
+import { DataRightsService } from "../compliance/data-rights.service";
 import {
   canonicalizeSuppressionValue,
   canonicalizeSuppressionValues,
   companyMatchesSuppression,
-} from '../discovery/suppression-value';
-import { storageRightsContextForLead } from '../compliance/data-rights.context';
-import { SanctionsScreeningService, reconcileReviewState, matchesFromJson,
-} from '../sanctions/sanctions-screening.service';
-import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
-import { contactSuppressionKeys } from '../discovery/identity';
-import { blindContactKey } from '../compliance/pii-crypto';
+} from "../discovery/suppression-value";
+import { storageRightsContextForLead } from "../compliance/data-rights.context";
+import {
+  SanctionsScreeningService,
+  reconcileReviewState,
+  matchesFromJson,
+} from "../sanctions/sanctions-screening.service";
+import { lockWorkspaceSuppressionPolicy } from "../discovery/suppression-policy-lock";
+import { contactSuppressionKeys } from "../discovery/identity";
+import { blindContactKey } from "../compliance/pii-crypto";
+import {
+  lockWorkspaceOrganizationIdentity,
+  resolveOrganizationRoot,
+} from "../discovery/organization-identity-root";
 
 @Injectable()
 export class LeadService {
@@ -31,21 +42,27 @@ export class LeadService {
   /** 触发对某 ACTIVE ICP 的评分（异步，Temporal）。 */
   async qualify(ctx: RequestContext, icpId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true, status: true },
+      const icp = await tx.icpDefinition.findUnique({
+        where: { id: icpId },
+        select: { id: true, status: true },
       });
-      if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' },
+      if (!icp)
+        throw new NotFoundException({
+          error: { code: "NOT_FOUND", message: "icp not found" },
         });
-      if (icp.status !== 'ACTIVE') {
+      if (icp.status !== "ACTIVE") {
         throw new ConflictException({
-          error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; qualify requires ACTIVE`,
+          error: {
+            code: "INVALID_STATE",
+            message: `icp is ${icp.status}; qualify requires ACTIVE`,
           },
         });
       }
       const ev = await tx.outboxEvent.create({
         data: {
           workspaceId: ctx.workspaceId,
-          eventType: 'QualifyRequested',
-          aggregateType: 'ICP',
+          eventType: "QualifyRequested",
+          aggregateType: "ICP",
           aggregateId: icpId,
           payload: {},
         },
@@ -75,7 +92,10 @@ export class LeadService {
         ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
         // nulls last：fit 门先建的 Lead 尚无分（totalScore=null），PG 默认 DESC NULLS FIRST 会把
         // 未评分行顶到列表最前——显式压到最后，评分完成后自然按分排。
-        orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+        orderBy: [
+          { totalScore: { sort: "desc", nulls: "last" } },
+          { id: "asc" },
+        ],
       });
       const hasMore = rows.length > opts.limit;
       const data = hasMore ? rows.slice(0, opts.limit) : rows;
@@ -111,7 +131,7 @@ export class LeadService {
       });
       if (!lead)
         throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'lead not found' },
+          error: { code: "NOT_FOUND", message: "lead not found" },
         });
       const company = await tx.canonicalCompany.findUnique({
         where: { id: lead.canonicalCompanyId },
@@ -125,292 +145,515 @@ export class LeadService {
    * 人工裁决（LED-009）：accept → QUALIFIED（发 LeadQualified，Campaign 的入口）；
    * reject → REJECTED。裁决记录留痕，重评分不覆盖人工终态。
    */
-  async decide(ctx: RequestContext, leadId: string, action: 'accept' | 'reject', reason?: string) {
-    const result = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const lead = await tx.lead.findUnique({ where: { id: leadId } });
-      if (!lead)
-        throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'lead not found' },
-        });
-      if (lead.status === 'SUPPRESSED') {
-        throw new ConflictException({
-          error: {
-            code: 'SUPPRESSED',
-            message: 'suppressed lead cannot be decided',
-          },
-        });
-      }
-      if (['CONTACTED', 'CONVERTED'].includes(lead.status)) {
-        throw new ConflictException({
-          error: {
-            code: 'INVALID_STATE',
-            message: `lead is ${lead.status}; already past decision`,
-          },
-        });
-      }
-      const status = action === 'accept' ? 'QUALIFIED' : 'REJECTED';
-      const alreadyAtTarget = lead.status === status;
-      // reject 重试没有外部交棒，仍可立即幂等返回。accept 重试必须重新经过 suppression、
-      // DataRights 与 sanctions 终极闸，避免首次 QUALIFIED 后新增的禁联事实被早返回绕过；
-      // 通过复核后仍不建第二条 decision/outbox。
-      if (alreadyAtTarget && action === 'reject') return lead;
-      const persistDecision = async (): Promise<void> => {
-        // CAS 乐观锁（C）：accept 必须先通过 sanctions/DataRights 预检；DENY 不得留下业务状态变化。
-        const cas = await tx.lead.updateMany({
-          where: { id: leadId, version: lead.version },
-          data: {
-            status: status as never,
-            queue: action === 'accept' ? 'recommended' : 'rejected',
-            version: { increment: 1 },
-          },
-        });
-        if (cas.count === 0) {
-          throw new ConflictException({
-            error: {
-              code: 'CONFLICT',
-              message: 'lead was modified concurrently; retry',
-            },
-          });
+  async decide(
+    ctx: RequestContext,
+    leadId: string,
+    action: "accept" | "reject",
+    reason?: string,
+  ) {
+    const result = await this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => {
+        if (action === "accept") {
+          // LeadQualified is an externally visible commercial fact. Serialize it with
+          // suppression changes and reversible identity merge/split before reading the
+          // Lead or resolving its root. Otherwise a concurrent merge can validate that
+          // no terminal Lead exists while this transaction is about to create one.
+          // Global lock order: suppression -> organization identity -> company row.
+          await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
+          await lockWorkspaceOrganizationIdentity(tx, ctx.workspaceId);
         }
-        await tx.leadDecision.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            leadId,
-            action,
-            reason: reason ?? null,
-            decidedBy: ctx.userId,
-          },
-        });
-      };
-      if (action === 'accept') {
-        await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
-        // 🔴 Art.17 竞态闸（Codex PR #72）：交棒前**先对公司行加行锁**（SELECT … FOR UPDATE），
-        // 与 freezeSubject 的 `status=SUPPRESSED` updateMany 串行化。两种交错都被关死：
-        //  ① freeze 先提交 → 本锁在其提交后才拿到，READ COMMITTED 下随后 findUnique 读到 SUPPRESSED
-        //     → 下方 rights=DENY 挡下交棒；
-        //  ② 本 decide 先拿锁 → freeze 阻塞到 handoff 提交后才 suppress（合法的「冻结之前」序）。
-        // 纯 findUnique 无锁：freeze 可在「读之后、本事务提交之前」落定 SUPPRESSED，旧代码仍据陈旧
-        // ENRICHED 交棒——正是本 guard 要堵的 Art.17 漏网。锁行是关闭该窗口的唯一手段（重读只窄化不关闭）。
-        // 行不存在（FK 保证不会）→ 返 0 行、无锁，下方 findUnique 得 null 走 NOT_FOUND 守卫。
-        await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${lead.canonicalCompanyId}::uuid FOR UPDATE`;
-        // 收口③：payload = LeadQualified 快照 v1（decide 事务当刻取数的不可变副本，
-        // 之后 lead/company 变化不回写）。契约 lead-qualified.v1.schema.json。
-        // 加锁后再读——company.status 此刻反映 freeze 是否已提交的最新状态，快照+权利判定同基于此读。
-        const company = await tx.canonicalCompany.findUnique({
-          where: { id: lead.canonicalCompanyId },
-          include: { contacts: { include: { contactPoints: true } } },
-        });
-        // FK（Lead→CanonicalCompany onDelete:Cascade）保证同事务内公司存在；此守卫仅防御性。
-        if (!company) {
+        const lead = await tx.lead.findUnique({ where: { id: leadId } });
+        if (!lead)
           throw new NotFoundException({
-            error: {
-              code: 'NOT_FOUND',
-              message: 'canonical company not found',
-            },
+            error: { code: "NOT_FOUND", message: "lead not found" },
           });
-        }
-        const suppressionRows = await tx.suppressionRecord.findMany({
-          where: {
-            type: { in: ['domain', 'company_name', 'email', 'contact_key'] },
-          },
-          select: { type: true, value: true },
-        });
-        const matchedSuppression = companyMatchesSuppression(suppressionRows, company);
-        if (matchedSuppression && company.status !== 'SUPPRESSED') {
-          await tx.canonicalCompany.update({
-            where: { id: company.id },
-            data: { status: 'SUPPRESSED', version: { increment: 1 } },
-          });
-        }
-        const suppressedEmails = canonicalizeSuppressionValues(
-          'email',
-          suppressionRows.filter((row) => row.type === 'email').map((row) => row.value),
-        );
-        const suppressedDomains = canonicalizeSuppressionValues(
-          'domain',
-          suppressionRows.filter((row) => row.type === 'domain').map((row) => row.value),
-        );
-        const suppressedContactKeys = new Set(
-          suppressionRows.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
-        );
-        const suppressedContactIds = new Set(
-          company.contacts
-            .filter((contact) => {
-              const personKeys = contactSuppressionKeys(contact.fullName, company.dedupeKey).map((value) =>
-                blindContactKey(value).toLowerCase(),
-              );
-              if (personKeys.some((value) => suppressedContactKeys.has(value))) return true;
-              return contact.contactPoints.some((point) => {
-                if (point.type !== 'email') return false;
-                const email = canonicalizeSuppressionValue('email', point.value);
-                const emailDomain = email ? canonicalizeSuppressionValue('domain', email.split('@')[1]) : null;
-                return (
-                  !!email && (suppressedEmails.has(email) || (!!emailDomain && suppressedDomains.has(emailDomain)))
-                );
-              });
-            })
-            .map((contact) => contact.id),
-        );
-        const deliverableContacts = company.contacts.filter((contact) => !suppressedContactIds.has(contact.id));
-        const hasDeliverableReachability = deliverableContacts.some((contact) =>
-          contact.contactPoints.some(
-            (point) =>
-              point.type !== 'external_id' &&
-              (point.status === 'VALID' || point.status === 'UNVERIFIED' || point.status === 'RISKY'),
-          ),
-        );
-        if (!matchedSuppression && suppressedContactIds.size > 0 && !hasDeliverableReachability) {
+        if (lead.status === "SUPPRESSED") {
           throw new ConflictException({
             error: {
-              code: 'SUPPRESSED_CONTACT_UNREACHABLE',
-              message: 'all reachable contacts are suppressed; re-score or discover a permitted contact before handoff',
+              code: "SUPPRESSED",
+              message: "suppressed lead cannot be decided",
             },
           });
         }
-        const effectiveCompany = {
-          ...company,
-          ...(matchedSuppression ? { status: 'SUPPRESSED' } : {}),
-          contacts: deliverableContacts,
-        };
-
-        // Suppression/DataRights 必须先于任何会抛错的下游门。命中禁联时先提交公司派生状态与
-        // append-only DENY 审计，再由事务外转换为 409；否则 sanctions 异常会回滚禁联状态修复和审计。
-        const rightsCtx = storageRightsContextForLead({
-          country: effectiveCompany.country,
-          status: effectiveCompany.status,
-          hasNamedContacts: effectiveCompany.contacts.length > 0,
-        });
-        const rights = this.dataRights.evaluate(rightsCtx);
-        if (!rights.allowed) {
-          await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
-            subjectType: 'lead',
-            subjectId: leadId,
-            actorId: ctx.userId,
+        if (["CONTACTED", "CONVERTED"].includes(lead.status)) {
+          throw new ConflictException({
+            error: {
+              code: "INVALID_STATE",
+              message: `lead is ${lead.status}; already past decision`,
+            },
           });
-          return {
-            storageRightsDenied: true as const,
-            effect: rights.effect,
-          };
         }
-
-        // 🔴 第五门制裁筛查硬 re-check（decide 不可绕的终极安全网）：live 重筛（catch 名单自 qualify 后的更新）
-        // + reconcile 既有复核态。命中且未被人工清（open/confirmed）→ 抛 SANCTIONS_HOLD_UNRESOLVED，
-        // **回滚整个 decide、绝不建/发快照**（绝不把被制裁公司交付客户）。未启用(DISABLED)→ not_screened、不拦。
-        const screen = this.sanctions.screen(effectiveCompany.name, effectiveCompany.country);
-        // 🔴 持久化命中（qualify 写）**独立于 live 索引新鲜度**读取——闭合跨进程 fail-open 窗口（复审 #1）：
-        // 即便 live screen 因 API 索引空/陈旧/构建失败返 not_screened，只要库里有未清的命中就硬拦。
-        const prior = await tx.sanctionsScreeningResult.findFirst({
-          where: { canonicalCompanyId: effectiveCompany.id },
-          orderBy: { screenedAt: 'desc' },
-          select: {
-            status: true,
-            reviewState: true,
-            matches: true,
-            listVersions: true,
-          },
-        });
-        const priorBlocking =
-          !!prior && prior.status === 'potential_match' && prior.reviewState !== 'cleared_false_positive';
-        let liveBlocking = false;
-        if (screen.status === 'potential_match') {
-          const reviewState = reconcileReviewState(
-            prior
-              ? {
-                  reviewState: prior.reviewState,
-                  matches: matchesFromJson(prior.matches),
-                }
-              : null,
-            screen.matches,
+        const identity = await resolveOrganizationRoot(
+          tx,
+          ctx.workspaceId,
+          lead.canonicalCompanyId,
+        );
+        const effectiveCompanyId = identity.rootCompanyId;
+        if (
+          action === "accept" &&
+          tx.organizationCanonicalMapping &&
+          tx.organizationIdentityReplay
+        ) {
+          const activeMappings = await tx.organizationCanonicalMapping.findMany(
+            {
+              where: {
+                workspaceId: ctx.workspaceId,
+                status: "ACTIVE",
+                OR: [
+                  { sourceCompanyId: { in: identity.relatedCompanyIds } },
+                  { canonicalCompanyId: { in: identity.relatedCompanyIds } },
+                ],
+              },
+              select: { id: true },
+            },
           );
-          liveBlocking = reviewState !== 'cleared_false_positive';
+          if (activeMappings.length) {
+            const mappingIds = new Set(
+              activeMappings.map((mapping) => mapping.id),
+            );
+            const pendingIdentityChanges =
+              await tx.organizationIdentityReplay.findMany({
+                where: {
+                  workspaceId: ctx.workspaceId,
+                  status: { in: ["PENDING", "RUNNING"] },
+                  decision: { action: "SPLIT" },
+                },
+                select: { decision: { select: { factSnapshot: true } } },
+              });
+            const splitPending = pendingIdentityChanges.some(({ decision }) => {
+              const facts = decision.factSnapshot;
+              return (
+                !!facts &&
+                typeof facts === "object" &&
+                !Array.isArray(facts) &&
+                typeof facts.mappingId === "string" &&
+                mappingIds.has(facts.mappingId)
+              );
+            });
+            if (splitPending) {
+              throw new ConflictException({
+                error: {
+                  code: "IDENTITY_CHANGE_PENDING",
+                  message:
+                    "lead handoff is blocked while an organization identity change is pending",
+                },
+              });
+            }
+          }
         }
-        if (priorBlocking || liveBlocking) {
-          throw new ConflictException({
-            error: {
-              code: 'SANCTIONS_HOLD_UNRESOLVED',
-              message: 'sanctions screening hit — handoff blocked pending human review (fifth gate)',
+        if (effectiveCompanyId !== lead.canonicalCompanyId) {
+          const rootLead = await tx.lead.findFirst({
+            where: {
+              workspaceId: ctx.workspaceId,
+              icpId: lead.icpId,
+              canonicalCompanyId: effectiveCompanyId,
+              id: { not: lead.id },
+            },
+            select: { id: true },
+          });
+          if (rootLead) {
+            throw new ConflictException({
+              error: {
+                code: "IDENTITY_LEAD_CONFLICT",
+                message: "root company already has a Lead for this ICP",
+              },
+            });
+          }
+        }
+        if (action === "accept") {
+          const activeSourceLinks = await tx.identityLink.findMany({
+            where: {
+              workspaceId: ctx.workspaceId,
+              canonicalType: "company",
+              canonicalId: { in: identity.relatedCompanyIds },
+              status: "ACTIVE",
+            },
+            select: { rawRecord: { select: { providerKey: true } } },
+          });
+          const activeProviderKeys = new Set(
+            activeSourceLinks.map((link) => link.rawRecord.providerKey),
+          );
+          // Fail closed when governance/RLS has removed every active source link. A
+          // historical Lead must never become handoff-eligible merely because its
+          // restricted provenance is no longer visible to the application role.
+          if (
+            activeProviderKeys.size === 0 ||
+            (activeProviderKeys.size === 1 &&
+              activeProviderKeys.has("usaspending_awards"))
+          ) {
+            throw new ConflictException({
+              error: {
+                code: "HISTORICAL_RESEARCH_ONLY",
+                message:
+                  "USAspending-only historical award research cannot be handed off without an independent active source",
+              },
+            });
+          }
+        }
+        const effectiveLead = {
+          ...lead,
+          canonicalCompanyId: effectiveCompanyId,
+        };
+        const status = action === "accept" ? "QUALIFIED" : "REJECTED";
+        const alreadyAtTarget = lead.status === status;
+        // reject 重试没有外部交棒，仍可立即幂等返回。accept 重试必须重新经过 suppression、
+        // DataRights 与 sanctions 终极闸，避免首次 QUALIFIED 后新增的禁联事实被早返回绕过；
+        // 通过复核后仍不建第二条 decision/outbox。
+        if (alreadyAtTarget && action === "reject") return lead;
+        const persistDecision = async (): Promise<void> => {
+          // CAS 乐观锁（C）：accept 必须先通过 sanctions/DataRights 预检；DENY 不得留下业务状态变化。
+          const cas = await tx.lead.updateMany({
+            where: { id: leadId, version: lead.version },
+            data: {
+              status: status as never,
+              queue: action === "accept" ? "recommended" : "rejected",
+              version: { increment: 1 },
+            },
+          });
+          if (cas.count === 0) {
+            throw new ConflictException({
+              error: {
+                code: "CONFLICT",
+                message: "lead was modified concurrently; retry",
+              },
+            });
+          }
+          await tx.leadDecision.create({
+            data: {
+              workspaceId: ctx.workspaceId,
+              leadId,
+              action,
+              reason: reason ?? null,
+              decidedBy: ctx.userId,
+            },
+          });
+        };
+        if (action === "accept") {
+          const openIdentityConflicts =
+            await tx.organizationIdentityConflictParty.count({
+              where: {
+                workspaceId: ctx.workspaceId,
+                companyId: { in: identity.relatedCompanyIds },
+                conflict: { status: { in: ["OPEN", "RESOLVING"] } },
+              },
+            });
+          if (openIdentityConflicts > 0) {
+            throw new ConflictException({
+              error: {
+                code: "IDENTITY_CONFLICT_OPEN",
+                message:
+                  "lead handoff is blocked by an unresolved organization identity conflict",
+              },
+            });
+          }
+          // 🔴 Art.17 竞态闸（Codex PR #72）：交棒前**先对公司行加行锁**（SELECT … FOR UPDATE），
+          // 与 freezeSubject 的 `status=SUPPRESSED` updateMany 串行化。两种交错都被关死：
+          //  ① freeze 先提交 → 本锁在其提交后才拿到，READ COMMITTED 下随后 findUnique 读到 SUPPRESSED
+          //     → 下方 rights=DENY 挡下交棒；
+          //  ② 本 decide 先拿锁 → freeze 阻塞到 handoff 提交后才 suppress（合法的「冻结之前」序）。
+          // 纯 findUnique 无锁：freeze 可在「读之后、本事务提交之前」落定 SUPPRESSED，旧代码仍据陈旧
+          // ENRICHED 交棒——正是本 guard 要堵的 Art.17 漏网。锁行是关闭该窗口的唯一手段（重读只窄化不关闭）。
+          // 行不存在（FK 保证不会）→ 返 0 行、无锁，下方 findUnique 得 null 走 NOT_FOUND 守卫。
+          await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${effectiveCompanyId}::uuid FOR UPDATE`;
+          // 收口③：payload = LeadQualified 快照 v1（decide 事务当刻取数的不可变副本，
+          // 之后 lead/company 变化不回写）。契约 lead-qualified.v1.schema.json。
+          // 加锁后再读——company.status 此刻反映 freeze 是否已提交的最新状态，快照+权利判定同基于此读。
+          const company = await tx.canonicalCompany.findUnique({
+            where: { id: effectiveCompanyId },
+            include: { contacts: { include: { contactPoints: true } } },
+          });
+          // FK（Lead→CanonicalCompany onDelete:Cascade）保证同事务内公司存在；此守卫仅防御性。
+          if (!company) {
+            throw new NotFoundException({
+              error: {
+                code: "NOT_FOUND",
+                message: "canonical company not found",
+              },
+            });
+          }
+          const aliasCompanies =
+            identity.relatedCompanyIds.length > 1
+              ? await tx.canonicalCompany.findMany({
+                  where: {
+                    id: {
+                      in: identity.relatedCompanyIds.filter(
+                        (companyId) => companyId !== effectiveCompanyId,
+                      ),
+                    },
+                  },
+                  include: { contacts: { include: { contactPoints: true } } },
+                })
+              : [];
+          const identityCompanies = [company, ...aliasCompanies];
+          const suppressionRows = await tx.suppressionRecord.findMany({
+            where: {
+              type: { in: ["domain", "company_name", "email", "contact_key"] },
+            },
+            select: { type: true, value: true },
+          });
+          const matchedSuppression = identityCompanies.some((item) =>
+            companyMatchesSuppression(suppressionRows, item),
+          );
+          if (matchedSuppression && company.status !== "SUPPRESSED") {
+            await tx.canonicalCompany.update({
+              where: { id: company.id },
+              data: { status: "SUPPRESSED", version: { increment: 1 } },
+            });
+          }
+          const suppressedEmails = canonicalizeSuppressionValues(
+            "email",
+            suppressionRows
+              .filter((row) => row.type === "email")
+              .map((row) => row.value),
+          );
+          const suppressedDomains = canonicalizeSuppressionValues(
+            "domain",
+            suppressionRows
+              .filter((row) => row.type === "domain")
+              .map((row) => row.value),
+          );
+          const suppressedContactKeys = new Set(
+            suppressionRows
+              .filter((row) => row.type === "contact_key")
+              .map((row) => row.value.toLowerCase()),
+          );
+          const dedupeKeyByCompanyId = new Map(
+            identityCompanies.map((item) => [item.id, item.dedupeKey]),
+          );
+          const identityContacts = identityCompanies.flatMap(
+            (item) => item.contacts,
+          );
+          const suppressedContactIds = new Set(
+            identityContacts
+              .filter((contact) => {
+                const personKeys = contactSuppressionKeys(
+                  contact.fullName,
+                  dedupeKeyByCompanyId.get(contact.companyId) ??
+                    company.dedupeKey,
+                ).map((value) => blindContactKey(value).toLowerCase());
+                if (
+                  personKeys.some((value) => suppressedContactKeys.has(value))
+                )
+                  return true;
+                return contact.contactPoints.some((point) => {
+                  if (point.type !== "email") return false;
+                  const email = canonicalizeSuppressionValue(
+                    "email",
+                    point.value,
+                  );
+                  const emailDomain = email
+                    ? canonicalizeSuppressionValue(
+                        "domain",
+                        email.split("@")[1],
+                      )
+                    : null;
+                  return (
+                    !!email &&
+                    (suppressedEmails.has(email) ||
+                      (!!emailDomain && suppressedDomains.has(emailDomain)))
+                  );
+                });
+              })
+              .map((contact) => contact.id),
+          );
+          const deliverableContacts = identityContacts.filter(
+            (contact) => !suppressedContactIds.has(contact.id),
+          );
+          const hasDeliverableReachability = deliverableContacts.some(
+            (contact) =>
+              contact.contactPoints.some(
+                (point) =>
+                  point.type !== "external_id" &&
+                  (point.status === "VALID" ||
+                    point.status === "UNVERIFIED" ||
+                    point.status === "RISKY"),
+              ),
+          );
+          if (
+            !matchedSuppression &&
+            suppressedContactIds.size > 0 &&
+            !hasDeliverableReachability
+          ) {
+            throw new ConflictException({
+              error: {
+                code: "SUPPRESSED_CONTACT_UNREACHABLE",
+                message:
+                  "all reachable contacts are suppressed; re-score or discover a permitted contact before handoff",
+              },
+            });
+          }
+          const effectiveCompany = {
+            ...company,
+            ...(matchedSuppression ? { status: "SUPPRESSED" } : {}),
+            contacts: deliverableContacts,
+          };
+
+          // Suppression/DataRights 必须先于任何会抛错的下游门。命中禁联时先提交公司派生状态与
+          // append-only DENY 审计，再由事务外转换为 409；否则 sanctions 异常会回滚禁联状态修复和审计。
+          const rightsCtx = storageRightsContextForLead({
+            country: effectiveCompany.country,
+            status: effectiveCompany.status,
+            hasNamedContacts: effectiveCompany.contacts.length > 0,
+          });
+          const rights = this.dataRights.evaluate(rightsCtx);
+          if (!rights.allowed) {
+            await this.dataRights.logDecision(
+              tx,
+              ctx.workspaceId,
+              rightsCtx,
+              rights,
+              {
+                subjectType: "lead",
+                subjectId: leadId,
+                actorId: ctx.userId,
+              },
+            );
+            return {
+              storageRightsDenied: true as const,
+              effect: rights.effect,
+            };
+          }
+
+          // 🔴 第五门制裁筛查硬 re-check（decide 不可绕的终极安全网）：live 重筛（catch 名单自 qualify 后的更新）
+          // + reconcile 既有复核态。命中且未被人工清（open/confirmed）→ 抛 SANCTIONS_HOLD_UNRESOLVED，
+          // **回滚整个 decide、绝不建/发快照**（绝不把被制裁公司交付客户）。未启用(DISABLED)→ not_screened、不拦。
+          const screen = this.sanctions.screen(
+            effectiveCompany.name,
+            effectiveCompany.country,
+          );
+          // 🔴 持久化命中（qualify 写）**独立于 live 索引新鲜度**读取——闭合跨进程 fail-open 窗口（复审 #1）：
+          // 即便 live screen 因 API 索引空/陈旧/构建失败返 not_screened，只要库里有未清的命中就硬拦。
+          const prior = await tx.sanctionsScreeningResult.findFirst({
+            where: { canonicalCompanyId: effectiveCompany.id },
+            orderBy: { screenedAt: "desc" },
+            select: {
+              status: true,
+              reviewState: true,
+              matches: true,
+              listVersions: true,
+            },
+          });
+          const priorBlocking =
+            !!prior &&
+            prior.status === "potential_match" &&
+            prior.reviewState !== "cleared_false_positive";
+          let liveBlocking = false;
+          if (screen.status === "potential_match") {
+            const reviewState = reconcileReviewState(
+              prior
+                ? {
+                    reviewState: prior.reviewState,
+                    matches: matchesFromJson(prior.matches),
+                  }
+                : null,
+              screen.matches,
+            );
+            liveBlocking = reviewState !== "cleared_false_positive";
+          }
+          if (priorBlocking || liveBlocking) {
+            throw new ConflictException({
+              error: {
+                code: "SANCTIONS_HOLD_UNRESOLVED",
+                message:
+                  "sanctions screening hit — handoff blocked pending human review (fifth gate)",
+              },
+            });
+          }
+          // 未拦 → 合规结论（诚实）：曾被真实筛过（live 索引 active，或 qualify 已筛并留有记录）→ clear；
+          // 从未筛过（门 DISABLED 且无历史记录）→ not_screened（SaaS 不得据此对外触达）。
+          const wasScreened = screen.status !== "not_screened" || !!prior;
+          const sanctionsScreening: {
+            status: "clear" | "not_screened";
+            screenedAt: string;
+            listVersions: Record<string, string>;
+          } = {
+            status: wasScreened ? "clear" : "not_screened",
+            screenedAt: new Date().toISOString(),
+            listVersions:
+              screen.status !== "not_screened"
+                ? screen.listVersions
+                : ((prior?.listVersions as Record<string, string> | null) ??
+                  {}),
+          };
+          // accept 重试已完成所有当前安全复核；保持原 event/decision 幂等，不产生第二份交棒事实。
+          if (alreadyAtTarget) return lead;
+          const icp = await tx.icpDefinition.findUnique({
+            where: { id: lead.icpId },
+            select: { version: true },
+          });
+          // 鲜度模型（v2）：取本公司 + 其联系人 field_evidence **每个分级的最早抓取时刻**算 valid_until。
+          // groupBy 有界（每分级 1 行，≤3~4 条）——同一分级 TTL 恒定 → 最早抓取即该级最早失效；
+          // 避免把一家公司累积的全部证据行拉进 decide 写事务。entity_id 全局唯一 uuid + withWorkspace(RLS) 双重作用域。
+          const evidenceByClass = await tx.fieldEvidence.groupBy({
+            by: ["dataClass"],
+            where: {
+              entityId: {
+                in: [
+                  effectiveCompany.id,
+                  ...effectiveCompany.contacts.map((c) => c.id),
+                ],
+              },
+            },
+            _min: { fetchedAt: true },
+          });
+          const evidence = evidenceByClass
+            .filter((g) => g._min.fetchedAt != null)
+            .map((g) => ({
+              dataClass: g.dataClass,
+              fetchedAt: g._min.fetchedAt as Date,
+            }));
+          await persistDecision();
+          // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
+          // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 已在上方写日志并返回
+          // sentinel，由外层在事务提交后转为 409；此处只处理 ALLOW 的成功交棒。
+          // 的 STORE 判定（含 effect/rule/actor/subject/Art.14 标记），补齐合规审计对"为何允许具名 refs 离开后端"的证据。
+          await this.dataRights.logDecision(
+            tx,
+            ctx.workspaceId,
+            rightsCtx,
+            rights,
+            {
+              subjectType: "lead",
+              subjectId: leadId,
+              actorId: ctx.userId,
+            },
+          );
+          const snapshot = buildLeadQualifiedSnapshot({
+            lead: effectiveLead,
+            company: effectiveCompany,
+            icpVersion: icp?.version ?? null,
+            storageRightsDecision: rights.effect,
+            evidence,
+            sanctionsScreening, // 第五门合规结论（clear/not_screened；命中 hold 上方已 throw 到不了这里）
+          });
+          await tx.outboxEvent.create({
+            data: {
+              workspaceId: ctx.workspaceId,
+              eventType: "LeadQualified",
+              aggregateType: "Lead",
+              aggregateId: leadId,
+              schemaVersion: LEAD_QUALIFIED_SCHEMA_VERSION,
+              // 分级按内容定（H）：含具名人 refs → RESTRICTED（后续保留/删除策略挂此级）。
+              privacyClassification: classifyLeadQualified(snapshot),
+              payload: snapshot as unknown as Prisma.InputJsonValue,
             },
           });
         }
-        // 未拦 → 合规结论（诚实）：曾被真实筛过（live 索引 active，或 qualify 已筛并留有记录）→ clear；
-        // 从未筛过（门 DISABLED 且无历史记录）→ not_screened（SaaS 不得据此对外触达）。
-        const wasScreened = screen.status !== 'not_screened' || !!prior;
-        const sanctionsScreening: {
-          status: 'clear' | 'not_screened';
-          screenedAt: string;
-          listVersions: Record<string, string>;
-        } = {
-          status: wasScreened ? 'clear' : 'not_screened',
-          screenedAt: new Date().toISOString(),
-          listVersions:
-            screen.status !== 'not_screened'
-              ? screen.listVersions
-              : ((prior?.listVersions as Record<string, string> | null) ?? {}),
-        };
-        // accept 重试已完成所有当前安全复核；保持原 event/decision 幂等，不产生第二份交棒事实。
-        if (alreadyAtTarget) return lead;
-        const icp = await tx.icpDefinition.findUnique({
-          where: { id: lead.icpId },
-          select: { version: true },
-        });
-        // 鲜度模型（v2）：取本公司 + 其联系人 field_evidence **每个分级的最早抓取时刻**算 valid_until。
-        // groupBy 有界（每分级 1 行，≤3~4 条）——同一分级 TTL 恒定 → 最早抓取即该级最早失效；
-        // 避免把一家公司累积的全部证据行拉进 decide 写事务。entity_id 全局唯一 uuid + withWorkspace(RLS) 双重作用域。
-        const evidenceByClass = await tx.fieldEvidence.groupBy({
-          by: ['dataClass'],
-          where: {
-            entityId: {
-              in: [effectiveCompany.id, ...effectiveCompany.contacts.map((c) => c.id)],
-            },
-          },
-          _min: { fetchedAt: true },
-        });
-        const evidence = evidenceByClass
-          .filter((g) => g._min.fetchedAt != null)
-          .map((g) => ({
-            dataClass: g.dataClass,
-            fetchedAt: g._min.fetchedAt as Date,
-          }));
-        await persistDecision();
-        // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
-        // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 已在上方写日志并返回
-        // sentinel，由外层在事务提交后转为 409；此处只处理 ALLOW 的成功交棒。
-        // 的 STORE 判定（含 effect/rule/actor/subject/Art.14 标记），补齐合规审计对"为何允许具名 refs 离开后端"的证据。
-        await this.dataRights.logDecision(tx, ctx.workspaceId, rightsCtx, rights, {
-          subjectType: 'lead',
-          subjectId: leadId,
-          actorId: ctx.userId,
-        });
-        const snapshot = buildLeadQualifiedSnapshot({
-          lead,
-          company: effectiveCompany,
-          icpVersion: icp?.version ?? null,
-          storageRightsDecision: rights.effect,
-          evidence,
-          sanctionsScreening, // 第五门合规结论（clear/not_screened；命中 hold 上方已 throw 到不了这里）
-        });
-        await tx.outboxEvent.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            eventType: 'LeadQualified',
-            aggregateType: 'Lead',
-            aggregateId: leadId,
-            schemaVersion: LEAD_QUALIFIED_SCHEMA_VERSION,
-            // 分级按内容定（H）：含具名人 refs → RESTRICTED（后续保留/删除策略挂此级）。
-            privacyClassification: classifyLeadQualified(snapshot),
-            payload: snapshot as unknown as Prisma.InputJsonValue,
-          },
-        });
-      }
-      if (action === 'reject') await persistDecision();
-      // updateMany 不返回行 → 重取 CAS 后的 lead 作为响应（同事务内读，状态一致）。
-      const updated = await tx.lead.findUnique({ where: { id: leadId } });
-      return updated ?? lead;
-    });
-    if (result && 'storageRightsDenied' in result && result.storageRightsDenied) {
+        if (action === "reject") await persistDecision();
+        // updateMany 不返回行 → 重取 CAS 后的 lead 作为响应（同事务内读，状态一致）。
+        const updated = await tx.lead.findUnique({ where: { id: leadId } });
+        return updated ?? lead;
+      },
+    );
+    if (
+      result &&
+      "storageRightsDenied" in result &&
+      result.storageRightsDenied
+    ) {
       throw new ConflictException({
         error: {
-          code: 'STORAGE_RIGHTS_NOT_GRANTED',
+          code: "STORAGE_RIGHTS_NOT_GRANTED",
           message: `storage rights ${result.effect} — handoff blocked pending approval/lawful basis`,
         },
       });
@@ -422,7 +665,7 @@ export class LeadService {
   queueSummary(ctx: RequestContext, icpId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.lead.groupBy({
-        by: ['queue'],
+        by: ["queue"],
         where: { icpId },
         _count: { _all: true },
       });
@@ -446,7 +689,7 @@ export class LeadService {
   async reviewSanctions(
     ctx: RequestContext,
     leadId: string,
-    decision: 'cleared_false_positive' | 'confirmed_true_hit',
+    decision: "cleared_false_positive" | "confirmed_true_hit",
     note?: string,
   ) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -456,27 +699,31 @@ export class LeadService {
       });
       if (!lead)
         throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'lead not found' },
+          error: { code: "NOT_FOUND", message: "lead not found" },
         });
       const result = await tx.sanctionsScreeningResult.findFirst({
         where: { canonicalCompanyId: lead.canonicalCompanyId },
-        orderBy: { screenedAt: 'desc' },
+        orderBy: { screenedAt: "desc" },
         select: { id: true, reviewState: true },
       });
       if (!result) {
         throw new NotFoundException({
           error: {
-            code: 'NOT_FOUND',
-            message: 'no sanctions screening result for this lead',
+            code: "NOT_FOUND",
+            message: "no sanctions screening result for this lead",
           },
         });
       }
       // 🔴 复审 #3：confirmed_true_hit 不可经本端点翻成 cleared——真命中不可轻易解除（需更高流程/人，非单次 API 调用）。
-      if (result.reviewState === 'confirmed_true_hit' && decision === 'cleared_false_positive') {
+      if (
+        result.reviewState === "confirmed_true_hit" &&
+        decision === "cleared_false_positive"
+      ) {
         throw new ConflictException({
           error: {
-            code: 'SANCTIONS_CONFIRMED_IMMUTABLE',
-            message: 'a confirmed sanctions hit cannot be cleared via this endpoint',
+            code: "SANCTIONS_CONFIRMED_IMMUTABLE",
+            message:
+              "a confirmed sanctions hit cannot be cleared via this endpoint",
           },
         });
       }
@@ -488,13 +735,13 @@ export class LeadService {
           reviewNote: note ?? null,
         },
       });
-      if (decision === 'cleared_false_positive') {
+      if (decision === "cleared_false_positive") {
         await tx.lead.updateMany({
           where: {
             canonicalCompanyId: lead.canonicalCompanyId,
-            queue: 'sanctions_hold',
+            queue: "sanctions_hold",
           },
-          data: { queue: 'needs_review' },
+          data: { queue: "needs_review" },
         });
       }
       return { leadId, reviewState: decision };

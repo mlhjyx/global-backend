@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { Context } from '@temporalio/activity';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scoreLead } from '../lead/scoring';
@@ -8,22 +10,104 @@ import {
   matchesFromJson,
 } from '../sanctions/sanctions-screening.service';
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
+import { organizationMayUseExternalProcessing } from '../discovery/organization-identity-root';
 
 export interface QualifyRunInput {
   workspaceId: string;
   icpId: string;
 }
 
+interface ScoreCandidatesResult {
+  scored: number;
+  queues: Record<string, number>;
+}
+
+const SCORE_CANDIDATES_IDEMPOTENCY_ENDPOINT = 'TEMPORAL scoreCandidates/v1';
+const SCORE_CANDIDATES_LEAD_IDEMPOTENCY_ENDPOINT = 'TEMPORAL scoreCandidates/lead/v1';
+
+function currentActivityExecutionKey(): string | null {
+  try {
+    const info = Context.current().info;
+    return `${info.workflowExecution?.runId ?? 'unknown-workflow-run'}:${info.activityId}`;
+  } catch {
+    // Unit callers and non-Temporal maintenance code have no activity context.
+    // They retain the historical behavior unless they inject an explicit key.
+    return null;
+  }
+}
+
+function scoreCandidatesRequestHash(args: QualifyRunInput & { batchSize?: number }): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ batchSize: args.batchSize ?? 100, icpId: args.icpId }))
+    .digest('hex');
+}
+
+function storedScoreCandidatesResult(value: unknown): ScoreCandidatesResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('corrupt scoreCandidates idempotency result');
+  }
+  const candidate = value as { scored?: unknown; queues?: unknown };
+  if (!Number.isSafeInteger(candidate.scored) || (candidate.scored as number) < 0) {
+    throw new Error('corrupt scoreCandidates idempotency result');
+  }
+  if (!candidate.queues || typeof candidate.queues !== 'object' || Array.isArray(candidate.queues)) {
+    throw new Error('corrupt scoreCandidates idempotency result');
+  }
+  const queues = Object.fromEntries(
+    Object.entries(candidate.queues as Record<string, unknown>).map(([key, count]) => {
+      if (!Number.isSafeInteger(count) || (count as number) < 0) {
+        throw new Error('corrupt scoreCandidates idempotency result');
+      }
+      return [key, count as number];
+    }),
+  );
+  return { scored: candidate.scored as number, queues };
+}
+
+function storedScoredLeadQueue(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('corrupt scoreCandidates lead idempotency result');
+  }
+  const queue = (value as { queue?: unknown }).queue;
+  if (typeof queue !== 'string' || !queue) {
+    throw new Error('corrupt scoreCandidates lead idempotency result');
+  }
+  return queue;
+}
+
 /**
- * Qualify 处理链（PRD 5.6）：canonical 候选 → 确定性评分 → Lead + 四队列。
- * 幂等：lead 按 (workspace, icp, company) upsert，重跑刷新分数不重复建。
+ * Qualify 处理链（PRD 5.6）：已完成 ICP fit 判定的 Lead → 确定性评分 → 四队列。
+ * 企业发现只写 Raw/Canonical；Lead 只由 fit 判定创建。本活动只刷新既有 Lead，
+ * 防止模型不可用或尚未判定时把整个客户池误物化成 needs_review 线索。
  */
-export function createQualifyActivities(deps: { prisma: PrismaService; sanctionsScreening?: SanctionsScreeningService }) {
+export function createQualifyActivities(deps: {
+  prisma: PrismaService;
+  sanctionsScreening?: SanctionsScreeningService;
+  activityExecutionKey?: () => string | null;
+}) {
   return {
-    async scoreCandidates(args: QualifyRunInput & { batchSize?: number }): Promise<{
-      scored: number;
-      queues: Record<string, number>;
-    }> {
+    async scoreCandidates(args: QualifyRunInput & { batchSize?: number }): Promise<ScoreCandidatesResult> {
+      const executionKey = deps.activityExecutionKey?.() ?? currentActivityExecutionKey();
+      const requestHash = executionKey ? scoreCandidatesRequestHash(args) : null;
+      if (executionKey) {
+        const prior = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          tx.idempotencyKey.findUnique({
+            where: {
+              workspaceId_endpoint_key: {
+                workspaceId: args.workspaceId,
+                endpoint: SCORE_CANDIDATES_IDEMPOTENCY_ENDPOINT,
+                key: executionKey,
+              },
+            },
+          }),
+        );
+        if (prior) {
+          if (prior.requestHash === null || prior.requestHash !== requestHash) {
+            throw new Error('scoreCandidates activity execution key was reused with different input');
+          }
+          return storedScoreCandidatesResult(prior.response);
+        }
+      }
       const batchSize = args.batchSize ?? 100;
       // ICP 载入单独短事务；批循环**每批一个事务**——全量千余家塞单个交互事务会撞
       // Prisma 默认 5s 事务超时（P2028），且长事务持连接。批间用 id>cursor 续扫。
@@ -61,25 +145,73 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
         const done = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const companies = await tx.canonicalCompany.findMany({
             take: batchSize,
-            ...(cursor ? { where: { id: { gt: cursor } } } : {}),
+            where: {
+              ...(cursor ? { id: { gt: cursor } } : {}),
+              identitySourceMappings: { none: { status: 'ACTIVE' } },
+              identityConflictParties: {
+                none: { conflict: { status: { in: ['OPEN', 'RESOLVING'] } } },
+              },
+            },
             orderBy: { id: 'asc' },
-            include: { contacts: { include: { contactPoints: true } } },
+            include: {
+              contacts: { include: { contactPoints: true } },
+              identityCanonicalMappings: {
+                where: { status: 'ACTIVE' },
+                include: {
+                  sourceCompany: { include: { contacts: { include: { contactPoints: true } } } },
+                },
+              },
+            },
           });
           if (!companies.length) return true;
           for (const c of companies) {
+            if (!(await organizationMayUseExternalProcessing(tx, args.workspaceId, c.id))) continue;
+            const identityContacts = [
+              ...c.contacts,
+              ...c.identityCanonicalMappings.flatMap((mapping) => mapping.sourceCompany.contacts),
+            ];
             // 该 (icpId, company) 的既有 Lead——资格门① 写在这里（fitVerdict/fitReasons），是 CandidateAssessment。
             // 权威 Fit 来自**本 ICP 的 Lead**（不再读 canonical，那是「上一个判定该公司的 ICP」的值 → 串 ICP 的根 bug）。
-            const existing = await tx.lead.findUnique({
+            const identityCompanyIds = [
+              c.id,
+              ...c.identityCanonicalMappings.map((mapping) => mapping.sourceCompanyId),
+            ];
+            const existing = await tx.lead.findFirst({
               where: {
-                workspaceId_icpId_canonicalCompanyId: {
-                  workspaceId: args.workspaceId,
-                  icpId: args.icpId,
-                  canonicalCompanyId: c.id,
-                },
+                workspaceId: args.workspaceId,
+                icpId: args.icpId,
+                canonicalCompanyId: { in: identityCompanyIds },
               },
               select: { id: true, status: true, fitVerdict: true },
             });
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
+            // Discovery and Lead are separate lifecycle stages. A missing/null
+            // fit judgment is not a review verdict and must not create a Lead.
+            if (!existing || !authoritativeFit) continue;
+            const leadExecutionKey = executionKey ? `${executionKey}:${existing.id}` : null;
+            if (leadExecutionKey) {
+              if (typeof tx.$executeRaw === 'function') {
+                await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${args.workspaceId + ':' + SCORE_CANDIDATES_LEAD_IDEMPOTENCY_ENDPOINT + ':' + leadExecutionKey}, 0))`;
+              }
+              const priorLead = await tx.idempotencyKey.findUnique({
+                where: {
+                  workspaceId_endpoint_key: {
+                    workspaceId: args.workspaceId,
+                    endpoint: SCORE_CANDIDATES_LEAD_IDEMPOTENCY_ENDPOINT,
+                    key: leadExecutionKey,
+                  },
+                },
+              });
+              if (priorLead) {
+                if (priorLead.requestHash === null || priorLead.requestHash !== requestHash) {
+                  throw new Error('scoreCandidates lead execution key was reused with different input');
+                }
+                const replayedQueue = storedScoredLeadQueue(priorLead.response);
+                queues[replayedQueue] = (queues[replayedQueue] ?? 0) + 1;
+                scored += 1;
+                continue;
+              }
+            }
 
             // 第五门制裁筛查（召回优先，内存索引）：命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。
             // DISABLED/清白 → not_screened/clear → sanctionsHold=false（fail-open，不影响队列）。
@@ -114,7 +246,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 revenueUsd: c.revenueUsd,
                 attributes: c.attributes as Record<string, unknown> | null,
                 status: c.status,
-                contacts: c.contacts.map((ct) => ({
+                contacts: identityContacts.map((ct) => ({
                   title: ct.title,
                   seniority: ct.seniority,
                   contactPoints: ct.contactPoints.map((p) => ({ type: p.type, status: p.status })),
@@ -132,32 +264,14 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
             const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
-            await tx.lead.upsert({
-              where: {
-                workspaceId_icpId_canonicalCompanyId: {
-                  workspaceId: args.workspaceId,
-                  icpId: args.icpId,
-                  canonicalCompanyId: c.id,
-                },
-              },
-              update: {
+            const update = {
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
                 ...(humanFinal ? {} : { status: status as never, queue }),
                 version: { increment: 1 },
-              },
-              create: {
-                workspaceId: args.workspaceId,
-                icpId: args.icpId,
-                canonicalCompanyId: c.id,
-                status: status as never,
-                queue,
-                totalScore: result.totalScore,
-                scores: result.scores as unknown as Prisma.InputJsonValue,
-                scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
-              },
-            });
+              };
+            await tx.lead.update({ where: { id: existing.id }, data: update });
             // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。
             if (screenMatches.length) {
               const data = {
@@ -176,6 +290,17 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 create: { workspaceId: args.workspaceId, canonicalCompanyId: c.id, ...data },
               });
             }
+            if (leadExecutionKey) {
+              await tx.idempotencyKey.create({
+                data: {
+                  workspaceId: args.workspaceId,
+                  endpoint: SCORE_CANDIDATES_LEAD_IDEMPOTENCY_ENDPOINT,
+                  key: leadExecutionKey,
+                  requestHash: requestHash!,
+                  response: { queue },
+                },
+              });
+            }
             queues[queue] = (queues[queue] ?? 0) + 1;
             scored += 1;
           }
@@ -184,8 +309,27 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
         });
         if (done) break;
       }
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.outboxEvent.create({
+      const result = { scored, queues };
+      const committedResult = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        if (executionKey && typeof tx.$executeRaw === 'function') {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${args.workspaceId + ':' + SCORE_CANDIDATES_IDEMPOTENCY_ENDPOINT + ':' + executionKey}, 0))`;
+          const prior = await tx.idempotencyKey.findUnique({
+            where: {
+              workspaceId_endpoint_key: {
+                workspaceId: args.workspaceId,
+                endpoint: SCORE_CANDIDATES_IDEMPOTENCY_ENDPOINT,
+                key: executionKey,
+              },
+            },
+          });
+          if (prior) {
+            if (prior.requestHash === null || prior.requestHash !== requestHash) {
+              throw new Error('scoreCandidates activity execution key was reused with different input');
+            }
+            return storedScoreCandidatesResult(prior.response);
+          }
+        }
+        await tx.outboxEvent.create({
           data: {
             workspaceId: args.workspaceId,
             eventType: 'LeadsScored',
@@ -193,9 +337,21 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             aggregateId: args.icpId,
             payload: { scored, queues } as Prisma.InputJsonValue,
           },
-        }),
-      );
-      return { scored, queues };
+        });
+        if (executionKey) {
+          await tx.idempotencyKey.create({
+            data: {
+              workspaceId: args.workspaceId,
+              endpoint: SCORE_CANDIDATES_IDEMPOTENCY_ENDPOINT,
+              key: executionKey,
+              requestHash: requestHash!,
+              response: result as unknown as Prisma.InputJsonValue,
+            },
+          });
+        }
+        return result;
+      });
+      return committedResult;
     },
   };
 }
