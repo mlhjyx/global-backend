@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
@@ -72,6 +72,20 @@ function fakePlatformWriter(
       callback({ $queryRaw: vi.fn(handler) } as never),
     ),
   } as unknown as PrismaClient;
+}
+
+function rawQueryMarkerError(
+  marker: string,
+  options?: { prismaCode?: string; sqlState?: string; metaMessage?: string },
+): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('raw query failed', {
+    code: options?.prismaCode ?? 'P2010',
+    clientVersion: 'test',
+    meta: {
+      code: options?.sqlState ?? 'P0001',
+      message: options?.metaMessage ?? `ERROR: ${marker}`,
+    },
+  });
 }
 
 describe('ExecutionBudgetAuthorityRepository', () => {
@@ -210,12 +224,35 @@ describe('ExecutionBudgetAuthorityRepository', () => {
   ] as const)('maps SQL marker %s to the transport-neutral grant error', async (marker) => {
     const repository = new ExecutionBudgetAuthorityRepository(
       fakeWorkspacePrisma(async () => {
-        throw new Error(`database detail: ${marker}; token=${COMPACT_JWS}`);
+        throw rawQueryMarkerError(marker);
       }),
     );
 
     await expect(repository.consumeWorkspace(workspaceAuthority())).rejects.toEqual(
       new ExecutionBudgetGrantError(marker),
+    );
+  });
+
+  it.each([
+    new Error('EXECUTION_BUDGET_GRANT_EXPIRED'),
+    rawQueryMarkerError('EXECUTION_BUDGET_GRANT_EXPIRED', {
+      prismaCode: 'P2000',
+    }),
+    rawQueryMarkerError('EXECUTION_BUDGET_GRANT_EXPIRED', {
+      sqlState: '23505',
+    }),
+    rawQueryMarkerError('EXECUTION_BUDGET_GRANT_EXPIRED', {
+      metaMessage: 'ERROR: EXECUTION_BUDGET_GRANT_EXPIRED; injected detail',
+    }),
+  ])('does not trust marker-like unstructured or non-exact database errors', async (failure) => {
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => {
+        throw failure;
+      }),
+    );
+
+    await expect(repository.consumeWorkspace(workspaceAuthority())).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
     );
   });
 
@@ -257,5 +294,79 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       'CONTROL_PLANE_REVOKED',
       revokedAt,
     ]);
+  });
+
+  it('rejects platform revocation before any workspace or platform transaction', async () => {
+    const prisma = fakeWorkspacePrisma(async () => []);
+    const platformWriter = fakePlatformWriter(async () => []);
+    const repository = new ExecutionBudgetAuthorityRepository(prisma, platformWriter);
+
+    await expect(repository.revoke({
+      scopeKey: 'platform',
+      authorityId: AUTHORITY_ID,
+      reason: 'CONTROL_PLANE_REVOKED',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'),
+    );
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(platformWriter.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'malformed workspace scope',
+      input: { scopeKey: 'not-a-workspace', authorityId: AUTHORITY_ID },
+      code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    },
+    {
+      name: 'malformed authority UUID',
+      input: { scopeKey: WORKSPACE_ID, authorityId: 'not-an-authority' },
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    },
+  ] as const)('rejects $name before opening a revocation transaction', async ({ input, code }) => {
+    const prisma = fakeWorkspacePrisma(async () => []);
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(repository.revoke({
+      ...input,
+      reason: 'CONTROL_PLANE_REVOKED',
+    })).rejects.toEqual(new ExecutionBudgetGrantError(code));
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'workspace UUID',
+      authority: { ...workspaceAuthority(), workspaceId: 'not-a-workspace' },
+      code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    },
+    {
+      name: 'workspace JTI UUID',
+      authority: { ...workspaceAuthority(), jti: 'not-a-jti' },
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    },
+  ] as const)('validates the $name before workspace persistence', async ({ authority, code }) => {
+    const prisma = fakeWorkspacePrisma(async () => []);
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(repository.consumeWorkspace(authority)).rejects.toEqual(
+      new ExecutionBudgetGrantError(code),
+    );
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('validates platform JTI before opening the platform-writer transaction', async () => {
+    const prisma = fakeWorkspacePrisma(async () => []);
+    const platformWriter = fakePlatformWriter(async () => []);
+    const repository = new ExecutionBudgetAuthorityRepository(prisma, platformWriter);
+
+    await expect(repository.ingestPlatform({
+      ...platformAuthority(),
+      jti: 'not-a-jti',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID'),
+    );
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(platformWriter.$transaction).not.toHaveBeenCalled();
   });
 });

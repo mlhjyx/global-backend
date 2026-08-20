@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
@@ -21,6 +21,14 @@ function fakePrisma(rows: unknown[][]): PrismaService {
         $queryRaw: vi.fn(async () => queue.shift() ?? []),
       } as never)),
   } as unknown as PrismaService;
+}
+
+function rawQueryMarkerError(marker: string): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('raw query failed', {
+    code: 'P2010',
+    clientVersion: 'test',
+    meta: { code: 'P0001', message: `ERROR: ${marker}` },
+  });
 }
 
 describe('PostgresBudgetStore', () => {
@@ -47,6 +55,7 @@ describe('PostgresBudgetStore', () => {
       accountKey: 'icp:design:req',
       replayScope: true,
     })).resolves.toEqual({
+      accountId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       authorizedCapMicrousd: 2_000_000n,
       generation: 2,
@@ -115,7 +124,7 @@ describe('PostgresBudgetStore', () => {
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
         $queryRaw: vi.fn(async () => {
-          throw new Error(`database detail: ${marker}; host=secret`);
+          throw rawQueryMarkerError(marker);
         }),
       } as never)),
     } as unknown as PrismaService;
@@ -126,6 +135,115 @@ describe('PostgresBudgetStore', () => {
       scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
       accountKey: 'icp:design:req',
     })).rejects.toEqual(new ExecutionBudgetGrantError(marker));
+  });
+
+  it.each([
+    { name: 'missing row', rows: [] },
+    {
+      name: 'multiple rows',
+      rows: [
+        {
+          account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 1,
+          authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 1n,
+        },
+        {
+          account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 1,
+          authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 1n,
+        },
+      ],
+    },
+    {
+      name: 'malformed account UUID',
+      rows: [{
+        account_id: 'not-an-account', generation: 1,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 1n,
+      }],
+    },
+    {
+      name: 'non-positive generation',
+      rows: [{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 0,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 1n,
+      }],
+    },
+    {
+      name: 'unsafe generation',
+      rows: [{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: Number.MAX_SAFE_INTEGER + 1,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 1n,
+      }],
+    },
+    {
+      name: 'malformed authority UUID',
+      rows: [{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 1,
+        authority_id: 'not-an-authority', authorized_cap_microusd: 1n,
+      }],
+    },
+    {
+      name: 'wrong authority UUID',
+      rows: [{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 1,
+        authority_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07', authorized_cap_microusd: 1n,
+      }],
+    },
+    {
+      name: 'non-bigint cap',
+      rows: [{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 1,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 1,
+      }],
+    },
+    {
+      name: 'non-positive cap',
+      rows: [{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e', generation: 1,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', authorized_cap_microusd: 0n,
+      }],
+    },
+  ])('fails authorized open closed for $name', async ({ rows }) => {
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async () => rows),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      accountKey: 'icp:design:req',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
+    );
+  });
+
+  it.each([
+    {
+      name: 'malformed authority UUID',
+      input: {
+        authorityId: 'not-an-authority',
+        scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      },
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    },
+    {
+      name: 'malformed workspace scope',
+      input: {
+        authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        scopeKey: 'EXECUTION_BUDGET_GRANT_EXPIRED',
+      },
+      code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    },
+  ] as const)('rejects $name before authorized-open persistence', async ({ input, code }) => {
+    const prisma = fakePrisma([]);
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.openAuthorized({
+      ...input,
+      accountKey: 'icp:design:req',
+    })).rejects.toEqual(new ExecutionBudgetGrantError(code));
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
   });
 
   it('maps an atomic reservation into a durable handle', async () => {
