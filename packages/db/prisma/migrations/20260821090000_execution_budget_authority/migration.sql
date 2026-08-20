@@ -133,8 +133,10 @@ CREATE TABLE "execution_budget_authority" (
         )
         OR ("purpose" = 'contact.verify' AND "subject_type" = 'contact_point')
       )
+      AND "request_sha256" IS NOT NULL
       AND "request_sha256" ~ '^[0-9a-f]{64}$'
       AND "schedule_id" IS NULL
+      AND "cap_microusd" IS NOT NULL
       AND "cap_microusd" > 0
       AND "cap_per_run_microusd" IS NULL
       AND "campaign_cap_microusd" IS NULL
@@ -151,10 +153,14 @@ CREATE TABLE "execution_budget_authority" (
         'platform.acquisition', 'platform.intent_watch', 'platform.sanctions'
       )
       AND "request_sha256" IS NULL
+      AND "schedule_id" IS NOT NULL
       AND char_length(btrim("schedule_id")) BETWEEN 1 AND 191
       AND "cap_microusd" IS NULL
+      AND "cap_per_run_microusd" IS NOT NULL
       AND "cap_per_run_microusd" > 0
+      AND "campaign_cap_microusd" IS NOT NULL
       AND "campaign_cap_microusd" > 0
+      AND "max_runs" IS NOT NULL
       AND "max_runs" > 0
       AND "runs_consumed" <= "max_runs"
       AND (
@@ -199,7 +205,11 @@ ALTER TABLE "tool_budget_account"
     ON DELETE NO ACTION ON UPDATE NO ACTION,
   ADD CONSTRAINT "tool_budget_account_authority_shape_check" CHECK (
     ("authority_id" IS NULL AND "authorized_cap_microusd" IS NULL)
-    OR ("authority_id" IS NOT NULL AND "authorized_cap_microusd" > 0)
+    OR (
+      "authority_id" IS NOT NULL
+      AND "authorized_cap_microusd" IS NOT NULL
+      AND "authorized_cap_microusd" > 0
+    )
   );
 
 CREATE INDEX "tool_budget_account_authority_idx"
@@ -212,6 +222,11 @@ CREATE POLICY "execution_budget_authority_scope_isolation"
   USING (
     (
       "authority_kind" = 'WORKSPACE_GRANT'
+      AND NOT pg_has_role(
+        session_user,
+        'execution_budget_platform_writer',
+        'member'
+      )
       AND "scope_key" = current_workspace_id()::text
     )
     OR
@@ -228,6 +243,11 @@ CREATE POLICY "execution_budget_authority_scope_isolation"
   WITH CHECK (
     (
       "authority_kind" = 'WORKSPACE_GRANT'
+      AND NOT pg_has_role(
+        session_user,
+        'execution_budget_platform_writer',
+        'member'
+      )
       AND "scope_key" = current_workspace_id()::text
     )
     OR
@@ -247,7 +267,14 @@ ALTER TABLE "execution_budget_authority_revocation" FORCE ROW LEVEL SECURITY;
 CREATE POLICY "execution_budget_authority_revocation_scope_isolation"
   ON "execution_budget_authority_revocation"
   USING (
-    "scope_key" = current_workspace_id()::text
+    (
+      NOT pg_has_role(
+        session_user,
+        'execution_budget_platform_writer',
+        'member'
+      )
+      AND "scope_key" = current_workspace_id()::text
+    )
     OR (
       "scope_key" = 'platform'
       AND pg_has_role(
@@ -258,7 +285,14 @@ CREATE POLICY "execution_budget_authority_revocation_scope_isolation"
     )
   )
   WITH CHECK (
-    "scope_key" = current_workspace_id()::text
+    (
+      NOT pg_has_role(
+        session_user,
+        'execution_budget_platform_writer',
+        'member'
+      )
+      AND "scope_key" = current_workspace_id()::text
+    )
     OR (
       "scope_key" = 'platform'
       AND pg_has_role(
@@ -344,22 +378,29 @@ AS $$
 DECLARE
   authority "execution_budget_authority"%ROWTYPE;
 BEGIN
-  IF p_workspace_id IS DISTINCT FROM current_workspace_id()
-    OR char_length(btrim(p_issuer)) NOT BETWEEN 1 AND 512
+  IF p_workspace_id IS NULL
+    OR p_workspace_id IS DISTINCT FROM current_workspace_id()
+    OR NOT COALESCE(char_length(btrim(p_issuer)) BETWEEN 1 AND 512, false)
     OR p_audience IS DISTINCT FROM 'global-backend:execution-budget'
-    OR p_token_sha256 !~ '^[0-9a-f]{64}$'
+    OR p_jti IS NULL
+    OR NOT COALESCE(p_token_sha256 ~ '^[0-9a-f]{64}$', false)
     OR p_schema_version IS DISTINCT FROM 'execution-budget-grant/v1'
-    OR char_length(btrim(p_subject_type)) NOT BETWEEN 1 AND 191
-    OR char_length(btrim(p_subject_id)) NOT BETWEEN 1 AND 191
-    OR p_request_sha256 !~ '^[0-9a-f]{64}$'
+    OR NOT COALESCE(char_length(btrim(p_subject_type)) BETWEEN 1 AND 191, false)
+    OR NOT COALESCE(char_length(btrim(p_subject_id)) BETWEEN 1 AND 191, false)
+    OR NOT COALESCE(p_request_sha256 ~ '^[0-9a-f]{64}$', false)
     OR p_currency IS DISTINCT FROM 'USD'
     OR p_unit IS DISTINCT FROM 'microusd'
-    OR p_cap_microusd IS NULL
-    OR p_cap_microusd <= 0
-    OR p_issued_at > p_not_before
-    OR p_not_before >= p_expires_at
-    OR p_expires_at - p_issued_at > INTERVAL '5 minutes'
-    OR NOT (
+    OR NOT COALESCE(p_cap_microusd > 0, false)
+    OR p_issued_at IS NULL
+    OR p_not_before IS NULL
+    OR p_expires_at IS NULL
+    OR NOT COALESCE(p_issued_at <= p_not_before, false)
+    OR NOT COALESCE(p_not_before < p_expires_at, false)
+    OR NOT COALESCE(
+      p_expires_at - p_issued_at <= INTERVAL '5 minutes',
+      false
+    )
+    OR NOT COALESCE((
       (p_purpose = 'understanding.run' AND p_subject_type = 'company')
       OR (p_purpose = 'icp.design' AND p_subject_type = 'company')
       OR (p_purpose = 'icp.query_plan' AND p_subject_type = 'icp')
@@ -368,17 +409,9 @@ BEGIN
         AND p_subject_type IN ('discovery_run', 'company')
       )
       OR (p_purpose = 'contact.verify' AND p_subject_type = 'contact_point')
-    )
+    ), false)
   THEN
     RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'
-      USING ERRCODE = 'P0001';
-  END IF;
-  IF p_not_before > clock_timestamp() THEN
-    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_INVALID'
-      USING ERRCODE = 'P0001';
-  END IF;
-  IF p_expires_at <= clock_timestamp() THEN
-    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_EXPIRED'
       USING ERRCODE = 'P0001';
   END IF;
 
@@ -417,6 +450,15 @@ BEGIN
     END IF;
     RETURN QUERY SELECT authority."id", true;
     RETURN;
+  END IF;
+
+  IF p_not_before > clock_timestamp() THEN
+    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF p_expires_at <= clock_timestamp() THEN
+    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_EXPIRED'
+      USING ERRCODE = 'P0001';
   END IF;
 
   INSERT INTO "execution_budget_authority"(
@@ -467,37 +509,36 @@ BEGIN
       'execution_budget_platform_writer',
       'member'
     )
-    OR char_length(btrim(p_issuer)) NOT BETWEEN 1 AND 512
+    OR NOT COALESCE(char_length(btrim(p_issuer)) BETWEEN 1 AND 512, false)
     OR p_audience IS DISTINCT FROM 'global-backend:execution-budget'
-    OR p_token_sha256 !~ '^[0-9a-f]{64}$'
+    OR p_jti IS NULL
+    OR NOT COALESCE(p_token_sha256 ~ '^[0-9a-f]{64}$', false)
     OR p_schema_version IS DISTINCT FROM 'execution-budget-grant/v1'
-    OR p_purpose NOT IN (
-      'platform.acquisition', 'platform.intent_watch', 'platform.sanctions'
+    OR NOT COALESCE(
+      p_purpose IN (
+        'platform.acquisition', 'platform.intent_watch', 'platform.sanctions'
+      ),
+      false
     )
-    OR char_length(btrim(p_subject_type)) NOT BETWEEN 1 AND 191
-    OR char_length(btrim(p_subject_id)) NOT BETWEEN 1 AND 191
-    OR char_length(btrim(p_schedule_id)) NOT BETWEEN 1 AND 191
+    OR NOT COALESCE(char_length(btrim(p_subject_type)) BETWEEN 1 AND 191, false)
+    OR NOT COALESCE(char_length(btrim(p_subject_id)) BETWEEN 1 AND 191, false)
+    OR NOT COALESCE(char_length(btrim(p_schedule_id)) BETWEEN 1 AND 191, false)
     OR p_currency IS DISTINCT FROM 'USD'
     OR p_unit IS DISTINCT FROM 'microusd'
-    OR p_cap_per_run_microusd IS NULL
-    OR p_cap_per_run_microusd <= 0
-    OR p_campaign_cap_microusd IS NULL
-    OR p_campaign_cap_microusd <= 0
-    OR p_max_runs IS NULL
-    OR p_max_runs <= 0
-    OR p_issued_at > p_not_before
-    OR p_not_before >= p_expires_at
-    OR p_expires_at - p_issued_at > INTERVAL '5 minutes'
+    OR NOT COALESCE(p_cap_per_run_microusd > 0, false)
+    OR NOT COALESCE(p_campaign_cap_microusd > 0, false)
+    OR NOT COALESCE(p_max_runs > 0, false)
+    OR p_issued_at IS NULL
+    OR p_not_before IS NULL
+    OR p_expires_at IS NULL
+    OR NOT COALESCE(p_issued_at <= p_not_before, false)
+    OR NOT COALESCE(p_not_before < p_expires_at, false)
+    OR NOT COALESCE(
+      p_expires_at - p_issued_at <= INTERVAL '5 minutes',
+      false
+    )
   THEN
     RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'
-      USING ERRCODE = 'P0001';
-  END IF;
-  IF p_not_before > clock_timestamp() THEN
-    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_INVALID'
-      USING ERRCODE = 'P0001';
-  END IF;
-  IF p_expires_at <= clock_timestamp() THEN
-    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_EXPIRED'
       USING ERRCODE = 'P0001';
   END IF;
 
@@ -536,6 +577,15 @@ BEGIN
     END IF;
     RETURN QUERY SELECT authority."id", true;
     RETURN;
+  END IF;
+
+  IF p_not_before > clock_timestamp() THEN
+    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF p_expires_at <= clock_timestamp() THEN
+    RAISE EXCEPTION 'EXECUTION_BUDGET_GRANT_EXPIRED'
+      USING ERRCODE = 'P0001';
   END IF;
 
   INSERT INTO "execution_budget_authority"(

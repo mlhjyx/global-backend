@@ -16,6 +16,7 @@ const migrationDirectory = resolve(
   "packages/db/prisma/migrations/20260821090000_execution_budget_authority",
 );
 const migrationPath = resolve(migrationDirectory, "migration.sql");
+const migrationsRoot = resolve(repositoryRoot, "packages/db/prisma/migrations");
 
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;
@@ -46,6 +47,14 @@ function platformUrl() {
   const parsed = requireDatabaseUrl("DATABASE_URL", OWNER_URL);
   parsed.username = PLATFORM_LOGIN;
   parsed.password = PLATFORM_PASSWORD;
+  return parsed.href;
+}
+
+function databaseUrl(baseUrl, database, username, password) {
+  const parsed = requireDatabaseUrl("DATABASE_URL", baseUrl);
+  parsed.pathname = `/${database}`;
+  if (username !== undefined) parsed.username = username;
+  if (password !== undefined) parsed.password = password;
   return parsed.href;
 }
 
@@ -83,10 +92,15 @@ async function captureSqlError(callback, marker) {
   return message;
 }
 
+function overrideValue(overrides, name, fallback) {
+  return Object.hasOwn(overrides, name) ? overrides[name] : fallback;
+}
+
 function authorityTimes(overrides = {}) {
   return {
-    ...VALID_TIMES,
-    ...overrides,
+    issuedAt: overrideValue(overrides, "issuedAt", VALID_TIMES.issuedAt),
+    notBefore: overrideValue(overrides, "notBefore", VALID_TIMES.notBefore),
+    expiresAt: overrideValue(overrides, "expiresAt", VALID_TIMES.expiresAt),
   };
 }
 
@@ -98,19 +112,19 @@ async function consumeWorkspace(transaction, overrides = {}) {
       $7::uuid, $8, $9, $10, $11, $12, $13::bigint,
       $14::timestamptz, $15::timestamptz, $16::timestamptz
     )`,
-    overrides.issuer ?? ISSUER,
-    AUDIENCE,
-    overrides.jti ?? randomUUID(),
-    overrides.tokenSha256 ?? TOKEN_A,
-    "execution-budget-grant/v1",
-    overrides.purpose ?? "icp.design",
-    overrides.workspaceId ?? WS_A,
-    overrides.subjectType ?? "company",
-    overrides.subjectId ?? "company-a",
-    overrides.requestSha256 ?? REQUEST_A,
-    "USD",
-    "microusd",
-    overrides.capMicrousd ?? 5_000_000n,
+    overrideValue(overrides, "issuer", ISSUER),
+    overrideValue(overrides, "audience", AUDIENCE),
+    overrideValue(overrides, "jti", randomUUID()),
+    overrideValue(overrides, "tokenSha256", TOKEN_A),
+    overrideValue(overrides, "schemaVersion", "execution-budget-grant/v1"),
+    overrideValue(overrides, "purpose", "icp.design"),
+    overrideValue(overrides, "workspaceId", WS_A),
+    overrideValue(overrides, "subjectType", "company"),
+    overrideValue(overrides, "subjectId", "company-a"),
+    overrideValue(overrides, "requestSha256", REQUEST_A),
+    overrideValue(overrides, "currency", "USD"),
+    overrideValue(overrides, "unit", "microusd"),
+    overrideValue(overrides, "capMicrousd", 5_000_000n),
     times.issuedAt,
     times.notBefore,
     times.expiresAt,
@@ -125,24 +139,204 @@ async function ingestPlatform(transaction, overrides = {}) {
       $7, $8, $9, $10, $11, $12::bigint, $13::bigint, $14::bigint,
       $15::timestamptz, $16::timestamptz, $17::timestamptz
     )`,
-    overrides.issuer ?? ISSUER,
-    AUDIENCE,
-    overrides.jti ?? randomUUID(),
-    overrides.tokenSha256 ?? TOKEN_A,
-    "execution-budget-grant/v1",
-    overrides.purpose ?? "platform.acquisition",
-    overrides.subjectType ?? "schedule",
-    overrides.subjectId ?? "acquisition-schedule",
-    overrides.scheduleId ?? "acquisition-schedule",
-    "USD",
-    "microusd",
-    overrides.capPerRunMicrousd ?? 1_000_000n,
-    overrides.campaignCapMicrousd ?? 5_000_000n,
-    overrides.maxRuns ?? 5n,
+    overrideValue(overrides, "issuer", ISSUER),
+    overrideValue(overrides, "audience", AUDIENCE),
+    overrideValue(overrides, "jti", randomUUID()),
+    overrideValue(overrides, "tokenSha256", TOKEN_A),
+    overrideValue(overrides, "schemaVersion", "execution-budget-grant/v1"),
+    overrideValue(overrides, "purpose", "platform.acquisition"),
+    overrideValue(overrides, "subjectType", "schedule"),
+    overrideValue(overrides, "subjectId", "acquisition-schedule"),
+    overrideValue(overrides, "scheduleId", "acquisition-schedule"),
+    overrideValue(overrides, "currency", "USD"),
+    overrideValue(overrides, "unit", "microusd"),
+    overrideValue(overrides, "capPerRunMicrousd", 1_000_000n),
+    overrideValue(overrides, "campaignCapMicrousd", 5_000_000n),
+    overrideValue(overrides, "maxRuns", 5n),
     times.issuedAt,
     times.notBefore,
     times.expiresAt,
   );
+}
+
+async function insertWorkspaceAuthority(database, overrides = {}) {
+  const times = authorityTimes(overrides);
+  return database.$queryRawUnsafe(
+    `INSERT INTO execution_budget_authority(
+      scope_key, authority_kind, workspace_id, issuer, audience, jti,
+      token_sha256, schema_version, purpose, subject_type, subject_id,
+      request_sha256, currency, unit, cap_microusd, issued_at, not_before,
+      expires_at, consumed_at
+    ) VALUES (
+      $1, 'WORKSPACE_GRANT', $2::uuid, $3, $4, $5::uuid, $6, $7,
+      'icp.design', 'company', 'direct-shape-company', $8, 'USD', 'microusd',
+      $9::bigint, $10::timestamptz, $11::timestamptz, $12::timestamptz, now()
+    ) RETURNING id`,
+    WS_A,
+    overrideValue(overrides, "workspaceId", WS_A),
+    ISSUER,
+    AUDIENCE,
+    randomUUID(),
+    "7".repeat(64),
+    "execution-budget-grant/v1",
+    overrideValue(overrides, "requestSha256", REQUEST_A),
+    overrideValue(overrides, "capMicrousd", 1n),
+    times.issuedAt,
+    times.notBefore,
+    times.expiresAt,
+  );
+}
+
+async function insertPlatformAuthority(database, overrides = {}) {
+  const times = authorityTimes(overrides);
+  return database.$queryRawUnsafe(
+    `INSERT INTO execution_budget_authority(
+      scope_key, authority_kind, issuer, audience, jti, token_sha256,
+      schema_version, purpose, subject_type, subject_id, schedule_id, currency,
+      unit, cap_per_run_microusd, campaign_cap_microusd, max_runs, issued_at,
+      not_before, expires_at
+    ) VALUES (
+      'platform', 'PLATFORM_GRANT', $1, $2, $3::uuid, $4, $5,
+      'platform.acquisition', 'schedule', 'direct-shape-schedule', $6, 'USD',
+      'microusd', $7::bigint, $8::bigint, $9::bigint, $10::timestamptz,
+      $11::timestamptz, $12::timestamptz
+    ) RETURNING id`,
+    ISSUER,
+    AUDIENCE,
+    randomUUID(),
+    "8".repeat(64),
+    "execution-budget-grant/v1",
+    overrideValue(overrides, "scheduleId", "direct-shape-schedule"),
+    overrideValue(overrides, "capPerRunMicrousd", 1n),
+    overrideValue(overrides, "campaignCapMicrousd", 2n),
+    overrideValue(overrides, "maxRuns", 2n),
+    times.issuedAt,
+    times.notBefore,
+    times.expiresAt,
+  );
+}
+
+async function migrationObjects(database) {
+  const [state] = await database.$queryRawUnsafe(`
+    SELECT
+      to_regtype('public.execution_budget_authority_kind')::text AS kind_type,
+      to_regclass('public.execution_budget_authority')::text AS authority_table,
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name='tool_budget_account'
+          AND column_name='authority_id'
+      ) AS account_column
+  `);
+  return state;
+}
+
+async function exerciseMigrationRolePreconditions(ownerDatabase) {
+  const scenarioDatabase = "authority_task3_preflight";
+  const noCreateLogin = "execution_budget_no_create_test";
+  const noCreatePassword = "execution-budget-no-create-test-only";
+  const scenarioUrl = databaseUrl(OWNER_URL, scenarioDatabase);
+  let scenario;
+
+  await ownerDatabase.$executeRawUnsafe(`CREATE DATABASE ${scenarioDatabase}`);
+  try {
+    const migrationEntries = (
+      await readdir(migrationsRoot, { withFileTypes: true })
+    )
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          entry.name !== "20260821090000_execution_budget_authority",
+      )
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of migrationEntries) {
+      const deployed = spawnSync(
+        "psql",
+        [
+          scenarioUrl,
+          "--no-psqlrc",
+          "--single-transaction",
+          "--set",
+          "ON_ERROR_STOP=1",
+          "--file",
+          resolve(migrationsRoot, entry.name, "migration.sql"),
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(
+        deployed.status,
+        0,
+        `preflight setup migration ${entry.name} failed\n${deployed.stdout}\n${deployed.stderr}`,
+      );
+    }
+
+    scenario = client(scenarioUrl);
+    await ownerDatabase.$executeRawUnsafe(`
+      CREATE ROLE ${noCreateLogin}
+        LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+        NOREPLICATION NOBYPASSRLS PASSWORD '${noCreatePassword}'
+    `);
+    const noCreate = spawnSync(
+      "psql",
+      [
+        databaseUrl(
+          OWNER_URL,
+          scenarioDatabase,
+          noCreateLogin,
+          noCreatePassword,
+        ),
+        "--no-psqlrc",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--file",
+        migrationPath,
+      ],
+      { encoding: "utf8" },
+    );
+    const afterNoCreate = await migrationObjects(scenario);
+    await ownerDatabase.$executeRawUnsafe(`DROP ROLE ${noCreateLogin}`);
+
+    await ownerDatabase.$executeRawUnsafe(`
+      CREATE ROLE execution_budget_platform_writer
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    `);
+    const unsafeRole = spawnSync(
+      "psql",
+      [
+        scenarioUrl,
+        "--no-psqlrc",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--file",
+        migrationPath,
+      ],
+      { encoding: "utf8" },
+    );
+    const afterUnsafeRole = await migrationObjects(scenario);
+    await ownerDatabase.$executeRawUnsafe(
+      `DROP ROLE execution_budget_platform_writer`,
+    );
+
+    return {
+      noCreateStatus: noCreate.status,
+      noCreateOutput: `${noCreate.stdout}\n${noCreate.stderr}`,
+      afterNoCreate,
+      unsafeRoleStatus: unsafeRole.status,
+      unsafeRoleOutput: `${unsafeRole.stdout}\n${unsafeRole.stderr}`,
+      afterUnsafeRole,
+    };
+  } finally {
+    await scenario?.$disconnect();
+    await ownerDatabase.$executeRawUnsafe(
+      `DROP DATABASE IF EXISTS ${scenarioDatabase} WITH (FORCE)`,
+    );
+    await ownerDatabase.$executeRawUnsafe(
+      `DROP ROLE IF EXISTS ${noCreateLogin}`,
+    );
+    await ownerDatabase.$executeRawUnsafe(
+      `DROP ROLE IF EXISTS execution_budget_platform_writer`,
+    );
+  }
 }
 
 async function openAuthorized(
@@ -194,11 +388,15 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
   let app;
   /** @type {PrismaClient | undefined} */
   let platform;
+  let preflightEvidence;
   const raceClients = [];
 
   before(async () => {
     requireDatabaseUrl("DATABASE_URL", OWNER_URL);
     requireDatabaseUrl("APP_DATABASE_URL", APP_URL);
+
+    owner = client(OWNER_URL);
+    preflightEvidence = await exerciseMigrationRolePreconditions(owner);
 
     const deployment = spawnSync(
       "pnpm",
@@ -215,7 +413,6 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       `all migrations must deploy on the fresh database\n${deployment.stdout}\n${deployment.stderr}`,
     );
 
-    owner = client(OWNER_URL);
     await owner.$executeRawUnsafe(`
       DO $role$
       BEGIN
@@ -288,6 +485,30 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     ]);
   });
 
+  it("fails role preconditions before any Task 3 schema mutation", () => {
+    assert.notEqual(preflightEvidence.noCreateStatus, 0);
+    assert.match(
+      preflightEvidence.noCreateOutput,
+      /EXECUTION_BUDGET_AUTHORITY_MIGRATION_REQUIRES_CREATEROLE/,
+    );
+    assert.deepEqual(preflightEvidence.afterNoCreate, {
+      kind_type: null,
+      authority_table: null,
+      account_column: false,
+    });
+
+    assert.notEqual(preflightEvidence.unsafeRoleStatus, 0);
+    assert.match(
+      preflightEvidence.unsafeRoleOutput,
+      /EXECUTION_BUDGET_PLATFORM_WRITER_ROLE_INVALID/,
+    );
+    assert.deepEqual(preflightEvidence.afterUnsafeRole, {
+      kind_type: null,
+      authority_table: null,
+      account_column: false,
+    });
+  });
+
   it("uses fixed SECURITY DEFINER search paths and narrow role grants", async () => {
     const functions = await owner.$queryRawUnsafe(`
       SELECT proname, prosecdef, proconfig
@@ -295,11 +516,12 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       WHERE proname IN (
         'consume_workspace_execution_authority',
         'ingest_platform_execution_authority',
+        'mark_execution_budget_authority_revoked',
         'open_authorized_tool_budget_v1'
       )
       ORDER BY proname
     `);
-    assert.equal(functions.length, 3);
+    assert.equal(functions.length, 4);
     for (const entry of functions) {
       assert.equal(entry.prosecdef, true);
       assert.deepEqual(entry.proconfig, ["search_path=pg_catalog, public"]);
@@ -362,6 +584,318 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     assert.deepEqual(memberships, [
       { rolname: "execution_budget_platform_writer" },
     ]);
+
+    const publicFunctionExecution = await owner.$queryRawUnsafe(`
+      SELECT procedure.proname,
+             bool_or(privilege.grantee=0 AND privilege.privilege_type='EXECUTE')
+               AS public_execute
+      FROM pg_proc procedure
+      CROSS JOIN LATERAL aclexplode(
+        COALESCE(procedure.proacl, acldefault('f', procedure.proowner))
+      ) privilege
+      WHERE procedure.proname IN (
+        'consume_workspace_execution_authority',
+        'ingest_platform_execution_authority',
+        'mark_execution_budget_authority_revoked',
+        'open_authorized_tool_budget_v1'
+      )
+      GROUP BY procedure.proname
+      ORDER BY procedure.proname
+    `);
+    assert.deepEqual(publicFunctionExecution, [
+      {
+        proname: "consume_workspace_execution_authority",
+        public_execute: false,
+      },
+      {
+        proname: "ingest_platform_execution_authority",
+        public_execute: false,
+      },
+      {
+        proname: "mark_execution_budget_authority_revoked",
+        public_execute: false,
+      },
+      {
+        proname: "open_authorized_tool_budget_v1",
+        public_execute: false,
+      },
+    ]);
+
+    const [tablePrivileges] = await owner.$queryRawUnsafe(`
+      SELECT
+        has_table_privilege('app_user', 'execution_budget_authority', 'UPDATE')
+          AS app_authority_update,
+        has_table_privilege('app_user', 'execution_budget_authority', 'DELETE')
+          AS app_authority_delete,
+        has_table_privilege(
+          'app_user',
+          'execution_budget_authority_revocation',
+          'UPDATE'
+        ) AS app_revocation_update,
+        has_table_privilege(
+          'app_user',
+          'execution_budget_authority_revocation',
+          'DELETE'
+        ) AS app_revocation_delete,
+        has_table_privilege(
+          'execution_budget_platform_writer',
+          'execution_budget_authority',
+          'UPDATE'
+        ) AS platform_authority_update,
+        has_table_privilege(
+          'execution_budget_platform_writer',
+          'execution_budget_authority',
+          'DELETE'
+        ) AS platform_authority_delete
+    `);
+    assert.deepEqual(tablePrivileges, {
+      app_authority_update: false,
+      app_authority_delete: false,
+      app_revocation_update: false,
+      app_revocation_delete: false,
+      platform_authority_update: false,
+      platform_authority_delete: false,
+    });
+  });
+
+  it("rejects hostile NULL claims before either authority shape can be stored", async () => {
+    const workspaceNulls = [
+      ["issuer", { issuer: null }],
+      ["audience", { audience: null }],
+      ["jti", { jti: null }],
+      ["tokenSha256", { tokenSha256: null }],
+      ["schemaVersion", { schemaVersion: null }],
+      ["purpose", { purpose: null }],
+      ["workspaceId", { workspaceId: null }],
+      ["subjectType", { subjectType: null }],
+      ["subjectId", { subjectId: null }],
+      ["requestSha256", { requestSha256: null }],
+      ["capMicrousd", { capMicrousd: null }],
+      ["currency", { currency: null }],
+      ["unit", { unit: null }],
+      ["issuedAt", { issuedAt: null }],
+      ["notBefore", { notBefore: null }],
+      ["expiresAt", { expiresAt: null }],
+    ];
+    for (const [name, overrides] of workspaceNulls) {
+      await rejectsSql(
+        () =>
+          withWorkspace(app, WS_A, (transaction) =>
+            consumeWorkspace(transaction, overrides),
+          ),
+        "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+      ).catch((error) => {
+        error.message = `workspace ${name}: ${error.message}`;
+        throw error;
+      });
+    }
+
+    const platformNulls = [
+      ["issuer", { issuer: null }],
+      ["audience", { audience: null }],
+      ["jti", { jti: null }],
+      ["tokenSha256", { tokenSha256: null }],
+      ["schemaVersion", { schemaVersion: null }],
+      ["purpose", { purpose: null }],
+      ["subjectType", { subjectType: null }],
+      ["subjectId", { subjectId: null }],
+      ["scheduleId", { scheduleId: null }],
+      ["capPerRunMicrousd", { capPerRunMicrousd: null }],
+      ["campaignCapMicrousd", { campaignCapMicrousd: null }],
+      ["maxRuns", { maxRuns: null }],
+      ["currency", { currency: null }],
+      ["unit", { unit: null }],
+      ["issuedAt", { issuedAt: null }],
+      ["notBefore", { notBefore: null }],
+      ["expiresAt", { expiresAt: null }],
+    ];
+    for (const [name, overrides] of platformNulls) {
+      await rejectsSql(
+        () => ingestPlatform(platform, overrides),
+        "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
+      ).catch((error) => {
+        error.message = `platform ${name}: ${error.message}`;
+        throw error;
+      });
+    }
+
+    const [{ count }] = await owner.$queryRawUnsafe(
+      `SELECT count(*)::int AS count FROM execution_budget_authority`,
+    );
+    assert.equal(count, 0);
+  });
+
+  it("keeps both table authority-shape checks two-valued for nullable columns", async () => {
+    for (const overrides of [
+      { workspaceId: null },
+      { requestSha256: null },
+      { capMicrousd: null },
+    ]) {
+      await rejectsSql(() => insertWorkspaceAuthority(owner, overrides));
+    }
+    for (const overrides of [
+      { scheduleId: null },
+      { capPerRunMicrousd: null },
+      { campaignCapMicrousd: null },
+      { maxRuns: null },
+    ]) {
+      await rejectsSql(() => insertPlatformAuthority(owner, overrides));
+    }
+
+    const [{ count }] = await owner.$queryRawUnsafe(
+      `SELECT count(*)::int AS count FROM execution_budget_authority`,
+    );
+    assert.equal(count, 0);
+  });
+
+  it("requires Tool budget authority id and authorized cap to form a positive pair", async () => {
+    const [authority] = await withWorkspace(app, WS_A, (transaction) =>
+      consumeWorkspace(transaction, {
+        jti: randomUUID(),
+        subjectId: "account-pair-company",
+      }),
+    );
+
+    await rejectsSql(() =>
+      owner.$executeRawUnsafe(
+        `INSERT INTO tool_budget_account
+          (scope_key, account_key, cap_cents, authority_id,
+           authorized_cap_microusd)
+         VALUES ($1, $2, 1, $3::uuid, NULL)`,
+        WS_A,
+        `authority-without-cap-${randomUUID()}`,
+        authority.authority_id,
+      ),
+    );
+    await rejectsSql(() =>
+      owner.$executeRawUnsafe(
+        `INSERT INTO tool_budget_account
+          (scope_key, account_key, cap_cents, authority_id,
+           authorized_cap_microusd)
+         VALUES ($1, $2, 1, NULL, 1)`,
+        WS_A,
+        `cap-without-authority-${randomUUID()}`,
+      ),
+    );
+    await rejectsSql(() =>
+      owner.$executeRawUnsafe(
+        `INSERT INTO tool_budget_account
+          (scope_key, account_key, cap_cents, authority_id,
+           authorized_cap_microusd)
+         VALUES ($1, $2, 1, $3::uuid, 0)`,
+        WS_A,
+        `non-positive-authorized-cap-${randomUUID()}`,
+        authority.authority_id,
+      ),
+    );
+
+    const legacyAccountKey = `legacy-null-pair-${randomUUID()}`;
+    await owner.$executeRawUnsafe(
+      `INSERT INTO tool_budget_account
+        (scope_key, account_key, cap_cents, authority_id,
+         authorized_cap_microusd)
+       VALUES ($1, $2, 1, NULL, NULL)`,
+      WS_A,
+      legacyAccountKey,
+    );
+    const [legacyPair] = await owner.$queryRawUnsafe(
+      `SELECT authority_id, authorized_cap_microusd
+       FROM tool_budget_account WHERE account_key=$1`,
+      legacyAccountKey,
+    );
+    assert.deepEqual(legacyPair, {
+      authority_id: null,
+      authorized_cap_microusd: null,
+    });
+  });
+
+  it("replays an exact JTI after expiry while conflicting reuse remains a conflict", async () => {
+    const replayTimes = {
+      issuedAt: new Date(Date.now() - 30_000),
+      notBefore: new Date(Date.now() - 20_000),
+      expiresAt: new Date(Date.now() + 800),
+    };
+    const workspaceClaims = {
+      ...replayTimes,
+      jti: randomUUID(),
+      tokenSha256: "1".repeat(64),
+      subjectId: "expired-replay-company",
+      requestSha256: "2".repeat(64),
+      capMicrousd: 101n,
+    };
+    const platformClaims = {
+      ...replayTimes,
+      jti: randomUUID(),
+      tokenSha256: "3".repeat(64),
+      subjectId: "expired-replay-schedule",
+      scheduleId: "expired-replay-schedule",
+      capPerRunMicrousd: 31n,
+      campaignCapMicrousd: 93n,
+      maxRuns: 3n,
+    };
+
+    const [workspaceAuthority] = await withWorkspace(app, WS_A, (transaction) =>
+      consumeWorkspace(transaction, workspaceClaims),
+    );
+    const [platformAuthority] = await ingestPlatform(platform, platformClaims);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_200));
+
+    const workspaceReplay = await withWorkspace(app, WS_A, (transaction) =>
+      consumeWorkspace(transaction, workspaceClaims),
+    );
+    const platformReplay = await ingestPlatform(platform, platformClaims);
+    assert.deepEqual(workspaceReplay, [
+      { authority_id: workspaceAuthority.authority_id, replay: true },
+    ]);
+    assert.deepEqual(platformReplay, [
+      { authority_id: platformAuthority.authority_id, replay: true },
+    ]);
+
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          consumeWorkspace(transaction, {
+            ...workspaceClaims,
+            tokenSha256: "4".repeat(64),
+          }),
+        ),
+      "EXECUTION_BUDGET_GRANT_REUSED",
+    );
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          consumeWorkspace(transaction, {
+            ...workspaceClaims,
+            requestSha256: "5".repeat(64),
+          }),
+        ),
+      "EXECUTION_BUDGET_GRANT_REUSED",
+    );
+    await rejectsSql(
+      () =>
+        ingestPlatform(platform, {
+          ...platformClaims,
+          tokenSha256: "6".repeat(64),
+        }),
+      "EXECUTION_BUDGET_GRANT_REUSED",
+    );
+    await rejectsSql(
+      () =>
+        ingestPlatform(platform, {
+          ...platformClaims,
+          scheduleId: "changed-expired-replay-schedule",
+        }),
+      "EXECUTION_BUDGET_GRANT_REUSED",
+    );
+
+    const [{ count }] = await owner.$queryRawUnsafe(
+      `SELECT count(*)::int AS count
+       FROM execution_budget_authority
+       WHERE jti IN ($1::uuid, $2::uuid)`,
+      workspaceClaims.jti,
+      platformClaims.jti,
+    );
+    assert.equal(count, 2);
   });
 
   it("atomically consumes one immutable workspace identity in a 20-client same-JTI race", async () => {
@@ -393,6 +927,32 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     assert.equal(stored[0].token_sha256, TOKEN_A);
     assert.equal(stored[0].request_sha256, REQUEST_A);
     assert.ok(stored[0].consumed_at instanceof Date);
+
+    const openedAccounts = (
+      await Promise.all(
+        raceClients.map((database) =>
+          withWorkspace(database, WS_A, (transaction) =>
+            openAuthorized(transaction, {
+              scopeKey: WS_A,
+              authorityId: stored[0].id,
+              accountKey: `same-jti-account-${jti}`,
+            }),
+          ),
+        ),
+      )
+    ).flat();
+    assert.equal(new Set(openedAccounts.map((row) => row.account_id)).size, 1);
+    assert.equal(new Set(openedAccounts.map((row) => row.generation)).size, 1);
+    const [identityState] = await owner.$queryRawUnsafe(
+      `SELECT
+         count(account.id)::int AS accounts,
+         min(authority.runs_consumed) AS runs_consumed
+       FROM execution_budget_authority authority
+       LEFT JOIN tool_budget_account account ON account.authority_id=authority.id
+       WHERE authority.id=$1::uuid`,
+      stored[0].id,
+    );
+    assert.deepEqual(identityState, { accounts: 1, runs_consumed: 1n });
 
     await withWorkspace(app, WS_A, async (transaction) => {
       const replay = await consumeWorkspace(transaction, { jti });
@@ -443,6 +1003,13 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       subjectId: "visibility-schedule",
       scheduleId: "visibility-schedule",
     });
+    const [platformRevocation] = await owner.$queryRawUnsafe(
+      `INSERT INTO execution_budget_authority_revocation
+        (scope_key, authority_id, reason)
+       VALUES ('platform', $1::uuid, 'platform-policy-readback')
+       RETURNING id`,
+      platformAuthority.authority_id,
+    );
 
     await rejectsSql(() =>
       withWorkspace(app, WS_A, (transaction) =>
@@ -494,6 +1061,12 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
         platformAuthority.authority_id,
       );
       assert.deepEqual(platformRows, []);
+      const platformRevocations = await transaction.$queryRawUnsafe(
+        `SELECT id FROM execution_budget_authority_revocation
+         WHERE id=$1::uuid`,
+        platformRevocation.id,
+      );
+      assert.deepEqual(platformRevocations, []);
     });
 
     const missingError = await captureSqlError(
@@ -550,11 +1123,48 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     );
     assert.equal(foreignState.revoked_at, null);
 
+    await withWorkspace(app, WS_A, (transaction) =>
+      transaction.$executeRawUnsafe(
+        `INSERT INTO execution_budget_authority_revocation
+          (scope_key, authority_id, reason)
+         VALUES ($1, $2::uuid, 'workspace-visible-only')`,
+        WS_A,
+        authority.authority_id,
+      ),
+    );
+    await withWorkspace(platform, WS_A, async (transaction) => {
+      const workspaceAuthorities = await transaction.$queryRawUnsafe(
+        "SELECT id FROM execution_budget_authority WHERE workspace_id=$1::uuid",
+        WS_A,
+      );
+      const workspaceRevocations = await transaction.$queryRawUnsafe(
+        "SELECT id FROM execution_budget_authority_revocation WHERE scope_key=$1",
+        WS_A,
+      );
+      assert.deepEqual(workspaceAuthorities, []);
+      assert.deepEqual(workspaceRevocations, []);
+    });
+
     const platformWorkspaceRows = await platform.$queryRawUnsafe(
       "SELECT id FROM execution_budget_authority WHERE workspace_id=$1::uuid",
       WS_A,
     );
     assert.deepEqual(platformWorkspaceRows, []);
+    const intendedPlatformRows = await platform.$queryRawUnsafe(
+      "SELECT id FROM execution_budget_authority WHERE id=$1::uuid",
+      platformAuthority.authority_id,
+    );
+    assert.deepEqual(intendedPlatformRows, [
+      { id: platformAuthority.authority_id },
+    ]);
+    const intendedPlatformRevocations = await platform.$queryRawUnsafe(
+      `SELECT id FROM execution_budget_authority_revocation
+       WHERE id=$1::uuid`,
+      platformRevocation.id,
+    );
+    assert.deepEqual(intendedPlatformRevocations, [
+      { id: platformRevocation.id },
+    ]);
     await rejectsSql(() => ingestPlatform(app, { jti: randomUUID() }));
   });
 
