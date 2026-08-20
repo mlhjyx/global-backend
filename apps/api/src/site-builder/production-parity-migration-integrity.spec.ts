@@ -109,7 +109,7 @@ describe('production parity budget migration integrity', () => {
       sql.indexOf('CREATE TABLE "runtime_process_lease"'),
     );
     expect(roleBlock).toContain('PRODUCTION_PARITY_RUNTIME_GROUP_ROLE_INVALID');
-    expect(roleBlock).toMatch(/rolcanlogin[sS]*?rolsuper[sS]*?rolbypassrls[sS]*?rolcreaterole[sS]*?rolcreatedb[sS]*?rolreplication/);
+    expect(roleBlock).toMatch(/rolcanlogin[^]*?rolsuper[^]*?rolbypassrls[^]*?rolcreaterole[^]*?rolcreatedb[^]*?rolreplication/);
     expect(roleBlock).toContain('FROM pg_auth_members membership');
   });
 

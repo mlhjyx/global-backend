@@ -38,16 +38,31 @@ CREATE TYPE "tool_budget_operation_status" AS ENUM ('RESERVED', 'SETTLED', 'RELE
 -- Runtime writers use distinct login principals that are members of exactly
 -- one fixed NOLOGIN role. The ordinary app_user can only read leases for
 -- readiness and can never mint a READY Worker/Relay identity.
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'runtime_api') THEN
-    CREATE ROLE runtime_api NOLOGIN;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'runtime_worker') THEN
-    CREATE ROLE runtime_worker NOLOGIN;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'runtime_outbox_relay') THEN
-    CREATE ROLE runtime_outbox_relay NOLOGIN;
-  END IF;
+DO $$
+DECLARE
+  group_name TEXT;
+  group_role pg_roles%ROWTYPE;
+BEGIN
+  FOREACH group_name IN ARRAY ARRAY['runtime_api', 'runtime_worker', 'runtime_outbox_relay']
+  LOOP
+    SELECT * INTO group_role FROM pg_roles WHERE rolname = group_name;
+    IF group_role.oid IS NULL THEN
+      EXECUTE format('CREATE ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS', group_name);
+    ELSIF group_role.rolcanlogin
+      OR group_role.rolsuper
+      OR group_role.rolbypassrls
+      OR group_role.rolcreaterole
+      OR group_role.rolcreatedb
+      OR group_role.rolreplication
+      OR EXISTS (
+        SELECT 1
+          FROM pg_auth_members membership
+         WHERE membership.member = group_role.oid
+      )
+    THEN
+      RAISE EXCEPTION 'PRODUCTION_PARITY_RUNTIME_GROUP_ROLE_INVALID: %', group_name;
+    END IF;
+  END LOOP;
 END $$;
 
 CREATE TABLE "runtime_process_lease" (
