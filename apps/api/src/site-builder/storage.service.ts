@@ -72,11 +72,18 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       },
     });
     this.unregisterReadiness = readinessRegistry?.register('storage', () => {
-      const readiness = this.getReadiness();
+      return this.checkReadiness();
+    });
+  }
+
+  private asRuntimeComponentStatus(): Readonly<{ status: 'ok' }> | Readonly<{
+    status: 'failed';
+    code: StorageReadinessFailureCode;
+  }> {
+    const readiness = this.getReadiness();
       return readiness.status === 'ready'
         ? { status: 'ok' as const }
         : { status: 'failed' as const, code: readiness.code };
-    });
   }
 
   onModuleDestroy(): void {
@@ -88,6 +95,18 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
    * process diagnostic surface alive while capability readiness remains fail-closed.
    */
   async onModuleInit(): Promise<void> {
+    await this.refreshReadiness();
+  }
+
+  /** Re-checks provisioned storage instead of permanently caching a startup outage. */
+  async checkReadiness(): Promise<
+    Readonly<{ status: 'ok' }> | Readonly<{ status: 'failed'; code: StorageReadinessFailureCode }>
+  > {
+    await this.refreshReadiness();
+    return this.asRuntimeComponentStatus();
+  }
+
+  private async refreshReadiness(): Promise<void> {
     if (!process.env.S3_ACCESS_KEY || !process.env.S3_SECRET_KEY) {
       this.failReadiness('OBJECT_STORAGE_CREDENTIALS_REQUIRED');
       return;

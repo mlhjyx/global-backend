@@ -71,6 +71,7 @@ import {
 } from "../runtime/managed-dependency-readiness";
 import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
+import { waitForWorkerDependencyAdmission } from "../runtime/worker-dependency-admission";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -159,37 +160,28 @@ async function main(): Promise<void> {
   const costLedger = new SiteBuildCostLedger(prisma);
   const siteBuilderStorage = new StorageService();
   await siteBuilderStorage.onModuleInit();
-  const storageReadiness = siteBuilderStorage.getReadiness();
-  if (storageReadiness.status !== "ready") {
-    clearInterval(startingHeartbeat);
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(storageReadiness.code, runtimeLeases);
-  }
-  const redisReadiness = await checkRedisReadiness(process.env);
-  if (redisReadiness.status !== "ok") {
-    clearInterval(startingHeartbeat);
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(redisReadiness.code, runtimeLeases);
-  }
-  const gatewayReadiness = await checkModelGatewayReadiness(process.env);
-  if (gatewayReadiness.status !== "ok") {
-    clearInterval(startingHeartbeat);
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(gatewayReadiness.code, runtimeLeases);
-  }
-  const browserReadiness = await checkBrowserReadiness(process.env);
-  if (browserReadiness.status !== "ok") {
-    clearInterval(startingHeartbeat);
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(browserReadiness.code, runtimeLeases);
-  }
-  const imageIsolationReadiness =
-    await checkImagePipelineIsolationReadiness();
-  if (imageIsolationReadiness.status !== "ok") {
-    clearInterval(startingHeartbeat);
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(imageIsolationReadiness.code, runtimeLeases);
-  }
+  const dependencyBlocked = (code: string): void =>
+    console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`);
+  await waitForWorkerDependencyAdmission({
+    check: () => siteBuilderStorage.checkReadiness(),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkRedisReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkModelGatewayReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkBrowserReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkImagePipelineIsolationReadiness(),
+    onBlocked: dependencyBlocked,
+  });
   const rendererBuildIdentity = rendererRuntimeIdentity(releaseIdentity);
   const releaseService = new SiteReleaseService(prisma, siteBuilderStorage, {
     buildIdentity: rendererBuildIdentity,

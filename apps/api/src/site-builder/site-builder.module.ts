@@ -28,7 +28,6 @@ import { DeterministicQualityService } from './quality/deterministic-quality.ser
 import { ClosedRepairService } from './quality/closed-repair.service';
 import { SiteBuildBudgetGrantVerifier } from './site-build-budget-grant';
 import { SiteBuildRuntimeGuard } from '../runtime/site-build-runtime.guard';
-import { RuntimeReadinessService } from '../health/runtime-readiness.service';
 import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readiness-registry';
 
 /**
@@ -61,7 +60,6 @@ import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readines
       useFactory: (registry: RuntimeReadinessContributorRegistry) =>
         new SiteBuildBudgetGrantVerifier(process.env, {}, registry),
     },
-    RuntimeReadinessService,
     SiteBuildRuntimeGuard,
     SitePreviewArtifactService,
     ImagePipelineService,

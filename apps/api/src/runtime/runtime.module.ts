@@ -22,6 +22,7 @@ import {
 } from './runtime-process-lease';
 import { ApiRuntimeProcessHeartbeat } from './runtime-process-heartbeat';
 import { ManagedDependencyReadinessContributors } from './managed-dependency-readiness';
+import { RuntimeReadinessService } from '../health/runtime-readiness.service';
 
 export const RUNTIME_SETTINGS = Symbol('RUNTIME_SETTINGS');
 export const RUNTIME_RELEASE_IDENTITY = Symbol('RUNTIME_RELEASE_IDENTITY');
@@ -100,6 +101,7 @@ function buildCompatibilityIdentity(identity: RuntimeReleaseIdentity): BuildIden
     },
     ApiRuntimeProcessHeartbeat,
     ManagedDependencyReadinessContributors,
+    RuntimeReadinessService,
   ],
   exports: [
     RUNTIME_SETTINGS,
@@ -108,6 +110,7 @@ function buildCompatibilityIdentity(identity: RuntimeReleaseIdentity): BuildIden
     RuntimeAdmissionService,
     RuntimeReadinessContributorRegistry,
     RuntimeProcessLeaseService,
+    RuntimeReadinessService,
   ],
 })
 export class RuntimeModule {}

@@ -22,6 +22,7 @@ import {
 } from "../temporal/asset-cleanup.contract";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
 import { RuntimeProcessLeaseService } from "../runtime/runtime-process-lease";
+import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import {
   INTEGRATION_EVENTS,
@@ -109,7 +110,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     | Readonly<{ status: "ready" }>
     | Readonly<{
         status: "not_ready";
-        code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE";
+        code:
+          | "OUTBOX_RELAY_DATABASE_UNAVAILABLE"
+          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED";
       }> = {
     status: "not_ready",
     code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
@@ -121,6 +124,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     @Optional() db?: PrismaClient,
     @Optional() fetchFn?: FetchLike,
     @Optional() private readonly leases?: RuntimeProcessLeaseService,
+    @Optional() private readonly admission?: RuntimeAdmissionService,
   ) {
     this.db =
       db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -139,12 +143,22 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     | Readonly<{ status: "ready" }>
     | Readonly<{
         status: "not_ready";
-        code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE";
+        code:
+          | "OUTBOX_RELAY_DATABASE_UNAVAILABLE"
+          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED";
       }> {
     return this.readiness;
   }
 
   async reconnect(): Promise<boolean> {
+    if (this.admission && !this.admission.current().admitted) {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED",
+      };
+      this.logger.error("outbox relay runtime admission is closed; relay remains non-consuming");
+      return false;
+    }
     try {
       await this.db.$connect();
       if (!this.leaseStartingPublished) {

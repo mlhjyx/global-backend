@@ -52,7 +52,7 @@ describe('StorageService variant-attempt lifecycle', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('publishes one shared storage readiness contribution and unregisters it on destroy', () => {
+  it('publishes one shared storage readiness contribution and unregisters it on destroy', async () => {
     let contribute: (() => unknown) | undefined;
     const unregister = vi.fn();
     const registry = {
@@ -66,7 +66,7 @@ describe('StorageService variant-attempt lifecycle', () => {
     const service = new StorageService(registry as never);
 
     expect(registry.register).toHaveBeenCalledTimes(1);
-    expect(contribute?.()).toEqual({
+    await expect(contribute?.()).resolves.toEqual({
       status: 'failed',
       code: 'OBJECT_STORAGE_CREDENTIALS_REQUIRED',
     });
@@ -96,7 +96,7 @@ describe('StorageService variant-attempt lifecycle', () => {
 
       await service.onModuleInit();
 
-      expect(contribute?.()).toEqual({ status: 'ok' });
+      await expect(contribute?.()).resolves.toEqual({ status: 'ok' });
       service.onModuleDestroy();
       expect(unregister).toHaveBeenCalledOnce();
     });

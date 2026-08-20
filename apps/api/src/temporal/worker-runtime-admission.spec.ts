@@ -25,7 +25,7 @@ describe("worker runtime admission wiring", () => {
 
   it("checks migration, storage, native isolation and mixed worker identities before polling", () => {
     const migration = source.indexOf("assertMigrationCompatible");
-    const storage = source.indexOf("getReadiness()");
+    const storage = source.indexOf("checkReadiness()");
     const browser = source.indexOf("checkBrowserReadiness");
     const imageIsolation = source.indexOf(
       "checkImagePipelineIsolationReadiness",
@@ -65,5 +65,14 @@ describe("worker runtime admission wiring", () => {
     expect(source).toContain("startWorkerLeaseHeartbeat");
     expect(source).toContain("runtime lease lost; polling is shutting down");
     expect(source).not.toContain('.heartbeat("WORKER", "READY", UNDERSTANDING_TASK_QUEUE)\n      .catch(() => undefined)');
+  });
+
+  it("retries managed dependency readiness without enabling polling or using a fallback", () => {
+    const poll = source.indexOf("worker.run()");
+    const dependencyAdmission = source.indexOf("waitForWorkerDependencyAdmission");
+    expect(dependencyAdmission).toBeGreaterThan(-1);
+    expect(dependencyAdmission).toBeLessThan(poll);
+    expect(source).not.toContain("await holdWorkerNotReady(redisReadiness.code");
+    expect(source).not.toContain("await holdWorkerNotReady(gatewayReadiness.code");
   });
 });
