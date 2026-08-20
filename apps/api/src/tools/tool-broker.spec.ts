@@ -121,7 +121,8 @@ describe('ToolBroker — per-wire external-action authorization', () => {
 
 describe('ToolBroker — 预算 reserve-then-settle', () => {
   it('replays an approved durable projection without executing the physical tool again', async () => {
-    const tool = fakeTool('t.replay', 1, vi.fn(async () => ({ mustNotRun: true })));
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool('t.replay', 1, execute);
     tool.durableReplayResult = (result) => result;
     const projectedResult = { data: { value: 'cached' }, costCents: 1 };
     const projection = projectGenericOperationResult({
@@ -138,7 +139,7 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
 
     await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
       .resolves.toEqual(projectedResult);
-    expect(tool.execute).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('atomically settles the scrubbed tool projection with the observed cost', async () => {

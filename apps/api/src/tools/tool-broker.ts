@@ -13,6 +13,10 @@ import {
   UnavailableBudgetStore,
 } from './budget-store';
 import { UnavailableRateLimitStore } from './redis-rate-limit-store';
+import {
+  projectGenericOperationResult,
+  type GenericOperationProjection,
+} from './generic-operation-projection';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   legacyToolCostMeasurement,
@@ -262,6 +266,11 @@ export class ToolBroker implements ExecutionBroker {
           estimatedCents: tool.cost.estimatedCents,
         });
         if (reservation.replay) {
+          const replay = this.replayGenericToolProjection(
+            tool,
+            reservation.replayProjection,
+          );
+          if (replay) return replay;
           throw new BudgetOperationReplayError(reservation.operationId);
         }
       } catch (err) {
@@ -396,7 +405,19 @@ export class ToolBroker implements ExecutionBroker {
           },
         });
       } else if (reservation) {
-        await this.budget.settle(reservation, result.costCents);
+        const durableReplay = tool.durableReplayResult?.(result) ?? null;
+        const projection = durableReplay
+          ? projectGenericOperationResult({
+              kind: 'tool',
+              schema: 'tool-result/v1',
+              data: {
+                toolId: tool.id,
+                toolVersion: tool.version,
+                result: durableReplay,
+              },
+            })
+          : undefined;
+        await this.budget.settle(reservation, result.costCents, projection);
       }
       this.trace(
         ctx,
@@ -412,6 +433,36 @@ export class ToolBroker implements ExecutionBroker {
     } finally {
       await release?.();
     }
+  }
+
+  private replayGenericToolProjection<I, O>(
+    tool: Tool<I, O>,
+    projection: GenericOperationProjection | undefined,
+  ): ToolResult<O> | null {
+    if (
+      !projection ||
+      projection.kind !== 'tool' ||
+      projection.schema !== 'tool-result/v1' ||
+      !projection.data ||
+      typeof projection.data !== 'object' ||
+      Array.isArray(projection.data)
+    ) return null;
+    const envelope = projection.data as Record<string, unknown>;
+    if (
+      envelope.toolId !== tool.id ||
+      envelope.toolVersion !== tool.version ||
+      !tool.durableReplayResult
+    ) return null;
+    const replay = tool.durableReplayResult(
+      envelope.result as ToolResult<O>,
+    );
+    if (!replay) return null;
+    const verified = projectGenericOperationResult({
+      kind: 'tool',
+      schema: 'tool-result/v1',
+      data: { toolId: tool.id, toolVersion: tool.version, result: replay },
+    });
+    return verified.digest === projection.digest ? replay : null;
   }
 
   private notIncurredMeasurement(): PaidCostMeasurement {
