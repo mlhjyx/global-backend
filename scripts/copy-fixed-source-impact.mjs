@@ -65,6 +65,22 @@ const REVIEWED_STALE_SCOPES = Object.freeze([
       "pnpm-lock.yaml",
     ]),
   }),
+  Object.freeze({
+    scope: "PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION",
+    paths: Object.freeze([
+      "apps/api/package.json",
+      "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+      "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+      "apps/api/src/site-builder/agents/ai-task.ts",
+      "apps/api/tsconfig.build.json",
+      "package.json",
+      "packages/contracts/package.json",
+      "packages/contracts/src/index.ts",
+      "packages/contracts/src/site-builder/component-qualification.ts",
+      "packages/db/prisma/schema.prisma",
+      "pnpm-lock.yaml",
+    ]),
+  }),
 ]);
 
 function fail(code) {
