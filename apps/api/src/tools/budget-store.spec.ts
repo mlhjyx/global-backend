@@ -1,5 +1,7 @@
+import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import {
   BudgetAccountUnavailableError,
   BudgetExceededError,
@@ -22,6 +24,85 @@ function fakePrisma(rows: unknown[][]): PrismaService {
 }
 
 describe('PostgresBudgetStore', () => {
+  it('opens an authority-bound account without accepting or sending a caller amount', async () => {
+    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async (query) => {
+          queries.push(query);
+          return [{
+            account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+            generation: 2,
+            authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+            authorized_cap_microusd: 2_000_000n,
+          }];
+        }),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      accountKey: 'icp:design:req',
+      replayScope: true,
+    })).resolves.toEqual({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      authorizedCapMicrousd: 2_000_000n,
+      generation: 2,
+    });
+
+    const serializedQuery = queries[0]?.strings?.join('') ?? '';
+    expect(serializedQuery).toContain('open_authorized_tool_budget_v1');
+    expect(serializedQuery).not.toMatch(/capCents|capMicrousd|amount/i);
+    expect(queries[0]?.values).toEqual([
+      'e03abddd-1307-47cb-a731-7e7a786615a0',
+      '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      'icp:design:req',
+      true,
+    ]);
+  });
+
+  it('does not treat the legacy owner connection as the platform authority writer', async () => {
+    const ownerDb = {
+      $transaction: vi.fn(async () => []),
+    } as unknown as PrismaClient;
+    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb);
+
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'platform',
+      accountKey: 'acquisition-hourly:run-1',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
+    );
+    expect(ownerDb.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'EXECUTION_BUDGET_GRANT_INVALID',
+    'EXECUTION_BUDGET_GRANT_EXPIRED',
+    'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    'EXECUTION_BUDGET_GRANT_REUSED',
+    'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+    'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
+  ] as const)('maps authorized-open SQL marker %s without leaking database detail', async (marker) => {
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async () => {
+          throw new Error(`database detail: ${marker}; host=secret`);
+        }),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      accountKey: 'icp:design:req',
+    })).rejects.toEqual(new ExecutionBudgetGrantError(marker));
+  });
+
   it('maps an atomic reservation into a durable handle', async () => {
     const store = new PostgresBudgetStore(
       fakePrisma([
