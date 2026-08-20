@@ -168,9 +168,35 @@ Mutation tests 证明少一路、额外一路、以及用 predecessor 的旧 10-
 
 下表绑定代码/治理提交 `7b34625c67bb8ecce431660a0d6b169d54d3201e`；后续文档提交不改变被测产品代码。
 
+Fix Round 1 使用完整 Authority/Task 7/BudgetStore denominator；以下命令保留原六个 include 与十个 specs，并只新增 `budget-store.ts` 和 `budget-store.spec.ts`：
+
+```bash
+pnpm --filter @global/api exec vitest run \
+  --coverage \
+  --coverage.reporter=text \
+  --coverage.include='src/execution-budget/**/*.ts' \
+  --coverage.include=src/runtime/managed-dependency-readiness.ts \
+  --coverage.include=src/health/runtime-readiness.service.ts \
+  --coverage.include=src/health/health.controller.ts \
+  --coverage.include=src/health/health-openapi.schemas.ts \
+  --coverage.include=src/runtime/site-build-runtime.guard.ts \
+  --coverage.include=src/tools/budget-store.ts \
+  src/execution-budget/execution-budget-authority.types.spec.ts \
+  src/execution-budget/execution-budget-grant.verifier.spec.ts \
+  src/execution-budget/execution-budget-authority.repository.spec.ts \
+  src/execution-budget/execution-budget-authority.service.spec.ts \
+  src/execution-budget/platform-authority-ingestion.service.spec.ts \
+  src/runtime/managed-dependency-readiness.spec.ts \
+  src/health/runtime-readiness.service.spec.ts \
+  src/health/health.controller.spec.ts \
+  src/health/health-openapi.spec.ts \
+  src/runtime/site-build-runtime.guard.spec.ts \
+  src/tools/budget-store.spec.ts
+```
+
 | 检查 | 命令与结果 |
 | --- | --- |
-| Authority + Task 7 changed-scope coverage | `pnpm --filter @global/api exec vitest run --coverage ...`：10 files / 214 tests PASS；statements 88.30% (521/590)，branches 87.71% (400/456)，functions 86.52% (122/141)，lines 90.84% (506/557)。`execution-budget` 子目录 statements 92.11%、branches 89.71% |
+| Authority + Task 7 + BudgetStore changed-scope coverage | 上方 exact command：11 files / 252 tests PASS；statements 88.76% (632/712)，branches 88.21% (479/543)，functions 88.10% (163/185)，lines 91.19% (611/670)。`execution-budget` 子目录 statements 92.39%、branches 90.00%；`budget-store.ts` statements 90.16%、branches 89.65% |
 | Full API | `pnpm --filter @global/api test`：327 files / 4,836 tests PASS；`pnpm --filter @global/api build` PASS |
 | API lint | `pnpm --filter @global/api lint`：0 errors、17 个既有 warnings，均不在 Authority 新目录 |
 | Contracts | `pnpm --filter @global/contracts build` PASS；`pnpm --filter @global/contracts lint`：0 errors、15 个既有 undefined-tag warnings |
