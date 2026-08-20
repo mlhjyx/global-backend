@@ -165,6 +165,48 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     );
   });
 
+  it('retries an unknown success-settlement ACK with the identical tool projection and no second wire', async () => {
+    const execute = vi.fn(async () => ({ value: 'live' }));
+    const tool = fakeTool('t.settlement-ack', 1, execute);
+    tool.durableReplayResult = (result) => result;
+    const settle = vi.fn()
+      .mockRejectedValueOnce(new Error('settlement ACK unavailable'))
+      .mockResolvedValueOnce({ chargedCents: 1, observedCents: 1, capVariance: false, replay: true });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .resolves.toMatchObject({ data: { value: 'live' } });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
+    expect(settle.mock.calls[0]?.[2]).toMatchObject({ kind: 'tool', schema: 'tool-result/v1' });
+  });
+
+  it('converts a first-success replay projector failure into the stable no-second-wire error', async () => {
+    const execute = vi.fn(async () => ({ value: 'live' }));
+    const tool = fakeTool('t.projector-failure', 1, execute);
+    tool.durableReplayResult = () => { throw new Error('projection contract unavailable'); };
+    const settle = vi.fn();
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(settle).not.toHaveBeenCalled();
+  });
+
   it('rejects a projection bound to another tool without executing either wire', async () => {
     const execute = vi.fn(async () => ({ mustNotRun: true }));
     const tool = fakeTool('t.bound', 1, execute);
