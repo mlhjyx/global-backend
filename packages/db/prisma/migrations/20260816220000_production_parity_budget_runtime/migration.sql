@@ -30,6 +30,12 @@ BEGIN
   END IF;
 END $$;
 
+-- Projection digests are recalculated inside PostgreSQL. pgcrypto is a trusted
+-- extension and is installed by the database owner in the same transaction;
+-- callers cannot make two caller-controlled digest strings authenticate each
+-- other without the database recomputing the canonical payload.
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
 CREATE TYPE "runtime_process_role" AS ENUM ('API', 'WORKER', 'OUTBOX_RELAY');
 CREATE TYPE "runtime_process_state" AS ENUM ('STARTING', 'READY', 'DRAINING', 'STOPPED');
 CREATE TYPE "site_build_spend_reconciliation_status" AS ENUM ('UNRESOLVED', 'RESOLVED', 'CONFLICT', 'EXPIRED');
@@ -609,6 +615,10 @@ CREATE TABLE "tool_budget_operation" (
     ("result_schema_version" IS NULL AND "result_schema" IS NULL AND "result_digest" IS NULL AND "result_json" IS NULL)
     OR (
       "status" = 'SETTLED'
+      AND "result_schema_version" IS NOT NULL
+      AND "result_schema" IS NOT NULL
+      AND "result_digest" IS NOT NULL
+      AND "result_json" IS NOT NULL
       AND "result_schema_version" = 'generic-operation-projection/v1'
       AND "result_schema" ~ '^[a-z][a-z0-9_-]{1,63}/v[1-9][0-9]{0,3}$'
       AND "result_digest" ~ '^[0-9a-f]{64}$'
@@ -617,6 +627,53 @@ CREATE TABLE "tool_budget_operation" (
   )
 );
 CREATE INDEX "tool_budget_operation_scope_account_status_idx" ON "tool_budget_operation"("scope_key", "account_id", "status");
+
+CREATE FUNCTION generic_operation_canonical_json(p_value JSONB)
+RETURNS TEXT LANGUAGE plpgsql IMMUTABLE STRICT
+SET search_path = pg_catalog, public AS $$
+DECLARE
+  rendered TEXT;
+BEGIN
+  CASE jsonb_typeof(p_value)
+    WHEN 'object' THEN
+      SELECT '{' || COALESCE(string_agg(
+        to_jsonb(entry.key)::text || ':' || generic_operation_canonical_json(entry.value),
+        ',' ORDER BY entry.key
+      ), '') || '}'
+      INTO rendered
+      FROM jsonb_each(p_value) AS entry;
+      RETURN rendered;
+    WHEN 'array' THEN
+      SELECT '[' || COALESCE(string_agg(
+        generic_operation_canonical_json(entry.value),
+        ',' ORDER BY entry.ordinality
+      ), '') || ']'
+      INTO rendered
+      FROM jsonb_array_elements(p_value) WITH ORDINALITY AS entry(value, ordinality);
+      RETURN rendered;
+    ELSE
+      RETURN p_value::text;
+  END CASE;
+END $$;
+
+CREATE FUNCTION generic_operation_projection_digest(p_projection JSONB)
+RETURNS TEXT LANGUAGE sql IMMUTABLE STRICT
+SET search_path = pg_catalog, public AS $$
+  SELECT encode(
+    public.digest(
+      convert_to(
+        '{"schemaVersion":' || to_jsonb(p_projection->>'schemaVersion')::text
+        || ',"kind":' || to_jsonb(p_projection->>'kind')::text
+        || ',"schema":' || to_jsonb(p_projection->>'schema')::text
+        || ',"data":' || generic_operation_canonical_json(p_projection->'data')
+        || '}',
+        'UTF8'
+      ),
+      'sha256'
+    ),
+    'hex'
+  )
+$$;
 
 ALTER TABLE "site_build_budget_grant" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "site_build_budget_grant" FORCE ROW LEVEL SECURITY;
@@ -716,12 +773,11 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE a "tool_budget_account"%ROWTYPE; o "tool_budget_operation"%ROWTYPE; charge BIGINT;
 BEGIN
   IF ((p_scope_key = 'platform' AND session_user = 'app_user') OR (p_scope_key <> 'platform' AND p_scope_key IS DISTINCT FROM current_workspace_id()::text)) OR p_observed_cents < 0 THEN RAISE EXCEPTION 'invalid tool budget settlement'; END IF;
-  SELECT * INTO o FROM "tool_budget_operation" WHERE "id"=p_operation_id AND "scope_key"=p_scope_key FOR UPDATE;
-  IF o."id" IS NULL THEN RAISE EXCEPTION 'TOOL_BUDGET_OPERATION_UNAVAILABLE'; END IF;
-  SELECT * INTO a FROM "tool_budget_account" WHERE "id"=o."account_id" AND "scope_key"=p_scope_key FOR UPDATE;
-  IF o."status" <> 'RESERVED' THEN RETURN QUERY SELECT o."charged_cents",o."observed_cents",o."observed_cents">o."reserved_cents",o."status"::text,true; RETURN; END IF;
-  charge:=LEAST(p_observed_cents,o."reserved_cents");
-  IF (p_result_json IS NULL) IS DISTINCT FROM (p_result_schema_version IS NULL AND p_result_schema IS NULL AND p_result_digest IS NULL) THEN
+  IF NOT (
+    (p_result_json IS NULL AND p_result_schema_version IS NULL AND p_result_schema IS NULL AND p_result_digest IS NULL)
+    OR
+    (p_result_json IS NOT NULL AND p_result_schema_version IS NOT NULL AND p_result_schema IS NOT NULL AND p_result_digest IS NOT NULL)
+  ) THEN
     RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
   END IF;
   IF p_result_json IS NOT NULL THEN
@@ -729,14 +785,15 @@ BEGIN
       RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
     END IF;
     IF (SELECT count(*) FROM jsonb_object_keys(p_result_json)) <> 5
-      OR p_result_schema_version <> 'generic-operation-projection/v1'
-      OR p_result_schema !~ '^[a-z][a-z0-9_-]{1,63}/v[1-9][0-9]{0,3}$'
-      OR p_result_digest !~ '^[0-9a-f]{64}$'
+      OR p_result_schema_version IS DISTINCT FROM 'generic-operation-projection/v1'
+      OR COALESCE(p_result_schema !~ '^[a-z][a-z0-9_-]{1,63}/v[1-9][0-9]{0,3}$', true)
+      OR COALESCE(p_result_digest !~ '^[0-9a-f]{64}$', true)
       OR p_result_json->>'schemaVersion' IS DISTINCT FROM p_result_schema_version
       OR p_result_json->>'schema' IS DISTINCT FROM p_result_schema
       OR p_result_json->>'digest' IS DISTINCT FROM p_result_digest
       OR COALESCE(p_result_json->>'kind' NOT IN ('model', 'tool'), true)
       OR NOT (p_result_json ? 'data')
+      OR p_result_digest IS DISTINCT FROM generic_operation_projection_digest(p_result_json)
       OR jsonb_path_exists(
         p_result_json,
         '$.** ? (@.type() == "object").keyvalue() ? (@.key like_regex "^(authorization|headers|prompt|rawresponse|token)$" flag "i")'
@@ -745,6 +802,26 @@ BEGIN
       RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
     END IF;
   END IF;
+  SELECT * INTO o FROM "tool_budget_operation" WHERE "id"=p_operation_id AND "scope_key"=p_scope_key FOR UPDATE;
+  IF o."id" IS NULL THEN RAISE EXCEPTION 'TOOL_BUDGET_OPERATION_UNAVAILABLE'; END IF;
+  SELECT * INTO a FROM "tool_budget_account" WHERE "id"=o."account_id" AND "scope_key"=p_scope_key FOR UPDATE;
+  IF o."status" <> 'RESERVED' THEN
+    IF o."status" <> 'SETTLED'
+      OR o."observed_cents" IS DISTINCT FROM p_observed_cents
+      OR o."result_schema_version" IS DISTINCT FROM p_result_schema_version
+      OR o."result_schema" IS DISTINCT FROM p_result_schema
+      OR o."result_digest" IS DISTINCT FROM p_result_digest
+      OR o."result_json" IS DISTINCT FROM p_result_json
+    THEN
+      RAISE EXCEPTION 'GENERIC_OPERATION_SETTLEMENT_CONFLICT';
+    END IF;
+    RETURN QUERY SELECT o."charged_cents",o."observed_cents",o."observed_cents">o."reserved_cents",o."status"::text,true;
+    RETURN;
+  END IF;
+  -- Generic product calls use conservative charging. observed_cents remains an
+  -- append-only observation, but a caller cannot release authorization by
+  -- reporting a lower value than the reserved physical-call upper bound.
+  charge:=o."reserved_cents";
   UPDATE "tool_budget_operation" SET
     "observed_cents"=p_observed_cents,"charged_cents"=charge,"status"='SETTLED',
     "result_schema_version"=p_result_schema_version,"result_schema"=p_result_schema,
@@ -815,6 +892,7 @@ REVOKE ALL ON FUNCTION heartbeat_api_runtime_process_lease(UUID,"runtime_process
 REVOKE ALL ON FUNCTION create_site_build_budget_from_grant(UUID,UUID), disable_site_build_paid_calls(UUID,UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reserve_site_build_spend(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,TEXT,BIGINT,JSONB), settle_site_build_spend(UUID,UUID,VARCHAR,UUID,TEXT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,INTEGER,INTEGER,INTEGER,JSONB,JSONB,TEXT), reconcile_site_build_spend(UUID,UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT,TEXT,TEXT,TEXT,JSONB), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION generic_operation_canonical_json(JSONB), generic_operation_projection_digest(JSONB) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT,TEXT,TEXT,TEXT,JSONB), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) TO app_user;
 GRANT EXECUTE ON FUNCTION create_site_build_budget_from_grant(UUID,UUID), disable_site_build_paid_calls(UUID,UUID,TEXT) TO app_user;
 GRANT EXECUTE ON FUNCTION reserve_site_build_spend(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,TEXT,BIGINT,JSONB), settle_site_build_spend(UUID,UUID,VARCHAR,UUID,TEXT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,INTEGER,INTEGER,INTEGER,JSONB,JSONB,TEXT), reconcile_site_build_spend(UUID,UUID) TO app_user;
