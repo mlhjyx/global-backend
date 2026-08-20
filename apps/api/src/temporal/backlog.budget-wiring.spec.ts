@@ -19,7 +19,7 @@ describe('backlog durable budget wiring', () => {
     expect(activities).toContain("openStageBudget('email-guess'");
     expect(activities).toMatch(/correlationId: 'backlog-enrich',[\s\S]*?runId: budget\.key/);
     expect(activities).toMatch(/registerWatch\([\s\S]*?budgetKey: budget\.key/);
-    expect(activities).toMatch(/actor: 'backlog',[\s\S]*?runId: budget\.key/);
+    expect(activities).toMatch(/workspaceId: args\.workspaceId,[\s\S]*?runId: budget\.key/);
     expect(activities).toContain('err instanceof BudgetOperationReplayError');
   });
 });

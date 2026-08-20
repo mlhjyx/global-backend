@@ -6,7 +6,11 @@ import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, ProviderContactRecord,
 } from '../discovery/provider-contract';
 import { BudgetExceededError, sweepBudgetCents } from '../tools/budget';
-import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import {
+  BudgetOperationReplayError,
+  type BudgetStore,
+  UnavailableBudgetStore,
+} from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
@@ -401,38 +405,45 @@ export function createBacklogActivities(deps: {
         if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
         attempted += 1;
         const hits: { key: string; result: EnrichmentResult }[] = [];
-        const ctx: ExecutionContext = {
-          workspaceId: args.workspaceId,
-          correlationId: 'backlog-enrich',
-          authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
-        };
-        for (const e of pending) {
-          if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
-          try {
-            const r = await e.enrichCompany(
-              {
-                name: c.name,
-                domain: c.domain ?? undefined,
-                country: c.country ?? undefined,
-                region: c.region ?? undefined,
-              },
-              ctx,
-            );
-            if (r.matched) hits.push({ key: e.key, result: r });
-          } catch {
-            /* 单富集源失败不影响其余 */
-          }
-        }
-        if (!hits.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          commitCompanyEnrichmentResults(tx, {
+        const budget = await openStageBudget('enrich', args.workspaceId, args.budgetScopeId);
+        try {
+          const ctx: ExecutionContext = {
             workspaceId: args.workspaceId,
-            companyId: c.id,
-            hits,
-            status: 'ENRICHED',
-          }),
-        );
-        if (committed) matched += 1;
+            correlationId: 'backlog-enrich',
+            runId: budget.key,
+            authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          };
+          for (const e of pending) {
+            if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
+            try {
+              const r = await e.enrichCompany(
+                {
+                  name: c.name,
+                  domain: c.domain ?? undefined,
+                  country: c.country ?? undefined,
+                  region: c.region ?? undefined,
+                },
+                ctx,
+              );
+              if (r.matched) hits.push({ key: e.key, result: r });
+            } catch (err) {
+              if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
+              /* 单富集源失败不影响其余 */
+            }
+          }
+          if (!hits.length) continue;
+          const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            commitCompanyEnrichmentResults(tx, {
+              workspaceId: args.workspaceId,
+              companyId: c.id,
+              hits,
+              status: 'ENRICHED',
+            }),
+          );
+          if (committed) matched += 1;
+        } finally {
+          await budget.close();
+        }
       }
       // 水位：本批全部已处理（命中/未命中/已有命名空间跳过）→ 离开过滤集，游标吞噬存量。
       await stampProcessed(
@@ -616,13 +627,19 @@ export function createBacklogActivities(deps: {
         if (!c.domain || existing.has(keyOf(c.domain))) continue;
         if (suspended.has(c.domain.toLowerCase())) continue; // DAT-011：kill-switch 域名不注册、不探测 sitemap
         if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) continue;
+        const budget = await openStageBudget('watch', args.workspaceId, args.budgetScopeId);
         try {
           await intentSvc.registerWatch(args.workspaceId, c.id, {
+            budgetKey: budget.key,
+            budgetWorkspaceId: args.workspaceId,
             authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
           });
           registered += 1;
-        } catch {
+        } catch (err) {
+          if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
           /* 单家注册失败（sitemap 不可达/DAT-011）不影响其余 */
+        } finally {
+          await budget.close();
         }
       }
       // 水位：本批全部已处理（新注册/已注册跳过/DAT-011）→ 离开过滤集，游标吞噬存量。
@@ -941,6 +958,7 @@ export function createBacklogActivities(deps: {
         for (const t of gc.emailless) {
           if (!(await contactMayUseExternal(args.workspaceId, t.contactId))) continue;
           attempted += 1;
+          const budget = await openStageBudget('email-guess', args.workspaceId, args.budgetScopeId);
           try {
             const result = await guesser.guess(
               {
@@ -950,6 +968,7 @@ export function createBacklogActivities(deps: {
               },
               {
                 workspaceId: args.workspaceId,
+                runId: budget.key,
                 lawfulBasis, // interim 全局 LIA（config 配置）；🔴 自动路径**绝不**传 allowPersonalWithoutBasis
                 actor: 'backlog',
                 suppressedEmails,
@@ -958,8 +977,11 @@ export function createBacklogActivities(deps: {
               },
             );
             results.push({ contactId: t.contactId, result });
-          } catch {
+          } catch (err) {
+            if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
             /* 单人猜测失败（SMTP 异常等）不影响其余 */
+          } finally {
+            await budget.close();
           }
         }
       }

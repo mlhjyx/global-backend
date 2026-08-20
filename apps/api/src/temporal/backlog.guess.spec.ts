@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBacklogActivities, parseConfiguredLawfulBasis } from './backlog.activities';
 import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
 import type { EmailVerificationAdapter } from '../discovery/provider-contract';
+import { BudgetLedger } from '../tools/budget';
+import { InMemoryBudgetStoreAdapter } from '../tools/budget-store';
 
 /**
  * 存量邮箱猜测活动（选项 B · P0.4，阶段⑤b）单测：**双闸合规门**（kill-switch + config.lawfulBasis）、
@@ -111,7 +113,14 @@ function makeDeps(opts: {
   };
   const providers = { routeEmailVerification: async () => (opts.noVerifier ? [] : [verifier]) };
   const ownerDb = { dataProvider: { findFirst: async () => opts.providerRow } };
-  const deps = { prisma, providers, gateway: {}, ownerDb } as unknown as Parameters<typeof createBacklogActivities>[0];
+  const deps = {
+    prisma,
+    providers,
+    gateway: {},
+    ownerDb,
+    budgetStore: new InMemoryBudgetStoreAdapter(new BudgetLedger()),
+    activityRunId: () => 'backlog-guess-test-run',
+  } as unknown as Parameters<typeof createBacklogActivities>[0];
   return { deps, updateManyCalls, upsertedPoints };
 }
 

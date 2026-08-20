@@ -104,7 +104,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxEnrichRounds ?? 10); round++) {
-        const r: EnrichBacklogResult = await fitActs.enrichBacklog({ workspaceId: t.workspaceId, limit: input?.enrichBatch ?? 25, cursor });
+        const r: EnrichBacklogResult = await fitActs.enrichBacklog({ workspaceId: t.workspaceId, budgetScopeId, limit: input?.enrichBatch ?? 25, cursor });
         stats.enrich.scanned += r.scanned;
         stats.enrich.attempted += r.attempted;
         stats.enrich.matched += r.matched;
@@ -134,7 +134,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxWatchRounds ?? 3); round++) {
-        const r: WatchBacklogResult = await slowActs.registerWatchesBacklog({ workspaceId: t.workspaceId, limit: input?.watchBatch ?? 12, cursor });
+        const r: WatchBacklogResult = await slowActs.registerWatchesBacklog({ workspaceId: t.workspaceId, budgetScopeId, limit: input?.watchBatch ?? 12, cursor });
         stats.watches.scanned += r.scanned;
         stats.watches.registered += r.registered;
         cursor = r.nextCursor;
@@ -163,7 +163,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxGuessRounds ?? 3); round++) {
-        const r: GuessEmailsBacklogResult = await slowActs.guessEmailsBacklog({ ...t, limit: input?.guessBatch ?? 6, cursor });
+        const r: GuessEmailsBacklogResult = await slowActs.guessEmailsBacklog({ ...t, budgetScopeId, limit: input?.guessBatch ?? 6, cursor });
         stats.guesses.scanned += r.scanned;
         stats.guesses.attempted += r.attempted;
         stats.guesses.guessed += r.guessed;
