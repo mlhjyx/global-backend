@@ -22,9 +22,15 @@ export async function waitForWorkerDependencyAdmission(
   const retryMs = input.retryMs ?? 30_000;
   const sleep = input.sleep ?? delay;
   for (;;) {
-    const result = await input.check();
-    if (result.status === 'ok') return;
-    input.onBlocked(result.code);
+    try {
+      const result = await input.check();
+      if (result.status === 'ok') return;
+      input.onBlocked(result.code);
+    } catch {
+      // A thrown transport/probe failure has no safe success interpretation.
+      // Keep the worker STARTING and let the next bounded probe establish truth.
+      input.onBlocked('WORKER_DEPENDENCY_UNAVAILABLE');
+    }
     await sleep(retryMs);
   }
 }
