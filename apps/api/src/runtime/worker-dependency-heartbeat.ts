@@ -16,7 +16,7 @@ export async function startWorkerDependencyHeartbeat(input: {
 }): Promise<WorkerDependencyHeartbeatHandle> {
   const intervalMs = input.intervalMs ?? 10_000;
   let stopped = false;
-  let timer: NodeJS.Timeout | undefined;
+  const timer = { current: undefined as NodeJS.Timeout | undefined };
 
   const checkOnce = async (): Promise<boolean> => {
     let result: RuntimeComponentStatus;
@@ -28,7 +28,7 @@ export async function startWorkerDependencyHeartbeat(input: {
     if (result.status === 'ok') return true;
     if (stopped) return false;
     stopped = true;
-    if (timer) clearInterval(timer);
+    if (timer.current) clearInterval(timer.current);
     input.onBlocked(result.code);
     await input.leases.heartbeat('WORKER', 'DRAINING', input.taskQueue).catch(() => undefined);
     input.worker.shutdown();
@@ -36,13 +36,13 @@ export async function startWorkerDependencyHeartbeat(input: {
   };
 
   if (!(await checkOnce())) return Object.freeze({ admitted: false, stop: () => undefined });
-  timer = setInterval(() => void checkOnce(), intervalMs);
-  timer.unref();
+  timer.current = setInterval(() => void checkOnce(), intervalMs);
+  timer.current.unref();
   return Object.freeze({
     admitted: true,
     stop(): void {
       stopped = true;
-      if (timer) clearInterval(timer);
+      if (timer.current) clearInterval(timer.current);
     },
   });
 }
