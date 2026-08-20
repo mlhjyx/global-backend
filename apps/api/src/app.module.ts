@@ -21,6 +21,7 @@ import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
 import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guard';
+import { ExecutionBudgetModule } from './execution-budget/execution-budget.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -39,6 +40,7 @@ import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guar
     RuntimeModule,
     AuthModule,
     ModelGatewayModule,
+    ExecutionBudgetModule,
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,

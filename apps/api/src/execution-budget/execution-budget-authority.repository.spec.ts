@@ -9,6 +9,8 @@ import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority
 
 const WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
+const ACCOUNT_ID = '8cf66f2a-1780-453e-8d7d-f70e36cb22a6';
+const ACCOUNT_KEY = `icp.design:company:f5ba98f2-a0e2-4e85-b799-e85568877702:${'a'.repeat(64)}`;
 const COMPACT_JWS = 'header.payload.signature';
 
 function workspaceAuthority(): VerifiedExecutionBudgetAuthority {
@@ -89,6 +91,109 @@ function rawQueryMarkerError(
 }
 
 describe('ExecutionBudgetAuthorityRepository', () => {
+  it('consumes workspace authority and opens its account through the same workspace transaction', async () => {
+    const queries: Array<{
+      readonly receiver: object;
+      readonly query: {
+        strings?: readonly string[];
+        values?: readonly unknown[];
+      };
+    }> = [];
+    const tx = {
+      $queryRaw: vi.fn(async function (
+        this: object,
+        query: { strings?: readonly string[]; values?: readonly unknown[] },
+      ) {
+        queries.push({ receiver: this, query });
+        return queries.length === 1
+          ? [{ authority_id: AUTHORITY_ID, replay: false }]
+          : [
+              {
+                account_id: ACCOUNT_ID,
+                generation: 1,
+                authority_id: AUTHORITY_ID,
+                authorized_cap_microusd: 2_000_000n,
+              },
+            ];
+      }),
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+    } as unknown as PrismaService;
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+    const authority = Object.assign(workspaceAuthority(), {
+      compactJws: COMPACT_JWS,
+    });
+
+    await expect(
+      repository.consumeWorkspaceAndOpen(authority, ACCOUNT_KEY),
+    ).resolves.toEqual({
+      authorityId: AUTHORITY_ID,
+      replay: false,
+      accountId: ACCOUNT_ID,
+      generation: 1,
+      authorizedCapMicrousd: 2_000_000n,
+    });
+
+    expect(prisma.withWorkspace).toHaveBeenCalledTimes(1);
+    expect(prisma.withWorkspace).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.any(Function),
+    );
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(queries.map(({ receiver }) => receiver)).toEqual([tx, tx]);
+    expect(queries[0]?.query.strings?.join('')).toContain(
+      'consume_workspace_execution_authority',
+    );
+    expect(queries[1]?.query.strings?.join('')).toContain(
+      'open_authorized_tool_budget_v1',
+    );
+    expect(queries[1]?.query.values).toEqual([
+      WORKSPACE_ID,
+      AUTHORITY_ID,
+      ACCOUNT_KEY,
+      true,
+    ]);
+    expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(
+      COMPACT_JWS,
+    );
+  });
+
+  it('rolls back a newly consumed authority when atomic account opening fails', async () => {
+    const committed: string[] = [];
+    const observedQueries: string[] = [];
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, callback) => {
+        const staged: string[] = [];
+        const tx = {
+          $queryRaw: vi.fn(async (query: { strings?: readonly string[] }) => {
+            const sql = query.strings?.join('') ?? '';
+            observedQueries.push(sql);
+            if (sql.includes('consume_workspace_execution_authority')) {
+              staged.push('authority');
+              return [{ authority_id: AUTHORITY_ID, replay: false }];
+            }
+            throw rawQueryMarkerError('EXECUTION_BUDGET_AUTHORITY_REVOKED');
+          }),
+        };
+        const result = await callback(tx as never);
+        committed.push(...staged);
+        return result;
+      }),
+    } as unknown as PrismaService;
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(
+      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
+    ).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_AUTHORITY_REVOKED'),
+    );
+
+    expect(prisma.withWorkspace).toHaveBeenCalledTimes(1);
+    expect(observedQueries).toHaveLength(2);
+    expect(committed).toEqual([]);
+  });
+
   it('consumes verified workspace claims with parameterized SQL and returns exact replay identity', async () => {
     const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
     const responses = [

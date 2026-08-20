@@ -17,6 +17,12 @@ export interface ExecutionBudgetAuthorityPersistenceResult {
   replay: boolean;
 }
 
+export interface ExecutionBudgetWorkspaceAccountPersistenceResult extends ExecutionBudgetAuthorityPersistenceResult {
+  accountId: string;
+  generation: number;
+  authorizedCapMicrousd: bigint;
+}
+
 export interface ExecutionBudgetAuthorityRevocationInput {
   scopeKey: string;
   authorityId: string;
@@ -28,6 +34,21 @@ type AuthorityRow = {
   authority_id: string;
   replay: boolean;
 };
+
+type AuthorizedOpenRow = {
+  account_id: string;
+  generation: number;
+  authority_id: string;
+  authorized_cap_microusd: bigint;
+};
+
+type VerifiedWorkspaceExecutionBudgetAuthority =
+  VerifiedExecutionBudgetAuthority & {
+    authorityKind: 'WORKSPACE_GRANT';
+    workspaceId: string;
+    requestSha256: string;
+    capMicrousd: bigint;
+  };
 
 const DATABASE_ERROR_CODES = [
   'EXECUTION_BUDGET_GRANT_INVALID',
@@ -129,6 +150,69 @@ function parseAuthorityRow(rows: readonly AuthorityRow[]): ExecutionBudgetAuthor
   return { authorityId: row.authority_id, replay: row.replay };
 }
 
+function parseAuthorizedOpenRow(
+  rows: readonly AuthorizedOpenRow[],
+  consumption: ExecutionBudgetAuthorityPersistenceResult,
+): ExecutionBudgetWorkspaceAccountPersistenceResult {
+  const row = rows[0];
+  if (
+    rows.length !== 1 ||
+    !row ||
+    !isExecutionBudgetUuid(row.account_id) ||
+    !isExecutionBudgetUuid(row.authority_id) ||
+    row.authority_id !== consumption.authorityId ||
+    !Number.isSafeInteger(row.generation) ||
+    row.generation < 1 ||
+    typeof row.authorized_cap_microusd !== 'bigint' ||
+    row.authorized_cap_microusd < 1n
+  ) {
+    throw unavailable();
+  }
+  return {
+    ...consumption,
+    accountId: row.account_id,
+    generation: row.generation,
+    authorizedCapMicrousd: row.authorized_cap_microusd,
+  };
+}
+
+function assertWorkspaceAuthority(
+  authority: VerifiedExecutionBudgetAuthority,
+): asserts authority is VerifiedWorkspaceExecutionBudgetAuthority {
+  assertAuthorityPurposeShape(authority);
+  if (
+    authority.authorityKind !== 'WORKSPACE_GRANT' ||
+    authority.workspaceId === null ||
+    authority.requestSha256 === null ||
+    authority.capMicrousd === null
+  ) {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    );
+  }
+  assertExecutionBudgetScopeKey(authority.workspaceId, {
+    allowPlatform: false,
+  });
+  assertExecutionBudgetAuthorityId(authority.jti);
+}
+
+function consumeWorkspaceWithTransaction(
+  tx: Prisma.TransactionClient,
+  authority: VerifiedWorkspaceExecutionBudgetAuthority,
+): Promise<AuthorityRow[]> {
+  return tx.$queryRaw<AuthorityRow[]>(
+    Prisma.sql`SELECT * FROM consume_workspace_execution_authority(
+      ${authority.issuer}, ${authority.audience}, ${authority.jti}::uuid,
+      ${authority.tokenSha256}, ${authority.schemaVersion},
+      ${authority.purpose}::"execution_budget_purpose",
+      ${authority.workspaceId}::uuid, ${authority.subjectType},
+      ${authority.subjectId}, ${authority.requestSha256},
+      ${authority.currency}, ${authority.unit}, ${authority.capMicrousd},
+      ${authority.issuedAt}, ${authority.notBefore}, ${authority.expiresAt}
+    )`,
+  );
+}
+
 @Injectable()
 export class ExecutionBudgetAuthorityRepository {
   constructor(
@@ -142,38 +226,40 @@ export class ExecutionBudgetAuthorityRepository {
     authority: VerifiedExecutionBudgetAuthority,
   ): Promise<ExecutionBudgetAuthorityPersistenceResult> {
     try {
-      assertAuthorityPurposeShape(authority);
-      if (
-        authority.authorityKind !== 'WORKSPACE_GRANT' ||
-        authority.workspaceId === null ||
-        authority.requestSha256 === null ||
-        authority.capMicrousd === null
-      ) {
-        throw new ExecutionBudgetGrantError(
-          'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
-        );
-      }
-      assertExecutionBudgetScopeKey(authority.workspaceId, {
-        allowPlatform: false,
-      });
-      assertExecutionBudgetAuthorityId(authority.jti);
-
+      assertWorkspaceAuthority(authority);
       const rows = await this.prisma.withWorkspace(
         authority.workspaceId,
-        (tx) =>
-          tx.$queryRaw<AuthorityRow[]>(
-            Prisma.sql`SELECT * FROM consume_workspace_execution_authority(
-              ${authority.issuer}, ${authority.audience}, ${authority.jti}::uuid,
-              ${authority.tokenSha256}, ${authority.schemaVersion},
-              ${authority.purpose}::"execution_budget_purpose",
-              ${authority.workspaceId}::uuid, ${authority.subjectType},
-              ${authority.subjectId}, ${authority.requestSha256},
-              ${authority.currency}, ${authority.unit}, ${authority.capMicrousd},
-              ${authority.issuedAt}, ${authority.notBefore}, ${authority.expiresAt}
-            )`,
-          ),
+        (tx) => consumeWorkspaceWithTransaction(tx, authority),
       );
       return parseAuthorityRow(rows);
+    } catch (error) {
+      throw mapExecutionBudgetPersistenceError(error);
+    }
+  }
+
+  async consumeWorkspaceAndOpen(
+    authority: VerifiedExecutionBudgetAuthority,
+    accountKey: string,
+  ): Promise<ExecutionBudgetWorkspaceAccountPersistenceResult> {
+    try {
+      assertWorkspaceAuthority(authority);
+      assertBoundedText(accountKey, 200, 'EXECUTION_BUDGET_GRANT_INVALID');
+
+      return await this.prisma.withWorkspace(
+        authority.workspaceId,
+        async (tx) => {
+          const consumption = parseAuthorityRow(
+            await consumeWorkspaceWithTransaction(tx, authority),
+          );
+          const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
+            Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
+            ${authority.workspaceId}, ${consumption.authorityId}::uuid,
+            ${accountKey}, ${true}
+          )`,
+          );
+          return parseAuthorizedOpenRow(opened, consumption);
+        },
+      );
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }
