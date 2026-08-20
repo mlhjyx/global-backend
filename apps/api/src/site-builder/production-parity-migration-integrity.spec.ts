@@ -78,20 +78,28 @@ describe('production parity budget migration integrity', () => {
     expect(reserve.slice(exhausted, insert)).toContain("'EXHAUSTED'");
   });
 
-  it('retains a settled generation across a normal close/reopen so a lost activity ACK cannot re-dispatch providers', async () => {
+  it('distinguishes durable retry scopes from reusable product scopes when reopening a budget', async () => {
     const sql = await readFile(migrationUrl, 'utf8');
     const open = sql.slice(
       sql.indexOf('CREATE FUNCTION open_tool_budget('),
       sql.indexOf('CREATE FUNCTION reserve_tool_budget('),
     );
+    expect(open).toContain('p_replay_scope BOOLEAN');
     const closedAccount = open.slice(
       open.indexOf('ELSIF v."ref_count" = 0 THEN'),
       open.indexOf('ELSIF v."cap_cents" <> p_cap_cents THEN'),
     );
-    expect(closedAccount).not.toContain('"generation"=v."generation"+1');
-    expect(closedAccount).not.toContain('"charged_cents"=0');
-    expect(closedAccount).not.toContain('"exhausted"=false');
-    expect(closedAccount).toContain('"ref_count"=1');
+    expect(closedAccount).toMatch(/IF p_replay_scope THEN[\s\S]*?"ref_count"=1[\s\S]*?ELSE[\s\S]*?"generation"=target\."generation"\+1[\s\S]*?"charged_cents"=0[\s\S]*?"exhausted"=false/);
+  });
+
+  it('has a narrowly explicit platform RLS branch matching the function scope guard', async () => {
+    const sql = await readFile(migrationUrl, 'utf8');
+    expect(sql).toMatch(
+      /CREATE POLICY "tool_budget_account_tenant_isolation"[\s\S]*?"scope_key" = 'platform'[\s\S]*?session_user <> 'app_user'/,
+    );
+    expect(sql).toMatch(
+      /CREATE POLICY "tool_budget_operation_tenant_isolation"[\s\S]*?"scope_key" = 'platform'[\s\S]*?session_user <> 'app_user'/,
+    );
   });
 
   it('locks the Grant database audience to the single product audience', async () => {

@@ -61,6 +61,8 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(provision, /RUNTIME_API_LEASE_PASSWORD/);
   assert.match(provision, /\\getenv api_password RUNTIME_API_LEASE_PASSWORD/);
   assert.match(provision, /PGPASSWORD/);
+  assert.match(provision, /runtime_connection="\$\(node/);
+  assert.match(provision, /\|\|[\s\S]*exit 1/);
   assert.doesNotMatch(provision, /--set\s+api_password=/);
   assert.doesNotMatch(provision, /--set\s+worker_password=/);
   assert.doesNotMatch(provision, /--set\s+relay_password=/);

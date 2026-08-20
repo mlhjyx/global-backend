@@ -92,4 +92,10 @@ describe("worker runtime admission wiring", () => {
     expect(recurring).toBeGreaterThan(-1);
     expect(recurring).toBeLessThan(poll);
   });
+
+  it("includes app-user database and exact migration compatibility in the recurring drain gate", () => {
+    const recurring = source.slice(source.indexOf("startWorkerDependencyHeartbeat"));
+    expect(recurring).toContain("prisma.reconnect()");
+    expect(recurring).toContain("assertMigrationCompatible(prisma, releaseIdentity)");
+  });
 });

@@ -592,6 +592,38 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     vi.useRealTimers();
   });
 
+  it("closes an already-ready relay before consuming events when migration compatibility later diverges", async () => {
+    vi.useFakeTimers();
+    const migration = vi
+      .fn()
+      .mockResolvedValueOnce([{ migration_name: "expected_migration" }])
+      .mockResolvedValueOnce([{ migration_name: "newer_migration" }]);
+    const db = {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+      $queryRawUnsafe: migration,
+      outboxEvent: { findMany: vi.fn(async () => []) },
+    };
+    const leases = { heartbeat: vi.fn(async () => undefined) };
+    const service = new (OutboxRelayService as any)(
+      makeTemporal(), db, vi.fn(), leases,
+      { current: () => ({ admitted: true }) },
+      { current: () => ({ attested: true, migration_revision: "expected_migration" }) },
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+
+    await service.onModuleInit();
+    await service.managedTick();
+
+    expect(db.outboxEvent.findMany).not.toHaveBeenCalled();
+    expect(service.getReadiness()).toEqual({
+      status: "not_ready",
+      code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
+    });
+    await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
   it("does not connect, publish a lease, or consume events while managed runtime admission is closed", async () => {
     vi.useFakeTimers();
     const db = {
