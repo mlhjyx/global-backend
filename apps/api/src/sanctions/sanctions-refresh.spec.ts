@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  SanctionsRefreshService,
   countryToAlpha2,
   toDesiredEntity,
   diffSanctionsEntities,
   type ExistingEntityRow,
 } from './sanctions-refresh.service';
 import type { ParsedSanctionsEntity } from '../adapters/ofac-xml';
+import type { PrismaClient } from '@prisma/client';
+import type { ExecutionBroker } from '../tools/tool-contract';
 
 const ent = (over: Partial<ParsedSanctionsEntity> = {}): ParsedSanctionsEntity => ({
   externalId: '36',
@@ -88,5 +91,45 @@ describe('diffSanctionsEntities', () => {
     ];
     const diff = diffSanctionsEntities(existing, [d1]);
     expect(diff.toWithdrawExternalIds).toEqual(['99']);
+  });
+});
+
+describe('SanctionsRefreshService — budget context', () => {
+  it('passes the activity budget key into the ToolBroker context', async () => {
+    const invoke = vi.fn(async () => ({
+      data: { body: '<sdnList></sdnList>', contentType: 'application/xml', lastModified: null },
+      costCents: 0,
+    }));
+    const update = vi.fn(async () => undefined);
+    const ownerDb = {
+      sanctionsSource: {
+        findUniqueOrThrow: vi.fn(async () => ({
+          id: 'source-1',
+          key: 'ofac',
+          format: 'ofac_sdn_xml',
+          url: 'https://example.test/sdn.xml',
+          config: null,
+        })),
+        update,
+      },
+      sanctionsEntity: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const service = new SanctionsRefreshService({
+      ownerDb,
+      broker: { invoke } as unknown as ExecutionBroker,
+    });
+
+    await expect(
+      service.refreshSource('source-1', 'sanctions-refresh:workflow-run'),
+    ).rejects.toThrow('shrink guard');
+    expect(invoke).toHaveBeenCalledWith(
+      'sanctions.download',
+      expect.objectContaining({ url: 'https://example.test/sdn.xml' }),
+      {
+        workspaceId: 'platform',
+        purpose: 'sanctions_screening',
+        runId: 'sanctions-refresh:workflow-run',
+      },
+    );
   });
 });

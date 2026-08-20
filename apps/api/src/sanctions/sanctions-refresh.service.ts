@@ -156,12 +156,12 @@ export class SanctionsRefreshService {
   constructor(private readonly deps: SanctionsRefreshDeps) {}
 
   /** 刷新全部 ENABLED 源（单源失败 fail-safe）。 */
-  async refreshAll(): Promise<SanctionsRefreshSummary[]> {
+  async refreshAll(budgetKey?: string): Promise<SanctionsRefreshSummary[]> {
     const sources = await this.deps.ownerDb.sanctionsSource.findMany({ where: { status: 'ENABLED' } });
     const out: SanctionsRefreshSummary[] = [];
     for (const src of sources) {
       try {
-        out.push(await this.refreshSource(src.id));
+        out.push(await this.refreshSource(src.id, budgetKey));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await this.deps.ownerDb.sanctionsSource
@@ -174,7 +174,7 @@ export class SanctionsRefreshService {
   }
 
   /** 刷新单源：broker 下载 → 解析 → diff → 批量 upsert + 撤下 → 更新审计。 */
-  async refreshSource(sourceId: string): Promise<SanctionsRefreshSummary> {
+  async refreshSource(sourceId: string, budgetKey?: string): Promise<SanctionsRefreshSummary> {
     const src = await this.deps.ownerDb.sanctionsSource.findUniqueOrThrow({ where: { id: sourceId } });
     const parse = PARSERS[src.format];
     if (!parse) throw new Error(`unsupported sanctions format: ${src.format}`);
@@ -183,7 +183,11 @@ export class SanctionsRefreshService {
     const res = await this.deps.broker.invoke<SanctionsDownloadInput, SanctionsDownloadOutput>(
       'sanctions.download',
       { url: src.url, userAgent },
-      { workspaceId: PLATFORM_WORKSPACE, purpose: 'sanctions_screening' },
+      {
+        workspaceId: PLATFORM_WORKSPACE,
+        purpose: 'sanctions_screening',
+        ...(budgetKey ? { runId: budgetKey } : {}),
+      },
     );
     const parsed = parse(res.data.body);
     const listVersion = parsed.publishDate ?? new Date().toISOString().slice(0, 10);

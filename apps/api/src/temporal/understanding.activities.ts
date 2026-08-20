@@ -8,6 +8,12 @@ import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links'
 import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import { runBudgetCents } from '../tools/budget';
+import {
+  BudgetStoreUnavailableError,
+  type BudgetStore,
+  UnavailableBudgetStore,
+} from '../tools/budget-store';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -52,8 +58,45 @@ export function createUnderstandingActivities(deps: {
   /** 收口②：页面抓取经 ToolBroker（crawl4ai.fetch，白名单绑定 extract_claims 契约）。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
+  budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
 }) {
-  const crawlViaBroker = async (workspaceId: string, url: string): Promise<string> => {
+  const budgets =
+    deps.budgetStore ??
+    new UnavailableBudgetStore('understanding activities require an authoritative BudgetStore');
+
+  const workflowAccountKey = (): string => {
+    let workflowRunId: string | undefined;
+    try {
+      workflowRunId = deps.activityRunId?.() ?? Context.current().info.workflowExecution?.runId;
+    } catch {
+      workflowRunId = undefined;
+    }
+    if (!workflowRunId) {
+      throw new BudgetStoreUnavailableError('understanding activity requires a Temporal workflow run id');
+    }
+    return `understanding:${workflowRunId}`;
+  };
+
+  const withRunBudget = async <T>(
+    workspaceId: string,
+    execute: (accountKey: string) => Promise<T>,
+  ): Promise<T> => {
+    const accountKey = workflowAccountKey();
+    await budgets.open({
+      workspaceId,
+      accountKey,
+      capCents: runBudgetCents(),
+      replayScope: true,
+    });
+    try {
+      return await execute(accountKey);
+    } finally {
+      await budgets.close({ workspaceId, accountKey });
+    }
+  };
+
+  const crawlViaBroker = async (workspaceId: string, url: string, accountKey: string): Promise<string> => {
     if (!deps.broker) throw new Error('understanding: broker unavailable (fail-closed, no raw egress)');
     const r = await deps.broker.invoke<{ url: string }, CrawlResult>(
       'crawl4ai.fetch',
@@ -65,6 +108,7 @@ export function createUnderstandingActivities(deps: {
         taskContractId: 'company_understanding.extract_claims',
         correlationId: url,
         purpose: ['discovery', 'enrichment'],
+        runId: accountKey,
       },
     );
     return r.data.text;
@@ -85,8 +129,10 @@ export function createUnderstandingActivities(deps: {
     },
 
     async crawlWebsite(args: { workspaceId: string; website: string }): Promise<CrawledPage> {
-      const text = await crawlViaBroker(args.workspaceId, args.website);
-      return { url: args.website, text: text.slice(0, MAX_PAGE_CHARS) };
+      return withRunBudget(args.workspaceId, async (accountKey) => {
+        const text = await crawlViaBroker(args.workspaceId, args.website, accountKey);
+        return { url: args.website, text: text.slice(0, MAX_PAGE_CHARS) };
+      });
     },
 
     /** Deterministic: pick key subpages (products/about/certifications/cases/contact…). */
@@ -97,89 +143,98 @@ export function createUnderstandingActivities(deps: {
 
     /** Crawl subpages, tolerating individual failures — a broken page must not kill the run. */
     async crawlPages(args: { workspaceId: string; urls: string[] }): Promise<{ pages: CrawledPage[] }> {
-      const settled = await Promise.allSettled(args.urls.map((u) => crawlViaBroker(args.workspaceId, u)));
-      const pages: CrawledPage[] = [];
-      settled.forEach((s, i) => {
-        if (s.status === 'fulfilled' && s.value.trim()) {
-          pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
-        } else if (s.status === 'rejected') {
-
-          console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
-        }
+      return withRunBudget(args.workspaceId, async (accountKey) => {
+        const settled = await Promise.allSettled(
+          args.urls.map((u) => crawlViaBroker(args.workspaceId, u, accountKey)),
+        );
+        const pages: CrawledPage[] = [];
+        settled.forEach((s, i) => {
+          if (s.status === 'fulfilled' && s.value.trim()) {
+            pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
+          } else if (s.status === 'rejected') {
+            console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
+          }
+        });
+        return { pages };
       });
-      return { pages };
     },
 
     async extractClaims(args: { workspaceId: string; text: string }): Promise<{ claims: ExtractedClaim[] }> {
-      const contract = getTask('company_understanding.extract_claims');
-      const result = await executeStructuredTaskWithRuntime(
-        deps.gateway,
-        {
-          task: contract?.id ?? 'company_understanding.extract_claims',
-          prompt: args.text,
-          system: contract?.description,
-          model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
-          schema: contract?.outputSchema ?? { required: ['claims'] },
-        },
-        { workspaceId: args.workspaceId },
-        { telemetry: deps.runtimeTelemetry },
-      );
-      const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
-      // Stub gateway returns { claims: null }; synthesize a deterministic sample
-      // so the loop is observable end-to-end until a real model is registered.
-      const claims: ExtractedClaim[] = Array.isArray(fromModel)
-        ? fromModel
-        : [{ type: 'capability', statement: 'Stub-extracted capability claim', evidence: '(stub)', confidence: 0.5 }];
-      return { claims };
+      return withRunBudget(args.workspaceId, async (accountKey) => {
+        const contract = getTask('company_understanding.extract_claims');
+        const result = await executeStructuredTaskWithRuntime(
+          deps.gateway,
+          {
+            task: contract?.id ?? 'company_understanding.extract_claims',
+            prompt: args.text,
+            system: contract?.description,
+            model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
+            schema: contract?.outputSchema ?? { required: ['claims'] },
+          },
+          { workspaceId: args.workspaceId, runId: accountKey },
+          { telemetry: deps.runtimeTelemetry },
+        );
+        const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
+        // Stub gateway returns { claims: null }; synthesize a deterministic sample
+        // so the loop is observable end-to-end until a real model is registered.
+        const claims: ExtractedClaim[] = Array.isArray(fromModel)
+          ? fromModel
+          : [{ type: 'capability', statement: 'Stub-extracted capability claim', evidence: '(stub)', confidence: 0.5 }];
+        return { claims };
+      });
     },
 
     /** 画像回填（KNW-002/5.2.3）：行业 + 简介，只在首页文本上跑一次。 */
     async extractAndPersistProfile(args: UnderstandingInput & { text: string }): Promise<void> {
-      const contract = getTask('company_understanding.extract_profile');
-      const result = await executeStructuredTaskWithRuntime(
-        deps.gateway,
-        {
-          task: contract?.id ?? 'company_understanding.extract_profile',
-          prompt: args.text,
-          system: contract?.description,
-          model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
-        },
-        { workspaceId: args.workspaceId },
-        { telemetry: deps.runtimeTelemetry },
-      );
-      const out = result.data as { industry?: string; summary?: string };
-      if (!out?.industry && !out?.summary) return; // stub/空输出不回填
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.companyProfile.update({
-          where: { id: args.companyId },
-          data: {
-            ...(out.industry ? { industry: out.industry } : {}),
-            ...(out.summary ? { summary: out.summary } : {}),
+      return withRunBudget(args.workspaceId, async (accountKey) => {
+        const contract = getTask('company_understanding.extract_profile');
+        const result = await executeStructuredTaskWithRuntime(
+          deps.gateway,
+          {
+            task: contract?.id ?? 'company_understanding.extract_profile',
+            prompt: args.text,
+            system: contract?.description,
+            model: contract?.model,
+            schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
           },
-        }),
-      );
+          { workspaceId: args.workspaceId, runId: accountKey },
+          { telemetry: deps.runtimeTelemetry },
+        );
+        const out = result.data as { industry?: string; summary?: string };
+        if (!out?.industry && !out?.summary) return; // stub/空输出不回填
+        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          tx.companyProfile.update({
+            where: { id: args.companyId },
+            data: {
+              ...(out.industry ? { industry: out.industry } : {}),
+              ...(out.summary ? { summary: out.summary } : {}),
+            },
+          }),
+        );
+      });
     },
 
     async extractOfferings(args: {
       workspaceId: string;
       text: string;
     }): Promise<{ offerings: ExtractedOffering[] }> {
-      const contract = getTask('company_understanding.extract_offerings');
-      const result = await executeStructuredTaskWithRuntime(
-        deps.gateway,
-        {
-          task: contract?.id ?? 'company_understanding.extract_offerings',
-          prompt: args.text,
-          system: contract?.description,
-          model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['offerings'] },
-        },
-        { workspaceId: args.workspaceId },
-        { telemetry: deps.runtimeTelemetry },
-      );
-      const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
-      return { offerings: Array.isArray(fromModel) ? fromModel : [] };
+      return withRunBudget(args.workspaceId, async (accountKey) => {
+        const contract = getTask('company_understanding.extract_offerings');
+        const result = await executeStructuredTaskWithRuntime(
+          deps.gateway,
+          {
+            task: contract?.id ?? 'company_understanding.extract_offerings',
+            prompt: args.text,
+            system: contract?.description,
+            model: contract?.model,
+            schema: contract?.outputSchema ?? { required: ['offerings'] },
+          },
+          { workspaceId: args.workspaceId, runId: accountKey },
+          { telemetry: deps.runtimeTelemetry },
+        );
+        const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
+        return { offerings: Array.isArray(fromModel) ? fromModel : [] };
+      });
     },
 
     /**
