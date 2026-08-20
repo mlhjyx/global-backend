@@ -124,6 +124,32 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(queries[0]?.values).not.toContain(COMPACT_JWS);
   });
 
+  it('treats an exact token digest as replay and a changed digest as JTI reuse', async () => {
+    let persistedDigest: unknown;
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async (query) => {
+        const digest = query.values?.[3];
+        if (persistedDigest === undefined) {
+          persistedDigest = digest;
+          return [{ authority_id: AUTHORITY_ID, replay: false }];
+        }
+        if (digest !== persistedDigest) {
+          throw new Error('EXECUTION_BUDGET_GRANT_REUSED');
+        }
+        return [{ authority_id: AUTHORITY_ID, replay: true }];
+      }),
+    );
+    const exact = workspaceAuthority();
+
+    await expect(repository.consumeWorkspace(exact)).resolves.toMatchObject({ replay: false });
+    await expect(repository.consumeWorkspace(exact)).resolves.toMatchObject({ replay: true });
+    await expect(
+      repository.consumeWorkspace({ ...exact, tokenSha256: 'c'.repeat(64) }),
+    ).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED'),
+    );
+  });
+
   it('ingests platform authority only through the injected platform-writer transaction', async () => {
     const queryRaw = vi.fn(async () => [{ authority_id: AUTHORITY_ID, replay: false }]);
     const platformWriter = fakePlatformWriter(queryRaw);

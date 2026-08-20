@@ -1,5 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
+import { mapExecutionBudgetPersistenceError } from '../execution-budget/execution-budget-authority.repository';
 import { BudgetExceededError, type BudgetLedger } from './budget';
 import {
   parseGenericOperationProjection,
@@ -41,9 +43,21 @@ export interface BudgetStatus {
   open: boolean;
 }
 
+export interface BudgetAccountAuthorization {
+  authorityId: string;
+  authorizedCapMicrousd: bigint;
+  generation: number;
+}
+
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
 export interface BudgetStore {
   open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void>;
+  openAuthorized(input: {
+    authorityId: string;
+    scopeKey: string;
+    accountKey: string;
+    replayScope?: boolean;
+  }): Promise<BudgetAccountAuthorization>;
   reserve(input: BudgetReservationRequest): Promise<BudgetReservation>;
   settle(
     reservation: BudgetReservation,
@@ -107,6 +121,10 @@ export class UnavailableBudgetStore implements BudgetStore {
     this.unavailable();
   }
 
+  async openAuthorized(): Promise<BudgetAccountAuthorization> {
+    return this.unavailable();
+  }
+
   async reserve(): Promise<BudgetReservation> {
     return this.unavailable();
   }
@@ -134,6 +152,12 @@ export class InMemoryBudgetStoreAdapter implements BudgetStore {
 
   async open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void> {
     this.ledger.open(input.accountKey, input.capCents);
+  }
+
+  async openAuthorized(): Promise<BudgetAccountAuthorization> {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    );
   }
 
   async reserve(input: BudgetReservationRequest): Promise<BudgetReservation> {
@@ -187,6 +211,13 @@ type SettleRow = {
   replay?: boolean;
 };
 
+type AuthorizedOpenRow = {
+  account_id: string;
+  generation: number;
+  authority_id: string;
+  authorized_cap_microusd: bigint;
+};
+
 function assertKey(name: string, value: string): void {
   if (!value || value.length > MAX_KEY_LENGTH || [...value].some((character) => character.charCodeAt(0) < 32)) {
     throw new TypeError(`${name} must be 1-${MAX_KEY_LENGTH} printable characters`);
@@ -215,19 +246,38 @@ function isBudgetUnsettled(error: unknown): boolean {
 
 /**
  * PostgreSQL implementation backed by narrow, row-locking functions installed by the DB migration.
- * Every call enters PrismaService.withWorkspace, so FORCE RLS and the function's workspace assertion
- * agree on the same tenant. Static Prisma.sql templates keep all values parameterized.
+ * Workspace calls enter PrismaService.withWorkspace, so FORCE RLS and each function's workspace
+ * assertion agree on the same tenant. Platform authority calls require a separately injected,
+ * deployment-owned writer connection. Static Prisma.sql templates keep all values parameterized.
  */
 export class PostgresBudgetStore implements BudgetStore {
   constructor(
     private readonly prisma: PrismaService,
+    /** Legacy platform/owner connection; authority-aware operations never use this fallback. */
     private readonly platformDb?: PrismaClient,
+    /** Connection authenticated as the deployment-owned platform authority writer principal. */
+    private readonly authorityPlatformWriter?: PrismaClient,
   ) {}
 
   private async inScope<T>(scopeKey: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     if (scopeKey === 'platform') {
       if (!this.platformDb) throw new BudgetStoreUnavailableError('platform budget store requires an owner connection');
       return this.platformDb.$transaction(fn);
+    }
+    return this.prisma.withWorkspace(scopeKey, fn);
+  }
+
+  private async inAuthorityScope<T>(
+    scopeKey: string,
+    fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    if (scopeKey === 'platform') {
+      if (!this.authorityPlatformWriter) {
+        throw new ExecutionBudgetGrantError(
+          'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+        );
+      }
+      return this.authorityPlatformWriter.$transaction(fn);
     }
     return this.prisma.withWorkspace(scopeKey, fn);
   }
@@ -244,6 +294,49 @@ export class PostgresBudgetStore implements BudgetStore {
     } catch (error) {
       if (isBudgetUnsettled(error)) throw new BudgetUnsettledOperationsError(input.accountKey);
       throw error;
+    }
+  }
+
+  async openAuthorized(input: {
+    authorityId: string;
+    scopeKey: string;
+    accountKey: string;
+    replayScope?: boolean;
+  }): Promise<BudgetAccountAuthorization> {
+    assertKey('scopeKey', input.scopeKey);
+    assertKey('accountKey', input.accountKey);
+    try {
+      const rows = await this.inAuthorityScope(input.scopeKey, (tx) =>
+        tx.$queryRaw<AuthorizedOpenRow[]>(
+          Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
+            ${input.scopeKey}, ${input.authorityId}::uuid, ${input.accountKey},
+            ${input.replayScope ?? false}
+          )`,
+        ),
+      );
+      const row = rows[0];
+      if (
+        !row ||
+        row.authority_id !== input.authorityId ||
+        !Number.isSafeInteger(row.generation) ||
+        row.generation < 1 ||
+        typeof row.authorized_cap_microusd !== 'bigint' ||
+        row.authorized_cap_microusd < 1n
+      ) {
+        throw new ExecutionBudgetGrantError(
+          'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+        );
+      }
+      return {
+        authorityId: row.authority_id,
+        authorizedCapMicrousd: row.authorized_cap_microusd,
+        generation: row.generation,
+      };
+    } catch (error) {
+      if (isBudgetUnsettled(error)) {
+        throw new BudgetUnsettledOperationsError(input.accountKey);
+      }
+      throw mapExecutionBudgetPersistenceError(error);
     }
   }
 

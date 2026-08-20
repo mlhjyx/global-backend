@@ -79,6 +79,31 @@ describe('PostgresBudgetStore', () => {
     expect(ownerDb.$transaction).not.toHaveBeenCalled();
   });
 
+  it('opens platform authority only through the separately injected writer connection', async () => {
+    const ownerDb = {
+      $transaction: vi.fn(async () => []),
+    } as unknown as PrismaClient;
+    const platformWriter = {
+      $transaction: vi.fn(async (fn) => fn({
+        $queryRaw: vi.fn(async () => [{
+          account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+          generation: 1,
+          authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+          authorized_cap_microusd: 1_000_000n,
+        }]),
+      } as never)),
+    } as unknown as PrismaClient;
+    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb, platformWriter);
+
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'platform',
+      accountKey: 'acquisition-hourly:run-1',
+    })).resolves.toMatchObject({ authorizedCapMicrousd: 1_000_000n });
+    expect(ownerDb.$transaction).not.toHaveBeenCalled();
+    expect(platformWriter.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     'EXECUTION_BUDGET_GRANT_INVALID',
     'EXECUTION_BUDGET_GRANT_EXPIRED',
