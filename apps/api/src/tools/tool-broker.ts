@@ -410,19 +410,42 @@ export class ToolBroker implements ExecutionBroker {
           },
         });
       } else if (reservation) {
-        const durableReplay = tool.durableReplayResult?.(result) ?? null;
-        const projection = durableReplay
-          ? projectGenericOperationResult({
-              kind: 'tool',
-              schema: 'tool-result/v1',
-              data: {
-                toolId: tool.id,
-                toolVersion: tool.version,
-                result: durableReplay,
-              },
-            })
-          : undefined;
-        await this.budget.settle(reservation, result.costCents, projection);
+        let projection: GenericOperationProjection | undefined;
+        try {
+          const durableReplay = tool.durableReplayResult?.(result) ?? null;
+          if (tool.durableReplayResult && !durableReplay) {
+            throw new Error('approved durable replay hook returned no result');
+          }
+          projection = durableReplay
+            ? projectGenericOperationResult({
+                kind: 'tool',
+                schema: 'tool-result/v1',
+                data: {
+                  toolId: tool.id,
+                  toolVersion: tool.version,
+                  result: durableReplay,
+                },
+              })
+            : undefined;
+        } catch {
+          // The physical tool succeeded, but its result cannot satisfy the
+          // approved durable contract. Keep the operation unresolved and make
+          // the caller fail explicitly; never downgrade to an empty provider
+          // result or allow a second physical request.
+          throw new BudgetOperationReplayError(reservation.operationId);
+        }
+        const settlement = [reservation, result.costCents, projection] as const;
+        try {
+          await this.budget.settle(...settlement);
+        } catch {
+          try {
+            // A lost ACK after commit is safe to retry only with byte-identical
+            // cost and projection. PostgreSQL rejects any settlement drift.
+            await this.budget.settle(...settlement);
+          } catch {
+            throw new BudgetOperationReplayError(reservation.operationId);
+          }
+        }
       }
       this.trace(
         ctx,
