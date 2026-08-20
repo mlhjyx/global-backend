@@ -6,6 +6,7 @@ vi.mock('../model-runtime/structured-task-runtime-bridge', () => ({
 
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { judgeFitCompany } from './fit-judge';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 
 const executeTask = vi.mocked(executeStructuredTaskWithRuntime);
 const company = {
@@ -28,6 +29,19 @@ const output = {
 describe('judgeFitCompany provider-independent result semantics', () => {
   beforeEach(() => {
     executeTask.mockReset();
+  });
+
+  it('never downgrades a missing durable replay into a null fit judgment', async () => {
+    executeTask.mockRejectedValue(new BudgetOperationReplayError('fit-op'));
+    await expect(
+      judgeFitCompany(
+        {} as never,
+        '10000000-0000-4000-8000-000000000001',
+        { seller: 'Seller', seller_summary: null },
+        company,
+        { runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
   });
 
   it.each(['new-api', 'stub'])(
