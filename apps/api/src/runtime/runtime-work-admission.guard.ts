@@ -18,7 +18,7 @@ const MUTATING_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 export class RuntimeWorkAdmissionGuard implements CanActivate {
   constructor(
     private readonly admission: RuntimeAdmissionService,
-    private readonly readiness: Pick<RuntimeReadinessService, 'current'>,
+    private readonly readiness: RuntimeReadinessService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {

@@ -1,9 +1,12 @@
+import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExecutionContext } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
 import { RuntimeWorkAdmissionGuard } from './runtime-work-admission.guard';
+import { RuntimeAdmissionService } from './runtime-admission';
+import { RuntimeReadinessService } from '../health/runtime-readiness.service';
 
 const readySnapshot = Object.freeze({ status: 'ready' as const });
 
@@ -15,6 +18,12 @@ function context(method: string): ExecutionContext {
 }
 
 describe('RuntimeWorkAdmissionGuard', () => {
+  it('keeps concrete Nest injection metadata for the dynamic readiness snapshot', () => {
+    expect(
+      Reflect.getMetadata('design:paramtypes', RuntimeWorkAdmissionGuard),
+    ).toEqual([RuntimeAdmissionService, RuntimeReadinessService]);
+  });
+
   it('keeps diagnostics readable but rejects every HTTP mutation while managed admission is closed', () => {
     const guard = new RuntimeWorkAdmissionGuard({
       current: () => ({ admitted: false }),
