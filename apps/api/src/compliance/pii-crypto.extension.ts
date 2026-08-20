@@ -154,7 +154,13 @@ const DATABASE_PRINCIPAL_QUERY = `
     LEFT JOIN pg_auth_members membership ON membership.member = principal.oid
     LEFT JOIN pg_roles granted ON granted.oid = membership.roleid
    WHERE principal.rolname = session_user
-   GROUP BY principal.oid`;
+   GROUP BY principal.oid,
+            principal.rolsuper,
+            principal.rolbypassrls,
+            principal.rolcreatedb,
+            principal.rolcreaterole,
+            principal.rolreplication,
+            principal.rolinherit`;
 
 async function reconnectDatabase(value: object): Promise<DatabaseReadiness> {
   const context = extensionContext(value);
