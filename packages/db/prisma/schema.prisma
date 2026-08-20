@@ -47,6 +47,26 @@ enum ToolBudgetOperationStatus {
   @@map("tool_budget_operation_status")
 }
 
+enum ExecutionBudgetAuthorityKind {
+  WORKSPACE_GRANT
+  PLATFORM_GRANT
+
+  @@map("execution_budget_authority_kind")
+}
+
+enum ExecutionBudgetPurpose {
+  ICP_DESIGN            @map("icp.design")
+  ICP_QUERY_PLAN        @map("icp.query_plan")
+  UNDERSTANDING_RUN     @map("understanding.run")
+  DISCOVERY_RUN         @map("discovery.run")
+  CONTACT_VERIFY        @map("contact.verify")
+  PLATFORM_ACQUISITION  @map("platform.acquisition")
+  PLATFORM_INTENT_WATCH @map("platform.intent_watch")
+  PLATFORM_SANCTIONS    @map("platform.sanctions")
+
+  @@map("execution_budget_purpose")
+}
+
 // ── Tenancy & infrastructure ──────────────────────────────────────────────
 
 model Workspace {
@@ -55,9 +75,10 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  companyProfiles  CompanyProfile[]
-  outboxEvents     OutboxEvent[]
-  outboxDeliveries OutboxDelivery[]
+  companyProfiles            CompanyProfile[]
+  outboxEvents               OutboxEvent[]
+  outboxDeliveries           OutboxDelivery[]
+  executionBudgetAuthorities ExecutionBudgetAuthority[]
 
   @@map("workspace")
 }
@@ -87,25 +108,87 @@ model RuntimeProcessLease {
 /// Workspace-wide durable budget used by non-Site-Builder ToolBroker flows.
 /// All arithmetic is performed by database functions; runtime code has no DML grant.
 model ToolBudgetAccount {
-  id            String    @id @default(uuid()) @db.Uuid
-  scopeKey      String    @map("scope_key") @db.VarChar(200)
-  accountKey    String    @map("account_key") @db.VarChar(200)
-  generation    Int       @default(1)
-  capCents      BigInt    @map("cap_cents")
-  reservedCents BigInt    @default(0) @map("reserved_cents")
-  chargedCents  BigInt    @default(0) @map("charged_cents")
-  exhausted     Boolean   @default(false)
-  refCount      Int       @default(1) @map("ref_count")
-  closedAt      DateTime? @map("closed_at") @db.Timestamptz(3)
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                    String    @id @default(uuid()) @db.Uuid
+  scopeKey              String    @map("scope_key") @db.VarChar(200)
+  accountKey            String    @map("account_key") @db.VarChar(200)
+  generation            Int       @default(1)
+  capCents              BigInt    @map("cap_cents")
+  reservedCents         BigInt    @default(0) @map("reserved_cents")
+  chargedCents          BigInt    @default(0) @map("charged_cents")
+  exhausted             Boolean   @default(false)
+  refCount              Int       @default(1) @map("ref_count")
+  authorityId           String?   @map("authority_id") @db.Uuid
+  authorizedCapMicrousd BigInt?   @map("authorized_cap_microusd")
+  closedAt              DateTime? @map("closed_at") @db.Timestamptz(3)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   operations ToolBudgetOperation[]
+  authority  ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
 
   @@unique([scopeKey, accountKey], map: "tool_budget_account_scope_key")
   @@unique([scopeKey, id], map: "tool_budget_account_scope_id_key")
   @@index([scopeKey, exhausted, closedAt], map: "tool_budget_account_scope_state_idx")
+  @@index([authorityId], map: "tool_budget_account_authority_idx")
   @@map("tool_budget_account")
+}
+
+/// Verified external spending authority. Signed claim fields are immutable;
+/// only narrow database functions advance lifecycle counters/timestamps.
+model ExecutionBudgetAuthority {
+  id                  String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeKey            String                       @map("scope_key") @db.VarChar(200)
+  authorityKind       ExecutionBudgetAuthorityKind @map("authority_kind")
+  workspaceId         String?                      @map("workspace_id") @db.Uuid
+  issuer              String                       @db.VarChar(512)
+  audience            String                       @db.VarChar(191)
+  jti                 String                       @db.Uuid
+  tokenSha256         String                       @map("token_sha256") @db.VarChar(64)
+  schemaVersion       String                       @map("schema_version") @db.VarChar(80)
+  purpose             ExecutionBudgetPurpose
+  subjectType         String                       @map("subject_type") @db.VarChar(191)
+  subjectId           String                       @map("subject_id") @db.VarChar(191)
+  requestSha256       String?                      @map("request_sha256") @db.VarChar(64)
+  scheduleId          String?                      @map("schedule_id") @db.VarChar(191)
+  currency            String                       @db.VarChar(3)
+  unit                String                       @db.VarChar(16)
+  capMicrousd         BigInt?                      @map("cap_microusd")
+  capPerRunMicrousd   BigInt?                      @map("cap_per_run_microusd")
+  campaignCapMicrousd BigInt?                      @map("campaign_cap_microusd")
+  maxRuns             BigInt?                      @map("max_runs")
+  runsConsumed        BigInt                       @default(0) @map("runs_consumed")
+  issuedAt            DateTime                     @map("issued_at") @db.Timestamptz(3)
+  notBefore           DateTime                     @map("not_before") @db.Timestamptz(3)
+  expiresAt           DateTime                     @map("expires_at") @db.Timestamptz(3)
+  consumedAt          DateTime?                    @map("consumed_at") @db.Timestamptz(3)
+  revokedAt           DateTime?                    @map("revoked_at") @db.Timestamptz(3)
+  createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace   Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
+  accounts    ToolBudgetAccount[]
+  revocations ExecutionBudgetAuthorityRevocation[]
+
+  @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
+  @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
+  @@index([workspaceId, purpose, expiresAt], map: "execution_budget_authority_workspace_purpose_expiry_idx")
+  @@index([scheduleId, purpose, expiresAt], map: "execution_budget_authority_schedule_purpose_expiry_idx")
+  @@map("execution_budget_authority")
+}
+
+/// Append-only revocation fact. The copied scope participates in both RLS and
+/// a composite FK so a workspace cannot revoke another scope by guessing an id.
+model ExecutionBudgetAuthorityRevocation {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeKey    String   @map("scope_key") @db.VarChar(200)
+  authorityId String   @map("authority_id") @db.Uuid
+  reason      String   @db.VarChar(80)
+  revokedAt   DateTime @default(now()) @map("revoked_at") @db.Timestamptz(3)
+
+  authority ExecutionBudgetAuthority @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_revocation_scope_fkey")
+
+  @@unique([authorityId], map: "execution_budget_authority_revocation_authority_key")
+  @@index([scopeKey, revokedAt], map: "execution_budget_authority_revocation_scope_time_idx")
+  @@map("execution_budget_authority_revocation")
 }
 
 model ToolBudgetOperation {
