@@ -560,6 +560,36 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
 });
 
 describe("OutboxRelayService degraded bootstrap and durable identity", () => {
+  it("does not connect, publish a lease, or consume events while managed runtime admission is closed", async () => {
+    vi.useFakeTimers();
+    const db = {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+      outboxEvent: { findMany: vi.fn(async () => []) },
+    };
+    const leases = { heartbeat: vi.fn(async () => undefined) };
+    const service = new (OutboxRelayService as any)(
+      makeTemporal(),
+      db,
+      vi.fn(),
+      leases,
+      { current: () => ({ admitted: false }) },
+    );
+
+    await service.onModuleInit();
+    await service.managedTick();
+
+    expect(db.$connect).not.toHaveBeenCalled();
+    expect(leases.heartbeat).not.toHaveBeenCalled();
+    expect(db.outboxEvent.findMany).not.toHaveBeenCalled();
+    expect(service.getReadiness()).toEqual({
+      status: "not_ready",
+      code: "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED",
+    });
+    await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
   it("starts not-ready when its owner connection is unavailable and does not tick", async () => {
     vi.useFakeTimers();
     const db = {

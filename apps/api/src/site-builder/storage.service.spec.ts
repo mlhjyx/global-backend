@@ -102,6 +102,39 @@ describe('StorageService variant-attempt lifecycle', () => {
     });
   });
 
+  it('revalidates a transient storage outage through the shared readiness contributor', async () => {
+    await withStorageCredentials(async () => {
+      let contribute: (() => unknown) | undefined;
+      const service = new StorageService({
+        register: vi.fn((_name: string, callback: () => unknown) => {
+          contribute = callback;
+          return vi.fn();
+        }),
+      } as never);
+      const send = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('temporary object-store outage'))
+        .mockResolvedValue({
+          Rules: [{
+            ID: 'global-variant-attempt-ttl',
+            Status: 'Enabled',
+            Filter: { Tag: { Key: 'global-lifecycle', Value: 'variant-attempt' } },
+            Expiration: { Days: 1 },
+          }],
+        });
+      (service as unknown as { client: { send: typeof send } }).client.send = send;
+
+      await service.onModuleInit();
+      expect(service.getReadiness()).toEqual({
+        status: 'not_ready',
+        code: 'OBJECT_STORAGE_VALIDATION_UNAVAILABLE',
+      });
+      await expect(contribute?.()).resolves.toEqual({ status: 'ok' });
+      expect(service.getReadiness()).toEqual({ status: 'ready' });
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it.each([
     ['missing Rules', async () => ({})],
     [
