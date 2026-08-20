@@ -146,7 +146,7 @@ const DATABASE_PRINCIPAL_QUERY = `
          principal.rolreplication AS "rolReplication",
          principal.rolinherit AS "rolInherit",
          COALESCE(
-           array_agg(granted.rolname ORDER BY granted.rolname)
+           array_agg(granted.rolname::text ORDER BY granted.rolname)
              FILTER (WHERE granted.rolname IS NOT NULL),
            ARRAY[]::text[]
          ) AS memberships
