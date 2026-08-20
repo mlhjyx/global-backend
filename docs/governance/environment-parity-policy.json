@@ -60,6 +60,14 @@
       "reason": "Development and the isolated test process may use loopback HTTP SaaS Budget Grant trust roots while retaining the same asymmetric verifier, claims, scope, amount, and failure contracts."
     },
     {
+      "id": "execution-budget-grant-loopback-jwks-trust-root",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/execution-budget/execution-budget-grant.verifier.ts",
+      "match_sha256": "sha256:8fd0360931c6940e77e1052ebe3c455cf260644a5fb9421234609de5dacbd5ae",
+      "category": "trust",
+      "reason": "Development and the isolated test process may use loopback HTTP execution Budget Grant trust roots while retaining the same asymmetric verifier, fixed audience, claims, scope, amount, and failure contracts."
+    },
+    {
       "id": "pilot-gateway-loopback-network",
       "rule": "ENVIRONMENT_BRANCH",
       "path": "apps/api/src/runtime/runtime-admission.ts",

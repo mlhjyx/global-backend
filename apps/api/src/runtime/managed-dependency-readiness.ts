@@ -11,8 +11,12 @@ import {
   type RuntimeReleaseIdentity,
 } from './runtime-release-identity';
 import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
-import { probeJwksDocument } from '../auth/jwks-readiness';
+import {
+  probeJwksDocument,
+  type JwksProbeFetch,
+} from '../auth/jwks-readiness';
 import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
+import { validateExecutionBudgetGrantVerifierConfiguration } from '../execution-budget/execution-budget-grant.verifier';
 
 interface RedisProbeClient {
   readonly status: string;
@@ -131,6 +135,26 @@ export async function checkAuthJwksReadiness(
       : { status: 'failed', code: 'AUTH_JWKS_UNAVAILABLE' };
   } catch {
     return { status: 'failed', code: 'AUTH_JWKS_UNAVAILABLE' };
+  }
+}
+
+export async function checkExecutionBudgetJwksReadiness(
+  env: NodeJS.ProcessEnv,
+  fetcher: JwksProbeFetch = fetch,
+): Promise<RuntimeComponentStatus> {
+  try {
+    const config = validateExecutionBudgetGrantVerifierConfiguration(env);
+    return (await probeJwksDocument(config.jwks.href, fetcher))
+      ? { status: 'ok' }
+      : {
+          status: 'failed',
+          code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+        };
+  } catch {
+    return {
+      status: 'failed',
+      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    };
   }
 }
 

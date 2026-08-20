@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   checkBrowserReadiness,
+  checkExecutionBudgetJwksReadiness,
   checkImagePipelineIsolationReadiness,
   checkModelGatewayReadiness,
   checkRedisReadiness,
@@ -23,6 +24,97 @@ const identity = {
 };
 
 describe('managed dependency readiness', () => {
+  it('rejects an unsafe execution-budget JWKS URL before network dispatch', async () => {
+    const unsafe =
+      'https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil';
+    const fetcher = vi.fn();
+
+    const result = await checkExecutionBudgetJwksReadiness(
+      {
+        APP_ENVIRONMENT: 'production',
+        NODE_ENV: 'production',
+        EXECUTION_BUDGET_GRANT_JWKS_URI: unsafe,
+        EXECUTION_BUDGET_GRANT_ISSUER:
+          'https://control-plane.example.test/',
+        EXECUTION_BUDGET_GRANT_AUDIENCE:
+          'global-backend:execution-budget',
+        EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+      },
+      fetcher,
+    );
+
+    expect(result).toEqual({
+      status: 'failed',
+      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain(unsafe);
+    expect(JSON.stringify(result)).not.toContain('must-never-leak');
+  });
+
+  it('probes the configured execution-budget JWKS with a bounded redirect-free request', async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          keys: [
+            {
+              kty: 'EC',
+              crv: 'P-256',
+              kid: 'execution-budget-key-1',
+              use: 'sig',
+              x: 'x',
+              y: 'y',
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await checkExecutionBudgetJwksReadiness(
+      {
+        APP_ENVIRONMENT: 'test',
+        NODE_ENV: 'test',
+        EXECUTION_BUDGET_GRANT_JWKS_URI:
+          'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
+        EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
+        EXECUTION_BUDGET_GRANT_AUDIENCE:
+          'global-backend:execution-budget',
+        EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+      },
+      fetcher as never,
+    );
+
+    expect(result).toEqual({ status: 'ok' });
+    expect(fetcher).toHaveBeenCalledWith(
+      'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
+      expect.objectContaining({ method: 'GET', redirect: 'error' }),
+    );
+  });
+
+  it('rejects loopback HTTP execution-budget trust roots in production', async () => {
+    const fetcher = vi.fn();
+
+    const result = await checkExecutionBudgetJwksReadiness(
+      {
+        APP_ENVIRONMENT: 'production',
+        NODE_ENV: 'production',
+        EXECUTION_BUDGET_GRANT_JWKS_URI: 'http://127.0.0.1:3100/jwks',
+        EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
+        EXECUTION_BUDGET_GRANT_AUDIENCE:
+          'global-backend:execution-budget',
+        EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+      },
+      fetcher,
+    );
+
+    expect(result).toEqual({
+      status: 'failed',
+      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('holds Worker readiness when the Linux image decoder limiter is absent', async () => {
     await expect(
       checkImagePipelineIsolationReadiness('linux', async () => false),
