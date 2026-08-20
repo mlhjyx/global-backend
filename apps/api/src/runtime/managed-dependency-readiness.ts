@@ -11,6 +11,8 @@ import {
   type RuntimeReleaseIdentity,
 } from './runtime-release-identity';
 import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
+import { probeJwksDocument } from '../auth/jwks-readiness';
+import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
 
 interface RedisProbeClient {
   readonly status: string;
@@ -119,6 +121,19 @@ export async function checkRedisReadiness(
   }
 }
 
+export async function checkAuthJwksReadiness(
+  env: NodeJS.ProcessEnv,
+): Promise<RuntimeComponentStatus> {
+  try {
+    const config = validateJwksTokenVerifierConfiguration(env);
+    return (await probeJwksDocument(config.jwks.href))
+      ? { status: 'ok' }
+      : { status: 'failed', code: 'AUTH_JWKS_UNAVAILABLE' };
+  } catch {
+    return { status: 'failed', code: 'AUTH_JWKS_UNAVAILABLE' };
+  }
+}
+
 export async function checkModelGatewayReadiness(
   env: NodeJS.ProcessEnv,
   fetcher: GatewayProbeFetch = fetch,
@@ -202,6 +217,7 @@ export class ManagedDependencyReadinessContributors
   onModuleInit(): void {
     this.unregister = Object.freeze([
       this.registry.register('redis', () => checkRedisReadiness(process.env)),
+      this.registry.register('auth_jwks', () => checkAuthJwksReadiness(process.env)),
       this.registry.register('model_gateway', () =>
         checkModelGatewayReadiness(process.env),
       ),

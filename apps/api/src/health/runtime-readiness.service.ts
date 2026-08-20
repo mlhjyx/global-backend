@@ -32,6 +32,7 @@ export interface RuntimeReadinessReport {
     renderer: ComponentStatus;
     browser: ComponentStatus;
     budget_grant_verification: ComponentStatus;
+    auth_jwks: ComponentStatus;
     admission: ComponentStatus;
   };
 }
@@ -61,6 +62,7 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
       renderer: unavailableComponent(),
       browser: unavailableComponent(),
       budget_grant_verification: unavailableComponent(),
+      auth_jwks: unavailableComponent(),
       admission: unavailableComponent(),
     }),
   });
@@ -126,6 +128,7 @@ export class RuntimeReadinessService
       renderer,
       browser,
       budgetGrantVerification,
+      authJwks,
     ] = await Promise.all([
         this.checkDatabaseAndMigration(),
         this.checkTemporal(),
@@ -142,6 +145,7 @@ export class RuntimeReadinessService
         this.contributors.check('renderer'),
         this.contributors.check('browser'),
         this.contributors.check('budget_grant_verification'),
+        this.contributors.check('auth_jwks'),
       ]);
     const admissionStatus: ComponentStatus =
       admission.admitted && identity.attested
@@ -160,6 +164,7 @@ export class RuntimeReadinessService
       renderer,
       browser,
       budget_grant_verification: budgetGrantVerification,
+      auth_jwks: authJwks,
       admission: admissionStatus,
     } satisfies RuntimeReadinessReport['components'];
     const ready = Object.values(components).every(

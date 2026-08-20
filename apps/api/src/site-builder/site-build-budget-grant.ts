@@ -12,6 +12,7 @@ import {
 } from 'jose';
 import type { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readiness-registry';
 import { resolveRuntimeMode } from '../runtime/runtime-environment';
+import { probeJwksDocument, type JwksProbeFetch } from '../auth/jwks-readiness';
 
 export const SITE_BUILD_BUDGET_GRANT_HEADER =
   'X-Site-Build-Budget-Grant' as const;
@@ -120,7 +121,7 @@ export class SiteBuildBudgetGrantError extends HttpException {
 interface VerifierDeps {
   keyResolver?: JWTVerifyGetKey;
   now?: () => Date;
-  fetcher?: (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'body'>>;
+  fetcher?: JwksProbeFetch;
 }
 
 function requiredCanonical(env: NodeJS.ProcessEnv, name: string): string {
@@ -176,7 +177,7 @@ export class SiteBuildBudgetGrantVerifier implements OnModuleDestroy {
   private readonly keyResolver: JWTVerifyGetKey | null;
   private readonly jwksUri: string | null;
   private readonly probeRemoteJwks: boolean;
-  private readonly fetcher: (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'body'>>;
+  private readonly fetcher: JwksProbeFetch;
   private readonly now: () => Date;
   private readonly available: boolean;
   private readonly unregisterReadiness?: () => void;
@@ -264,25 +265,9 @@ export class SiteBuildBudgetGrantVerifier implements OnModuleDestroy {
       return { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
     }
     if (!this.probeRemoteJwks || !this.jwksUri) return { status: 'ok' };
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2_000);
-    timeout.unref();
-    try {
-      const response = await this.fetcher(this.jwksUri, {
-        method: 'GET',
-        headers: { Accept: 'application/json, application/jwk-set+json' },
-        redirect: 'error',
-        signal: controller.signal,
-      });
-      await response.body?.cancel().catch(() => undefined);
-      return response.ok
-        ? { status: 'ok' }
-        : { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
-    } catch {
-      return { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
-    } finally {
-      clearTimeout(timeout);
-    }
+    return (await probeJwksDocument(this.jwksUri, this.fetcher))
+      ? { status: 'ok' }
+      : { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
   }
 
   async verify(
