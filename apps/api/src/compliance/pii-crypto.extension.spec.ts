@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { encryptArgs, decryptResult, piiSpecFor } from './pii-crypto.extension';
 import { encryptPii, isEncryptedPii } from './pii-crypto';
@@ -63,5 +65,15 @@ describe('pii-crypto.extension 结果解密', () => {
 
   it('null 结果不抛', () => {
     expect(() => decryptResult(null, CONTACT)).not.toThrow();
+  });
+});
+
+describe('pii-crypto.extension 数据库 principal 读取', () => {
+  it('casts PostgreSQL role memberships to Prisma-decodable text[]', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, 'pii-crypto.extension.ts'),
+      'utf8',
+    );
+    expect(source).toContain('array_agg(granted.rolname::text ORDER BY granted.rolname)');
   });
 });
