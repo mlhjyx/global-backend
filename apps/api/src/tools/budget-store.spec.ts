@@ -137,6 +137,30 @@ describe('PostgresBudgetStore', () => {
     })).rejects.toEqual(new ExecutionBudgetGrantError(marker));
   });
 
+  it('trusts unsettled-operation markers only from the structured raw-query error', async () => {
+    const input = {
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      accountKey: 'icp:design:req',
+    };
+    const fake = (failure: Error) => new PostgresBudgetStore({
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async () => {
+          throw failure;
+        }),
+      } as never)),
+    } as unknown as PrismaService);
+
+    await expect(
+      fake(new Error('TOOL_BUDGET_UNSETTLED_OPERATIONS')).openAuthorized(input),
+    ).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
+    );
+    await expect(
+      fake(rawQueryMarkerError('TOOL_BUDGET_UNSETTLED_OPERATIONS')).openAuthorized(input),
+    ).rejects.toBeInstanceOf(BudgetUnsettledOperationsError);
+  });
+
   it.each([
     { name: 'missing row', rows: [] },
     {

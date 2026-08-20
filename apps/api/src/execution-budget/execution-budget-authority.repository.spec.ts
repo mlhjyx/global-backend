@@ -148,7 +148,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
           return [{ authority_id: AUTHORITY_ID, replay: false }];
         }
         if (digest !== persistedDigest) {
-          throw new Error('EXECUTION_BUDGET_GRANT_REUSED');
+          throw rawQueryMarkerError('EXECUTION_BUDGET_GRANT_REUSED');
         }
         return [{ authority_id: AUTHORITY_ID, replay: true }];
       }),

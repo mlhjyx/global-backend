@@ -1,7 +1,13 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
-import { mapExecutionBudgetPersistenceError } from '../execution-budget/execution-budget-authority.repository';
+import {
+  assertExecutionBudgetAuthorityId,
+  assertExecutionBudgetScopeKey,
+  isExecutionBudgetUuid,
+  isTrustedExecutionBudgetDatabaseMarker,
+  mapExecutionBudgetPersistenceError,
+} from '../execution-budget/execution-budget-authority.repository';
 import { BudgetExceededError, type BudgetLedger } from './budget';
 import {
   parseGenericOperationProjection,
@@ -44,6 +50,7 @@ export interface BudgetStatus {
 }
 
 export interface BudgetAccountAuthorization {
+  accountId: string;
   authorityId: string;
   authorizedCapMicrousd: bigint;
   generation: number;
@@ -303,7 +310,8 @@ export class PostgresBudgetStore implements BudgetStore {
     accountKey: string;
     replayScope?: boolean;
   }): Promise<BudgetAccountAuthorization> {
-    assertKey('scopeKey', input.scopeKey);
+    assertExecutionBudgetScopeKey(input.scopeKey, { allowPlatform: true });
+    assertExecutionBudgetAuthorityId(input.authorityId);
     assertKey('accountKey', input.accountKey);
     try {
       const rows = await this.inAuthorityScope(input.scopeKey, (tx) =>
@@ -316,7 +324,10 @@ export class PostgresBudgetStore implements BudgetStore {
       );
       const row = rows[0];
       if (
+        rows.length !== 1 ||
         !row ||
+        !isExecutionBudgetUuid(row.account_id) ||
+        !isExecutionBudgetUuid(row.authority_id) ||
         row.authority_id !== input.authorityId ||
         !Number.isSafeInteger(row.generation) ||
         row.generation < 1 ||
@@ -328,12 +339,18 @@ export class PostgresBudgetStore implements BudgetStore {
         );
       }
       return {
+        accountId: row.account_id,
         authorityId: row.authority_id,
         authorizedCapMicrousd: row.authorized_cap_microusd,
         generation: row.generation,
       };
     } catch (error) {
-      if (isBudgetUnsettled(error)) {
+      if (
+        isTrustedExecutionBudgetDatabaseMarker(
+          error,
+          'TOOL_BUDGET_UNSETTLED_OPERATIONS',
+        )
+      ) {
         throw new BudgetUnsettledOperationsError(input.accountKey);
       }
       throw mapExecutionBudgetPersistenceError(error);

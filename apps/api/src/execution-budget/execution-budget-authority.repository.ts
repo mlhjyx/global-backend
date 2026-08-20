@@ -41,6 +41,10 @@ const DATABASE_ERROR_CODES = [
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+type TrustedDatabaseMarker =
+  | (typeof DATABASE_ERROR_CODES)[number]
+  | 'TOOL_BUDGET_UNSETTLED_OPERATIONS';
+
 function unavailable(): ExecutionBudgetGrantError {
   return new ExecutionBudgetGrantError(
     'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
@@ -53,16 +57,48 @@ function unavailable(): ExecutionBudgetGrantError {
  */
 export function mapExecutionBudgetPersistenceError(error: unknown): Error {
   if (error instanceof ExecutionBudgetGrantError) return error;
-  const message = error instanceof Error ? error.message : '';
   const code = DATABASE_ERROR_CODES.find((candidate) =>
-    message.includes(candidate),
+    isTrustedExecutionBudgetDatabaseMarker(error, candidate),
   );
   return code ? new ExecutionBudgetGrantError(code) : unavailable();
 }
 
-function assertUuid(value: string): void {
-  if (!UUID_PATTERN.test(value)) {
+export function isExecutionBudgetUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+export function isTrustedExecutionBudgetDatabaseMarker(
+  error: unknown,
+  marker: TrustedDatabaseMarker,
+): boolean {
+  return Boolean(
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2010' &&
+      error.meta?.code === 'P0001' &&
+      error.meta?.message === `ERROR: ${marker}`,
+  );
+}
+
+export function assertExecutionBudgetAuthorityId(value: string): void {
+  if (!isExecutionBudgetUuid(value)) {
     throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID');
+  }
+}
+
+export function assertExecutionBudgetScopeKey(
+  value: string,
+  options: { allowPlatform: boolean },
+): void {
+  if (value === 'platform') {
+    if (options.allowPlatform) return;
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    );
+  }
+  if (!isExecutionBudgetUuid(value)) {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    );
   }
 }
 
@@ -85,7 +121,7 @@ function parseAuthorityRow(rows: readonly AuthorityRow[]): ExecutionBudgetAuthor
   if (
     !row ||
     typeof row.authority_id !== 'string' ||
-    !UUID_PATTERN.test(row.authority_id) ||
+    !isExecutionBudgetUuid(row.authority_id) ||
     typeof row.replay !== 'boolean'
   ) {
     throw unavailable();
@@ -117,6 +153,10 @@ export class ExecutionBudgetAuthorityRepository {
           'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
         );
       }
+      assertExecutionBudgetScopeKey(authority.workspaceId, {
+        allowPlatform: false,
+      });
+      assertExecutionBudgetAuthorityId(authority.jti);
 
       const rows = await this.prisma.withWorkspace(
         authority.workspaceId,
@@ -155,6 +195,7 @@ export class ExecutionBudgetAuthorityRepository {
           'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
         );
       }
+      assertExecutionBudgetAuthorityId(authority.jti);
       if (!this.platformWriter) throw unavailable();
 
       const rows = await this.platformWriter.$transaction((tx) =>
@@ -179,12 +220,8 @@ export class ExecutionBudgetAuthorityRepository {
 
   async revoke(input: ExecutionBudgetAuthorityRevocationInput): Promise<void> {
     try {
-      assertBoundedText(
-        input.scopeKey,
-        200,
-        'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
-      );
-      assertUuid(input.authorityId);
+      assertExecutionBudgetScopeKey(input.scopeKey, { allowPlatform: false });
+      assertExecutionBudgetAuthorityId(input.authorityId);
       assertBoundedText(
         input.reason,
         80,
@@ -205,11 +242,6 @@ export class ExecutionBudgetAuthorityRepository {
           RETURNING "authority_id"`,
         );
 
-      if (input.scopeKey === 'platform') {
-        if (!this.platformWriter) throw unavailable();
-        await this.platformWriter.$transaction(append);
-        return;
-      }
       await this.prisma.withWorkspace(input.scopeKey, append);
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
