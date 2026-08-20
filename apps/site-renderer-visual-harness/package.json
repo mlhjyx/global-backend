@@ -19,7 +19,7 @@
     "@fontsource/jetbrains-mono": "^5.2.0",
     "@fontsource/instrument-serif": "^5.2.0",
     "@global/contracts": "workspace:*",
-    "astro": "^5.7.0",
+    "astro": "^7.2.4",
     "remixicon": "^4.6.0"
   }
 }

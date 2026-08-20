@@ -35,7 +35,6 @@ const PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS = Object.freeze([
   "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
   "apps/api/src/site-builder/agents/ai-task.ts",
   "apps/api/tsconfig.build.json",
-  "apps/site-renderer-visual-harness/package.json",
   "package.json",
   "packages/contracts/package.json",
   "packages/contracts/src/site-builder/component-qualification.ts",
