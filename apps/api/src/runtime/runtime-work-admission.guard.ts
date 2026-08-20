@@ -5,6 +5,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { RuntimeAdmissionService } from './runtime-admission';
+import { RuntimeReadinessService } from '../health/runtime-readiness.service';
 
 const MUTATING_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -15,14 +16,21 @@ const MUTATING_HTTP_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  */
 @Injectable()
 export class RuntimeWorkAdmissionGuard implements CanActivate {
-  constructor(private readonly admission: RuntimeAdmissionService) {}
+  constructor(
+    private readonly admission: RuntimeAdmissionService,
+    private readonly readiness: Pick<RuntimeReadinessService, 'current'>,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     if (context.getType() !== 'http') return true;
     const method = String(
       context.switchToHttp().getRequest<{ method?: string }>().method ?? '',
     ).toUpperCase();
-    if (!MUTATING_HTTP_METHODS.has(method) || this.admission.current().admitted) {
+    if (
+      !MUTATING_HTTP_METHODS.has(method) ||
+      (this.admission.current().admitted &&
+        this.readiness.current().status === 'ready')
+    ) {
       return true;
     }
     throw new ServiceUnavailableException({

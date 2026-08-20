@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import { RuntimeWorkAdmissionGuard } from './runtime-work-admission.guard';
 
+const readySnapshot = Object.freeze({ status: 'ready' as const });
+
 function context(method: string): ExecutionContext {
   return {
     getType: () => 'http',
@@ -16,7 +18,7 @@ describe('RuntimeWorkAdmissionGuard', () => {
   it('keeps diagnostics readable but rejects every HTTP mutation while managed admission is closed', () => {
     const guard = new RuntimeWorkAdmissionGuard({
       current: () => ({ admitted: false }),
-    } as never);
+    } as never, { current: () => readySnapshot } as never);
 
     expect(guard.canActivate(context('GET'))).toBe(true);
     expect(guard.canActivate(context('HEAD'))).toBe(true);
@@ -31,7 +33,7 @@ describe('RuntimeWorkAdmissionGuard', () => {
   it('does not alter mutation routing after managed admission succeeds', () => {
     const guard = new RuntimeWorkAdmissionGuard({
       current: () => ({ admitted: true }),
-    } as never);
+    } as never, { current: () => readySnapshot } as never);
     expect(guard.canActivate(context('POST'))).toBe(true);
   });
 

@@ -45,6 +45,48 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe('RuntimeReadinessService', () => {
+  it('starts fail-closed and publishes a dynamic worker failure into the mutation snapshot', async () => {
+    const deps = dependencies({
+      leases: {
+        inspectWorkerQueue: vi.fn(async () => ({
+          status: 'failed',
+          code: 'MATCHING_WORKER_NOT_READY',
+        })),
+        inspectRole: vi.fn(async () => ({ status: 'ok' })),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+
+    expect(service.current()).toMatchObject({
+      status: 'not_ready',
+      components: {
+        worker: {
+          status: 'not_proven',
+          code: 'RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE',
+        },
+      },
+    });
+    await expect(service.check()).resolves.toMatchObject({
+      status: 'not_ready',
+      components: {
+        worker: { status: 'failed', code: 'MATCHING_WORKER_NOT_READY' },
+      },
+    });
+    expect(service.current()).toMatchObject({
+      status: 'not_ready',
+      components: {
+        worker: { status: 'failed', code: 'MATCHING_WORKER_NOT_READY' },
+      },
+    });
+  });
+
   it('requires exact durable worker, relay, migration and storage evidence in development too', async () => {
     const deps = dependencies();
     const service = new RuntimeReadinessService(

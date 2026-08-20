@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  OnApplicationBootstrap,
+  OnApplicationShutdown,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuntimeAdmissionService } from '../runtime/runtime-admission';
 import { RuntimeProcessLeaseService } from '../runtime/runtime-process-lease';
@@ -32,8 +36,44 @@ export interface RuntimeReadinessReport {
   };
 }
 
+const READINESS_REFRESH_INTERVAL_MS = 10_000;
+const SNAPSHOT_UNAVAILABLE = 'RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE';
+
+function unavailableComponent(): ComponentStatus {
+  return Object.freeze({ status: 'not_proven', code: SNAPSHOT_UNAVAILABLE });
+}
+
+function initialReadinessSnapshot(): RuntimeReadinessReport {
+  return Object.freeze({
+    status: 'not_ready' as const,
+    service: 'global-api' as const,
+    ts: new Date(0).toISOString(),
+    components: Object.freeze({
+      database: unavailableComponent(),
+      migration: unavailableComponent(),
+      temporal_control_plane: unavailableComponent(),
+      worker: unavailableComponent(),
+      outbox_relay: unavailableComponent(),
+      api_runtime: unavailableComponent(),
+      storage: unavailableComponent(),
+      redis: unavailableComponent(),
+      model_gateway: unavailableComponent(),
+      renderer: unavailableComponent(),
+      browser: unavailableComponent(),
+      budget_grant_verification: unavailableComponent(),
+      admission: unavailableComponent(),
+    }),
+  });
+}
+
 @Injectable()
-export class RuntimeReadinessService {
+export class RuntimeReadinessService
+  implements OnApplicationBootstrap, OnApplicationShutdown
+{
+  private snapshot: RuntimeReadinessReport = initialReadinessSnapshot();
+  private refreshInFlight?: Promise<RuntimeReadinessReport>;
+  private timer?: NodeJS.Timeout;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly temporal: TemporalClient,
@@ -43,7 +83,35 @@ export class RuntimeReadinessService {
     private readonly contributors: RuntimeReadinessContributorRegistry,
   ) {}
 
+  async onApplicationBootstrap(): Promise<void> {
+    void this.check();
+    this.timer = setInterval(() => void this.check(), READINESS_REFRESH_INTERVAL_MS);
+    this.timer.unref();
+  }
+
+  onApplicationShutdown(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  current(): RuntimeReadinessReport {
+    return this.snapshot;
+  }
+
   async check(): Promise<RuntimeReadinessReport> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const refresh = this.calculate();
+    this.refreshInFlight = refresh;
+    try {
+      const report = await refresh;
+      this.snapshot = report;
+      return report;
+    } finally {
+      this.refreshInFlight = undefined;
+    }
+  }
+
+  private async calculate(): Promise<RuntimeReadinessReport> {
     const admission = this.admission.current();
     const identity = this.releaseIdentity.current();
     const [
