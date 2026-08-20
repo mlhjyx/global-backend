@@ -62,6 +62,27 @@ describe('production parity budget migration integrity', () => {
     );
   });
 
+  it('validates the complete generic replay envelope before a SECURITY DEFINER settlement writes it', async () => {
+    const sql = await readFile(migrationUrl, 'utf8');
+    const settle = sql.slice(
+      sql.indexOf('CREATE FUNCTION settle_tool_budget('),
+      sql.indexOf('CREATE FUNCTION release_tool_budget('),
+    );
+    const validation = settle.indexOf('GENERIC_OPERATION_PROJECTION_INVALID');
+    const ledgerWrite = settle.indexOf('UPDATE "tool_budget_operation" SET');
+
+    expect(validation).toBeGreaterThan(0);
+    expect(validation).toBeLessThan(ledgerWrite);
+    expect(settle).toContain("jsonb_typeof(p_result_json) <> 'object'");
+    expect(settle).toContain("p_result_json->>'schemaVersion' IS DISTINCT FROM p_result_schema_version");
+    expect(settle).toContain("p_result_json->>'schema' IS DISTINCT FROM p_result_schema");
+    expect(settle).toContain("p_result_json->>'digest' IS DISTINCT FROM p_result_digest");
+    expect(settle).toContain("p_result_json->>'kind' NOT IN ('model', 'tool')");
+    expect(settle).toContain("NOT (p_result_json ? 'data')");
+    expect(settle).toContain('jsonb_object_keys(p_result_json)');
+    expect(settle).toContain('jsonb_path_exists');
+  });
+
   it('keeps an exhausted Tool budget closed to new physical operations while preserving operation replay', async () => {
     const sql = await readFile(migrationUrl, 'utf8');
     const reserve = sql.slice(
