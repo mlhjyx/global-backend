@@ -137,8 +137,8 @@ function extensionContext(value: object): object & {
 }
 
 const DATABASE_PRINCIPAL_QUERY = `
-  SELECT session_user AS "sessionUser",
-         current_user AS "currentUser",
+  SELECT session_user::text AS "sessionUser",
+         current_user::text AS "currentUser",
          principal.rolsuper AS "rolSuper",
          principal.rolbypassrls AS "rolBypassRls",
          principal.rolcreatedb AS "rolCreateDb",
