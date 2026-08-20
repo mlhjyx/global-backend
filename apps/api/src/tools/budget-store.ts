@@ -1,6 +1,10 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { BudgetExceededError, type BudgetLedger } from './budget';
+import {
+  parseGenericOperationProjection,
+  type GenericOperationProjection,
+} from './generic-operation-projection';
 
 const MAX_KEY_LENGTH = 200;
 
@@ -21,6 +25,7 @@ export interface BudgetReservation {
   operationId: string;
   estimatedCents: number;
   replay: boolean;
+  replayProjection?: GenericOperationProjection;
 }
 
 export interface BudgetSettlement {
@@ -40,7 +45,11 @@ export interface BudgetStatus {
 export interface BudgetStore {
   open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void>;
   reserve(input: BudgetReservationRequest): Promise<BudgetReservation>;
-  settle(reservation: BudgetReservation, actualCents: number): Promise<BudgetSettlement>;
+  settle(
+    reservation: BudgetReservation,
+    actualCents: number,
+    projection?: GenericOperationProjection,
+  ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
   /**
@@ -167,6 +176,7 @@ type ReserveRow = {
   reserved_cents: bigint;
   remaining_cents: bigint;
   status?: string;
+  result_json?: unknown;
 };
 
 type SettleRow = {
@@ -260,20 +270,37 @@ export class PostgresBudgetStore implements BudgetStore {
       throw new BudgetExceededError(input.accountKey, input.estimatedCents, toSafeNumber('remainingCents', row.remaining_cents));
     }
     if (!row.operation_id) throw new BudgetStoreUnavailableError('budget reserve returned no operation id');
+    const replayProjection =
+      row.kind === 'REPLAY' && row.result_json != null
+        ? parseGenericOperationProjection(row.result_json)
+        : undefined;
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
       operationId: row.operation_id,
       estimatedCents: toSafeNumber('reservedCents', row.reserved_cents),
       replay: row.kind === 'REPLAY',
+      ...(replayProjection ? { replayProjection } : {}),
     };
   }
 
-  async settle(reservation: BudgetReservation, actualCents: number): Promise<BudgetSettlement> {
+  async settle(
+    reservation: BudgetReservation,
+    actualCents: number,
+    projection?: GenericOperationProjection,
+  ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
+    const durable = projection
+      ? parseGenericOperationProjection(projection)
+      : null;
     const rows = await this.inScope(reservation.workspaceId, (tx) =>
       tx.$queryRaw<SettleRow[]>(
-        Prisma.sql`SELECT * FROM settle_tool_budget(${reservation.workspaceId}, ${reservation.operationId}::uuid, ${BigInt(actualCents)})`,
+        Prisma.sql`SELECT * FROM settle_tool_budget(
+          ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+          ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
+          ${durable?.schema ?? null}, ${durable?.digest ?? null},
+          ${durable ? JSON.stringify(durable) : null}::jsonb
+        )`,
       ),
     );
     const row = rows[0];

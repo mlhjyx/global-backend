@@ -585,6 +585,10 @@ CREATE TABLE "tool_budget_operation" (
   "reserved_cents" BIGINT NOT NULL,
   "observed_cents" BIGINT,
   "charged_cents" BIGINT,
+  "result_schema_version" VARCHAR(80),
+  "result_schema" VARCHAR(80),
+  "result_digest" VARCHAR(64),
+  "result_json" JSONB,
   "status" "tool_budget_operation_status" NOT NULL DEFAULT 'RESERVED',
   "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "settled_at" TIMESTAMPTZ(3),
@@ -600,6 +604,16 @@ CREATE TABLE "tool_budget_operation" (
   CONSTRAINT "tool_budget_operation_status_shape_check" CHECK (
     ("status" = 'RESERVED' AND "observed_cents" IS NULL AND "charged_cents" IS NULL AND "settled_at" IS NULL)
     OR ("status" <> 'RESERVED' AND "observed_cents" IS NOT NULL AND "charged_cents" IS NOT NULL AND "settled_at" IS NOT NULL)
+  ),
+  CONSTRAINT "tool_budget_operation_result_shape_check" CHECK (
+    ("result_schema_version" IS NULL AND "result_schema" IS NULL AND "result_digest" IS NULL AND "result_json" IS NULL)
+    OR (
+      "status" = 'SETTLED'
+      AND "result_schema_version" = 'generic-operation-projection/v1'
+      AND "result_schema" ~ '^[a-z][a-z0-9_-]{1,63}/v[1-9][0-9]{0,3}$'
+      AND "result_digest" ~ '^[0-9a-f]{64}$'
+      AND octet_length("result_json"::text) <= 131072
+    )
   )
 );
 CREATE INDEX "tool_budget_operation_scope_account_status_idx" ON "tool_budget_operation"("scope_key", "account_id", "status");
@@ -666,7 +680,7 @@ BEGIN
 END $$;
 
 CREATE FUNCTION reserve_tool_budget(p_scope_key TEXT, p_account_key TEXT, p_operation_key TEXT, p_reservation_cents BIGINT)
-RETURNS TABLE(kind TEXT, operation_id UUID, reserved_cents BIGINT, remaining_cents BIGINT, status TEXT)
+RETURNS TABLE(kind TEXT, operation_id UUID, reserved_cents BIGINT, remaining_cents BIGINT, status TEXT, result_json JSONB)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE a "tool_budget_account"%ROWTYPE; o "tool_budget_operation"%ROWTYPE;
 BEGIN
@@ -674,25 +688,29 @@ BEGIN
   SELECT * INTO a FROM "tool_budget_account" WHERE "scope_key"=p_scope_key AND "account_key"=p_account_key FOR UPDATE;
   IF a."id" IS NULL OR a."ref_count"=0 THEN RAISE EXCEPTION 'TOOL_BUDGET_ACCOUNT_UNAVAILABLE'; END IF;
   SELECT * INTO o FROM "tool_budget_operation" WHERE "account_id"=a."id" AND "generation"=a."generation" AND "operation_key"=p_operation_key FOR UPDATE;
-  IF o."id" IS NOT NULL THEN RETURN QUERY SELECT 'REPLAY',o."id",o."reserved_cents",a."cap_cents"-a."reserved_cents"-a."charged_cents",o."status"::text; RETURN; END IF;
+  IF o."id" IS NOT NULL THEN RETURN QUERY SELECT 'REPLAY',o."id",o."reserved_cents",a."cap_cents"-a."reserved_cents"-a."charged_cents",o."status"::text,o."result_json"; RETURN; END IF;
   -- A cap variance is a durable safety stop. Existing operation keys remain
   -- replayable above, but no new physical operation may be reserved after it.
   IF a."exhausted" THEN
-    RETURN QUERY SELECT 'DENIED',NULL::UUID,0::BIGINT,a."cap_cents"-a."reserved_cents"-a."charged_cents",'EXHAUSTED'; RETURN;
+    RETURN QUERY SELECT 'DENIED',NULL::UUID,0::BIGINT,a."cap_cents"-a."reserved_cents"-a."charged_cents",'EXHAUSTED',NULL::JSONB; RETURN;
   END IF;
   IF p_reservation_cents > a."cap_cents"-a."reserved_cents"-a."charged_cents" THEN
     UPDATE "tool_budget_account" SET "exhausted"=true,"updated_at"=clock_timestamp() WHERE "id"=a."id";
-    RETURN QUERY SELECT 'DENIED',NULL::UUID,0::BIGINT,a."cap_cents"-a."reserved_cents"-a."charged_cents",'EXHAUSTED'; RETURN;
+    RETURN QUERY SELECT 'DENIED',NULL::UUID,0::BIGINT,a."cap_cents"-a."reserved_cents"-a."charged_cents",'EXHAUSTED',NULL::JSONB; RETURN;
   END IF;
   INSERT INTO "tool_budget_operation"("scope_key","account_id","generation","operation_key","reserved_cents") VALUES(p_scope_key,a."id",a."generation",p_operation_key,p_reservation_cents) RETURNING * INTO o;
   UPDATE "tool_budget_account" AS target
   SET "reserved_cents"=target."reserved_cents"+p_reservation_cents,
       "updated_at"=clock_timestamp()
   WHERE target."id"=a."id" RETURNING target.* INTO a;
-  RETURN QUERY SELECT 'EXECUTE',o."id",o."reserved_cents",a."cap_cents"-a."reserved_cents"-a."charged_cents",o."status"::text;
+  RETURN QUERY SELECT 'EXECUTE',o."id",o."reserved_cents",a."cap_cents"-a."reserved_cents"-a."charged_cents",o."status"::text,NULL::JSONB;
 END $$;
 
-CREATE FUNCTION settle_tool_budget(p_scope_key TEXT, p_operation_id UUID, p_observed_cents BIGINT)
+CREATE FUNCTION settle_tool_budget(
+  p_scope_key TEXT, p_operation_id UUID, p_observed_cents BIGINT,
+  p_result_schema_version TEXT, p_result_schema TEXT, p_result_digest TEXT,
+  p_result_json JSONB
+)
 RETURNS TABLE(charged_cents BIGINT, observed_cents BIGINT, cap_variance BOOLEAN, status TEXT, replay BOOLEAN)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE a "tool_budget_account"%ROWTYPE; o "tool_budget_operation"%ROWTYPE; charge BIGINT;
@@ -703,7 +721,15 @@ BEGIN
   SELECT * INTO a FROM "tool_budget_account" WHERE "id"=o."account_id" AND "scope_key"=p_scope_key FOR UPDATE;
   IF o."status" <> 'RESERVED' THEN RETURN QUERY SELECT o."charged_cents",o."observed_cents",o."observed_cents">o."reserved_cents",o."status"::text,true; RETURN; END IF;
   charge:=LEAST(p_observed_cents,o."reserved_cents");
-  UPDATE "tool_budget_operation" SET "observed_cents"=p_observed_cents,"charged_cents"=charge,"status"='SETTLED',"settled_at"=clock_timestamp() WHERE "id"=o."id" RETURNING * INTO o;
+  IF (p_result_json IS NULL) IS DISTINCT FROM (p_result_schema_version IS NULL AND p_result_schema IS NULL AND p_result_digest IS NULL) THEN
+    RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
+  END IF;
+  UPDATE "tool_budget_operation" SET
+    "observed_cents"=p_observed_cents,"charged_cents"=charge,"status"='SETTLED',
+    "result_schema_version"=p_result_schema_version,"result_schema"=p_result_schema,
+    "result_digest"=p_result_digest,"result_json"=p_result_json,
+    "settled_at"=clock_timestamp()
+  WHERE "id"=o."id" RETURNING * INTO o;
   UPDATE "tool_budget_account" AS target
   SET "reserved_cents"=target."reserved_cents"-o."reserved_cents",
       "charged_cents"=target."charged_cents"+charge,
@@ -767,8 +793,8 @@ REVOKE ALL ON FUNCTION register_api_runtime_process_lease(UUID,TEXT,TEXT,TEXT,TE
 REVOKE ALL ON FUNCTION heartbeat_api_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ), heartbeat_worker_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ), heartbeat_outbox_relay_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION create_site_build_budget_from_grant(UUID,UUID), disable_site_build_paid_calls(UUID,UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reserve_site_build_spend(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,TEXT,BIGINT,JSONB), settle_site_build_spend(UUID,UUID,VARCHAR,UUID,TEXT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,INTEGER,INTEGER,INTEGER,JSONB,JSONB,TEXT), reconcile_site_build_spend(UUID,UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) TO app_user;
+REVOKE ALL ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT,TEXT,TEXT,TEXT,JSONB), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT,TEXT,TEXT,TEXT,JSONB), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) TO app_user;
 GRANT EXECUTE ON FUNCTION create_site_build_budget_from_grant(UUID,UUID), disable_site_build_paid_calls(UUID,UUID,TEXT) TO app_user;
 GRANT EXECUTE ON FUNCTION reserve_site_build_spend(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,TEXT,BIGINT,JSONB), settle_site_build_spend(UUID,UUID,VARCHAR,UUID,TEXT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,INTEGER,INTEGER,INTEGER,JSONB,JSONB,TEXT), reconcile_site_build_spend(UUID,UUID) TO app_user;
 REVOKE EXECUTE ON FUNCTION register_runtime_process_lease(UUID,"runtime_process_role",TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ), heartbeat_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ) FROM app_user;
