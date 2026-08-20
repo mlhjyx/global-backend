@@ -81,6 +81,13 @@ describe('production parity budget migration integrity', () => {
     expect(settle).toContain("NOT (p_result_json ? 'data')");
     expect(settle).toContain('jsonb_object_keys(p_result_json)');
     expect(settle).toContain('jsonb_path_exists');
+    expect(settle).toContain('generic_operation_projection_digest(p_result_json)');
+    expect(settle).toMatch(/p_result_schema_version IS NOT NULL[\s\S]*?p_result_schema IS NOT NULL[\s\S]*?p_result_digest IS NOT NULL/);
+    expect(settle.indexOf('GENERIC_OPERATION_PROJECTION_INVALID')).toBeLessThan(
+      settle.indexOf('IF o."status" <> \'RESERVED\' THEN'),
+    );
+    expect(settle).toContain('GENERIC_OPERATION_SETTLEMENT_CONFLICT');
+    expect(settle).toContain('charge:=o."reserved_cents"');
   });
 
   it('keeps an exhausted Tool budget closed to new physical operations while preserving operation replay', async () => {

@@ -185,6 +185,31 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it('converts a throwing durable replay hook into the stable no-second-wire error', async () => {
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool('t.throwing-replay', 1, execute);
+    tool.durableReplayResult = () => { throw new Error('old replay shape'); };
+    const projection = projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: {
+        toolId: tool.id,
+        toolVersion: tool.version,
+        result: { data: { value: 'cached' }, costCents: 1 },
+      },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('超预算 → BudgetExceededError，工具不执行', async () => {
     const exec = vi.fn(async () => ({ ok: true }));
     const budget = new BudgetLedger();

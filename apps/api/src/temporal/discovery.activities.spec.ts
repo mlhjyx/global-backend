@@ -3,6 +3,7 @@ import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
 import { BudgetLedger } from '../tools/budget';
 import {
+  BudgetOperationReplayError,
   BudgetUnsettledOperationsError,
   InMemoryBudgetStoreAdapter,
   type BudgetStore,
@@ -150,6 +151,18 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     const r = await acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-ok-x', query: QUERY });
     expect(r.budgetTruncated).toBe(false);
     expect(r.rawCount).toBe(1);
+  });
+
+  it('generic replay 不可恢复时拒绝 activity，而不是把已付费结果吞成空成功', async () => {
+    const deps = makeDeps([{
+      ...okAdapter('ted', []),
+      discoverCompanies: async () => { throw new BudgetOperationReplayError('ted-op'); },
+    }]);
+    const acts = createDiscoveryActivities(deps);
+
+    await expect(
+      acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-ok-x', query: QUERY }),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
   });
 });
 

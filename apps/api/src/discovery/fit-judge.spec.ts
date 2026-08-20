@@ -86,10 +86,12 @@ describe('judgeFitCompany provider-independent result semantics', () => {
         data: output,
         provider: 'new-api',
         model: 'qualified-model',
-        usage: { inputTokens: 11, outputTokens: 7 },
-      })).toEqual(expect.objectContaining({
-        usage: { inputTokens: 11, outputTokens: 7 },
-      }));
+        usage: { inputTokens: 11, outputTokens: 7, costUsd: 0.0017 },
+      })).toEqual({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+      });
       expect(() => replay.restore(null)).toThrow('FIT_JUDGMENT_REPLAY_INVALID');
       expect(replay.restore({
         data: output,
@@ -104,10 +106,12 @@ describe('judgeFitCompany provider-independent result semantics', () => {
         data: output,
         provider: 'new-api',
         model: 'qualified-model',
-        usage: { inputTokens: 11, outputTokens: 7 },
-      })).toEqual(expect.objectContaining({
-        usage: { inputTokens: 11, outputTokens: 7 },
-      }));
+        usage: { inputTokens: 11, outputTokens: 7, costUsd: 0.0017 },
+      })).toEqual({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+      });
       return { provider: 'new-api', data: output } as never;
     });
 

@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { createExternalIntentActivities } from './external-intent.activities';
+import type { BudgetStore } from '../tools/budget-store';
 
 /**
  * 收口⑤ fast-follow（Codex #56 P1）：投影活动的 DataProvider **kill-switch live 重读**回归。
@@ -21,6 +22,37 @@ const TARGET = {
   fdaProductCodes: ['LLZ'],
   naicsCodes: ['3339'],
 };
+
+describe('ingestExternalSignals — durable workflow budget scope', () => {
+  it('reopens an explicit workflow scope in replay mode', async () => {
+    const open = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const budgetStore = { open, close } as unknown as BudgetStore;
+    const ownerDb = {
+      dataProvider: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+      budgetStore,
+    });
+
+    await acts.ingestExternalSignals({
+      targets: [{ ...TARGET }],
+      tedEnabled: true,
+      openfdaEnabled: false,
+      samgovEnabled: false,
+      budgetScopeId: 'workflow-stable-scope',
+    });
+
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({
+      replayScope: true,
+      accountKey: expect.stringContaining('workflow-stable-scope'),
+    }));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});
 
 /** 构造只喂投影路径所需依赖的活动集：sourceSignal.findMany 探针 + DataProvider live 状态（findProviders 探针=owner-DB 读计数）。 */
 function makeActs(live: { ted: string; openfda: string }) {

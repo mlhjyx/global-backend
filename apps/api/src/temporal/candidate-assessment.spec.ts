@@ -258,6 +258,30 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
 });
 
 describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立判同一存量公司', () => {
+  it('用 workflow budgetScopeId 重开 stable activity 预算时保持同一 generation', async () => {
+    const store: Store = { companies: [], leads: [], raws: [], links: [], suppressions: [] };
+    const budgetStore = testBudgetStore();
+    const open = vi.spyOn(budgetStore, 'open');
+    const acts = createBacklogActivities({
+      prisma: makeFakePrisma(store) as never,
+      providers: {} as never,
+      gateway: {} as never,
+      ownerDb: {} as never,
+      budgetStore,
+    });
+
+    await acts.qualifyFitBacklog({
+      workspaceId: WS,
+      icpId: ICP_A,
+      budgetScopeId: 'workflow-stable-scope',
+    });
+
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({
+      replayScope: true,
+      accountKey: expect.stringContaining('workflow-stable-scope'),
+    }));
+  });
+
   it('ICP-A match、ICP-B mismatch → 两条独立 Lead（存量投影公司的多 ICP 场景）', async () => {
     // 存量场景：公司经租户投影进来、不属于任何 run（无 raw/link）——backlog 直接扫 canonical。
     const store: Store = {

@@ -136,6 +136,40 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     );
   });
 
+  it('retries an unknown success-settlement ACK with the identical projection and never recalls the provider', async () => {
+    const provider = fakeProvider(async () => ({ data: 'ok', provider: 'fake', model: 'm' }));
+    const settle = vi.fn()
+      .mockRejectedValueOnce(new Error('settlement ACK unavailable'))
+      .mockResolvedValueOnce({ chargedCents: 20, observedCents: 20, capVariance: false, replay: true });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+    const replay = {
+      schema: 'generic-text/v1',
+      project: (result: ModelResult<unknown>) => result,
+      restore: (projection: unknown) => projection as ModelResult<unknown>,
+    };
+
+    await expect(gateway.generateText(
+      { task: QUALIFY_TASK, prompt: 'p' },
+      { workspaceId: 'ws-1', runId: 'run-1', genericReplay: replay },
+    )).resolves.toMatchObject({ data: 'ok' });
+    expect(provider.generateText).toHaveBeenCalledTimes(1);
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
+    expect(settle.mock.calls[0]?.[2]).toMatchObject({
+      kind: 'model', schema: replay.schema,
+    });
+  });
+
   it('rejects a model projection schema mismatch without executing a provider', async () => {
     const provider = fakeProvider(async () => { throw new Error('must not execute'); });
     const projection = projectGenericOperationResult({
@@ -166,6 +200,45 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     )).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
     expect(provider.generateText).not.toHaveBeenCalled();
   });
+
+  it.each(['restore', 'project'] as const)(
+    'converts a throwing replay %s hook into the stable no-second-wire error',
+    async (throwingHook) => {
+      const provider = fakeProvider(async () => { throw new Error('must not execute'); });
+      const projection = projectGenericOperationResult({
+        kind: 'model', schema: 'generic-text/v1',
+        data: { result: { data: 'cached', provider: 'fake', model: 'm' } },
+      });
+      const budgetStore = {
+        reserve: vi.fn(async () => ({
+          workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+          replay: true, replayProjection: projection,
+        })),
+      } as unknown as BudgetStore;
+      const gateway = new RouterModelGateway(
+        { route: () => [provider] } as unknown as ModelRouter,
+        undefined,
+        budgetStore,
+      );
+
+      await expect(gateway.generateText(
+        { task: QUALIFY_TASK, prompt: 'p' },
+        {
+          workspaceId: 'ws-1', runId: 'run-1',
+          genericReplay: {
+            schema: 'generic-text/v1',
+            restore: throwingHook === 'restore'
+              ? () => { throw new Error('old replay shape'); }
+              : (value) => value as ModelResult<unknown>,
+            project: throwingHook === 'project'
+              ? () => { throw new Error('projection schema changed'); }
+              : (value) => value,
+          },
+        },
+      )).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+      expect(provider.generateText).not.toHaveBeenCalled();
+    },
+  );
 
   it('未开账户 → 不限预算（内部调用照常）', async () => {
     const budget = new BudgetLedger();
