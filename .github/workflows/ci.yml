@@ -3,8 +3,8 @@ name: CI
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
 # 55 型三断点视觉回归仅在渲染输出、其消费的契约或本工作流变更时运行；
 # 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终跑全量视觉门，避免路径过滤遗漏或运行器漂移长期未被发现。
-# 绿了才合。测试是纯单测（解析器/评分/身份解析等纯函数，无 DB/网络），故 CI 不需要 Postgres/服务。
-# 需要 DB/真源的验证走本地 `apps/api/scripts/verify-*.mts`（见 AGENTS.md §5「真实数据不用 sandbox」），不进 CI。
+# 绿了才合。普通API测试仍是纯单测；运行身份权限另使用一次性 PostgreSQL 验证真实数据库授权。
+# 真源/provider调用仍走受控验证（见 AGENTS.md §5），不进入CI。
 # contracts job（收口④）：openapi.json 单一真值三道门——drift（契约=代码）+ spectral lint + oasdiff breaking。
 # pull_request 加 labeled/unlabeled：打/摘 `breaking-change-approved` label 要重估 breaking 门。
 
@@ -86,6 +86,20 @@ jobs:
     needs: renderer-visual-scope
     if: always()
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_USER: global
+          POSTGRES_PASSWORD: global-test-only
+          POSTGRES_DB: global_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U global -d global_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Fail closed when renderer scope evaluation did not succeed
         shell: bash
@@ -131,6 +145,40 @@ jobs:
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
         run: pnpm --filter @global/db generate
 
+      - name: Runtime lease principal PostgreSQL permissions
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+        run: |
+          set -euo pipefail
+          pnpm --filter @global/db exec prisma migrate deploy
+          export RUNTIME_LEASE_PROVISION_DATABASE_URL="${DATABASE_URL}"
+          export RUNTIME_API_LEASE_LOGIN=ci_runtime_api
+          export RUNTIME_WORKER_LEASE_LOGIN=ci_runtime_worker
+          export RUNTIME_OUTBOX_RELAY_LEASE_LOGIN=ci_runtime_outbox_relay
+          export RUNTIME_API_LEASE_PASSWORD="$(openssl rand -hex 24)"
+          export RUNTIME_WORKER_LEASE_PASSWORD="$(openssl rand -hex 24)"
+          export RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD="$(openssl rand -hex 24)"
+          export RUNTIME_API_LEASE_DATABASE_URL="postgresql://${RUNTIME_API_LEASE_LOGIN}:${RUNTIME_API_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
+          export RUNTIME_WORKER_LEASE_DATABASE_URL="postgresql://${RUNTIME_WORKER_LEASE_LOGIN}:${RUNTIME_WORKER_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
+          export RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL="postgresql://${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}:${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}@127.0.0.1:5432/global_test"
+          bash infra/postgres/provision-runtime-lease-principals.sh
+          bash infra/postgres/verify-runtime-lease-principal-permissions.sh
+          EXPECT_APP_DATABASE_READINESS=ready \
+            pnpm exec tsx apps/api/scripts/verify-app-database-principal.mts
+          restore_app_role() {
+            psql "${DATABASE_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+              --command 'ALTER ROLE app_user NOBYPASSRLS;' >/dev/null
+          }
+          trap restore_app_role EXIT
+          psql "${DATABASE_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+            --command 'ALTER ROLE app_user BYPASSRLS;' >/dev/null
+          EXPECT_APP_DATABASE_READINESS=DATABASE_PRINCIPAL_INVALID \
+            pnpm exec tsx apps/api/scripts/verify-app-database-principal.mts
+          restore_app_role
+          trap - EXIT
+
       - name: Lint（eslint flat config，typescript-eslint）
         run: pnpm --filter @global/api lint
 
@@ -142,6 +190,9 @@ jobs:
 
       - name: Test（vitest 纯单测）
         run: pnpm --filter @global/api test
+
+      - name: Site Builder isolated zero-dispatch evaluation boundary
+        run: pnpm --filter @global/site-builder-eval-runner test
 
       - name: Evaluate Copy fixed-source impact
         id: copy-impact
@@ -164,7 +215,106 @@ jobs:
           set -euo pipefail
           BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           export BUILT_AT
+          RENDERER_RUNTIME="${RUNNER_TEMP}/site-renderer-runtime"
+          DEPENDENCY_INVENTORY="${RUNNER_TEMP}/runtime-production-dependencies.json"
+          node scripts/prepare-site-renderer-runtime.mjs apps/site-renderer "${RENDERER_RUNTIME}"
+          node scripts/verify-runtime-artifact.mjs "${RENDERER_RUNTIME}"
+          pnpm --filter @global/api --filter @global/site-renderer list --prod --depth Infinity --json > "${DEPENDENCY_INVENTORY}"
+          node scripts/generate-runtime-sbom.mjs \
+            "${DEPENDENCY_INVENTORY}" "${BUILD_SHA}" "${BUILT_AT}" \
+            apps/api/dist/runtime-sbom.cdx.json @global/contracts@0.0.1
+          node scripts/generate-runtime-artifact-manifest.mjs \
+            --build-sha "${BUILD_SHA}" \
+            --built-at "${BUILT_AT}" \
+            --api apps/api/dist \
+            --contracts packages/contracts/dist \
+            --renderer "${RENDERER_RUNTIME}" \
+            --sbom apps/api/dist/runtime-sbom.cdx.json \
+            --source api-source=apps/api/src \
+            --source contracts-source=packages/contracts/src \
+            --source database-contract=packages/db/prisma \
+            --source renderer-source="${RENDERER_RUNTIME}" \
+            --output apps/api/dist/artifact-manifest.json
+          node scripts/verify-runtime-artifact.mjs apps/api/dist
           pnpm exec tsx apps/api/scripts/generate-build-attestation.mts
+
+      - name: Build and inspect immutable OCI runtime
+        shell: bash
+        env:
+          BUILD_SHA: ${{ github.sha }}
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          export BUILT_AT
+          docker build \
+            --build-arg "BUILD_SHA=${BUILD_SHA}" \
+            --build-arg "BUILT_AT=${BUILT_AT}" \
+            --tag "${OCI_IMAGE}" \
+            .
+          test "$(docker image inspect --format '{{.Config.User}}' "${OCI_IMAGE}")" = global
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${OCI_IMAGE}")" = '["node","/app/runtime-entrypoint.mjs"]'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${OCI_IMAGE}")" = "${BUILD_SHA}"
+          ARTIFACT_DIR="$(mktemp -d)"
+          CONTAINER_ID="$(docker create "${OCI_IMAGE}" api)"
+          cleanup() {
+            docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
+            rm -rf "${ARTIFACT_DIR}"
+          }
+          trap cleanup EXIT
+          mkdir "${ARTIFACT_DIR}/api-dist"
+          docker cp "${CONTAINER_ID}:/app/apps/api/dist/." "${ARTIFACT_DIR}/api-dist"
+          node scripts/verify-runtime-artifact.mjs "${ARTIFACT_DIR}/api-dist"
+          docker run --rm --network none --entrypoint node "${OCI_IMAGE}" \
+            /app/runtime-image-verifier.mjs /app
+          docker run --rm --network none --entrypoint openssl "${OCI_IMAGE}" version
+          docker run --rm --network none --entrypoint /usr/bin/chromium "${OCI_IMAGE}" \
+            --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
+            --disable-background-networking --disable-component-update \
+            --no-first-run --no-default-browser-check --dump-dom \
+            'data:text/html,<title>oci-browser-smoke</title>'
+              docker run --rm --network none \
+                --env "EXPECTED_BUILD_SHA=${BUILD_SHA}" \
+                --entrypoint node "${OCI_IMAGE}" -e \
+                'const fs=require("node:fs");const a=JSON.parse(fs.readFileSync("/app/apps/api/dist/build-attestation.json","utf8"));if(a.build_sha!==process.env.EXPECTED_BUILD_SHA)process.exit(1)'
+
+      - name: Worker fail-closed runtime smoke
+        shell: bash
+        env:
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          WORKER_LOG="$(mktemp)"
+          cleanup_worker_smoke() {
+            rm -f "${WORKER_LOG}"
+          }
+          trap cleanup_worker_smoke EXIT
+          LOCAL_IMAGE_DIGEST="$(docker image inspect --format '{{.Id}}' "${OCI_IMAGE}")"
+          RUNTIME_IMAGE_REFERENCE="global-backend-ci@${LOCAL_IMAGE_DIGEST}"
+          set +e
+          timeout --signal=TERM --kill-after=5s 10s \
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001 \
+              --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
+              --env NODE_ENV=production \
+              --env APP_ENVIRONMENT=development \
+              --env "RUNTIME_IMAGE_REFERENCE=${RUNTIME_IMAGE_REFERENCE}" \
+              "${OCI_IMAGE}" worker >"${WORKER_LOG}" 2>&1
+          WORKER_STATUS=$?
+          set -e
+          if [[ "${WORKER_STATUS}" -eq 0 ]]; then
+            cat "${WORKER_LOG}"
+            echo "::error::worker diagnostic smoke exited instead of holding fail-closed"
+            exit 1
+          fi
+          grep -F 'Temporal polling remains disabled' "${WORKER_LOG}"
+          if grep -Fq 'understanding worker up' "${WORKER_LOG}"; then
+            cat "${WORKER_LOG}"
+            echo "::error::unready Worker began Temporal polling"
+            exit 1
+          fi
 
       - name: Renderer contract tests
         run: pnpm --filter @global/site-renderer test:contracts
@@ -212,15 +362,14 @@ jobs:
       - name: Build API
         run: pnpm --filter @global/api build
 
-      # 导出不连任何服务：Prisma 懒连接、Temporal/relay 只在 app.init() 才启动，
-      # 假 DATABASE_URL 即可（本地同款验证过）。
+      # 导出不连任何服务：test-process只生成code-first schema；没有开发token或产品依赖旁路。
       - name: Export OpenAPI（code-first 单一真值）
         run: node apps/api/dist/main.js --export-openapi
         env:
-          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
-          APP_ENVIRONMENT: development
+          NODE_ENV: test
+          APP_ENVIRONMENT: test
           API_BIND_HOST: 127.0.0.1
-          AUTH_ALLOW_DEV_TOKENS: "true"
+          DATA_PROCESSOR_JURISDICTION: EU
 
       # git status --porcelain 同时抓「有 diff」与「文件未被跟踪/被删除」（git diff 对 untracked 视而不见）
       - name: Drift check（提交的 openapi.json 必须与代码一致且被跟踪）

@@ -43,6 +43,18 @@ describe('DataRightsService', () => {
     expect(s.ruleCount()).toBe(n);
   });
 
+  it('onModuleInit 在数据库不可达时启动但不就绪：规则为空、fail-closed、不抛错', async () => {
+    const fake = new FakePrisma();
+    fake.jurisdictionPolicy.findMany = async () => {
+      throw new Error("Can't reach database server");
+    };
+    const s = svc(fake);
+    // 缺 managed dependency 的合同是「进程可启动做诊断，readiness 关闭」，
+    // 不允许 onModuleInit 抛错杀死进程（OCI 单制品运行时 smoke 守门）。
+    await expect(s.onModuleInit()).resolves.toBeUndefined();
+    expect(s.ruleCount()).toBe(0);
+  });
+
   it('evaluateAndLog 写 policy_decision_log 并返回判定', async () => {
     const fake = new FakePrisma();
     const s = svc(fake);

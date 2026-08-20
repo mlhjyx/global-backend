@@ -1,5 +1,6 @@
 import { mkdir, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { Logger } from "@nestjs/common";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -75,7 +76,6 @@ import {
 } from "../site-builder/build-progress";
 import type { NormalizedBuildRequest } from "../site-builder/build-request-contract";
 import type { ExecutionBroker } from "../tools/tool-contract";
-import { budgetLedger, siteBuildBudgetCents } from "../tools/budget";
 import {
   claimEvidenceOriginKey,
   claimOriginIdentity,
@@ -90,6 +90,7 @@ import { gateCertificationFactsForPersistence } from "../site-builder/claim-evid
 import {
   SiteBuildCostLedger,
   type SiteBuildCostSummary,
+  type SiteBuildReconciliationObservation,
 } from "../site-builder/site-build-cost-ledger";
 import {
   buildCopyGenerationContext,
@@ -165,6 +166,11 @@ import type { ClosedRepairService } from "../site-builder/quality/closed-repair.
 import type { QualityCandidateIdentity } from "../site-builder/quality/quality-candidate.service";
 import type { QualityNarrativeEvidenceRefV1 } from "../site-builder/quality/quality-narrative";
 import type { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
+import type { SiteBuildCostReconciliationResolver } from "../site-builder/site-build-cost-reconciliation-resolver";
+import {
+  materializeQualityCandidateArtifact,
+  persistQualityCandidateArtifact,
+} from "../site-builder/quality/quality-candidate-artifact";
 
 /** refurbish 六步键序（begin/finalize 写 steps 的权威顺序；compensate 回填复用）。 */
 const REFURBISH_STEP_KEYS = [
@@ -271,6 +277,25 @@ export function qualityNarrativePaidGateDecision(state: {
   return state.paidCallsEnabled ? "allowed" : "paid_gate_denied";
 }
 
+function reconciliationRequestId(
+  meta: Record<string, unknown> | null,
+): string | undefined {
+  const settlements = meta?.gatewaySettlements;
+  if (!Array.isArray(settlements)) return undefined;
+  for (const settlement of settlements) {
+    if (!settlement || typeof settlement !== "object") continue;
+    const requestId = (settlement as Record<string, unknown>).requestId;
+    if (
+      typeof requestId === "string" &&
+      requestId.length > 0 &&
+      requestId.length <= 191
+    ) {
+      return requestId;
+    }
+  }
+  return undefined;
+}
+
 export async function runNonAuthoritativeQualityNarrative(
   operation: () => Promise<QualityNarrativeEvidenceRefV1>,
   signal?: AbortSignal,
@@ -357,6 +382,8 @@ export interface SiteBuilderActivityDeps {
   >;
   /** Immutable Renderer identity frozen into DesignBrief and ReleaseManifest v2. */
   rendererBuildIdentity?: string;
+  /** Request-bound provider accounting adapter; absence remains honestly unresolved. */
+  costReconciliationResolver?: SiteBuildCostReconciliationResolver;
   /** Test seam; production resolves the monorepo root from the worker cwd. */
   repositoryRoot?: string;
 }
@@ -755,7 +782,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     qualityNarrativeService,
     closedRepairService,
     storage,
-    rendererBuildIdentity = "site-renderer@dev-unpinned",
+    rendererBuildIdentity,
+    costReconciliationResolver,
     repositoryRoot = resolveRepositoryRoot(),
     renderSiteSpec = buildSiteSpecWithTemporaryFile,
     promotePreview = preparePreviewPromotion,
@@ -763,13 +791,51 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
   const log = new Logger("SiteBuilderActivities");
   const qualifiedTemplates = loadQualifiedComponentTemplates();
 
-  // FIX B（Codex P2 · worker 重启鲁棒）：每个耗费活动入口幂等 open（open 取较大 cap + 引用计数，
-  // 重复无害）。budgetLedger 是进程内单例、无 GC——若只在 beginRefurbishRun 开账，换 worker 或
-  // 重启后（Temporal 把 begin 当已完成缓存、不重放）后续活动会发现无账户 → reserve 返回不限额 →
-  // 预算门被绕过。故镜像 discovery.activities 的 ensureRunBudget，在每个耗费活动入口重新立账。
-  // finalize/compensate 的 close(force) 无视引用计数，仍能完全关账。
-  const ensureRunBudget = (runId: string): void =>
-    budgetLedger.open(runId, siteBuildBudgetCents());
+  if (!rendererBuildIdentity?.trim()) {
+    throw new Error("RENDERER_BUILD_IDENTITY_REQUIRED");
+  }
+
+  const candidateScratchParent =
+    process.env.SITE_BUILDER_CANDIDATE_TMP_ROOT ??
+    path.join(tmpdir(), "global-site-builder-candidates");
+
+  const withMaterializedQualityCandidate = async <T>(
+    candidate: QualityCandidateIdentity,
+    run: (root: string) => Promise<T>,
+  ): Promise<T> => {
+    if (candidate.artifact) {
+      if (!storage) throw new Error("QUALITY_CANDIDATE_ARTIFACT_UNAVAILABLE");
+      const materialized = await materializeQualityCandidateArtifact({
+        reference: candidate.artifact,
+        scratchParent: candidateScratchParent,
+        storage,
+        signal: activityCancellationSignal(),
+      });
+      try {
+        return await run(materialized.root);
+      } finally {
+        await materialized.cleanup();
+      }
+    }
+    // Histories created before the immutable artifact reference existed may
+    // replay only from the exact run-scoped path on the explicitly persistent
+    // PREVIEW_DIR. New histories never emit this field.
+    const legacyRoot = candidate.root;
+    const expectedLegacyRoot = previewStagingDir(candidate.buildRunId);
+    if (!legacyRoot || path.resolve(legacyRoot) !== path.resolve(expectedLegacyRoot)) {
+      throw new Error("QUALITY_CANDIDATE_ARTIFACT_INVALID");
+    }
+    return run(legacyRoot);
+  };
+
+  const assertRunBudget = async (
+    workspaceId: string,
+    siteId: string,
+    buildRunId: string,
+  ): Promise<void> => {
+    if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
+    await costLedger.assertAuthorizedBudget({ workspaceId, siteId, buildRunId });
+  };
 
   const terminalCostSummary = async (
     workspaceId: string,
@@ -778,12 +844,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     reason: "run_succeeded" | "run_failed" | "run_cancelled",
   ) => {
     if (!costLedger) return undefined;
-    await costLedger.ensureBudget({
-      workspaceId,
-      siteId,
-      buildRunId,
-      capMicrousd: siteBuildBudgetCents() * 10_000,
-    });
+    await costLedger.assertAuthorizedBudget({ workspaceId, siteId, buildRunId });
     return costLedger.closeAndSummarize({
       workspaceId,
       siteId,
@@ -1173,31 +1234,61 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         `run ${buildRunId} no longer running — controlled candidate discarded`,
       );
     }
+    const candidateIdentityBase = {
+      workspaceId,
+      siteId,
+      siteVersionId: version.id,
+      buildRunId,
+      specDigest: releaseSpecDigest(doc),
+      designBriefDigest: effectiveBrief.digest,
+      rendererOutputDigest: rendererManifest.treeDigest,
+      basePath: previewBasePath(state.site.slug),
+      siteOrigin: previewOrigin(state.site.slug),
+    };
+    if (mode === "quality_candidate") {
+      // Production parity：候选字节不依赖单个 Worker 的本地磁盘。P3 渲染后
+      // 立即不可变上传到对象存储，新 history 只携带 artifact 引用；P4、
+      // repair、P5 可能落在任意同 digest Worker，统一逐文件校验下载。
+      if (!storage) {
+        throw new Error("QUALITY_CANDIDATE_ARTIFACT_UNAVAILABLE");
+      }
+      const artifact = await persistQualityCandidateArtifact({
+        root: outDir,
+        objectPrefix: qualityCandidatePrefix(siteId, buildRunId),
+        rendererOutputDigest: rendererManifest.treeDigest,
+        storage,
+        signal: activityCancellationSignal(),
+      });
+      const identity: QualityCandidateIdentity = {
+        ...candidateIdentityBase,
+        artifact,
+      };
+      await qualityCandidateService!.assembleQualityCandidate({
+        identity,
+        designBrief: effectiveBrief,
+        materializedRoot: outDir,
+      });
+      // 字节已不可变持久化；本地 staging 不再被任何后续 activity 读取。
+      await rm(outDir, { recursive: true, force: true });
+      const summary: RefurbishQualityCandidateSummary = {
+        previewSlug: state.site.slug,
+        versionId: version.id,
+        designBrief: effectiveBrief,
+        candidateSpec: doc,
+        candidate: identity,
+      };
+      return summary;
+    }
     const summary: RefurbishQualityCandidateSummary = {
       previewSlug: state.site.slug,
       versionId: version.id,
       designBrief: effectiveBrief,
       candidateSpec: doc,
       candidate: {
-        workspaceId,
-        siteId,
-        siteVersionId: version.id,
-        buildRunId,
-        specDigest: releaseSpecDigest(doc),
-        designBriefDigest: effectiveBrief.digest,
-        rendererOutputDigest: rendererManifest.treeDigest,
-        basePath: previewBasePath(state.site.slug),
-        siteOrigin: previewOrigin(state.site.slug),
+        ...candidateIdentityBase,
         root: outDir,
       },
     };
-    if (mode === "quality_candidate") {
-      await qualityCandidateService!.assembleQualityCandidate({
-        identity: summary.candidate,
-        designBrief: effectiveBrief,
-      });
-      return summary;
-    }
     await releaseService.materialize({
       workspaceId,
       siteId,
@@ -1298,6 +1389,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     siteId: string;
     buildRunId: string;
     candidate: QualityCandidateIdentity;
+    /** 本地已校验的候选根目录（对象存储 scratch 或 legacy staging）。 */
+    candidateRoot: string;
     spec: SiteSpecV1_1;
     designBrief: DesignBriefV2;
     replayingCommittedResult: boolean;
@@ -1342,7 +1435,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       manifest,
       promote: async () => {
         await promoteQualityRepairDirectory({
-          candidateRoot: input.candidate.root,
+          candidateRoot: input.candidateRoot,
           repairRoot,
           backupRoot,
           allowMissingCandidate: input.replayingCommittedResult,
@@ -1891,17 +1984,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           data: { status: "building" },
         });
       });
-      // 预算门真接线（改动 1）：认领成功后才开账（失败 claim 上一步已抛）。close-then-open 清跨-retry
-      // 残留账户 + wasExhausted 打标（镜像 discovery resetRunBudget，ledger 进程内无 GC，重试从干净态起）。
-      // ⚠️ 只能在活动里（worker 进程持有 ledger 单例）；workflow sandbox 不可触碰。
-      budgetLedger.close(buildRunId, { force: true });
-      budgetLedger.open(buildRunId, siteBuildBudgetCents());
-      await costLedger?.ensureBudget({
-        workspaceId,
-        siteId,
-        buildRunId,
-        capMicrousd: siteBuildBudgetCents() * 10_000,
-      });
+      await assertRunBudget(workspaceId, siteId, buildRunId);
     },
 
     async recordRefurbishProgress(
@@ -2096,6 +2179,144 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     },
 
     /**
+     * Owner-side bounded tenant enumeration followed by workspace-scoped,
+     * append-only reconciliation. Until a signed provider accounting resolver
+     * is configured, due attempts are recorded as UNRESOLVED and eventually
+     * EXPIRED by the durable cadence. No model/provider generation API is used.
+     */
+    async sweepSiteBuildCostReconciliation(input: {
+      limit?: number;
+      cursor?: {
+        lastAttempt: string | null;
+        workspaceId: string;
+      } | null;
+    }): Promise<{
+      workspaces: number;
+      attempted: number;
+      resolved: number;
+      nextCursor: {
+        lastAttempt: string | null;
+        workspaceId: string;
+      } | null;
+    }> {
+      if (!ownerDb || !costLedger) {
+        throw new Error("SITE_BUILD_RECONCILIATION_UNAVAILABLE");
+      }
+      const requested = input.limit ?? 50;
+      const limit = Math.max(
+        1,
+        Math.min(10, Number.isFinite(requested) ? Math.floor(requested) : 10),
+      );
+
+      if (input.cursor !== null && input.cursor !== undefined) {
+        if (typeof input.cursor.workspaceId !== "string") {
+          throw new Error("SITE_BUILD_RECONCILIATION_CURSOR_INVALID");
+        }
+        if (
+          !/^[0-9a-fA-F-]{36}$/.test(input.cursor.workspaceId) &&
+          !/^[0-9a-fA-F]{32}$/.test(input.cursor.workspaceId)
+        ) {
+          throw new Error("SITE_BUILD_RECONCILIATION_CURSOR_INVALID");
+        }
+        if (
+          input.cursor.lastAttempt !== null &&
+          (typeof input.cursor.lastAttempt !== "string" ||
+            Number.isNaN(Date.parse(input.cursor.lastAttempt)))
+        ) {
+          throw new Error("SITE_BUILD_RECONCILIATION_CURSOR_INVALID");
+        }
+      }
+
+      const cursor = input.cursor ?? null;
+      const cursorAttempt =
+        cursor?.lastAttempt === null || !cursor?.lastAttempt
+          ? new Date(0)
+          : new Date(cursor.lastAttempt);
+
+      const cursorCondition = cursor
+        ? Prisma.sql`
+            AND (
+              COALESCE(MAX(att.last_attempt), '1970-01-01 00:00:00+00'::timestamptz) >
+                ${cursorAttempt}::timestamptz
+              OR (
+                COALESCE(MAX(att.last_attempt), '1970-01-01 00:00:00+00'::timestamptz) =
+                  ${cursorAttempt}::timestamptz
+                AND s.workspace_id > ${cursor.workspaceId}
+              )
+            )
+          `
+        : Prisma.sql``;
+
+      // 公平轮转枚举：按该工作区最近一次被 sweep 尝试时间升序（从未尝试者优先）；
+      // 平手按 workspace_id 确定排序。
+      const workspaceRows = await ownerDb.$queryRaw<
+        Array<{ workspaceId: string; lastAttempt: Date | null }>
+      >(Prisma.sql`
+        SELECT
+          s.workspace_id AS "workspaceId",
+          MAX(att.last_attempt) AS "lastAttempt"
+        FROM site_build_spend s
+        LEFT JOIN LATERAL (
+          SELECT MAX(r.created_at) AS last_attempt
+          FROM site_build_spend_reconciliation r
+          WHERE r.spend_id = s.id
+        ) att ON TRUE
+        WHERE s.cost_basis = 'estimated_upper_bound'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM site_build_spend_reconciliation rx
+            WHERE rx.spend_id = s.id
+              AND rx.status IN ('RESOLVED', 'CONFLICT', 'EXPIRED')
+          )
+          ${cursorCondition}
+        GROUP BY s.workspace_id
+        ORDER BY MAX(att.last_attempt) ASC NULLS FIRST, s.workspace_id ASC
+        LIMIT ${limit}
+      `);
+
+      let attempted = 0;
+      let resolved = 0;
+      for (const row of workspaceRows) {
+        const result = await costLedger.runReconciliationSweep({
+          workspaceId: row.workspaceId,
+          // The request-bound resolver may poll for up to five seconds. One
+          // spend per workspace keeps the whole ten-workspace page safely
+          // inside the two-minute Activity deadline.
+          limit: 1,
+          resolve: async (candidate): Promise<SiteBuildReconciliationObservation> =>
+            costReconciliationResolver
+              ? costReconciliationResolver.resolve(candidate)
+              : {
+                  status: "UNRESOLVED",
+                  resolverId: "site-build-cost-reconciliation-v1",
+                  requestId: reconciliationRequestId(candidate.meta),
+                  observedAt: new Date(),
+                  meta: { reason: "exact_cost_resolver_unavailable" },
+                },
+        });
+        attempted += result.attempted;
+        resolved += result.resolved;
+      }
+
+      const nextCursor =
+        workspaceRows.length === 0
+          ? null
+          : {
+              lastAttempt: workspaceRows.at(-1)?.lastAttempt?.toISOString() ?? null,
+              workspaceId: workspaceRows.at(-1)?.workspaceId ?? "",
+            };
+      if (nextCursor && nextCursor.workspaceId.length === 0) {
+        throw new Error("SITE_BUILD_RECONCILIATION_CURSOR_BROKEN");
+      }
+      return {
+        workspaces: workspaceRows.length,
+        attempted,
+        resolved,
+        nextCursor,
+      };
+    },
+
+    /**
      * P1：品牌档案（M1-b，09 §2.4）。KB digest + 站主档案 + web 研究 → 模型综合 →
      * 确定性 evidence 闸（D1/D2）→ brand_profile 追加新版本（版本化不覆盖）。
      * - web 研究失败=独立降级位 researchDegraded（仅凭 KB 出 Brief），不整体失败；
@@ -2106,7 +2327,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishActivityInput,
     ): Promise<BrandProfileSummary> {
       const { workspaceId, siteId, buildRunId } = input;
-      ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
+      await assertRunBudget(workspaceId, siteId, buildRunId);
       if (!gateway) throw new Error("brand profile: model gateway unavailable");
       if (!costLedger) throw new Error("PERSISTENT_LEDGER_UNAVAILABLE");
 
@@ -2634,7 +2855,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishActivityInput,
     ): Promise<DesignBriefGenerationSummary> {
       const { workspaceId, siteId, buildRunId } = input;
-      ensureRunBudget(buildRunId);
+      await assertRunBudget(workspaceId, siteId, buildRunId);
       assertPartialBuildContract(input.scope);
       if (isPartialBuild(input.scope)) {
         const base = await prisma.withWorkspace(workspaceId, (tx) =>
@@ -2778,7 +2999,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishActivityInput,
     ): Promise<CopyGenerationSummary> {
       const { workspaceId, siteId, buildRunId } = input;
-      ensureRunBudget(buildRunId);
+      await assertRunBudget(workspaceId, siteId, buildRunId);
 
       assertPartialBuildContract(input.scope);
       const {
@@ -3055,7 +3276,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
     async assembleQualityCandidate(
       input: RefurbishQualityCandidateInput,
     ): Promise<RefurbishQualityCandidateSummary> {
-      ensureRunBudget(input.buildRunId);
+      await assertRunBudget(input.workspaceId, input.siteId, input.buildRunId);
       return assembleControlledCandidate(
         input,
         "quality_candidate",
@@ -3075,11 +3296,14 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         designBrief: input.qualityCandidate.designBrief,
         candidate: input.qualityCandidate.candidate,
       });
-      const deterministic =
-        await qualityCandidateService.evaluateQualityCandidate({
-          identity: input.qualityCandidate.candidate,
-          designBrief: input.qualityCandidate.designBrief,
-          quality: {
+      const deterministic = await withMaterializedQualityCandidate(
+        input.qualityCandidate.candidate,
+        (materializedRoot) =>
+          qualityCandidateService.evaluateQualityCandidate({
+            identity: input.qualityCandidate.candidate,
+            designBrief: input.qualityCandidate.designBrief,
+            materializedRoot,
+            quality: {
             round: input.round,
             artifactPrefix: `${qualityCandidatePrefix(
               input.siteId,
@@ -3091,9 +3315,10 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               claimSnapshot: context.claimSnapshot,
               copySlots: context.copySlots,
             },
-            signal: activityCancellationSignal(),
-          },
-        });
+              signal: activityCancellationSignal(),
+            },
+          }),
+      );
       const evaluation = composeUnavailableAestheticEvaluation(
         {
           spec: context.spec,
@@ -3183,23 +3408,50 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
           left.rank - right.rank || left.optionId.localeCompare(right.optionId),
       )[0];
       if (!option) throw new Error("QUALITY_REPAIR_OPTION_UNAVAILABLE");
-      const repaired = await qualityCandidateService.applyQualityRepair({
-        identity: input.qualityCandidate.candidate,
-        context: closedContext,
-        evaluation: input.qualityEvaluation.evaluation,
-        artifactSet: input.qualityEvaluation.artifactSet,
-        selection: { optionId: option.optionId },
-        render: ({ spec, designBrief, replayingCommittedResult }) =>
-          prepareRepairRenderer({
-            workspaceId: input.workspaceId,
-            siteId: input.siteId,
-            buildRunId: input.buildRunId,
-            candidate: input.qualityCandidate.candidate,
-            spec,
-            designBrief,
-            replayingCommittedResult,
-          }),
-      });
+      const repaired = await withMaterializedQualityCandidate(
+        input.qualityCandidate.candidate,
+        async (materializedRoot) => {
+          const applied = await qualityCandidateService.applyQualityRepair({
+            identity: input.qualityCandidate.candidate,
+            materializedRoot,
+            context: closedContext,
+            evaluation: input.qualityEvaluation.evaluation,
+            artifactSet: input.qualityEvaluation.artifactSet,
+            selection: { optionId: option.optionId },
+            render: ({ spec, designBrief, replayingCommittedResult }) =>
+              prepareRepairRenderer({
+                workspaceId: input.workspaceId,
+                siteId: input.siteId,
+                buildRunId: input.buildRunId,
+                candidate: input.qualityCandidate.candidate,
+                candidateRoot: materializedRoot,
+                spec,
+                designBrief,
+                replayingCommittedResult,
+              }),
+          });
+          if (!input.qualityCandidate.candidate.artifact) {
+            // Legacy 本地 history：候选字节仍在显式持久 PREVIEW_DIR，不上传。
+            return applied;
+          }
+          // 修复后的候选字节必须作为新的不可变 artifact 重新发布——identity
+          // 中的旧引用与新 rendererOutputDigest 已不再匹配。
+          if (!storage) {
+            throw new Error("QUALITY_CANDIDATE_ARTIFACT_UNAVAILABLE");
+          }
+          const artifact = await persistQualityCandidateArtifact({
+            root: materializedRoot,
+            objectPrefix: qualityCandidatePrefix(input.siteId, input.buildRunId),
+            rendererOutputDigest: applied.identity.rendererOutputDigest,
+            storage,
+            signal: activityCancellationSignal(),
+          });
+          return {
+            ...applied,
+            identity: { ...applied.identity, artifact },
+          };
+        },
+      );
       return {
         previewSlug: input.qualityCandidate.previewSlug,
         versionId: input.qualityCandidate.versionId,
@@ -3224,41 +3476,46 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       }
       await assertQualityExecutionEligible(input);
       let artifactRefs: BuildStepArtifactRefsV1 | undefined;
-      await qualityCandidateService.materializeApprovedRelease({
-        workspaceId: input.workspaceId,
-        siteId: input.siteId,
-        siteVersionId: input.qualityCandidate.versionId,
-        buildRunId: input.buildRunId,
-        root: input.qualityCandidate.candidate.root,
-        spec: validateSiteSpecV1_1(
-          (
-            await prisma.withWorkspace(input.workspaceId, (tx) =>
-              tx.siteVersion.findUnique({
-                where: { id: input.qualityCandidate.versionId },
-                select: { spec: true },
-              }),
-            )
-          )?.spec,
-        ),
-        storedSpecVersion: SITE_SPEC_V1_1_VERSION,
-        designBrief: input.qualityCandidate.designBrief,
-        createdBy: "system",
-        candidate: input.qualityCandidate.candidate,
-        prepareQuality: async (releaseIdentity) => {
-          const prepared = await prepareReleaseQuality({
-            releaseIdentity,
-            evaluation: input.qualityEvaluation.evaluation,
-            artifactSet: input.qualityEvaluation.artifactSet,
-            rounds: input.rounds,
+      await withMaterializedQualityCandidate(
+        input.qualityCandidate.candidate,
+        async (materializedRoot) => {
+          await qualityCandidateService!.materializeApprovedRelease({
+            workspaceId: input.workspaceId,
+            siteId: input.siteId,
+            siteVersionId: input.qualityCandidate.versionId,
+            buildRunId: input.buildRunId,
+            root: materializedRoot,
+            spec: validateSiteSpecV1_1(
+              (
+                await prisma.withWorkspace(input.workspaceId, (tx) =>
+                  tx.siteVersion.findUnique({
+                    where: { id: input.qualityCandidate.versionId },
+                    select: { spec: true },
+                  }),
+                )
+              )?.spec,
+            ),
+            storedSpecVersion: SITE_SPEC_V1_1_VERSION,
+            designBrief: input.qualityCandidate.designBrief,
+            createdBy: "system",
+            candidate: input.qualityCandidate.candidate,
+            prepareQuality: async (releaseIdentity) => {
+              const prepared = await prepareReleaseQuality({
+                releaseIdentity,
+                evaluation: input.qualityEvaluation.evaluation,
+                artifactSet: input.qualityEvaluation.artifactSet,
+                rounds: input.rounds,
+              });
+              artifactRefs = prepared.artifactRefs;
+              return {
+                manifest: prepared.manifest,
+                designEvaluation: prepared.designEvaluation,
+                aestheticEvidence: prepared.aestheticEvidence,
+              };
+            },
           });
-          artifactRefs = prepared.artifactRefs;
-          return {
-            manifest: prepared.manifest,
-            designEvaluation: prepared.designEvaluation,
-            aestheticEvidence: prepared.aestheticEvidence,
-          };
         },
-      });
+      );
       if (!artifactRefs) {
         throw new Error("QUALITY_ARTIFACT_INVALID");
       }
@@ -3277,7 +3534,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
       input: RefurbishActivityInput,
     ): Promise<RefurbishBuildSummary> {
       const { workspaceId, siteId, buildRunId } = input;
-      ensureRunBudget(buildRunId); // FIX B：入口幂等 open，防换 worker/重启后账户缺失绕过预算门
+      await assertRunBudget(workspaceId, siteId, buildRunId);
       if (input.designBrief) {
         return assembleControlledCandidate(
           input,
@@ -3944,7 +4201,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
         }
       }
       // 预算门收尾（改动 1）：run 终点强制关账（force 无视 refs）。发布失败走 compensate 关账。
-      budgetLedger.close(buildRunId, { force: true });
       if (input.qualityV1 && storage) {
         await storage
           .deletePrefix(`${qualityCandidatePrefix(siteId, buildRunId)}/`)
@@ -4103,7 +4359,6 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             );
         }
         // 预算门收尾（改动 1）：run 终点强制关账，即便补偿 DB 工作失败也释放账户（force 无视 refs）。
-        budgetLedger.close(buildRunId, { force: true });
       }
     },
   };

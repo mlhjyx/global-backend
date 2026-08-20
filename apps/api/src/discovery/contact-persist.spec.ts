@@ -92,6 +92,23 @@ const chDirector: ProviderContactRecord = {
 const company = { id: 'co-1', dedupeKey: 'd:astrazeneca.com' };
 
 describe('contact-persist · externalIds → external_id 点 + license 署名', () => {
+  it('拒绝 synthetic provider/contact provenance，且在获取锁和任何产品写入前失败', async () => {
+    const { tx, queryRaw, canonicalUpsert, fieldEvidenceCreate } = fakeTx([]);
+
+    await expect(
+      persistDiscoveredContacts(tx, {
+        workspaceId: 'ws-1',
+        company,
+        adapterKey: 'sandbox',
+        contacts: [{ ...chDirector, license: 'sandbox' }],
+        suppressedEmails: new Set(),
+      }),
+    ).rejects.toMatchObject({ code: 'SYNTHETIC_DISCOVERY_PROVENANCE' });
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(fieldEvidenceCreate).not.toHaveBeenCalled();
+  });
+
   it('新人：createContact + 写 external_id 点（value=`scheme:value`）+ OGL license 证据', async () => {
     const { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert } = fakeTx([]); // 无候选 → 新建
     const res = await persistDiscoveredContacts(tx, {

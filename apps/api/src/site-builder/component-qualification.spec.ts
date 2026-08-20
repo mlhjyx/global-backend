@@ -28,7 +28,8 @@ const completeEvidence: ComponentQualificationEvidence = {
 const sha256 = "a".repeat(64);
 const fixtureFile = {
   fixtureId: "technical-baseline",
-  repositoryPath: "apps/site-renderer/fixtures/technical-baseline-spec.json",
+  repositoryPath:
+    "apps/site-renderer/product-assets/component-catalog-v1/hero-banner-spec.json",
   sha256,
 };
 const visualOutputs = [
@@ -368,7 +369,7 @@ describe("M1-e-A component qualification gate", () => {
       expect(registered.fixtureFiles).toHaveLength(1);
       const [fixture] = registered.fixtureFiles;
       expect(fixture.repositoryPath).toMatch(
-        /^apps\/site-renderer\/fixtures\/component-qualification\/.+-spec\.json$/,
+        /^apps\/site-renderer\/product-assets\/component-catalog-v1\/.+-spec\.json$/,
       );
 
       const spec = JSON.parse(

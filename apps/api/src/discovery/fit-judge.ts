@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetExceededError } from '../tools/budget';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 
@@ -137,18 +138,33 @@ export async function judgeFitCompany(
         workspaceId,
         runId: opts?.runId,
         authorizeExternalAction: opts?.authorizeExternalAction,
+        genericReplay: {
+          schema: 'fit-judgment/v1',
+          project: (result) => ({
+            data: result.data,
+            provider: result.provider,
+            model: result.model,
+          }),
+          restore: (projection) => {
+            if (!projection || typeof projection !== 'object' || Array.isArray(projection)) {
+              throw new Error('FIT_JUDGMENT_REPLAY_INVALID');
+            }
+            const restored = projection as Record<string, unknown>;
+            return {
+              data: restored.data,
+              provider: String(restored.provider ?? ''),
+              model: String(restored.model ?? ''),
+            };
+          },
+        },
       },
       { telemetry: opts?.runtimeTelemetry },
     );
-    // 🔴 stub 兜底绝不写真实判定：dev 里网关瞬时失败会 fallback 到 stub（罐头 null 输出），
-    // 归一化后变成 weak 假判定污染 canonical（实测抓到 2 家：fit_reasons 全 null）。宁可不判、
-    // 下个 sweep 真模型重试。
-    if (result.provider === 'stub') return null;
     out = result.data;
   } catch (err) {
     // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
     // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
-    if (err instanceof BudgetExceededError) throw err;
+    if (err instanceof BudgetExceededError || err instanceof BudgetOperationReplayError) throw err;
     return null;
   }
   const verdict = (

@@ -24,6 +24,16 @@ interface ResolverDependencies {
 
 const CAPTURED_FETCH = fetch;
 
+/**
+ * Canonical resolver identity for request-bound cost reconciliation through
+ * the New API gateway. The provider's unknown-settlement observations, the
+ * deployment catalog (SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON), and the
+ * sweep resolver must all use this exact id; a mismatch makes trustedContext()
+ * reject the spend meta and reconciliation can only expire unresolved.
+ */
+export const NEW_API_REQUEST_BOUND_RESOLVER_ID =
+  "new-api-request-bound-reconciliation-v1";
+
 export interface NewApiRequestBoundSettlementResolverSettings {
   gatewayOrigin: string;
   apiKey: string;
@@ -280,6 +290,7 @@ export class NewApiRequestBoundSettlementResolver {
       try {
         response = await this.fetchImpl(`${this.gatewayOrigin}/api/log/token`, {
           headers: { Authorization: `Bearer ${this.settings.apiKey}` },
+          redirect: "error",
           signal,
         });
         if (!response.ok) continue;

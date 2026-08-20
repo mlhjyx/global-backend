@@ -20,9 +20,6 @@ export function resolveRuntimeMode(env: NodeJS.ProcessEnv): RuntimeMode {
   if (declared && !ALLOWED_MODES.has(declared as RuntimeMode)) {
     throw new Error(`APP_ENVIRONMENT must be one of: ${[...ALLOWED_MODES].join(', ')}`);
   }
-  if (env.NODE_ENV === 'production' && declared && declared !== 'production' && declared !== 'pilot') {
-    throw new Error('NODE_ENV=production cannot be downgraded by APP_ENVIRONMENT');
-  }
   if (
     (declared === 'pilot' || declared === 'production') &&
     env.NODE_ENV !== 'production'
@@ -122,7 +119,7 @@ export function resolveCorsOrigin(
     }
     return origins;
   }
-  return mode === 'development' || mode === 'test';
+  return mode === 'test';
 }
 
 export function resolveRuntimeSettings(env: NodeJS.ProcessEnv = process.env): RuntimeSettings {

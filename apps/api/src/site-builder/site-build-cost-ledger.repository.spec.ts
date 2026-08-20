@@ -21,13 +21,126 @@ const SCOPE = {
 };
 
 describe('SiteBuildCostLedger paid-operation replay gate', () => {
-  it('commits unknown settlement and the BuildRun kill switch in one workspace transaction', async () => {
-    const settle = vi.fn(async () => [{ decision: 'SETTLED' }]);
-    const disable = vi.fn(async () => ({ count: 1 }));
+  it('projects CAP_VARIANCE and emits one outbox event without relabelling known output UNKNOWN', async () => {
+    const updateRun = vi.fn(async () => ({ id: SCOPE.buildRunId }));
+    const createOutbox = vi.fn(async () => ({ id: 'outbox-1' }));
     const ledger = new SiteBuildCostLedger(
       fakePrisma({
-        $queryRaw: settle,
-        siteBuildBudget: { updateMany: disable },
+        $queryRaw: vi
+          .fn()
+          .mockResolvedValueOnce([{ decision: 'OVER_RESERVATION' }])
+          .mockResolvedValueOnce([{ decision: 'REPLAY' }]),
+        siteBuildBudget: {
+          findUnique: vi.fn(async () => ({
+            capMicrousd: 100n,
+            reservedMicrousd: 0n,
+            chargedMicrousd: 40n,
+            paidCallsEnabled: false,
+            disabledReason: 'settlement_exceeded_reservation',
+            exhaustedAt: new Date('2026-08-16T00:00:00.000Z'),
+          })),
+        },
+        siteBuildSpend: {
+          findMany: vi.fn(async () => [
+            {
+              id: '44444444-4444-4444-8444-444444444444',
+              kind: 'model',
+              status: 'SUCCEEDED',
+              costBasis: 'provider_reported',
+              budgetChargeMicrousd: 40n,
+              reportedCostMicrousd: 80n,
+              calculatedCostMicrousd: null,
+              estimatedCostMicrousd: null,
+              inputTokens: 10,
+              outputTokens: 2,
+              callCount: 1,
+            },
+          ]),
+        },
+        siteBuildSpendReconciliation: {
+          findMany: vi.fn(async () => [
+            {
+              spendId: '44444444-4444-4444-8444-444444444444',
+              status: 'CONFLICT',
+              exactCostMicrousd: null,
+              createdAt: new Date('2026-08-16T00:00:00.000Z'),
+            },
+          ]),
+        },
+        siteBuildRun: { update: updateRun },
+        outboxEvent: { create: createOutbox },
+      }),
+    );
+
+    await expect(
+      ledger.settleOperation({
+        scope: {
+          ...SCOPE,
+          operationKey: 'e'.repeat(64),
+          kind: 'model',
+          taskId: 'site_builder.copy',
+          subject: 'gpt-5.6-terra@gateway',
+          reservationMicrousd: 40,
+        },
+        status: 'SUCCEEDED',
+        result: { data: { ok: true } },
+        measurement: {
+          basis: 'provider_reported',
+          budgetChargeMicrousd: 80,
+          reportedCostMicrousd: 80,
+          calculatedCostMicrousd: null,
+          estimatedCostMicrousd: null,
+          inputTokens: 10,
+          outputTokens: 2,
+          callCount: 1,
+          meta: {},
+        },
+      }),
+    ).resolves.toBe('OVER_RESERVATION');
+    await expect(
+      ledger.settleOperation({
+        scope: {
+          ...SCOPE,
+          operationKey: 'e'.repeat(64),
+          kind: 'model',
+          taskId: 'site_builder.copy',
+          subject: 'gpt-5.6-terra@gateway',
+          reservationMicrousd: 40,
+        },
+        status: 'SUCCEEDED',
+        result: { data: { ok: true } },
+        measurement: {
+          basis: 'provider_reported',
+          budgetChargeMicrousd: 80,
+          reportedCostMicrousd: 80,
+          calculatedCostMicrousd: null,
+          estimatedCostMicrousd: null,
+          inputTokens: 10,
+          outputTokens: 2,
+          callCount: 1,
+          meta: {},
+        },
+      }),
+    ).resolves.toBe('REPLAY');
+    expect(updateRun).toHaveBeenCalledOnce();
+    expect(createOutbox).toHaveBeenCalledOnce();
+    expect(createOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: 'SiteBuildCostSummaryUpdated',
+        }),
+      }),
+    );
+  });
+
+  it('commits unknown settlement and the BuildRun kill switch in one workspace transaction', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ decision: 'SETTLED' }])
+      .mockResolvedValueOnce([{ count: 1 }]);
+    const ledger = new SiteBuildCostLedger(
+      fakePrisma({
+        $queryRaw: queryRaw,
       }),
     );
 
@@ -57,25 +170,16 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
         disablePaidCallsReason: 'MODEL_SETTLEMENT_UNKNOWN',
       }),
     ).resolves.toBe('SETTLED');
-    expect(disable).toHaveBeenCalledWith({
-      where: { buildRunId: SCOPE.buildRunId },
-      data: {
-        paidCallsEnabled: false,
-        disabledReason: 'MODEL_SETTLEMENT_UNKNOWN',
-      },
-    });
-    expect(settle.mock.invocationCallOrder[0]).toBeLessThan(
-      disable.mock.invocationCallOrder[0],
-    );
+    expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it('serializes a manual kill switch with final pointer publication', async () => {
     const executeRaw = vi.fn(async () => 0);
-    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const queryRaw = vi.fn(async () => [{ count: 1 }]);
     const ledger = new SiteBuildCostLedger(
       fakePrisma({
         $executeRaw: executeRaw,
-        siteBuildBudget: { updateMany },
+        $queryRaw: queryRaw,
       }),
     );
 
@@ -86,15 +190,9 @@ describe('SiteBuildCostLedger paid-operation replay gate', () => {
     );
 
     expect(executeRaw).toHaveBeenCalledOnce();
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { buildRunId: SCOPE.buildRunId },
-      data: {
-        paidCallsEnabled: false,
-        disabledReason: 'manual_kill_switch',
-      },
-    });
+    expect(queryRaw).toHaveBeenCalledOnce();
     expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      updateMany.mock.invocationCallOrder[0],
+      queryRaw.mock.invocationCallOrder[0],
     );
   });
 
@@ -394,13 +492,11 @@ describe('SiteBuildCostLedger BrandProfile task attempt fencing', () => {
 });
 
 describe('SiteBuildCostLedger terminal cost summary', () => {
-  it('reconciles ambiguous reservations, closes paid calls and returns the stable v1 summary', async () => {
+  it('reconciles ambiguous reservations, closes paid calls and returns the stable v2 summary', async () => {
     const reconcile = vi.fn(async () => [{ reconciled: 1 }]);
-    const disable = vi.fn(async () => ({ count: 1 }));
     const tx = {
       $queryRaw: reconcile,
       siteBuildBudget: {
-        updateMany: disable,
         findUnique: vi.fn(async () => ({
           capMicrousd: 5_000_000n,
           reservedMicrousd: 0n,
@@ -438,6 +534,7 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
           },
         ]),
       },
+      siteBuildSpendReconciliation: { findMany: vi.fn(async () => []) },
     };
     const ledger = new SiteBuildCostLedger(fakePrisma(tx));
 
@@ -447,44 +544,25 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
         reason: 'run_succeeded',
       }),
     ).resolves.toMatchObject({
-      schemaVersion: 'site-builder-cost-summary/v1',
+      schemaVersion: 'site-builder-cost-summary/v2',
       budget: {
-        chargedMicrousd: 820_000,
+        chargedMicrousd: '820000',
         paidCallsEnabled: false,
         disabledReason: 'run_succeeded',
       },
       totals: {
-        calculatedCostMicrousd: 20_000,
+        calculatedCostMicrousd: '20000',
         unknownOperations: 1,
       },
       usage: { modelCalls: 1, toolCalls: 0 },
     });
-    expect(reconcile).toHaveBeenCalledOnce();
-    expect(disable).toHaveBeenCalledWith({
-      where: {
-        buildRunId: SCOPE.buildRunId,
-        OR: [
-          { paidCallsEnabled: true },
-          {
-            disabledReason: {
-              in: ['run_succeeded', 'run_failed', 'run_cancelled'],
-            },
-          },
-        ],
-      },
-      data: {
-        paidCallsEnabled: false,
-        disabledReason: 'run_succeeded',
-      },
-    });
+    expect(reconcile).toHaveBeenCalledTimes(2);
   });
 
   it('corrects a provisional success reason when publication falls into failed compensation', async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
       $queryRaw: vi.fn(async () => [{ reconciled: 0 }]),
       siteBuildBudget: {
-        updateMany,
         findUnique: vi.fn(async () => ({
           capMicrousd: 5_000_000n,
           reservedMicrousd: 0n,
@@ -495,24 +573,12 @@ describe('SiteBuildCostLedger terminal cost summary', () => {
         })),
       },
       siteBuildSpend: { findMany: vi.fn(async () => []) },
+      siteBuildSpendReconciliation: { findMany: vi.fn(async () => []) },
     };
     const ledger = new SiteBuildCostLedger(fakePrisma(tx));
 
     await ledger.closeAndSummarize({ ...SCOPE, reason: 'run_failed' });
 
-    expect(updateMany).toHaveBeenCalledWith({
-      where: {
-        buildRunId: SCOPE.buildRunId,
-        OR: [
-          { paidCallsEnabled: true },
-          {
-            disabledReason: {
-              in: ['run_succeeded', 'run_failed', 'run_cancelled'],
-            },
-          },
-        ],
-      },
-      data: { paidCallsEnabled: false, disabledReason: 'run_failed' },
-    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
   });
 });

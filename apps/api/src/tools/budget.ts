@@ -98,9 +98,6 @@ export class BudgetLedger {
   }
 }
 
-/** 进程级单例（worker/API 各自持有；预算按 run 隔离）。 */
-export const budgetLedger = new BudgetLedger();
-
 // ── 预算上限配置（收口②「真开账」：编排层用这些 cap 调 open()，超限 reserve 抛错=真拦截）──
 
 function intFromEnv(name: string, fallback: number): number {
@@ -116,15 +113,6 @@ export function runBudgetCents(): number {
 /** 单轮 sweep（backlog 等·per-workspace）的预算上限（¢）。 */
 export function sweepBudgetCents(): number {
   return intFromEnv('SWEEP_BUDGET_CENTS', 5000);
-}
-
-/**
- * 单个 site-builder refurbish run 的预算上限（¢）。默认 500（$5）：M1-b 单 run 峰值 reserve
- * ≈ brand_profile 80¢（40×2 校验-修复预留）+ 研究工具 ~1¢，500 有 ~6× headroom 永不误伤，
- * 又是有意义天花板（真 runaway 会打穿）。M1-d copy 扇出后按 backtest 收紧/上调（env 可调）。
- */
-export function siteBuildBudgetCents(): number {
-  return intFromEnv('SITE_BUILD_BUDGET_CENTS', 500);
 }
 
 /** LLM 调用无任务契约 maxCostCents 时的保守预留估算（¢）。 */

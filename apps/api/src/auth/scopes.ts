@@ -23,43 +23,6 @@ const MAX_TOKEN_ROLES = 128;
 
 type RoleScopeMap = Readonly<Record<string, readonly AuthorizationScope[]>>;
 
-function fixedScopes(
-  ...scopes: readonly AuthorizationScope[]
-): readonly AuthorizationScope[] {
-  return Object.freeze([...scopes]);
-}
-
-const DEVELOPMENT_ROLE_SCOPE_MAP: RoleScopeMap = Object.freeze({
-  viewer: fixedScopes('acquisition:read', 'ops:read'),
-  operator: fixedScopes(
-    'acquisition:read',
-    'acquisition:write',
-    'acquisition:label:write',
-    'ops:read',
-  ),
-  reviewer: fixedScopes(
-    'acquisition:read',
-    'acquisition:review',
-    'acquisition:identity:review',
-    'personal-data:read',
-    'ops:read',
-  ),
-  compliance: fixedScopes(
-    'acquisition:read',
-    'acquisition:label:write',
-    'acquisition:identity:review',
-    'personal-data:read',
-    'compliance:manage',
-    'ops:read',
-  ),
-  integration: fixedScopes(
-    'acquisition:read',
-    'acquisition:event:ack',
-  ),
-  ops: fixedScopes('ops:read'),
-  admin: AUTHORIZATION_SCOPES,
-});
-
 export interface RolesToScopesPolicy {
   resolve(roles: readonly string[]): readonly AuthorizationScope[];
 }
@@ -82,10 +45,6 @@ export function normalizeTokenRoles(value: unknown): string[] {
     roles.add(role);
   }
   return [...roles];
-}
-
-function controlled(mode: RuntimeMode): boolean {
-  return mode === 'pilot' || mode === 'production';
 }
 
 function parseConfiguredMap(raw: string): RoleScopeMap {
@@ -164,10 +123,7 @@ export function createRolesToScopesPolicy(
   }
   const configured = raw?.trim();
   if (!configured) {
-    if (controlled(mode)) {
-      throw new Error(`AUTH_ROLE_SCOPE_MAP_JSON is required in ${mode}`);
-    }
-    return policy(DEVELOPMENT_ROLE_SCOPE_MAP);
+    throw new Error(`AUTH_ROLE_SCOPE_MAP_JSON is required in ${mode}`);
   }
   return policy(parseConfiguredMap(configured));
 }

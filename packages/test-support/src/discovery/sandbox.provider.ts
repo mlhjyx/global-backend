@@ -1,18 +1,62 @@
-import {
-  CompanyDiscoveryAdapter,
-  CompanyDiscoveryQuery,
-  ContactDiscoveryAdapter,
-  ContactDiscoveryResult,
-  DiscoveryResult,
-  EmailVerdict,
-  EmailVerificationAdapter,
-  ExecutionContext,
-  ProviderCompanyRecord,
-  SourceClass,
-} from '../provider-contract';
+export type SandboxSourceClass =
+  | 'trade_data'
+  | 'b2b_company_person'
+  | 'company_registry'
+  | 'contact_discovery'
+  | 'email_verification'
+  | 'public_intelligence'
+  | 'industry_data';
+
+export interface SandboxCompanyDiscoveryQuery {
+  sourceClass: SandboxSourceClass;
+  filters: Record<string, unknown>;
+  keywords: string[];
+  limit: number;
+}
+
+export interface SandboxExecutionContext {
+  workspaceId: string;
+  runId?: string;
+  correlationId?: string;
+  authorizeExternalAction?: () => Promise<boolean>;
+}
+
+export interface SandboxCompanyRecord {
+  externalId: string;
+  name: string;
+  domain?: string;
+  country?: string;
+  industry?: string;
+  employeeCount?: number;
+  revenueUsd?: number;
+  attributes?: Record<string, unknown>;
+}
+
+export interface SandboxDiscoveryResult {
+  records: SandboxCompanyRecord[];
+  costCents: number;
+}
+
+export interface SandboxContactDiscoveryResult {
+  contacts: Array<{
+    externalId: string;
+    fullName: string;
+    title?: string;
+    seniority?: string;
+    department?: string;
+    email?: string;
+  }>;
+  costCents: number;
+}
+
+export interface SandboxEmailVerdict {
+  status: 'VALID' | 'RISKY' | 'INVALID' | 'BLOCKED';
+  detail?: string;
+  costCents: number;
+}
 
 /**
- * Sandbox Provider（Provider 合同签署前的第一版数据源，见路线图「数据源先 sandbox」）。
+ * Test-only deterministic Sandbox Provider. Product composition roots must never import it.
  * 关键约束——数据真实性 P-04：sandbox 产出的一切都明确标记为合成数据
  * （license='sandbox'、域名 *.sandbox.example.com），绝不冒充真实企业；
  * 它的价值是让 发现→归一→评分→Lead 管线端到端可验证，真源接入后只换适配器。
@@ -56,11 +100,9 @@ const TITLES = [
   { title: 'Operations Manager', seniority: 'manager', department: 'operations' },
 ];
 
-export class SandboxDiscoveryProvider
-  implements CompanyDiscoveryAdapter, ContactDiscoveryAdapter, EmailVerificationAdapter
-{
+export class SandboxDiscoveryProvider {
   readonly key = 'sandbox';
-  readonly classes: SourceClass[] = [
+  readonly classes: SandboxSourceClass[] = [
     'trade_data',
     'b2b_company_person',
     'company_registry',
@@ -68,7 +110,10 @@ export class SandboxDiscoveryProvider
     'industry_data',
   ];
 
-  async discoverCompanies(query: CompanyDiscoveryQuery, _ctx: ExecutionContext): Promise<DiscoveryResult> {
+  async discoverCompanies(
+    query: SandboxCompanyDiscoveryQuery,
+    _ctx: SandboxExecutionContext,
+  ): Promise<SandboxDiscoveryResult> {
     const seed = hash32(JSON.stringify({ c: query.sourceClass, f: query.filters, k: query.keywords }));
     const rnd = mulberry32(seed);
     const countries = asStrArr(query.filters.country ?? query.filters.countries ?? query.filters.region);
@@ -77,7 +122,7 @@ export class SandboxDiscoveryProvider
     const keywords = query.keywords ?? [];
     const n = Math.min(query.limit, 25);
 
-    const records: ProviderCompanyRecord[] = [];
+    const records: SandboxCompanyRecord[] = [];
     for (let i = 0; i < n; i++) {
       const stem = pick(rnd, NAME_STEMS, 'Nova');
       const suffix = pick(rnd, NAME_SUFFIX, 'Industries');
@@ -105,7 +150,10 @@ export class SandboxDiscoveryProvider
     return { records, costCents: 0 };
   }
 
-  async discoverContacts(company: { name: string; domain?: string }, _ctx: ExecutionContext): Promise<ContactDiscoveryResult> {
+  async discoverContacts(
+    company: { name: string; domain?: string },
+    _ctx: SandboxExecutionContext,
+  ): Promise<SandboxContactDiscoveryResult> {
     const seed = hash32(company.domain ?? company.name);
     const rnd = mulberry32(seed);
     const count = 2 + Math.floor(rnd() * 2);
@@ -125,7 +173,7 @@ export class SandboxDiscoveryProvider
     return { contacts, costCents: 0 };
   }
 
-  async verifyEmail(email: string): Promise<EmailVerdict> {
+  async verifyEmail(email: string): Promise<SandboxEmailVerdict> {
     const h = hash32(email) % 100;
     const status = h < 70 ? 'VALID' : h < 85 ? 'RISKY' : 'INVALID';
     return { status, detail: 'sandbox deterministic verdict', costCents: 0 };

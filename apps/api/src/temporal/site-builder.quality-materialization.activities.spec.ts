@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rename,
   rm,
   writeFile,
@@ -23,7 +24,12 @@ import { buildM1ebGoldenFixtures } from "../site-builder/design/m1eb-golden";
 import { releaseSpecDigest } from "../site-builder/release-artifact";
 import type { StorageService } from "../site-builder/storage.service";
 import {
+  persistQualityCandidateArtifact,
+  type QualityCandidateArtifactRef,
+} from "../site-builder/quality/quality-candidate-artifact";
+import {
   createSiteBuilderActivities,
+  previewRoot,
   promoteQualityRepairDirectory,
   qualitySettlementIsPublishable,
 } from "./site-builder.activities";
@@ -195,6 +201,7 @@ describe("M1-f approved quality materialization Activity", () => {
       asset: { findMany: vi.fn(async () => []) },
     };
     const activities = createSiteBuilderActivities({
+      rendererBuildIdentity: "site-renderer@sha256:" + "d".repeat(64),
       prisma: {
         withWorkspace: vi.fn(
           async (
@@ -222,7 +229,7 @@ describe("M1-f approved quality materialization Activity", () => {
       rendererOutputDigest: "d".repeat(64),
       basePath: "/preview/acme",
       siteOrigin: "https://preview.example.test",
-      root: "/private/candidate",
+      root: path.join(previewRoot(), ".staging", "run-1"),
     };
 
     const result = await activities.applyQualityRepair({
@@ -384,6 +391,7 @@ describe("M1-f approved quality materialization Activity", () => {
       ),
     } as unknown as PrismaService;
     const activities = createSiteBuilderActivities({
+      rendererBuildIdentity: "site-renderer@sha256:" + "d".repeat(64),
       prisma,
       storage,
       qualityCandidateService: {
@@ -410,7 +418,7 @@ describe("M1-f approved quality materialization Activity", () => {
           rendererOutputDigest: "d".repeat(64),
           basePath: "/preview/acme",
           siteOrigin: "https://preview.example.test",
-          root: "/private/candidate",
+          root: path.join(previewRoot(), ".staging", "run-1"),
         },
       },
       qualityEvaluation: {
@@ -424,7 +432,7 @@ describe("M1-f approved quality materialization Activity", () => {
           rendererOutputDigest: "d".repeat(64),
           basePath: "/preview/acme",
           siteOrigin: "https://preview.example.test",
-          root: "/private/candidate",
+          root: path.join(previewRoot(), ".staging", "run-1"),
         },
         designBrief: fixture.designBrief,
         evaluation,
@@ -540,6 +548,7 @@ describe("M1-f approved quality materialization Activity", () => {
         ),
       } as unknown as PrismaService;
       const activities = createSiteBuilderActivities({
+        rendererBuildIdentity: "site-renderer@sha256:" + "d".repeat(64),
         prisma,
         storage: {} as StorageService,
         qualityCandidateService: {
@@ -558,4 +567,363 @@ describe("M1-f approved quality materialization Activity", () => {
       expect(materializeApprovedRelease).not.toHaveBeenCalled();
     },
   );
+
+  describe("object-storage candidate artifacts (production parity)", () => {
+    const inMemoryStorage = (store: Map<string, Buffer>) =>
+      ({
+        putBufferImmutable: vi.fn(
+          async (key: string, data: Buffer) => {
+            if (store.has(key)) return "exists";
+            store.set(key, data);
+            return "created";
+          },
+        ),
+        getBufferBounded: vi.fn(async (key: string) => {
+          const bytes = store.get(key);
+          if (!bytes) throw new Error(`missing object ${key}`);
+          return bytes;
+        }),
+        hashObject: vi.fn(async (key: string) => {
+          const bytes = store.get(key);
+          if (!bytes) throw new Error(`missing object ${key}`);
+          return { sha256: sha256(bytes), size: bytes.length };
+        }),
+      }) as unknown as StorageService;
+
+    const persistFixtureCandidate = async (
+      store: Map<string, Buffer>,
+      rendererOutputDigest: string,
+    ): Promise<QualityCandidateArtifactRef> => {
+      const sourceRoot = await mkdtemp(
+        path.join(tmpdir(), "quality-candidate-src-"),
+      );
+      await writeFile(path.join(sourceRoot, "index.html"), "<h1>candidate</h1>");
+      const artifact = await persistQualityCandidateArtifact({
+        root: sourceRoot,
+        objectPrefix: "sites/site-1/quality-candidates/run-1",
+        rendererOutputDigest,
+        storage: inMemoryStorage(store) as never,
+      });
+      await rm(sourceRoot, { recursive: true, force: true });
+      return artifact;
+    };
+
+    it("materializes an artifact-referenced candidate for approved release and cleans the scratch", async () => {
+      const scratch = await mkdtemp(path.join(tmpdir(), "candidate-scratch-"));
+      process.env.SITE_BUILDER_CANDIDATE_TMP_ROOT = scratch;
+      try {
+        const store = new Map<string, Buffer>();
+        const candidateSpecDigest = releaseSpecDigest(fixture.spec);
+        const artifact = await persistFixtureCandidate(store, "d".repeat(64));
+        const qualityArtifacts = ([375, 768, 1440] as const).map(
+          (breakpoint) => {
+            const bytes = Buffer.from(`private screenshot ${breakpoint}`);
+            const objectKey = `sites/site-1/quality-candidates/run-1/quality/round-0/home-${breakpoint}.png`;
+            store.set(objectKey, bytes);
+            return {
+              artifactId: `home-${breakpoint}`,
+              objectKey,
+              sha256: sha256(bytes),
+              sizeBytes: bytes.length,
+              mimeType: "image/png" as const,
+              kind: "screenshot" as const,
+              target: { locale: "en", pageId: "home", breakpoint },
+            };
+          },
+        );
+        const artifactSetDraft = {
+          schemaVersion: QUALITY_ARTIFACT_SET_SCHEMA_VERSION,
+          candidateSpecDigest,
+          designBriefDigest: fixture.designBrief.digest,
+          round: 0 as const,
+          expectedTargets: [{ locale: "en", pageId: "home" }],
+          artifacts: qualityArtifacts,
+        };
+        const artifactSet: QualityArtifactSetV1 = {
+          ...artifactSetDraft,
+          artifactSetDigest: qualityArtifactSetDigest(artifactSetDraft),
+        };
+        const evaluation: DesignEvaluationV2 = {
+          schemaVersion: DESIGN_EVALUATION_V2_SCHEMA_VERSION,
+          candidateSpecDigest,
+          designBriefDigest: fixture.designBrief.digest,
+          artifactSetDigest: artifactSet.artifactSetDigest,
+          round: 0,
+          evaluatorVersion: "site-builder-deterministic-quality@1.0.0",
+          deterministic: { status: "passed", hardFailures: [], findings: [] },
+          aesthetic: {
+            status: "unavailable",
+            overallScore: null,
+            dimensions: null,
+            unavailableReason: "timeout",
+            findings: [],
+          },
+        };
+        let observedContent: string | undefined;
+        const materializeApprovedRelease = vi.fn(
+          async (input: {
+            root: string;
+            prepareQuality: (identity: {
+              artifactPrefix: string;
+              producerToken: string;
+            }) => Promise<unknown>;
+          }) => {
+            observedContent = await readFile(
+              path.join(input.root, "index.html"),
+              "utf8",
+            );
+            await input.prepareQuality({
+              artifactPrefix: "sites/site-1/releases/release-1",
+              producerToken: "producer-1",
+            });
+          },
+        );
+        const prisma = {
+          withWorkspace: vi.fn(
+            async (_workspaceId: string, callback: (tx: never) => Promise<unknown>) =>
+              callback({
+                siteBuildRun: {
+                  findUnique: vi.fn(async () => ({ status: "running" })),
+                },
+                siteBuildBudget: {
+                  findUnique: vi.fn(async () => ({ paidCallsEnabled: true })),
+                },
+                siteBuildSpend: { count: vi.fn(async () => 0) },
+                siteVersion: {
+                  findUnique: vi.fn(async () => ({ spec: fixture.spec })),
+                },
+              } as never),
+          ),
+        } as unknown as PrismaService;
+        const activities = createSiteBuilderActivities({
+          rendererBuildIdentity: "site-renderer@sha256:" + "d".repeat(64),
+          prisma,
+          storage: inMemoryStorage(store),
+          qualityCandidateService: { materializeApprovedRelease } as never,
+        });
+
+        await activities.materializeApprovedRelease({
+          workspaceId: "ws-1",
+          siteId: "site-1",
+          buildRunId: "run-1",
+          qualityCandidate: {
+            previewSlug: "acme",
+            versionId: "version-1",
+            designBrief: fixture.designBrief,
+            candidateSpec: fixture.spec,
+            candidate: {
+              workspaceId: "ws-1",
+              siteId: "site-1",
+              siteVersionId: "version-1",
+              buildRunId: "run-1",
+              designBriefDigest: fixture.designBrief.digest,
+              specDigest: candidateSpecDigest,
+              rendererOutputDigest: "d".repeat(64),
+              basePath: "/preview/acme",
+              siteOrigin: "https://preview.example.test",
+              artifact,
+            },
+          },
+          qualityEvaluation: {
+            candidate: {
+              workspaceId: "ws-1",
+              siteId: "site-1",
+              siteVersionId: "version-1",
+              buildRunId: "run-1",
+              designBriefDigest: fixture.designBrief.digest,
+              specDigest: candidateSpecDigest,
+              rendererOutputDigest: "d".repeat(64),
+              basePath: "/preview/acme",
+              siteOrigin: "https://preview.example.test",
+              artifact,
+            },
+            designBrief: fixture.designBrief,
+            evaluation,
+            designEvaluationDigest: designEvaluationV2Digest(
+              evaluation,
+              artifactSet,
+            ),
+            artifactSet,
+            passed: true,
+            artifactRefs: {
+              schemaVersion: "site-builder-build-step-artifact-refs/v1",
+              collectionDigest: "e".repeat(64),
+              artifacts: [],
+            },
+          },
+          rounds: [
+            {
+              round: 0,
+              candidateSpecDigest,
+              artifactSetDigest: artifactSet.artifactSetDigest,
+              designEvaluationDigest: designEvaluationV2Digest(
+                evaluation,
+                artifactSet,
+              ),
+              repairCatalogDigest: null,
+              selectedRepairOptionId: null,
+              repairSelectionMode: null,
+            },
+          ],
+        } as never);
+
+        // P5 拿到的是从对象存储逐文件校验下载的 scratch，且字节完全一致。
+        expect(observedContent).toBe("<h1>candidate</h1>");
+        expect(materializeApprovedRelease).toHaveBeenCalledOnce();
+        // scratch 必须清理——只读容器上不得泄漏候选字节。
+        await expect(readdir(scratch)).resolves.toEqual([]);
+      } finally {
+        delete process.env.SITE_BUILDER_CANDIDATE_TMP_ROOT;
+        await rm(scratch, { recursive: true, force: true });
+      }
+    });
+
+    it("re-publishes a repaired candidate as a new immutable artifact", async () => {
+      const scratch = await mkdtemp(path.join(tmpdir(), "candidate-scratch-"));
+      process.env.SITE_BUILDER_CANDIDATE_TMP_ROOT = scratch;
+      try {
+        const store = new Map<string, Buffer>();
+        const originalDigest = releaseSpecDigest(fixture.spec);
+        const artifact = await persistFixtureCandidate(store, "d".repeat(64));
+        const repairedSpec = structuredClone(fixture.spec);
+        const repairedDigest = (() => {
+          const clone = structuredClone(fixture.spec);
+          clone.site = { ...clone.site, seoGlobal: { siteName: "repaired" } } as never;
+          return releaseSpecDigest(clone);
+        })();
+        let observedContent: string | undefined;
+        const applyQualityRepair = vi.fn(
+          async (input: { materializedRoot: string }) => {
+            observedContent = await readFile(
+              path.join(input.materializedRoot, "index.html"),
+              "utf8",
+            );
+            return {
+              identity: {
+                workspaceId: "ws-1",
+                siteId: "site-1",
+                siteVersionId: "version-1",
+                buildRunId: "run-1",
+                designBriefDigest: fixture.designBrief.digest,
+                specDigest: repairedDigest,
+                rendererOutputDigest: "e".repeat(64),
+                basePath: "/preview/acme",
+                siteOrigin: "https://preview.example.test",
+                artifact,
+              },
+              designBrief: fixture.designBrief,
+              spec: repairedSpec,
+              catalogDigest: "f".repeat(64),
+              selectedOptionId: "items:home:section:2",
+            };
+          },
+        );
+        const tx = {
+          siteBuildRun: {
+            findUnique: vi.fn(async () => ({ status: "running" })),
+          },
+          siteBuildBudget: {
+            findUnique: vi.fn(async () => ({ paidCallsEnabled: true })),
+          },
+          siteBuildSpend: { count: vi.fn(async () => 0) },
+          site: {
+            findFirst: vi.fn(async () => ({ name: "Acme", slug: "acme" })),
+          },
+          siteVersion: {
+            findFirst: vi.fn(async () => ({
+              spec: repairedSpec,
+              specVersion: "1.1.0",
+              buildStatus: "building",
+            })),
+          },
+          sitePublishableClaimSnapshot: {
+            findFirst: vi.fn(async () => ({
+              workspaceId: "ws-1",
+              siteId: "site-1",
+              companyProfileId: "company-1",
+              buildRunId: "run-1",
+              schemaVersion: "site-builder-publishable-claim-snapshot/v1",
+              capturedAt: new Date("2026-07-24T00:00:00.000Z"),
+              snapshotDigest: "c".repeat(64),
+              items: [],
+            })),
+          },
+          asset: { findMany: vi.fn(async () => []) },
+        };
+        const activities = createSiteBuilderActivities({
+          rendererBuildIdentity: "site-renderer@sha256:" + "d".repeat(64),
+          prisma: {
+            withWorkspace: vi.fn(
+              async (_workspaceId: string, callback: (tx: never) => Promise<unknown>) =>
+                callback(tx as never),
+            ),
+          } as unknown as PrismaService,
+          storage: inMemoryStorage(store),
+          qualityCandidateService: { applyQualityRepair } as never,
+          closedRepairService: {
+            generateCatalog: vi.fn(() => ({
+              catalog: {
+                options: [{ optionId: "items:home:section:2", rank: 1 }],
+              },
+            })),
+          } as never,
+        });
+
+        const result = await activities.applyQualityRepair({
+          workspaceId: "ws-1",
+          siteId: "site-1",
+          buildRunId: "run-1",
+          copy: {
+            snapshotId: "snapshot-1",
+            set: { bundles: {} },
+            degradedLocales: [],
+            taskAttemptIds: {},
+          } as never,
+          qualityCandidate: {
+            previewSlug: "acme",
+            versionId: "version-1",
+            designBrief: fixture.designBrief,
+            candidateSpec: fixture.spec,
+            candidate: {
+              workspaceId: "ws-1",
+              siteId: "site-1",
+              siteVersionId: "version-1",
+              buildRunId: "run-1",
+              designBriefDigest: fixture.designBrief.digest,
+              specDigest: originalDigest,
+              rendererOutputDigest: "d".repeat(64),
+              basePath: "/preview/acme",
+              siteOrigin: "https://preview.example.test",
+              artifact,
+            },
+          },
+          qualityEvaluation: {
+            evaluation: { round: 0 },
+            artifactSet: { artifactSetDigest: "a".repeat(64) },
+          } as never,
+        });
+
+        // 服务在从对象存储恢复的 scratch 上工作，字节与上传时一致。
+        expect(observedContent).toBe("<h1>candidate</h1>");
+        // 修复结果以新 artifact 发布：新 manifest 记录新渲染摘要，
+        // identity 不再引用旧 artifact，也不回落到本地 root。
+        expect(result.candidate.artifact).toBeDefined();
+        expect(result.candidate.artifact!.manifestKey).not.toBe(
+          artifact.manifestKey,
+        );
+        expect(result.candidate.artifact!.rendererOutputDigest).toBe(
+          "e".repeat(64),
+        );
+        expect(result.candidate.root).toBeUndefined();
+        const repairedManifest = JSON.parse(
+          store.get(result.candidate.artifact!.manifestKey)!.toString("utf8"),
+        ) as { rendererOutputDigest: string };
+        expect(repairedManifest.rendererOutputDigest).toBe("e".repeat(64));
+        await expect(readdir(scratch)).resolves.toEqual([]);
+      } finally {
+        delete process.env.SITE_BUILDER_CANDIDATE_TMP_ROOT;
+        await rm(scratch, { recursive: true, force: true });
+      }
+    });
+  });
 });

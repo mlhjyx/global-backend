@@ -1,4 +1,4 @@
-import { proxyActivities, patched } from '@temporalio/workflow';
+import { proxyActivities, patched, workflowInfo } from '@temporalio/workflow';
 import type { ExternalIntentActivities, ExternalIntentIcpResult, ExternalIntentRecomputeSummary, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
 
 const acts = proxyActivities<ExternalIntentActivities>({
@@ -34,6 +34,8 @@ const LIVE_REFRESH_EVERY = 25;
 export async function externalIntentSweepWorkflow(
   input?: { limit?: number; liveRefreshEvery?: number },
 ): Promise<ExternalIntentSweepResult> {
+  // Preserve command arguments for workflow histories that predate durable per-run budget scopes.
+  const budgetScopeId = patched('external-intent-durable-budget-scope-v1') ? workflowInfo().runId : undefined;
   // 默认不传 limit → 枚举全部 ACTIVE ICP（无静默截断/不饿死旧 ICP）；调用方可显式传 limit 做有界跑。
   const { targets, tedEnabled, openfdaEnabled, samgovEnabled } = await acts.listExternalIntentTargets(
     input?.limit ? { limit: input.limit } : {},
@@ -59,7 +61,13 @@ export async function externalIntentSweepWorkflow(
 
   // 平台层摄取一次（指纹全局去重 → 跨 workspace 共享拉取）。
   try {
-    agg.ingest = await acts.ingestExternalSignals({ targets: resolved, tedEnabled, openfdaEnabled, samgovEnabled });
+    agg.ingest = await acts.ingestExternalSignals({
+      targets: resolved,
+      tedEnabled,
+      openfdaEnabled,
+      samgovEnabled,
+      budgetScopeId,
+    });
   } catch (err) {
     // 摄取整体失败 fail-safe：投影仍可吃此前窗口已落库的信号。
     agg.ingest = { tedSpecs: 0, fdaSpecs: 0, samSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };

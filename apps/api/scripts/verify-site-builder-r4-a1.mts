@@ -27,7 +27,9 @@ import {
   buildToolBroker,
   sourcePolicyReaderFrom,
 } from "../src/tools/tool-broker.factory";
-import { budgetLedger } from "../src/tools/budget";
+import { BudgetLedger } from "../src/tools/budget";
+
+const budgetLedger = new BudgetLedger();
 
 function isLoopback(hostname: string): boolean {
   return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(

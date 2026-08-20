@@ -209,7 +209,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "oem-capability-hero-field",
           role: "hero",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/oem-capability-hero.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/oem-capability-hero.svg",
           sha256:
             "2127aec38d4a50813029eabcbf6fb6adfc6ce5e7581a7b65dbfe967785712ea0",
           mimeType: "image/svg+xml",
@@ -220,7 +220,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "oem-capability-product-module",
           role: "generic-product",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/oem-capability-product.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/oem-capability-product.svg",
           sha256:
             "54180fb3c099d95bac3305eb8f70916f9e42c2bcbea2fa4a880e293cf00dbdaa",
           mimeType: "image/svg+xml",
@@ -231,7 +231,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "oem-capability-process-line",
           role: "generic-process",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/oem-capability-process-line.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/oem-capability-process-line.svg",
           sha256:
             "204e76ce33159fa8d1049d37bf0e70000474cdc0580228d9fb08279dd94f3d06",
           mimeType: "image/svg+xml",
@@ -242,7 +242,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "oem-capability-process-proof",
           role: "generic-process",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/oem-capability-process-proof.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/oem-capability-process-proof.svg",
           sha256:
             "63304f2f21e71958cefd56b15b2d8829109db0b817ecf538af09bb27df78e0e3",
           mimeType: "image/svg+xml",
@@ -264,7 +264,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "scientific-trust-hero-field",
           role: "hero",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/scientific-trust-hero.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/scientific-trust-hero.svg",
           sha256:
             "974186f8c186ea0e5ec6cc0b95fa912bc552fde20b63ec30310891f6c2382464",
           mimeType: "image/svg+xml",
@@ -275,7 +275,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "scientific-trust-product-instrument",
           role: "generic-product",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/scientific-trust-product.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/scientific-trust-product.svg",
           sha256:
             "94cb6496ee466e8bd459ead9e0cac3df0a131af96cfaf7d0de52fa1a02ab94af",
           mimeType: "image/svg+xml",
@@ -286,7 +286,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "scientific-trust-process-sample",
           role: "generic-process",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/scientific-trust-process-sample.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/scientific-trust-process-sample.svg",
           sha256:
             "bc076be6569d4e4698ee0bceb8415f3c876ae83c233da057738d7669c44e59d4",
           mimeType: "image/svg+xml",
@@ -297,7 +297,7 @@ export const M1_E_B_B2_CATALOG_V2_DRAFT: DesignCatalogV2Draft = {
           id: "scientific-trust-process-validation",
           role: "generic-process",
           repositoryPath:
-            "apps/site-renderer/fixtures/design-demo-visuals/scientific-trust-process-validation.svg",
+            "apps/site-renderer/product-assets/design-demo-visuals/scientific-trust-process-validation.svg",
           sha256:
             "29fcd01d518118505896f6d8855ce5cf0b334dae30db4df193762e6c9a1a428f",
           mimeType: "image/svg+xml",

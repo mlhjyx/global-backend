@@ -9,7 +9,10 @@ import type { Mock } from 'vitest';
  */
 
 // 工厂动态 import 与下方静态 import 解析到同一模块实例 → 同一 spy 注册表。
-vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
+vi.mock('@temporalio/workflow', async () => ({
+  ...(await import('./testing/temporal-workflow.mock')),
+  workflowInfo: () => ({ runId: 'external-intent-workflow-run' }),
+}));
 
 import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { externalIntentSweepWorkflow } from './external-intent.workflow';

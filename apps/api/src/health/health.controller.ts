@@ -7,7 +7,7 @@ import {
 } from "@nestjs/swagger";
 import type { Response } from "express";
 import { PrismaService } from "../prisma/prisma.service";
-import { BuildIdentityService } from "../runtime/build-attestation";
+import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import {
   BUILD_HEALTH_RESPONSE_SCHEMA,
   LIVE_HEALTH_RESPONSE_SCHEMA,
@@ -22,7 +22,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly readinessService: RuntimeReadinessService,
-    private readonly buildIdentity: BuildIdentityService,
+    private readonly buildIdentity: RuntimeReleaseIdentityService,
   ) {}
 
   @Get()

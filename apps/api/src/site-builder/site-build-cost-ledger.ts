@@ -6,13 +6,14 @@ import type { ModelUsage } from '../model-gateway/types';
 import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from './agents/model-policy.registry';
 
 export const SITE_BUILD_COST_SUMMARY_VERSION =
-  'site-builder-cost-summary/v1' as const;
+  'site-builder-cost-summary/v2' as const;
 
 export type PaidCostBasis =
   | 'provider_reported'
   | 'token_pricing'
   | 'tool_reported'
   | 'legacy_estimate'
+  | 'estimated_upper_bound'
   | 'unknown'
   | 'not_incurred';
 
@@ -120,11 +121,11 @@ export function modelCostMeasurement(
       };
     }
     return {
-      basis: 'unknown',
+      basis: 'estimated_upper_bound',
       budgetChargeMicrousd: input.reservationMicrousd,
       reportedCostMicrousd: null,
       calculatedCostMicrousd: null,
-      estimatedCostMicrousd: null,
+      estimatedCostMicrousd: input.reservationMicrousd,
       inputTokens,
       outputTokens,
       callCount,
@@ -133,6 +134,26 @@ export function modelCostMeasurement(
         requestedModel: input.requestedModel,
         ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
         settlementPreflight: input.settlementPreflight,
+        gatewaySettlements,
+      },
+    };
+  }
+  if (
+    gatewaySettlements.some((observation) => observation.status === 'unknown')
+  ) {
+    return {
+      basis: 'estimated_upper_bound',
+      budgetChargeMicrousd: input.reservationMicrousd,
+      reportedCostMicrousd: null,
+      calculatedCostMicrousd: null,
+      estimatedCostMicrousd: input.reservationMicrousd,
+      inputTokens,
+      outputTokens,
+      callCount,
+      meta: {
+        reason: 'gateway_exact_cost_unavailable',
+        requestedModel: input.requestedModel,
+        ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
         gatewaySettlements,
       },
     };
@@ -186,11 +207,11 @@ export function modelCostMeasurement(
   }
 
   return {
-    basis: 'unknown',
+    basis: 'estimated_upper_bound',
     budgetChargeMicrousd: input.reservationMicrousd,
     reportedCostMicrousd: null,
     calculatedCostMicrousd: null,
-    estimatedCostMicrousd: null,
+    estimatedCostMicrousd: input.reservationMicrousd,
     inputTokens,
     outputTokens,
     callCount,
@@ -198,6 +219,7 @@ export function modelCostMeasurement(
       reason: rate ? 'token_usage_incomplete' : 'no_verified_price',
       requestedModel: input.requestedModel,
       ...(input.resolvedModel ? { resolvedModel: input.resolvedModel } : {}),
+      ...(gatewaySettlements.length > 0 ? { gatewaySettlements } : {}),
     },
   };
 }
@@ -250,6 +272,7 @@ interface SummaryBudgetRow {
 }
 
 interface SummarySpendRow {
+  id?: string;
   kind: string;
   status: string;
   costBasis?: string | null;
@@ -262,20 +285,27 @@ interface SummarySpendRow {
   callCount: number | null;
 }
 
-function jsonInteger(value: bigint): number {
-  const number = Number(value);
-  if (!Number.isSafeInteger(number)) {
-    throw new Error('site build cost exceeds the stable JSON integer range');
+interface SummaryReconciliationRow {
+  spendId: string;
+  status: string;
+  exactCostMicrousd: bigint | null;
+  createdAt: Date;
+}
+
+function jsonMicrousd(value: bigint): string {
+  if (value < 0n) {
+    throw new Error('site build cost cannot be negative');
   }
-  return number;
+  return value.toString(10);
 }
 
 export function buildSiteBuildCostSummary(
   budget: SummaryBudgetRow,
   spends: readonly SummarySpendRow[],
+  reconciliations: readonly SummaryReconciliationRow[] = [],
 ) {
-  const sumBigInt = (pick: (row: SummarySpendRow) => bigint | null): number =>
-    jsonInteger(spends.reduce((sum, row) => sum + (pick(row) ?? 0n), 0n));
+  const sumBigInt = (pick: (row: SummarySpendRow) => bigint | null): string =>
+    jsonMicrousd(spends.reduce((sum, row) => sum + (pick(row) ?? 0n), 0n));
   const operationCount = (status: string): number =>
     spends.filter((row) => row.status === status).length;
   const calls = (kind: string): number =>
@@ -283,19 +313,60 @@ export function buildSiteBuildCostSummary(
       (sum, row) => sum + (row.kind === kind ? (row.callCount ?? 0) : 0),
       0,
     );
-  const cap = jsonInteger(budget.capMicrousd);
-  const reserved = jsonInteger(budget.reservedMicrousd);
-  const charged = jsonInteger(budget.chargedMicrousd);
+  const cap = jsonMicrousd(budget.capMicrousd);
+  const reserved = jsonMicrousd(budget.reservedMicrousd);
+  const charged = jsonMicrousd(budget.chargedMicrousd);
+  const resolvedBySpend = new Map(
+    reconciliations
+      .filter(
+        (row) => row.status === 'RESOLVED' && row.exactCostMicrousd !== null,
+      )
+      .map((row) => [row.spendId, row.exactCostMicrousd!] as const),
+  );
+  const exactCostMicrousd = jsonMicrousd(
+    spends.reduce((sum, row) => {
+      const reconciled = row.id ? resolvedBySpend.get(row.id) : undefined;
+      return (
+        sum +
+        (reconciled ?? row.reportedCostMicrousd ?? row.calculatedCostMicrousd ?? 0n)
+      );
+    }, 0n),
+  );
+  const upperBoundCostMicrousd = sumBigInt((row) =>
+    row.costBasis === 'estimated_upper_bound'
+      ? row.estimatedCostMicrousd
+      : null,
+  );
+  const upperBoundSpendIds = new Set(
+    spends
+      .filter((row) => row.id && row.costBasis === 'estimated_upper_bound')
+      .map((row) => row.id!),
+  );
+  const resolvedUpperBounds = new Set(
+    reconciliations
+      .filter((row) => row.status === 'RESOLVED')
+      .map((row) => row.spendId),
+  );
+  const asOf = reconciliations.reduce<Date | null>(
+    (latest, row) => (!latest || row.createdAt > latest ? row.createdAt : latest),
+    null,
+  );
 
   return {
     schemaVersion: SITE_BUILD_COST_SUMMARY_VERSION,
     currency: 'USD' as const,
     unit: 'microusd' as const,
     budget: {
+      authorizedCapMicrousd: cap,
+      conservativeChargedMicrousd: charged,
       capMicrousd: cap,
       reservedMicrousd: reserved,
       chargedMicrousd: charged,
-      remainingMicrousd: Math.max(0, cap - reserved - charged),
+      remainingMicrousd: jsonMicrousd(
+        budget.capMicrousd -
+          budget.reservedMicrousd -
+          budget.chargedMicrousd,
+      ),
       paidCallsEnabled: budget.paidCallsEnabled,
       disabledReason: budget.disabledReason,
       exhaustedAt: budget.exhaustedAt?.toISOString() ?? null,
@@ -307,6 +378,8 @@ export function buildSiteBuildCostSummary(
       unknownOperations: spends.filter(
         (row) => row.costBasis === 'unknown' || row.status === 'UNKNOWN',
       ).length,
+      exactCostMicrousd,
+      upperBoundCostMicrousd,
     },
     usage: {
       inputTokens: spends.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0),
@@ -323,10 +396,118 @@ export function buildSiteBuildCostSummary(
       unknown: operationCount('UNKNOWN'),
       released: operationCount('RELEASED'),
     },
+    reconciliation: {
+      pendingOperations: [...upperBoundSpendIds].filter(
+        (spendId) => !resolvedUpperBounds.has(spendId),
+      ).length,
+      resolvedOperations: reconciliations.filter(
+        (row) => row.status === 'RESOLVED',
+      ).length,
+      conflictOperations: reconciliations.filter(
+        (row) => row.status === 'CONFLICT',
+      ).length,
+      asOf: asOf?.toISOString() ?? null,
+      revision: reconciliations.length,
+    },
   };
 }
 
 export type SiteBuildCostSummary = ReturnType<typeof buildSiteBuildCostSummary>;
+
+export interface SiteBuildReconciliationObservation {
+  status: 'UNRESOLVED' | 'RESOLVED' | 'CONFLICT' | 'EXPIRED';
+  resolverId: string;
+  requestId?: string | null;
+  receiptDigest?: string | null;
+  costBasis?: 'provider_reported' | 'token_pricing';
+  exactCostMicrousd?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  observedAt: Date;
+  meta?: Record<string, unknown>;
+}
+
+const RECONCILIATION_RETRY_DELAYS_MS = [
+  60_000,
+  5 * 60_000,
+  30 * 60_000,
+  2 * 60 * 60_000,
+  12 * 60 * 60_000,
+] as const;
+const RECONCILIATION_EXPIRY_MS = 24 * 60 * 60_000;
+const RECONCILIATION_META_MAX_BYTES = 4_096;
+const FORBIDDEN_RECONCILIATION_META_KEY =
+  /credential|secret|token|authorization|prompt|response|body|content|cookie|api.?key|personal|email|phone/i;
+
+export function reconciliationDueAction(input: {
+  now: Date;
+  spendCreatedAt: Date;
+  observations: ReadonlyArray<{ status: string; observedAt: Date }>;
+}): 'WAIT' | 'RESOLVE' | 'EXPIRE' | 'TERMINAL' {
+  if (
+    input.observations.some((row) =>
+      ['RESOLVED', 'CONFLICT', 'EXPIRED'].includes(row.status),
+    )
+  ) {
+    return 'TERMINAL';
+  }
+  if (
+    input.now.getTime() - input.spendCreatedAt.getTime() >=
+    RECONCILIATION_EXPIRY_MS
+  ) {
+    return 'EXPIRE';
+  }
+  const attempts = input.observations.filter(
+    (row) => row.status === 'UNRESOLVED',
+  );
+  if (attempts.length >= RECONCILIATION_RETRY_DELAYS_MS.length) return 'WAIT';
+  const base =
+    attempts.length === 0
+      ? input.spendCreatedAt
+      : attempts.reduce(
+          (latest, row) => (row.observedAt > latest ? row.observedAt : latest),
+          attempts[0]!.observedAt,
+        );
+  return input.now.getTime() - base.getTime() >=
+    RECONCILIATION_RETRY_DELAYS_MS[attempts.length]!
+    ? 'RESOLVE'
+    : 'WAIT';
+}
+
+export function boundedReconciliationMeta(
+  meta: Record<string, unknown> | undefined,
+): Prisma.InputJsonObject | undefined {
+  if (!meta) return undefined;
+  let nodes = 0;
+  const visit = (value: unknown, depth: number): void => {
+    nodes += 1;
+    if (nodes > 128 || depth > 4) throw new Error('reconciliation meta is too complex');
+    if (typeof value === 'string' && value.length > 512) {
+      throw new Error('reconciliation meta string is too long');
+    }
+    if (Array.isArray(value)) {
+      if (value.length > 32) throw new Error('reconciliation meta array is too large');
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length > 32) throw new Error('reconciliation meta has too many keys');
+      for (const [key, item] of entries) {
+        if (key.length > 64 || FORBIDDEN_RECONCILIATION_META_KEY.test(key)) {
+          throw new Error('reconciliation meta contains a forbidden key');
+        }
+        visit(item, depth + 1);
+      }
+    }
+  };
+  const canonical = jsonObject(meta);
+  visit(canonical, 0);
+  if (Buffer.byteLength(JSON.stringify(canonical), 'utf8') > RECONCILIATION_META_MAX_BYTES) {
+    throw new Error('reconciliation meta exceeds the size limit');
+  }
+  return canonical as Prisma.InputJsonObject;
+}
 
 export class PaidCallDeniedError extends Error {
   constructor(public readonly decision: string) {
@@ -572,15 +753,87 @@ export class SiteBuildCostLedger {
         ) AS decision
       `;
       const decision = rows[0]?.decision ?? 'MISSING';
-      if (decision === 'SETTLED' && disableReason) {
-        const disabled = await tx.siteBuildBudget.updateMany({
-          where: { buildRunId: scope.buildRunId },
+      if (decision === 'OVER_RESERVATION') {
+        const [budget, spends, reconciliations] = await Promise.all([
+          tx.siteBuildBudget.findUnique({
+            where: { buildRunId: scope.buildRunId },
+            select: {
+              capMicrousd: true,
+              reservedMicrousd: true,
+              chargedMicrousd: true,
+              paidCallsEnabled: true,
+              disabledReason: true,
+              exhaustedAt: true,
+            },
+          }),
+          tx.siteBuildSpend.findMany({
+            where: { buildRunId: scope.buildRunId },
+            select: {
+              id: true,
+              kind: true,
+              status: true,
+              costBasis: true,
+              budgetChargeMicrousd: true,
+              reportedCostMicrousd: true,
+              calculatedCostMicrousd: true,
+              estimatedCostMicrousd: true,
+              inputTokens: true,
+              outputTokens: true,
+              callCount: true,
+            },
+          }),
+          tx.siteBuildSpendReconciliation.findMany({
+            where: { buildRunId: scope.buildRunId },
+            select: {
+              spendId: true,
+              status: true,
+              exactCostMicrousd: true,
+              createdAt: true,
+            },
+          }),
+        ]);
+        if (!budget) throw new PaidCallDeniedError('DENIED_NO_BUDGET');
+        const summary = buildSiteBuildCostSummary(
+          budget,
+          spends,
+          reconciliations,
+        );
+        await tx.siteBuildRun.update({
+          where: { id: scope.buildRunId },
+          data: { costSummary: summary as unknown as Prisma.InputJsonObject },
+        });
+        await tx.outboxEvent.create({
           data: {
-            paidCallsEnabled: false,
-            disabledReason: disableReason,
+            workspaceId: scope.workspaceId,
+            eventType: 'SiteBuildCostSummaryUpdated',
+            schemaVersion: 1,
+            aggregateType: 'SiteBuildRun',
+            aggregateId: scope.buildRunId,
+            privacyClassification: 'INTERNAL',
+            payload: {
+              workspaceId: scope.workspaceId,
+              siteId: scope.siteId,
+              buildRunId: scope.buildRunId,
+              revision: summary.reconciliation.revision,
+              summaryDigest: createHash('sha256')
+                .update(JSON.stringify(summary))
+                .digest('hex'),
+              budget: summary.budget,
+              totals: summary.totals,
+              reconciliation: summary.reconciliation,
+            } as Prisma.InputJsonObject,
           },
         });
-        if (disabled.count !== 1) {
+      }
+      if (decision === 'SETTLED' && disableReason) {
+        const disabled = await tx.$queryRaw<Array<{ count: number }>>`
+          SELECT disable_site_build_paid_calls(
+            ${scope.workspaceId}::uuid,
+            ${scope.buildRunId}::uuid,
+            ${disableReason}::text
+          ) AS count
+        `;
+        if (disabled[0]?.count !== 1) {
           throw new Error('atomic paid-call disable target missing');
         }
       }
@@ -588,23 +841,33 @@ export class SiteBuildCostLedger {
     });
   }
 
-  async ensureBudget(input: {
+  async assertAuthorizedBudget(input: {
     workspaceId: string;
     siteId: string;
     buildRunId: string;
-    capMicrousd: number;
   }): Promise<void> {
     await this.prisma.withWorkspace(input.workspaceId, async (tx) => {
-      await tx.siteBuildBudget.upsert({
-        where: { buildRunId: input.buildRunId },
-        create: {
-          workspaceId: input.workspaceId,
-          siteId: input.siteId,
-          buildRunId: input.buildRunId,
-          capMicrousd: BigInt(input.capMicrousd),
-        },
-        update: {},
-      });
+      const [budget, grant] = await Promise.all([
+        tx.siteBuildBudget.findUnique({
+          where: { buildRunId: input.buildRunId },
+          select: { workspaceId: true, siteId: true, capMicrousd: true },
+        }),
+        tx.siteBuildBudgetGrant.findUnique({
+          where: { buildRunId: input.buildRunId },
+          select: { workspaceId: true, siteId: true, capMicrousd: true },
+        }),
+      ]);
+      if (
+        !budget ||
+        !grant ||
+        budget.workspaceId !== input.workspaceId ||
+        grant.workspaceId !== input.workspaceId ||
+        budget.siteId !== input.siteId ||
+        grant.siteId !== input.siteId ||
+        budget.capMicrousd !== grant.capMicrousd
+      ) {
+        throw new PaidCallDeniedError("DENIED_BUDGET_AUTHORIZATION");
+      }
     });
   }
 
@@ -615,13 +878,13 @@ export class SiteBuildCostLedger {
   ): Promise<void> {
     await this.prisma.withWorkspace(workspaceId, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-progress-${buildRunId}`}))`;
-      await tx.siteBuildBudget.updateMany({
-        where: { buildRunId },
-        data: {
-          paidCallsEnabled: false,
-          disabledReason: reason.slice(0, 80),
-        },
-      });
+      await tx.$queryRaw`
+        SELECT disable_site_build_paid_calls(
+          ${workspaceId}::uuid,
+          ${buildRunId}::uuid,
+          ${reason.slice(0, 80)}::text
+        )
+      `;
     });
   }
 
@@ -641,24 +904,14 @@ export class SiteBuildCostLedger {
           ${input.buildRunId}::uuid
         ) AS reconciled
       `;
-      await tx.siteBuildBudget.updateMany({
-        where: {
-          buildRunId: input.buildRunId,
-          OR: [
-            { paidCallsEnabled: true },
-            {
-              disabledReason: {
-                in: ['run_succeeded', 'run_failed', 'run_cancelled'],
-              },
-            },
-          ],
-        },
-        data: {
-          paidCallsEnabled: false,
-          disabledReason: reason,
-        },
-      });
-      const [budget, spends] = await Promise.all([
+      await tx.$queryRaw`
+        SELECT disable_site_build_paid_calls(
+          ${input.workspaceId}::uuid,
+          ${input.buildRunId}::uuid,
+          ${reason}::text
+        )
+      `;
+      const [budget, spends, reconciliations] = await Promise.all([
         tx.siteBuildBudget.findUnique({
           where: { buildRunId: input.buildRunId },
           select: {
@@ -673,6 +926,7 @@ export class SiteBuildCostLedger {
         tx.siteBuildSpend.findMany({
           where: { buildRunId: input.buildRunId },
           select: {
+            id: true,
             kind: true,
             status: true,
             costBasis: true,
@@ -686,11 +940,341 @@ export class SiteBuildCostLedger {
           },
           orderBy: { operationKey: 'asc' },
         }),
+        tx.siteBuildSpendReconciliation.findMany({
+          where: { buildRunId: input.buildRunId },
+          select: {
+            spendId: true,
+            status: true,
+            exactCostMicrousd: true,
+            createdAt: true,
+          },
+          orderBy: [{ spendId: 'asc' }, { attemptNo: 'asc' }],
+        }),
       ]);
       if (!budget) {
         throw new PaidCallDeniedError('DENIED_NO_BUDGET');
       }
-      return buildSiteBuildCostSummary(budget, spends);
+      return buildSiteBuildCostSummary(budget, spends, reconciliations);
+    });
+  }
+
+  async listPendingReconciliations(
+    workspaceId: string,
+    limit = 50,
+  ): Promise<
+    Array<{
+      workspaceId: string;
+      siteId: string;
+      buildRunId: string;
+      spendId: string;
+      operationKey: string;
+      meta: Record<string, unknown> | null;
+      action: 'RESOLVE' | 'EXPIRE';
+    }>
+  > {
+    const take = Math.max(1, Math.min(100, Math.floor(limit)));
+    return this.prisma.withWorkspace(workspaceId, async (tx) => {
+      const rows = await tx.siteBuildSpend.findMany({
+        where: {
+          workspaceId,
+          costBasis: 'estimated_upper_bound',
+          reconciliations: {
+            none: { status: { in: ['RESOLVED', 'CONFLICT', 'EXPIRED'] } },
+          },
+        },
+        select: {
+          id: true,
+          workspaceId: true,
+          siteId: true,
+          buildRunId: true,
+          operationKey: true,
+          meta: true,
+          createdAt: true,
+          reconciliations: {
+            select: { status: true, observedAt: true },
+            orderBy: { attemptNo: 'asc' },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+        take,
+      });
+      return rows.flatMap((row) => {
+        const action = reconciliationDueAction({
+          now: this.now(),
+          spendCreatedAt: row.createdAt,
+          observations: row.reconciliations,
+        });
+        if (action !== 'RESOLVE' && action !== 'EXPIRE') return [];
+        return [
+          {
+            workspaceId: row.workspaceId,
+            siteId: row.siteId,
+            buildRunId: row.buildRunId,
+            operationKey: row.operationKey,
+            meta:
+              row.meta && typeof row.meta === 'object' && !Array.isArray(row.meta)
+                ? (row.meta as Record<string, unknown>)
+                : null,
+            spendId: row.id,
+            action,
+          },
+        ];
+      });
+    });
+  }
+
+  async runReconciliationSweep(input: {
+    workspaceId: string;
+    limit?: number;
+    resolve: (candidate: {
+      spendId: string;
+      operationKey: string;
+      meta: Record<string, unknown> | null;
+    }) => Promise<SiteBuildReconciliationObservation>;
+  }): Promise<{ attempted: number; resolved: number }> {
+    const candidates = await this.listPendingReconciliations(
+      input.workspaceId,
+      input.limit,
+    );
+    let resolved = 0;
+    for (const candidate of candidates) {
+      let observation: SiteBuildReconciliationObservation;
+      try {
+        observation =
+          candidate.action === 'EXPIRE'
+            ? {
+                status: 'EXPIRED',
+                resolverId: 'reconciliation-sweep-v1',
+                observedAt: this.now(),
+                meta: { reason: 'reconciliation_window_expired' },
+              }
+            : await input.resolve(candidate);
+      } catch {
+        observation = {
+          status: 'UNRESOLVED',
+          resolverId: 'reconciliation-sweep-v1',
+          observedAt: this.now(),
+          meta: { reason: 'resolver_unavailable' },
+        };
+      }
+      await this.appendReconciliation({
+        ...candidate,
+        observation,
+      });
+      if (observation.status === 'RESOLVED') resolved += 1;
+    }
+    return { attempted: candidates.length, resolved };
+  }
+
+  async appendReconciliation(input: {
+    workspaceId: string;
+    siteId: string;
+    buildRunId: string;
+    spendId: string;
+    observation: SiteBuildReconciliationObservation;
+  }): Promise<SiteBuildCostSummary> {
+    const { observation } = input;
+    const resolverId = observation.resolverId.trim();
+    if (!resolverId || resolverId.length > 191) {
+      throw new Error('reconciliation resolver id is invalid');
+    }
+    const receiptDigest = observation.receiptDigest ?? null;
+    if (receiptDigest !== null && !/^[0-9a-f]{64}$/.test(receiptDigest)) {
+      throw new Error('reconciliation receipt digest is invalid');
+    }
+    const exact = observation.exactCostMicrousd;
+    if (
+      observation.status === 'RESOLVED'
+        ? !receiptDigest ||
+          !observation.costBasis ||
+          typeof exact !== 'string' ||
+          !/^(0|[1-9][0-9]*)$/.test(exact) ||
+          BigInt(exact) > 9_223_372_036_854_775_807n
+        : exact !== undefined || observation.costBasis !== undefined
+    ) {
+      throw new Error('reconciliation observation shape is invalid');
+    }
+    const safeMeta = boundedReconciliationMeta(observation.meta);
+
+    return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-reconciliation-${input.spendId}`}))`;
+      const spend = await tx.siteBuildSpend.findFirst({
+        where: {
+          id: input.spendId,
+          workspaceId: input.workspaceId,
+          siteId: input.siteId,
+          buildRunId: input.buildRunId,
+        },
+        select: { id: true, reservationMicrousd: true },
+      });
+      if (!spend) throw new Error('reconciliation spend scope is invalid');
+      const prior = receiptDigest
+        ? await tx.siteBuildSpendReconciliation.findFirst({
+            where: { spendId: input.spendId, receiptDigest },
+          })
+        : null;
+      if (!prior) {
+        const existingResolved =
+          observation.status === 'RESOLVED'
+            ? await tx.siteBuildSpendReconciliation.findFirst({
+                where: { spendId: input.spendId, status: 'RESOLVED' },
+                select: { receiptDigest: true },
+              })
+            : null;
+        const effectiveObservation: SiteBuildReconciliationObservation =
+          existingResolved &&
+          existingResolved.receiptDigest !== observation.receiptDigest
+            ? {
+                status: 'CONFLICT',
+                resolverId,
+                requestId: observation.requestId,
+                receiptDigest: observation.receiptDigest,
+                observedAt: observation.observedAt,
+                meta: { reason: 'conflicting_resolved_receipt' },
+              }
+            : observation;
+        const last = await tx.siteBuildSpendReconciliation.findFirst({
+          where: { spendId: input.spendId },
+          select: { attemptNo: true },
+          orderBy: { attemptNo: 'desc' },
+        });
+        await tx.siteBuildSpendReconciliation.create({
+          data: {
+            workspaceId: input.workspaceId,
+            siteId: input.siteId,
+            buildRunId: input.buildRunId,
+            spendId: input.spendId,
+            attemptNo: (last?.attemptNo ?? 0) + 1,
+            status: effectiveObservation.status,
+            resolverId,
+            requestId: effectiveObservation.requestId ?? null,
+            receiptDigest: effectiveObservation.receiptDigest ?? null,
+            costBasis: effectiveObservation.costBasis ?? null,
+            exactCostMicrousd:
+              effectiveObservation.exactCostMicrousd === undefined
+                ? null
+                : BigInt(effectiveObservation.exactCostMicrousd),
+            inputTokens: effectiveObservation.inputTokens ?? null,
+            outputTokens: effectiveObservation.outputTokens ?? null,
+            observedAt: effectiveObservation.observedAt,
+            meta:
+              effectiveObservation === observation
+                ? safeMeta
+                : ({ reason: 'conflicting_resolved_receipt' } as Prisma.InputJsonObject),
+          },
+        });
+        if (
+          effectiveObservation.status === 'RESOLVED' &&
+          BigInt(effectiveObservation.exactCostMicrousd!) >
+            spend.reservationMicrousd
+        ) {
+          await tx.siteBuildSpendReconciliation.create({
+            data: {
+              workspaceId: input.workspaceId,
+              siteId: input.siteId,
+              buildRunId: input.buildRunId,
+              spendId: input.spendId,
+              attemptNo: (last?.attemptNo ?? 0) + 2,
+              status: 'CONFLICT',
+              resolverId: 'site-build-cap-variance-v1',
+              requestId: effectiveObservation.requestId ?? null,
+              receiptDigest: null,
+              costBasis: null,
+              exactCostMicrousd: null,
+              inputTokens: null,
+              outputTokens: null,
+              observedAt: effectiveObservation.observedAt,
+              meta: {
+                reason: 'CAP_VARIANCE',
+                observedMicrousd:
+                  effectiveObservation.exactCostMicrousd!,
+                authorizedMicrousd: spend.reservationMicrousd.toString(10),
+              },
+            },
+          });
+          await tx.$queryRaw`
+            SELECT disable_site_build_paid_calls(
+              ${input.workspaceId}::uuid,
+              ${input.buildRunId}::uuid,
+              ${'reconciliation_cap_variance'}::text
+            )
+          `;
+        }
+      }
+
+      const [budget, spends, reconciliations] = await Promise.all([
+        tx.siteBuildBudget.findUnique({
+          where: { buildRunId: input.buildRunId },
+          select: {
+            capMicrousd: true,
+            reservedMicrousd: true,
+            chargedMicrousd: true,
+            paidCallsEnabled: true,
+            disabledReason: true,
+            exhaustedAt: true,
+          },
+        }),
+        tx.siteBuildSpend.findMany({
+          where: { buildRunId: input.buildRunId },
+          select: {
+            id: true,
+            kind: true,
+            status: true,
+            costBasis: true,
+            budgetChargeMicrousd: true,
+            reportedCostMicrousd: true,
+            calculatedCostMicrousd: true,
+            estimatedCostMicrousd: true,
+            inputTokens: true,
+            outputTokens: true,
+            callCount: true,
+          },
+        }),
+        tx.siteBuildSpendReconciliation.findMany({
+          where: { buildRunId: input.buildRunId },
+          select: {
+            spendId: true,
+            status: true,
+            exactCostMicrousd: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+      if (!budget) throw new PaidCallDeniedError('DENIED_NO_BUDGET');
+      const summary = buildSiteBuildCostSummary(
+        budget,
+        spends,
+        reconciliations,
+      );
+      if (prior) return summary;
+      const summaryJson = summary as unknown as Prisma.InputJsonObject;
+      await tx.siteBuildRun.update({
+        where: { id: input.buildRunId },
+        data: { costSummary: summaryJson },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          workspaceId: input.workspaceId,
+          eventType: 'SiteBuildCostSummaryUpdated',
+          schemaVersion: 1,
+          aggregateType: 'SiteBuildRun',
+          aggregateId: input.buildRunId,
+          privacyClassification: 'INTERNAL',
+          payload: {
+            workspaceId: input.workspaceId,
+            siteId: input.siteId,
+            buildRunId: input.buildRunId,
+            revision: summary.reconciliation.revision,
+            summaryDigest: createHash('sha256')
+              .update(JSON.stringify(summary))
+              .digest('hex'),
+            budget: summary.budget,
+            totals: summary.totals,
+            reconciliation: summary.reconciliation,
+          } as Prisma.InputJsonObject,
+        },
+      });
+      return summary;
     });
   }
 

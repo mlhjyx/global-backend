@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
 import { companyIdentity } from '../discovery/identity';
 import { mergeIntent, type IntentAttr, type IntentEvent } from '../intent/intent-projection.service';
@@ -27,6 +27,7 @@ interface Fixture {
   signals: Record<string, unknown>[];
   watchSources: Map<string, { id: string }>;
   watchChanges: { sourceId: string; changeType: string; createdAt: Date; detail: unknown }[];
+  syntheticEntityIds?: Set<string>;
 }
 
 function fakePrisma(f: Fixture): PrismaService {
@@ -65,6 +66,12 @@ function fakePrisma(f: Fixture): PrismaService {
     },
     suppressionRecord: {
       findMany: async () => f.suppressions ?? [],
+    },
+    fieldEvidence: {
+      findMany: async ({ where }: { where: { entityId: string | { in: string[] } } }) =>
+        (typeof where.entityId === 'string' ? [where.entityId] : where.entityId.in)
+          .filter((entityId) => f.syntheticEntityIds?.has(entityId))
+          .map((entityId) => ({ entityId, providerKey: 'sandbox', license: 'sandbox' })),
     },
   };
   return {
@@ -139,6 +146,19 @@ function fixture(over?: Partial<Fixture>): Fixture {
 }
 
 describe('IntentRecomputeService —— 收口⑤「信号可复算」（surfaces=与增量投影同过滤面）', () => {
+  it('显式公司复算在读取外部事实或写派生状态前拒绝 historical sandbox provenance', async () => {
+    const f = fixture({ syntheticEntityIds: new Set(['co-1']) });
+    const prisma = fakePrisma(f);
+    const sourceFindMany = vi.spyOn(prisma.sourceSignal, 'findMany');
+    const svc = new IntentRecomputeService({ prisma });
+
+    await expect(svc.recomputeCompany(WS, 'co-1', { surfaces: SURFACES })).rejects.toMatchObject({
+      code: 'SYNTHETIC_DISCOVERY_PROVENANCE',
+    });
+    expect(sourceFindMany).not.toHaveBeenCalled();
+    expect(f.companies.get('co-1')?.attributes.intent).toBeUndefined();
+  });
+
   it('投影被清空后可从 ACTIVE 一等信号确定性重建（可复算核心断言）', async () => {
     const f = fixture();
     const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
@@ -294,5 +314,25 @@ describe('IntentRecomputeService —— 收口⑤「信号可复算」（surface
     const p2 = await svc.recomputeWorkspace(WS, { limit: 2, cursor: p1.nextCursor!, surfaces: SURFACES });
     expect(p2.companiesScanned).toBe(1);
     expect(p2.nextCursor).toBeNull();
+  });
+
+  it('workspace 批量复算过滤 historical sandbox company，同时按原始页推进 cursor', async () => {
+    const mk = (id: string): [string, Company] => [
+      id,
+      { id, name: id, domain: null, dedupeKey: `k-${id}`, attributes: {}, status: 'NEW', version: 1 },
+    ];
+    const f = fixture({
+      companies: new Map([mk('co-1'), mk('co-2')]),
+      signals: [],
+      syntheticEntityIds: new Set(['co-1']),
+    });
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+
+    await expect(svc.recomputeWorkspace(WS, { limit: 2 })).resolves.toEqual({
+      companiesScanned: 2,
+      companiesRebuilt: 0,
+      companiesCleared: 0,
+      nextCursor: 'co-2',
+    });
   });
 });

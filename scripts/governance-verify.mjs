@@ -25,6 +25,7 @@ import {
   readRepoRegularFile,
   resolveRepoOutputFile,
 } from "./governance-path-contracts.mjs";
+import { verifyEnvironmentParityRepository } from "./environment-parity-policy.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROVIDER_REGISTRY = "docs/governance/provider-registry.json";
@@ -322,6 +323,10 @@ async function verifyRepository() {
       codeowners: await readText(CODEOWNERS),
     }).issues,
   );
+  const environmentParity = await verifyEnvironmentParityRepository({
+    root: ROOT,
+  });
+  issues.push(...environmentParity.issues);
   await verifyNoHandwrittenOpenApiCounts(issues);
 
   if (issues.length > 0) {
@@ -341,6 +346,7 @@ async function verifyRepository() {
       `runtime_historical=${runtime.classifications.HISTORICAL}`,
       `release_bundles=${releases.count}`,
       `openapi_operations=${operationIds(openApi).size}`,
+      `environment_parity_findings=${environmentParity.finding_count}`,
     ].join(" "),
   );
 }

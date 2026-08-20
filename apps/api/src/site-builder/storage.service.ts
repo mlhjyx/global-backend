@@ -1,7 +1,12 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import {
   CopyObjectCommand,
-  CreateBucketCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetBucketLifecycleConfigurationCommand,
@@ -9,13 +14,13 @@ import {
   HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  PutBucketLifecycleConfigurationCommand,
   S3Client,
   type LifecycleRule,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readiness-registry';
 
 const PRESIGN_PUT_TTL_S = 900; // 15min 完成直传
 const PRESIGN_GET_TTL_S = 300;
@@ -23,17 +28,39 @@ const VARIANT_ATTEMPT_LIFECYCLE_RULE_ID = 'global-variant-attempt-ttl';
 const VARIANT_ATTEMPT_LIFECYCLE_TAG = 'global-lifecycle';
 const VARIANT_ATTEMPT_LIFECYCLE_VALUE = 'variant-attempt';
 
+export type StorageReadinessFailureCode =
+  | 'OBJECT_STORAGE_CREDENTIALS_REQUIRED'
+  | 'OBJECT_STORAGE_LIFECYCLE_INVALID'
+  | 'OBJECT_STORAGE_VALIDATION_UNAVAILABLE';
+
+export type StorageReadiness =
+  | Readonly<{ status: 'ready' }>
+  | Readonly<{
+      status: 'not_ready';
+      code: StorageReadinessFailureCode;
+    }>;
+
+class StorageLifecycleContractError extends Error {}
+
 /**
  * 对象存储薄封装（MinIO/S3 兼容，02 §2）。owner 凭证只在后端，
  * 外部一律短时 presigned URL；bucket 永不公开。
  */
 @Injectable()
-export class StorageService implements OnModuleInit {
+export class StorageService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(StorageService.name);
   private readonly client: S3Client;
+  private readiness: StorageReadiness = Object.freeze({
+    status: 'not_ready',
+    code: 'OBJECT_STORAGE_CREDENTIALS_REQUIRED',
+  });
+  private readonly unregisterReadiness?: () => void;
   readonly bucket: string;
 
-  constructor() {
+  constructor(
+    @Optional()
+    readinessRegistry?: RuntimeReadinessContributorRegistry,
+  ) {
     this.bucket = process.env.S3_BUCKET ?? 'global-site-builder';
     this.client = new S3Client({
       endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
@@ -44,93 +71,114 @@ export class StorageService implements OnModuleInit {
         secretAccessKey: process.env.S3_SECRET_KEY ?? '',
       },
     });
+    this.unregisterReadiness = readinessRegistry?.register('storage', () => {
+      return this.checkReadiness();
+    });
   }
 
-  /** dev 幂等建桶；失败只告警（真正用到时再报错，不挡无关模块启动）。 */
+  private asRuntimeComponentStatus(): Readonly<{ status: 'ok' }> | Readonly<{
+    status: 'failed';
+    code: StorageReadinessFailureCode;
+  }> {
+    const readiness = this.getReadiness();
+      return readiness.status === 'ready'
+        ? { status: 'ok' as const }
+        : { status: 'failed' as const, code: readiness.code };
+  }
+
+  onModuleDestroy(): void {
+    this.unregisterReadiness?.();
+  }
+
+  /**
+   * Product replicas validate infrastructure but never provision it. Failure keeps the
+   * process diagnostic surface alive while capability readiness remains fail-closed.
+   */
   async onModuleInit(): Promise<void> {
-    if (!process.env.S3_ACCESS_KEY) {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('S3_ACCESS_KEY is required in production');
-      }
-      this.log.warn('S3_ACCESS_KEY not set — object storage unavailable until configured');
+    await this.refreshReadiness();
+  }
+
+  /** Re-checks provisioned storage instead of permanently caching a startup outage. */
+  async checkReadiness(): Promise<
+    Readonly<{ status: 'ok' }> | Readonly<{ status: 'failed'; code: StorageReadinessFailureCode }>
+  > {
+    await this.refreshReadiness();
+    return this.asRuntimeComponentStatus();
+  }
+
+  private async refreshReadiness(): Promise<void> {
+    if (!process.env.S3_ACCESS_KEY || !process.env.S3_SECRET_KEY) {
+      this.failReadiness('OBJECT_STORAGE_CREDENTIALS_REQUIRED');
       return;
     }
     try {
-      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
-      this.log.log(`bucket ${this.bucket} created`);
-    } catch (err) {
-      const name = err instanceof Error ? err.name : '';
-      if (name !== 'BucketAlreadyOwnedByYou' && name !== 'BucketAlreadyExists') {
-        this.log.warn(`ensure bucket failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      await this.ensureVariantAttemptLifecycle();
+      this.readiness = Object.freeze({ status: 'ready' });
+    } catch (error) {
+      this.failReadiness(
+        error instanceof StorageLifecycleContractError
+          ? 'OBJECT_STORAGE_LIFECYCLE_INVALID'
+          : 'OBJECT_STORAGE_VALIDATION_UNAVAILABLE',
+      );
+      this.log.error(
+        `object storage validation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    await this.ensureVariantAttemptLifecycle();
+  }
+
+  getReadiness(): StorageReadiness {
+    return this.readiness;
+  }
+
+  assertReady(): void {
+    if (this.readiness.status !== 'ready') {
+      throw new Error(this.readiness.code);
+    }
+  }
+
+  private failReadiness(code: StorageReadinessFailureCode): void {
+    this.readiness = Object.freeze({ status: 'not_ready', code });
+    this.log.error(`object storage is not ready: ${code}`);
   }
 
   /**
    * Attempt objects are never public/canonical. A one-day tagged lifecycle is the last-resort
    * convergence path for a producer that resumes after its frozen cleanup command has settled.
-   * Development may own the rule; production defaults to validate-only so API replicas never
-   * race a full-bucket lifecycle PUT. An explicit production manager must be single-owner/IaC.
+   * Every product replica is validate-only so replicas never race a full-bucket lifecycle PUT.
+   * A single deployment owner/IaC must provision the bucket and lifecycle contract.
    */
   private async ensureVariantAttemptLifecycle(): Promise<void> {
-    const configured = process.env.S3_MANAGE_VARIANT_ATTEMPT_LIFECYCLE;
-    const manage = configured === 'true' || (configured === undefined && process.env.NODE_ENV !== 'production');
-    const strict = process.env.NODE_ENV === 'production' || !manage;
+    let rules: LifecycleRule[] = [];
     try {
-      let rules: LifecycleRule[] = [];
-      try {
-        const current = await this.client.send(
-          new GetBucketLifecycleConfigurationCommand({ Bucket: this.bucket }),
-        );
-        rules = current.Rules ?? [];
-      } catch (error) {
-        const name = error instanceof Error ? error.name : '';
-        if (name !== 'NoSuchLifecycleConfiguration' && name !== 'NoSuchLifecycle') throw error;
-      }
-      const expected = {
-        ID: VARIANT_ATTEMPT_LIFECYCLE_RULE_ID,
-        Status: 'Enabled' as const,
-        Filter: {
-          Tag: {
-            Key: VARIANT_ATTEMPT_LIFECYCLE_TAG,
-            Value: VARIANT_ATTEMPT_LIFECYCLE_VALUE,
-          },
-        },
-        Expiration: { Days: 1 },
-      };
-      const current = rules.find((rule) => rule.ID === VARIANT_ATTEMPT_LIFECYCLE_RULE_ID);
-      if (
-        current?.Status === expected.Status &&
-        current.Expiration?.Days === expected.Expiration.Days &&
-        current.Filter?.Tag?.Key === expected.Filter.Tag.Key &&
-        current.Filter?.Tag?.Value === expected.Filter.Tag.Value
-      ) return;
-      if (!manage) {
-        throw new Error(
-          'required variant-attempt lifecycle is missing; configure it through the single deployment owner',
-        );
-      }
-      await this.client.send(
-        new PutBucketLifecycleConfigurationCommand({
-          Bucket: this.bucket,
-          LifecycleConfiguration: {
-            Rules: [
-              ...rules.filter((rule) => rule.ID !== VARIANT_ATTEMPT_LIFECYCLE_RULE_ID),
-              expected,
-            ],
-          },
-        }),
+      const current = await this.client.send(
+        new GetBucketLifecycleConfigurationCommand({ Bucket: this.bucket }),
       );
-      this.log.log('variant-attempt one-day lifecycle ensured');
+      rules = current.Rules ?? [];
     } catch (error) {
-      if (strict) throw error;
-      // Development reconciliation remains active even when local MinIO lifecycle management
-      // fails. Production validate-only mode above fails startup instead.
-      this.log.warn(
-        `ensure variant-attempt lifecycle failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const name = error instanceof Error ? error.name : '';
+      if (name !== 'NoSuchLifecycleConfiguration' && name !== 'NoSuchLifecycle') throw error;
     }
+    const expected = {
+      ID: VARIANT_ATTEMPT_LIFECYCLE_RULE_ID,
+      Status: 'Enabled' as const,
+      Filter: {
+        Tag: {
+          Key: VARIANT_ATTEMPT_LIFECYCLE_TAG,
+          Value: VARIANT_ATTEMPT_LIFECYCLE_VALUE,
+        },
+      },
+      Expiration: { Days: 1 },
+    };
+    const current = rules.find((rule) => rule.ID === VARIANT_ATTEMPT_LIFECYCLE_RULE_ID);
+    if (
+      current?.Status === expected.Status &&
+      current.Expiration?.Days === expected.Expiration.Days &&
+      current.Filter?.Tag?.Key === expected.Filter.Tag.Key &&
+      current.Filter?.Tag?.Value === expected.Filter.Tag.Value
+    ) return;
+    throw new StorageLifecycleContractError(
+      'required variant-attempt lifecycle is missing; configure it through the single deployment owner',
+    );
   }
 
   async presignPut(
@@ -138,6 +186,7 @@ export class StorageService implements OnModuleInit {
     contentType: string,
     ttlS = PRESIGN_PUT_TTL_S,
   ): Promise<{ url: string; expiresAt: Date }> {
+    this.assertReady();
     const url = await getSignedUrl(
       this.client,
       new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
@@ -147,6 +196,7 @@ export class StorageService implements OnModuleInit {
   }
 
   async presignGet(key: string, ttlS = PRESIGN_GET_TTL_S): Promise<string> {
+    this.assertReady();
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: ttlS,
     });
@@ -154,6 +204,7 @@ export class StorageService implements OnModuleInit {
 
   /** 对象元信息；不存在返回 null（fail-safe 判断，调用方决定 409/422）。 */
   async head(key: string, signal?: AbortSignal): Promise<{ size: number; contentType: string | null } | null> {
+    this.assertReady();
     try {
       const res = await this.client.send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
@@ -168,6 +219,7 @@ export class StorageService implements OnModuleInit {
   }
 
   async getBuffer(key: string, signal?: AbortSignal): Promise<Buffer> {
+    this.assertReady();
     const res = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       signal ? { abortSignal: signal } : undefined,
@@ -180,6 +232,7 @@ export class StorageService implements OnModuleInit {
   /** Read a small trusted class of object with a hard byte ceiling (image pipeline input). */
   async getBufferBounded(key: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('maxBytes must be positive');
+    this.assertReady();
     const res = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       signal ? { abortSignal: signal } : undefined,
@@ -203,6 +256,7 @@ export class StorageService implements OnModuleInit {
 
   /** 流式 sha256 + 魔数头（Codex P2：500MB 视频整段进 Buffer 会打爆内存）。 */
   async hashObject(key: string, signal?: AbortSignal): Promise<{ sha256: string; head: Buffer; size: number }> {
+    this.assertReady();
     const res = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       signal ? { abortSignal: signal } : undefined,
@@ -228,6 +282,7 @@ export class StorageService implements OnModuleInit {
     signal?: AbortSignal,
     options?: { lifecycle?: 'variant-attempt' },
   ): Promise<void> {
+    this.assertReady();
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -254,6 +309,7 @@ export class StorageService implements OnModuleInit {
     sha256: string,
     signal?: AbortSignal,
   ): Promise<'created' | 'exists'> {
+    this.assertReady();
     const actual = createHash('sha256').update(data).digest('hex');
     if (!/^[0-9a-f]{64}$/.test(sha256) || actual !== sha256) {
       throw new Error(`immutable object sha256 mismatch: ${key}`);
@@ -285,6 +341,7 @@ export class StorageService implements OnModuleInit {
   }
 
   async copy(fromKey: string, toKey: string, signal?: AbortSignal): Promise<void> {
+    this.assertReady();
     await this.client.send(
       new CopyObjectCommand({
         Bucket: this.bucket,
@@ -299,6 +356,7 @@ export class StorageService implements OnModuleInit {
   }
 
   async delete(key: string, signal?: AbortSignal): Promise<void> {
+    this.assertReady();
     await this.client.send(
       new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       signal ? { abortSignal: signal } : undefined,
@@ -309,6 +367,7 @@ export class StorageService implements OnModuleInit {
     if (!prefix.endsWith('/') || prefix.includes('..')) {
       throw new Error('invalid object deletion prefix');
     }
+    this.assertReady();
     let deleted = 0;
     for (let page = 0; page < 10_000; page += 1) {
       const listed = await this.client.send(

@@ -6,7 +6,7 @@ import { Context as ActivityContext } from "@temporalio/activity";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { PrismaService } from "../prisma/prisma.service";
 import {
-  createSiteBuilderActivities,
+  createSiteBuilderActivities as createSiteBuilderActivitiesRaw,
   buildCompensatedSteps,
   controlledAssemblyEffectiveBrief,
   durableCopyTaskCompletion,
@@ -20,7 +20,6 @@ import {
   RefurbishFinalizeInput,
 } from "./site-builder.activities";
 import type { CopySlotDefinition } from "@global/contracts";
-import { budgetLedger, siteBuildBudgetCents } from "../tools/budget";
 import { buildDemoSpec, DEMO_SPEC_VERSION } from "../site-builder/demo-spec";
 
 /**
@@ -67,15 +66,228 @@ function fakePrisma(tx: any): PrismaService {
   } as unknown as PrismaService;
 }
 
+function createSiteBuilderActivities(
+  deps: Parameters<typeof createSiteBuilderActivitiesRaw>[0],
+) {
+  return createSiteBuilderActivitiesRaw({
+    ...deps,
+    rendererBuildIdentity:
+      deps.rendererBuildIdentity ?? "site-renderer@test-sha256",
+    costLedger:
+      deps.costLedger ??
+      ({
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+        closeAndSummarize: vi.fn(async () => undefined),
+      } as never),
+  });
+}
+
 function spyBudget() {
-  const open = vi.spyOn(budgetLedger, "open").mockImplementation(() => {});
-  const close = vi.spyOn(budgetLedger, "close").mockImplementation(() => {});
-  return { open, close };
+  const close = vi.fn();
+  return {
+    open: vi.fn(),
+    close,
+    costLedger: {
+      assertAuthorizedBudget: vi.fn(async () => undefined),
+      closeAndSummarize: vi.fn(async (input: { buildRunId: string }) => {
+        close(input.buildRunId, { force: true });
+        return undefined;
+      }),
+    },
+  };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+describe("site build cost reconciliation sweep", () => {
+  it("enumerates bounded tenant workspaces and appends due observations without another model call", async () => {
+    const queryRaw = vi.fn(async () => [
+      {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        lastAttempt: new Date("2026-08-18T00:00:00.000Z"),
+      },
+      {
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+        lastAttempt: null,
+      },
+    ]);
+    const runReconciliationSweep = vi
+      .fn()
+      .mockResolvedValueOnce({ attempted: 2, resolved: 0 })
+      .mockResolvedValueOnce({ attempted: 1, resolved: 0 });
+    const gateway = { generateText: vi.fn() };
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      ownerDb: { $queryRaw: queryRaw } as unknown as PrismaClient,
+      gateway: gateway as never,
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+        closeAndSummarize: vi.fn(async () => undefined),
+        runReconciliationSweep,
+      } as never,
+    });
+
+    const result = await acts.sweepSiteBuildCostReconciliation({ limit: 500 });
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const fairQuery = queryRaw.mock.calls[0]?.[0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    const fairSql = fairQuery.strings.join(" ");
+    // 公平轮转：按工作区最近一次被尝试时间升序（从未尝试者优先），
+    // 避免 `workspace_id ASC` 让 UUID 靠后的租户永久饥饿。
+    expect(fairSql).toContain("NULLS FIRST");
+    expect(fairSql).toContain("site_build_spend_reconciliation");
+    expect(fairQuery.values).toEqual([10]);
+    expect(runReconciliationSweep).toHaveBeenCalledTimes(2);
+    expect(runReconciliationSweep).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        limit: 1,
+        resolve: expect.any(Function),
+      }),
+    );
+    expect(gateway.generateText).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      workspaces: 2,
+      attempted: 3,
+      resolved: 0,
+      nextCursor: {
+        lastAttempt: null,
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+      },
+    });
+  });
+
+  it("fails closed when the owner scan or durable ledger is unavailable", async () => {
+    const noOwner = createSiteBuilderActivities({ prisma: fakePrisma({}) });
+    await expect(
+      noOwner.sweepSiteBuildCostReconciliation({ limit: 10 }),
+    ).rejects.toThrow("SITE_BUILD_RECONCILIATION_UNAVAILABLE");
+  });
+
+  it("uses the injected request-bound resolver for due candidates", async () => {
+    const resolve = vi.fn(async () => ({
+      status: "RESOLVED" as const,
+      resolverId: "new-api-request-bound-reconciliation-v1",
+      requestId: "req-cost-reconcile-001",
+      receiptDigest: "a".repeat(64),
+      costBasis: "token_pricing" as const,
+      exactCostMicrousd: '540',
+      observedAt: new Date(),
+    }));
+    const runReconciliationSweep = vi.fn(async (input: {
+      resolve: (candidate: {
+        spendId: string;
+        operationKey: string;
+        meta: Record<string, unknown> | null;
+      }) => Promise<{ status: string }>;
+    }) => {
+      const observation = await input.resolve({
+        spendId: "spend-1",
+        operationKey: "b".repeat(64),
+        meta: { settlementPreflight: {} },
+      });
+      return { attempted: 1, resolved: observation.status === "RESOLVED" ? 1 : 0 };
+    });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      ownerDb: {
+        $queryRaw: vi.fn(async () => [
+          { workspaceId: "00000000-0000-4000-8000-000000000001" },
+        ]),
+      } as unknown as PrismaClient,
+      costReconciliationResolver: { resolve },
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+        closeAndSummarize: vi.fn(async () => undefined),
+        runReconciliationSweep,
+      } as never,
+    });
+
+    await expect(
+      acts.sweepSiteBuildCostReconciliation({ limit: 10 }),
+    ).resolves.toEqual({
+      workspaces: 1,
+      attempted: 1,
+      resolved: 1,
+      nextCursor: {
+        lastAttempt: null,
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ spendId: "spend-1" }),
+    );
+  });
+
+  it("accepts cursor input and returns the next keyset cursor", async () => {
+    const queryRaw = vi.fn(async () => [
+      {
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+        lastAttempt: null,
+      },
+    ]);
+    const runReconciliationSweep = vi.fn(async () => ({ attempted: 1, resolved: 1 }));
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      ownerDb: { $queryRaw: queryRaw } as unknown as PrismaClient,
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+        closeAndSummarize: vi.fn(async () => undefined),
+        runReconciliationSweep,
+      } as never,
+    });
+
+    const first = await acts.sweepSiteBuildCostReconciliation({
+      limit: 1,
+      cursor: {
+        lastAttempt: "2026-08-18T01:00:00.000Z",
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(first).toEqual({
+      workspaces: 1,
+      attempted: 1,
+      resolved: 1,
+      nextCursor: {
+        workspaceId: "00000000-0000-4000-8000-000000000002",
+        lastAttempt: null,
+      },
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(runReconciliationSweep).toHaveBeenCalledTimes(1);
+    const queryWithCursor = queryRaw.mock.calls[0]?.[0] as {
+      strings: readonly string[];
+      values: readonly unknown[];
+    };
+    expect(queryWithCursor.strings.join(" ")).toContain("COALESCE");
+  });
+
+  it("rejects malformed cursor input", async () => {
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma({}),
+      ownerDb: {
+        $queryRaw: vi.fn(async () => []),
+      } as unknown as PrismaClient,
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+        closeAndSummarize: vi.fn(async () => undefined),
+        runReconciliationSweep: vi.fn(async () => ({ attempted: 0, resolved: 0 })),
+      } as never,
+    });
+    await expect(
+      acts.sweepSiteBuildCostReconciliation({
+        limit: 10,
+        cursor: { workspaceId: "not-a-uuid", lastAttempt: "bad-time" },
+      } as never),
+    ).rejects.toThrow("SITE_BUILD_RECONCILIATION_CURSOR_INVALID");
+  });
 });
 
 describe("M1-g non-authoritative quality narrative failure boundaries", () => {
@@ -487,9 +699,8 @@ describe("listKbRecoveryCandidates — expired lease fairness", () => {
 });
 
 describe("beginRefurbishRun — 预算门接线（改动 1）", () => {
-  it("R4-B: a claimed run creates its durable database budget before returning", async () => {
-    spyBudget();
-    const ensureBudget = vi.fn(async () => undefined);
+  it("R4-B: a claimed run verifies the pre-authorized Grant and budget before returning", async () => {
+    const assertAuthorizedBudget = vi.fn(async () => undefined);
     const tx = {
       site: {
         findUnique: vi.fn(async () => ({ id: "site-1" })),
@@ -502,43 +713,20 @@ describe("beginRefurbishRun — 预算门接线（改动 1）", () => {
     };
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma(tx),
-      costLedger: { ensureBudget } as never,
+      costLedger: { assertAuthorizedBudget } as never,
     });
 
     await acts.beginRefurbishRun(INPUT);
 
-    expect(ensureBudget).toHaveBeenCalledWith({
+    expect(assertAuthorizedBudget).toHaveBeenCalledWith({
       workspaceId: "ws-1",
       siteId: "site-1",
       buildRunId: "run-1",
-      capMicrousd: siteBuildBudgetCents() * 10_000,
     });
   });
 
-  it("认领成功 → close(force) 后 open(buildRunId, siteBuildBudgetCents())", async () => {
-    const { open, close } = spyBudget();
-    const tx = {
-      site: {
-        findUnique: vi.fn(async () => ({ id: "site-1" })),
-        update: vi.fn(async () => ({})),
-      },
-      siteBuildRun: {
-        findUnique: vi.fn(async () => ({ status: "queued" })),
-        updateMany: vi.fn(async () => ({ count: 1 })),
-      },
-    };
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
-    await acts.beginRefurbishRun(INPUT);
-    expect(close).toHaveBeenCalledWith("run-1", { force: true });
-    expect(open).toHaveBeenCalledWith("run-1", siteBuildBudgetCents());
-    // close 在 open 之前（清残留再开新账）
-    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
-      open.mock.invocationCallOrder[0],
-    );
-  });
-
-  it("认领失败（count=0）→ 抛错且 open 不被调用（失败 claim 先抛）", async () => {
-    const { open } = spyBudget();
+  it("认领失败（count=0）→ 抛错且不验证预算（失败 claim 先抛）", async () => {
+    const assertAuthorizedBudget = vi.fn(async () => undefined);
     const tx = {
       site: {
         findUnique: vi.fn(async () => ({ id: "site-1" })),
@@ -549,15 +737,18 @@ describe("beginRefurbishRun — 预算门接线（改动 1）", () => {
         updateMany: vi.fn(async () => ({ count: 0 })),
       },
     };
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: { assertAuthorizedBudget } as never,
+    });
     await expect(acts.beginRefurbishRun(INPUT)).rejects.toThrow(
       /not claimable/,
     );
-    expect(open).not.toHaveBeenCalled();
+    expect(assertAuthorizedBudget).not.toHaveBeenCalled();
   });
 
   it("running activity retry does not reset startedAt, phase, progress or steps", async () => {
-    const { open } = spyBudget();
+    const assertAuthorizedBudget = vi.fn(async () => undefined);
     const updateMany = vi.fn();
     const tx = {
       site: {
@@ -569,16 +760,19 @@ describe("beginRefurbishRun — 预算门接线（改动 1）", () => {
         updateMany,
       },
     };
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: { assertAuthorizedBudget } as never,
+    });
     await acts.beginRefurbishRun(INPUT);
     expect(updateMany).not.toHaveBeenCalled();
-    expect(open).toHaveBeenCalled();
+    expect(assertAuthorizedBudget).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
   it("R1 promotes a READY Release with the DB pointer only and never calls the local symlink seam", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const releaseUpdateMany = vi.fn(async () => ({ count: 1 }));
     const siteUpdateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
@@ -602,6 +796,7 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma(tx),
       promotePreview,
+      costLedger: costLedger as never,
     });
 
     await expect(
@@ -660,7 +855,7 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma(tx),
       costLedger: {
-        ensureBudget: vi.fn(async () => undefined),
+        assertAuthorizedBudget: vi.fn(async () => undefined),
         closeAndSummarize,
       } as never,
     });
@@ -686,7 +881,7 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
   });
 
   it("发布成功 → close(buildRunId, {force:true})", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const tx = {
       siteBuildRun: {
         findUnique: vi.fn(async () => ({ status: "running", scope: {} })),
@@ -702,7 +897,10 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
         })),
       },
     };
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: costLedger as never,
+    });
     const input: RefurbishFinalizeInput = {
       ...INPUT,
       kb: { processed: 1, failed: 0, degraded: false },
@@ -715,7 +913,7 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
   });
 
   it("兼容升级前已调度且没有 images 字段的 activity payload", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
       siteBuildRun: {
@@ -732,7 +930,10 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
         })),
       },
     };
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: costLedger as never,
+    });
     await expect(
       acts.finalizeRefurbish({
         ...INPUT,
@@ -984,7 +1185,7 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
   });
 
   it("旧 finalize retry 发现更新 build 已接管时不覆盖新的 served pointer", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const root = await mkdtemp(path.join(tmpdir(), "r3b2-stale-publish-"));
     vi.stubEnv("PREVIEW_DIR", root);
     const staging = path.join(root, ".staging", "run-1");
@@ -1029,6 +1230,7 @@ describe("finalizeRefurbish — 末尾 force close（改动 1）", () => {
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma(tx),
       promotePreview,
+      costLedger: costLedger as never,
     });
     try {
       await expect(
@@ -1092,7 +1294,9 @@ describe("assembleAndBuild — deterministic demo compatibility", () => {
     const acts = createSiteBuilderActivities({
       prisma: assembleStopAfterPolishPrisma(site),
       gateway: gateway as never,
-      costLedger: {} as never,
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+      } as never,
     });
     await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow(
       "stop-after-polish",
@@ -1101,20 +1305,24 @@ describe("assembleAndBuild — deterministic demo compatibility", () => {
   });
 });
 
-describe("入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁棒）", () => {
-  // 用真实 budgetLedger 观测（不 mock open/close）：begin 只在 beginRefurbishRun 开账，
-  // 换 worker/重启后的后续活动会发现无账户 → reserve 返回不限额 → 预算门被绕过。故每个耗费活动入口须幂等 open。
-  it("assembleAndBuild 账户未预开 → 进入活动即立账（remaining=cap，非 Infinity）", async () => {
-    expect(budgetLedger.remainingCents("run-1")).toBe(Infinity); // 前置：无账户
+describe("活动入口只接受持久 Grant + Budget 授权", () => {
+  it("assembleAndBuild 在任何数据读取前验证授权预算", async () => {
+    const assertAuthorizedBudget = vi.fn(async () => undefined);
     const prisma = {
       withWorkspace: vi.fn(async () => {
         throw new Error("stop");
       }),
     } as unknown as PrismaService;
-    const acts = createSiteBuilderActivities({ prisma });
+    const acts = createSiteBuilderActivities({
+      prisma,
+      costLedger: { assertAuthorizedBudget } as never,
+    });
     await expect(acts.assembleAndBuild(INPUT)).rejects.toThrow("stop");
-    expect(budgetLedger.remainingCents("run-1")).toBe(siteBuildBudgetCents()); // 入口已 open
-    budgetLedger.close("run-1", { force: true }); // 清理，避免跨用例泄漏
+    expect(assertAuthorizedBudget).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      siteId: "site-1",
+      buildRunId: "run-1",
+    });
   });
 
   it("R3-B2 assemble 入口不把已记录的 0.65 进度写回旧 0.5", async () => {
@@ -1294,14 +1502,16 @@ describe("入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     );
   });
 
-  it("buildBrandProfile 账户未预开 → 入口立账（即便随后 gateway 缺席抛错）", async () => {
-    expect(budgetLedger.remainingCents("run-1")).toBe(Infinity);
-    const acts = createSiteBuilderActivities({ prisma: {} as PrismaService }); // 无 gateway
+  it("buildBrandProfile 在 gateway 缺席时仍先验证持久授权", async () => {
+    const assertAuthorizedBudget = vi.fn(async () => undefined);
+    const acts = createSiteBuilderActivities({
+      prisma: {} as PrismaService,
+      costLedger: { assertAuthorizedBudget } as never,
+    });
     await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
       /gateway unavailable/,
     );
-    expect(budgetLedger.remainingCents("run-1")).toBe(siteBuildBudgetCents());
-    budgetLedger.close("run-1", { force: true });
+    expect(assertAuthorizedBudget).toHaveBeenCalledTimes(1);
   });
 
   it("R4-B: BrandProfile fails closed before I/O when no durable ledger is installed", async () => {
@@ -1312,9 +1522,10 @@ describe("入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
         throw new Error("database must not be reached");
       }),
     } as unknown as PrismaService;
-    const acts = createSiteBuilderActivities({
+    const acts = createSiteBuilderActivitiesRaw({
       prisma,
       gateway: gateway as never,
+      rendererBuildIdentity: "site-renderer@test-sha256",
     });
 
     await expect(acts.buildBrandProfile(INPUT)).rejects.toThrow(
@@ -1348,7 +1559,10 @@ describe("入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
       prisma,
       gateway: gateway as never,
       broker: broker as never,
-      costLedger: { claimTaskAttempt } as never,
+      costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
+        claimTaskAttempt,
+      } as never,
     });
 
     await expect(acts.buildBrandProfile(INPUT)).resolves.toEqual(summary);
@@ -1385,6 +1599,7 @@ describe("入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
       gateway: gateway as never,
       broker: broker as never,
       costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
         claimTaskAttempt: vi.fn(async () => ({
           kind: "claimed",
           attempt: {
@@ -1401,7 +1616,6 @@ describe("入口幂等 open 预算账户（FIX B / Codex P2 · worker 重启鲁�
     );
     expect(gateway.generateStructured).not.toHaveBeenCalled();
     expect(broker.execute).not.toHaveBeenCalled();
-    budgetLedger.close("run-1", { force: true });
   });
 });
 
@@ -1522,6 +1736,7 @@ describe("R4-B BrandProfile paid attempt recovery", () => {
       prisma: fakePrisma(tx),
       gateway: gateway as never,
       costLedger: {
+        assertAuthorizedBudget: vi.fn(async () => undefined),
         claimTaskAttempt: vi.fn(async () => ({
           kind: "claimed",
           attempt: {
@@ -1644,9 +1859,12 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
   }
 
   it("转 failed 时 always force close", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const { tx } = compensateTx({});
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: costLedger as never,
+    });
     await acts.compensateRefurbish(INPUT);
     expect(close).toHaveBeenCalledWith("run-1", { force: true });
   });
@@ -1663,7 +1881,7 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
     const acts = createSiteBuilderActivities({
       prisma: fakePrisma(tx),
       costLedger: {
-        ensureBudget: vi.fn(async () => undefined),
+        assertAuthorizedBudget: vi.fn(async () => undefined),
         closeAndSummarize,
       } as never,
     });
@@ -1684,12 +1902,13 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
   });
 
   it("DB 补偿失败会传播，交给 Temporal 重试且绝不伪装成功", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const failure = new Error("database unavailable");
     const acts = createSiteBuilderActivities({
       prisma: {
         withWorkspace: vi.fn().mockRejectedValue(failure),
       } as unknown as PrismaService,
+      costLedger: costLedger as never,
     });
     await expect(acts.compensateRefurbish(INPUT)).rejects.toBe(failure);
     expect(close).toHaveBeenCalledWith("run-1", { force: true });
@@ -1771,11 +1990,14 @@ describe("compensateRefurbish — 末尾 force close + steps 回填（改动 1+3
   });
 
   it("run 已 succeeded → 不改状态、不写 steps、不查 brandProfile/siteVersion（守卫），但仍 force close", async () => {
-    const { close } = spyBudget();
+    const { close, costLedger } = spyBudget();
     const { tx, runUpdate, findFirst, svFindFirst } = compensateTx({
       runStatus: "succeeded",
     });
-    const acts = createSiteBuilderActivities({ prisma: fakePrisma(tx) });
+    const acts = createSiteBuilderActivities({
+      prisma: fakePrisma(tx),
+      costLedger: costLedger as never,
+    });
     await acts.compensateRefurbish(INPUT);
     expect(runUpdate).not.toHaveBeenCalled();
     expect(findFirst).not.toHaveBeenCalled();

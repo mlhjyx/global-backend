@@ -5,6 +5,7 @@ import { companyIdentity } from '../identity';
 import { CompanyDiscoveryQuery, ExecutionContext } from '../provider-contract';
 import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import type { TedSearchOutput } from '../../tools/source-tools';
+import { BudgetOperationReplayError } from '../../tools/budget-store';
 
 const NOW = '2026-07-08T00:00:00.000Z';
 const CTX: ExecutionContext = { workspaceId: 'ws-1', runId: 'run-1' };
@@ -38,6 +39,16 @@ function notice(overrides: Partial<TedAwardNotice> = {}): TedAwardNotice {
 function q(filters: Record<string, unknown>): CompanyDiscoveryQuery {
   return { sourceClass: 'public_intelligence', filters, keywords: [], limit: 25 };
 }
+
+describe('TED durable replay failure semantics', () => {
+  it('never converts replay-unavailable into an empty successful source result', async () => {
+    const provider = new TedDiscoveryProvider({
+      broker: fakeBroker(async () => { throw new BudgetOperationReplayError('ted-op'); }),
+    });
+    await expect(provider.discoverCompanies(q({ cpv: '42122430' }), CTX))
+      .rejects.toBeInstanceOf(BudgetOperationReplayError);
+  });
+});
 
 describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () => {
   it('单中标方带官网 → 域名可解析 + ted 命名空间事实 + 署名', () => {

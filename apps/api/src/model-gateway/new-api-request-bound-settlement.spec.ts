@@ -95,6 +95,16 @@ function anthropicResolveInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe("NewApiRequestBoundSettlementResolver", () => {
+  it("rejects settlement endpoint redirects before following an untrusted hop", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 302, headers: { Location: "http://169.254.169.254/" } }));
+    const settlement = resolver(fetchImpl as typeof fetch);
+
+    await expect(settlement.resolve(resolveInput())).resolves.toMatchObject({ status: "unknown", reason: "log_unavailable" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `${GATEWAY_ORIGIN}/api/log/token`,
+      expect.objectContaining({ redirect: "error" }),
+    );
+  });
   it("settles exactly one request-bound row and emits a deterministic receipt digest", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ data: [logRow()] }));
     const settlement = resolver(fetchMock as typeof fetch);

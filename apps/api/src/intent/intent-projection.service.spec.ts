@@ -136,7 +136,7 @@ describe('IntentProjectionService — suppression authority materialization gate
       suppressionRecord: {
         findMany: vi.fn(async () => [{ type: 'domain', value: 'blocked.example' }]),
       },
-      fieldEvidence: { create: evidenceCreate },
+      fieldEvidence: { findMany: vi.fn(async () => []), create: evidenceCreate },
     };
     const prisma = {
       sourceEntityChange: {
@@ -166,14 +166,44 @@ describe('IntentProjectionService — suppression authority materialization gate
 });
 
 describe('IntentProjectionService — watch registration terminal suppression denial', () => {
+  it('quarantines historical sandbox evidence before sitemap discovery or monitored-source writes', async () => {
+    const create = vi.fn(async () => ({ id: 'monitor-synthetic' }));
+    const invoke = vi.fn();
+    const tx = {
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({ name: 'Synthetic Co', domain: 'synthetic.example', region: null })),
+      },
+      fieldEvidence: {
+        findMany: vi.fn(async () => [{ providerKey: 'sandbox', license: 'sandbox' }]),
+      },
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
+      monitoredSource: { findUnique: vi.fn(async () => null), create },
+    };
+    const service = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: { invoke } as never,
+    });
+
+    await expect(
+      service.registerWatch('workspace-1', 'company-synthetic', {
+        pages: [{ url: 'https://synthetic.example/', kind: 'homepage' }],
+      }),
+    ).rejects.toMatchObject({ code: 'SYNTHETIC_DISCOVERY_PROVENANCE' });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('does not downgrade a sitemap suppression denial into homepage monitor creation', async () => {
     const create = vi.fn(async () => ({ id: 'monitor-1' }));
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: unknown) => unknown) =>
         callback({
           canonicalCompany: {
-            findUnique: vi.fn(async () => ({ name: 'Acme GmbH', domain: 'acme.example', region: null })),
+            findUnique: vi.fn(async () => ({ id: 'company-1', name: 'Acme GmbH', domain: 'acme.example', region: null })),
           },
+          fieldEvidence: { findMany: vi.fn(async () => []) },
         }),
       ),
       monitoredSource: {
@@ -194,5 +224,52 @@ describe('IntentProjectionService — watch registration terminal suppression de
       }),
     ).rejects.toThrow(/suppression_action_gate/);
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntentProjectionService — synthetic projection quarantine', () => {
+  it('does not derive intent or evidence from a historical sandbox-backed canonical company', async () => {
+    const update = vi.fn();
+    const evidenceCreate = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'company-synthetic',
+          name: 'Synthetic Co',
+          domain: 'synthetic.example',
+          dedupeKey: 'd:synthetic.example',
+          attributes: {},
+          status: 'NEW',
+        })),
+        update,
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      fieldEvidence: {
+        findMany: vi.fn(async () => [{ providerKey: 'sandbox', license: 'sandbox' }]),
+        create: evidenceCreate,
+      },
+    };
+    const prisma = {
+      sourceEntityChange: {
+        findMany: vi.fn(async () => [
+          {
+            changeType: 'PAGE_CHANGED',
+            createdAt: new Date('2026-08-10T00:00:00.000Z'),
+            detail: { strength: 0.3 },
+            source: { config: { company: { name: 'Synthetic Co', domain: 'synthetic.example' } } },
+          },
+        ]),
+      },
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const service = new IntentProjectionService({ prisma: prisma as never });
+
+    await expect(service.projectIntent('workspace-1')).resolves.toEqual({
+      companiesTouched: 0,
+      eventsProjected: 0,
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(evidenceCreate).not.toHaveBeenCalled();
   });
 });

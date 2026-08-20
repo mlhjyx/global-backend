@@ -31,7 +31,41 @@ export const ACTIVE_COPY_RUNTIME_BINDING_PATH =
   "docs/evidence/site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v22.json";
 export const ACTIVE_COPY_RUNTIME_BINDING_SHA256 =
   "135ff0a6166d30b2257de48048b5c6c093a277ace5ef376a6e3dac1582a58bcd";
-const ALLOWED_STALE_PATHS = Object.freeze(["packages/db/prisma/schema.prisma"]);
+const REVIEWED_STALE_SCOPES = Object.freeze([
+  Object.freeze({
+    scope: "PRISMA_SCHEMA_EVOLUTION",
+    paths: Object.freeze(["packages/db/prisma/schema.prisma"]),
+  }),
+  Object.freeze({
+    scope: "PRODUCTION_PARITY_SINGLE_RUNTIME_PATH",
+    paths: Object.freeze([
+      "apps/api/package.json",
+      "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+      "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+      "apps/api/src/site-builder/agents/ai-task.ts",
+      "apps/api/tsconfig.build.json",
+      "packages/contracts/package.json",
+      "packages/contracts/src/site-builder/component-qualification.ts",
+      "packages/db/prisma/schema.prisma",
+      "pnpm-lock.yaml",
+    ]),
+  }),
+  Object.freeze({
+    scope: "PRODUCTION_PARITY_SINGLE_RUNTIME_PATH_SECURITY_PATCH",
+    paths: Object.freeze([
+      "apps/api/package.json",
+      "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+      "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+      "apps/api/src/site-builder/agents/ai-task.ts",
+      "apps/api/tsconfig.build.json",
+      "package.json",
+      "packages/contracts/package.json",
+      "packages/contracts/src/site-builder/component-qualification.ts",
+      "packages/db/prisma/schema.prisma",
+      "pnpm-lock.yaml",
+    ]),
+  }),
+]);
 
 function fail(code) {
   const error = new Error(code);
@@ -244,6 +278,17 @@ export function buildCopySourceFingerprint(files) {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
+function reviewedStaleScope(driftedPaths) {
+  if (driftedPaths.length === 0) return "NONE";
+  const reviewed = REVIEWED_STALE_SCOPES.find(
+    ({ paths }) =>
+      paths.length === driftedPaths.length &&
+      paths.every((path, index) => path === driftedPaths[index]),
+  );
+  if (!reviewed) fail("COPY_FIXED_SOURCE_STALE_SCOPE_INVALID");
+  return reviewed.scope;
+}
+
 function validateBinding(binding) {
   if (
     binding === null ||
@@ -358,9 +403,7 @@ export function buildCopyRuntimeEligibilityReceipt({ binding, currentFiles }) {
     .filter((entry, index) => entry.sha256 !== boundFiles[index].sha256)
     .map(({ path }) => path);
   const status = driftedPaths.length === 0 ? "CURRENT" : "STALE_HOLD";
-  if (driftedPaths.some((path) => !ALLOWED_STALE_PATHS.includes(path))) {
-    fail("COPY_FIXED_SOURCE_STALE_SCOPE_INVALID");
-  }
+  const staleScope = reviewedStaleScope(driftedPaths);
   return Object.freeze({
     schema_version: "site-builder-copy-runtime-eligibility/v1",
     active_binding_path: ACTIVE_COPY_RUNTIME_BINDING_PATH,
@@ -375,7 +418,7 @@ export function buildCopyRuntimeEligibilityReceipt({ binding, currentFiles }) {
       status === "CURRENT"
         ? "SEPARATE_DISPATCH_AUTHORIZATION"
         : "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
-    stale_scope: status === "CURRENT" ? "NONE" : "PRISMA_SCHEMA_EVOLUTION",
+    stale_scope: staleScope,
   });
 }
 

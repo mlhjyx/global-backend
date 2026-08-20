@@ -20,7 +20,7 @@ import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
-import { RuntimeReadinessService } from './health/runtime-readiness.service';
+import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guard';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -53,6 +53,9 @@ import { RuntimeReadinessService } from './health/runtime-readiness.service';
     SiteBuilderModule,
   ],
   controllers: [HealthController, WhoamiController],
-  providers: [RuntimeReadinessService, { provide: APP_GUARD, useClass: WsThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: WsThrottlerGuard },
+    { provide: APP_GUARD, useClass: RuntimeWorkAdmissionGuard },
+  ],
 })
 export class AppModule {}

@@ -21,8 +21,7 @@ const BLIND_PREFIX = 'bi:v1:';
 const BLIND_LABEL = 'pii-blind:v1:';
 
 /** 解析 32 字节 key（hex64 或 base64）。未配置 → null；长度错 → 抛（配置错误要大声）。 */
-function resolveKey(): Buffer | null {
-  const raw = process.env[KEY_ENV];
+function resolveKey(raw: string | undefined): Buffer | null {
   if (!raw) return null;
   const buf = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
   if (buf.length !== 32) {
@@ -41,10 +40,22 @@ export function piiKeyConfigured(): boolean {
   return !!process.env[KEY_ENV];
 }
 
+/** Validates presence and exact AES-256 key shape without exposing key material. */
+export function assertPiiKeyConfigured(raw?: string): void {
+  if (!resolveKey(raw ?? process.env[KEY_ENV])) {
+    throw new Error(`${KEY_ENV} 未配置`);
+  }
+}
+
+/** Validates an explicitly supplied runtime configuration without falling back to process.env. */
+export function assertPiiKeyConfiguration(raw: string | undefined): void {
+  if (!resolveKey(raw)) throw new Error(`${KEY_ENV} 未配置`);
+}
+
 /** 加密明文 → `enc:v1:base64(iv|tag|ct)`。key 缺失 → 抛（fail-closed）。幂等：已加密的原样返回。 */
 export function encryptPii(plaintext: string): string {
   if (isEncryptedPii(plaintext)) return plaintext;
-  const key = resolveKey();
+  const key = resolveKey(process.env[KEY_ENV]);
   if (!key) throw new Error(`${KEY_ENV} 未配置 — 拒绝以明文存储 PII（fail-closed）`);
   const iv = createHmac('sha256', key).update('pii-iv:v1:').update(plaintext, 'utf8').digest().subarray(0, IV_LEN);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -56,7 +67,7 @@ export function encryptPii(plaintext: string): string {
 /** 解密。非密文（legacy 明文）→ 原样返回。篡改（GCM tag 不符）→ 抛。key 缺失且是密文 → 抛。 */
 export function decryptPii(stored: string): string {
   if (!isEncryptedPii(stored)) return stored;
-  const key = resolveKey();
+  const key = resolveKey(process.env[KEY_ENV]);
   if (!key) throw new Error(`${KEY_ENV} 未配置 — 无法解密 PII`);
   const raw = Buffer.from(stored.slice(PREFIX.length), 'base64');
   const iv = raw.subarray(0, IV_LEN);
@@ -84,7 +95,7 @@ export function isBlindedContactKey(value: string): boolean {
  */
 export function blindContactKey(rawKey: string): string {
   if (isBlindedContactKey(rawKey)) return rawKey;
-  const key = resolveKey();
+  const key = resolveKey(process.env[KEY_ENV]);
   if (!key) throw new Error(`${KEY_ENV} 未配置 — 拒绝以明文存储联系人去重键（fail-closed）`);
   const mac = createHmac('sha256', key).update(BLIND_LABEL).update(rawKey, 'utf8').digest('hex');
   return BLIND_PREFIX + mac;

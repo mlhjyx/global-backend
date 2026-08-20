@@ -1,4 +1,9 @@
 import { Prisma } from '@prisma/client';
+import {
+  isAuthorizedAppDatabasePrincipal,
+  type DatabasePrincipalEvidence,
+  type DatabaseReadiness,
+} from '../prisma/prisma.service';
 import { encryptPii, decryptPii, isEncryptedPii } from './pii-crypto';
 
 /**
@@ -117,6 +122,87 @@ export function piiSpecFor(model: string | undefined): FieldSpec | undefined {
 const CONTACT_SPEC = SPECS.CanonicalContact;
 const POINT_SPEC = SPECS.ContactPoint;
 
+const databaseReadiness = new WeakMap<object, DatabaseReadiness>();
+
+function extensionContext(value: object): object & {
+  $connect: () => Promise<void>;
+  $disconnect: () => Promise<void>;
+  $queryRawUnsafe: <T>(query: string) => Promise<T>;
+} {
+  return Prisma.getExtensionContext(value) as unknown as object & {
+    $connect: () => Promise<void>;
+    $disconnect: () => Promise<void>;
+    $queryRawUnsafe: <T>(query: string) => Promise<T>;
+  };
+}
+
+const DATABASE_PRINCIPAL_QUERY = `
+  SELECT session_user::text AS "sessionUser",
+         current_user::text AS "currentUser",
+         principal.rolsuper AS "rolSuper",
+         principal.rolbypassrls AS "rolBypassRls",
+         principal.rolcreatedb AS "rolCreateDb",
+         principal.rolcreaterole AS "rolCreateRole",
+         principal.rolreplication AS "rolReplication",
+         principal.rolinherit AS "rolInherit",
+         COALESCE(
+           array_agg(granted.rolname::text ORDER BY granted.rolname)
+             FILTER (WHERE granted.rolname IS NOT NULL),
+           ARRAY[]::text[]
+         ) AS memberships
+    FROM pg_roles principal
+    LEFT JOIN pg_auth_members membership ON membership.member = principal.oid
+    LEFT JOIN pg_roles granted ON granted.oid = membership.roleid
+   WHERE principal.rolname = session_user
+   GROUP BY principal.oid,
+            principal.rolsuper,
+            principal.rolbypassrls,
+            principal.rolcreatedb,
+            principal.rolcreaterole,
+            principal.rolreplication,
+            principal.rolinherit`;
+
+async function reconnectDatabase(value: object): Promise<DatabaseReadiness> {
+  const context = extensionContext(value);
+  try {
+    await context.$connect();
+  } catch {
+    const result = Object.freeze({
+      status: 'not_ready' as const,
+      code: 'DATABASE_UNAVAILABLE' as const,
+    });
+    databaseReadiness.set(context, result);
+    console.error('[database] startup connection unavailable; readiness remains closed');
+    return result;
+  }
+  let evidence: DatabasePrincipalEvidence[];
+  try {
+    evidence = await context.$queryRawUnsafe<DatabasePrincipalEvidence[]>(
+      DATABASE_PRINCIPAL_QUERY,
+    );
+  } catch {
+    const result = Object.freeze({
+      status: 'not_ready' as const,
+      code: 'DATABASE_UNAVAILABLE' as const,
+    });
+    databaseReadiness.set(context, result);
+    console.error('[database] principal verification unavailable; readiness remains closed');
+    return result;
+  }
+  if (evidence.length !== 1 || !isAuthorizedAppDatabasePrincipal(evidence[0])) {
+    const result = Object.freeze({
+      status: 'not_ready' as const,
+      code: 'DATABASE_PRINCIPAL_INVALID' as const,
+    });
+    databaseReadiness.set(context, result);
+    console.error('[database] runtime principal is not authorized; readiness remains closed');
+    return result;
+  }
+  const result = Object.freeze({ status: 'ready' as const });
+  databaseReadiness.set(context, result);
+  return result;
+}
+
 /** 解密嵌套 include 里的 contact/contactPoint（company/lead 查询把它们嵌在结果里）。只作用于 enc: 前缀，安全。 */
 function decryptNested(node: unknown): void {
   if (!node || typeof node !== 'object') return;
@@ -170,18 +256,30 @@ export const piiExtension = Prisma.defineExtension({
     },
     /** NestJS 生命周期（$extends 会剥掉，故在 client 组件重挂，保持既有连接行为）。 */
     async onModuleInit(): Promise<void> {
-      await (
-        Prisma.getExtensionContext(this) as unknown as {
-          $connect: () => Promise<void>;
+      await reconnectDatabase(this);
+    },
+    async reconnect(): Promise<DatabaseReadiness> {
+      return reconnectDatabase(this);
+    },
+    getReadiness(): DatabaseReadiness {
+      const context = extensionContext(this);
+      return (
+        databaseReadiness.get(context) ?? {
+          status: 'not_ready',
+          code: 'DATABASE_UNAVAILABLE',
         }
-      ).$connect();
+      );
     },
     async onModuleDestroy(): Promise<void> {
-      await (
-        Prisma.getExtensionContext(this) as unknown as {
-          $disconnect: () => Promise<void>;
-        }
-      ).$disconnect();
+      const context = extensionContext(this);
+      try {
+        await context.$disconnect();
+      } finally {
+        databaseReadiness.set(context, {
+          status: 'not_ready',
+          code: 'DATABASE_UNAVAILABLE',
+        });
+      }
     },
   },
 });

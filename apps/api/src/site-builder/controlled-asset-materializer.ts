@@ -30,7 +30,7 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/webp': 'webp',
 };
 const APPROVED_CATALOG_ASSET_DIRECTORY =
-  'apps/site-renderer/fixtures/design-demo-visuals/';
+  'apps/site-renderer/product-assets/design-demo-visuals/';
 
 function sha256(value: Buffer): string {
   return createHash('sha256').update(value).digest('hex');

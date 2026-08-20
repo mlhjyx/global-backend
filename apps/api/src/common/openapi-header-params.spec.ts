@@ -195,6 +195,7 @@ describe("OpenAPI header 参数大小写唯一性（oasdiff 破坏性门防误�
     ]);
     expect(errorCodes("409")).toEqual([
       "IDEMPOTENCY_KEY_REUSED",
+      "BUDGET_GRANT_REUSED",
       "SITE_LIMIT_REACHED",
     ]);
     expect(errorCodes("502")).toEqual(["DEMO_LAUNCH_UNAVAILABLE"]);

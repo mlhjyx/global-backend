@@ -19,7 +19,7 @@ describe("R4-B production worker paid-ledger wiring", () => {
     );
     expect(worker).toContain("gateway.paidLedger = costLedger");
     expect(worker).toMatch(
-      /buildToolBroker\(\{\s*sourcePolicyReader,\s*paidLedger: costLedger,\s*\}\)/,
+      /buildToolBroker\(\{\s*sourcePolicyReader,\s*paidLedger: costLedger,\s*budgetStore,\s*prisma,\s*\}\)/,
     );
     expect(worker).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?\}\)/,
@@ -34,11 +34,15 @@ describe("R4-B production worker paid-ledger wiring", () => {
 describe("R1 production worker Release wiring", () => {
   it("initializes one storage client and injects one build-fenced Release service", () => {
     expect(worker).toMatch(
-      /import \{\s*SiteReleaseService,\s*resolveSiteRendererBuildIdentity,\s*\} from ["']\.\.\/site-builder\/site-release\.service["']/,
+      /import \{\s*SiteReleaseService\s*\} from ["']\.\.\/site-builder\/site-release\.service["']/,
+    );
+    // renderer 身份只能从 OCI release identity 派生（禁止 env 的 dev-unpinned 旁路）。
+    expect(worker).toMatch(
+      /import \{[\s\S]*?rendererRuntimeIdentity,[\s\S]*?\} from ["']\.\.\/runtime\/managed-dependency-readiness["']/,
     );
     expect(worker).toContain("await siteBuilderStorage.onModuleInit()");
     expect(worker).toContain(
-      "const rendererBuildIdentity = resolveSiteRendererBuildIdentity()",
+      "const rendererBuildIdentity = rendererRuntimeIdentity(releaseIdentity)",
     );
     expect(worker).toMatch(
       /const releaseService = new SiteReleaseService\([\s\S]*?prisma,[\s\S]*?siteBuilderStorage,[\s\S]*?buildIdentity: rendererBuildIdentity/,

@@ -3,6 +3,9 @@ import { ToolRegistry } from './tool-registry';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger, BudgetExceededError } from './budget';
 import { RateLimiter } from './rate-limiter';
+import { BudgetStoreUnavailableError, type BudgetStore } from './budget-store';
+import { projectGenericOperationResult } from './generic-operation-projection';
+import { RateLimitStoreUnavailableError } from './redis-rate-limit-store';
 import { Tool } from './tool-contract';
 
 function fakeTool(id: string, costCents = 5, exec?: () => Promise<unknown>): Tool {
@@ -30,6 +33,24 @@ function makeBroker(tool: Tool, extra?: Partial<ConstructorParameters<typeof Too
 }
 
 describe('ToolBroker — allowedTools 白名单（无超级 Agent 的代码强制）', () => {
+  it('fails closed when no authoritative budget store is injected', async () => {
+    const registry = new ToolRegistry();
+    registry.register(fakeTool('searxng.search'));
+    const broker = new ToolBroker({ registry, limiter: new RateLimiter() });
+    await expect(broker.invoke('searxng.search', {}, { workspaceId: 'w' })).rejects.toBeInstanceOf(
+      BudgetStoreUnavailableError,
+    );
+  });
+
+  it('fails closed when no authoritative rate-limit store is injected', async () => {
+    const registry = new ToolRegistry();
+    registry.register(fakeTool('searxng.search'));
+    const broker = new ToolBroker({ registry, budget: new BudgetLedger() });
+    await expect(broker.invoke('searxng.search', {}, { workspaceId: 'w' })).rejects.toBeInstanceOf(
+      RateLimitStoreUnavailableError,
+    );
+  });
+
   it('未注册工具 → denied', async () => {
     const { broker } = makeBroker(fakeTool('searxng.search'));
     await expect(broker.invoke('nope.tool', {}, { workspaceId: 'w' })).rejects.toThrow(ToolPolicyDenied);
@@ -99,6 +120,138 @@ describe('ToolBroker — per-wire external-action authorization', () => {
 });
 
 describe('ToolBroker — 预算 reserve-then-settle', () => {
+  it('replays an approved durable projection without executing the physical tool again', async () => {
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool('t.replay', 1, execute);
+    tool.durableReplayResult = (result) => result;
+    const projectedResult = { data: { value: 'cached' }, costCents: 1 };
+    const projection = projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: { toolId: tool.id, toolVersion: tool.version, result: projectedResult },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .resolves.toEqual(projectedResult);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('atomically settles the scrubbed tool projection with the observed cost', async () => {
+    const tool = fakeTool('t.project', 1);
+    tool.durableReplayResult = (result) => result;
+    const settle = vi.fn(async () => ({ chargedCents: 1, observedCents: 1, capVariance: false, replay: false }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' });
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      1,
+      expect.objectContaining({
+        kind: 'tool', schema: 'tool-result/v1',
+        data: expect.objectContaining({ toolId: tool.id, toolVersion: tool.version }),
+      }),
+    );
+  });
+
+  it('retries an unknown success-settlement ACK with the identical tool projection and no second wire', async () => {
+    const execute = vi.fn(async () => ({ value: 'live' }));
+    const tool = fakeTool('t.settlement-ack', 1, execute);
+    tool.durableReplayResult = (result) => result;
+    const settle = vi.fn()
+      .mockRejectedValueOnce(new Error('settlement ACK unavailable'))
+      .mockResolvedValueOnce({ chargedCents: 1, observedCents: 1, capVariance: false, replay: true });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .resolves.toMatchObject({ data: { value: 'live' } });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
+    expect(settle.mock.calls[0]?.[2]).toMatchObject({ kind: 'tool', schema: 'tool-result/v1' });
+  });
+
+  it('converts a first-success replay projector failure into the stable no-second-wire error', async () => {
+    const execute = vi.fn(async () => ({ value: 'live' }));
+    const tool = fakeTool('t.projector-failure', 1, execute);
+    tool.durableReplayResult = () => { throw new Error('projection contract unavailable'); };
+    const settle = vi.fn();
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(settle).not.toHaveBeenCalled();
+  });
+
+  it('rejects a projection bound to another tool without executing either wire', async () => {
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool('t.bound', 1, execute);
+    tool.durableReplayResult = (result) => result;
+    const projection = projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: { toolId: 't.other', toolVersion: tool.version, result: { data: {}, costCents: 1 } },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('converts a throwing durable replay hook into the stable no-second-wire error', async () => {
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool('t.throwing-replay', 1, execute);
+    tool.durableReplayResult = () => { throw new Error('old replay shape'); };
+    const projection = projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: {
+        toolId: tool.id,
+        toolVersion: tool.version,
+        result: { data: { value: 'cached' }, costCents: 1 },
+      },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('超预算 → BudgetExceededError，工具不执行', async () => {
     const exec = vi.fn(async () => ({ ok: true }));
     const budget = new BudgetLedger();
@@ -123,7 +276,7 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     expect(rejected).toBe(1);
   });
 
-  it('执行失败不计费（settle 0），预算退还', async () => {
+  it('执行开始后的失败保持 reservation，未知物理调用不得退额重试', async () => {
     const budget = new BudgetLedger();
     const failing = fakeTool('t.fail', 10);
     failing.execute = async () => {
@@ -132,7 +285,29 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     const { broker } = makeBroker(failing, { budget });
     budget.open('run1', 10);
     await expect(broker.invoke('t.fail', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow('boom');
-    expect(budget.remainingCents('run1')).toBe(10); // 全额退还
+    expect(budget.remainingCents('run1')).toBe(0); // 保守占用；不能把未知调用当作零费用
+  });
+
+  it('domain-delay admission fails before execution and releases both budget and concurrency', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run1', 10);
+    const tool = fakeTool('crawl.delayed', 10);
+    tool.rateLimit.perDomainCrawlDelayMs = 1_000;
+    const release = vi.fn();
+    const limiter = {
+      configure: vi.fn(),
+      acquire: vi.fn(async () => release),
+      respectDomainDelay: vi.fn(async () => {
+        throw new Error('redis unavailable');
+      }),
+    };
+    const { broker } = makeBroker(tool, { budget, limiter });
+
+    await expect(
+      broker.invoke('crawl.delayed', { url: 'https://example.com/' }, { workspaceId: 'w', runId: 'run1' }),
+    ).rejects.toThrow('redis unavailable');
+    expect(budget.remainingCents('run1')).toBe(10);
+    expect(release).toHaveBeenCalledOnce();
   });
 });
 

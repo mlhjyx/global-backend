@@ -8,7 +8,7 @@ import type { CopySlotDefinition } from "../copy-bundle.service";
 import { COMPONENT_ASSEMBLY_ADAPTERS } from "./component-assembly-adapters";
 
 export interface QualifiedComponentTemplateRepository {
-  /** Returns a trusted M1-e-A fixture template, never model output. */
+  /** Returns a trusted, versioned product-catalog template, never model output. */
   get(componentType: SiteSpecComponentType): Record<string, unknown>;
 }
 

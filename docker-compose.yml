@@ -99,7 +99,7 @@ services:
   # Tenant isolation = key prefix ws/{workspace_id}/… + presigned URLs; bucket is
   # never public. Console at http://localhost:9001 (dev creds below, dev only).
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: global-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -107,8 +107,8 @@ services:
       - "127.0.0.1:9000:9000" # S3 API
       - "127.0.0.1:9001:9001" # Web console (dev only)
     environment:
-      MINIO_ROOT_USER: global
-      MINIO_ROOT_PASSWORD: global-minio-dev # dev only — never reuse in prod
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-global}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-global-minio-dev} # dev only — never reuse in prod
     volumes:
       - miniodata:/data
     healthcheck:
@@ -116,6 +116,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Single deployment owner for the private Site Builder bucket. API and Worker
+  # validate this immutable contract but never race lifecycle configuration PUTs.
+  minio-bootstrap:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: global-minio-bootstrap
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/config/bootstrap.sh"]
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-global}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-global-minio-dev}
+      S3_BUCKET: ${S3_BUCKET:-global-site-builder}
+    volumes:
+      - ./infra/minio:/config:ro
+    restart: "no"
 
   # Self-hosted embeddings for the knowledge base (docs/site-builder/02 D14:
   # BGE-M3, 1024-dim, 100+ languages; company data never leaves the host).

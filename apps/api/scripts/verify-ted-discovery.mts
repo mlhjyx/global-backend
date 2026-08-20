@@ -22,8 +22,8 @@ import { TedDiscoveryProvider } from '../src/discovery/providers/ted.provider';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
-import { StubModelProvider } from '../src/model-gateway/providers/stub-model.provider';
-import { buildGatewayProvider, stubAllowed } from '../src/model-gateway/model-providers.config';
+import { createSchemaFixtureStubModelProvider } from '@global/test-support/model';
+import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { judgeFitCompany, IcpBrief } from '../src/discovery/fit-judge';
@@ -103,7 +103,9 @@ async function main() {
   const reg = new ModelProviderRegistry();
   const gp = buildGatewayProvider();
   if (gp) reg.register(gp);
-  if (stubAllowed()) reg.register(new StubModelProvider());
+  if (process.argv.includes('--use-test-model-fixture')) {
+    reg.register(createSchemaFixtureStubModelProvider());
+  }
   const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
   const providers = new DiscoveryProviderRegistry({ gateway, broker }); // §8.8 用途门在 Broker 内单点判定（收口②）
   const acts = createDiscoveryActivities({ prisma, providers, gateway });

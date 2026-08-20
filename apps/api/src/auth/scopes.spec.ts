@@ -22,12 +22,18 @@ describe('roles to scopes policy', () => {
     expect(AUTHORIZATION_SCOPES).toEqual(EXPECTED_SCOPES);
   });
 
-  it('requires an explicit server-controlled mapping in pilot and production', () => {
+  it('requires one explicit server-controlled mapping in every managed environment', () => {
+    expect(() => createRolesToScopesPolicy({}, 'development')).toThrow(
+      'AUTH_ROLE_SCOPE_MAP_JSON is required in development',
+    );
     expect(() => createRolesToScopesPolicy({}, 'pilot')).toThrow(
       'AUTH_ROLE_SCOPE_MAP_JSON is required in pilot',
     );
     expect(() => createRolesToScopesPolicy({}, 'production')).toThrow(
       'AUTH_ROLE_SCOPE_MAP_JSON is required in production',
+    );
+    expect(() => createRolesToScopesPolicy({}, 'test')).toThrow(
+      'AUTH_ROLE_SCOPE_MAP_JSON is required in test',
     );
   });
 
@@ -83,9 +89,12 @@ describe('roles to scopes policy', () => {
       'acquisition:write',
     ]);
 
-    const developmentPolicy = createRolesToScopesPolicy({}, 'development');
-    expect(developmentPolicy.resolve(['toString'])).toEqual([]);
-    expect(developmentPolicy.resolve(['hasOwnProperty'])).toEqual([]);
+    const testPolicy = createRolesToScopesPolicy(
+      { AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({ viewer: [] }) },
+      'test',
+    );
+    expect(testPolicy.resolve(['toString'])).toEqual([]);
+    expect(testPolicy.resolve(['hasOwnProperty'])).toEqual([]);
   });
 
   it('deduplicates roles and scopes without mutating caller claims', () => {
@@ -110,13 +119,19 @@ describe('roles to scopes policy', () => {
     expect(roles).toEqual(['operator', 'operator']);
   });
 
-  it('keeps development usable through a fixed built-in policy only', () => {
-    const policy = createRolesToScopesPolicy({}, 'development');
-    expect(policy.resolve(['viewer'])).toEqual([
+  it('uses the same explicit role map semantics in tests and managed runtime', () => {
+    const env = {
+      AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({
+        viewer: ['acquisition:read', 'ops:read'],
+      }),
+    };
+    expect(createRolesToScopesPolicy(env, 'test').resolve(['viewer'])).toEqual([
       'acquisition:read',
       'ops:read',
     ]);
-    expect(policy.resolve(['admin'])).toEqual(EXPECTED_SCOPES);
+    expect(
+      createRolesToScopesPolicy(env, 'production').resolve(['viewer']),
+    ).toEqual(['acquisition:read', 'ops:read']);
   });
 
   it('normalizes a bounded string-only roles claim and rejects malformed values', () => {

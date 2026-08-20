@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createBacklogActivities } from './backlog.activities';
-import { budgetLedger } from '../tools/budget';
+import { BudgetLedger } from '../tools/budget';
+import { InMemoryBudgetStoreAdapter } from '../tools/budget-store';
+
+const budgetLedger = new BudgetLedger();
 import type { EnrichmentResult, ExecutionContext } from '../discovery/provider-contract';
 
 /**
@@ -54,7 +57,7 @@ function makeDeps(opts: {
         return { count: ids.length };
       },
     },
-    fieldEvidence: { create: async () => ({}) },
+    fieldEvidence: { create: async () => ({}), findMany: async () => [] },
     suppressionRecord: { findMany: async () => opts.suppressionRows ?? [] },
   };
 
@@ -71,7 +74,13 @@ function makeDeps(opts: {
     },
   };
   const providers = { routeSignalEnrichment: async () => [enricher] };
-  const deps = { prisma, providers, gateway: {}, ownerDb: {} } as unknown as Parameters<typeof createBacklogActivities>[0];
+  const deps = {
+    prisma,
+    providers,
+    gateway: {},
+    ownerDb: {},
+    budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+  } as unknown as Parameters<typeof createBacklogActivities>[0];
   return { deps, updateManyCalls, enrichCalls, seenRunIds };
 }
 
@@ -180,7 +189,7 @@ describe('enrichSignalsBacklog —— 信号抓取计入 sweep:signals 预算 + 
         update: async () => ({}),
         updateMany: async () => ({ count: 1 }),
       },
-      fieldEvidence: { create: async () => ({}) },
+      fieldEvidence: { create: async () => ({}), findMany: async () => [] },
       suppressionRecord: { findMany: async () => [] },
     };
     const prisma = {
@@ -188,7 +197,13 @@ describe('enrichSignalsBacklog —— 信号抓取计入 sweep:signals 预算 + 
       sourcePolicy: { findMany: async () => [] as { domain: string }[] },
     };
     const providers = { routeSignalEnrichment: async () => [e1, e2] };
-    const deps = { prisma, providers, gateway: {}, ownerDb: {} } as unknown as Parameters<typeof createBacklogActivities>[0];
+    const deps = {
+      prisma,
+      providers,
+      gateway: {},
+      ownerDb: {},
+      budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+    } as unknown as Parameters<typeof createBacklogActivities>[0];
 
     await createBacklogActivities(deps).enrichSignalsBacklog({ workspaceId: WS, limit: 1 });
 

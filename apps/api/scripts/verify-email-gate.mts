@@ -3,7 +3,8 @@
  *
  * #14 后 SMTP 出网走 ToolBroker、SelfHostedEmailVerifier 聚焦出网机制；**合规门在服务层**
  * （verifyContactPoint）先于选择/调用任何验证器裁决——provider 无关，防 kill-switch 落到忽略
- * ctx 的 sandbox/public_web 绕过。本脚本离线跑纯裁决 evaluateEmailGate + 佐证 sandbox 不设防。
+ * ctx 的第三方/测试 adapter 绕过。本脚本离线跑纯裁决 evaluateEmailGate，并显式注入
+ * test-support 的 synthetic adapter 证明服务层门不能下沉到任意 provider。
  *   node --import tsx scripts/verify-email-gate.mts
  */
 import { evaluateEmailGate, resolveEmailVerificationPolicy } from '../src/discovery/compliance/email-verification-gate';
@@ -35,7 +36,7 @@ for (const c of cases) {
 }
 
 // 佐证 Codex P1：其它验证器忽略 ctx —— 故门必须在服务层、先于选择/调用任何 adapter。
-const { SandboxDiscoveryProvider } = await import('../src/discovery/providers/sandbox.provider');
+const { SandboxDiscoveryProvider } = await import('@global/test-support/discovery');
 const s = await new SandboxDiscoveryProvider().verifyEmail('max.mustermann@acme.de', { suppressed: true } as never);
 console.log(
   `\nsandbox.verifyEmail（人名+禁联，忽略 ctx）→ ${s.status}  ← adapter 自身不设防；` +

@@ -188,25 +188,51 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
-async function childCommand(): Promise<{ command: string; prefix: string[] }> {
-  const adjacentCompiled = path.join(__dirname, 'image-pipeline-child.js');
-  const buildCompiled = path.join(process.cwd(), 'dist', 'site-builder', 'image-pipeline-child.js');
-  const compiled = await exists(adjacentCompiled)
+interface ImagePipelineChildCommandOptions {
+  platform?: NodeJS.Platform;
+  processExecPath?: string;
+  adjacentCompiled?: string;
+  buildCompiled?: string;
+  exists?: (file: string) => Promise<boolean>;
+}
+
+export async function resolveImagePipelineChildCommand(
+  options: ImagePipelineChildCommandOptions = {},
+): Promise<{ command: string; prefix: string[] }> {
+  const fileExists = options.exists ?? exists;
+  const adjacentCompiled =
+    options.adjacentCompiled ?? path.join(__dirname, 'image-pipeline-child.js');
+  const buildCompiled =
+    options.buildCompiled ??
+    path.join(process.cwd(), 'dist', 'site-builder', 'image-pipeline-child.js');
+  const compiled = await fileExists(adjacentCompiled)
     ? adjacentCompiled
-    : await exists(buildCompiled)
+    : await fileExists(buildCompiled)
       ? buildCompiled
       : null;
   if (!compiled) throw new Error('compiled image pipeline child is missing; build @global/api first');
   const nodePrefix = ['--max-old-space-size=256', compiled];
-  // Ubuntu development gets an actual native/libvips address-space ceiling. This complements,
-  // but does not replace, the dedicated container/cgroup required by the production runbook.
-  if (process.platform === 'linux' && await exists('/usr/bin/prlimit')) {
+  const platform = options.platform ?? process.platform;
+  const processExecPath = options.processExecPath ?? process.execPath;
+  // Every managed runtime is Linux. Native/libvips work must have its own
+  // address-space and file-descriptor ceiling in addition to the container
+  // cgroup; silently falling back would create a second, unsafe runtime path.
+  if (platform === 'linux') {
+    if (!(await fileExists('/usr/bin/prlimit'))) {
+      throw new Error('IMAGE_PIPELINE_ISOLATION_UNAVAILABLE');
+    }
     return {
       command: '/usr/bin/prlimit',
-      prefix: [`--as=${LINUX_COMPILED_ADDRESS_SPACE_BYTES}`, '--nofile=64', '--', process.execPath, ...nodePrefix],
+      prefix: [
+        `--as=${LINUX_COMPILED_ADDRESS_SPACE_BYTES}`,
+        '--nofile=64',
+        '--',
+        processExecPath,
+        ...nodePrefix,
+      ],
     };
   }
-  return { command: process.execPath, prefix: nodePrefix };
+  return { command: processExecPath, prefix: nodePrefix };
 }
 
 function runChild(
@@ -219,11 +245,7 @@ function runChild(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ['ignore', 'ignore', 'pipe'],
-      env: {
-        PATH: process.env.PATH,
-        NODE_ENV: process.env.NODE_ENV ?? 'development',
-        VIPS_BLOCK_UNTRUSTED: '1',
-      },
+      env: imagePipelineChildEnvironment(process.env),
     });
     let stderr = '';
     let timedOut = false;
@@ -262,6 +284,16 @@ function runChild(
       }
     });
   });
+}
+
+export function imagePipelineChildEnvironment(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    PATH: env.PATH,
+    NODE_ENV: 'production',
+    VIPS_BLOCK_UNTRUSTED: '1',
+  };
 }
 
 async function readRegularFileBounded(
@@ -431,7 +463,7 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
         JSON.stringify({ ...request, inputPath, outputDir: dir }),
         { mode: 0o600, flag: 'wx' },
       );
-      const child = await childCommand();
+      const child = await resolveImagePipelineChildCommand();
       await runChild(child.command, [...child.prefix, requestPath, resultPath], this.timeoutMs, signal);
       if (signal?.aborted) throw abortReason(signal);
       const raw = await readRegularFileBounded(resultPath, dir, 'result.json', MAX_RESULT_BYTES);

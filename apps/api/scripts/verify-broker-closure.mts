@@ -25,10 +25,12 @@ import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
-import { budgetLedger, BudgetExceededError } from '../src/tools/budget';
+import { BudgetLedger, BudgetExceededError } from '../src/tools/budget';
 import { ToolPolicyDenied } from '../src/tools/tool-broker';
 import type { TedSearchInput, TedSearchOutput, HttpGetInput, HttpGetOutput } from '../src/tools/source-tools';
 import type { CrawlHtmlResult } from '../src/adapters/web-crawler';
+
+const budgetLedger = new BudgetLedger();
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);

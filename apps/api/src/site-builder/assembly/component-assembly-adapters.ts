@@ -49,8 +49,8 @@ type ControlledComponentType =
 
 export interface ComponentAdapterPolicy {
   componentType: ControlledComponentType;
-  /** Props are produced only from a server-owned qualified template. */
-  propsShape: 'm1-e-a-qualified-fixture';
+  /** Props are produced only from the server-owned, versioned product catalog. */
+  propsShape: 'product-catalog-v1';
   ctaPolicy: 'none' | 'internal-page-only' | 'internal-or-approved-https';
   evidencePolicy: 'optional' | 'required-when-section-requires-evidence';
   minItems: number;
@@ -138,7 +138,7 @@ export const COMPONENT_ASSEMBLY_ADAPTERS: Readonly<
         componentType,
         Object.freeze({
           componentType,
-          propsShape: 'm1-e-a-qualified-fixture',
+          propsShape: 'product-catalog-v1',
           ctaPolicy: CTA_COMPONENTS.has(componentType)
             ? 'internal-page-only'
             : 'none',
@@ -188,7 +188,7 @@ function claimBackedLiteralReplacement(
   path: readonly (string | number)[],
 ): unknown | undefined {
   if (CLAIM_BACKED_ARRAY_FIELDS.has(key) && Array.isArray(child)) {
-    // Qualified fixtures demonstrate layout only. Literal badges, client
+    // Catalog templates demonstrate layout only. Literal badges, client
     // names, and service areas are tenant facts and must not survive
     // controlled assembly without Claim references. Some component schemas
     // impose a minimum item count, so preserve only structural cardinality

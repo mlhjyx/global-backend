@@ -101,7 +101,7 @@ function makeDeps(opts: {
         return {};
       },
     },
-    fieldEvidence: { create: async () => ({}) },
+    fieldEvidence: { create: async () => ({}), findMany: async () => [] },
     $queryRaw: async () => [{ id: COMPANY.id, name: COMPANY.name, domain: COMPANY.domain, status: 'NEW' }],
   };
 

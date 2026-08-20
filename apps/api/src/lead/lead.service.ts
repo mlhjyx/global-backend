@@ -19,6 +19,8 @@ import { SanctionsScreeningService, reconcileReviewState, matchesFromJson,
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKey } from '../compliance/pii-crypto';
+import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
+import { collectProductReadPage } from '../discovery/product-read-pagination';
 
 @Injectable()
 export class LeadService {
@@ -65,41 +67,61 @@ export class LeadService {
     },
   ) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const rows = await tx.lead.findMany({
-        where: {
-          ...(opts.icpId ? { icpId: opts.icpId } : {}),
-          ...(opts.queue ? { queue: opts.queue } : {}),
-          ...(opts.status ? { status: opts.status as never } : {}),
+      return collectProductReadPage({
+        limit: opts.limit,
+        cursor: opts.cursor,
+        fetchBatch: (cursor, take) =>
+          tx.lead.findMany({
+            where: {
+              ...(opts.icpId ? { icpId: opts.icpId } : {}),
+              ...(opts.queue ? { queue: opts.queue } : {}),
+              ...(opts.status ? { status: opts.status as never } : {}),
+            },
+            take,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            // nulls last：fit 门先建的 Lead 尚无分（totalScore=null），PG 默认 DESC NULLS FIRST 会把
+            // 未评分行顶到列表最前——显式压到最后，评分完成后自然按分排。
+            orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+          }),
+        projectProductRows: async (rows) => {
+          // 附公司摘要（跨表查询而非 include：lead 与 canonical 无 Prisma relation）
+          const companies = await tx.canonicalCompany.findMany({
+            where: { id: { in: rows.map((lead) => lead.canonicalCompanyId) } },
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              industry: true,
+              employeeCount: true,
+            },
+          });
+          const evidenceRows = companies.length
+            ? await tx.fieldEvidence.findMany({
+                where: {
+                  entityType: 'company',
+                  entityId: { in: companies.map((company) => company.id) },
+                },
+                select: { entityId: true, providerKey: true, license: true },
+              })
+            : [];
+          const quarantinedCompanyIds = new Set(
+            evidenceRows
+              .filter(isSyntheticDiscoveryProvenance)
+              .map((evidence) => evidence.entityId),
+          );
+          const byId = new Map(companies.map((company) => [company.id, company]));
+          return rows
+            .filter((lead) => !quarantinedCompanyIds.has(lead.canonicalCompanyId))
+            .map((lead) => ({
+              cursor: lead.id,
+              value: {
+                ...lead,
+                company: byId.get(lead.canonicalCompanyId) ?? null,
+              },
+            }));
         },
-        take: opts.limit + 1,
-        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-        // nulls last：fit 门先建的 Lead 尚无分（totalScore=null），PG 默认 DESC NULLS FIRST 会把
-        // 未评分行顶到列表最前——显式压到最后，评分完成后自然按分排。
-        orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
       });
-      const hasMore = rows.length > opts.limit;
-      const data = hasMore ? rows.slice(0, opts.limit) : rows;
-      // 附公司摘要（跨表查询而非 include：lead 与 canonical 无 Prisma relation）
-      const companies = await tx.canonicalCompany.findMany({
-        where: { id: { in: data.map((l) => l.canonicalCompanyId) } },
-        select: {
-          id: true,
-          name: true,
-          domain: true,
-          country: true,
-          industry: true,
-          employeeCount: true,
-        },
-      });
-      const byId = new Map(companies.map((c) => [c.id, c]));
-      return {
-        data: data.map((l) => ({
-          ...l,
-          company: byId.get(l.canonicalCompanyId) ?? null,
-        })),
-        nextCursor: hasMore ? data[data.length - 1].id : null,
-        hasMore,
-      };
     });
   }
 
@@ -117,6 +139,22 @@ export class LeadService {
         where: { id: lead.canonicalCompanyId },
         include: { contacts: { include: { contactPoints: true } } },
       });
+      if (company) {
+        const evidenceRows = await tx.fieldEvidence.findMany({
+          where: {
+            entityId: { in: [company.id, ...company.contacts.map((contact) => contact.id)] },
+          },
+          select: { providerKey: true, license: true },
+        });
+        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
+          throw new ConflictException({
+            error: {
+              code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+              message: 'historical synthetic discovery evidence is quarantined from product reads',
+            },
+          });
+        }
+      }
       return { ...lead, company };
     });
   }
@@ -206,6 +244,20 @@ export class LeadService {
             error: {
               code: 'NOT_FOUND',
               message: 'canonical company not found',
+            },
+          });
+        }
+        const evidenceRows = await tx.fieldEvidence.findMany({
+          where: {
+            entityId: { in: [company.id, ...company.contacts.map((contact) => contact.id)] },
+          },
+          select: { providerKey: true, license: true },
+        });
+        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
+          throw new ConflictException({
+            error: {
+              code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+              message: 'historical synthetic discovery evidence is quarantined from product handoff',
             },
           });
         }

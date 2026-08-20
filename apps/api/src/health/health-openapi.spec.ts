@@ -60,14 +60,19 @@ describe('layered health OpenAPI contract', () => {
         'build_sha',
         'built_at',
         'artifact_digest',
+        'artifact_manifest_digest',
+        'sbom_digest',
+        'source_tree_digest',
+        'renderer_digest',
         'migration_revision',
         'schema_digest',
+        'image_digest',
       ],
     });
     expect(build?.oneOf?.[1]).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['attested', 'schema_version'],
+      required: ['attested', 'schema_version', 'code'],
     });
   });
 
@@ -85,9 +90,17 @@ describe('layered health OpenAPI contract', () => {
       additionalProperties: false,
       required: [
         'database',
+        'migration',
         'temporal_control_plane',
         'worker',
         'outbox_relay',
+        'api_runtime',
+        'storage',
+        'redis',
+        'model_gateway',
+        'renderer',
+        'browser',
+        'budget_grant_verification',
         'admission',
       ],
     });

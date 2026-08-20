@@ -32,8 +32,8 @@ import { DiscoveryProviderRegistry } from '../src/discovery/provider.registry';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
-import { StubModelProvider } from '../src/model-gateway/providers/stub-model.provider';
-import { buildGatewayProvider, stubAllowed } from '../src/model-gateway/model-providers.config';
+import { createSchemaFixtureStubModelProvider } from '@global/test-support/model';
+import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { companyIdentity, contactIdentity } from '../src/discovery/identity';
@@ -201,7 +201,9 @@ await cleanup();
 const reg = new ModelProviderRegistry();
 const gp = buildGatewayProvider();
 if (gp) reg.register(gp);
-if (stubAllowed()) reg.register(new StubModelProvider());
+if (process.argv.includes('--use-test-model-fixture')) {
+  reg.register(createSchemaFixtureStubModelProvider());
+}
 const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
 const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
 const providers = new DiscoveryProviderRegistry({ gateway, broker });

@@ -8,6 +8,7 @@ import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
   companyMatchesSuppression,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
+import { assertProductDiscoveryProvenance, resolveEvidenceLicense } from './evidence-license';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -42,6 +43,11 @@ export async function persistDiscoveredContacts(
 ): Promise<{ created: number; merged: number; skippedSuppressed: number;
   skippedInvalid: number;
 }> {
+  assertProductDiscoveryProvenance({ providerKey: args.adapterKey });
+  for (const contact of args.contacts) {
+    assertProductDiscoveryProvenance({ providerKey: args.adapterKey, license: contact.license });
+  }
+
   let created = 0;
   let merged = 0;
   let skippedSuppressed = 0;
@@ -137,8 +143,8 @@ export async function persistDiscoveredContacts(
       ? await mergeIntoContact(tx, args, c, hit)
       : await createContact(tx, args, c, email, ambiguous);
 
-    // 身份源须声明署名义务许可（CH=OGL-UK-3.0…），缺省回退现有语义（licensed/sandbox）。
-    const evidenceLicense = c.license ?? (args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed');
+    // 身份源须声明署名义务许可（CH=OGL-UK-3.0…）；未声明的正式源回退 licensed。
+    const evidenceLicense = resolveEvidenceLicense(c.license, args.adapterKey);
     const points: { type: string; value?: string }[] = [
       { type: 'email', value: email },
       { type: 'phone', value: c.phone },
@@ -324,7 +330,7 @@ async function mergeIntoContact(
         ...(hit.score != null ? { score: hit.score } : {}),
       } as unknown as Prisma.InputJsonValue,
       providerKey: args.adapterKey,
-      license: c.license ?? (args.adapterKey === 'sandbox' ? 'sandbox' : 'licensed'),
+      license: resolveEvidenceLicense(c.license, args.adapterKey),
       allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
     },
   });

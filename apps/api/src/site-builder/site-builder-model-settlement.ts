@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   GatewaySettlementObservation,
   PAID_MODEL_PROTOCOLS,
@@ -985,40 +983,6 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       reason: 'log_unavailable',
     };
   }
-}
-
-export function loadSiteBuilderModelSettlement(
-  env: NodeJS.ProcessEnv = process.env,
-  deps: RuntimeDeps = {},
-): PaidModelSettlementController | undefined {
-  const attestationPath =
-    env.SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH?.trim();
-  if (!attestationPath) return undefined;
-  const expectedFileSha256 =
-    env.SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256?.trim();
-  if (!expectedFileSha256 || !SHA256.test(expectedFileSha256)) {
-    throw new Error(
-      'SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256 is required',
-    );
-  }
-  const gatewayUrl = env.MODEL_GATEWAY_URL?.trim();
-  const apiKey = env.MODEL_GATEWAY_KEY?.trim();
-  if (!gatewayUrl || !apiKey) {
-    throw new Error('model gateway credential is required for settlement');
-  }
-  const bytes = readFileSync(resolve(attestationPath));
-  if (sha256(bytes) !== expectedFileSha256) {
-    throw new Error('model settlement attestation file digest mismatch');
-  }
-  const parsed = JSON.parse(bytes.toString('utf8')) as unknown;
-  const attestation = assertAttestation(
-    parsed,
-    env,
-    gatewayUrl,
-    apiKey,
-    deps.now?.() ?? new Date(),
-  );
-  return new NewApiSiteBuilderModelSettlement(attestation, apiKey, deps);
 }
 
 export function settlementAttestationSnapshotSha256(

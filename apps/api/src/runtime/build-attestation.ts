@@ -14,6 +14,7 @@ import type { RuntimeMode } from './runtime-environment';
 export const BUILD_ATTESTATION_SCHEMA = 'global-runtime-build-attestation/v1' as const;
 const MAX_ATTESTATION_BYTES = 16 * 1024;
 const MAX_SCHEMA_BYTES = 16 * 1024 * 1024;
+const MAX_PROVENANCE_BYTES = 32 * 1024 * 1024;
 const MAX_ARTIFACT_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_ARTIFACT_TOTAL_BYTES = 128 * 1024 * 1024;
 const MAX_ARTIFACT_ENTRIES = 20_000;
@@ -28,6 +29,10 @@ export interface BuildAttestation {
   build_sha: string;
   built_at: string;
   artifact_digest: string;
+  artifact_manifest_digest: string;
+  sbom_digest: string;
+  source_tree_digest: string;
+  renderer_digest: string;
   migration_revision: string;
   schema_digest: string;
 }
@@ -61,6 +66,10 @@ export function parseBuildAttestation(value: unknown): BuildAttestation {
     'build_sha',
     'built_at',
     'artifact_digest',
+    'artifact_manifest_digest',
+    'sbom_digest',
+    'source_tree_digest',
+    'renderer_digest',
     'migration_revision',
     'schema_digest',
   ];
@@ -73,11 +82,19 @@ export function parseBuildAttestation(value: unknown): BuildAttestation {
   const buildSha = requireString(value, 'build_sha');
   const builtAt = requireString(value, 'built_at');
   const artifactDigest = requireString(value, 'artifact_digest');
+  const artifactManifestDigest = requireString(value, 'artifact_manifest_digest');
+  const sbomDigest = requireString(value, 'sbom_digest');
+  const sourceTreeDigest = requireString(value, 'source_tree_digest');
+  const rendererDigest = requireString(value, 'renderer_digest');
   const migrationRevision = requireString(value, 'migration_revision');
   const schemaDigest = requireString(value, 'schema_digest');
   if (schemaVersion !== BUILD_ATTESTATION_SCHEMA) throw new Error('build attestation schema_version is unsupported');
   if (!BUILD_SHA_PATTERN.test(buildSha)) throw new Error('build attestation build_sha must be 40 lowercase hex');
   if (!SHA256_PATTERN.test(artifactDigest)) throw new Error('build attestation artifact_digest must be sha256 lowercase hex');
+  if (!SHA256_PATTERN.test(artifactManifestDigest)) throw new Error('build attestation artifact_manifest_digest must be sha256 lowercase hex');
+  if (!SHA256_PATTERN.test(sbomDigest)) throw new Error('build attestation sbom_digest must be sha256 lowercase hex');
+  if (!SHA256_PATTERN.test(sourceTreeDigest)) throw new Error('build attestation source_tree_digest must be sha256 lowercase hex');
+  if (!SHA256_PATTERN.test(rendererDigest)) throw new Error('build attestation renderer_digest must be sha256 lowercase hex');
   if (!SHA256_PATTERN.test(schemaDigest)) throw new Error('build attestation schema_digest must be sha256 lowercase hex');
   if (!MIGRATION_REVISION_PATTERN.test(migrationRevision)) throw new Error('build attestation migration_revision is invalid');
   const parsedTimestamp = new Date(builtAt);
@@ -89,6 +106,10 @@ export function parseBuildAttestation(value: unknown): BuildAttestation {
     build_sha: buildSha,
     built_at: builtAt,
     artifact_digest: artifactDigest,
+    artifact_manifest_digest: artifactManifestDigest,
+    sbom_digest: sbomDigest,
+    source_tree_digest: sourceTreeDigest,
+    renderer_digest: rendererDigest,
     migration_revision: migrationRevision,
     schema_digest: schemaDigest,
   });
@@ -328,13 +349,13 @@ export async function loadBuildIdentity(input: {
       );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        if (input.mode === 'development' || input.mode === 'test') {
+        if (input.mode === 'test') {
           return Object.freeze({
             attested: false,
             schema_version: BUILD_ATTESTATION_SCHEMA,
           });
         }
-        throw new Error(`build attestation is required in ${input.mode}`, {
+        throw new Error(`build attestation is required in managed ${input.mode}`, {
           cause: error,
         });
       }
@@ -395,6 +416,89 @@ async function latestMigrationRevision(root: string): Promise<string> {
   }
 }
 
+interface RuntimeProvenanceDigests {
+  artifactManifestDigest: string;
+  sbomDigest: string;
+  sourceTreeDigest: string;
+  rendererDigest: string;
+}
+
+async function readArtifactFile(
+  directory: FileHandle,
+  name: string,
+  label: string,
+): Promise<Buffer> {
+  const handle = await openNoFollow(
+    descriptorPath(directory, name),
+    fsConstants.O_RDONLY,
+    label,
+  );
+  try {
+    return await readBoundedRegularHandle(handle, MAX_PROVENANCE_BYTES, label);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function runtimeProvenanceDigests(
+  directory: FileHandle,
+  buildSha: string,
+  builtAt: string,
+): Promise<RuntimeProvenanceDigests> {
+  const manifestBytes = await readArtifactFile(
+    directory,
+    'artifact-manifest.json',
+    'runtime artifact manifest',
+  );
+  const sbomBytes = await readArtifactFile(
+    directory,
+    'runtime-sbom.cdx.json',
+    'runtime SBOM',
+  );
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(manifestBytes.toString('utf8'));
+  } catch (error) {
+    throw new Error('runtime artifact manifest must be valid JSON', { cause: error });
+  }
+  if (!isRecord(manifest)) throw new Error('runtime artifact manifest must be an object');
+  if (manifest.schema_version !== 'global-runtime-artifact-manifest/v1') {
+    throw new Error('runtime artifact manifest schema_version is unsupported');
+  }
+  if (manifest.build_sha !== buildSha || manifest.built_at !== builtAt) {
+    throw new Error('runtime artifact manifest build identity does not match');
+  }
+  const sourceTreeDigest = requireString(manifest, 'source_tree_digest');
+  if (!SHA256_PATTERN.test(sourceTreeDigest)) {
+    throw new Error('runtime artifact manifest source_tree_digest is invalid');
+  }
+  if (!isRecord(manifest.sbom)) throw new Error('runtime artifact manifest sbom is invalid');
+  const declaredSbomDigest = requireString(manifest.sbom, 'sha256');
+  const sbomDigest = sha256(sbomBytes);
+  if (declaredSbomDigest !== sbomDigest) {
+    throw new Error('runtime artifact manifest SBOM digest does not match');
+  }
+  if (!Array.isArray(manifest.components)) {
+    throw new Error('runtime artifact manifest components are invalid');
+  }
+  const renderer = manifest.components.find(
+    (component) => isRecord(component) && component.name === 'renderer',
+  );
+  if (!isRecord(renderer)) {
+    throw new Error('runtime artifact manifest renderer component is missing');
+  }
+  const rendererDigest = requireString(renderer, 'digest');
+  if (!SHA256_PATTERN.test(rendererDigest)) {
+    throw new Error('runtime artifact manifest renderer digest is invalid');
+  }
+  return {
+    artifactManifestDigest: sha256(manifestBytes),
+    sbomDigest,
+    sourceTreeDigest,
+    rendererDigest,
+  };
+}
+
 export async function generateBuildAttestation(input: {
   distRoot: string;
   buildSha: string;
@@ -402,6 +506,9 @@ export async function generateBuildAttestation(input: {
   schemaPath: string;
   migrationsRoot: string;
 }): Promise<BuildAttestation> {
+  if (!BUILD_SHA_PATTERN.test(input.buildSha)) {
+    throw new Error('build attestation build_sha must be 40 lowercase hex');
+  }
   const migrationRevision = await latestMigrationRevision(input.migrationsRoot);
   const schemaContents = await readBoundedRegularFile(
     input.schemaPath,
@@ -410,11 +517,20 @@ export async function generateBuildAttestation(input: {
   );
   const distDirectory = await openStableDirectory(input.distRoot, 'artifact tree root');
   try {
+    const provenance = await runtimeProvenanceDigests(
+      distDirectory,
+      input.buildSha,
+      input.builtAt,
+    );
     const candidate = parseBuildAttestation({
       schema_version: BUILD_ATTESTATION_SCHEMA,
       build_sha: input.buildSha,
       built_at: input.builtAt,
       artifact_digest: await computeArtifactDigestFromDirectory(distDirectory),
+      artifact_manifest_digest: provenance.artifactManifestDigest,
+      sbom_digest: provenance.sbomDigest,
+      source_tree_digest: provenance.sourceTreeDigest,
+      renderer_digest: provenance.rendererDigest,
       migration_revision: migrationRevision,
       schema_digest: sha256(schemaContents),
     });
