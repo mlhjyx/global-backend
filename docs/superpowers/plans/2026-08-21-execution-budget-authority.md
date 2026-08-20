@@ -357,14 +357,14 @@ git commit -m "feat(db): add execution budget authority"
 **Interfaces:**
 
 - Consumes: Task 3 functions.
-- Produces: `ExecutionBudgetAuthorityRepository.consumeWorkspace`, `.ingestPlatform`, `.revoke`; authority-aware `BudgetStore.open`.
+- Produces: `ExecutionBudgetAuthorityRepository.consumeWorkspace`, `.ingestPlatform`, `.revoke`; additive authority-aware `BudgetStore.openAuthorized`.
 
 - [ ] **Step 1: Write RED repository and adapter tests**
 
-Assert parameterized Prisma SQL, exact SQL marker-to-error mapping, token digest idempotency, and that `BudgetStore.open` sends no amount argument:
+Assert parameterized Prisma SQL, exact SQL marker-to-error mapping, token digest idempotency, and that `BudgetStore.openAuthorized` sends no amount argument:
 
 ```ts
-await store.open({
+await store.openAuthorized({
   authorityId: AUTHORITY_ID,
   scopeKey: WORKSPACE_ID,
   accountKey: "icp:design:req",
@@ -384,10 +384,10 @@ Expected: FAIL because the repository and new signature are absent.
 
 - [ ] **Step 3: Implement repository and signature atomically**
 
-Replace the public interface with:
+Add this parallel interface while preserving the existing cap-bearing `open` only for pre-cutover callers:
 
 ```ts
-open(input: {
+openAuthorized(input: {
   authorityId: string;
   scopeKey: string;
   accountKey: string;
@@ -395,7 +395,7 @@ open(input: {
 }): Promise<BudgetAccountAuthorization>;
 ```
 
-Keep the current legacy SQL function present for additive compatibility, but remove every new call to it. Map stable SQL markers to Task 1 errors and keep raw database messages out of HTTP/log responses.
+Keep the current legacy TypeScript method and SQL function present for additive compatibility, but remove every new authority call to them. The cutover plan switches all callers and removes the legacy method/function atomically. Map stable SQL markers to Task 1 errors and keep raw database messages out of HTTP/log responses.
 
 - [ ] **Step 4: Run GREEN and build**
 
@@ -529,7 +529,7 @@ git add packages/contracts/events/payloads/platform-execution-budget-authority-u
 git commit -m "feat(contracts): add platform execution authority command"
 ```
 
-### Task 7: Authority readiness and health contract
+### Task 7: Authority capability probes and health contract
 
 **Files:**
 
@@ -537,37 +537,36 @@ git commit -m "feat(contracts): add platform execution authority command"
 - Modify: `apps/api/src/health/runtime-readiness.service.ts`
 - Modify: `apps/api/src/health/runtime-readiness.service.spec.ts`
 - Modify: `apps/api/src/temporal/worker.ts`
-- Test: `apps/api/src/temporal/worker-startup.spec.ts`
 
 **Interfaces:**
 
 - Consumes: verifier probe and repository freshness query.
-- Produces: readiness components `execution_budget_jwks`, `workspace_budget_authority`, `platform_budget_authority`.
+- Produces: queryable capability components `execution_budget_jwks`, `workspace_budget_authority`, `platform_budget_authority`; they do not yet change overall admission.
 
 - [ ] **Step 1: Write RED readiness tests**
 
-Assert initial snapshots are not ready, unavailable JWKS causes no network dispatch to unsafe URLs, workspace capability needs valid verifier config, and each platform schedule purpose needs a non-revoked unexpired authority. Assert Worker does not poll when any required scheduled purpose lacks authority.
+Assert capability snapshots start `not_proven`, unavailable JWKS causes no network dispatch to unsafe URLs, workspace capability needs valid verifier config, and each platform schedule purpose reports missing/non-revoked/unexpired authority precisely. Assert these additive components do not change the pre-cutover global readiness decision.
 
 - [ ] **Step 2: Run RED**
 
-Run: `pnpm --filter @global/api test -- src/health/runtime-readiness.service.spec.ts src/temporal/worker-startup.spec.ts`
+Run: `pnpm --filter @global/api test -- src/health/runtime-readiness.service.spec.ts src/runtime/managed-dependency-readiness.spec.ts`
 
 Expected: FAIL because the new components are absent.
 
 - [ ] **Step 3: Implement cached fail-closed contributors**
 
-Use the existing readiness contributor registry. Probes may read JWKS and PostgreSQL, but request guards consume only the cached snapshot. Do not query external systems on every HTTP request. Platform freshness must return a stable code naming the missing purpose, never authority claims or token digests.
+Use the existing readiness contributor registry and a separate capability snapshot that is not included in overall `ready` until the atomic cutover. Probes may read JWKS and PostgreSQL, but request guards consume only cached state. Do not query external systems on every HTTP request. Platform freshness must return a stable code naming the missing purpose, never authority claims or token digests. The cutover plan promotes these probes into API/Worker admission in the same commit that switches product callers.
 
 - [ ] **Step 4: Run GREEN and OpenAPI health snapshot tests**
 
-Run: `pnpm --filter @global/api test -- src/health/runtime-readiness.service.spec.ts src/health/health-openapi.spec.ts src/temporal/worker-startup.spec.ts && pnpm --filter @global/api build`
+Run: `pnpm --filter @global/api test -- src/health/runtime-readiness.service.spec.ts src/health/health-openapi.spec.ts src/runtime/managed-dependency-readiness.spec.ts && pnpm --filter @global/api build`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/runtime/managed-dependency-readiness.ts apps/api/src/health apps/api/src/temporal/worker.ts apps/api/src/temporal/worker-startup.spec.ts
+git add apps/api/src/runtime/managed-dependency-readiness.ts apps/api/src/health
 git commit -m "feat(runtime): gate work on execution authority"
 ```
 

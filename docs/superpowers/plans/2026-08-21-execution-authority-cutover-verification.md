@@ -288,7 +288,7 @@ Expected: FAIL before cutover migration/removal.
 
 - [ ] **Step 3: Implement explicit-transaction cutover migration and delete legacy code**
 
-Pause new work for retained rollout, but CI tests fresh and upgrade paths. Migration validates no active unauthorized accounts, makes new authority fields mandatory, replaces reserve/status/settle functions with microusd authority-aware versions, revokes old function execution and preserves historical terminal rows read-only. Delete amount environment functions and product InMemory/default compatibility composition; retain test-only adapters under `packages/test-support` only.
+Pause new work for retained rollout, but CI tests fresh and upgrade paths. Migration validates no active unauthorized accounts, makes new authority fields mandatory, replaces reserve/status/settle functions with microusd authority-aware versions, revokes old function execution and preserves historical terminal rows read-only. Switch every product caller from the legacy cap-bearing `open` to `openAuthorized`, delete the legacy method/function, and rename `openAuthorized` to the sole `open` interface in the same commit. Delete amount environment functions and product InMemory/default compatibility composition; retain test-only adapters under `packages/test-support` only.
 
 - [ ] **Step 4: Run GREEN fresh/upgrade/rollback-compatibility tests**
 

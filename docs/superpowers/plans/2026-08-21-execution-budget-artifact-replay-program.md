@@ -69,10 +69,10 @@ export type ToolBudgetOperationStatus =
   "RESERVED" | "RESULT_UNKNOWN" | "SETTLED" | "RELEASED";
 ```
 
-`BudgetStore.open` changes exactly once, during the additive authority task, to:
+The additive authority plan introduces this parallel interface without changing existing product traffic:
 
 ```ts
-open(input: {
+openAuthorized(input: {
   authorityId: string;
   scopeKey: string;
   accountKey: string;
@@ -80,7 +80,7 @@ open(input: {
 }): Promise<BudgetAccountAuthorization>;
 ```
 
-No implementation may retain a public `capCents`, `capMicrousd`, `RUN_BUDGET_CENTS` or `SWEEP_BUDGET_CENTS` argument as an alternate authorization path after the cutover task.
+The cutover task switches every product caller in one commit, removes the legacy cap-bearing `open`, and renames `openAuthorized` to the sole `open` surface. No implementation may retain a public `capCents`, `capMicrousd`, `RUN_BUDGET_CENTS` or `SWEEP_BUDGET_CENTS` argument as an alternate authorization path after that cutover.
 
 ## External Control Plane Delivery Contract
 
