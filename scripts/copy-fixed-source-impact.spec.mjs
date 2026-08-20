@@ -29,6 +29,19 @@ const PRODUCTION_PARITY_STALE_PATHS = Object.freeze([
   "packages/db/prisma/schema.prisma",
   "pnpm-lock.yaml",
 ]);
+const PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS = Object.freeze([
+  "apps/api/package.json",
+  "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+  "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+  "apps/api/src/site-builder/agents/ai-task.ts",
+  "apps/api/tsconfig.build.json",
+  "apps/site-renderer-visual-harness/package.json",
+  "package.json",
+  "packages/contracts/package.json",
+  "packages/contracts/src/site-builder/component-qualification.ts",
+  "packages/db/prisma/schema.prisma",
+  "pnpm-lock.yaml",
+]);
 
 function regularStat(overrides = {}) {
   return {
@@ -86,6 +99,19 @@ function productionParityBinding() {
     sourceBundle: {
       ...binding().sourceBundle,
       files: PRODUCTION_PARITY_STALE_PATHS.map((path) => ({
+        path,
+        sha256: SHA_A,
+      })),
+    },
+  };
+}
+
+function productionParitySecurityPatchBinding() {
+  return {
+    ...binding(),
+    sourceBundle: {
+      ...binding().sourceBundle,
+      files: PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS.map((path) => ({
         path,
         sha256: SHA_A,
       })),
@@ -271,6 +297,47 @@ test("Copy impact admits only the exact production-parity successor scope", () =
       }),
     /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
     "a partial production-parity drift set must not inherit the reviewed scope",
+  );
+});
+
+test("Copy impact admits only the complete production-parity security-patch successor scope", () => {
+  const parityBinding = productionParitySecurityPatchBinding();
+  const currentFiles = PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS.map(
+    (path) => ({ path, sha256: SHA_C }),
+  );
+  const receipt = buildCopyRuntimeEligibilityReceipt({
+    binding: parityBinding,
+    currentFiles,
+  });
+
+  assert.equal(
+    receipt.stale_scope,
+    "PRODUCTION_PARITY_SINGLE_RUNTIME_PATH_SECURITY_PATCH",
+  );
+  assert.deepEqual(
+    receipt.drifted_paths,
+    PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS,
+  );
+  assert.equal(receipt.dispatch_authorization, "NOT_AUTHORIZED");
+  assert.equal(receipt.pilot_eligibility, "BLOCKED");
+
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: parityBinding,
+        currentFiles: currentFiles.slice(1),
+      }),
+    /COPY_FIXED_SOURCE_CURRENT_FILES_INVALID/u,
+  );
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: parityBinding,
+        currentFiles: currentFiles.map((entry, index) =>
+          index === 0 ? { ...entry, sha256: SHA_A } : entry,
+        ),
+      }),
+    /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
   );
 });
 
