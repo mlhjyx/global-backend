@@ -120,6 +120,7 @@ export class SiteBuildBudgetGrantError extends HttpException {
 interface VerifierDeps {
   keyResolver?: JWTVerifyGetKey;
   now?: () => Date;
+  fetcher?: (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'body'>>;
 }
 
 function requiredCanonical(env: NodeJS.ProcessEnv, name: string): string {
@@ -173,6 +174,9 @@ export class SiteBuildBudgetGrantVerifier implements OnModuleDestroy {
   private readonly audience: string;
   private readonly algorithms: string[];
   private readonly keyResolver: JWTVerifyGetKey | null;
+  private readonly jwksUri: string | null;
+  private readonly probeRemoteJwks: boolean;
+  private readonly fetcher: (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'body'>>;
   private readonly now: () => Date;
   private readonly available: boolean;
   private readonly unregisterReadiness?: () => void;
@@ -186,10 +190,12 @@ export class SiteBuildBudgetGrantVerifier implements OnModuleDestroy {
     let audience = '';
     let algorithms: string[] = [];
     let keyResolver: JWTVerifyGetKey | null = null;
+    let jwksUri: string | null = null;
+    let probeRemoteJwks = false;
     let available = false;
     try {
       const mode = resolveRuntimeMode(env);
-      const jwksUri = requiredTrustedUrl(
+      const resolvedJwksUri = requiredTrustedUrl(
         env,
         'SITE_BUILD_BUDGET_GRANT_JWKS_URI',
         mode,
@@ -224,7 +230,9 @@ export class SiteBuildBudgetGrantVerifier implements OnModuleDestroy {
           'SITE_BUILD_BUDGET_GRANT_ALGORITHMS must be a unique asymmetric allowlist',
         );
       }
-      keyResolver = deps.keyResolver ?? createRemoteJWKSet(new URL(jwksUri));
+      keyResolver = deps.keyResolver ?? createRemoteJWKSet(new URL(resolvedJwksUri));
+      jwksUri = resolvedJwksUri;
+      probeRemoteJwks = !deps.keyResolver;
       available = true;
     } catch {
       // Managed runtimes remain diagnostic but not ready. Request handling below
@@ -234,22 +242,47 @@ export class SiteBuildBudgetGrantVerifier implements OnModuleDestroy {
     this.audience = audience;
     this.algorithms = algorithms;
     this.keyResolver = keyResolver;
+    this.jwksUri = jwksUri;
+    this.probeRemoteJwks = probeRemoteJwks;
+    this.fetcher = deps.fetcher ?? fetch;
     this.available = available;
     this.now = deps.now ?? (() => new Date());
     this.unregisterReadiness = readinessRegistry?.register(
       'budget_grant_verification',
-      () =>
-        this.available
-          ? { status: 'ok' as const }
-          : {
-              status: 'failed' as const,
-              code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE',
-            },
+      () => this.readiness(),
     );
   }
 
   onModuleDestroy(): void {
     this.unregisterReadiness?.();
+  }
+
+  private async readiness(): Promise<
+    Readonly<{ status: 'ok' }> | Readonly<{ status: 'failed'; code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' }>
+  > {
+    if (!this.available || !this.keyResolver) {
+      return { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
+    }
+    if (!this.probeRemoteJwks || !this.jwksUri) return { status: 'ok' };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_000);
+    timeout.unref();
+    try {
+      const response = await this.fetcher(this.jwksUri, {
+        method: 'GET',
+        headers: { Accept: 'application/json, application/jwk-set+json' },
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      await response.body?.cancel().catch(() => undefined);
+      return response.ok
+        ? { status: 'ok' }
+        : { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
+    } catch {
+      return { status: 'failed', code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE' };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async verify(

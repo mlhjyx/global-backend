@@ -97,11 +97,9 @@ function verifier() {
 
 describe('SiteBuildBudgetGrantVerifier', () => {
   it('stays constructible but unavailable when trust configuration is absent', async () => {
-    const register = vi.fn((_name, contributor) => {
-      expect(contributor()).toEqual({
-        status: 'failed',
-        code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE',
-      });
+    let contributor: (() => unknown) | undefined;
+    const register = vi.fn((_name, callback) => {
+      contributor = callback;
       return vi.fn();
     });
     const unavailable = new SiteBuildBudgetGrantVerifier(
@@ -114,6 +112,10 @@ describe('SiteBuildBudgetGrantVerifier', () => {
       'budget_grant_verification',
       expect.any(Function),
     );
+    await expect(Promise.resolve(contributor?.())).resolves.toEqual({
+      status: 'failed',
+      code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE',
+    });
     const error = await unavailable.verify(undefined, {
         workspaceId,
         siteId,
@@ -144,10 +146,11 @@ describe('SiteBuildBudgetGrantVerifier', () => {
     expect(key).not.toHaveBeenCalled();
   });
 
-  it('allows HTTP trust roots only for development loopback', () => {
+  it('allows HTTP trust roots only for development loopback', async () => {
     const unregister = vi.fn();
-    const register = vi.fn((_name, contributor) => {
-      expect(contributor()).toEqual({ status: 'ok' });
+    let contributor: (() => unknown) | undefined;
+    const register = vi.fn((_name, callback) => {
+      contributor = callback;
       return unregister;
     });
     const available = new SiteBuildBudgetGrantVerifier(
@@ -162,8 +165,31 @@ describe('SiteBuildBudgetGrantVerifier', () => {
       { register } as never,
     );
     expect(register).toHaveBeenCalledOnce();
+    await expect(Promise.resolve(contributor?.())).resolves.toEqual({ status: 'ok' });
     available.onModuleDestroy();
     expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it('keeps readiness closed when the configured remote JWKS trust root is unreachable', async () => {
+    let contributor: (() => unknown) | undefined;
+    const verifier = new SiteBuildBudgetGrantVerifier(
+      {
+        APP_ENVIRONMENT: 'production',
+        NODE_ENV: 'production',
+        SITE_BUILD_BUDGET_GRANT_JWKS_URI: 'https://saas.example.test/.well-known/jwks.json',
+        SITE_BUILD_BUDGET_GRANT_ISSUER: 'https://saas.example.test',
+        SITE_BUILD_BUDGET_GRANT_AUDIENCE: 'global-backend:site-builder-budget',
+        SITE_BUILD_BUDGET_GRANT_ALGORITHMS: 'RS256',
+      },
+      { fetcher: vi.fn(async () => { throw new Error('jwks offline'); }) },
+      { register: vi.fn((_name, callback) => { contributor = callback; return vi.fn(); }) } as never,
+    );
+
+    await expect(Promise.resolve(contributor?.())).resolves.toEqual({
+      status: 'failed',
+      code: 'BUDGET_GRANT_VERIFICATION_UNAVAILABLE',
+    });
+    verifier.onModuleDestroy();
   });
 
   it('verifies and normalizes a request-bound one-time grant without retaining the token', async () => {
