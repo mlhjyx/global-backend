@@ -41,6 +41,33 @@ const PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS = Object.freeze([
   "packages/db/prisma/schema.prisma",
   "pnpm-lock.yaml",
 ]);
+const EXECUTION_BUDGET_AUTHORITY_FOUNDATION_STALE_PATHS = Object.freeze([
+  "apps/api/package.json",
+  "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+  "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+  "apps/api/src/site-builder/agents/ai-task.ts",
+  "apps/api/tsconfig.build.json",
+  "package.json",
+  "packages/contracts/package.json",
+  "packages/contracts/src/index.ts",
+  "packages/contracts/src/site-builder/component-qualification.ts",
+  "packages/db/prisma/schema.prisma",
+  "pnpm-lock.yaml",
+]);
+const EXECUTION_BUDGET_AUTHORITY_EXTRA_STALE_PATHS = Object.freeze([
+  "apps/api/package.json",
+  "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+  "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+  "apps/api/src/site-builder/agents/ai-task.ts",
+  "apps/api/tsconfig.build.json",
+  "package.json",
+  "packages/contracts/package.json",
+  "packages/contracts/src/index.ts",
+  "packages/contracts/src/site-builder/component-qualification.ts",
+  "packages/contracts/src/site-builder/copy-bundle.ts",
+  "packages/db/prisma/schema.prisma",
+  "pnpm-lock.yaml",
+]);
 
 function regularStat(overrides = {}) {
   return {
@@ -114,6 +141,16 @@ function productionParitySecurityPatchBinding() {
         path,
         sha256: SHA_A,
       })),
+    },
+  };
+}
+
+function bindingWithPaths(paths) {
+  return {
+    ...binding(),
+    sourceBundle: {
+      ...binding().sourceBundle,
+      files: paths.map((path) => ({ path, sha256: SHA_A })),
     },
   };
 }
@@ -337,6 +374,77 @@ test("Copy impact admits only the complete production-parity security-patch succ
         ),
       }),
     /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
+  );
+});
+
+test("Copy impact admits only the exact execution-budget authority foundation successor scope", () => {
+  const authorityBinding = bindingWithPaths(
+    EXECUTION_BUDGET_AUTHORITY_FOUNDATION_STALE_PATHS,
+  );
+  const currentFiles = EXECUTION_BUDGET_AUTHORITY_FOUNDATION_STALE_PATHS.map(
+    (path) => ({ path, sha256: SHA_C }),
+  );
+  const receipt = buildCopyRuntimeEligibilityReceipt({
+    binding: authorityBinding,
+    currentFiles,
+  });
+
+  assert.deepEqual(receipt, {
+    schema_version: "site-builder-copy-runtime-eligibility/v1",
+    active_binding_path: ACTIVE_COPY_RUNTIME_BINDING_PATH,
+    active_binding_artifact_id: authorityBinding.artifactId,
+    active_binding_source_bundle_digest: authorityBinding.sourceBundle.digest,
+    status: "STALE_HOLD",
+    current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
+    drifted_paths: [...EXECUTION_BUDGET_AUTHORITY_FOUNDATION_STALE_PATHS],
+    dispatch_authorization: "NOT_AUTHORIZED",
+    pilot_eligibility: "BLOCKED",
+    required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
+    stale_scope: "PRODUCTION_PARITY_EXECUTION_BUDGET_AUTHORITY_FOUNDATION",
+  });
+
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: authorityBinding,
+        currentFiles: currentFiles.map((entry, index) =>
+          index === 0 ? { ...entry, sha256: SHA_A } : entry,
+        ),
+      }),
+    /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
+    "a partial authority-foundation drift set must not inherit the reviewed scope",
+  );
+
+  const extraBinding = bindingWithPaths(
+    EXECUTION_BUDGET_AUTHORITY_EXTRA_STALE_PATHS,
+  );
+  assert.throws(
+    () =>
+      buildCopyRuntimeEligibilityReceipt({
+        binding: extraBinding,
+        currentFiles: EXECUTION_BUDGET_AUTHORITY_EXTRA_STALE_PATHS.map(
+          (path) => ({ path, sha256: SHA_C }),
+        ),
+      }),
+    /COPY_FIXED_SOURCE_STALE_SCOPE_INVALID/u,
+    "an extra drifted path must not inherit the reviewed scope",
+  );
+
+  assert.throws(
+    () =>
+      evaluateCopyFixedSourceImpact({
+        binding: authorityBinding,
+        eligibility: eligibility({
+          status: "STALE_HOLD",
+          current_source_fingerprint: buildCopySourceFingerprint(currentFiles),
+          drifted_paths: [...PRODUCTION_PARITY_SECURITY_PATCH_STALE_PATHS],
+          stale_scope: "PRODUCTION_PARITY_SINGLE_RUNTIME_PATH_SECURITY_PATCH",
+          required_followup: "REBASE_FIXED_SOURCE_BEFORE_DISPATCH",
+        }),
+        currentFiles,
+      }),
+    /COPY_FIXED_SOURCE_DRIFT_PATHS_MISMATCH/u,
+    "the stale predecessor path set cannot describe current authority drift",
   );
 });
 
