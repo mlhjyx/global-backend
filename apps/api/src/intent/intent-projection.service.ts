@@ -3,9 +3,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain, companyIdentity } from '../discovery/identity';
 import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-harvest.provider';
 import { isTerminalExternalActionPolicyDenied } from '../tools/tool-contract';
-import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import { BudgetExceededError, runBudgetCents } from '../tools/budget';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import { PageKind, classifyPageKind } from './page-signals';
 import { WEB_WATCH_KEY } from './website-watch.service';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
@@ -46,13 +47,16 @@ export interface ProjectIntentResult {
  * 平台采集一次、租户各自投影 —— 与 acquisition/TenantProjectionService 同一架构。
  */
 export class IntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker; budgetStore?: BudgetStore }) {}
 
   async registerWatch(
     workspaceId: string,
     canonicalCompanyId: string,
     opts?: { pages?: { url: string; kind?: PageKind }[]; cadenceMs?: number;
       authorizeExternalAction?: () => Promise<boolean>;
+      budgetKey?: string;
+      budgetWorkspaceId?: string;
+      budgetCapCents?: number;
     },
   ): Promise<RegisterWatchResult> {
     const { prisma } = this.deps;
@@ -76,7 +80,7 @@ export class IntentProjectionService {
     const pages = (
       opts?.pages?.length
         ? opts.pages
-        : await discoverWatchPages(domain, this.sitemapHttpGet(opts?.authorizeExternalAction))
+        : await this.discoverPagesWithBudget(workspaceId, domain, opts)
     ).slice(0, 12);
     const sourceKey = `${WEB_WATCH_KEY}:${domain}`;
     const config = {
@@ -223,20 +227,71 @@ export class IntentProjectionService {
    * 无租户 → PLATFORM_WORKSPACE 哨兵（只入工具 Trace/预算，绝不流入任何 AiContext）。
    * 无 broker = 不允许原始出网 → undefined（discoverWatchPages 跳过 sitemap/探测，退既有兜底页集）。
    */
-  private sitemapHttpGet(authorizeExternalAction?: () => Promise<boolean>): HttpGetFn | undefined {
+  private async discoverPagesWithBudget(
+    workspaceId: string,
+    domain: string,
+    opts?: {
+      authorizeExternalAction?: () => Promise<boolean>;
+      budgetKey?: string;
+      budgetWorkspaceId?: string;
+      budgetCapCents?: number;
+    },
+  ): Promise<{ url: string; kind: PageKind }[]> {
+    if (!this.deps.broker) return discoverWatchPages(domain);
+    if (!opts?.budgetKey) throw new Error('registerWatch requires budgetKey before sitemap discovery');
+    const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
+    const budgets = this.deps.budgetStore
+      ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
+    await budgets.open({
+      workspaceId: budgetWorkspaceId,
+      accountKey: opts.budgetKey,
+      capCents: opts.budgetCapCents ?? runBudgetCents(),
+      replayScope: true,
+    });
+    try {
+      let budgetError: unknown;
+      const pages = await discoverWatchPages(
+        domain,
+        this.sitemapHttpGet(
+          budgetWorkspaceId,
+          opts.budgetKey,
+          opts.authorizeExternalAction,
+          (error) => { budgetError = error; },
+        ),
+      );
+      if (budgetError) throw budgetError;
+      return pages;
+    } finally {
+      await budgets.close({ workspaceId: budgetWorkspaceId, accountKey: opts.budgetKey });
+    }
+  }
+
+  private sitemapHttpGet(
+    workspaceId: string,
+    budgetKey: string,
+    authorizeExternalAction?: () => Promise<boolean>,
+    onBudgetError?: (error: unknown) => void,
+  ): HttpGetFn | undefined {
     const broker = this.deps.broker;
     if (!broker) {
       console.warn('[intent-projection] broker unavailable — skip sitemap discovery (fail-closed, no raw egress)');
       return undefined;
     }
-    return async (input) =>
-      (
-        await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
-          workspaceId: PLATFORM_WORKSPACE,
-          correlationId: 'register-watch',
+    return async (input) => {
+      try {
+        return (
+          await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
+          workspaceId,
+          runId: budgetKey,
+          correlationId: budgetKey,
           authorizeExternalAction,
         })
-      ).data;
+        ).data;
+      } catch (error) {
+        if (error instanceof BudgetExceededError || isBudgetControlError(error)) onBudgetError?.(error);
+        throw error;
+      }
+    };
   }
 }
 
@@ -363,7 +418,9 @@ export async function discoverWatchPages(
   try {
     urls = await fetchSitemapUrls(domain, httpGet);
   } catch (error) {
-    if (isTerminalExternalActionPolicyDenied(error)) throw error;
+    if (isTerminalExternalActionPolicyDenied(error) || error instanceof BudgetExceededError || isBudgetControlError(error)) {
+      throw error;
+    }
     urls = [];
   }
   const pathLen = (u: string) => {
@@ -379,6 +436,11 @@ export async function discoverWatchPages(
   }
   const seen = new Set<string>();
   return pages.filter((p) => (seen.has(p.url) ? false : (seen.add(p.url), true))).slice(0, 8);
+}
+
+function isBudgetControlError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    && (error as { code: string }).code.startsWith('BUDGET_');
 }
 
 function companyOf(config: unknown): { name: string; domain?: string } | undefined {

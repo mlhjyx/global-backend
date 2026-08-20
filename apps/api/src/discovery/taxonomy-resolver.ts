@@ -4,8 +4,12 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import { createHash } from 'node:crypto';
+import { BudgetExceededError, runBudgetCents } from '../tools/budget';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
+export type TaxonomyResolveOptions = { allowLlm?: boolean; workspaceId?: string; runId?: string };
 
 /** 官方码制对照（§8.2 暴露给 resolveIcpToCpv 等冷路径；schemaless JSON，键按 kind 选用）。 */
 export interface TaxonomyCrosswalks {
@@ -55,10 +59,11 @@ export class TaxonomyResolver {
     private readonly prisma: PrismaService,
     private readonly gateway: ModelGateway,
     private readonly runtimeTelemetry?: RuntimeTelemetry,
+    private readonly budgetStore?: BudgetStore,
   ) {}
 
   /** 归一单个词到规范节点；无法归一返回 null。allowLlm=false 则只走确定性。 */
-  async resolve(kind: TaxonomyKind, term: string, opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<CanonicalNode | null> {
+  async resolve(kind: TaxonomyKind, term: string, opts?: TaxonomyResolveOptions): Promise<CanonicalNode | null> {
     const t = norm(term);
     if (!t) return null;
 
@@ -66,11 +71,11 @@ export class TaxonomyResolver {
     if (alias) return this.node(kind, alias.code);
 
     if (opts?.allowLlm === false) return null;
-    return this.llmResolve(kind, term, opts?.workspaceId);
+    return this.llmResolve(kind, term, opts);
   }
 
   /** 批量归一（去重）。 */
-  async resolveMany(kind: TaxonomyKind, terms: string[], opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<CanonicalNode[]> {
+  async resolveMany(kind: TaxonomyKind, terms: string[], opts?: TaxonomyResolveOptions): Promise<CanonicalNode[]> {
     const seen = new Map<string, CanonicalNode>();
     for (const term of terms) {
       const n = await this.resolve(kind, term, opts);
@@ -95,10 +100,10 @@ export class TaxonomyResolver {
   }
 
   /** 冷路径：让 LLM 在标准码表内选一个 code（enum 约束），校验后沉淀。 */
-  private async llmResolve(kind: TaxonomyKind, term: string, workspaceId?: string): Promise<CanonicalNode | null> {
+  private async llmResolve(kind: TaxonomyKind, term: string, opts?: TaxonomyResolveOptions): Promise<CanonicalNode | null> {
     // 收口②：无真实租户上下文不走 LLM 冷路径——伪 workspace（曾用 'taxonomy'）会令
     // ai_trace/usage_ledger 的 @db.Uuid 列写入静默失败，记账全盲。确定性路径不受影响。
-    if (!workspaceId) return null;
+    if (!opts?.workspaceId) return null;
     const contract = getTask('taxonomy.normalize');
     if (!contract) return null;
     // 候选码表（该 kind 全部节点，作为 enum 约束）
@@ -114,8 +119,7 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
-        this.gateway,
+      const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
           task: contract.id,
           system: contract.description,
@@ -123,8 +127,8 @@ export class TaxonomyResolver {
           schema,
           prompt: `把词「${term}」归一到下面 ${kind} 标准码表中最匹配的一个 code（只能选表中已有的 code，选不到就返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId },
-        { telemetry: this.runtimeTelemetry },
+        opts.workspaceId,
+        opts.runId,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -136,6 +140,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`alias sediment failed: ${String(e).slice(0, 120)}`));
       return node;
     } catch (e) {
+      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
       this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -149,7 +154,7 @@ export class TaxonomyResolver {
   async resolveCpvForProduct(
     product: string,
     subtreePrefixes: string[],
-    opts?: { workspaceId?: string; allowLlm?: boolean },
+    opts?: TaxonomyResolveOptions,
   ): Promise<string | null> {
     const term = norm(product);
     if (!term || !subtreePrefixes.length) return null;
@@ -185,8 +190,7 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
-        this.gateway,
+      const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
           task: contract.id,
           system: contract.description,
@@ -194,8 +198,8 @@ export class TaxonomyResolver {
           schema,
           prompt: `把产品「${product}」精修到下面 CPV 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId: opts.workspaceId },
-        { telemetry: this.runtimeTelemetry },
+        opts.workspaceId,
+        opts.runId,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -210,6 +214,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`cpv alias sediment failed: ${String(e).slice(0, 120)}`));
       return code;
     } catch (e) {
+      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
       this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -223,7 +228,7 @@ export class TaxonomyResolver {
   async resolveNaicsForProduct(
     product: string,
     subtreePrefixes: string[],
-    opts?: { workspaceId?: string; allowLlm?: boolean },
+    opts?: TaxonomyResolveOptions,
   ): Promise<string | null> {
     const term = norm(product);
     if (!term || !subtreePrefixes.length) return null;
@@ -255,8 +260,7 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
-        this.gateway,
+      const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
           task: contract.id,
           system: contract.description,
@@ -264,8 +268,8 @@ export class TaxonomyResolver {
           schema,
           prompt: `把产品「${product}」精修到下面 NAICS 子码表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId: opts.workspaceId },
-        { telemetry: this.runtimeTelemetry },
+        opts.workspaceId,
+        opts.runId,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -276,6 +280,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`naics alias sediment failed: ${String(e).slice(0, 120)}`));
       return code;
     } catch (e) {
+      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
       this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -289,7 +294,7 @@ export class TaxonomyResolver {
   async resolveFdaProductCode(
     product: string,
     panelCodes: string[],
-    opts?: { workspaceId?: string; allowLlm?: boolean },
+    opts?: TaxonomyResolveOptions,
   ): Promise<string | null> {
     const term = norm(product);
     if (!term || !panelCodes.length) return null;
@@ -325,8 +330,7 @@ export class TaxonomyResolver {
       },
     };
     try {
-      const result = await executeStructuredTaskWithRuntime<{ code: string | null }>(
-        this.gateway,
+      const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
           task: contract.id,
           system: contract.description,
@@ -334,8 +338,8 @@ export class TaxonomyResolver {
           schema,
           prompt: `把医疗器械产品「${product}」精修到下面 FDA product code 表中最匹配的一个 code（只能选表中已有 code，选不到返回 null）：\n${JSON.stringify(catalog).slice(0, 6000)}`,
         },
-        { workspaceId: opts.workspaceId },
-        { telemetry: this.runtimeTelemetry },
+        opts.workspaceId,
+        opts.runId,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -346,6 +350,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`fda alias sediment failed: ${String(e).slice(0, 120)}`));
       return code;
     } catch (e) {
+      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
       this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -361,4 +366,29 @@ export class TaxonomyResolver {
     });
     return rows.map((r) => r.code);
   }
+
+  private async executeBudgetedTask<Output>(
+    input: Parameters<ModelGateway['generateStructured']>[0],
+    workspaceId: string,
+    runId?: string,
+  ) {
+    const accountKey = runId ?? `taxonomy:${createHash('sha256').update(`${input.task}:${input.prompt}`).digest('hex').slice(0, 32)}`;
+    const budgets = this.budgetStore ?? new UnavailableBudgetStore('TaxonomyResolver requires an authoritative BudgetStore');
+    await budgets.open({ workspaceId, accountKey, capCents: runBudgetCents(), replayScope: true });
+    try {
+      return await executeStructuredTaskWithRuntime<Output>(
+        this.gateway,
+        input,
+        { workspaceId, runId: accountKey },
+        { telemetry: this.runtimeTelemetry },
+      );
+    } finally {
+      await budgets.close({ workspaceId, accountKey });
+    }
+  }
+}
+
+function isBudgetControlError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    && (error as { code: string }).code.startsWith('BUDGET_');
 }

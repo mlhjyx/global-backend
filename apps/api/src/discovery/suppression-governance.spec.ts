@@ -524,11 +524,26 @@ describe('Suppression governance', () => {
     const prisma = {
       withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
     };
-    const service = new DiscoveryService(prisma as never, { routeEmailVerification } as never);
+    const budgetStore = {
+      open: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    };
+    const service = new DiscoveryService(prisma as never, { routeEmailVerification } as never, budgetStore as never);
 
     const result = await service.verifyContactPoint(CTX, point.id);
 
     expect(verifyEmail).toHaveBeenCalledTimes(1);
+    expect(budgetStore.open).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      accountKey: `verify-contact-point:${point.id}`,
+      capCents: expect.any(Number),
+      replayScope: true,
+    });
+    expect(verifyEmail.mock.calls[0]?.[1]).toMatchObject({ runId: `verify-contact-point:${point.id}` });
+    expect(budgetStore.close).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      accountKey: `verify-contact-point:${point.id}`,
+    });
     expect(result).toMatchObject({ status: 'BLOCKED' });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'BLOCKED' }) }));
   });

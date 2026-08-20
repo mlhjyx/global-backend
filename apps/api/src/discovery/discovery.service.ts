@@ -619,6 +619,7 @@ export class DiscoveryService {
       assertProductDiscoveryProvenance({ providerKey: loaded.adapter.key });
       const verifyCtx: EmailVerifyContext = {
         workspaceId: ctx.workspaceId,
+        runId: `verify-contact-point:${pointId}`,
         kind: loaded.kind,
         lawfulBasis: recordedBasis,
         allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
@@ -632,8 +633,20 @@ export class DiscoveryService {
             }),
           ),
       };
-      verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
-      providerKey = loaded.adapter.key;
+      const accountKey = `verify-contact-point:${pointId}`;
+      const budgets = this.budgets();
+      await budgets.open({
+        workspaceId: ctx.workspaceId,
+        accountKey,
+        capCents: runBudgetCents(),
+        replayScope: true,
+      });
+      try {
+        verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
+        providerKey = loaded.adapter.key;
+      } finally {
+        await budgets.close({ workspaceId: ctx.workspaceId, accountKey });
+      }
     }
     assertProductDiscoveryProvenance({ providerKey });
 

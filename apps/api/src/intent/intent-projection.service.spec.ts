@@ -8,6 +8,7 @@ import {
   IntentProjectionService,
 } from './intent-projection.service';
 import { ToolPolicyDenied } from '../tools/tool-broker';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 
 // 这三个纯函数是 TED P3 / openFDA P3 / web_watch 共享的**幂等基石**——每 sweep 复现同一信号时靠它们判「实质未变」
 // 而不重写 canonical / 不堆 field_evidence。TED P3 实测抓到过 jsonb 键序 bug（DB 取回对象键序被 Postgres 规范化，
@@ -216,11 +217,18 @@ describe('IntentProjectionService — watch registration terminal suppression de
         throw new ToolPolicyDenied('http.get', 'suppression_action_gate');
       }),
     };
-    const service = new IntentProjectionService({ prisma: prisma as never, broker: broker as never });
+    const budgetStore = { open: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    const budgetedService = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: broker as never,
+      budgetStore: budgetStore as never,
+    });
 
     await expect(
-      service.registerWatch('workspace-1', 'company-1', {
+      budgetedService.registerWatch('workspace-1', 'company-1', {
         authorizeExternalAction: vi.fn(async () => false),
+        budgetKey: 'watch:company-1',
+        budgetWorkspaceId: 'workspace-1',
       }),
     ).rejects.toThrow(/suppression_action_gate/);
     expect(create).not.toHaveBeenCalled();
@@ -271,5 +279,71 @@ describe('IntentProjectionService — synthetic projection quarantine', () => {
     });
     expect(update).not.toHaveBeenCalled();
     expect(evidenceCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntentProjectionService — sitemap budget scope', () => {
+  it('opens the caller scope and binds broker runId to the same budgetKey', async () => {
+    const order: string[] = [];
+    const invoke = vi.fn(async (_tool, _input, context) => {
+      order.push('wire');
+      expect(context).toMatchObject({
+        workspaceId: 'workspace-1',
+        runId: 'discovery:run-1:watches:company-1',
+        correlationId: 'discovery:run-1:watches:company-1',
+      });
+      return { data: { status: 404, body: '', headers: {}, url: 'https://acme.example/sitemap.xml' }, costCents: 0 };
+    });
+    const budgetStore = {
+      open: vi.fn(async () => { order.push('open'); }),
+      close: vi.fn(async () => { order.push('close'); }),
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => unknown) => fn({
+        canonicalCompany: { findUnique: vi.fn(async () => ({ id: 'company-1', name: 'Acme', domain: 'acme.example', region: null })) },
+        fieldEvidence: { findMany: vi.fn(async () => []) },
+      })),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'monitor-1' })),
+      },
+    };
+    const service = new IntentProjectionService({ prisma: prisma as never, broker: { invoke } as never, budgetStore: budgetStore as never });
+
+    await service.registerWatch('workspace-1', 'company-1', {
+      budgetKey: 'discovery:run-1:watches:company-1',
+      budgetWorkspaceId: 'workspace-1',
+    });
+
+    expect(budgetStore.open).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1', accountKey: 'discovery:run-1:watches:company-1', capCents: expect.any(Number), replayScope: true,
+    });
+    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'workspace-1', accountKey: 'discovery:run-1:watches:company-1' });
+    expect(order[0]).toBe('open');
+    expect(order.at(-1)).toBe('close');
+  });
+
+  it('propagates replay loss and does not create a homepage-only monitor', async () => {
+    const replayError = new BudgetOperationReplayError('http-op');
+    const create = vi.fn();
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => unknown) => fn({
+        canonicalCompany: { findUnique: vi.fn(async () => ({ id: 'company-1', name: 'Acme', domain: 'acme.example', region: null })) },
+        fieldEvidence: { findMany: vi.fn(async () => []) },
+      })),
+      monitoredSource: { findUnique: vi.fn(async () => null), create },
+    };
+    const budgetStore = { open: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    const service = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: { invoke: vi.fn(async () => { throw replayError; }) } as never,
+      budgetStore: budgetStore as never,
+    });
+
+    await expect(service.registerWatch('workspace-1', 'company-1', {
+      budgetKey: 'watch:company-1', budgetWorkspaceId: 'workspace-1',
+    })).rejects.toBe(replayError);
+    expect(create).not.toHaveBeenCalled();
+    expect(budgetStore.close).toHaveBeenCalled();
   });
 });

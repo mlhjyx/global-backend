@@ -1,9 +1,8 @@
 import { MonitoredSourceAdapter } from '../source-adapter';
 import { RawSourceEntity } from '../clean';
-import { ExecutionBroker } from '../../tools/tool-contract';
+import { ExecutionBroker, type ToolContext } from '../../tools/tool-contract';
 import type { TradeFairAlgoliaInput } from '../../tools/source-tools';
 import type { AlgoliaFairConfig, FairExhibitor } from '../../adapters/trade-fair-algolia';
-import { PLATFORM_WORKSPACE } from '../../discovery/provider-contract';
 
 /**
  * 展会参展商采集源（RX/Algolia 平台）。config = 某届的 Algolia 配置 + 展会标识。
@@ -18,18 +17,19 @@ export class TradeFairSourceAdapter implements MonitoredSourceAdapter {
 
   constructor(private readonly broker?: ExecutionBroker) {}
 
-  async fetch(config: Record<string, unknown>, limit = 2000): Promise<RawSourceEntity[]> {
+  async fetch(config: Record<string, unknown>, limit = 2000, context?: ToolContext): Promise<RawSourceEntity[]> {
     const algolia = config.algolia as AlgoliaFairConfig | undefined;
     if (!algolia?.appId || !algolia?.apiKey || !algolia?.indexName || !algolia?.eventEditionId) {
       throw new Error('trade_fair source config missing algolia {appId,apiKey,indexName,eventEditionId}');
     }
     const fairSlug = String(config.fairSlug ?? config.sourceKey ?? 'fair');
     if (!this.broker) throw new Error('trade_fair: broker unavailable (fail-closed)');
+    if (!context?.runId) throw new Error('trade_fair: durable budget context unavailable (fail-closed)');
 
     const result = await this.broker.invoke<TradeFairAlgoliaInput, { exhibitors: FairExhibitor[] }>(
       'tradefair.algolia',
       { cfg: algolia, limit },
-      { workspaceId: PLATFORM_WORKSPACE, correlationId: 'acquisition-sweep' },
+      context,
     );
     return result.data.exhibitors.map((e) => ({
       externalId: e.externalId,

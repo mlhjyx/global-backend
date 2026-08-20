@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SourceAdapterRegistry } from './source-adapter';
 import { cleanEntity, CleanedEntity } from './clean';
 import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
+import type { ToolContext } from '../tools/tool-contract';
+import { BudgetExceededError } from '../tools/budget';
 
 const PARSER_VERSION = 'acquisition/v1';
 const CHUNK = 50;
@@ -30,7 +32,7 @@ export interface AcquireResult {
 export class AcquisitionService {
   constructor(private readonly deps: { prisma: PrismaService; registry: SourceAdapterRegistry }) {}
 
-  async acquire(sourceId: string, opts?: { limit?: number }): Promise<AcquireResult> {
+  async acquire(sourceId: string, opts?: { limit?: number; context?: ToolContext }): Promise<AcquireResult> {
     const { prisma, registry } = this.deps;
     const source = await prisma.monitoredSource.findUnique({ where: { id: sourceId } });
     if (!source) throw new Error(`monitored_source ${sourceId} not found`);
@@ -51,7 +53,7 @@ export class AcquisitionService {
       const config = { ...(source.config as Record<string, unknown>), sourceKey: source.sourceKey };
       const configLimit = Number((source.config as Record<string, unknown>)?.fetchLimit);
       const limit = opts?.limit ?? (Number.isFinite(configLimit) && configLimit > 0 ? configLimit : DEFAULT_FETCH_LIMIT);
-      const raw = await adapter.fetch(config, limit);
+      const raw = await adapter.fetch(config, limit, opts?.context);
       truncated = raw.length >= limit;
       const byExt = new Map<string, CleanedEntity>();
       for (const r of raw) {
@@ -60,6 +62,7 @@ export class AcquisitionService {
       }
       cleaned = [...byExt.values()];
     } catch (err) {
+      if (err instanceof BudgetExceededError || isBudgetControlError(err)) throw err;
       await prisma.sourceFetch.update({
         where: { id: fetch.id },
         data: { status: 'FAILED', error: String(err).slice(0, 300), finishedAt: new Date() },
@@ -147,6 +150,11 @@ export class AcquisitionService {
     });
     return result;
   }
+}
+
+function isBudgetControlError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    && (error as { code: string }).code.startsWith('BUDGET_');
 }
 
 /** 判定变更子类型：产品变→PRODUCTS_CHANGED、联系方式变→CONTACT_CHANGED、否则 UPDATED。 */

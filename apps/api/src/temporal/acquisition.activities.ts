@@ -1,6 +1,9 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { SourceAdapterRegistry } from '../acquisition/source-adapter';
 import { AcquisitionService, AcquireResult } from '../acquisition/acquisition.service';
+import { sweepBudgetCents } from '../tools/budget';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 
 const DUE_LIMIT = 50;
 
@@ -8,8 +11,9 @@ const DUE_LIMIT = 50;
  * 采集活动（平台级、源无关）。listDueSources 找到期的自动源、acquireSource 跑一次增量。
  * 与 discovery.activities 并列在同一 worker/队列；平台表无 RLS，故不走 withWorkspace。
  */
-export function createAcquisitionActivities(deps: { prisma: PrismaService; registry: SourceAdapterRegistry }) {
+export function createAcquisitionActivities(deps: { prisma: PrismaService; registry: SourceAdapterRegistry; budgetStore?: BudgetStore }) {
   const svc = new AcquisitionService({ prisma: deps.prisma, registry: deps.registry });
+  const budgets = deps.budgetStore ?? new UnavailableBudgetStore('acquisition activities require an authoritative BudgetStore');
   return {
     /** 到期的自动源：ACTIVE + 有 cadence.everyMs>0 + (从未抓 或 nextFetchAt 到点)。手动源（无 cadence）不自动扫。
      *  cadence 过滤下推到 DB（JSON path）——否则大量手动源(nextFetchAt=null 排最前)会挤占 take、把真正到期的自动源饿死。 */
@@ -35,7 +39,16 @@ export function createAcquisitionActivities(deps: { prisma: PrismaService; regis
 
     /** 对一个源跑一次 acquire（抓取→清洗→落库→增量）。幂等 by externalId，可安全重试。 */
     async acquireSource(args: { sourceId: string; limit?: number }): Promise<AcquireResult> {
-      return svc.acquire(args.sourceId, args.limit ? { limit: args.limit } : undefined);
+      const accountKey = `acquisition:${args.sourceId}`;
+      await budgets.open({ workspaceId: PLATFORM_WORKSPACE, accountKey, capCents: sweepBudgetCents(), replayScope: true });
+      try {
+        return await svc.acquire(args.sourceId, {
+          ...(args.limit ? { limit: args.limit } : {}),
+          context: { workspaceId: PLATFORM_WORKSPACE, runId: accountKey, correlationId: accountKey },
+        });
+      } finally {
+        await budgets.close({ workspaceId: PLATFORM_WORKSPACE, accountKey });
+      }
     },
   };
 }

@@ -1,7 +1,8 @@
 import { isAllowedByRobots } from '../adapters/robots';
 import type { CrawlHtmlResult } from '../adapters/web-crawler';
-import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import type { ToolContext } from '../tools/tool-contract';
+import { BudgetExceededError } from '../tools/budget';
 
 /**
  * 抓一个被监控页面的渲染后 HTML（robots 合规门 + Crawl4AI）。
@@ -18,7 +19,7 @@ export interface FetchedPage {
 }
 
 export interface PageFetcher {
-  fetch(url: string): Promise<FetchedPage | null>;
+  fetch(url: string, context?: ToolContext): Promise<FetchedPage | null>;
 }
 
 const MIN_HTML = 200; // 过短 = 抓空/被拦，视为 miss（不据此判页面消失）
@@ -28,7 +29,7 @@ export class Crawl4aiPageFetcher implements PageFetcher {
 
   constructor(private readonly broker?: ExecutionBroker) {}
 
-  async fetch(url: string): Promise<FetchedPage | null> {
+  async fetch(url: string, context?: ToolContext): Promise<FetchedPage | null> {
     if (!/^https?:\/\//i.test(url)) return null;
     if (!(await isAllowedByRobots(url).catch(() => true))) return null; // 被 robots 禁 → 放弃（不硬闯）
     if (!this.broker) {
@@ -40,17 +41,27 @@ export class Crawl4aiPageFetcher implements PageFetcher {
       }
       return null;
     }
-    // 平台级 sweep 无租户 → PLATFORM_WORKSPACE 哨兵（只入工具 Trace/预算，绝不流入任何 AiContext）。
-    const page = await this.broker
-      .invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
-        'crawl4ai.render',
-        { url },
-        { workspaceId: PLATFORM_WORKSPACE, correlationId: 'intent-sweep' },
-      )
-      .then((r) => r.data)
-      .catch(() => null);
+    if (!context?.runId) throw new Error('web_watch: durable budget context unavailable (fail-closed)');
+    let page: (CrawlHtmlResult & { robotsBlocked?: boolean }) | null;
+    try {
+      page = (
+        await this.broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
+          'crawl4ai.render',
+          { url },
+          context,
+        )
+      ).data;
+    } catch (error) {
+      if (error instanceof BudgetExceededError || isBudgetControlError(error)) throw error;
+      page = null;
+    }
     if (!page || page.robotsBlocked) return null; // 工具内 robots 权威判定 → 走原 robots 禁抓路径
     if (!page.html || page.html.length < MIN_HTML) return null;
     return { url, html: page.html };
   }
+}
+
+function isBudgetControlError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    && (error as { code: string }).code.startsWith('BUDGET_');
 }

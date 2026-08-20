@@ -1,8 +1,7 @@
 import { MonitoredSourceAdapter } from '../source-adapter';
 import { RawSourceEntity } from '../clean';
-import { ExecutionBroker } from '../../tools/tool-contract';
+import { ExecutionBroker, type ToolContext } from '../../tools/tool-contract';
 import type { MapYourShowFetchInput, MysRawHit } from '../../tools/source-tools';
-import { PLATFORM_WORKSPACE } from '../../discovery/provider-contract';
 
 /**
  * MapYourShow 参展商采集源（第二个展会平台，与 RX/Algolia 并列）。
@@ -22,18 +21,19 @@ export class MapYourShowSourceAdapter implements MonitoredSourceAdapter {
 
   constructor(private readonly broker?: ExecutionBroker) {}
 
-  async fetch(config: Record<string, unknown>, limit = 5000): Promise<RawSourceEntity[]> {
+  async fetch(config: Record<string, unknown>, limit = 5000, context?: ToolContext): Promise<RawSourceEntity[]> {
     const host = String(config.host ?? '').trim();
     if (!host || !/^[\w.-]+\.mapyourshow\.com$/.test(host)) {
       throw new Error(`mapyourshow source config needs host like "<show>.mapyourshow.com", got: ${host}`);
     }
     const fairSlug = String(config.fairSlug ?? config.sourceKey ?? host.split('.')[0]);
     if (!this.broker) throw new Error('mapyourshow: broker unavailable (fail-closed)');
+    if (!context?.runId) throw new Error('mapyourshow: durable budget context unavailable (fail-closed)');
 
     const result = await this.broker.invoke<MapYourShowFetchInput, { hits: MysRawHit[] }>(
       'mapyourshow.fetch',
       { host, limit },
-      { workspaceId: PLATFORM_WORKSPACE, correlationId: 'acquisition-sweep' },
+      context,
     );
     const hits = result.data.hits;
 

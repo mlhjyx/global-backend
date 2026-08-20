@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MISS_THRESHOLD, computeNextFetchAt } from '../acquisition/monitored-source.lifecycle';
 import { PageFetcher } from './page-fetcher';
+import { BudgetExceededError } from '../tools/budget';
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageKind, PageSignals } from './page-signals';
 
 const PARSER_VERSION = 'web-watch/v1';
@@ -87,7 +88,13 @@ export class WebsiteWatchService {
       seen.add(url);
       const kind = p.kind ?? classifyPageKind(url);
 
-      const page = await fetcher.fetch(url).catch(() => null);
+      let page;
+      try {
+        page = await fetcher.fetch(url);
+      } catch (error) {
+        if (error instanceof BudgetExceededError || isBudgetControlError(error)) throw error;
+        page = null;
+      }
       const prev = existingByUrl.get(url);
 
       if (!page) {
@@ -185,6 +192,11 @@ export class WebsiteWatchService {
     });
     return { deleted: res.count };
   }
+}
+
+function isBudgetControlError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    && (error as { code: string }).code.startsWith('BUDGET_');
 }
 
 // ─────────────────────── helpers ───────────────────────

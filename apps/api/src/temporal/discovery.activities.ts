@@ -111,6 +111,7 @@ export function createDiscoveryActivities(deps: {
       provider: string | null;
       budgetTruncated: boolean;
     }> {
+      await ensureRunBudget(args.workspaceId, args.runId);
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -120,7 +121,10 @@ export function createDiscoveryActivities(deps: {
       if (deps.taxonomy) {
         const industryTerms = [enriched.industry, enriched.sub_industry].flat().filter(Boolean).map(String);
         const countryTerms = [enriched.country, enriched.region].flat().filter(Boolean).map(String);
-        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, { workspaceId: args.workspaceId });
+        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
+          workspaceId: args.workspaceId,
+          runId: args.runId,
+        });
         if (inds.length) {
           enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
           enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
@@ -129,6 +133,7 @@ export function createDiscoveryActivities(deps: {
         for (const ct of countryTerms) {
           const c = await deps.taxonomy.resolve('country', ct, {
             workspaceId: args.workspaceId,
+            runId: args.runId,
           });
           if (c?.wikidataQid) {
             enriched._countryQid = c.wikidataQid;
@@ -169,7 +174,6 @@ export function createDiscoveryActivities(deps: {
 
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
-      await ensureRunBudget(args.workspaceId, args.runId);
       const ctx: ExecutionContext = {
         workspaceId: args.workspaceId,
         runId: args.runId,
@@ -583,7 +587,8 @@ export function createDiscoveryActivities(deps: {
               ctx,
             );
             if (r.matched) hits.push({ key: e.key, result: r });
-          } catch {
+          } catch (error) {
+            if (error instanceof BudgetOperationReplayError) throw error;
             // 单富集源失败不影响其余
           }
         }
@@ -714,7 +719,8 @@ export function createDiscoveryActivities(deps: {
               ctx,
             );
             if (r.matched) hits.push({ key: e.key, result: r });
-          } catch {
+          } catch (error) {
+            if (error instanceof BudgetOperationReplayError) throw error;
             /* 单信号源失败不影响其余 */
           }
         }
@@ -754,6 +760,7 @@ export function createDiscoveryActivities(deps: {
       const intentSvc = new IntentProjectionService({
         prisma: deps.prisma,
         broker: deps.broker,
+        budgetStore: budgets,
       });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
@@ -791,9 +798,13 @@ export function createDiscoveryActivities(deps: {
             continue;
           await intentSvc.registerWatch(args.workspaceId, c.id, {
             authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+            budgetKey: args.runId,
+            budgetWorkspaceId: args.workspaceId,
+            budgetCapCents: runBudgetCents(),
           });
           registered += 1;
-        } catch {
+        } catch (error) {
+          if (error instanceof BudgetOperationReplayError) throw error;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
