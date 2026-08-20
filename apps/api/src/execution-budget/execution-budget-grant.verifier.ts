@@ -49,6 +49,26 @@ const PURPOSES = new Set<ExecutionBudgetPurpose>([
   'platform.sanctions',
 ]);
 
+const PLATFORM_COMMAND_CLAIMS = new Set([
+  'schema_version',
+  'iss',
+  'aud',
+  'jti',
+  'iat',
+  'nbf',
+  'exp',
+  'authority_kind',
+  'purpose',
+  'subject_type',
+  'subject_id',
+  'schedule_id',
+  'currency',
+  'unit',
+  'cap_per_run_microusd',
+  'campaign_cap_microusd',
+  'max_runs',
+]);
+
 type WorkspaceExpectedScope = Readonly<
   Pick<
     VerifiedExecutionBudgetAuthority,
@@ -485,10 +505,31 @@ export class ExecutionBudgetGrantVerifier {
     compactJws: string | undefined,
     expectedScope: ExecutionBudgetGrantExpectedScope,
   ): Promise<VerifiedExecutionBudgetAuthority> {
+    return this.verifyAuthority(compactJws, expectedScope, false);
+  }
+
+  async verifyPlatform(
+    compactJws: string,
+  ): Promise<VerifiedExecutionBudgetAuthority> {
+    const authority = await this.verifyAuthority(compactJws, undefined, true);
+    if (authority.authorityKind !== 'PLATFORM_GRANT') {
+      throw new ExecutionBudgetGrantError(
+        'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+      );
+    }
+    return authority;
+  }
+
+  private async verifyAuthority(
+    compactJws: string | undefined,
+    expectedScope: ExecutionBudgetGrantExpectedScope | undefined,
+    exactPlatformClaims: boolean,
+  ): Promise<VerifiedExecutionBudgetAuthority> {
     if (!this.configuration || !this.keyResolver) throw unavailable();
     if (!compactJws) {
       throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REQUIRED');
     }
+    if (typeof compactJws !== 'string') throw invalid();
     if (
       compactJws !== compactJws.trim() ||
       Buffer.byteLength(compactJws, 'utf8') > MAX_GRANT_BYTES
@@ -528,6 +569,12 @@ export class ExecutionBudgetGrantVerifier {
 
     try {
       if (payload.aud !== EXECUTION_BUDGET_GRANT_AUDIENCE) throw invalid();
+      if (
+        exactPlatformClaims &&
+        Object.keys(payload).some((claim) => !PLATFORM_COMMAND_CLAIMS.has(claim))
+      ) {
+        throw invalid();
+      }
       const issuedAt = numericDate(payload, 'iat');
       const notBefore = numericDate(payload, 'nbf');
       const expiresAt = numericDate(payload, 'exp');
@@ -585,7 +632,7 @@ export class ExecutionBudgetGrantVerifier {
       }) satisfies VerifiedExecutionBudgetAuthority;
 
       assertAuthorityPurposeShape(authority);
-      assertExpectedScope(authority, expectedScope);
+      if (expectedScope) assertExpectedScope(authority, expectedScope);
       return authority;
     } catch (error) {
       if (error instanceof ExecutionBudgetGrantError) throw error;

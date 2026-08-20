@@ -367,6 +367,33 @@ describe('ExecutionBudgetGrantVerifier', () => {
     });
   });
 
+  it('verifies a platform command without trusting an unsigned expected scope', async () => {
+    await expect(
+      verifier().verifyPlatform(await platformToken()),
+    ).resolves.toMatchObject({
+      authorityKind: 'PLATFORM_GRANT',
+      purpose: 'platform.acquisition',
+      subjectType: 'schedule',
+      subjectId: SCHEDULE_ID,
+      scheduleId: SCHEDULE_ID,
+    });
+  });
+
+  it('rejects workspace grants and mismatched platform subject bindings at the platform boundary', async () => {
+    await expect(
+      verifier().verifyPlatform(await signedToken()),
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_INVALID',
+    });
+    await expect(
+      verifier().verifyPlatform(
+        await platformToken({ subject_id: 'another-schedule' }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    });
+  });
+
   it.each([
     ['schedule', { scheduleId: 'another-schedule' }],
     ['purpose', { purpose: 'platform.intent_watch' as const }],

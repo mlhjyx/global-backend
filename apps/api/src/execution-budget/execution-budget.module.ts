@@ -3,6 +3,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 import { ExecutionBudgetAuthorityService } from './execution-budget-authority.service';
 import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
+import { PlatformExecutionBudgetAuthorityIngestionService } from './platform-authority-ingestion.service';
 
 @Module({
   imports: [PrismaModule],
@@ -13,7 +14,11 @@ import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier'
     },
     ExecutionBudgetAuthorityRepository,
     ExecutionBudgetAuthorityService,
+    PlatformExecutionBudgetAuthorityIngestionService,
   ],
-  exports: [ExecutionBudgetAuthorityService],
+  exports: [
+    ExecutionBudgetAuthorityService,
+    PlatformExecutionBudgetAuthorityIngestionService,
+  ],
 })
 export class ExecutionBudgetModule {}

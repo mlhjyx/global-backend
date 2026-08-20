@@ -9,6 +9,8 @@
  */
 export const CONTRACTS_PACKAGE = "@global/contracts";
 
+export * from "./execution-budget";
+
 /**
  * Site Builder 契约（DQ-1）：SiteSpec 顶层信封 + Puck 兼容页面形状。
  * API 生产端与渲染器消费端的唯一类型真值，取代两处手写重复接口。

@@ -1,0 +1,37 @@
+{
+  "fixture_version": "platform-execution-budget-authority-conformance/v1",
+  "command": "PlatformExecutionBudgetAuthorityUpserted/v1",
+  "public_jwk": {
+    "kty": "RSA",
+    "n": "vvU8Nm9m3YvIiOXCZqXomV3u-zjFalIISNGP8ofPvEvAEcgsHUQIYIaCttQGx3jRrHVlQT0jbvMM_D1IlpEDDJjutdcwD559OZ9FHV06i_gEcflKxXCmG4JaElRwFLzIdo2asc62_YjuBDsXTNJQAvyehc38rnz2dhIqmvTPRqQw3Ofaa0A571IbX5U-P1nlGcKT2FffpPqj7l636e3rU2HMM-vvJIEt4N3qEqK4kuYM0B9-DIOJ5WgH9vKize-SzZS8asDf_w0G3966N0ExKIa6aq51B-gO-e0EEhTd2Ag52kAH0u4O69t4OCtsnkcbsUU_3RCauR9qqgTyTGw1Zw",
+    "e": "AQAB",
+    "alg": "RS256",
+    "kid": "execution-rs256-conformance-1",
+    "use": "sig"
+  },
+  "claims": {
+    "schema_version": "execution-budget-grant/v1",
+    "iss": "https://control-plane.example.test/",
+    "aud": "global-backend:execution-budget",
+    "jti": "120a4e9f-0c06-4cb4-8364-b7df51c45a88",
+    "iat": 1786752000,
+    "nbf": 1786752000,
+    "exp": 1786752300,
+    "authority_kind": "PLATFORM_GRANT",
+    "purpose": "platform.acquisition",
+    "subject_type": "schedule",
+    "subject_id": "platform-acquisition-hourly",
+    "schedule_id": "platform-acquisition-hourly",
+    "currency": "USD",
+    "unit": "microusd",
+    "cap_per_run_microusd": "1000000",
+    "campaign_cap_microusd": "10000000",
+    "max_runs": "10"
+  },
+  "expected": {
+    "accepted": true,
+    "authority_kind": "PLATFORM_GRANT",
+    "schedule_id": "platform-acquisition-hourly",
+    "replay_on_exact_redelivery": true
+  }
+}

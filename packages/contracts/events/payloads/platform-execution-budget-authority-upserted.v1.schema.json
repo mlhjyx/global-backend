@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/platform-execution-budget-authority-upserted.v1.schema.json",
+  "title": "PlatformExecutionBudgetAuthorityUpsertedV1",
+  "description": "Closed claims contract carried inside the signed compact JWS registered externally as PlatformExecutionBudgetAuthorityUpserted/v1. This is not an outbound DomainEventEnvelope and does not describe an outer transport wrapper.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "iss",
+    "aud",
+    "jti",
+    "iat",
+    "nbf",
+    "exp",
+    "authority_kind",
+    "purpose",
+    "subject_type",
+    "subject_id",
+    "schedule_id",
+    "currency",
+    "unit",
+    "cap_per_run_microusd",
+    "campaign_cap_microusd",
+    "max_runs"
+  ],
+  "properties": {
+    "schema_version": { "const": "execution-budget-grant/v1" },
+    "iss": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 512 },
+    "aud": { "const": "global-backend:execution-budget" },
+    "jti": { "type": "string", "format": "uuid" },
+    "iat": { "$ref": "#/$defs/numericDate" },
+    "nbf": { "$ref": "#/$defs/numericDate" },
+    "exp": { "$ref": "#/$defs/numericDate" },
+    "authority_kind": { "const": "PLATFORM_GRANT" },
+    "purpose": {
+      "enum": [
+        "platform.acquisition",
+        "platform.intent_watch",
+        "platform.sanctions"
+      ]
+    },
+    "subject_type": { "const": "schedule" },
+    "subject_id": { "$ref": "#/$defs/boundedIdentifier" },
+    "schedule_id": {
+      "$ref": "#/$defs/boundedIdentifier",
+      "description": "Must equal subject_id; equality is enforced after signature verification."
+    },
+    "currency": { "const": "USD" },
+    "unit": { "const": "microusd" },
+    "cap_per_run_microusd": { "$ref": "#/$defs/positiveDecimal" },
+    "campaign_cap_microusd": { "$ref": "#/$defs/positiveDecimal" },
+    "max_runs": { "$ref": "#/$defs/positiveDecimal" }
+  },
+  "$defs": {
+    "numericDate": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799
+    },
+    "boundedIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$"
+    },
+    "positiveDecimal": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$",
+      "maxLength": 19,
+      "description": "Canonical positive decimal within PostgreSQL BIGINT; the verifier enforces the exact 9223372036854775807 upper bound."
+    }
+  }
+}

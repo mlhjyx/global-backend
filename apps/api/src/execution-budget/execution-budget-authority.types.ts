@@ -155,9 +155,10 @@ export function assertAuthorityPurposeShape(
     !PLATFORM_PURPOSES.has(authority.purpose) ||
     authority.workspaceId !== null ||
     authority.requestSha256 !== null ||
-    !isNonEmptyString(authority.subjectType) ||
+    authority.subjectType !== 'schedule' ||
     !isNonEmptyString(authority.subjectId) ||
     !isNonEmptyString(authority.scheduleId) ||
+    authority.subjectId !== authority.scheduleId ||
     authority.capMicrousd !== null ||
     !isPositiveBigInt(authority.capPerRunMicrousd) ||
     !isPositiveBigInt(authority.campaignCapMicrousd) ||

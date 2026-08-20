@@ -212,7 +212,10 @@ describe('ExecutionBudgetAuthorityService', () => {
 });
 
 describe('ExecutionBudgetModule product composition', () => {
-  it('registers and exports only verifier/repository/service authority providers', () => {
+  it('registers and exports the authority application services without a transport', async () => {
+    const { PlatformExecutionBudgetAuthorityIngestionService } = await import(
+      './platform-authority-ingestion.service'
+    );
     const providers = Reflect.getMetadata(
       MODULE_METADATA.PROVIDERS,
       ExecutionBudgetModule,
@@ -229,8 +232,12 @@ describe('ExecutionBudgetModule product composition', () => {
       },
       ExecutionBudgetAuthorityRepository,
       ExecutionBudgetAuthorityService,
+      PlatformExecutionBudgetAuthorityIngestionService,
     ]);
-    expect(exports).toEqual([ExecutionBudgetAuthorityService]);
+    expect(exports).toEqual([
+      ExecutionBudgetAuthorityService,
+      PlatformExecutionBudgetAuthorityIngestionService,
+    ]);
     expect(providers).not.toContain(TOOL_BUDGET_STORE);
     const verifierProvider = providers[0] as {
       useFactory: () => ExecutionBudgetGrantVerifier;
