@@ -9,6 +9,7 @@ import {
   UnavailableBudgetStore,
 } from './budget-store';
 import { BudgetLedger } from './budget';
+import { projectGenericOperationResult } from './generic-operation-projection';
 
 function fakePrisma(rows: unknown[][]): PrismaService {
   const queue = [...rows];
@@ -227,6 +228,9 @@ describe('PostgresBudgetStore', () => {
   });
 
   it('marks an existing operation as replay and rejects unsafe inputs', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'tool', schema: 'bounded-tool/v1', data: { ok: true },
+    });
     const store = new PostgresBudgetStore(
       fakePrisma([[
         {
@@ -235,18 +239,44 @@ describe('PostgresBudgetStore', () => {
           reserved_cents: 5n,
           remaining_cents: 10n,
           status: 'RESERVED',
+          result_json: projection,
         },
       ]]),
     );
     await expect(
       store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedCents: 5 }),
-    ).resolves.toMatchObject({ replay: true });
+    ).resolves.toMatchObject({ replay: true, replayProjection: projection });
     await expect(
       store.open({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: '', capCents: 1 }),
     ).rejects.toBeInstanceOf(TypeError);
     await expect(
       store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run', operationKey: 'op', estimatedCents: -1 }),
     ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it('passes an approved projection into the atomic settlement function', async () => {
+    const queries: Array<{ values?: unknown[] }> = [];
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async (query: { values?: unknown[] }) => {
+          queries.push(query);
+          return [{ charged_cents: 1n, observed_cents: 1n, cap_variance: false, status: 'SETTLED', replay: false }];
+        }),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+    const projection = projectGenericOperationResult({
+      kind: 'model', schema: 'fit-judgment/v1', data: { verdict: 'match' },
+    });
+
+    await store.settle({
+      workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run',
+      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b', estimatedCents: 1, replay: false,
+    }, 1, projection);
+
+    expect(queries[0]?.values).toEqual(expect.arrayContaining([
+      projection.schemaVersion, projection.schema, projection.digest,
+    ]));
   });
 
   it('records zero-cost operations for durable idempotency without consuming budget', async () => {
