@@ -724,6 +724,27 @@ BEGIN
   IF (p_result_json IS NULL) IS DISTINCT FROM (p_result_schema_version IS NULL AND p_result_schema IS NULL AND p_result_digest IS NULL) THEN
     RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
   END IF;
+  IF p_result_json IS NOT NULL THEN
+    IF jsonb_typeof(p_result_json) <> 'object' THEN
+      RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(p_result_json)) <> 5
+      OR p_result_schema_version <> 'generic-operation-projection/v1'
+      OR p_result_schema !~ '^[a-z][a-z0-9_-]{1,63}/v[1-9][0-9]{0,3}$'
+      OR p_result_digest !~ '^[0-9a-f]{64}$'
+      OR p_result_json->>'schemaVersion' IS DISTINCT FROM p_result_schema_version
+      OR p_result_json->>'schema' IS DISTINCT FROM p_result_schema
+      OR p_result_json->>'digest' IS DISTINCT FROM p_result_digest
+      OR COALESCE(p_result_json->>'kind' NOT IN ('model', 'tool'), true)
+      OR NOT (p_result_json ? 'data')
+      OR jsonb_path_exists(
+        p_result_json,
+        '$.** ? (@.type() == "object").keyvalue() ? (@.key like_regex "^(authorization|headers|prompt|rawresponse|token)$" flag "i")'
+      )
+    THEN
+      RAISE EXCEPTION 'GENERIC_OPERATION_PROJECTION_INVALID';
+    END IF;
+  END IF;
   UPDATE "tool_budget_operation" SET
     "observed_cents"=p_observed_cents,"charged_cents"=charge,"status"='SETTLED',
     "result_schema_version"=p_result_schema_version,"result_schema"=p_result_schema,
