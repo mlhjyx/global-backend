@@ -38,7 +38,7 @@ export interface BudgetStatus {
 
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
 export interface BudgetStore {
-  open(input: { workspaceId: string; accountKey: string; capCents: number }): Promise<void>;
+  open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void>;
   reserve(input: BudgetReservationRequest): Promise<BudgetReservation>;
   settle(reservation: BudgetReservation, actualCents: number): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
@@ -123,7 +123,7 @@ export class UnavailableBudgetStore implements BudgetStore {
 export class InMemoryBudgetStoreAdapter implements BudgetStore {
   constructor(private readonly ledger: BudgetLedger) {}
 
-  async open(input: { workspaceId: string; accountKey: string; capCents: number }): Promise<void> {
+  async open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void> {
     this.ledger.open(input.accountKey, input.capCents);
   }
 
@@ -222,13 +222,13 @@ export class PostgresBudgetStore implements BudgetStore {
     return this.prisma.withWorkspace(scopeKey, fn);
   }
 
-  async open(input: { workspaceId: string; accountKey: string; capCents: number }): Promise<void> {
+  async open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void> {
     assertKey('accountKey', input.accountKey);
     assertCents('capCents', input.capCents);
     try {
       await this.inScope(input.workspaceId, async (tx) => {
         await tx.$queryRaw(
-          Prisma.sql`SELECT * FROM open_tool_budget(${input.workspaceId}, ${input.accountKey}, ${BigInt(input.capCents)})`,
+          Prisma.sql`SELECT * FROM open_tool_budget(${input.workspaceId}, ${input.accountKey}, ${BigInt(input.capCents)}, ${input.replayScope ?? false})`,
         );
       });
     } catch (error) {

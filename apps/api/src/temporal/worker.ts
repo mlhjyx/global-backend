@@ -429,6 +429,15 @@ async function main(): Promise<void> {
   });
   const dependencyHeartbeat = await startWorkerDependencyHeartbeat({
     check: async () => {
+      const database = await prisma.reconnect();
+      if (database.status !== "ready") {
+        return { status: "failed", code: database.code } as const;
+      }
+      try {
+        await assertMigrationCompatible(prisma, releaseIdentity);
+      } catch {
+        return { status: "failed", code: "MIGRATION_REVISION_MISMATCH" } as const;
+      }
       const checks = await Promise.all([
         siteBuilderStorage.checkReadiness(),
         checkRedisReadiness(process.env),

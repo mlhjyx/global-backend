@@ -600,13 +600,15 @@ CREATE POLICY "site_build_spend_reconciliation_tenant_isolation" ON "site_build_
 ALTER TABLE "tool_budget_account" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "tool_budget_account" FORCE ROW LEVEL SECURITY;
 CREATE POLICY "tool_budget_account_tenant_isolation" ON "tool_budget_account"
-  USING ("scope_key" = current_workspace_id()::text) WITH CHECK ("scope_key" = current_workspace_id()::text);
+  USING (("scope_key" = 'platform' AND session_user <> 'app_user') OR "scope_key" = current_workspace_id()::text)
+  WITH CHECK (("scope_key" = 'platform' AND session_user <> 'app_user') OR "scope_key" = current_workspace_id()::text);
 ALTER TABLE "tool_budget_operation" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "tool_budget_operation" FORCE ROW LEVEL SECURITY;
 CREATE POLICY "tool_budget_operation_tenant_isolation" ON "tool_budget_operation"
-  USING ("scope_key" = current_workspace_id()::text) WITH CHECK ("scope_key" = current_workspace_id()::text);
+  USING (("scope_key" = 'platform' AND session_user <> 'app_user') OR "scope_key" = current_workspace_id()::text)
+  WITH CHECK (("scope_key" = 'platform' AND session_user <> 'app_user') OR "scope_key" = current_workspace_id()::text);
 
-CREATE FUNCTION open_tool_budget(p_scope_key TEXT, p_account_key TEXT, p_cap_cents BIGINT)
+CREATE FUNCTION open_tool_budget(p_scope_key TEXT, p_account_key TEXT, p_cap_cents BIGINT, p_replay_scope BOOLEAN DEFAULT false)
 RETURNS TABLE(account_id UUID, generation INTEGER)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE v "tool_budget_account"%ROWTYPE;
@@ -627,12 +629,19 @@ BEGIN
     ) THEN
       RAISE EXCEPTION 'TOOL_BUDGET_UNSETTLED_OPERATIONS';
     END IF;
-    -- Account keys are durable Temporal activity/run identities. A close only
-    -- drops holders: retry after an ACK loss must still see settled operations
-    -- and replay them instead of issuing a second physical provider call.
-    UPDATE "tool_budget_account" AS target
-    SET "ref_count"=1,"closed_at"=NULL,"updated_at"=clock_timestamp()
-    WHERE target."id"=v."id" RETURNING target.* INTO v;
+    IF p_replay_scope THEN
+      -- Durable workflow/run identity: retry after ACK loss reuses settled operations.
+      UPDATE "tool_budget_account" AS target
+      SET "ref_count"=1,"closed_at"=NULL,"updated_at"=clock_timestamp()
+      WHERE target."id"=v."id" RETURNING target.* INTO v;
+    ELSE
+      -- A reusable product key starts a fresh authorized generation.
+      UPDATE "tool_budget_account" AS target
+      SET "generation"=target."generation"+1,"cap_cents"=p_cap_cents,
+          "reserved_cents"=0,"charged_cents"=0,"exhausted"=false,
+          "ref_count"=1,"closed_at"=NULL,"updated_at"=clock_timestamp()
+      WHERE target."id"=v."id" RETURNING target.* INTO v;
+    END IF;
   ELSIF v."cap_cents" <> p_cap_cents THEN
     RAISE EXCEPTION 'TOOL_BUDGET_CAP_MISMATCH';
   ELSE
@@ -743,8 +752,8 @@ REVOKE ALL ON FUNCTION register_api_runtime_process_lease(UUID,TEXT,TEXT,TEXT,TE
 REVOKE ALL ON FUNCTION heartbeat_api_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ), heartbeat_worker_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ), heartbeat_outbox_relay_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION create_site_build_budget_from_grant(UUID,UUID), disable_site_build_paid_calls(UUID,UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reserve_site_build_spend(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,TEXT,BIGINT,JSONB), settle_site_build_spend(UUID,UUID,VARCHAR,UUID,TEXT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,INTEGER,INTEGER,INTEGER,JSONB,JSONB,TEXT), reconcile_site_build_spend(UUID,UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) TO app_user;
+REVOKE ALL ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION open_tool_budget(TEXT,TEXT,BIGINT,BOOLEAN), reserve_tool_budget(TEXT,TEXT,TEXT,BIGINT), settle_tool_budget(TEXT,UUID,BIGINT), release_tool_budget(TEXT,UUID), tool_budget_status(TEXT,TEXT), close_tool_budget(TEXT,TEXT,BOOLEAN) TO app_user;
 GRANT EXECUTE ON FUNCTION create_site_build_budget_from_grant(UUID,UUID), disable_site_build_paid_calls(UUID,UUID,TEXT) TO app_user;
 GRANT EXECUTE ON FUNCTION reserve_site_build_spend(UUID,UUID,UUID,UUID,VARCHAR,TEXT,TEXT,TEXT,BIGINT,JSONB), settle_site_build_spend(UUID,UUID,VARCHAR,UUID,TEXT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,INTEGER,INTEGER,INTEGER,JSONB,JSONB,TEXT), reconcile_site_build_spend(UUID,UUID) TO app_user;
 REVOKE EXECUTE ON FUNCTION register_runtime_process_lease(UUID,"runtime_process_role",TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ), heartbeat_runtime_process_lease(UUID,"runtime_process_state",TIMESTAMPTZ) FROM app_user;

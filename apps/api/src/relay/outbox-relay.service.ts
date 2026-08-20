@@ -168,18 +168,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       await this.db.$connect();
-      if (this.releaseIdentity) {
-        try {
-          await assertMigrationCompatible(this.db as never, this.releaseIdentity.current());
-        } catch {
-          this.readiness = {
-            status: "not_ready",
-            code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
-          };
-          this.logger.error("outbox relay migration is incompatible; relay remains non-consuming");
-          return false;
-        }
-      }
+      if (!(await this.migrationCompatible())) return false;
       if (!this.leaseStartingPublished) {
         await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
         this.leaseStartingPublished = true;
@@ -234,6 +223,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   private async managedTick(): Promise<void> {
     if (this.readiness.status !== "ready" && !(await this.reconnect())) return;
+    if (!(await this.migrationCompatible())) return;
     try {
       await this.leases?.heartbeat("OUTBOX_RELAY", "READY", null);
     } catch {
@@ -247,6 +237,21 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.tick();
+  }
+
+  private async migrationCompatible(): Promise<boolean> {
+    if (!this.releaseIdentity) return true;
+    try {
+      await assertMigrationCompatible(this.db as never, this.releaseIdentity.current());
+      return true;
+    } catch {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
+      };
+      this.logger.error("outbox relay migration is incompatible; relay remains non-consuming");
+      return false;
+    }
   }
 
   async tick(): Promise<void> {

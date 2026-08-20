@@ -36,9 +36,7 @@ if [[ "${logins[0]}" == "${logins[1]}" ||
   exit 1
 fi
 
-while IFS= read -r -d '' setting && IFS= read -r -d '' value; do
-  export "${setting}=${value}"
-done < <(node - <<'NODE'
+runtime_connection="$(node - <<'NODE'
 const value = process.env.RUNTIME_LEASE_PROVISION_DATABASE_URL;
 let url;
 try {
@@ -46,7 +44,7 @@ try {
 } catch {
   process.exit(1);
 }
-if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.username) process.exit(1);
+if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.username || !url.password || !url.pathname || url.search || url.hash) process.exit(1);
 const output = {
   PGHOST: url.hostname,
   PGPORT: url.port || '5432',
@@ -54,9 +52,20 @@ const output = {
   PGUSER: decodeURIComponent(url.username),
   PGPASSWORD: decodeURIComponent(url.password),
 };
-for (const [name, entry] of Object.entries(output)) process.stdout.write(`${name}\0${entry}\0`);
+for (const [name, entry] of Object.entries(output)) {
+  if (/[\0\r\n]/.test(entry)) process.exit(1);
+  process.stdout.write(`${name}=${entry}\n`);
+}
 NODE
-)
+)" || { echo "runtime lease provisioning database URL is invalid" >&2; exit 1; }
+
+while IFS= read -r setting; do
+  [[ "${setting}" =~ ^PG(HOST|PORT|DATABASE|USER|PASSWORD)= ]] || {
+    echo "runtime lease provisioning database URL parser emitted invalid data" >&2
+    exit 1
+  }
+  export "${setting}"
+done <<< "${runtime_connection}"
 
 psql \
   --no-psqlrc \

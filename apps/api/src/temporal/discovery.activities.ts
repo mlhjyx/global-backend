@@ -64,7 +64,7 @@ export function createDiscoveryActivities(deps: {
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
   // 每个活动入口幂等开持久账户；跨 worker/重试共用同一数据库真值。
   const ensureRunBudget = (workspaceId: string, runId: string): Promise<void> =>
-    budgets.open({ workspaceId, accountKey: runId, capCents: runBudgetCents() });
+    budgets.open({ workspaceId, accountKey: runId, capCents: runBudgetCents(), replayScope: true });
   const authorizeCompanyExternalAction =
     (workspaceId: string, companyId: string): (() => Promise<boolean>) =>
     () =>
