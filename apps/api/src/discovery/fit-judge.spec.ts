@@ -69,6 +69,59 @@ describe('judgeFitCompany provider-independent result semantics', () => {
     },
   );
 
+  it('keeps the durable replay projector closed, bounded, and usage-aware', async () => {
+    executeTask.mockImplementation(async (_gateway, _input, context) => {
+      const replay = context.genericReplay!;
+      expect(replay.project({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+      })).toEqual({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+        usage: null,
+      });
+      expect(replay.project({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+        usage: { inputTokens: 11, outputTokens: 7 },
+      })).toEqual(expect.objectContaining({
+        usage: { inputTokens: 11, outputTokens: 7 },
+      }));
+      expect(() => replay.restore(null)).toThrow('FIT_JUDGMENT_REPLAY_INVALID');
+      expect(replay.restore({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+      })).toEqual({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+      });
+      expect(replay.restore({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+        usage: { inputTokens: 11, outputTokens: 7 },
+      })).toEqual(expect.objectContaining({
+        usage: { inputTokens: 11, outputTokens: 7 },
+      }));
+      return { provider: 'new-api', data: output } as never;
+    });
+
+    await expect(
+      judgeFitCompany(
+        {} as never,
+        '10000000-0000-4000-8000-000000000001',
+        { seller: 'Seller', seller_summary: null },
+        company,
+        { runId: 'run-1' },
+      ),
+    ).resolves.toMatchObject({ verdict: 'match' });
+  });
+
   it('keeps a provider/runtime failure retryable without persisting a fabricated judgment', async () => {
     executeTask.mockRejectedValue(new Error('provider unavailable'));
 
