@@ -35,6 +35,17 @@ describe('RuntimeWorkAdmissionGuard', () => {
     expect(guard.canActivate(context('POST'))).toBe(true);
   });
 
+  it('rejects mutations after dynamic readiness closes even when static admission was valid at boot', () => {
+    const guard = new RuntimeWorkAdmissionGuard(
+      { current: () => ({ admitted: true }) } as never,
+      { current: () => ({ status: 'not_ready' }) } as never,
+    );
+
+    expect(() => guard.canActivate(context('POST'))).toThrow(
+      'RUNTIME_ADMISSION_CLOSED',
+    );
+  });
+
   it('is registered as a global guard rather than relying on each controller to opt in', () => {
     const source = readFileSync(join(import.meta.dirname, '..', 'app.module.ts'), 'utf8');
     expect(source).toContain('useClass: RuntimeWorkAdmissionGuard');
