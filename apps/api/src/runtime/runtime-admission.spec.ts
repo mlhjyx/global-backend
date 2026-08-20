@@ -208,6 +208,44 @@ describe("inspectRuntimeAdmission", () => {
     ).toEqual({ status: "failed", code: "AUTH_ROLE_SCOPE_POLICY_INVALID" });
   });
 
+  it("fails admission when the JWKS verifier itself would be unavailable", () => {
+    const settings = {
+      mode: "development" as const,
+      bindHost: "127.0.0.1",
+      port: 3000,
+    };
+    const base = {
+      NODE_ENV: "production",
+      DATA_PROCESSOR_JURISDICTION: "EU",
+      APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+      AUTH_JWKS_URI: "http://127.0.0.1:3100/jwks",
+      AUTH_ISSUER: "http://127.0.0.1:3100/",
+      AUTH_AUDIENCE: "global-api",
+      AUTH_ROLE_SCOPE_MAP_JSON: '{"operator":["acquisition:read"]}',
+      MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+      MODEL_GATEWAY_KEY: "secret",
+    };
+    for (const invalidVerifierConfiguration of [
+      { AUTH_CLOCK_SKEW_S: "-1" },
+      { AUTH_AUDIENCE: " global-api" },
+      {
+        AUTH_WORKSPACE_CLAIM: "tenant_context",
+        AUTH_ROLES_CLAIM: "tenant_context",
+      },
+    ]) {
+      const result = inspectRuntimeAdmission(
+        settings,
+        { ...base, ...invalidVerifierConfiguration },
+        attestedBuild,
+      );
+      expect(result.admitted).toBe(false);
+      expect(result.checks.auth).toEqual({
+        status: "failed",
+        code: "AUTH_CONFIG_INVALID",
+      });
+    }
+  });
+
   it("fails the pilot closed for missing audience or a non-loopback gateway", () => {
     const missingAudience = inspectRuntimeAdmission(
       { mode: "pilot", bindHost: "127.0.0.1", port: 3000 },

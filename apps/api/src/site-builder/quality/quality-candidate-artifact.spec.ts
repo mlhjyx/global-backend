@@ -36,7 +36,9 @@ function memoryStorage(): QualityCandidateArtifactStorage & {
     }),
     getBufferBounded: vi.fn(async (key, maxBytes) => {
       const bytes = objects.get(key);
-      if (!bytes || bytes.length > maxBytes) throw new Error("missing object");
+      if (!bytes || bytes.length === 0 || bytes.length > maxBytes) {
+        throw new Error("missing object");
+      }
       return Buffer.from(bytes);
     }),
     hashObject: vi.fn(async (key) => {
@@ -106,6 +108,40 @@ describe("quality candidate artifact", () => {
         storage,
       }),
     ).rejects.toThrow("QUALITY_CANDIDATE_ARTIFACT_INVALID");
+  });
+
+  it("materializes a verified zero-byte file without using the non-empty download path", async () => {
+    const source = await temporaryRoot("candidate-zero-byte-source-");
+    await writeFile(path.join(source, "index.html"), "candidate");
+    await writeFile(path.join(source, "empty.txt"), Buffer.alloc(0));
+    const storage = memoryStorage();
+    const reference = await persistQualityCandidateArtifact({
+      root: source,
+      objectPrefix: "sites/site-1/quality-candidates/run-1/tree-zero",
+      rendererOutputDigest: "e".repeat(64),
+      storage,
+    });
+    const manifest = JSON.parse(
+      storage.objects.get(reference.manifestKey)!.toString("utf8"),
+    ) as { files: Array<{ path: string; objectKey: string }> };
+    const zero = manifest.files.find((file) => file.path === "empty.txt")!;
+    const scratchParent = await temporaryRoot("candidate-zero-byte-target-");
+
+    const materialized = await materializeQualityCandidateArtifact({
+      reference,
+      scratchParent,
+      storage,
+    });
+
+    await expect(readFile(path.join(materialized.root, "empty.txt"))).resolves.toEqual(
+      Buffer.alloc(0),
+    );
+    expect(storage.getBufferBounded).not.toHaveBeenCalledWith(
+      zero.objectKey,
+      expect.any(Number),
+      undefined,
+    );
+    await materialized.cleanup();
   });
 
   it("rejects traversal and a file whose bytes do not match its immutable manifest", async () => {
