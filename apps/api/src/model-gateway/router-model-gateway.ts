@@ -14,6 +14,7 @@ import {
   UnavailableBudgetStore,
   type BudgetStore,
 } from '../tools/budget-store';
+import { projectGenericOperationResult } from '../tools/generic-operation-projection';
 import {
   ExternalActionDeniedError,
   ProviderIdentityError,
@@ -369,6 +370,27 @@ export class RouterModelGateway extends ModelGateway {
         estimatedCents: reserveCents,
       });
       if (reservation.replay) {
+        const replay = reservation.replayProjection;
+        if (
+          replay &&
+          replay.kind === 'model' &&
+          ctx.genericReplay &&
+          replay.schema === ctx.genericReplay.schema &&
+          replay.data &&
+          typeof replay.data === 'object' &&
+          !Array.isArray(replay.data)
+        ) {
+          const stored = replay.data as Record<string, unknown>;
+          const restored = ctx.genericReplay.restore(stored.result);
+          const verified = projectGenericOperationResult({
+            kind: 'model',
+            schema: ctx.genericReplay.schema,
+            data: { result: ctx.genericReplay.project(restored) },
+          });
+          if (verified.digest === replay.digest) {
+            return restored as ModelResult<T>;
+          }
+        }
         throw new BudgetOperationReplayError(operationKey);
       }
     } catch (err) {
@@ -397,11 +419,19 @@ export class RouterModelGateway extends ModelGateway {
       }
       const result = await call(provider, ctx);
       const costUsd = result.usage?.costUsd;
+      const projection = ctx.genericReplay
+        ? projectGenericOperationResult({
+            kind: 'model',
+            schema: ctx.genericReplay.schema,
+            data: { result: ctx.genericReplay.project(result as ModelResult<unknown>) },
+          })
+        : undefined;
       await this.budgetStore.settle(
         reservation,
         costUsd != null
           ? Math.ceil(costUsd * 100)
           : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1)),
+        projection,
       );
       this.trace?.record({
             workspaceId: ctx.workspaceId,

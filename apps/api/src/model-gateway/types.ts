@@ -19,6 +19,12 @@ export interface AiContext {
   modelPolicy?: ModelExecutionTrace;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: PaidCostContext;
+  /** Explicit bounded projection/parser for non-Site-Builder durable replay. */
+  genericReplay?: {
+    schema: string;
+    project: (result: ModelResult<unknown>) => unknown;
+    restore: (projection: unknown) => ModelResult<unknown>;
+  };
 }
 
 export interface ModelUsage {

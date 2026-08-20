@@ -11,6 +11,8 @@ import {
 import { BudgetLedger, BudgetExceededError } from '../tools/budget';
 import { ModelResult, type ReviewVisionInput } from './types';
 import { AiTraceSink } from './ai-trace.sink';
+import type { BudgetStore } from '../tools/budget-store';
+import { projectGenericOperationResult } from '../tools/generic-operation-projection';
 
 /**
  * 收口② D：LLM 网关预算门——task.maxCostCents 从纯声明变 reserve-then-settle 真闸。
@@ -73,6 +75,67 @@ function gatewayWith(provider: ModelProvider, budget: BudgetLedger): RouterModel
 }
 
 describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', () => {
+  it('replays an approved generic model projection without a second provider wire', async () => {
+    const provider = fakeProvider(async () => { throw new Error('must not execute'); });
+    const restored = { data: 'cached', provider: 'fake', model: 'm' };
+    const replay = {
+      schema: 'generic-text/v1',
+      project: (result: ModelResult<unknown>) => result,
+      restore: (projection: unknown) => projection as ModelResult<unknown>,
+    };
+    const projection = projectGenericOperationResult({
+      kind: 'model', schema: replay.schema, data: { result: restored },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await expect(gateway.generateText(
+      { task: QUALIFY_TASK, prompt: 'p' },
+      { workspaceId: 'ws-1', runId: 'run-1', genericReplay: replay },
+    )).resolves.toEqual(restored);
+    expect(provider.generateText).not.toHaveBeenCalled();
+  });
+
+  it('atomically settles the approved generic model projection', async () => {
+    const provider = fakeProvider(async () => ({ data: 'ok', provider: 'fake', model: 'm' }));
+    const settle = vi.fn(async () => ({ chargedCents: 20, observedCents: 20, capVariance: false, replay: false }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+    const replay = {
+      schema: 'generic-text/v1',
+      project: (result: ModelResult<unknown>) => result,
+      restore: (projection: unknown) => projection as ModelResult<unknown>,
+    };
+
+    await gateway.generateText(
+      { task: QUALIFY_TASK, prompt: 'p' },
+      { workspaceId: 'ws-1', runId: 'run-1', genericReplay: replay },
+    );
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      20,
+      expect.objectContaining({ kind: 'model', schema: replay.schema }),
+    );
+  });
+
   it('未开账户 → 不限预算（内部调用照常）', async () => {
     const budget = new BudgetLedger();
     const gw = gatewayWith(fakeProvider(), budget);
