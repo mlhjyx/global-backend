@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 export const GENERIC_OPERATION_PROJECTION_VERSION =
   'generic-operation-projection/v1' as const;
 
-const MAX_BYTES = 128 * 1024;
+// PostgreSQL caps the stored JSONB envelope at 128 KiB. Keep 8 KiB reserved
+// for the digest field plus JSONB key/value formatting so an application-valid
+// projection cannot fail only after a physical call has succeeded.
+const MAX_BYTES = 120 * 1024;
 const MAX_STRING = 64 * 1024;
 const MAX_ARRAY = 256;
 const MAX_FIELDS = 512;
@@ -51,9 +54,13 @@ function normalize(value: unknown, depth: number, count: { fields: number }): un
   const output: Record<string, unknown> = {};
   for (const key of Object.keys(value as Record<string, unknown>).sort()) {
     if (!key || key.length > 128 || SENSITIVE_KEYS.has(key.toLowerCase())) invalid();
+    const entry = (value as Record<string, unknown>)[key];
+    // Match JSON object semantics for optional fields while keeping arrays
+    // strict: optional provider facts are omitted, never converted to null.
+    if (entry === undefined) continue;
     count.fields += 1;
     if (count.fields > MAX_FIELDS) invalid();
-    output[key] = normalize((value as Record<string, unknown>)[key], depth + 1, count);
+    output[key] = normalize(entry, depth + 1, count);
   }
   return Object.freeze(output);
 }
@@ -75,12 +82,12 @@ export function projectGenericOperationResult(input: {
     schema: input.schema,
     data,
   });
-  const bytes = canonical(base);
-  if (Buffer.byteLength(bytes, 'utf8') > MAX_BYTES) invalid();
-  return Object.freeze({
+  const projected = Object.freeze({
     ...base,
-    digest: createHash('sha256').update(bytes).digest('hex'),
+    digest: createHash('sha256').update(canonical(base)).digest('hex'),
   });
+  if (Buffer.byteLength(canonical(projected), 'utf8') > MAX_BYTES) invalid();
+  return projected;
 }
 
 export function parseGenericOperationProjection(

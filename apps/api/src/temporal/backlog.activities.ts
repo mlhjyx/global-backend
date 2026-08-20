@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
@@ -167,6 +168,7 @@ export function createBacklogActivities(deps: {
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('backlog activities require an authoritative BudgetStore');
   const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker,
@@ -184,14 +186,21 @@ export function createBacklogActivities(deps: {
     workspaceId: string,
     budgetScopeId?: string,
   ): Promise<{ key: string; close: () => Promise<void>; exhausted: () => Promise<boolean> }> => {
-    const key = budgetScopeId
-      ? `sweep:${budgetScopeId}:${stage}:${workspaceId}`
+    let activityRunId: string | undefined;
+    try {
+      activityRunId = deps.activityRunId?.() ?? ActivityContext.current().info.workflowExecution?.runId;
+    } catch {
+      activityRunId = undefined;
+    }
+    const replayScopeId = budgetScopeId ?? activityRunId;
+    const key = replayScopeId
+      ? `sweep:${replayScopeId}:${stage}:${workspaceId}`
       : `sweep:${stage}:${workspaceId}`;
     await budgets.open({
       workspaceId,
       accountKey: key,
       capCents: sweepBudgetCents(),
-      replayScope: Boolean(budgetScopeId),
+      replayScope: Boolean(replayScopeId),
     });
     return {
       key,

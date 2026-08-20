@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import { BudgetExceededError } from '../tools/budget';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { OpenFdaSearchInput, OpenFdaSearchOutput, SamSearchInput, SamSearchOutput, TedSearchInput, TedSearchOutput } from '../tools/source-tools';
 import type { Fda510kClearance } from '../adapters/openfda-api';
@@ -186,7 +187,7 @@ export class SignalIngestService {
         observedAt: new Date(nowMs),
       });
     } catch (err) {
-      if (err instanceof BudgetExceededError) throw err; // 预算真拦截透传（绝不吞成 ERROR 账本行）
+      if (err instanceof BudgetExceededError || err instanceof BudgetOperationReplayError) throw err;
       const msg = String(err).slice(0, 300);
       await this.writeLedgerError(spec, fingerprint, windowKey, msg);
       console.warn(`[signal-ingest] fetch failed provider=${spec.provider}: ${msg.slice(0, 150)}`);

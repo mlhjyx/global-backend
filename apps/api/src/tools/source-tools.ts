@@ -405,6 +405,46 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
   },
   capabilities: { produces: ['company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `openfda.search:${stableKey(i)}`,
+  durableReplayResult: (result) => ({
+    data: {
+      ...(result.data.establishments
+        ? {
+            establishments: result.data.establishments.slice(0, 250).map((record) => ({
+              registrationNumber: record.registrationNumber,
+              feiNumber: record.feiNumber,
+              name: record.name,
+              country: record.country,
+              city: record.city,
+              stateCode: record.stateCode,
+              statusCode: record.statusCode,
+              establishmentTypes: record.establishmentTypes.slice(0, 64),
+              initialImporter: record.initialImporter,
+              productCodes: record.productCodes.slice(0, 64),
+              deviceFacts: record.deviceFacts,
+              deviceNames: record.deviceNames.slice(0, 64),
+              ownerOperatorNumbers: record.ownerOperatorNumbers.slice(0, 64),
+              createdDate: record.createdDate,
+            })),
+          }
+        : {}),
+      ...(result.data.clearances
+        ? {
+            clearances: result.data.clearances.slice(0, 250).map((record) => ({
+              kNumber: record.kNumber,
+              applicant: record.applicant,
+              country: record.country,
+              productCode: record.productCode,
+              decisionDateIso: record.decisionDateIso,
+              decisionCode: record.decisionCode,
+              deviceName: record.deviceName,
+              deviceFacts: record.deviceFacts,
+            })),
+          }
+        : {}),
+    },
+    costCents: result.costCents,
+    degraded: result.degraded,
+  }),
   healthCheck: async () => ({ healthy: true, detail: 'openfda' }),
   execute: async (input, ctx) => {
     const beforeRequest = beforeExternalRequest(ctx);
@@ -710,6 +750,28 @@ export const samgovSearchTool: Tool<SamSearchInput, SamSearchOutput> = {
   },
   capabilities: { produces: ['company'], accepts: ['keywords'] },
   idempotencyKey: (i) => `samgov.search:${stableKey(i)}`,
+  durableReplayResult: (result) => ({
+    data: {
+      ...(result.data.notices
+        ? {
+            notices: result.data.notices.slice(0, 250).map((notice) => ({
+              noticeId: notice.noticeId,
+              title: notice.title,
+              department: notice.department,
+              subTier: notice.subTier,
+              office: notice.office,
+              postedDateIso: notice.postedDateIso,
+              naicsCode: notice.naicsCode,
+              responseDeadlineIso: notice.responseDeadlineIso,
+              popCountry: notice.popCountry,
+              link: notice.link,
+            })),
+          }
+        : {}),
+    },
+    costCents: result.costCents,
+    degraded: result.degraded,
+  }),
   healthCheck: async () => ({ healthy: true, detail: 'samgov' }),
   execute: async (input) => ({
     data: { notices: await fetchSourcesSought(input.params) },

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
@@ -100,6 +101,7 @@ export function createExternalIntentActivities(deps: {
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker;
   budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('external-intent activities require an authoritative BudgetStore');
@@ -253,12 +255,19 @@ export function createExternalIntentActivities(deps: {
       summary.samSpecs = samParams ? 1 : 0;
       if (!tedByFp.size && !fdaByFp.size && !samParams) return summary;
 
-      const budgetKey = args.budgetScopeId ? `${SWEEP_BUDGET_KEY}:${args.budgetScopeId}` : SWEEP_BUDGET_KEY;
+      let activityRunId: string | undefined;
+      try {
+        activityRunId = deps.activityRunId?.() ?? ActivityContext.current().info.workflowExecution?.runId;
+      } catch {
+        activityRunId = undefined;
+      }
+      const replayScopeId = args.budgetScopeId ?? activityRunId;
+      const budgetKey = replayScopeId ? `${SWEEP_BUDGET_KEY}:${replayScopeId}` : SWEEP_BUDGET_KEY;
       await budgets.open({
         workspaceId: PLATFORM_WORKSPACE,
         accountKey: budgetKey,
         capCents: sweepBudgetCents(),
-        replayScope: Boolean(args.budgetScopeId),
+        replayScope: Boolean(replayScopeId),
       });
       try {
         const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {
