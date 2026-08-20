@@ -1,6 +1,7 @@
 import type { RuntimeReleaseIdentity } from "./runtime-release-identity";
 import type { RuntimeSettings } from "./runtime-environment";
 import { createRolesToScopesPolicy } from "../auth/scopes";
+import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
 import { resolveProcessorJurisdiction } from "../compliance/data-rights.context";
 
 type AdmissionStatus = "ok" | "optional" | "failed";
@@ -117,6 +118,11 @@ function inspectAuth(
   }
   if (!present(env.AUTH_ROLE_SCOPE_MAP_JSON)) {
     return { status: "failed", code: "AUTH_ROLE_SCOPE_POLICY_INCOMPLETE" };
+  }
+  try {
+    validateJwksTokenVerifierConfiguration(env);
+  } catch {
+    return { status: "failed", code: "AUTH_CONFIG_INVALID" };
   }
   try {
     createRolesToScopesPolicy(env, settings.mode);

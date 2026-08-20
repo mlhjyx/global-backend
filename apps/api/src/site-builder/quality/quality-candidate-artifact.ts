@@ -311,11 +311,14 @@ export async function materializeQualityCandidateArtifact(input: {
   const root = await mkdtemp(path.join(input.scratchParent, "candidate-"));
   try {
     for (const file of manifest.files) {
-      const bytes = await input.storage.getBufferBounded(
-        file.objectKey,
-        file.sizeBytes === 0 ? 1 : file.sizeBytes,
-        input.signal,
-      );
+      const bytes =
+        file.sizeBytes === 0
+          ? await verifiedEmptyObject(input.storage, file, input.signal)
+          : await input.storage.getBufferBounded(
+              file.objectKey,
+              file.sizeBytes,
+              input.signal,
+            );
       if (bytes.length !== file.sizeBytes || sha256(bytes) !== file.sha256) invalid();
       const target = path.join(root, ...file.path.split("/"));
       const relative = path.relative(root, target);
@@ -331,4 +334,14 @@ export async function materializeQualityCandidateArtifact(input: {
     await rm(root, { recursive: true, force: true });
     throw error;
   }
+}
+
+async function verifiedEmptyObject(
+  storage: QualityCandidateArtifactStorage,
+  file: CandidateArtifactFile,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const observed = await storage.hashObject(file.objectKey, signal);
+  if (observed.size !== 0 || observed.sha256 !== file.sha256) invalid();
+  return Buffer.alloc(0);
 }

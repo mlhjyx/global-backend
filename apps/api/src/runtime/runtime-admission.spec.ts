@@ -221,7 +221,7 @@ describe("inspectRuntimeAdmission", () => {
       AUTH_JWKS_URI: "http://127.0.0.1:3100/jwks",
       AUTH_ISSUER: "http://127.0.0.1:3100/",
       AUTH_AUDIENCE: "global-api",
-      AUTH_ROLE_SCOPE_MAP_JSON: '{"operator":["acquisition:read"]}',
+      AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
       MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
       MODEL_GATEWAY_KEY: "secret",
     };
