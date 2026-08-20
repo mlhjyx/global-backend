@@ -1,6 +1,18 @@
 import { proxyActivities, patched, workflowInfo } from '@temporalio/workflow';
 import type { ExternalIntentActivities, ExternalIntentIcpResult, ExternalIntentRecomputeSummary, IngestSweepSummary, LiveProviderState, ResolvedIntentTarget } from './external-intent.activities';
 
+function isDurableBudgetFailure(error: unknown, depth = 0): boolean {
+  if (!error || typeof error !== 'object' || depth > 4) return false;
+  const record = error as Record<string, unknown>;
+  const tokens = [record.code, record.type, record.name, record.message]
+    .filter((value): value is string => typeof value === 'string');
+  if (tokens.some((value) =>
+    value.includes('BUDGET_OPERATION_REPLAY') ||
+    value.includes('BUDGET_STORE_') ||
+    value === 'BudgetOperationReplayError')) return true;
+  return isDurableBudgetFailure(record.cause, depth + 1);
+}
+
 const acts = proxyActivities<ExternalIntentActivities>({
   // 摄取活动对**全部** ACTIVE ICP 的唯一 TED/openFDA 指纹逐个有界分页——查询面多的 workspace 下时长可观，
   // 10min 易在触到尾部指纹前超时并整体重试。放宽到 30min 给全目标工作量足够 headroom（#56 P2）。
@@ -70,7 +82,7 @@ export async function externalIntentSweepWorkflow(
     });
   } catch (err) {
     const detail = String(err);
-    if (detail.includes('BUDGET_OPERATION_REPLAY') || detail.includes('BUDGET_STORE_')) throw err;
+    if (isDurableBudgetFailure(err)) throw err;
     agg.ingest = {
       tedSpecs: 0, fdaSpecs: 0, samSpecs: 0, fetches: 0, ledgerHits: 0,
       signalsUpserted: 0, budgetExceeded: false, errors: [detail.slice(0, 200)],

@@ -67,6 +67,11 @@ function understandingReplay<Output>(schema: string) {
   };
 }
 
+function isBudgetControlFailure(error: unknown): boolean {
+  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    && (error as { code: string }).code.startsWith('BUDGET_');
+}
+
 /**
  * Activities do the real (side-effectful) work — DB writes go through
  * withWorkspace so RLS confines them to the tenant. Crawling runs on Crawl4AI
@@ -174,6 +179,7 @@ export function createUnderstandingActivities(deps: {
           if (s.status === 'fulfilled' && s.value.trim()) {
             pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
           } else if (s.status === 'rejected') {
+            if (isBudgetControlFailure(s.reason)) throw s.reason;
             console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
           }
         });

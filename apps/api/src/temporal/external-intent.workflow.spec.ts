@@ -68,6 +68,18 @@ describe('externalIntentSweepWorkflow — 单次 live 重读 + 穿线（PR #70 �
     expect(acts.projectExternalIntentForIcp).not.toHaveBeenCalled();
   });
 
+  it('recognizes a Temporal ActivityFailure cause type even when the outer message omits the budget code', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    acts.ingestExternalSignals.mockRejectedValue({
+      name: 'ActivityFailure',
+      message: 'Activity task failed',
+      cause: { type: 'BudgetOperationReplayError', message: 'durable result unavailable' },
+    });
+
+    await expect(externalIntentSweepWorkflow({})).rejects.toMatchObject({ name: 'ActivityFailure' });
+    expect(acts.projectExternalIntentForIcp).not.toHaveBeenCalled();
+  });
+
   it('happy path：liveProviderState 恰调一次，其快照 thread 进每个投影（同引用），调用顺序 live 在 ingest 后、投影前', async () => {
     const t1 = target('ws-1', 'icp-1');
     const t2 = target('ws-2', 'icp-2');

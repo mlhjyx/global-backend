@@ -168,4 +168,21 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       accountKey: 'understanding:understanding-workflow-run',
     });
   });
+
+  it('does not downgrade a subpage durable replay failure into a successful partial page list', async () => {
+    const budget = budgetStoreSpies();
+    const replayError = Object.assign(new Error('durable result unavailable'), {
+      code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE',
+    });
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: {} as ModelGateway,
+      broker: { invoke: vi.fn(async () => { throw replayError; }) } as unknown as ExecutionBroker,
+      budgetStore: budget.store,
+      activityRunId: () => 'understanding-workflow-run',
+    });
+
+    await expect(acts.crawlPages({ workspaceId: 'ws-1', urls: ['https://acme.example/about'] }))
+      .rejects.toBe(replayError);
+  });
 });
