@@ -79,5 +79,8 @@ describe('pii-crypto.extension 数据库 principal 读取', () => {
     expect(source).toContain(
       'array_agg(granted.rolname::text ORDER BY granted.rolname)',
     );
+    expect(source).toMatch(
+      /GROUP BY principal\.oid,\s+principal\.rolsuper,\s+principal\.rolbypassrls,\s+principal\.rolcreatedb,\s+principal\.rolcreaterole,\s+principal\.rolreplication,\s+principal\.rolinherit/u,
+    );
   });
 });
