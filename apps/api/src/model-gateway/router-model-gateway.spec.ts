@@ -136,6 +136,37 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     );
   });
 
+  it('rejects a model projection schema mismatch without executing a provider', async () => {
+    const provider = fakeProvider(async () => { throw new Error('must not execute'); });
+    const projection = projectGenericOperationResult({
+      kind: 'model', schema: 'another-task/v1',
+      data: { result: { data: 'cached', provider: 'fake', model: 'm' } },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+    await expect(gateway.generateText(
+      { task: QUALIFY_TASK, prompt: 'p' },
+      {
+        workspaceId: 'ws-1', runId: 'run-1',
+        genericReplay: {
+          schema: 'generic-text/v1',
+          project: (result) => result,
+          restore: (value) => value as ModelResult<unknown>,
+        },
+      },
+    )).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(provider.generateText).not.toHaveBeenCalled();
+  });
+
   it('未开账户 → 不限预算（内部调用照常）', async () => {
     const budget = new BudgetLedger();
     const gw = gatewayWith(fakeProvider(), budget);
