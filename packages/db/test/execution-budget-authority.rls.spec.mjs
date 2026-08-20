@@ -169,17 +169,22 @@ async function insertWorkspaceAuthority(database, overrides = {}) {
       expires_at, consumed_at
     ) VALUES (
       $1, 'WORKSPACE_GRANT', $2::uuid, $3, $4, $5::uuid, $6, $7,
-      'icp.design', 'company', 'direct-shape-company', $8, 'USD', 'microusd',
-      $9::bigint, $10::timestamptz, $11::timestamptz, $12::timestamptz, now()
+      $8::execution_budget_purpose, $9, $10, $11, $12, $13,
+      $14::bigint, $15::timestamptz, $16::timestamptz, $17::timestamptz, now()
     ) RETURNING id`,
     WS_A,
     overrideValue(overrides, "workspaceId", WS_A),
-    ISSUER,
-    AUDIENCE,
-    randomUUID(),
-    "7".repeat(64),
-    "execution-budget-grant/v1",
+    overrideValue(overrides, "issuer", ISSUER),
+    overrideValue(overrides, "audience", AUDIENCE),
+    overrideValue(overrides, "jti", randomUUID()),
+    overrideValue(overrides, "tokenSha256", "7".repeat(64)),
+    overrideValue(overrides, "schemaVersion", "execution-budget-grant/v1"),
+    overrideValue(overrides, "purpose", "icp.design"),
+    overrideValue(overrides, "subjectType", "company"),
+    overrideValue(overrides, "subjectId", "direct-shape-company"),
     overrideValue(overrides, "requestSha256", REQUEST_A),
+    overrideValue(overrides, "currency", "USD"),
+    overrideValue(overrides, "unit", "microusd"),
     overrideValue(overrides, "capMicrousd", 1n),
     times.issuedAt,
     times.notBefore,
@@ -197,16 +202,21 @@ async function insertPlatformAuthority(database, overrides = {}) {
       not_before, expires_at
     ) VALUES (
       'platform', 'PLATFORM_GRANT', $1, $2, $3::uuid, $4, $5,
-      'platform.acquisition', 'schedule', 'direct-shape-schedule', $6, 'USD',
-      'microusd', $7::bigint, $8::bigint, $9::bigint, $10::timestamptz,
-      $11::timestamptz, $12::timestamptz
+      $6::execution_budget_purpose, $7, $8, $9, $10, $11,
+      $12::bigint, $13::bigint, $14::bigint, $15::timestamptz,
+      $16::timestamptz, $17::timestamptz
     ) RETURNING id`,
-    ISSUER,
-    AUDIENCE,
-    randomUUID(),
-    "8".repeat(64),
-    "execution-budget-grant/v1",
+    overrideValue(overrides, "issuer", ISSUER),
+    overrideValue(overrides, "audience", AUDIENCE),
+    overrideValue(overrides, "jti", randomUUID()),
+    overrideValue(overrides, "tokenSha256", "8".repeat(64)),
+    overrideValue(overrides, "schemaVersion", "execution-budget-grant/v1"),
+    overrideValue(overrides, "purpose", "platform.acquisition"),
+    overrideValue(overrides, "subjectType", "schedule"),
+    overrideValue(overrides, "subjectId", "direct-shape-schedule"),
     overrideValue(overrides, "scheduleId", "direct-shape-schedule"),
+    overrideValue(overrides, "currency", "USD"),
+    overrideValue(overrides, "unit", "microusd"),
     overrideValue(overrides, "capPerRunMicrousd", 1n),
     overrideValue(overrides, "campaignCapMicrousd", 2n),
     overrideValue(overrides, "maxRuns", 2n),
@@ -527,38 +537,6 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       assert.deepEqual(entry.proconfig, ["search_path=pg_catalog, public"]);
     }
 
-    const [privileges] = await owner.$queryRawUnsafe(`
-      SELECT
-        has_function_privilege(
-          'app_user',
-          'consume_workspace_execution_authority(text,text,uuid,text,text,execution_budget_purpose,uuid,text,text,text,text,text,bigint,timestamptz,timestamptz,timestamptz)',
-          'EXECUTE'
-        ) AS app_consume,
-        has_function_privilege(
-          'app_user',
-          'ingest_platform_execution_authority(text,text,uuid,text,text,execution_budget_purpose,text,text,text,text,text,bigint,bigint,bigint,timestamptz,timestamptz,timestamptz)',
-          'EXECUTE'
-        ) AS app_ingest_platform,
-        has_function_privilege(
-          'execution_budget_platform_writer',
-          'ingest_platform_execution_authority(text,text,uuid,text,text,execution_budget_purpose,text,text,text,text,text,bigint,bigint,bigint,timestamptz,timestamptz,timestamptz)',
-          'EXECUTE'
-        ) AS platform_ingest,
-        has_function_privilege(
-          'execution_budget_platform_writer',
-          'consume_workspace_execution_authority(text,text,uuid,text,text,execution_budget_purpose,uuid,text,text,text,text,text,bigint,timestamptz,timestamptz,timestamptz)',
-          'EXECUTE'
-        ) AS platform_consume,
-        pg_has_role('app_user', 'execution_budget_platform_writer', 'member') AS app_is_platform_writer
-    `);
-    assert.deepEqual(privileges, {
-      app_consume: true,
-      app_ingest_platform: false,
-      platform_ingest: true,
-      platform_consume: false,
-      app_is_platform_writer: false,
-    });
-
     const [platformRole] = await owner.$queryRawUnsafe(`
       SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreatedb,
              rolcreaterole, rolreplication
@@ -584,78 +562,158 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     assert.deepEqual(memberships, [
       { rolname: "execution_budget_platform_writer" },
     ]);
+    const [appMembership] = await owner.$queryRawUnsafe(`
+      SELECT pg_has_role(
+        'app_user',
+        'execution_budget_platform_writer',
+        'member'
+      ) AS app_is_platform_writer
+    `);
+    assert.deepEqual(appMembership, { app_is_platform_writer: false });
+  });
 
-    const publicFunctionExecution = await owner.$queryRawUnsafe(`
-      SELECT procedure.proname,
-             bool_or(privilege.grantee=0 AND privilege.privilege_type='EXECUTE')
-               AS public_execute
-      FROM pg_proc procedure
-      CROSS JOIN LATERAL aclexplode(
-        COALESCE(procedure.proacl, acldefault('f', procedure.proowner))
-      ) privilege
-      WHERE procedure.proname IN (
-        'consume_workspace_execution_authority',
-        'ingest_platform_execution_authority',
-        'mark_execution_budget_authority_revoked',
-        'open_authorized_tool_budget_v1'
+  it("enforces the complete routine EXECUTE privilege matrix", async () => {
+    const routinePrivileges = await owner.$queryRawUnsafe(`
+      WITH principal(name) AS (
+        VALUES
+          ('PUBLIC'::text),
+          ('app_user'::text),
+          ('execution_budget_platform_writer'::text)
+      ), routine AS (
+        SELECT oid, proname, proacl, proowner
+        FROM pg_proc
+        WHERE proname IN (
+          'consume_workspace_execution_authority',
+          'ingest_platform_execution_authority',
+          'mark_execution_budget_authority_revoked',
+          'open_authorized_tool_budget_v1'
+        )
       )
-      GROUP BY procedure.proname
-      ORDER BY procedure.proname
+      SELECT routine.proname AS routine,
+             principal.name AS principal,
+             CASE
+               WHEN principal.name='PUBLIC' THEN EXISTS (
+                 SELECT 1
+                 FROM aclexplode(
+                   COALESCE(routine.proacl, acldefault('f', routine.proowner))
+                 ) privilege
+                 WHERE privilege.grantee=0
+                   AND privilege.privilege_type='EXECUTE'
+               )
+               ELSE has_function_privilege(
+                 principal.name,
+                 routine.oid,
+                 'EXECUTE'
+               )
+             END AS allowed
+      FROM routine CROSS JOIN principal
+      ORDER BY routine.proname, principal.name
     `);
-    assert.deepEqual(publicFunctionExecution, [
-      {
-        proname: "consume_workspace_execution_authority",
-        public_execute: false,
+    const expectedRoutinePrivileges = {
+      consume_workspace_execution_authority: {
+        PUBLIC: false,
+        app_user: true,
+        execution_budget_platform_writer: false,
       },
-      {
-        proname: "ingest_platform_execution_authority",
-        public_execute: false,
+      ingest_platform_execution_authority: {
+        PUBLIC: false,
+        app_user: false,
+        execution_budget_platform_writer: true,
       },
-      {
-        proname: "mark_execution_budget_authority_revoked",
-        public_execute: false,
+      mark_execution_budget_authority_revoked: {
+        PUBLIC: false,
+        app_user: false,
+        execution_budget_platform_writer: false,
       },
-      {
-        proname: "open_authorized_tool_budget_v1",
-        public_execute: false,
+      open_authorized_tool_budget_v1: {
+        PUBLIC: false,
+        app_user: true,
+        execution_budget_platform_writer: true,
       },
-    ]);
+    };
+    assert.equal(routinePrivileges.length, 12);
+    for (const entry of routinePrivileges) {
+      assert.equal(
+        entry.allowed,
+        expectedRoutinePrivileges[entry.routine][entry.principal],
+        `${entry.principal} EXECUTE ${entry.routine}`,
+      );
+    }
+  });
 
-    const [tablePrivileges] = await owner.$queryRawUnsafe(`
-      SELECT
-        has_table_privilege('app_user', 'execution_budget_authority', 'UPDATE')
-          AS app_authority_update,
-        has_table_privilege('app_user', 'execution_budget_authority', 'DELETE')
-          AS app_authority_delete,
-        has_table_privilege(
-          'app_user',
-          'execution_budget_authority_revocation',
-          'UPDATE'
-        ) AS app_revocation_update,
-        has_table_privilege(
-          'app_user',
-          'execution_budget_authority_revocation',
-          'DELETE'
-        ) AS app_revocation_delete,
-        has_table_privilege(
-          'execution_budget_platform_writer',
+  it("enforces the complete table DML privilege matrix", async () => {
+    const tablePrivileges = await owner.$queryRawUnsafe(`
+      WITH principal(name) AS (
+        VALUES
+          ('PUBLIC'::text),
+          ('app_user'::text),
+          ('execution_budget_platform_writer'::text)
+      ), target_table(name, oid, relacl, relowner) AS (
+        SELECT relation.relname, relation.oid, relation.relacl, relation.relowner
+        FROM pg_class relation
+        WHERE relation.relname IN (
           'execution_budget_authority',
-          'UPDATE'
-        ) AS platform_authority_update,
-        has_table_privilege(
-          'execution_budget_platform_writer',
-          'execution_budget_authority',
-          'DELETE'
-        ) AS platform_authority_delete
+          'execution_budget_authority_revocation'
+        )
+      ), requested_privilege(name) AS (
+        VALUES ('DELETE'::text), ('INSERT'::text), ('SELECT'::text), ('UPDATE'::text)
+      )
+      SELECT target_table.name AS table_name,
+             principal.name AS principal,
+             requested_privilege.name AS privilege,
+             CASE
+               WHEN principal.name='PUBLIC' THEN EXISTS (
+                 SELECT 1
+                 FROM aclexplode(
+                   COALESCE(
+                     target_table.relacl,
+                     acldefault('r', target_table.relowner)
+                   )
+                 ) privilege
+                 WHERE privilege.grantee=0
+                   AND privilege.privilege_type=requested_privilege.name
+               )
+               ELSE has_table_privilege(
+                 principal.name,
+                 target_table.oid,
+                 requested_privilege.name
+               )
+             END AS allowed
+      FROM target_table CROSS JOIN principal CROSS JOIN requested_privilege
+      ORDER BY target_table.name, principal.name, requested_privilege.name
     `);
-    assert.deepEqual(tablePrivileges, {
-      app_authority_update: false,
-      app_authority_delete: false,
-      app_revocation_update: false,
-      app_revocation_delete: false,
-      platform_authority_update: false,
-      platform_authority_delete: false,
-    });
+    const expectedTablePrivileges = {
+      execution_budget_authority: {
+        PUBLIC: { DELETE: false, INSERT: false, SELECT: false, UPDATE: false },
+        app_user: { DELETE: false, INSERT: false, SELECT: true, UPDATE: false },
+        execution_budget_platform_writer: {
+          DELETE: false,
+          INSERT: false,
+          SELECT: true,
+          UPDATE: false,
+        },
+      },
+      execution_budget_authority_revocation: {
+        PUBLIC: { DELETE: false, INSERT: false, SELECT: false, UPDATE: false },
+        app_user: { DELETE: false, INSERT: true, SELECT: true, UPDATE: false },
+        execution_budget_platform_writer: {
+          DELETE: false,
+          INSERT: false,
+          SELECT: true,
+          UPDATE: false,
+        },
+      },
+    };
+    assert.equal(tablePrivileges.length, 24);
+    for (const entry of tablePrivileges) {
+      assert.equal(
+        entry.allowed,
+        expectedTablePrivileges[entry.table_name][entry.principal][
+          entry.privilege
+        ],
+        `${entry.principal} ${entry.privilege} ${entry.table_name}`,
+      );
+    }
   });
 
   it("rejects hostile NULL claims before either authority shape can be stored", async () => {
@@ -809,46 +867,145 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     });
   });
 
-  it("replays an exact JTI after expiry while conflicting reuse remains a conflict", async () => {
-    const replayTimes = {
-      issuedAt: new Date(Date.now() - 30_000),
-      notBefore: new Date(Date.now() - 20_000),
-      expiresAt: new Date(Date.now() + 800),
+  it("rejects absent expired Workspace and Platform identities without inserting rows", async () => {
+    const expiredTimes = {
+      issuedAt: new Date(TEST_STARTED_AT - 130_000),
+      notBefore: new Date(TEST_STARTED_AT - 120_000),
+      expiresAt: new Date(TEST_STARTED_AT - 10_000),
     };
     const workspaceClaims = {
-      ...replayTimes,
+      ...expiredTimes,
+      issuer: `https://expired-workspace-${randomUUID()}.example.test`,
+      jti: randomUUID(),
+      tokenSha256: "9".repeat(64),
+      subjectId: "absent-expired-company",
+      requestSha256: "a".repeat(64),
+      capMicrousd: 19n,
+    };
+    const platformClaims = {
+      ...expiredTimes,
+      issuer: `https://expired-platform-${randomUUID()}.example.test`,
+      jti: randomUUID(),
+      tokenSha256: "b".repeat(64),
+      subjectId: "absent-expired-schedule",
+      scheduleId: "absent-expired-schedule",
+      capPerRunMicrousd: 23n,
+      campaignCapMicrousd: 46n,
+      maxRuns: 2n,
+    };
+
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          consumeWorkspace(transaction, workspaceClaims),
+        ),
+      "EXECUTION_BUDGET_GRANT_EXPIRED",
+    );
+    await rejectsSql(
+      () => ingestPlatform(platform, platformClaims),
+      "EXECUTION_BUDGET_GRANT_EXPIRED",
+    );
+
+    const [{ count }] = await owner.$queryRawUnsafe(
+      `SELECT count(*)::int AS count
+       FROM execution_budget_authority
+       WHERE (issuer=$1 AND jti=$2::uuid)
+          OR (issuer=$3 AND jti=$4::uuid)`,
+      workspaceClaims.issuer,
+      workspaceClaims.jti,
+      platformClaims.issuer,
+      platformClaims.jti,
+    );
+    assert.equal(count, 0);
+  });
+
+  it("ingests new current Workspace and Platform identities before replay", async () => {
+    const workspaceClaims = {
+      issuer: `https://current-workspace-${randomUUID()}.example.test`,
+      jti: randomUUID(),
+      tokenSha256: "c".repeat(64),
+      subjectId: "current-company",
+      requestSha256: "d".repeat(64),
+      capMicrousd: 29n,
+    };
+    const platformClaims = {
+      issuer: `https://current-platform-${randomUUID()}.example.test`,
+      jti: randomUUID(),
+      tokenSha256: "e".repeat(64),
+      subjectId: "current-schedule",
+      scheduleId: "current-schedule",
+      capPerRunMicrousd: 31n,
+      campaignCapMicrousd: 62n,
+      maxRuns: 2n,
+    };
+
+    const workspaceResult = await withWorkspace(app, WS_A, (transaction) =>
+      consumeWorkspace(transaction, workspaceClaims),
+    );
+    const platformResult = await ingestPlatform(platform, platformClaims);
+    assert.equal(workspaceResult.length, 1);
+    assert.equal(workspaceResult[0].replay, false);
+    assert.equal(platformResult.length, 1);
+    assert.equal(platformResult[0].replay, false);
+
+    const [{ count }] = await owner.$queryRawUnsafe(
+      `SELECT count(*)::int AS count
+       FROM execution_budget_authority
+       WHERE (issuer=$1 AND jti=$2::uuid)
+          OR (issuer=$3 AND jti=$4::uuid)`,
+      workspaceClaims.issuer,
+      workspaceClaims.jti,
+      platformClaims.issuer,
+      platformClaims.jti,
+    );
+    assert.equal(count, 2);
+  });
+
+  it("deterministically replays committed expired identities and conflicts on mismatch", async () => {
+    const expiredFixtureTimes = {
+      issuedAt: new Date(TEST_STARTED_AT - 130_000),
+      notBefore: new Date(TEST_STARTED_AT - 120_000),
+      expiresAt: new Date(TEST_STARTED_AT - 10_000),
+    };
+    const workspaceClaims = {
+      ...expiredFixtureTimes,
+      issuer: `https://fixture-workspace-${randomUUID()}.example.test`,
       jti: randomUUID(),
       tokenSha256: "1".repeat(64),
-      subjectId: "expired-replay-company",
+      subjectId: "fixture-expired-company",
       requestSha256: "2".repeat(64),
       capMicrousd: 101n,
     };
     const platformClaims = {
-      ...replayTimes,
+      ...expiredFixtureTimes,
+      issuer: `https://fixture-platform-${randomUUID()}.example.test`,
       jti: randomUUID(),
       tokenSha256: "3".repeat(64),
-      subjectId: "expired-replay-schedule",
-      scheduleId: "expired-replay-schedule",
+      subjectId: "fixture-expired-schedule",
+      scheduleId: "fixture-expired-schedule",
       capPerRunMicrousd: 31n,
       campaignCapMicrousd: 93n,
       maxRuns: 3n,
     };
 
-    const [workspaceAuthority] = await withWorkspace(app, WS_A, (transaction) =>
-      consumeWorkspace(transaction, workspaceClaims),
+    const [workspaceAuthority] = await insertWorkspaceAuthority(
+      owner,
+      workspaceClaims,
     );
-    const [platformAuthority] = await ingestPlatform(platform, platformClaims);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_200));
+    const [platformAuthority] = await insertPlatformAuthority(
+      owner,
+      platformClaims,
+    );
 
     const workspaceReplay = await withWorkspace(app, WS_A, (transaction) =>
       consumeWorkspace(transaction, workspaceClaims),
     );
     const platformReplay = await ingestPlatform(platform, platformClaims);
     assert.deepEqual(workspaceReplay, [
-      { authority_id: workspaceAuthority.authority_id, replay: true },
+      { authority_id: workspaceAuthority.id, replay: true },
     ]);
     assert.deepEqual(platformReplay, [
-      { authority_id: platformAuthority.authority_id, replay: true },
+      { authority_id: platformAuthority.id, replay: true },
     ]);
 
     await rejectsSql(
@@ -883,7 +1040,7 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       () =>
         ingestPlatform(platform, {
           ...platformClaims,
-          scheduleId: "changed-expired-replay-schedule",
+          scheduleId: "changed-fixture-expired-schedule",
         }),
       "EXECUTION_BUDGET_GRANT_REUSED",
     );
