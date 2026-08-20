@@ -13,10 +13,13 @@ import {
 import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
 import {
   probeJwksDocument,
-  type JwksProbeFetch,
 } from '../auth/jwks-readiness';
 import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
-import { validateExecutionBudgetGrantVerifierConfiguration } from '../execution-budget/execution-budget-grant.verifier';
+import {
+  loadExecutionBudgetJwks,
+  validateExecutionBudgetGrantVerifierConfiguration,
+  type ExecutionBudgetJwksFetch,
+} from '../execution-budget/execution-budget-grant.verifier';
 
 interface RedisProbeClient {
   readonly status: string;
@@ -140,16 +143,12 @@ export async function checkAuthJwksReadiness(
 
 export async function checkExecutionBudgetJwksReadiness(
   env: NodeJS.ProcessEnv,
-  fetcher: JwksProbeFetch = fetch,
+  fetcher: ExecutionBudgetJwksFetch = fetch,
 ): Promise<RuntimeComponentStatus> {
   try {
     const config = validateExecutionBudgetGrantVerifierConfiguration(env);
-    return (await probeJwksDocument(config.jwks.href, fetcher))
-      ? { status: 'ok' }
-      : {
-          status: 'failed',
-          code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-        };
+    await loadExecutionBudgetJwks(config, fetcher);
+    return { status: 'ok' };
   } catch {
     return {
       status: 'failed',

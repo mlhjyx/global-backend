@@ -23,6 +23,26 @@ const identity = {
   schema_digest: `sha256:${'2'.repeat(64)}`,
 };
 
+const EXECUTION_BUDGET_ENV = {
+  APP_ENVIRONMENT: 'test',
+  NODE_ENV: 'test',
+  EXECUTION_BUDGET_GRANT_JWKS_URI:
+    'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
+  EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
+  EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
+  EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
+};
+
+const EXECUTION_ES256_PUBLIC_JWK = {
+  kty: 'EC',
+  x: 'RlAKnjNRkDLUtlfnTfa-PEqUIqRKwc9wqeL_jYz-l7s',
+  y: 'mEe-HjWcVujdmIJJc8Dyu4SQf1JGccAAnv2_uMOj-f4',
+  crv: 'P-256',
+  alg: 'ES256',
+  kid: 'execution-es256-1',
+  use: 'sig',
+};
+
 describe('managed dependency readiness', () => {
   it('rejects an unsafe execution-budget JWKS URL before network dispatch', async () => {
     const unsafe =
@@ -57,14 +77,7 @@ describe('managed dependency readiness', () => {
       new Response(
         JSON.stringify({
           keys: [
-            {
-              kty: 'EC',
-              crv: 'P-256',
-              kid: 'execution-budget-key-1',
-              use: 'sig',
-              x: 'x',
-              y: 'y',
-            },
+            EXECUTION_ES256_PUBLIC_JWK,
           ],
         }),
         { status: 200 },
@@ -72,17 +85,8 @@ describe('managed dependency readiness', () => {
     );
 
     const result = await checkExecutionBudgetJwksReadiness(
-      {
-        APP_ENVIRONMENT: 'test',
-        NODE_ENV: 'test',
-        EXECUTION_BUDGET_GRANT_JWKS_URI:
-          'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
-        EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
-        EXECUTION_BUDGET_GRANT_AUDIENCE:
-          'global-backend:execution-budget',
-        EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
-      },
-      fetcher as never,
+      EXECUTION_BUDGET_ENV,
+      fetcher,
     );
 
     expect(result).toEqual({ status: 'ok' });
@@ -90,6 +94,45 @@ describe('managed dependency readiness', () => {
       'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
       expect.objectContaining({ method: 'GET', redirect: 'error' }),
     );
+  });
+
+  it.each([
+    [
+      'an unusable public key',
+      {
+        ...EXECUTION_ES256_PUBLIC_JWK,
+        x: 'x',
+        y: 'y',
+      },
+    ],
+    [
+      'private key material',
+      {
+        ...EXECUTION_ES256_PUBLIC_JWK,
+        d: 'WRRQcLrRvsQguZtooDJ6t3J-rcSfYKZjJzbnf0VdVtQ',
+      },
+    ],
+    [
+      'an algorithm-incompatible key',
+      {
+        ...EXECUTION_ES256_PUBLIC_JWK,
+        alg: 'RS256',
+      },
+    ],
+  ])('rejects an execution-budget JWKS containing %s', async (_name, key) => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ keys: [key] }), { status: 200 }),
+    );
+
+    await expect(
+      checkExecutionBudgetJwksReadiness(
+        EXECUTION_BUDGET_ENV,
+        fetcher,
+      ),
+    ).resolves.toEqual({
+      status: 'failed',
+      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    });
   });
 
   it('rejects loopback HTTP execution-budget trust roots in production', async () => {

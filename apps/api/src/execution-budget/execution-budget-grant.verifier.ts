@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import {
   createRemoteJWKSet,
+  customFetch,
   decodeProtectedHeader,
   errors as joseErrors,
+  importJWK,
   jwtVerify,
+  type JWK,
   type JWTVerifyGetKey,
   type JWTPayload,
 } from 'jose';
@@ -23,6 +26,9 @@ export const EXECUTION_BUDGET_GRANT_AUDIENCE =
 const EXECUTION_BUDGET_GRANT_SCHEMA = 'execution-budget-grant/v1' as const;
 const EXECUTION_BUDGET_GRANT_TYPE = 'execution-budget-grant+jwt' as const;
 const MAX_GRANT_BYTES = 16 * 1024;
+const MAX_JWKS_BYTES = 64 * 1024;
+const MAX_JWKS_KEYS = 64;
+const JWKS_TIMEOUT_MS = 2_000;
 const MAX_TTL_SECONDS = 300;
 const CLOCK_TOLERANCE_SECONDS = 60;
 const MAX_BIGINT = 9_223_372_036_854_775_807n;
@@ -80,9 +86,26 @@ export interface ExecutionBudgetGrantVerifierConfiguration {
   readonly algorithms: readonly string[];
 }
 
+export type ExecutionBudgetJwksFetch = (
+  input: string,
+  init: RequestInit,
+) => Promise<Response>;
+
+interface ExecutionBudgetJwksDocument {
+  readonly keys: readonly JWK[];
+}
+
 interface VerifierDependencies {
   readonly keyResolver?: JWTVerifyGetKey;
+  readonly fetcher?: ExecutionBudgetJwksFetch;
   readonly now?: () => Date;
+}
+
+class ExecutionBudgetJwksUnavailableError extends Error {
+  constructor() {
+    super('EXECUTION_BUDGET_JWKS_UNAVAILABLE');
+    this.name = 'ExecutionBudgetJwksUnavailableError';
+  }
 }
 
 function invalid(): ExecutionBudgetGrantError {
@@ -178,6 +201,182 @@ export function validateExecutionBudgetGrantVerifierConfiguration(
   });
 }
 
+function record(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasPrivateMaterial(key: Record<string, unknown>): boolean {
+  return ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth', 'k'].some(
+    (name) => key[name] !== undefined,
+  );
+}
+
+function compatibleKeyShape(
+  key: Record<string, unknown>,
+  algorithm: string,
+): boolean {
+  if (algorithm === 'RS256') {
+    return (
+      key.kty === 'RSA' &&
+      typeof key.n === 'string' &&
+      typeof key.e === 'string'
+    );
+  }
+  if (algorithm === 'ES256') {
+    return (
+      key.kty === 'EC' &&
+      key.crv === 'P-256' &&
+      typeof key.x === 'string' &&
+      typeof key.y === 'string'
+    );
+  }
+  return (
+    algorithm === 'EdDSA' &&
+    key.kty === 'OKP' &&
+    key.crv === 'Ed25519' &&
+    typeof key.x === 'string'
+  );
+}
+
+async function validateExecutionBudgetJwksDocument(
+  value: unknown,
+  algorithms: readonly string[],
+): Promise<ExecutionBudgetJwksDocument> {
+  if (!record(value) || !Array.isArray(value.keys)) {
+    throw new ExecutionBudgetJwksUnavailableError();
+  }
+  if (value.keys.length < 1 || value.keys.length > MAX_JWKS_KEYS) {
+    throw new ExecutionBudgetJwksUnavailableError();
+  }
+
+  const keys: JWK[] = [];
+  const identities = new Set<string>();
+  for (const candidate of value.keys) {
+    if (!record(candidate) || hasPrivateMaterial(candidate)) {
+      throw new ExecutionBudgetJwksUnavailableError();
+    }
+    const { alg, kid, use, key_ops: keyOperations } = candidate;
+    if (
+      typeof alg !== 'string' ||
+      !algorithms.includes(alg) ||
+      typeof kid !== 'string' ||
+      !BOUNDED_IDENTIFIER.test(kid) ||
+      (use !== undefined && use !== 'sig') ||
+      (keyOperations !== undefined &&
+        (!Array.isArray(keyOperations) ||
+          !keyOperations.includes('verify') ||
+          keyOperations.some((operation) => operation !== 'verify'))) ||
+      !compatibleKeyShape(candidate, alg)
+    ) {
+      continue;
+    }
+    const identity = `${alg}:${kid}`;
+    if (identities.has(identity)) {
+      throw new ExecutionBudgetJwksUnavailableError();
+    }
+    try {
+      const imported = await importJWK(candidate as JWK, alg);
+      if (imported instanceof Uint8Array || imported.type !== 'public') {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    identities.add(identity);
+    keys.push(Object.freeze({ ...candidate }) as JWK);
+  }
+
+  if (keys.length < 1) {
+    throw new ExecutionBudgetJwksUnavailableError();
+  }
+
+  return Object.freeze({ keys: Object.freeze(keys) });
+}
+
+async function boundedJwksJson(response: Response): Promise<unknown> {
+  if (!response.body) throw new ExecutionBudgetJwksUnavailableError();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      length += next.value.byteLength;
+      if (length > MAX_JWKS_BYTES) {
+        throw new ExecutionBudgetJwksUnavailableError();
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+    await response.body.cancel().catch(() => undefined);
+  }
+  return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
+}
+
+export async function loadExecutionBudgetJwks(
+  configuration: ExecutionBudgetGrantVerifierConfiguration,
+  fetcher: ExecutionBudgetJwksFetch = fetch,
+  request: Readonly<{
+    headers?: HeadersInit;
+    signal?: AbortSignal;
+  }> = {},
+): Promise<ExecutionBudgetJwksDocument> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (request.signal?.aborted) abort();
+  else request.signal?.addEventListener('abort', abort, { once: true });
+  const timeout = setTimeout(abort, JWKS_TIMEOUT_MS);
+  timeout.unref();
+  try {
+    const response = await fetcher(configuration.jwks.href, {
+      method: 'GET',
+      headers:
+        request.headers ??
+        ({ Accept: 'application/jwk-set+json, application/json' } as const),
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ExecutionBudgetJwksUnavailableError();
+    }
+    return await validateExecutionBudgetJwksDocument(
+      await boundedJwksJson(response),
+      configuration.algorithms,
+    );
+  } catch {
+    throw new ExecutionBudgetJwksUnavailableError();
+  } finally {
+    clearTimeout(timeout);
+    request.signal?.removeEventListener('abort', abort);
+  }
+}
+
+function createBoundedRemoteJwkSet(
+  configuration: ExecutionBudgetGrantVerifierConfiguration,
+  fetcher: ExecutionBudgetJwksFetch,
+): JWTVerifyGetKey {
+  return createRemoteJWKSet(configuration.jwks, {
+    timeoutDuration: JWKS_TIMEOUT_MS,
+    [customFetch]: async (url, request) => {
+      if (url !== configuration.jwks.href) {
+        throw new ExecutionBudgetJwksUnavailableError();
+      }
+      const document = await loadExecutionBudgetJwks(
+        configuration,
+        fetcher,
+        request,
+      );
+      return new Response(JSON.stringify(document), {
+        status: 200,
+        headers: { 'Content-Type': 'application/jwk-set+json' },
+      });
+    },
+  });
+}
+
 function numericDate(payload: JWTPayload, name: 'iat' | 'nbf' | 'exp'): number {
   const value = payload[name];
   if (!Number.isSafeInteger(value) || value! < 0) throw invalid();
@@ -268,7 +467,11 @@ export class ExecutionBudgetGrantVerifier {
     try {
       configuration = validateExecutionBudgetGrantVerifierConfiguration(env);
       keyResolver =
-        dependencies.keyResolver ?? createRemoteJWKSet(configuration.jwks);
+        dependencies.keyResolver ??
+        createBoundedRemoteJwkSet(
+          configuration,
+          dependencies.fetcher ?? fetch,
+        );
     } catch {
       // Runtime composition may expose diagnostics while this additive
       // capability is unavailable. Verification remains fail closed.
@@ -401,6 +604,7 @@ export class ExecutionBudgetGrantVerifier {
       return new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_EXPIRED');
     }
     if (
+      error instanceof ExecutionBudgetJwksUnavailableError ||
       error instanceof joseErrors.JWKSTimeout ||
       error instanceof joseErrors.JWKSNoMatchingKey ||
       error instanceof joseErrors.JWKSMultipleMatchingKeys ||
