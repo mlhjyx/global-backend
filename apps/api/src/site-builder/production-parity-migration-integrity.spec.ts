@@ -102,6 +102,17 @@ describe('production parity budget migration integrity', () => {
     );
   });
 
+  it('rejects pre-existing runtime group roles that are login-capable, privileged, or inherited from another role', async () => {
+    const sql = await readFile(migrationUrl, 'utf8');
+    const roleBlock = sql.slice(
+      sql.indexOf('-- Runtime writers use distinct login principals'),
+      sql.indexOf('CREATE TABLE "runtime_process_lease"'),
+    );
+    expect(roleBlock).toContain('PRODUCTION_PARITY_RUNTIME_GROUP_ROLE_INVALID');
+    expect(roleBlock).toMatch(/rolcanlogin[sS]*?rolsuper[sS]*?rolbypassrls[sS]*?rolcreaterole[sS]*?rolcreatedb[sS]*?rolreplication/);
+    expect(roleBlock).toContain('FROM pg_auth_members membership');
+  });
+
   it('locks the Grant database audience to the single product audience', async () => {
     const sql = await readFile(migrationUrl, 'utf8');
     expect(sql).toMatch(
