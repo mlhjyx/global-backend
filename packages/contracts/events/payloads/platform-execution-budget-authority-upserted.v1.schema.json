@@ -28,7 +28,11 @@
     "schema_version": { "const": "execution-budget-grant/v1" },
     "iss": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 512 },
     "aud": { "const": "global-backend:execution-budget" },
-    "jti": { "type": "string", "format": "uuid" },
+    "jti": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
     "iat": { "$ref": "#/$defs/numericDate" },
     "nbf": { "$ref": "#/$defs/numericDate" },
     "exp": { "$ref": "#/$defs/numericDate" },

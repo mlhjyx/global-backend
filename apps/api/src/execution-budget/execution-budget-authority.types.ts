@@ -12,6 +12,12 @@ export type ExecutionBudgetPurpose =
   | 'platform.intent_watch'
   | 'platform.sanctions';
 
+export const EXECUTION_BUDGET_PLATFORM_PURPOSES = [
+  'platform.acquisition',
+  'platform.intent_watch',
+  'platform.sanctions',
+] as const satisfies readonly ExecutionBudgetPurpose[];
+
 export interface VerifiedExecutionBudgetAuthority {
   schemaVersion: 'execution-budget-grant/v1';
   authorityKind: ExecutionBudgetAuthorityKind;
@@ -97,11 +103,9 @@ const WORKSPACE_PURPOSE_SUBJECT_TYPES: Readonly<
   'contact.verify': ['contact_point'],
 };
 
-const PLATFORM_PURPOSES = new Set<ExecutionBudgetPurpose>([
-  'platform.acquisition',
-  'platform.intent_watch',
-  'platform.sanctions',
-]);
+const PLATFORM_PURPOSES = new Set<ExecutionBudgetPurpose>(
+  EXECUTION_BUDGET_PLATFORM_PURPOSES,
+);
 
 function isNonEmptyString(value: string | null): value is string {
   return typeof value === 'string' && value.length > 0;

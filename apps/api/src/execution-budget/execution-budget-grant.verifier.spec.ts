@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { PLATFORM_EXECUTION_BUDGET_PURPOSES } from '@global/contracts';
+import Ajv2020 from 'ajv/dist/2020';
+import addFormats from 'ajv-formats';
 import {
   createLocalJWKSet,
+  decodeJwt,
   importJWK,
   SignJWT,
   type JWK,
@@ -107,6 +113,7 @@ interface TokenOptions {
   issuedAt?: number;
   notBefore?: number;
   expiresAt?: number;
+  jti?: string;
   claims?: Record<string, unknown>;
 }
 
@@ -134,7 +141,7 @@ async function signedToken(options: TokenOptions = {}): Promise<string> {
     .setProtectedHeader(header)
     .setIssuer(options.issuer ?? ISSUER)
     .setAudience(options.audience ?? AUDIENCE)
-    .setJti(JTI)
+    .setJti(options.jti ?? JTI)
     .setIssuedAt(options.issuedAt ?? NOW_SECONDS)
     .setNotBefore(options.notBefore ?? NOW_SECONDS)
     .setExpirationTime(options.expiresAt ?? NOW_SECONDS + 300)
@@ -143,8 +150,10 @@ async function signedToken(options: TokenOptions = {}): Promise<string> {
 
 async function platformToken(
   claims: Record<string, unknown> = {},
+  options: Omit<TokenOptions, 'claims'> = {},
 ): Promise<string> {
   return signedToken({
+    ...options,
     claims: {
       authority_kind: 'PLATFORM_GRANT',
       purpose: 'platform.acquisition',
@@ -160,6 +169,30 @@ async function platformToken(
       ...claims,
     },
   });
+}
+
+async function loadPlatformClaimsSchema(): Promise<Record<string, unknown>> {
+  const candidates = [
+    resolve(
+      process.cwd(),
+      '../../packages/contracts/events/payloads/platform-execution-budget-authority-upserted.v1.schema.json',
+    ),
+    resolve(
+      process.cwd(),
+      'packages/contracts/events/payloads/platform-execution-budget-authority-upserted.v1.schema.json',
+    ),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(await readFile(candidate, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error('platform execution budget claims schema not found');
 }
 
 function verifier(
@@ -376,6 +409,74 @@ describe('ExecutionBudgetGrantVerifier', () => {
       subjectType: 'schedule',
       subjectId: SCHEDULE_ID,
       scheduleId: SCHEDULE_ID,
+    });
+  });
+
+  it('accepts the exact iat equals nbf and 300-second TTL boundaries', async () => {
+    await expect(
+      verifier().verifyPlatform(
+        await platformToken({}, {
+          issuedAt: NOW_SECONDS,
+          notBefore: NOW_SECONDS,
+          expiresAt: NOW_SECONDS + 300,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      issuedAt: NOW,
+      notBefore: NOW,
+      expiresAt: new Date(NOW.getTime() + 300_000),
+    });
+  });
+
+  it('rejects a signed platform command when iat, nbf and exp are equal', async () => {
+    const sameFutureSecond = NOW_SECONDS + 30;
+
+    await expect(
+      verifier().verifyPlatform(
+        await platformToken({}, {
+          issuedAt: sameFutureSecond,
+          notBefore: sameFutureSecond,
+          expiresAt: sameFutureSecond,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
+  });
+
+  it.each(PLATFORM_EXECUTION_BUDGET_PURPOSES)(
+    'accepts exactly the contract platform purpose %s after signature verification',
+    async (purpose) => {
+      await expect(
+        verifier().verifyPlatform(await platformToken({ purpose })),
+      ).resolves.toMatchObject({ purpose });
+    },
+  );
+
+  it.each([
+    ['icp.design', 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'],
+    ['icp.query_plan', 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'],
+    ['understanding.run', 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'],
+    ['discovery.run', 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'],
+    ['contact.verify', 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'],
+    ['platform.unknown', 'EXECUTION_BUDGET_GRANT_INVALID'],
+  ] as const)(
+    'rejects non-contract platform purpose %s with %s',
+    async (purpose, code) => {
+      await expect(
+        verifier().verifyPlatform(await platformToken({ purpose })),
+      ).rejects.toMatchObject({ code });
+    },
+  );
+
+  it('accepts one canonical schema-valid JTI through real platform signature verification', async () => {
+    const compactJws = await platformToken({}, { jti: JTI });
+    const validate = addFormats(
+      new Ajv2020({ allErrors: true, strict: true }),
+    ).compile(await loadPlatformClaimsSchema());
+    const signedClaims = decodeJwt(compactJws);
+
+    expect(validate(signedClaims), JSON.stringify(validate.errors)).toBe(true);
+    await expect(verifier().verifyPlatform(compactJws)).resolves.toMatchObject({
+      jti: JTI,
     });
   });
 

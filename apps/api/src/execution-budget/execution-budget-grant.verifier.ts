@@ -15,6 +15,7 @@ import { resolveRuntimeMode } from '../runtime/runtime-environment';
 import {
   assertAuthorityPurposeShape,
   assertCanonicalMicrousd,
+  EXECUTION_BUDGET_PLATFORM_PURPOSES,
   ExecutionBudgetGrantError,
   type ExecutionBudgetPurpose,
   type VerifiedExecutionBudgetAuthority,
@@ -44,9 +45,7 @@ const PURPOSES = new Set<ExecutionBudgetPurpose>([
   'understanding.run',
   'discovery.run',
   'contact.verify',
-  'platform.acquisition',
-  'platform.intent_watch',
-  'platform.sanctions',
+  ...EXECUTION_BUDGET_PLATFORM_PURPOSES,
 ]);
 
 const PLATFORM_COMMAND_CLAIMS = new Set([
@@ -581,7 +580,7 @@ export class ExecutionBudgetGrantVerifier {
       const nowSeconds = Math.floor(this.now().getTime() / 1_000);
       if (
         issuedAt > notBefore ||
-        notBefore > expiresAt ||
+        notBefore >= expiresAt ||
         expiresAt - issuedAt > MAX_TTL_SECONDS ||
         issuedAt > nowSeconds + CLOCK_TOLERANCE_SECONDS
       ) {

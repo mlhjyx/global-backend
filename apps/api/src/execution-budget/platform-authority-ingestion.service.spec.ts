@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
+  EXECUTION_BUDGET_AUTHORITY_AUDIENCE,
   PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND,
   PLATFORM_EXECUTION_BUDGET_AUTHORITY_SCHEMA_VERSION,
+  PLATFORM_EXECUTION_BUDGET_PURPOSES,
   type PlatformExecutionBudgetAuthorityUpsertedV1Claims,
 } from '@global/contracts';
 import { MODULE_METADATA } from '@nestjs/common/constants';
@@ -12,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 import {
+  EXECUTION_BUDGET_PLATFORM_PURPOSES,
   ExecutionBudgetGrantError,
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
@@ -162,6 +165,51 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
     expect(validate({ ...VALID_CLAIMS, request_sha256: null })).toBe(false);
     expect(validate({ ...VALID_CLAIMS, cap_microusd: '1' })).toBe(false);
     expect(validate({ ...VALID_CLAIMS, unknown: 'field' })).toBe(false);
+  });
+
+  it('machine-binds audience and the complete sorted purpose set across schema, Contracts and verifier types', async () => {
+    const schema = await loadSchema();
+    const properties = schema.properties as Record<
+      string,
+      { readonly const?: unknown; readonly enum?: readonly unknown[] }
+    >;
+
+    expect(properties.aud?.const).toBe(EXECUTION_BUDGET_AUTHORITY_AUDIENCE);
+    expect([...(properties.purpose?.enum ?? [])].sort()).toEqual(
+      [...PLATFORM_EXECUTION_BUDGET_PURPOSES].sort(),
+    );
+    expect([...EXECUTION_BUDGET_PLATFORM_PURPOSES].sort()).toEqual(
+      [...PLATFORM_EXECUTION_BUDGET_PURPOSES].sort(),
+    );
+  });
+
+  it.each(PLATFORM_EXECUTION_BUDGET_PURPOSES)(
+    'accepts the contract platform purpose %s in the signed-claims schema',
+    async (purpose) => {
+      const schema = await loadSchema();
+      const validate = addFormats(
+        new Ajv2020({ allErrors: true, strict: true }),
+      ).compile(schema);
+
+      expect(
+        validate({ ...VALID_CLAIMS, purpose }),
+        JSON.stringify(validate.errors),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    ['nil UUID', '00000000-0000-0000-0000-000000000000'],
+    ['URN UUID', `urn:uuid:${JTI}`],
+    ['wrong version', '120a4e9f-0c06-0cb4-8364-b7df51c45a88'],
+    ['wrong variant', '120a4e9f-0c06-4cb4-7364-b7df51c45a88'],
+  ])('rejects a non-canonical JTI with %s', async (_name, jti) => {
+    const schema = await loadSchema();
+    const validate = addFormats(
+      new Ajv2020({ allErrors: true, strict: true }),
+    ).compile(schema);
+
+    expect(validate({ ...VALID_CLAIMS, jti })).toBe(false);
   });
 
   it('ships a public-only cross-repository conformance fixture', async () => {
