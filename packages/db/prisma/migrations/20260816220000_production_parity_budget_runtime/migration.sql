@@ -627,10 +627,11 @@ BEGIN
     ) THEN
       RAISE EXCEPTION 'TOOL_BUDGET_UNSETTLED_OPERATIONS';
     END IF;
+    -- Account keys are durable Temporal activity/run identities. A close only
+    -- drops holders: retry after an ACK loss must still see settled operations
+    -- and replay them instead of issuing a second physical provider call.
     UPDATE "tool_budget_account" AS target
-    SET "generation"=target."generation"+1,"cap_cents"=p_cap_cents,
-        "reserved_cents"=0,"charged_cents"=0,"exhausted"=false,
-        "ref_count"=1,"closed_at"=NULL,"updated_at"=clock_timestamp()
+    SET "ref_count"=1,"closed_at"=NULL,"updated_at"=clock_timestamp()
     WHERE target."id"=v."id" RETURNING target.* INTO v;
   ELSIF v."cap_cents" <> p_cap_cents THEN
     RAISE EXCEPTION 'TOOL_BUDGET_CAP_MISMATCH';

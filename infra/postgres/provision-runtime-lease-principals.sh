@@ -36,15 +36,37 @@ if [[ "${logins[0]}" == "${logins[1]}" ||
   exit 1
 fi
 
-psql "${RUNTIME_LEASE_PROVISION_DATABASE_URL}" \
+while IFS= read -r -d '' setting && IFS= read -r -d '' value; do
+  export "${setting}=${value}"
+done < <(node - <<'NODE'
+const value = process.env.RUNTIME_LEASE_PROVISION_DATABASE_URL;
+let url;
+try {
+  url = new URL(value);
+} catch {
+  process.exit(1);
+}
+if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.username) process.exit(1);
+const output = {
+  PGHOST: url.hostname,
+  PGPORT: url.port || '5432',
+  PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+  PGUSER: decodeURIComponent(url.username),
+  PGPASSWORD: decodeURIComponent(url.password),
+};
+for (const [name, entry] of Object.entries(output)) process.stdout.write(`${name}\0${entry}\0`);
+NODE
+)
+
+psql \
   --no-psqlrc \
   --set ON_ERROR_STOP=1 \
   --set api_login="${RUNTIME_API_LEASE_LOGIN}" \
-  --set api_password="${RUNTIME_API_LEASE_PASSWORD}" \
   --set worker_login="${RUNTIME_WORKER_LEASE_LOGIN}" \
-  --set worker_password="${RUNTIME_WORKER_LEASE_PASSWORD}" \
-  --set relay_login="${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}" \
-  --set relay_password="${RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD}" <<'SQL'
+  --set relay_login="${RUNTIME_OUTBOX_RELAY_LEASE_LOGIN}" <<'SQL'
+\getenv api_password RUNTIME_API_LEASE_PASSWORD
+\getenv worker_password RUNTIME_WORKER_LEASE_PASSWORD
+\getenv relay_password RUNTIME_OUTBOX_RELAY_LEASE_PASSWORD
 SELECT format(
   'CREATE ROLE %I LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
   :'api_login', :'api_password'

@@ -72,6 +72,7 @@ import {
 import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import { waitForWorkerDependencyAdmission } from "../runtime/worker-dependency-admission";
+import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -118,17 +119,22 @@ async function main(): Promise<void> {
 
   const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
-  const appDatabaseReadiness = await prisma.reconnect();
-  if (appDatabaseReadiness.status !== "ready") {
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(appDatabaseReadiness.code);
-  }
-  try {
-    await assertMigrationCompatible(prisma, releaseIdentity);
-  } catch {
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady("MIGRATION_REVISION_MISMATCH");
-  }
+  await waitForWorkerDependencyAdmission({
+    check: async () => {
+      const appDatabaseReadiness = await prisma.reconnect();
+      if (appDatabaseReadiness.status !== "ready") {
+        return { status: "failed", code: appDatabaseReadiness.code } as const;
+      }
+      try {
+        await assertMigrationCompatible(prisma, releaseIdentity);
+        return { status: "ok" } as const;
+      } catch {
+        return { status: "failed", code: "MIGRATION_REVISION_MISMATCH" } as const;
+      }
+    },
+    onBlocked: (code) =>
+      console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`),
+  });
   const runtimeLeaseStore = new PrismaRuntimeProcessLeaseStore(prisma);
   const runtimeLeases = new RuntimeProcessLeaseService(runtimeLeaseStore, {
     identity: releaseIdentity,
@@ -421,9 +427,31 @@ async function main(): Promise<void> {
         "[worker] runtime lease lost; polling is shutting down and readiness is closed",
       ),
   });
+  const dependencyHeartbeat = await startWorkerDependencyHeartbeat({
+    check: async () => {
+      const checks = await Promise.all([
+        siteBuilderStorage.checkReadiness(),
+        checkRedisReadiness(process.env),
+        checkModelGatewayReadiness(process.env),
+        checkBrowserReadiness(process.env),
+        checkImagePipelineIsolationReadiness(),
+      ]);
+      return checks.find((check) => check.status !== "ok") ?? { status: "ok" };
+    },
+    leases: runtimeLeases,
+    worker,
+    taskQueue: UNDERSTANDING_TASK_QUEUE,
+    onBlocked: (code) =>
+      console.error(`[worker] dependency became unavailable: ${code}; polling is shutting down`),
+  });
+  if (!dependencyHeartbeat.admitted) {
+    readyHeartbeat.stop();
+    await holdPlatformNotReady("WORKER_DEPENDENCY_UNAVAILABLE");
+  }
   try {
     await worker.run();
   } finally {
+    dependencyHeartbeat.stop();
     readyHeartbeat.stop();
     await runtimeLeases
       .heartbeat("WORKER", "STOPPED", UNDERSTANDING_TASK_QUEUE)

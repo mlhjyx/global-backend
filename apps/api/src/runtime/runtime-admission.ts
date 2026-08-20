@@ -3,6 +3,7 @@ import type { RuntimeSettings } from "./runtime-environment";
 import { createRolesToScopesPolicy } from "../auth/scopes";
 import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
 import { resolveProcessorJurisdiction } from "../compliance/data-rights.context";
+import { assertPiiKeyConfiguration } from "../compliance/pii-crypto";
 
 type AdmissionStatus = "ok" | "optional" | "failed";
 
@@ -20,6 +21,7 @@ export interface RuntimeAdmissionResult {
     database: AdmissionCheck;
     auth: AdmissionCheck;
     gateway: AdmissionCheck;
+    pii: AdmissionCheck;
   };
 }
 
@@ -169,6 +171,19 @@ function inspectGateway(
   return { status: "ok" };
 }
 
+function inspectPii(
+  settings: RuntimeSettings,
+  env: NodeJS.ProcessEnv,
+): AdmissionCheck {
+  if (!managed(settings.mode)) return { status: "optional" };
+  try {
+    assertPiiKeyConfiguration(env.PII_ENCRYPTION_KEY);
+    return { status: "ok" };
+  } catch {
+    return { status: "failed", code: "PII_ENCRYPTION_KEY_INVALID" };
+  }
+}
+
 export function inspectRuntimeAdmission(
   settings: RuntimeSettings,
   env: NodeJS.ProcessEnv,
@@ -185,6 +200,7 @@ export function inspectRuntimeAdmission(
     database: inspectDatabase(settings, env),
     auth: inspectAuth(settings, env),
     gateway: inspectGateway(settings, env),
+    pii: inspectPii(settings, env),
   });
   return Object.freeze({
     mode: settings.mode,

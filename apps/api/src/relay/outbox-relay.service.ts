@@ -21,8 +21,12 @@ import {
   parseAssetCleanupCommand,
 } from "../temporal/asset-cleanup.contract";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
-import { RuntimeProcessLeaseService } from "../runtime/runtime-process-lease";
+import {
+  assertMigrationCompatible,
+  RuntimeProcessLeaseService,
+} from "../runtime/runtime-process-lease";
 import { RuntimeAdmissionService } from "../runtime/runtime-admission";
+import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import {
   INTEGRATION_EVENTS,
@@ -112,7 +116,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         status: "not_ready";
         code:
           | "OUTBOX_RELAY_DATABASE_UNAVAILABLE"
-          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED";
+          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED"
+          | "OUTBOX_RELAY_MIGRATION_MISMATCH";
       }> = {
     status: "not_ready",
     code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
@@ -125,6 +130,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     @Optional() fetchFn?: FetchLike,
     @Optional() private readonly leases?: RuntimeProcessLeaseService,
     @Optional() private readonly admission?: RuntimeAdmissionService,
+    @Optional() private readonly releaseIdentity?: RuntimeReleaseIdentityService,
   ) {
     this.db =
       db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -145,7 +151,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         status: "not_ready";
         code:
           | "OUTBOX_RELAY_DATABASE_UNAVAILABLE"
-          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED";
+          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED"
+          | "OUTBOX_RELAY_MIGRATION_MISMATCH";
       }> {
     return this.readiness;
   }
@@ -161,6 +168,18 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       await this.db.$connect();
+      if (this.releaseIdentity) {
+        try {
+          await assertMigrationCompatible(this.db as never, this.releaseIdentity.current());
+        } catch {
+          this.readiness = {
+            status: "not_ready",
+            code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
+          };
+          this.logger.error("outbox relay migration is incompatible; relay remains non-consuming");
+          return false;
+        }
+      }
       if (!this.leaseStartingPublished) {
         await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
         this.leaseStartingPublished = true;
