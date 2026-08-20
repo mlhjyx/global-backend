@@ -18,7 +18,10 @@ import {
   ExecutionBudgetGrantError,
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
-import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
+import {
+  EXECUTION_BUDGET_GRANT_AUDIENCE,
+  ExecutionBudgetGrantVerifier,
+} from './execution-budget-grant.verifier';
 import { ExecutionBudgetModule } from './execution-budget.module';
 import { PlatformExecutionBudgetAuthorityIngestionService } from './platform-authority-ingestion.service';
 
@@ -175,6 +178,9 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
     >;
 
     expect(properties.aud?.const).toBe(EXECUTION_BUDGET_AUTHORITY_AUDIENCE);
+    expect(EXECUTION_BUDGET_AUTHORITY_AUDIENCE).toBe(
+      EXECUTION_BUDGET_GRANT_AUDIENCE,
+    );
     expect([...(properties.purpose?.enum ?? [])].sort()).toEqual(
       [...PLATFORM_EXECUTION_BUDGET_PURPOSES].sort(),
     );
