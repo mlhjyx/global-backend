@@ -75,4 +75,21 @@ describe("worker runtime admission wiring", () => {
     expect(source).not.toContain("await holdWorkerNotReady(redisReadiness.code");
     expect(source).not.toContain("await holdWorkerNotReady(gatewayReadiness.code");
   });
+
+  it("retries app-user database and migration admission before creating a worker lease", () => {
+    const databaseAdmission = source.indexOf("appDatabaseReadiness");
+    const lease = source.indexOf("new PrismaRuntimeProcessLeaseStore");
+    expect(databaseAdmission).toBeGreaterThan(-1);
+    expect(databaseAdmission).toBeLessThan(lease);
+    expect(source).toContain("check: async () => {");
+    expect(source).not.toContain("await holdWorkerNotReady(appDatabaseReadiness.code");
+    expect(source).not.toContain('await holdWorkerNotReady("MIGRATION_REVISION_MISMATCH")');
+  });
+
+  it("starts a recurring managed dependency gate before worker polling", () => {
+    const recurring = source.indexOf("startWorkerDependencyHeartbeat");
+    const poll = source.indexOf("worker.run()");
+    expect(recurring).toBeGreaterThan(-1);
+    expect(recurring).toBeLessThan(poll);
+  });
 });

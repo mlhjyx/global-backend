@@ -42,6 +42,7 @@ describe("inspectRuntimeAdmission", () => {
       {
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
@@ -67,6 +68,7 @@ describe("inspectRuntimeAdmission", () => {
       {
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
+        PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "https://identity.example.test/.well-known/jwks.json",
@@ -100,6 +102,7 @@ describe("inspectRuntimeAdmission", () => {
       MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
       MODEL_GATEWAY_KEY: "secret",
       DATA_PROCESSOR_JURISDICTION: "EU",
+      PII_ENCRYPTION_KEY: "a".repeat(64),
     };
     const settings = {
       mode: "pilot" as const,
@@ -142,6 +145,33 @@ describe("inspectRuntimeAdmission", () => {
       status: "failed",
       code: "DATA_PROCESSOR_JURISDICTION_INVALID",
     });
+  });
+
+  it("keeps managed admission closed when the PII key is missing or does not decode to AES-256 key material", () => {
+    const settings = { mode: "development" as const, bindHost: "127.0.0.1", port: 3000 };
+    const base = {
+      NODE_ENV: "production",
+      DATA_PROCESSOR_JURISDICTION: "EU",
+      APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+      AUTH_JWKS_URI: "http://127.0.0.1:3100/jwks",
+      AUTH_ISSUER: "http://127.0.0.1:3100/",
+      AUTH_AUDIENCE: "global-api",
+      AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+      MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+      MODEL_GATEWAY_KEY: "secret",
+    };
+    for (const value of [undefined, "not-a-32-byte-key"]) {
+      const result = inspectRuntimeAdmission(
+        settings,
+        value === undefined ? base : { ...base, PII_ENCRYPTION_KEY: value },
+        attestedBuild,
+      );
+      expect(result.admitted).toBe(false);
+      expect(result.checks).toMatchObject({
+        pii: { status: "failed", code: "PII_ENCRYPTION_KEY_INVALID" },
+      });
+      expect(JSON.stringify(result)).not.toContain("not-a-32-byte-key");
+    }
   });
 
   it("requires the tenant app role URL and never admits an owner-role fallback", () => {

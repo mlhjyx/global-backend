@@ -59,6 +59,12 @@ test('runtime lease principals are provisioned without embedded credentials and 
   assert.match(compose, /backend-api-runtime\.env/);
   assert.match(compose, /backend-worker-runtime\.env/);
   assert.match(provision, /RUNTIME_API_LEASE_PASSWORD/);
+  assert.match(provision, /\\getenv api_password RUNTIME_API_LEASE_PASSWORD/);
+  assert.match(provision, /PGPASSWORD/);
+  assert.doesNotMatch(provision, /--set\s+api_password=/);
+  assert.doesNotMatch(provision, /--set\s+worker_password=/);
+  assert.doesNotMatch(provision, /--set\s+relay_password=/);
+  assert.doesNotMatch(provision, /psql\s+"\$\{RUNTIME_LEASE_PROVISION_DATABASE_URL\}"/);
   assert.match(provision, /REVOKE runtime_api, runtime_worker, runtime_outbox_relay/);
   assert.match(provision, /GRANT runtime_api TO/);
   assert.match(provision, /GRANT runtime_worker TO/);
