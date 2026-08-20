@@ -62,6 +62,22 @@ describe('production parity budget migration integrity', () => {
     );
   });
 
+  it('keeps an exhausted Tool budget closed to new physical operations while preserving operation replay', async () => {
+    const sql = await readFile(migrationUrl, 'utf8');
+    const reserve = sql.slice(
+      sql.indexOf('CREATE FUNCTION reserve_tool_budget('),
+      sql.indexOf('CREATE FUNCTION settle_tool_budget('),
+    );
+    const replay = reserve.indexOf("IF o.\"id\" IS NOT NULL THEN RETURN QUERY SELECT 'REPLAY'");
+    const exhausted = reserve.indexOf('IF a."exhausted" THEN');
+    const insert = reserve.indexOf('INSERT INTO "tool_budget_operation"');
+    expect(replay).toBeGreaterThan(-1);
+    expect(exhausted).toBeGreaterThan(replay);
+    expect(exhausted).toBeLessThan(insert);
+    expect(reserve.slice(exhausted, insert)).toContain("'DENIED'");
+    expect(reserve.slice(exhausted, insert)).toContain("'EXHAUSTED'");
+  });
+
   it('locks the Grant database audience to the single product audience', async () => {
     const sql = await readFile(migrationUrl, 'utf8');
     expect(sql).toMatch(

@@ -628,6 +628,33 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     );
     vi.useRealTimers();
   });
+
+  it("keeps an already READY OUTBOX_RELAY lease in READY on managed ticks", async () => {
+    vi.useFakeTimers();
+    const db = {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+      outboxEvent: { findMany: vi.fn(async () => []) },
+    };
+    const leases = { heartbeat: vi.fn(async () => undefined) };
+    const service = new (OutboxRelayService as any)(
+      makeTemporal(),
+      db,
+      vi.fn(),
+      leases,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+
+    await service.onModuleInit();
+    await service.managedTick();
+
+    expect(leases.heartbeat).toHaveBeenCalledTimes(3);
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(1, "OUTBOX_RELAY", "STARTING", null);
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(2, "OUTBOX_RELAY", "READY", null);
+    expect(leases.heartbeat).toHaveBeenNthCalledWith(3, "OUTBOX_RELAY", "READY", null);
+    await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
 });
 
 describe("tick — 轮询条件（parked 不毒化轮询）", () => {

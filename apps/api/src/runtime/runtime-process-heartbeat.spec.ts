@@ -103,6 +103,20 @@ describe('ApiRuntimeProcessHeartbeat', () => {
     await service.onApplicationShutdown();
   });
 
+  it('never regresses an already READY API lease back to STARTING on a periodic heartbeat', async () => {
+    const heartbeat = vi.fn(async () => undefined);
+    const { service } = fixture(heartbeat);
+
+    await service.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(heartbeat).toHaveBeenCalledTimes(3);
+    expect(heartbeat).toHaveBeenNthCalledWith(1, 'API', 'STARTING', null);
+    expect(heartbeat).toHaveBeenNthCalledWith(2, 'API', 'READY', null);
+    expect(heartbeat).toHaveBeenNthCalledWith(3, 'API', 'READY', null);
+    await service.onApplicationShutdown();
+  });
+
   it('retries migration admission after a transient bootstrap outage without reopening readiness early', async () => {
     const heartbeat = vi.fn(async () => undefined);
     const migrationQuery = vi
