@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-21 · Execution Budget Authority additive foundation
+
+- Tasks 1–7 在 `c96b5d4f04ca8d93ad23b4b7b690e88bd2449f42` 后完成共享 Authority claim/JWKS verifier、Workspace Grant 同事务 consume+authorized-open、Platform signed command/schema/ingestion、FORCE RLS authority/revocation/account binding，以及独立 capability health snapshots；实现收口于 `bea4d7392344cd44cbfbc5379a7d620f418122fc`。现有产品 caller、API/Worker admission 与 legacy cap path 未切换，probe 只观察、不 admission。
+- 外部 Control Plane signer/JWKS、Workspace producer、Platform inbound transport、部署 writer LOGIN/credential/connection 均为 `EXTERNAL_OWNED/PARTIAL`。本批次没有 retained migration、服务重启、真实 JWKS/provider/model/paid call、部署、RuntimeEvidence 或用户可用性声明；产品 cutover 仍须按独立计划与授权执行。
+- Authority 新 export 令 active Copy v22 source bundle 多出 `packages/contracts/src/index.ts` 漂移。旧 binding/evidence 未改写；机器 successor 固定 11-path fingerprint `fadc301c5944d06e1a97dd77c022b3d5d6b79ce9fe52758329f22fa6e69984a9`，继续为 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`。partial/extra/predecessor path-set mutation 均拒绝，不 rebaseline Copy、不授权 dispatch。
+- Fresh verification：Authority/Task 7 changed-scope coverage statements 88.30%、branches 87.71%；API 327 files / 4,836 tests；disposable PostgreSQL 16.14 从空库完成 84 migrations 与 RLS/ACL/concurrency 20/20，容器和匿名卷均销毁；Governance 115/115；ContractGraph 0 errors。完整 provenance、命令、外部交接与 deferred minors 见[实施记录](../implementation-records/execution-budget-authority-contract.md)。
+
 ## 2026-08-10 · 获客 Suppression/DataRights source 治理
 
 - #375 已以 merge commit `5b588353fba6cdbda3a7e0f5f171a3e2fabbc786` 合入 roles→scopes，并在该 main commit 上通过 CI、Governance、Security、Supply Chain 与 CodeQL push canary；Supply Chain 仍是带 36 项生产依赖遗留风险的 ratchet pass，不是漏洞清零。
