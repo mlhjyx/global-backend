@@ -322,7 +322,7 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
     data: {
       ...(result.data.awards
         ? {
-            awards: result.data.awards.slice(0, 250).map((notice) => ({
+            awards: result.data.awards.slice(0, 4).map((notice) => ({
               publicationNumber: notice.publicationNumber,
               publicationDate: notice.publicationDate,
               noticeType: notice.noticeType,
@@ -330,7 +330,7 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
               cpvCodes: notice.cpvCodes.slice(0, 64),
               buyerNames: notice.buyerNames.slice(0, 64),
               buyerCountries: notice.buyerCountries.slice(0, 64),
-              winners: notice.winners.slice(0, 64).map((winner) => ({
+              winners: notice.winners.slice(0, 16).map((winner) => ({
                 name: winner.name,
                 country: winner.country,
                 identifier: winner.identifier,
@@ -342,7 +342,7 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
         : {}),
       ...(result.data.notices
         ? {
-            notices: result.data.notices.slice(0, 250).map((notice) => ({
+            notices: result.data.notices.slice(0, 32).map((notice) => ({
               publicationNumber: notice.publicationNumber,
               publicationDate: notice.publicationDate,
               publicationDateIso: notice.publicationDateIso,
@@ -409,7 +409,7 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
     data: {
       ...(result.data.establishments
         ? {
-            establishments: result.data.establishments.slice(0, 250).map((record) => ({
+            establishments: result.data.establishments.slice(0, 12).map((record) => ({
               registrationNumber: record.registrationNumber,
               feiNumber: record.feiNumber,
               name: record.name,
@@ -429,7 +429,7 @@ export const openFdaSearchTool: Tool<OpenFdaSearchInput, OpenFdaSearchOutput> = 
         : {}),
       ...(result.data.clearances
         ? {
-            clearances: result.data.clearances.slice(0, 250).map((record) => ({
+            clearances: result.data.clearances.slice(0, 12).map((record) => ({
               kNumber: record.kNumber,
               applicant: record.applicant,
               country: record.country,
@@ -754,7 +754,7 @@ export const samgovSearchTool: Tool<SamSearchInput, SamSearchOutput> = {
     data: {
       ...(result.data.notices
         ? {
-            notices: result.data.notices.slice(0, 250).map((notice) => ({
+            notices: result.data.notices.slice(0, 32).map((notice) => ({
               noticeId: notice.noticeId,
               title: notice.title,
               department: notice.department,

@@ -7,7 +7,11 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     const order: string[] = [];
     const generateStructured = vi.fn(async (_input, context) => {
       order.push('model');
-      expect(context).toMatchObject({ workspaceId: 'workspace-1', runId: 'discovery:run-1' });
+      expect(context).toMatchObject({
+        workspaceId: 'workspace-1',
+        runId: 'discovery:run-1',
+        genericReplay: expect.objectContaining({ schema: 'taxonomy-result/v1' }),
+      });
       return { data: { code: 'industry-1' }, provider: 'gateway', model: 'model', usage: { inputTokens: 1, outputTokens: 1 } };
     });
     const prisma = {

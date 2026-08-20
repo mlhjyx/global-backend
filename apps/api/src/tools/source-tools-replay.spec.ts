@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openFdaSearchTool, samgovSearchTool, tedSearchTool } from './source-tools';
+import { projectGenericOperationResult } from './generic-operation-projection';
 
 describe('governed source Tool durable replay', () => {
   it('projects only bounded TED green organization facts', () => {
@@ -53,5 +54,33 @@ describe('governed source Tool durable replay', () => {
     });
     expect(replay?.data.notices).toHaveLength(1);
     expect(JSON.stringify(replay)).not.toMatch(/email|phone|contact|authorization|token/i);
+  });
+
+  it('keeps maximum governed source projections inside the shared field envelope', () => {
+    const fda = openFdaSearchTool.durableReplayResult!({
+      data: {
+        establishments: Array.from({ length: 250 }, (_, index) => ({
+          name: `Firm ${index}`, establishmentTypes: ['Manufacturer'], initialImporter: false,
+          productCodes: ['LLZ'], deviceNames: ['Pump'], ownerOperatorNumbers: [`OO-${index}`],
+        })),
+        clearances: Array.from({ length: 250 }, (_, index) => ({ applicant: `Firm ${index}` })),
+      },
+      costCents: 0,
+    });
+    const sam = samgovSearchTool.durableReplayResult!({
+      data: { notices: Array.from({ length: 250 }, (_, index) => ({
+        noticeId: `N-${index}`, title: 'Pump', department: 'DOD', subTier: 'Army', office: 'ACC',
+        postedDateIso: null, naicsCode: '333911', responseDeadlineIso: null,
+      })) },
+      costCents: 0,
+    });
+    expect(() => projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: { toolId: openFdaSearchTool.id, toolVersion: openFdaSearchTool.version, result: fda },
+    })).not.toThrow();
+    expect(() => projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: { toolId: samgovSearchTool.id, toolVersion: samgovSearchTool.version, result: sam },
+    })).not.toThrow();
   });
 });

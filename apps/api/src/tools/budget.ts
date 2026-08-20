@@ -100,19 +100,31 @@ export class BudgetLedger {
 
 // ── 预算上限配置（收口②「真开账」：编排层用这些 cap 调 open()，超限 reserve 抛错=真拦截）──
 
-function intFromEnv(name: string, fallback: number): number {
-  const v = Number(process.env[name]);
-  return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
+export class BudgetConfigurationError extends Error {
+  readonly code = 'BUDGET_CONFIGURATION_INVALID';
+
+  constructor(public readonly variable: string) {
+    super(`${variable} must be configured as a positive integer`);
+    this.name = 'BudgetConfigurationError';
+  }
 }
 
-/** 单个 discovery run 的预算上限（¢）。默认宽松（$20），先让账真实开起来，再按 backtest 收紧。 */
+function requiredIntFromEnv(name: string): number {
+  const raw = process.env[name];
+  if (!raw || !/^[1-9][0-9]*$/.test(raw)) throw new BudgetConfigurationError(name);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) throw new BudgetConfigurationError(name);
+  return value;
+}
+
+/** 单个 product run 的执行上限（¢）；managed runtime 必须由部署权威显式配置。 */
 export function runBudgetCents(): number {
-  return intFromEnv('RUN_BUDGET_CENTS', 2000);
+  return requiredIntFromEnv('RUN_BUDGET_CENTS');
 }
 
 /** 单轮 sweep（backlog 等·per-workspace）的预算上限（¢）。 */
 export function sweepBudgetCents(): number {
-  return intFromEnv('SWEEP_BUDGET_CENTS', 5000);
+  return requiredIntFromEnv('SWEEP_BUDGET_CENTS');
 }
 
 /** LLM 调用无任务契约 maxCostCents 时的保守预留估算（¢）。 */

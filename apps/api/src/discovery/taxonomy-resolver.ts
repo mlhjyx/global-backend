@@ -379,7 +379,32 @@ export class TaxonomyResolver {
       return await executeStructuredTaskWithRuntime<Output>(
         this.gateway,
         input,
-        { workspaceId, runId: accountKey },
+        {
+          workspaceId,
+          runId: accountKey,
+          genericReplay: {
+            schema: 'taxonomy-result/v1',
+            project: (result) => ({
+              json: JSON.stringify(result.data),
+              provider: result.provider,
+              model: result.model,
+            }),
+            restore: (value) => {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                throw new Error('TAXONOMY_REPLAY_INVALID');
+              }
+              const record = value as Record<string, unknown>;
+              if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
+                throw new Error('TAXONOMY_REPLAY_INVALID');
+              }
+              return {
+                data: JSON.parse(record.json) as Output,
+                provider: record.provider,
+                model: record.model,
+              };
+            },
+          },
+        },
         { telemetry: this.runtimeTelemetry },
       );
     } finally {

@@ -128,8 +128,26 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     }
     expect(generateStructured).toHaveBeenCalledTimes(3);
     for (const call of generateStructured.mock.calls) {
-      expect(call[1]).toEqual(expect.objectContaining({ runId: accountKey }));
+      expect(call[1]).toEqual(expect.objectContaining({
+        runId: accountKey,
+        genericReplay: expect.objectContaining({ schema: expect.stringMatching(/^understanding-/) }),
+      }));
     }
+  });
+
+  it('rejects missing model claims instead of synthesizing a Stub product fact', async () => {
+    const budget = budgetStoreSpies();
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured: vi.fn(async () => ({
+        data: { claims: null }, provider: 'gateway', model: 'model',
+      })) } as unknown as ModelGateway,
+      budgetStore: budget.store,
+      activityRunId: () => 'understanding-workflow-run',
+    });
+
+    await expect(acts.extractClaims({ workspaceId: 'ws-1', text: 'claims' }))
+      .rejects.toThrow();
   });
 
   it('closes the workflow budget account when egress fails', async () => {

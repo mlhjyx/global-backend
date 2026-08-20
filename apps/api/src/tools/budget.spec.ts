@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { BudgetLedger, BudgetExceededError } from './budget';
+import {
+  BudgetConfigurationError,
+  BudgetLedger,
+  BudgetExceededError,
+  runBudgetCents,
+  sweepBudgetCents,
+} from './budget';
 
 /**
  * BudgetLedger.wasExhausted 生命周期单测（Codex PR #51 P1 根治）：预算打穿的**唯一真相点**在 reserve。
@@ -60,5 +66,25 @@ describe('BudgetLedger.wasExhausted', () => {
     l.close('run-1');
     l.open('run-1', 100); // 复用同键
     expect(l.wasExhausted('run-1')).toBe(false); // 不带旧打标
+  });
+});
+
+describe('managed budget configuration', () => {
+  it.each([
+    ['RUN_BUDGET_CENTS', runBudgetCents],
+    ['SWEEP_BUDGET_CENTS', sweepBudgetCents],
+  ] as const)('%s is mandatory and never falls back to a hidden amount', (name, read) => {
+    const prior = process.env[name];
+    try {
+      delete process.env[name];
+      expect(read).toThrow(BudgetConfigurationError);
+      process.env[name] = 'not-a-positive-integer';
+      expect(read).toThrow(BudgetConfigurationError);
+      process.env[name] = '125';
+      expect(read()).toBe(125);
+    } finally {
+      if (prior === undefined) delete process.env[name];
+      else process.env[name] = prior;
+    }
   });
 });

@@ -60,6 +60,14 @@ const firstOrder = (m: Mock): number => m.mock.invocationCallOrder[0];
 beforeEach(() => resetActivities());
 
 describe('externalIntentSweepWorkflow — 单次 live 重读 + 穿线（PR #70 缺口守）', () => {
+  it('ingest activity failure rejects the workflow instead of projecting stale data as a successful sweep', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    acts.ingestExternalSignals.mockRejectedValue(new Error('BUDGET_OPERATION_REPLAY_UNAVAILABLE'));
+
+    await expect(externalIntentSweepWorkflow({})).rejects.toThrow('BUDGET_OPERATION_REPLAY_UNAVAILABLE');
+    expect(acts.projectExternalIntentForIcp).not.toHaveBeenCalled();
+  });
+
   it('happy path：liveProviderState 恰调一次，其快照 thread 进每个投影（同引用），调用顺序 live 在 ingest 后、投影前', async () => {
     const t1 = target('ws-1', 'icp-1');
     const t2 = target('ws-2', 'icp-2');

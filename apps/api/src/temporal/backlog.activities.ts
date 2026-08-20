@@ -551,7 +551,8 @@ export function createBacklogActivities(deps: {
                 ctx,
               );
               if (r.matched) hits.push({ key: e.key, result: r });
-            } catch {
+            } catch (err) {
+              if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
               /* 单信号源失败不影响其余 */
             }
           }
@@ -771,7 +772,8 @@ export function createBacklogActivities(deps: {
                   key: adapter.key,
                   contacts: result.contacts,
                 });
-            } catch {
+            } catch (err) {
+              if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
               // 单 adapter fail-safe：不阻断其余源
             }
           }

@@ -8,6 +8,7 @@ import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links'
 import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import type { ModelResult } from '../model-gateway/types';
 import { runBudgetCents } from '../tools/budget';
 import {
   BudgetStoreUnavailableError,
@@ -44,6 +45,27 @@ export interface CrawledPage {
 /** Keep Temporal payloads bounded — a page beyond this adds noise, not facts. */
 const MAX_PAGE_CHARS = 40_000;
 const MAX_SUBPAGES = 6;
+
+function understandingReplay<Output>(schema: string) {
+  return {
+    schema,
+    project: (result: ModelResult<unknown>) => ({
+      json: JSON.stringify(result.data),
+      provider: result.provider,
+      model: result.model,
+    }),
+    restore: (value: unknown): ModelResult<Output> => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('UNDERSTANDING_REPLAY_INVALID');
+      }
+      const record = value as Record<string, unknown>;
+      if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
+        throw new Error('UNDERSTANDING_REPLAY_INVALID');
+      }
+      return { data: JSON.parse(record.json) as Output, provider: record.provider, model: record.model };
+    },
+  };
+}
 
 /**
  * Activities do the real (side-effectful) work — DB writes go through
@@ -171,16 +193,16 @@ export function createUnderstandingActivities(deps: {
             model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
             schema: contract?.outputSchema ?? { required: ['claims'] },
           },
-          { workspaceId: args.workspaceId, runId: accountKey },
+          {
+            workspaceId: args.workspaceId,
+            runId: accountKey,
+            genericReplay: understandingReplay<{ claims: ExtractedClaim[] }>('understanding-claims/v1'),
+          },
           { telemetry: deps.runtimeTelemetry },
         );
         const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
-        // Stub gateway returns { claims: null }; synthesize a deterministic sample
-        // so the loop is observable end-to-end until a real model is registered.
-        const claims: ExtractedClaim[] = Array.isArray(fromModel)
-          ? fromModel
-          : [{ type: 'capability', statement: 'Stub-extracted capability claim', evidence: '(stub)', confidence: 0.5 }];
-        return { claims };
+        if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_CLAIMS_INVALID');
+        return { claims: fromModel };
       });
     },
 
@@ -197,7 +219,11 @@ export function createUnderstandingActivities(deps: {
             model: contract?.model,
             schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
           },
-          { workspaceId: args.workspaceId, runId: accountKey },
+          {
+            workspaceId: args.workspaceId,
+            runId: accountKey,
+            genericReplay: understandingReplay<{ industry?: string; summary?: string }>('understanding-profile/v1'),
+          },
           { telemetry: deps.runtimeTelemetry },
         );
         const out = result.data as { industry?: string; summary?: string };
@@ -229,11 +255,16 @@ export function createUnderstandingActivities(deps: {
             model: contract?.model,
             schema: contract?.outputSchema ?? { required: ['offerings'] },
           },
-          { workspaceId: args.workspaceId, runId: accountKey },
+          {
+            workspaceId: args.workspaceId,
+            runId: accountKey,
+            genericReplay: understandingReplay<{ offerings: ExtractedOffering[] }>('understanding-offerings/v1'),
+          },
           { telemetry: deps.runtimeTelemetry },
         );
         const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
-        return { offerings: Array.isArray(fromModel) ? fromModel : [] };
+        if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_OFFERINGS_INVALID');
+        return { offerings: fromModel };
       });
     },
 

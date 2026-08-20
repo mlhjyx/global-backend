@@ -162,6 +162,7 @@ describe('smtp.rcpt_probe 工具 · 经 ToolBroker 闸门', () => {
     // advisory：标的=任意公司邮箱域，未登记放行（required 会杀死邮箱验证）；登记即强制 SUSPENDED/用途门
     expect(smtpRcptProbeTool.compliance.sourcePolicy).toBe('advisory');
     expect(smtpRcptProbeTool.compliance.personalData).toBe(true); // rcptTo 可含具名人邮箱
+    expect(smtpRcptProbeTool.durableReplayResult).toBeTypeOf('function');
     expect(registerBuiltinTools(new ToolRegistry()).get('smtp.rcpt_probe')).toBeDefined();
   });
 

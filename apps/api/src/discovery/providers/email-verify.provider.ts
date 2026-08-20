@@ -1,4 +1,5 @@
 import { resolveMx } from 'node:dns/promises';
+import { createHash } from 'node:crypto';
 import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext,
   externalActionAuthorized,
 } from '../provider-contract';
@@ -88,7 +89,11 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
     if (!this.broker) return { status: 'RISKY', detail: 'smtp_gate_unavailable', costCents: 0 };
 
     // SMTP RCPT 探测经 ToolBroker：真实地址 + 一个随机地址（catch-all 检测）。SSRF 护栏在工具内。
-    const randomLocal = `x-verify-${Date.now().toString(36)}-zzq`;
+    const probeIdentity = createHash('sha256')
+      .update(`${ctx?.runId ?? 'no-run'}:${email.toLowerCase()}:${domain}`)
+      .digest('hex')
+      .slice(0, 20);
+    const randomLocal = `x-verify-${probeIdentity}`;
     const toolCtx: ToolContext = {
       workspaceId: ctx?.workspaceId ?? 'platform',
       // runId 不塞常量：broker 预算/限流按 runId ?? workspaceId 归账，留空即按真实 workspace 归属，
@@ -106,6 +111,11 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       );
       probe = res.data;
     } catch (err) {
+      if (
+        err && typeof err === 'object' &&
+        typeof (err as { code?: unknown }).code === 'string' &&
+        (err as { code: string }).code.startsWith('BUDGET_')
+      ) throw err;
       // Broker 拒绝：SUSPENDED/用途门（竞态）= source_policy_denied；其余（预算/限流兜底）= probe_failed。
       // 任何情况都**不**回落到原始出网。
       const denied = (err as { name?: string })?.name === 'ToolPolicyDenied';

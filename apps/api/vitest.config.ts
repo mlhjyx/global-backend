@@ -11,6 +11,8 @@ export default defineConfig({
     env: {
       PII_ENCRYPTION_KEY: "0".repeat(64),
       DATA_PROCESSOR_JURISDICTION: "EU",
+      RUN_BUDGET_CENTS: "2000",
+      SWEEP_BUDGET_CENTS: "5000",
     },
   },
 });

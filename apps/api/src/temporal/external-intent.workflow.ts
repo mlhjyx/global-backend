@@ -69,8 +69,12 @@ export async function externalIntentSweepWorkflow(
       budgetScopeId,
     });
   } catch (err) {
-    // 摄取整体失败 fail-safe：投影仍可吃此前窗口已落库的信号。
-    agg.ingest = { tedSpecs: 0, fdaSpecs: 0, samSpecs: 0, fetches: 0, ledgerHits: 0, signalsUpserted: 0, budgetExceeded: false, errors: [String(err).slice(0, 200)] };
+    const detail = String(err);
+    if (detail.includes('BUDGET_OPERATION_REPLAY') || detail.includes('BUDGET_STORE_')) throw err;
+    agg.ingest = {
+      tedSpecs: 0, fdaSpecs: 0, samSpecs: 0, fetches: 0, ledgerHits: 0,
+      signalsUpserted: 0, budgetExceeded: false, errors: [detail.slice(0, 200)],
+    };
   }
 
   // 过期后 intent **复算收敛**（#56 P2）：expireStaleSignals 只翻转信号状态，增量投影只加不删——已写进

@@ -12,7 +12,7 @@ import {
   SelfHostedEmailVerifier,
   EmailVerifyBroker,
 } from './email-verify.provider';
-import type { SmtpProbeOutput } from '../../tools/builtin-tools';
+import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
 
 const mockedMx = resolveMx as unknown as ReturnType<typeof vi.fn>;
 
@@ -101,13 +101,14 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
   const okProbe: SmtpProbeOutput = { reachable: true, mailFromCode: 250, codes: [250, 550],
   }; // 真实 250 / 随机 550=非 catch-all
 
-  function fakeBroker(opts: { suspend?: string[]; denyPurpose?: string[]; probe?: SmtpProbeOutput; throwName?: string; policyThrows?: boolean;
+  function fakeBroker(opts: { suspend?: string[]; denyPurpose?: string[]; probe?: SmtpProbeOutput; throwName?: string; throwCode?: string; policyThrows?: boolean;
     } = {},
   ) {
     const invoke = vi.fn(async () => {
       if (opts.throwName) {
         const e = new Error('broker denied');
         e.name = opts.throwName;
+        if (opts.throwCode) (e as Error & { code: string }).code = opts.throwCode;
         throw e;
       }
       return { data: opts.probe ?? okProbe, costCents: 0 };
@@ -157,6 +158,16 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
     expect((input as { rcptTo: string[] }).rcptTo).toHaveLength(2); // 真实 + 随机(catch-all 探测)
     expect(ctx).toMatchObject({ workspaceId: 'w' });
     expect(r.status).toBe('VALID'); // 可达+MAIL FROM过+250+catch-all 证伪
+  });
+
+  it('uses a stable catch-all address for the same durable run identity', async () => {
+    vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(2_000);
+    const { broker, invoke } = fakeBroker();
+    const verifier = new SelfHostedEmailVerifier(broker);
+    await verifier.verifyEmail('user@acme.de', { workspaceId: 'w', runId: 'verify-run-1' });
+    await verifier.verifyEmail('user@acme.de', { workspaceId: 'w', runId: 'verify-run-1' });
+    expect((invoke.mock.calls[0][1] as SmtpProbeInput).rcptTo[1])
+      .toBe((invoke.mock.calls[1][1] as SmtpProbeInput).rcptTo[1]);
   });
 
   it('suppression action denial before MX returns BLOCKED without DNS or SMTP', async () => {
@@ -212,6 +223,13 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
     const r = await new SelfHostedEmailVerifier(broker).verifyEmail('user@acme.de', { workspaceId: 'w' });
     expect(r).toEqual({ status: 'RISKY', detail: 'smtp_probe_failed', costCents: 0,
     });
+  });
+
+  it('never downgrades a durable budget replay failure to RISKY', async () => {
+    const { broker } = fakeBroker({ throwName: 'BudgetOperationReplayError', throwCode: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    await expect(new SelfHostedEmailVerifier(broker).verifyEmail('user@acme.de', {
+      workspaceId: 'w', runId: 'verify-run-1',
+    })).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
   });
 
   it('反枚举 provider(Gmail)：MX 后短路 RISKY，不 invoke 出网工具', async () => {

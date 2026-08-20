@@ -324,6 +324,16 @@ export function createSmtpRcptProbeTool(
     },
     capabilities: { produces: [], accepts: ['domain'] },
     idempotencyKey: (i) => `smtp.rcpt_probe:${stableKey({ domain: i.domain, mxHost: i.mxHost, rcptTo: i.rcptTo })}`,
+    durableReplayResult: (result) => ({
+      data: {
+        reachable: result.data.reachable,
+        mailFromCode: result.data.mailFromCode,
+        codes: result.data.codes.slice(0, 8),
+        egressBlocked: result.data.egressBlocked,
+      },
+      costCents: result.costCents,
+      degraded: result.degraded,
+    }),
     healthCheck: async () => ({ healthy: true, detail: 'smtp' }),
     execute: async (input, ctx) => {
       // 🛡️ SSRF 护栏：连接前解析 MX 主机并拒私网/内网/云元数据 IP，直连解析出的公网 IP

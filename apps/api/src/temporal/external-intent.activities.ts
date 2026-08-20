@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { BudgetExceededError, sweepBudgetCents } from '../tools/budget';
-import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { BudgetOperationReplayError, type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
@@ -281,6 +281,7 @@ export function createExternalIntentActivities(deps: {
             summary.signalsUpserted += r.signalsUpserted; // ledgerHit 归 0（本轮真实落库数，不跨窗双计）
             return true;
           } catch (err) {
+            if (err instanceof BudgetOperationReplayError) throw err;
             if (err instanceof BudgetExceededError) {
               summary.budgetExceeded = true; // 显性截断：预算打穿即停拉（绝不静默假完成）
               summary.errors.push('budget_exceeded');
