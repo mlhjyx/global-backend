@@ -18,23 +18,19 @@ import { DataRightsContext, JURISDICTIONS, Jurisdiction } from './data-rights.ty
  * 会被误判为 ALLOW 而非 REQUIRE_APPROVAL（GDPR Ch.V/PIPL 人审）——出海中企务必按真实处理地设置。**
  *
  * env DATA_PROCESSOR_JURISDICTION（值 ∈ JURISDICTIONS）。非法值 → 抛（fail-fast 防拼写）；
- * 🔴 **生产未设 → 抛（fail-closed，Codex P1 on PR #72）**：缺省 EU 会把在华处理误判为 ALLOW（漏
- * GDPR Ch.V/PIPL 跨境人审），故生产必须显式设真实处理地，宁可 fail-fast 不启动也不静默错判；
- * dev/test 未设 → 缺省 EU（便于本地/CI 跑）。nodeEnv 可注入便于单测。
+ * 🔴 **managed runtime 未设 → 抛（fail-closed）**：缺省 EU 会把在华处理误判为 ALLOW（漏
+ * GDPR Ch.V/PIPL 跨境人审）。development、pilot、production 与测试都必须显式声明；
+ * 测试 fixture 由 Vitest 配置注入，不在产品代码保留环境分支。
  */
 export function resolveProcessorJurisdiction(
   raw?: string | null,
-  nodeEnv: string | undefined = process.env.NODE_ENV,
 ): Jurisdiction {
   const v = (raw ?? '').trim().toUpperCase();
   if (!v) {
-    if (nodeEnv === 'production') {
-      throw new Error(
-        'DATA_PROCESSOR_JURISDICTION 未设：生产环境必须显式设置真实数据处理地' +
-          `（${JURISDICTIONS.join(' | ')}），否则 EU/UK 主体的跨境存储会被误判为 ALLOW 而非 REQUIRE_APPROVAL。`,
-      );
-    }
-    return 'EU';
+    throw new Error(
+      'DATA_PROCESSOR_JURISDICTION 未设：所有 managed runtime 必须显式设置真实数据处理地' +
+        `（${JURISDICTIONS.join(' | ')}），否则 EU/UK 主体的跨境存储会被误判为 ALLOW 而非 REQUIRE_APPROVAL。`,
+    );
   }
   if (!(JURISDICTIONS as readonly string[]).includes(v)) {
     throw new Error(
@@ -43,10 +39,6 @@ export function resolveProcessorJurisdiction(
   }
   return v as Jurisdiction;
 }
-
-export const PROCESSOR_JURISDICTION: Jurisdiction = resolveProcessorJurisdiction(
-  process.env.DATA_PROCESSOR_JURISDICTION,
-);
 
 export interface StorageRightsLeadInput {
   /** 公司国别 alpha-2（数据主体法域来源）。 */
@@ -60,7 +52,9 @@ export interface StorageRightsLeadInput {
 /** Lead/公司 → STORE 动作的 DataRightsContext（processor 可注入，便于测试与多部署）。 */
 export function storageRightsContextForLead(
   input: StorageRightsLeadInput,
-  processorJurisdiction: Jurisdiction = PROCESSOR_JURISDICTION,
+  processorJurisdiction: Jurisdiction = resolveProcessorJurisdiction(
+    process.env.DATA_PROCESSOR_JURISDICTION,
+  ),
 ): DataRightsContext {
   return {
     action: 'STORE',

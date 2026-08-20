@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
@@ -18,6 +18,13 @@ import {
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
+import { runBudgetCents } from '../tools/budget';
+import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
+import {
+  assertProductDiscoveryProvenance,
+  isSyntheticDiscoveryProvenance,
+} from './evidence-license';
+import { collectProductReadPage } from './product-read-pagination';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -42,7 +49,12 @@ export class DiscoveryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly providers: DiscoveryProviderRegistry,
+    @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
   ) {}
+
+  private budgets(): BudgetStore {
+    return this.budgetStore ?? new UnavailableBudgetStore('DiscoveryService requires an authoritative BudgetStore');
+  }
 
   /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
   async executePlan(ctx: RequestContext, planId: string) {
@@ -86,19 +98,34 @@ export class DiscoveryService {
 
   listCanonicalCompanies(ctx: RequestContext, opts: { status?: string; limit: number; cursor?: string }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const rows = await tx.canonicalCompany.findMany({
-        where: opts.status ? { status: opts.status } : {},
-        take: opts.limit + 1,
-        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      return collectProductReadPage({
+        limit: opts.limit,
+        cursor: opts.cursor,
+        fetchBatch: (cursor, take) =>
+          tx.canonicalCompany.findMany({
+            where: opts.status ? { status: opts.status } : {},
+            take,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          }),
+        projectProductRows: async (rows) => {
+          const provenance = await tx.fieldEvidence.findMany({
+            where: {
+              entityType: 'company',
+              entityId: { in: rows.map((company) => company.id) },
+            },
+            select: { entityId: true, providerKey: true, license: true },
+          });
+          const quarantinedIds = new Set(
+            provenance
+              .filter(isSyntheticDiscoveryProvenance)
+              .map((evidence) => evidence.entityId),
+          );
+          return rows
+            .filter((company) => !quarantinedIds.has(company.id))
+            .map((company) => ({ cursor: company.id, value: company }));
+        },
       });
-      const hasMore = rows.length > opts.limit;
-      const data = hasMore ? rows.slice(0, opts.limit) : rows;
-      return {
-        data,
-        nextCursor: hasMore ? data[data.length - 1].id : null,
-        hasMore,
-      };
     });
   }
 
@@ -113,9 +140,21 @@ export class DiscoveryService {
           error: { code: 'NOT_FOUND', message: 'company not found' },
         });
       const evidence = await tx.fieldEvidence.findMany({
-        where: { entityType: 'company', entityId: id },
+        where: {
+          entityId: {
+            in: [company.id, ...company.contacts.map((contact) => contact.id)],
+          },
+        },
         orderBy: { fetchedAt: 'desc' },
       });
+      if (evidence.some(isSyntheticDiscoveryProvenance)) {
+        throw new ConflictException({
+          error: {
+            code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+            message: 'historical synthetic discovery evidence is quarantined from product reads',
+          },
+        });
+      }
       return { company, evidence };
     });
   }
@@ -135,6 +174,21 @@ export class DiscoveryService {
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'company not found' },
         });
+      const evidenceRows = await tx.fieldEvidence.findMany({
+        where: {
+          entityType: 'company',
+          entityId: companyId,
+        },
+        select: { providerKey: true, license: true },
+      });
+      if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
+        throw new ConflictException({
+          error: {
+            code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+            message: 'historical synthetic discovery evidence is quarantined from product actions',
+          },
+        });
+      }
       const companySuppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
@@ -174,32 +228,39 @@ export class DiscoveryService {
       this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
         companyMayUseExternalProcessing(tx, ctx.workspaceId, companyId),
       );
-    for (const adapter of loaded.adapters) {
-      try {
-        const authorized = await authorizeExternalAction();
-        if (!authorized) break;
-        const result = await adapter.discoverContacts(
-          {
-            name: loaded.company.name,
-            domain: loaded.company.domain ?? undefined,
-            country: loaded.company.country ?? undefined,
-          },
-          // 收口②：真租户贯穿（LLM/抓取按 workspace 归属 trace/预算）
-          {
-            workspaceId: ctx.workspaceId,
-            correlationId: companyId,
-            authorizeExternalAction,
-          },
-        );
-        perAdapter.push({
-          key: adapter.key,
-          contacts: result.contacts,
-          costCents: result.costCents,
-        });
-      } catch (err) {
-        // 单 adapter fail-safe：不阻断其余源——但**留痕**（交互端点不静默退化为 0 联系人）
-        console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
+    const accountKey = `contact-discovery:${companyId}`;
+    const budgets = this.budgets();
+    await budgets.open({ workspaceId: ctx.workspaceId, accountKey, capCents: runBudgetCents() });
+    try {
+      for (const adapter of loaded.adapters) {
+        try {
+          const authorized = await authorizeExternalAction();
+          if (!authorized) break;
+          const result = await adapter.discoverContacts(
+            {
+              name: loaded.company.name,
+              domain: loaded.company.domain ?? undefined,
+              country: loaded.company.country ?? undefined,
+            },
+            {
+              workspaceId: ctx.workspaceId,
+              runId: accountKey,
+              correlationId: companyId,
+              authorizeExternalAction,
+            },
+          );
+          perAdapter.push({
+            key: adapter.key,
+            contacts: result.contacts,
+            costCents: result.costCents,
+          });
+        } catch (err) {
+          console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
+        }
+        if ((await budgets.status({ workspaceId: ctx.workspaceId, accountKey })).exhausted) break;
       }
+    } finally {
+      await budgets.close({ workspaceId: ctx.workspaceId, accountKey });
     }
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -330,46 +391,55 @@ export class DiscoveryService {
       fullName: string;
       result: GuessResult;
     }[] = [];
-    for (const c of targets) {
-      const authorized = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-        contactMayUseExternalProcessing(tx, {
-          workspaceId: ctx.workspaceId,
-          contactId: c.contactId,
-        }),
-      );
-      if (!authorized) {
-        results.push({
-          contactId: c.contactId,
-          fullName: c.fullName,
-          result: {
-            status: 'blocked',
-            triedCount: 0,
-            candidates: [],
-            reason: 'suppression_action_gate',
+    const accountKey = `email-guess:${companyId}`;
+    const budgets = this.budgets();
+    await budgets.open({ workspaceId: ctx.workspaceId, accountKey, capCents: runBudgetCents() });
+    try {
+      for (const c of targets) {
+        const authorized = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+          contactMayUseExternalProcessing(tx, {
+            workspaceId: ctx.workspaceId,
+            contactId: c.contactId,
+          }),
+        );
+        if (!authorized) {
+          results.push({
+            contactId: c.contactId,
+            fullName: c.fullName,
+            result: {
+              status: 'blocked',
+              triedCount: 0,
+              candidates: [],
+              reason: 'suppression_action_gate',
+            },
+          });
+          continue;
+        }
+        const result = await guesser.guess(
+          { fullName: c.fullName, domain, knownSamples },
+          {
+            workspaceId: ctx.workspaceId,
+            runId: accountKey,
+            lawfulBasis: opts?.lawfulBasis,
+            allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
+            actor: ctx.userId,
+            maxProbe: opts?.maxProbe,
+            suppressedEmails: loaded.suppressedEmails,
+            authorizeCandidate: (email) =>
+              this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+                contactMayUseExternalProcessing(tx, {
+                  workspaceId: ctx.workspaceId,
+                  contactId: c.contactId,
+                  email,
+                }),
+              ),
           },
-        });
-        continue;
+        );
+        results.push({ contactId: c.contactId, fullName: c.fullName, result });
+        if ((await budgets.status({ workspaceId: ctx.workspaceId, accountKey })).exhausted) break;
       }
-      const result = await guesser.guess(
-        { fullName: c.fullName, domain, knownSamples },
-        {
-          workspaceId: ctx.workspaceId,
-          lawfulBasis: opts?.lawfulBasis,
-          allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
-          actor: ctx.userId,
-          maxProbe: opts?.maxProbe,
-          suppressedEmails: loaded.suppressedEmails,
-          authorizeCandidate: (email) =>
-            this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-              contactMayUseExternalProcessing(tx, {
-                workspaceId: ctx.workspaceId,
-                contactId: c.contactId,
-                email,
-              }),
-            ),
-        },
-      );
-      results.push({ contactId: c.contactId, fullName: c.fullName, result });
+    } finally {
+      await budgets.close({ workspaceId: ctx.workspaceId, accountKey });
     }
 
     // 短事务②：落库
@@ -546,6 +616,7 @@ export class DiscoveryService {
           },
         });
       }
+      assertProductDiscoveryProvenance({ providerKey: loaded.adapter.key });
       const verifyCtx: EmailVerifyContext = {
         workspaceId: ctx.workspaceId,
         kind: loaded.kind,
@@ -564,6 +635,7 @@ export class DiscoveryService {
       verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
       providerKey = loaded.adapter.key;
     }
+    assertProductDiscoveryProvenance({ providerKey });
 
     // 短事务②：审计留痕（裁决 + 合法性基础）+ 回写状态。返回 point + verification 元数据供前端判断。
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -637,7 +709,7 @@ export class DiscoveryService {
             suppressed: currentlySuppressed || loaded.suppressed,
           } as unknown as Prisma.InputJsonValue,
           providerKey: committedProviderKey,
-          license: committedProviderKey === 'sandbox' ? 'sandbox' : 'public',
+          license: 'public',
           allowedActions: allowedActionsFor(committedVerdict.status) as unknown as Prisma.InputJsonValue,
         },
       });

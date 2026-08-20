@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from "vitest/config";
 
 /**
  * 收口⑥：为单测注入固定 PII_ENCRYPTION_KEY（32 字节 hex）。持久化路径（contact-persist /
@@ -7,8 +7,10 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
+    exclude: ["src/site-builder/eval/**", "node_modules/**", "dist/**"],
     env: {
-      PII_ENCRYPTION_KEY: '0'.repeat(64),
+      PII_ENCRYPTION_KEY: "0".repeat(64),
+      DATA_PROCESSOR_JURISDICTION: "EU",
     },
   },
 });

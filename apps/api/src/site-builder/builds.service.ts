@@ -29,12 +29,18 @@ import {
 } from "./build-scope";
 import type { SiteSpec } from "@global/contracts";
 import { terminalizeBuildProgress } from "./build-progress";
-import { siteBuildBudgetCents } from "../tools/budget";
 import { SiteBuildCostLedger } from "./site-build-cost-ledger";
+import {
+  assertBudgetGrantConsumable,
+  isBudgetGrantExpiredStorageError,
+  SiteBuildBudgetGrantError,
+  type VerifiedSiteBuildBudgetGrant,
+} from "./site-build-budget-grant";
 import {
   loadPartialBuildBase,
   PartialBuildRequiresV2BaseError,
 } from "./partial-build-base";
+import { SiteBuildRuntimeGuard } from "../runtime/site-build-runtime.guard";
 
 /** 每站每日 run 上限（T5 资源闸雏形；ModelBroker 细粒度预算随 M1-b）。配错值 fail-closed 回默认。 */
 const parsedDailyLimit = Number(process.env.SITE_BUILD_DAILY_LIMIT ?? 10);
@@ -62,7 +68,8 @@ type BuildErrorCode =
   | "BUILD_ACTIVE_SPEC_INVALID"
   | "PARTIAL_BUILD_REQUIRES_V2_BASE"
   | "QUOTA_EXCEEDED"
-  | "IDEMPOTENCY_KEY_REUSED";
+  | "IDEMPOTENCY_KEY_REUSED"
+  | "BUDGET_GRANT_REUSED";
 
 function buildHttpError(
   status: HttpStatus,
@@ -132,6 +139,7 @@ export class BuildsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(REFURBISH_LAUNCHER) private readonly launcher: RefurbishLauncher,
+    private readonly runtimeGuard: SiteBuildRuntimeGuard,
   ) {
     this.costLedger = new SiteBuildCostLedger(prisma);
   }
@@ -140,19 +148,41 @@ export class BuildsService {
     ctx: RequestContext,
     siteId: string,
     input: CreateBuildInput,
+    budgetGrant?: VerifiedSiteBuildBudgetGrant,
   ): Promise<{ buildId: string; status: string }> {
     const request = normalizeBuildRequest(input);
     const idempotencyKey = normalizeIdempotencyKey(
       input.idempotencyKey ?? undefined,
     );
     const endpoint = BUILD_ENDPOINT;
-    const requestHash = idempotencyKey
-      ? buildRequestHash(siteId, request)
-      : undefined;
+    const semanticRequestHash = buildRequestHash(siteId, request);
+    const requestHash = idempotencyKey ? semanticRequestHash : undefined;
+    if (!budgetGrant) {
+      throw new SiteBuildBudgetGrantError(
+        "BUDGET_GRANT_REQUIRED",
+        HttpStatus.PAYMENT_REQUIRED,
+      );
+    }
+    if (
+      budgetGrant.workspaceId !== ctx.workspaceId ||
+      budgetGrant.siteId !== siteId ||
+      budgetGrant.operation !== "refurbish" ||
+      budgetGrant.requestSha256 !== semanticRequestHash
+    ) {
+      throw new SiteBuildBudgetGrantError(
+        "BUDGET_GRANT_SCOPE_MISMATCH",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const readinessFailure = await this.runtimeGuard
+      .assertReady()
+      .then(() => null)
+      .catch((error: unknown) => error);
 
     const { run, replayed } = await this.prisma.withWorkspace(
       ctx.workspaceId,
       async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-grant-${budgetGrant.issuer}-${budgetGrant.jti}`}))`;
         // The ledger key is workspace-operation scoped, so requests for different Sites must
         // still serialize before checking/inserting the same key. Lock ordering is always
         // idempotency key first, then Site, avoiding cross-Site P2002 leaks and deadlocks.
@@ -195,6 +225,34 @@ export class BuildsService {
                 "corrupt site-builder build idempotency reference",
               );
             }
+            const [existingGrant, existingBudget] = await Promise.all([
+              tx.siteBuildBudgetGrant.findUnique({
+                where: { buildRunId: existing.id },
+              }),
+              tx.siteBuildBudget.findUnique({
+                where: { buildRunId: existing.id },
+              }),
+            ]);
+            if (!existingGrant || !existingBudget) {
+              throw new Error("build idempotency reference has no spending authority");
+            }
+            const exactConsumedGrant =
+              existingGrant.issuer === budgetGrant.issuer &&
+              existingGrant.jti === budgetGrant.jti;
+            if (exactConsumedGrant) {
+              if (existingGrant.tokenSha256 !== budgetGrant.tokenSha256) {
+                throw buildHttpError(
+                  HttpStatus.CONFLICT,
+                  "BUDGET_GRANT_REUSED",
+                  "budget grant was already consumed with a different token",
+                );
+              }
+            } else {
+              // A fresh Grant carried on an Idempotency-Key replay is not
+              // consumed, but it still must be valid now. Only the exact
+              // already-consumed token digest may be replayed after expiry.
+              assertBudgetGrantConsumable(budgetGrant);
+            }
             return { run: existing, replayed: true };
           }
 
@@ -214,6 +272,37 @@ export class BuildsService {
             });
           }
         }
+
+        const consumedGrant = await tx.siteBuildBudgetGrant.findUnique({
+          where: {
+            issuer_jti: {
+              issuer: budgetGrant.issuer,
+              jti: budgetGrant.jti,
+            },
+          },
+        });
+        if (consumedGrant) {
+          if (
+            consumedGrant.tokenSha256 !== budgetGrant.tokenSha256 ||
+            consumedGrant.workspaceId !== ctx.workspaceId ||
+            consumedGrant.siteId !== siteId ||
+            consumedGrant.operation !== "refurbish" ||
+            consumedGrant.requestSha256 !== semanticRequestHash
+          ) {
+            throw buildHttpError(
+              HttpStatus.CONFLICT,
+              "BUDGET_GRANT_REUSED",
+              "budget grant was already consumed by a different build request",
+            );
+          }
+          const existing = await tx.siteBuildRun.findUnique({
+            where: { id: consumedGrant.buildRunId },
+          });
+          if (!existing) throw new Error("budget grant references a missing build");
+          return { run: existing, replayed: true };
+        }
+        if (readinessFailure) throw readinessFailure;
+        assertBudgetGrantConsumable(budgetGrant);
 
         // A durable idempotency replay above is independent of today's active pointer. Only a
         // genuinely new partial request validates the current active SiteSpec.
@@ -345,15 +434,38 @@ export class BuildsService {
           }
           throw error;
         }
-        await tx.siteBuildBudget.create({
-          data: {
+        try {
+          await tx.siteBuildBudgetGrant.create({
+            data: {
             workspaceId: ctx.workspaceId,
             siteId,
             buildRunId: created.id,
-            capMicrousd: BigInt(siteBuildBudgetCents() * 10_000),
-            paidCallsEnabled: true,
-          },
-        });
+            issuer: budgetGrant.issuer,
+            audience: budgetGrant.audience,
+            jti: budgetGrant.jti,
+            schemaVersion: budgetGrant.schemaVersion,
+            purpose: budgetGrant.purpose,
+            operation: budgetGrant.operation,
+            requestSha256: budgetGrant.requestSha256,
+            tokenSha256: budgetGrant.tokenSha256,
+            currency: budgetGrant.currency,
+            unit: budgetGrant.unit,
+            capMicrousd: budgetGrant.capMicrousd,
+            issuedAt: budgetGrant.issuedAt,
+            notBefore: budgetGrant.notBefore,
+            expiresAt: budgetGrant.expiresAt,
+            },
+          });
+        } catch (error) {
+          if (isBudgetGrantExpiredStorageError(error)) {
+            throw new SiteBuildBudgetGrantError(
+              "BUDGET_GRANT_EXPIRED",
+              HttpStatus.PAYMENT_REQUIRED,
+            );
+          }
+          throw error;
+        }
+        await tx.$executeRaw`SELECT create_site_build_budget_from_grant(${ctx.workspaceId}::uuid, ${created.id}::uuid)`;
         if (idempotencyKey) {
           await tx.idempotencyKey.create({
             data: {
@@ -529,13 +641,13 @@ export class BuildsService {
             { buildId: run.id },
           );
         }
-        await tx.siteBuildBudget.updateMany({
-          where: { buildRunId: run.id },
-          data: {
-            paidCallsEnabled: false,
-            disabledReason: "cancellation_requested",
-          },
-        });
+        await tx.$queryRaw`
+          SELECT disable_site_build_paid_calls(
+            ${ctx.workspaceId}::uuid,
+            ${run.id}::uuid,
+            ${"cancellation_requested"}::text
+          )
+        `;
         return { workflowId: run.temporalWorkflowId, siteId: run.siteId };
       },
     );

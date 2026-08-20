@@ -177,6 +177,7 @@ function recomputeActs() {
   const tx = {
     $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
     suppressionRecord: { findMany: vi.fn(async () => []) },
+    fieldEvidence: { findMany: vi.fn(async () => []) },
     canonicalCompany: {
       findMany: async ({ take, where }: { take: number; where?: { id?: { gt?: string } } }) =>
         Array.from({ length: take }, (_, i) => ({ id: `${where?.id?.gt ?? 'c'}-${i}` })),

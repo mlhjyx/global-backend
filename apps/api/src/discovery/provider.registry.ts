@@ -6,7 +6,6 @@ import {
   EmailVerificationAdapter,
   SourceClass,
 } from './provider-contract';
-import { SandboxDiscoveryProvider } from './providers/sandbox.provider';
 import { PublicWebDiscoveryProvider } from './providers/public-web.provider';
 import { WikidataDiscoveryProvider } from './providers/wikidata.provider';
 import { OsmDiscoveryProvider } from './providers/osm.provider';
@@ -40,8 +39,7 @@ type ProviderDb = {
  * data_provider 表管运行状态（ENABLED/DISABLED = Kill Switch 执行点）与成本参数。
  *
  * seed 中各 provider 的 ENABLED/DISABLED 状态才是默认路由真值；registry 注册不等于运行启用。
- * sandbox 仅在 DISCOVERY_ALLOW_SANDBOX=true 时注册（用于无外网的单元/离线测试），
- * 生产与常规验证一律走真实数据。
+ * 合成 provider 不属于产品 registry；离线测试只能通过独立 test-support 注入。
  */
 export class DiscoveryProviderRegistry {
   private readonly discovery: CompanyDiscoveryAdapter[] = [];
@@ -134,12 +132,6 @@ export class DiscoveryProviderRegistry {
     this.signalEnrichers.push(new DigitalFootprintProvider({ broker }));
     this.signalEnrichers.push(new StructuredHarvestProvider({ broker }));
 
-    if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true' || !deps?.gateway) {
-      const sandbox = new SandboxDiscoveryProvider();
-      this.discovery.push(sandbox);
-      this.contacts.push(sandbox);
-      this.emailVerifiers.push(sandbox);
-    }
     this.assertDiscoverySourceClasses();
   }
 
@@ -431,13 +423,6 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'email_guess', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
     });
-    if (process.env.DISCOVERY_ALLOW_SANDBOX === 'true') {
-      await db.dataProvider.upsert({
-        where: { key: 'sandbox' },
-        update: {},
-        create: { key: 'sandbox', class: 'b2b_company_person', status: 'ENABLED', costPerCallCents: 0 },
-      });
-    }
   }
 
   /** 某 source_class 当前 ENABLED 的公司发现适配器，保持显式注册顺序；调用方负责 fan-out。 */

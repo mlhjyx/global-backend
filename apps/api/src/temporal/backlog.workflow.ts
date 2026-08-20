@@ -1,4 +1,4 @@
-import { proxyActivities, log } from '@temporalio/workflow';
+import { patched, proxyActivities, log, workflowInfo } from '@temporalio/workflow';
 import type {
   BacklogActivities,
   ContactBacklogResult,
@@ -62,6 +62,8 @@ export interface BacklogSweepTargetStats {
  * 阶段间无跨项依赖 → 顺序执行即可；单阶段失败不阻断后续阶段（fail-safe）。
  */
 export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<BacklogSweepTargetStats[]> {
+  // Preserve command arguments for workflow histories that predate durable per-run budget scopes.
+  const budgetScopeId = patched('backlog-durable-budget-scope-v1') ? workflowInfo().runId : undefined;
   const targets =
     input?.workspaceId && input?.icpId
       ? [{ workspaceId: input.workspaceId, icpId: input.icpId }]
@@ -84,7 +86,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxFitRounds ?? 60); round++) {
-        const r: FitBacklogResult = await fitActs.qualifyFitBacklog({ ...t, limit: input?.fitBatch ?? 20, cursor });
+        const r: FitBacklogResult = await fitActs.qualifyFitBacklog({ ...t, budgetScopeId, limit: input?.fitBatch ?? 20, cursor });
         stats.fit.scanned += r.scanned;
         stats.fit.judged += r.judged;
         for (const [k, v] of Object.entries(r.verdicts)) stats.fit.verdicts[k] = (stats.fit.verdicts[k] ?? 0) + v;
@@ -117,7 +119,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxSignalRounds ?? 3); round++) {
-        const r: EnrichBacklogResult = await slowActs.enrichSignalsBacklog({ workspaceId: t.workspaceId, limit: input?.signalBatch ?? 12, cursor });
+        const r: EnrichBacklogResult = await slowActs.enrichSignalsBacklog({ workspaceId: t.workspaceId, budgetScopeId, limit: input?.signalBatch ?? 12, cursor });
         stats.signals.scanned += r.scanned;
         stats.signals.attempted += r.attempted;
         stats.signals.matched += r.matched;
@@ -146,7 +148,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxContactRounds ?? 3); round++) {
-        const r: ContactBacklogResult = await slowActs.discoverContactsBacklog({ ...t, limit: input?.contactBatch ?? 8, cursor });
+        const r: ContactBacklogResult = await slowActs.discoverContactsBacklog({ ...t, budgetScopeId, limit: input?.contactBatch ?? 8, cursor });
         stats.contacts.scanned += r.scanned;
         stats.contacts.attempted += r.attempted;
         stats.contacts.contactsCreated += r.contactsCreated;

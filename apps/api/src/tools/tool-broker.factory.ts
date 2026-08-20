@@ -1,15 +1,54 @@
 import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
 import { ToolRegistry } from './tool-registry';
 import { registerBuiltinTools } from './builtin-tools';
 import { registerSourceTools } from './source-tools';
 import { ToolBroker, ToolTrace } from './tool-broker';
 import type { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
+import type { PrismaService } from '../prisma/prisma.service';
+import {
+  type BudgetStore,
+  PostgresBudgetStore,
+  UnavailableBudgetStore,
+} from './budget-store';
+import type { RateLimitStore } from './rate-limiter';
+import {
+  RedisRateLimitStore,
+  UnavailableRateLimitStore,
+  validateRedisConnectionUrl,
+} from './redis-rate-limit-store';
 
 /** source_policy 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type SourcePolicyDb = { sourcePolicy: PrismaClient['sourcePolicy'] };
 
 /** Broker 用的 source_policy 读取器：按域名查（SUSPENDED + 用途）。未登记 → null（无策略）。 */
 export type SourcePolicyReader = (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+
+let processRedis: Redis | undefined;
+let processRateLimitStore: RateLimitStore | undefined;
+
+function rateLimitStoreFromEnvironment(): RateLimitStore {
+  if (processRateLimitStore) return processRateLimitStore;
+  const url = process.env.TOOL_RATE_LIMIT_REDIS_URL ?? process.env.REDIS_URL;
+  if (!url?.trim()) {
+    return new UnavailableRateLimitStore('TOOL_RATE_LIMIT_REDIS_URL/REDIS_URL is not configured');
+  }
+  let configured: string;
+  try {
+    configured = validateRedisConnectionUrl(url);
+  } catch {
+    return new UnavailableRateLimitStore('Redis rate-limit configuration invalid');
+  }
+  processRedis ??= new Redis(configured, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 3_000,
+    commandTimeout: 5_000,
+  });
+  const store = new RedisRateLimitStore(processRedis);
+  processRateLimitStore = store;
+  return store;
+}
 
 /**
  * prisma 支持的 source_policy 读取。source_policy 是**平台级、无 RLS** 的治理表
@@ -36,6 +75,10 @@ export function sourcePolicyReaderFrom(db: SourcePolicyDb): SourcePolicyReader {
  * 默认 traceRecorder 对非 OK（DENIED/ERROR）落一条 warn，供出网被拒的审计可见。
  */
 export function buildToolBroker(deps?: {
+  /** Required by managed composition unless a BudgetStore is explicitly injected. */
+  prisma?: PrismaService;
+  budgetStore?: BudgetStore;
+  limiter?: RateLimitStore;
   sourcePolicyReader?: SourcePolicyReader;
   traceRecorder?: (t: ToolTrace) => void;
   paidLedger?: SiteBuildCostLedger;
@@ -48,6 +91,12 @@ export function buildToolBroker(deps?: {
     });
   return new ToolBroker({
     registry,
+    budgetStore:
+      deps?.budgetStore ??
+      (deps?.prisma
+        ? new PostgresBudgetStore(deps.prisma)
+        : new UnavailableBudgetStore('ToolBroker factory requires PrismaService for durable budgets')),
+    limiter: deps?.limiter ?? rateLimitStoreFromEnvironment(),
     sourcePolicyReader: deps?.sourcePolicyReader,
     traceRecorder,
     paidLedger: deps?.paidLedger,

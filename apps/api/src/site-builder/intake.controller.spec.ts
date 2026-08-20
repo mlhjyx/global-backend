@@ -26,18 +26,31 @@ describe("IntakeController R0 header bridge", () => {
       buildId: "run-1",
       status: "generating_demo",
     });
-    const controller = new IntakeController({
-      create,
-    } as unknown as IntakeService);
+    const verify = vi.fn().mockResolvedValue({ tokenSha256: "a".repeat(64) });
+    const controller = new IntakeController(
+      { create } as unknown as IntakeService,
+      { verify } as never,
+    );
     const targetCreate = controller.create.bind(controller) as unknown as (
       ctx: RequestContext,
       dto: IntakeDto,
       idempotencyKey?: string,
+      rawBudgetGrant?: string,
     ) => Promise<unknown>;
 
-    await expect(targetCreate(CTX, DTO, "request-key-1")).resolves.toEqual({
+    await expect(targetCreate(CTX, DTO, "request-key-1", "signed-grant")).resolves.toEqual({
       data: { siteId: "site-1", buildId: "run-1", status: "generating_demo" },
     });
-    expect(create).toHaveBeenCalledWith(CTX, DTO, "request-key-1");
+    expect(verify).toHaveBeenCalledWith("signed-grant", {
+      workspaceId: CTX.workspaceId,
+      operation: "intake",
+      requestSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(create).toHaveBeenCalledWith(
+      CTX,
+      DTO,
+      "request-key-1",
+      expect.objectContaining({ tokenSha256: "a".repeat(64) }),
+    );
   });
 });

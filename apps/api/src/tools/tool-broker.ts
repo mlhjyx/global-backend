@@ -3,8 +3,16 @@ import { ExecutionBroker,
   SourcePolicyDenyReason, Tool, ToolContext, ToolResult,
 } from './tool-contract';
 import { ToolRegistry } from './tool-registry';
-import { BudgetLedger, BudgetExceededError, budgetLedger } from './budget';
-import { RateLimiter, rateLimiter } from './rate-limiter';
+import { BudgetLedger, BudgetExceededError } from './budget';
+import type { RateLimitStore } from './rate-limiter';
+import {
+  BudgetOperationReplayError,
+  type BudgetReservation,
+  type BudgetStore,
+  InMemoryBudgetStoreAdapter,
+  UnavailableBudgetStore,
+} from './budget-store';
+import { UnavailableRateLimitStore } from './redis-rate-limit-store';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   legacyToolCostMeasurement,
@@ -38,8 +46,10 @@ export class ToolPolicyDenied extends Error {
 
 export interface BrokerDeps {
   registry: ToolRegistry;
+  /** @deprecated Explicit unit-test compatibility only. Product composition injects budgetStore. */
   budget?: BudgetLedger;
-  limiter?: RateLimiter;
+  budgetStore?: BudgetStore;
+  limiter?: RateLimitStore;
   /** 查某域名的 source_policy（返回 null=未登记；{suspended, allowedPurpose,...}）。 */
   sourcePolicyReader?: (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
   /** 记一条工具调用 Trace（成本/延迟/合规决策）。fire-and-forget。 */
@@ -78,15 +88,20 @@ function extractDomain(input: unknown): string | null {
 
 export class ToolBroker implements ExecutionBroker {
   private readonly registry: ToolRegistry;
-  private readonly budget: BudgetLedger;
-  private readonly limiter: RateLimiter;
+  private readonly budget: BudgetStore;
+  private readonly limiter: RateLimitStore;
   private readonly deps: BrokerDeps;
 
   constructor(deps: BrokerDeps) {
     this.deps = deps;
     this.registry = deps.registry;
-    this.budget = deps.budget ?? budgetLedger;
-    this.limiter = deps.limiter ?? rateLimiter;
+    this.budget =
+      deps.budgetStore ??
+      (deps.budget
+        ? new InMemoryBudgetStoreAdapter(deps.budget)
+        : new UnavailableBudgetStore('ToolBroker was created without an authoritative BudgetStore'));
+    this.limiter =
+      deps.limiter ?? new UnavailableRateLimitStore('ToolBroker was created without an authoritative RateLimitStore');
     for (const t of this.registry.all()) this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
   }
 
@@ -183,10 +198,10 @@ export class ToolBroker implements ExecutionBroker {
     }
     // 注：robots 由抓取类工具内部 isAllowedByRobots 强制（已实现），此处不重复。
 
-    // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the durable
-    // database ledger; all other legacy callers retain the process-local ledger.
+    // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
+    // ledger; every other product caller uses the injected durable BudgetStore.
     const runId = ctx.runId ?? ctx.workspaceId;
-    let reservation: { runId: string; estCents: number } | undefined;
+    let reservation: BudgetReservation | undefined;
     let paidScope: PaidOperationReservation | undefined;
     if (ctx.paidCost) {
       if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
@@ -234,7 +249,21 @@ export class ToolBroker implements ExecutionBroker {
       }
     } else {
       try {
-        reservation = this.budget.reserve(runId, tool.cost.estimatedCents);
+        reservation = await this.budget.reserve({
+          workspaceId: ctx.workspaceId,
+          accountKey: runId,
+          operationKey: paidOperationKey([
+            runId,
+            'tool-budget',
+            tool.id,
+            tool.version,
+            tool.idempotencyKey(input),
+          ]),
+          estimatedCents: tool.cost.estimatedCents,
+        });
+        if (reservation.replay) {
+          throw new BudgetOperationReplayError(reservation.operationId);
+        }
       } catch (err) {
         if (err instanceof BudgetExceededError) {
           this.trace(ctx, tool, 'DENIED', `budget exceeded: ${err.message.slice(0, 150)}`, 0, now() - started);
@@ -244,7 +273,7 @@ export class ToolBroker implements ExecutionBroker {
     }
 
     // 4) 限流（令牌桶 + 每域延迟）
-    let release: (() => void) | undefined;
+    let release: (() => void | Promise<void>) | undefined;
     try {
       release = await this.limiter.acquire(toolId, now());
     } catch (error) {
@@ -256,13 +285,31 @@ export class ToolBroker implements ExecutionBroker {
           errorCode: 'NOT_EXECUTED',
         });
       } else if (reservation) {
-        this.budget.settle(reservation, 0);
+        await this.budget.release(reservation);
       }
       throw error;
     }
     const domain = extractDomain(input);
     if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
-      await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+      try {
+        await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+      } catch (error) {
+        try {
+          if (paidScope) {
+            await this.settlePersistentOperation({
+              scope: paidScope,
+              status: 'RELEASED',
+              measurement: this.notIncurredMeasurement(),
+              errorCode: 'NOT_EXECUTED',
+            });
+          } else if (reservation) {
+            await this.budget.release(reservation);
+          }
+        } finally {
+          await release?.();
+        }
+        throw error;
+      }
     }
 
     // 5) 执行 + 6) settle + 7) trace
@@ -287,7 +334,7 @@ export class ToolBroker implements ExecutionBroker {
               errorCode: 'SUPPRESSION_ACTION_GATE',
             });
           } else if (reservation) {
-            this.budget.settle(reservation, 0);
+            await this.budget.release(reservation);
           }
           this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
           throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
@@ -306,7 +353,7 @@ export class ToolBroker implements ExecutionBroker {
               errorCode: 'SUPPRESSION_ACTION_GATE',
             });
           } else if (reservation) {
-            this.budget.settle(reservation, 0);
+            await this.budget.release(reservation);
           }
           this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
           throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
@@ -320,9 +367,10 @@ export class ToolBroker implements ExecutionBroker {
             measurement: this.unknownMeasurement(paidScope.reservationMicrousd),
             errorCode: 'TOOL_CALL_ERROR',
           });
-        } else if (reservation) {
-          this.budget.settle(reservation, 0); // legacy non-site behavior
         }
+        // For the generic BudgetStore, once execute() starts an upstream request
+        // may have happened even when no result arrived. The reservation therefore
+        // remains RESERVED; releasing it would allow another physical request.
         this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
         throw err;
       }
@@ -348,7 +396,7 @@ export class ToolBroker implements ExecutionBroker {
           },
         });
       } else if (reservation) {
-        this.budget.settle(reservation, result.costCents);
+        await this.budget.settle(reservation, result.costCents);
       }
       this.trace(
         ctx,
@@ -362,7 +410,7 @@ export class ToolBroker implements ExecutionBroker {
       );
       return result;
     } finally {
-      release?.();
+      await release?.();
     }
   }
 

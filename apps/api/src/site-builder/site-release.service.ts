@@ -29,10 +29,7 @@ export function resolveSiteRendererBuildIdentity(
 ): string {
   const configured = env.SITE_RENDERER_BUILD_ID?.trim();
   if (!configured) {
-    if (env.NODE_ENV === 'production') {
-      throw new Error('SITE_RENDERER_BUILD_ID is required in production');
-    }
-    return 'site-renderer@dev-unpinned';
+    throw new Error('SITE_RENDERER_BUILD_ID is required in every managed runtime');
   }
   if (!BUILD_IDENTITY.test(configured)) {
     throw new Error('SITE_RENDERER_BUILD_ID is invalid');
@@ -45,8 +42,8 @@ export interface SiteReleaseServiceOptions {
   now?: () => Date;
   randomUuid?: () => string;
   leaseMs?: number;
-  /** Deterministic TOCTOU test seam; production wiring never supplies it. */
-  beforeQualityCollectionForTest?: () => Promise<void>;
+  /** Artifact collector dependency; defaults to the immutable production collector. */
+  artifactCollector?: typeof buildReleaseArtifact;
 }
 
 export interface ReserveSiteReleaseInput {
@@ -353,7 +350,7 @@ export class SiteReleaseService {
       };
     }
     const buildArtifact = (): Promise<PreparedReleaseArtifact> =>
-      buildReleaseArtifact({
+      (this.options.artifactCollector ?? buildReleaseArtifact)({
         root: input.root,
         spec: input.spec,
         storedSpecVersion: input.storedSpecVersion,
@@ -426,7 +423,6 @@ export class SiteReleaseService {
               siteOrigin: input.candidateFence!.siteOrigin,
               treeDigest: input.candidateFence!.rendererOutputDigest,
             });
-            await this.options.beforeQualityCollectionForTest?.();
             // Collection is deliberately inside the same candidate fence. It
             // is bounded by renderer-build's 4k files / 64 MiB limits.
             const collected = await buildArtifact();

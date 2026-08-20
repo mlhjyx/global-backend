@@ -3,6 +3,8 @@ import { ToolRegistry } from './tool-registry';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger, BudgetExceededError } from './budget';
 import { RateLimiter } from './rate-limiter';
+import { BudgetStoreUnavailableError } from './budget-store';
+import { RateLimitStoreUnavailableError } from './redis-rate-limit-store';
 import { Tool } from './tool-contract';
 
 function fakeTool(id: string, costCents = 5, exec?: () => Promise<unknown>): Tool {
@@ -30,6 +32,24 @@ function makeBroker(tool: Tool, extra?: Partial<ConstructorParameters<typeof Too
 }
 
 describe('ToolBroker — allowedTools 白名单（无超级 Agent 的代码强制）', () => {
+  it('fails closed when no authoritative budget store is injected', async () => {
+    const registry = new ToolRegistry();
+    registry.register(fakeTool('searxng.search'));
+    const broker = new ToolBroker({ registry, limiter: new RateLimiter() });
+    await expect(broker.invoke('searxng.search', {}, { workspaceId: 'w' })).rejects.toBeInstanceOf(
+      BudgetStoreUnavailableError,
+    );
+  });
+
+  it('fails closed when no authoritative rate-limit store is injected', async () => {
+    const registry = new ToolRegistry();
+    registry.register(fakeTool('searxng.search'));
+    const broker = new ToolBroker({ registry, budget: new BudgetLedger() });
+    await expect(broker.invoke('searxng.search', {}, { workspaceId: 'w' })).rejects.toBeInstanceOf(
+      RateLimitStoreUnavailableError,
+    );
+  });
+
   it('未注册工具 → denied', async () => {
     const { broker } = makeBroker(fakeTool('searxng.search'));
     await expect(broker.invoke('nope.tool', {}, { workspaceId: 'w' })).rejects.toThrow(ToolPolicyDenied);
@@ -123,7 +143,7 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     expect(rejected).toBe(1);
   });
 
-  it('执行失败不计费（settle 0），预算退还', async () => {
+  it('执行开始后的失败保持 reservation，未知物理调用不得退额重试', async () => {
     const budget = new BudgetLedger();
     const failing = fakeTool('t.fail', 10);
     failing.execute = async () => {
@@ -132,7 +152,29 @@ describe('ToolBroker — 预算 reserve-then-settle', () => {
     const { broker } = makeBroker(failing, { budget });
     budget.open('run1', 10);
     await expect(broker.invoke('t.fail', {}, { workspaceId: 'w', runId: 'run1' })).rejects.toThrow('boom');
-    expect(budget.remainingCents('run1')).toBe(10); // 全额退还
+    expect(budget.remainingCents('run1')).toBe(0); // 保守占用；不能把未知调用当作零费用
+  });
+
+  it('domain-delay admission fails before execution and releases both budget and concurrency', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run1', 10);
+    const tool = fakeTool('crawl.delayed', 10);
+    tool.rateLimit.perDomainCrawlDelayMs = 1_000;
+    const release = vi.fn();
+    const limiter = {
+      configure: vi.fn(),
+      acquire: vi.fn(async () => release),
+      respectDomainDelay: vi.fn(async () => {
+        throw new Error('redis unavailable');
+      }),
+    };
+    const { broker } = makeBroker(tool, { budget, limiter });
+
+    await expect(
+      broker.invoke('crawl.delayed', { url: 'https://example.com/' }, { workspaceId: 'w', runId: 'run1' }),
+    ).rejects.toThrow('redis unavailable');
+    expect(budget.remainingCents('run1')).toBe(10);
+    expect(release).toHaveBeenCalledOnce();
   });
 });
 

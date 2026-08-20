@@ -23,6 +23,7 @@ import {
   releaseAestheticEvidenceDigest,
   releaseScreenshotSetDigest,
   releaseSpecDigest,
+  buildReleaseArtifact,
   type BuildReleaseQualityInputV3,
   type ReleaseAestheticEvidenceV1,
 } from './release-artifact';
@@ -485,11 +486,12 @@ describe('SiteReleaseService cross-system commit protocol', () => {
     const service = new SiteReleaseService(prisma as never, storage, {
       buildIdentity: 'site-renderer@test',
       randomUuid: () => ids.shift()!,
-      beforeQualityCollectionForTest: async () => {
+      artifactCollector: async (artifactInput) => {
         await writeFile(
           path.join(rootToSwap.value!, 'index.html'),
           '<h1>changed after P4 precheck</h1>',
         );
+        return buildReleaseArtifact(artifactInput);
       },
     });
     const golden = (
@@ -780,7 +782,7 @@ describe('Site renderer build fencing', () => {
   it('requires an explicit immutable build identity in production', () => {
     expect(() =>
       resolveSiteRendererBuildIdentity({ NODE_ENV: 'production' }),
-    ).toThrow('SITE_RENDERER_BUILD_ID is required in production');
+    ).toThrow('SITE_RENDERER_BUILD_ID is required');
     expect(
       resolveSiteRendererBuildIdentity({
         NODE_ENV: 'production',
@@ -789,9 +791,9 @@ describe('Site renderer build fencing', () => {
     ).toBe('site-renderer@1.0.0+sha.abc123');
   });
 
-  it('marks an unpinned development build honestly instead of calling it production', () => {
-    expect(resolveSiteRendererBuildIdentity({ NODE_ENV: 'development' })).toBe(
-      'site-renderer@dev-unpinned',
-    );
+  it('requires the immutable renderer identity in managed development too', () => {
+    expect(() =>
+      resolveSiteRendererBuildIdentity({ NODE_ENV: 'development' }),
+    ).toThrow('SITE_RENDERER_BUILD_ID is required');
   });
 });

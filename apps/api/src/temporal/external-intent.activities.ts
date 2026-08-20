@@ -2,7 +2,9 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
+import { BudgetExceededError, sweepBudgetCents } from '../tools/budget';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
 import { resolveIcpToNaics } from '../discovery/icp-to-naics';
@@ -97,7 +99,10 @@ export function createExternalIntentActivities(deps: {
   taxonomy: TaxonomyResolver;
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker;
+  budgetStore?: BudgetStore;
 }) {
+  const budgets =
+    deps.budgetStore ?? new UnavailableBudgetStore('external-intent activities require an authoritative BudgetStore');
   const ingestSvc = new SignalIngestService({ prisma: deps.prisma, broker: deps.broker });
   const tedProj = new TedIntentProjectionService({ prisma: deps.prisma });
   const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma });
@@ -216,6 +221,7 @@ export function createExternalIntentActivities(deps: {
       tedEnabled: boolean;
       openfdaEnabled: boolean;
       samgovEnabled: boolean;
+      budgetScopeId?: string;
       maxNotices?: number;
       maxRecords?: number;
     }): Promise<IngestSweepSummary> {
@@ -247,7 +253,12 @@ export function createExternalIntentActivities(deps: {
       summary.samSpecs = samParams ? 1 : 0;
       if (!tedByFp.size && !fdaByFp.size && !samParams) return summary;
 
-      budgetLedger.open(SWEEP_BUDGET_KEY, sweepBudgetCents());
+      const budgetKey = args.budgetScopeId ? `${SWEEP_BUDGET_KEY}:${args.budgetScopeId}` : SWEEP_BUDGET_KEY;
+      await budgets.open({
+        workspaceId: PLATFORM_WORKSPACE,
+        accountKey: budgetKey,
+        capCents: sweepBudgetCents(),
+      });
       try {
         const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {
           try {
@@ -273,22 +284,22 @@ export function createExternalIntentActivities(deps: {
         for (const params of tedByFp.values()) {
           const live = await liveEnabled(); // 每指纹 live 重读：中途 ops 关停本轮即生效
           if (!live.ted) break;
-          if (!(await runOne(() => ingestSvc.ingestTed(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+          if (!(await runOne(() => ingestSvc.ingestTed(params, { budgetKey })))) return summary;
         }
         for (const params of fdaByFp.values()) {
           const live = await liveEnabled();
           if (!live.openfda) break;
-          if (!(await runOne(() => ingestSvc.ingestFda(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+          if (!(await runOne(() => ingestSvc.ingestFda(params, { budgetKey })))) return summary;
         }
         if (samParams) {
           const live = await liveEnabled(); // live 重读：中途 ops 关停本轮即生效
           if (live.samgov) {
-            if (!(await runOne(() => ingestSvc.ingestSam(samParams, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+            if (!(await runOne(() => ingestSvc.ingestSam(samParams, { budgetKey })))) return summary;
           }
         }
         return summary;
       } finally {
-        budgetLedger.close(SWEEP_BUDGET_KEY);
+        await budgets.close({ workspaceId: PLATFORM_WORKSPACE, accountKey: budgetKey });
       }
     },
 

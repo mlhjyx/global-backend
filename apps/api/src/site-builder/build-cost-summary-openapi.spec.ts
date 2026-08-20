@@ -12,7 +12,7 @@ interface SchemaNode {
 }
 
 describe('R4-B BuildRun cost summary generated OpenAPI', () => {
-  it('publishes the closed site-builder-cost-summary/v1 shape instead of an open JSON bag', () => {
+  it('publishes the closed site-builder-cost-summary/v2 shape instead of an open JSON bag', () => {
     const document = JSON.parse(
       readFileSync(
         resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
@@ -41,10 +41,11 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
         'totals',
         'usage',
         'operations',
+        'reconciliation',
       ],
     });
     expect(summaryProperty.properties?.schemaVersion.enum).toEqual([
-      'site-builder-cost-summary/v1',
+      'site-builder-cost-summary/v2',
     ]);
     expect(summaryProperty.properties?.currency.enum).toEqual(['USD']);
     expect(summaryProperty.properties?.unit.enum).toEqual(['microusd']);
@@ -53,8 +54,10 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
       additionalProperties: false,
       required: [
         'capMicrousd',
+        'authorizedCapMicrousd',
         'reservedMicrousd',
         'chargedMicrousd',
+        'conservativeChargedMicrousd',
         'remainingMicrousd',
         'paidCallsEnabled',
         'disabledReason',
@@ -66,7 +69,34 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
       'calculatedCostMicrousd',
       'estimatedCostMicrousd',
       'unknownOperations',
+      'exactCostMicrousd',
+      'upperBoundCostMicrousd',
     ]);
+    for (const name of [
+      'capMicrousd',
+      'authorizedCapMicrousd',
+      'reservedMicrousd',
+      'chargedMicrousd',
+      'conservativeChargedMicrousd',
+      'remainingMicrousd',
+    ]) {
+      expect(summaryProperty.properties?.budget?.properties?.[name]).toMatchObject({
+        type: 'string',
+        pattern: '^(0|[1-9][0-9]*)$',
+      });
+    }
+    for (const name of [
+      'reportedCostMicrousd',
+      'calculatedCostMicrousd',
+      'estimatedCostMicrousd',
+      'exactCostMicrousd',
+      'upperBoundCostMicrousd',
+    ]) {
+      expect(summaryProperty.properties?.totals?.properties?.[name]).toMatchObject({
+        type: 'string',
+        pattern: '^(0|[1-9][0-9]*)$',
+      });
+    }
     expect(summaryProperty.properties?.usage?.required).toEqual([
       'inputTokens',
       'outputTokens',
@@ -78,6 +108,13 @@ describe('R4-B BuildRun cost summary generated OpenAPI', () => {
       'failed',
       'unknown',
       'released',
+    ]);
+    expect(summaryProperty.properties?.reconciliation?.required).toEqual([
+      'pendingOperations',
+      'resolvedOperations',
+      'conflictOperations',
+      'asOf',
+      'revision',
     ]);
   });
 });

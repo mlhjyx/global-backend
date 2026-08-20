@@ -1,5 +1,9 @@
 # AI 获客阶段 2A：服务端 roles→scopes TDD 记录
 
+> Status: `SUPERSEDED` historical implementation record（2026-08-16）。
+>
+> Successor: [ADR-024 ENVIRONMENT-PARITY-AND-BUDGET-AUTHORITY](../adr/registry.md) 与当前源码/机器政策。本文保留最初提交时的 TDD provenance，不是当前认证运行合同；下文关于 `DevTokenVerifier`、development/test 内置 role map、dev-token opt-in 和开发专用认证路径的陈述只描述历史实现，不得据此恢复产品分叉。所有 managed runtime 现在共用 JWKS verifier 与相同 roles/scopes 语义，仅允许配置独立的信任根；是否已部署及当前运行身份仍须 fresh RuntimeEvidence/readback，本文不提供该证明。
+>
 > 文档 ID：`DOC-IMPL-ACQ-AUTHZ-001`
 >
 > 初始基线：`origin/main@bd36d62bdb78837a10b7ce56a5e745a2590fc43a`（#374 runtime source merge）。

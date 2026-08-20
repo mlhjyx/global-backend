@@ -5,6 +5,7 @@ import { loadMaterializableCompanyState } from '../discovery/company-suppression
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { TENDER_PUBLISHED, TENDER_STRENGTH } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
+import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 
 // 单一真值在 signals/signal-mappers（摄取层先用）；此处 re-export 保持既有 import 路径不破。
 export { TENDER_PUBLISHED, TENDER_STRENGTH };
@@ -145,6 +146,13 @@ export class TedIntentProjectionService {
       });
       if (!materialization.allowed) return false;
       const { prior } = materialization;
+      if (prior) {
+        const evidenceRows = await tx.fieldEvidence.findMany({
+          where: { entityType: 'company', entityId: prior.id },
+          select: { providerKey: true, license: true },
+        });
+        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) return false;
+      }
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;

@@ -11,7 +11,7 @@ import {
 } from './token-claims';
 
 /**
- * 生产鉴权：校验外部 SaaS 平台签发的 JWT（PRD 12.2；评审点名的越权漏洞修复）。
+ * Managed runtime 鉴权：校验外部 SaaS 平台签发的 JWT（PRD 12.2）。
  * 用 JWKS 公钥端点验签（支持 kid 轮换），强制校验 iss/aud/exp/nbf。
  * 身份仍归 SaaS 平台——我方只校验、不签发、不刷新。
  *

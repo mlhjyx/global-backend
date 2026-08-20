@@ -14,6 +14,7 @@ export { patentsCacheRefreshWorkflow } from './patents-cache.workflow';
 export { sanctionsRefreshWorkflow } from './sanctions-refresh.workflow';
 export { demoV0Workflow } from './site-builder.workflow';
 export { siteReleaseMaintenanceSweepWorkflow } from './site-release-maintenance.workflow';
+export { siteBuildCostReconciliationSweepWorkflow } from './site-build-cost-reconciliation.workflow';
 export { refurbishWorkflow } from './refurbish.workflow';
 export { kbIngestWorkflow } from './kb-ingest.workflow';
 export { kbRecoverySweepWorkflow } from './kb-recovery.workflow';

@@ -38,8 +38,8 @@ import { resolveIcpToNaics } from '../src/discovery/icp-to-naics';
 import { ModelProviderRegistry } from '../src/model-gateway/model-provider.registry';
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
-import { StubModelProvider } from '../src/model-gateway/providers/stub-model.provider';
-import { buildGatewayProvider, stubAllowed } from '../src/model-gateway/model-providers.config';
+import { createSchemaFixtureStubModelProvider } from '@global/test-support/model';
+import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
@@ -77,7 +77,9 @@ await ownerDb.$connect();
 const reg = new ModelProviderRegistry();
 const gp = buildGatewayProvider();
 if (gp) reg.register(gp);
-if (stubAllowed()) reg.register(new StubModelProvider());
+if (process.argv.includes('--use-test-model-fixture')) {
+  reg.register(createSchemaFixtureStubModelProvider());
+}
 const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
 const taxonomy = new TaxonomyResolver(prisma, gateway);
 // §8.8（收口⑤）：出网收敛在**摄取层**——SignalIngestService 经 ToolBroker 过 source_policy 门；投影 service 只读 source_signal 平台表。

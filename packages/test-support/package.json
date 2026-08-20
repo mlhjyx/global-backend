@@ -1,0 +1,30 @@
+{
+  "name": "@global/test-support",
+  "version": "0.0.1",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./discovery": {
+      "types": "./dist/discovery/sandbox.provider.d.ts",
+      "default": "./dist/discovery/sandbox.provider.js"
+    },
+    "./model": {
+      "types": "./dist/model/stub-model.provider.d.ts",
+      "default": "./dist/model/stub-model.provider.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.10"
+  }
+}

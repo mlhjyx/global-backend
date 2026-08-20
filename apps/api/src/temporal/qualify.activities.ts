@@ -8,6 +8,7 @@ import {
   matchesFromJson,
 } from '../sanctions/sanctions-screening.service';
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
+import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -66,7 +67,22 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             include: { contacts: { include: { contactPoints: true } } },
           });
           if (!companies.length) return true;
-          for (const c of companies) {
+          const evidenceEntityOwners = new Map<string, string>();
+          for (const company of companies) {
+            evidenceEntityOwners.set(company.id, company.id);
+            for (const contact of company.contacts) evidenceEntityOwners.set(contact.id, company.id);
+          }
+          const evidenceRows = await tx.fieldEvidence.findMany({
+            where: { entityId: { in: [...evidenceEntityOwners.keys()] } },
+            select: { entityId: true, providerKey: true, license: true },
+          });
+          const quarantinedEntityIds = syntheticDiscoveryEntityIds(evidenceRows);
+          const quarantinedCompanyIds = new Set(
+            [...quarantinedEntityIds]
+              .map((entityId) => evidenceEntityOwners.get(entityId))
+              .filter((companyId): companyId is string => companyId !== undefined),
+          );
+          for (const c of companies.filter((company) => !quarantinedCompanyIds.has(company.id))) {
             // 该 (icpId, company) 的既有 Lead——资格门① 写在这里（fitVerdict/fitReasons），是 CandidateAssessment。
             // 权威 Fit 来自**本 ICP 的 Lead**（不再读 canonical，那是「上一个判定该公司的 ICP」的值 → 串 ICP 的根 bug）。
             const existing = await tx.lead.findUnique({

@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ModelGateway } from './model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
@@ -6,11 +6,14 @@ import { AiTraceSink } from './ai-trace.sink';
 import {
   assertModelOutputSchemaCompiles,
   checkAgainstSchema } from './schema-validate';
+import { BudgetLedger, BudgetExceededError, DEFAULT_LLM_EST_CENTS } from '../tools/budget';
 import {
-  BudgetLedger,
-  BudgetExceededError,
-  budgetLedger,
-  DEFAULT_LLM_EST_CENTS } from '../tools/budget';
+  BudgetOperationReplayError,
+  InMemoryBudgetStoreAdapter,
+  TOOL_BUDGET_STORE,
+  UnavailableBudgetStore,
+  type BudgetStore,
+} from '../tools/budget-store';
 import {
   ExternalActionDeniedError,
   ProviderIdentityError,
@@ -26,9 +29,7 @@ import {
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
-import {
-  PaidModelPreflightError,
-  type PaidModelPreflightEvidence } from './paid-model-settlement';
+import type { SiteBuildCostReconciliationCatalog } from '../site-builder/site-build-cost-reconciliation-resolver';
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -90,19 +91,31 @@ import { CANDIDATE_GATEWAY_VISION_TRANSPORTS } from './model-transports';
  */
 @Injectable()
 export class RouterModelGateway extends ModelGateway {
-  /**
-   * 预算账本（收口② D：LLM 是最大真实成本源，网关是预算门的正确位置）。
-   * 进程级单例，测试可替换。不走 Nest DI（worker 侧手动构造网关，保持两处组装一致）。
-   */
-  budget: BudgetLedger = budgetLedger;
+  private readonly unavailableBudgetStore = new UnavailableBudgetStore(
+    'RouterModelGateway requires an authoritative BudgetStore',
+  );
+  budgetStore: BudgetStore;
+
+  /** Test-only compatibility surface: product composition injects BudgetStore. */
+  set budget(ledger: BudgetLedger) {
+    this.budgetStore = new InMemoryBudgetStoreAdapter(ledger);
+  }
   /** Worker installs the durable R4-B ledger; paid contexts fail closed without it. */
   paidLedger?: SiteBuildCostLedger;
+  /**
+   * Versioned product pricing/channel catalog. Absence never fabricates an
+   * exact amount: output remains conservatively charged and reconciliation is
+   * UNRESOLVED until trusted product configuration is installed.
+   */
+  costReconciliationCatalog?: SiteBuildCostReconciliationCatalog;
 
   constructor(
     private readonly router: ModelRouter,
     @Optional() private readonly trace?: AiTraceSink,
+    @Optional() @Inject(TOOL_BUDGET_STORE) budgetStore?: BudgetStore,
   ) {
     super();
+    this.budgetStore = budgetStore ?? this.unavailableBudgetStore;
   }
 
   generateText(
@@ -136,16 +149,9 @@ export class RouterModelGateway extends ModelGateway {
         }
       };
       const first = await p.generateStructured<T>(input, runCtx);
-      if (p.id === 'stub') return first; // stub 输出不参与 schema 校验（dev 兜底）
-      if (first.usage?.gatewaySettlements?.some((observation) => observation.status === 'unknown')) {
-        throw new ProviderOutputError('initial structured call settlement is unknown; repair suppressed', first.usage, {
-          callCount: 1,
-          provider: first.provider,
-          model: first.model,
-          reportedModel: first.reportedModel,
-          modelResolutionSource: first.modelResolutionSource,
-        });
-      }
+      const initialSettlementUnknown = first.usage?.gatewaySettlements?.some(
+        (observation) => observation.status === 'unknown',
+      );
       const check = checkAgainstSchema(input.schema, first.data);
       let repairReason: string;
       let repairKind: 'JSON Schema' | '任务确定性硬门';
@@ -162,6 +168,22 @@ export class RouterModelGateway extends ModelGateway {
       } else {
         repairKind = 'JSON Schema';
         repairReason = (check.errors ?? []).join('\n');
+      }
+      if (initialSettlementUnknown) {
+        // A valid output can proceed under an upper-bound charge. An unusable
+        // output must not trigger a second physical request while the first
+        // call's exact settlement remains unresolved.
+        throw new ProviderOutputError(
+          'initial structured output is unusable and settlement is unresolved; repair suppressed',
+          first.usage,
+          {
+            callCount: 1,
+            provider: first.provider,
+            model: first.model,
+            reportedModel: first.reportedModel,
+            modelResolutionSource: first.modelResolutionSource,
+          },
+        );
       }
       // 修复重试：schema 或任务硬门只共享这唯一一次调用，绝不形成开放循环。
       let repair: ModelResult<T>;
@@ -326,9 +348,29 @@ export class RouterModelGateway extends ModelGateway {
     if (ctx.paidCost) {
       return this.runPersistent(op, input, ctx, chain, call, reserveCents);
     }
-    let reservation: { runId: string; estCents: number };
+    const accountKey = ctx.runId ?? ctx.workspaceId;
+    const operationKey = paidOperationKey([
+      accountKey,
+      'model-budget',
+      op,
+      input.task,
+      input.model ?? '',
+      ctx.correlationId ?? '',
+      input.prompt ?? '',
+      input.system ?? '',
+      input.schema ? JSON.stringify(input.schema) : '',
+    ]);
+    let reservation;
     try {
-      reservation = this.budget.reserve(ctx.runId ?? ctx.workspaceId, reserveCents);
+      reservation = await this.budgetStore.reserve({
+        workspaceId: ctx.workspaceId,
+        accountKey,
+        operationKey,
+        estimatedCents: reserveCents,
+      });
+      if (reservation.replay) {
+        throw new BudgetOperationReplayError(operationKey);
+      }
     } catch (err) {
       // 预算拒绝必须可审计（对齐 ToolBroker 的 DENIED trace）：否则截断完全不可观测。
       if (err instanceof BudgetExceededError) {
@@ -347,29 +389,21 @@ export class RouterModelGateway extends ModelGateway {
       }
       throw err;
     }
-    let settled = false;
-    const settle = (actualCents: number) => {
-      if (settled) return;
-      settled = true;
-      this.budget.settle(reservation, actualCents);
-    };
-
-    let lastErr: unknown;
+    const provider = chain[0]!;
+    const started = Date.now();
     try {
-      for (const provider of chain) {
-        const started = Date.now();
-        try {
-          if (ctx.authorizeExternalAction) {
-            await this.assertExternalActionAuthorized(ctx);
-          }
-          const result = await call(provider, ctx);
-          const costUsd = result.usage?.costUsd;
-          settle(
-            costUsd != null
-              ? Math.ceil(costUsd * 100)
-              : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1)),
-          );
-          this.trace?.record({
+      if (ctx.authorizeExternalAction) {
+        await this.assertExternalActionAuthorized(ctx);
+      }
+      const result = await call(provider, ctx);
+      const costUsd = result.usage?.costUsd;
+      await this.budgetStore.settle(
+        reservation,
+        costUsd != null
+          ? Math.ceil(costUsd * 100)
+          : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1)),
+      );
+      this.trace?.record({
             workspaceId: ctx.workspaceId,
             task: input.task,
             op,
@@ -382,43 +416,41 @@ export class RouterModelGateway extends ModelGateway {
             costUsd: result.usage?.costUsd,
             correlationId: ctx.correlationId,
             modelPolicy: ctx.modelPolicy,
-          });
-          return result;
-        } catch (err) {
-          // 改动 2：provider 消费了 token 却输出不可用（空/截断/非 JSON）→ 结算真实消耗，
-          // 否则全链失败 finally settle(0) 会把真实 token 记 0¢、绕过硬预算上界。单次 settle 语义不变
-          // （[real 抛带 usage, stub 成功]：real 先 settle → settled 置位 → stub 成功 settle no-op，只记 real）。
-          const c =
-            err instanceof ProviderOutputError ? (centsFromTokens(err.usage) ?? baseCents * err.callCount) : null;
-          if (c != null) settle(c);
-          const failedUsage = err instanceof ProviderOutputError ? err.usage : undefined;
-          this.trace?.record({
-            workspaceId: ctx.workspaceId,
-            task: input.task,
-            op,
-            provider: provider.id,
-            model: input.model ?? 'unknown',
-            status: 'ERROR',
-            errorMessage: String(err),
-            latencyMs: Date.now() - started,
-            inputTokens: failedUsage?.inputTokens,
-            outputTokens: failedUsage?.outputTokens,
-            correlationId: ctx.correlationId,
-            modelPolicy: ctx.modelPolicy,
-          });
-          if (
-            err instanceof TaskOutputValidationError ||
-            err instanceof ProviderIdentityError ||
-            err instanceof ExternalActionDeniedError
-          ) {
-            throw err;
-          }
-          lastErr = err; // try the next provider (fallback)
-        }
+      });
+      return result;
+    } catch (err) {
+      const failedUsage = err instanceof ProviderOutputError ? err.usage : undefined;
+      if (
+        err instanceof ExternalActionDeniedError &&
+        err.callCount === 0 &&
+        !err.usage
+      ) {
+        await this.budgetStore.release(reservation);
+      } else {
+        // Once a provider may have been called, an unusable output or unknown ACK is
+        // conservatively charged to the reservation and never falls through to a
+        // second physical model request.
+        const observedCents =
+          err instanceof ProviderOutputError
+            ? (centsFromTokens(err.usage) ?? baseCents * err.callCount)
+            : reserveCents;
+        await this.budgetStore.settle(reservation, observedCents);
       }
-      throw lastErr;
-    } finally {
-      settle(0); // 全链失败不计费（对齐 PRD 7.4.8）；成功路径已按实/按上限结算
+      this.trace?.record({
+        workspaceId: ctx.workspaceId,
+        task: input.task,
+        op,
+        provider: provider.id,
+        model: input.model ?? 'unknown',
+        status: 'ERROR',
+        errorMessage: err instanceof Error ? err.name : 'model call failed',
+        latencyMs: Date.now() - started,
+        inputTokens: failedUsage?.inputTokens,
+        outputTokens: failedUsage?.outputTokens,
+        correlationId: ctx.correlationId,
+        modelPolicy: ctx.modelPolicy,
+      });
+      throw err;
     }
   }
 
@@ -443,70 +475,19 @@ export class RouterModelGateway extends ModelGateway {
     if (!this.paidLedger || !ctx.runId) {
       throw new PaidCallDeniedError('PERSISTENT_LEDGER_UNAVAILABLE');
     }
-    if (!chain.some((provider) => provider.preflightPaidCall)) {
-      this.trace?.record({
-        workspaceId: ctx.workspaceId,
-        task: input.task,
-        op,
-        provider: 'model-preflight',
-        model: input.model ?? 'provider-default',
-        status: 'ERROR',
-        errorMessage: 'paid call denied before reserve: MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED',
-        latencyMs: 0,
-        correlationId: ctx.correlationId,
-        modelPolicy: ctx.modelPolicy,
-      });
-      throw new PaidCallDeniedError('MODEL_PREFLIGHT_PAID_OPERATION_NOT_ATTESTED');
-    }
-
-    let lastErr: unknown;
     for (const [providerIndex, provider] of chain.entries()) {
-      // Paid Site Builder execution may only enter an attested provider.
-      // Development stubs remain useful for non-paid local flows, but after a
-      // known, fully settled provider failure they must not replace that error
-      // with a terminal preflight denial and prevent the task-level model
-      // fallback from running.
-      if (!provider.preflightPaidCall) continue;
       const requestedModel = input.model ?? 'provider-default';
-      let settlementPreflight: PaidModelPreflightEvidence;
-      try {
-        if (op !== 'generateStructured' || !input.prompt || !input.maxTokens) {
-          throw new PaidModelPreflightError('PAID_OPERATION_NOT_ATTESTED');
-        }
-        const schemaText = input.schema ? JSON.stringify(input.schema) : '';
-        const promptUtf8BytesPerCall = Math.max(
-          1,
-          Buffer.byteLength(`${input.system ?? ''}\n${input.prompt}\n${schemaText}`, 'utf8'),
+      const settlementContext =
+        this.costReconciliationCatalog?.resolveContext({
+          providerId: provider.id,
+          taskId: input.task,
+          alias: requestedModel,
+          maxOutputTokens: input.maxTokens,
+        }) ?? null;
+      if (this.costReconciliationCatalog && !settlementContext) {
+        throw new PaidCallDeniedError(
+          'COST_RECONCILIATION_CONTEXT_UNAVAILABLE',
         );
-        settlementPreflight = await provider.preflightPaidCall(
-          {
-            taskId: input.task,
-            op,
-            alias: requestedModel,
-            promptUtf8BytesPerCall,
-            maxOutputTokens: input.maxTokens,
-            maximumWireCalls: 2,
-            reservationMicrousd: reserveCents * 10_000,
-            signal: input.signal,
-          },
-          ctx,
-        );
-      } catch (error) {
-        const decision =
-          error instanceof PaidModelPreflightError ? `MODEL_PREFLIGHT_${error.code}` : 'MODEL_PREFLIGHT_UNAVAILABLE';
-        this.trace?.record({
-          workspaceId: ctx.workspaceId,
-          task: input.task,
-          op,
-          provider: 'model-preflight',
-          model: requestedModel,
-          status: 'ERROR',
-          errorMessage: `paid call denied before reserve: ${decision}`,
-          latencyMs: 0,
-          correlationId: ctx.correlationId,
-          modelPolicy: ctx.modelPolicy,
-        });
-        throw new PaidCallDeniedError(decision);
       }
       const scope: PaidOperationReservation = {
         workspaceId: ctx.workspaceId,
@@ -530,7 +511,7 @@ export class RouterModelGateway extends ModelGateway {
           op,
           provider: provider.id,
           requestedModel,
-          settlementPreflight,
+          ...(settlementContext ? { settlementContext } : {}),
           ...(ctx.modelPolicy ? { modelPolicy: ctx.modelPolicy } : {}),
         },
       };
@@ -565,21 +546,15 @@ export class RouterModelGateway extends ModelGateway {
         if (decision.status === 'SUCCEEDED') {
           throw new PaidOperationUnknownError(scope.operationKey, 'DURABLE_REPLAY_UNAVAILABLE');
         }
-        lastErr = new Error(
-          `paid provider operation replayed ${decision.status}: ${decision.errorCode ?? 'recorded_failure'}`,
+        throw new PaidOperationUnknownError(
+          scope.operationKey,
+          decision.errorCode ?? `RECORDED_${decision.status}`,
         );
-        continue;
       }
 
       const started = Date.now();
       let result: ModelResult<T>;
-      const executionCtx: AiContext = {
-        ...ctx,
-        paidCost: {
-          ...paid,
-          settlementPreflight,
-        },
-      };
+      const executionCtx: AiContext = ctx;
       try {
         if (executionCtx.authorizeExternalAction) {
           await this.assertExternalActionAuthorized(executionCtx);
@@ -612,15 +587,30 @@ export class RouterModelGateway extends ModelGateway {
           });
           throw error;
         }
-        const measurement = modelCostMeasurement({
-          taskId: input.task,
-          requestedModel,
-          resolvedModel: providerError?.model,
-          usage: providerError?.usage,
-          settlementPreflight,
-          callCount: providerError?.callCount,
-          reservationMicrousd: scope.reservationMicrousd,
-        });
+        const providerSettlementUnknown =
+          providerError?.usage?.gatewaySettlements?.some(
+            (observation) => observation.status === 'unknown',
+          );
+        const measurement = providerSettlementUnknown
+          ? this.unknownModelMeasurement(
+              scope.reservationMicrousd,
+              providerError!.usage,
+              providerError!.callCount,
+            )
+          : providerError?.usage
+            ? modelCostMeasurement({
+                taskId: input.task,
+                requestedModel,
+                resolvedModel: providerError.model,
+                usage: providerError.usage,
+                callCount: providerError.callCount,
+                reservationMicrousd: scope.reservationMicrousd,
+              })
+            : this.unknownModelMeasurement(
+                scope.reservationMicrousd,
+                undefined,
+                providerError?.callCount,
+              );
         await this.settlePersistentOperation({
           scope,
           status: 'FAILED',
@@ -659,15 +649,7 @@ export class RouterModelGateway extends ModelGateway {
           correlationId: ctx.correlationId,
           modelPolicy: ctx.modelPolicy,
         });
-        if (
-          error instanceof TaskOutputValidationError ||
-          error instanceof ProviderIdentityError ||
-          error instanceof ExternalActionDeniedError
-        ) {
-          throw error;
-        }
-        lastErr = error;
-        continue;
+        throw error;
       }
 
       // Keep provider execution and success settlement in separate failure
@@ -678,23 +660,9 @@ export class RouterModelGateway extends ModelGateway {
         requestedModel,
         resolvedModel: result.model,
         usage: result.usage,
-        settlementPreflight,
         callCount: result.callCount,
         reservationMicrousd: scope.reservationMicrousd,
       });
-      if (measurement.basis === 'unknown') {
-        await this.settlePersistentOperation({
-          scope,
-          status: 'FAILED',
-          measurement,
-          meta: {
-            provider: result.provider,
-            requestedModel,
-            resolvedModel: result.model,
-          },
-          errorCode: 'MODEL_SETTLEMENT_UNKNOWN',
-        });
-      }
       let durableResult: Record<string, unknown> | undefined;
       try {
         durableResult = paid.durableReplayResult?.(result as unknown as Record<string, unknown>);
@@ -743,7 +711,7 @@ export class RouterModelGateway extends ModelGateway {
       });
       return result;
     }
-    throw lastErr ?? new Error(`all paid providers failed for ${input.task}`);
+    throw new Error(`all paid providers failed for ${input.task}`);
   }
 
   private async assertExternalActionAuthorized(
@@ -781,6 +749,36 @@ export class RouterModelGateway extends ModelGateway {
     };
   }
 
+  private unknownModelMeasurement(
+    reservationMicrousd: number,
+    usage?: ModelUsage,
+    callCount = 1,
+  ): PaidCostMeasurement {
+    return {
+      basis: 'unknown',
+      budgetChargeMicrousd: reservationMicrousd,
+      reportedCostMicrousd: null,
+      calculatedCostMicrousd: null,
+      estimatedCostMicrousd: null,
+      inputTokens: Number.isInteger(usage?.inputTokens)
+        ? usage!.inputTokens!
+        : null,
+      outputTokens: Number.isInteger(usage?.outputTokens)
+        ? usage!.outputTokens!
+        : null,
+      callCount: Math.max(1, Math.floor(callCount)),
+      meta: {
+        reason: 'model_output_or_ack_unavailable',
+        // 保留 provider 结算观测（含稳定 requestId/resolverId）：UNKNOWN
+        // spend 不进自动 sweep，后续只能按 requestId/operationKey/fence
+        // 做受控事实恢复，丢弃观测会让恢复无从定位物理调用。
+        ...(usage?.gatewaySettlements?.length
+          ? { gatewaySettlements: [...usage.gatewaySettlements] }
+          : {}),
+      },
+    };
+  }
+
   private async settlePersistentOperation(input: Parameters<SiteBuildCostLedger['settleOperation']>[0]): Promise<void> {
     const disablePaidCallsReason =
       input.measurement.basis === 'unknown' ? (input.errorCode ?? 'MODEL_SETTLEMENT_UNKNOWN') : undefined;
@@ -796,6 +794,11 @@ export class RouterModelGateway extends ModelGateway {
         error instanceof PaidOperationUnknownError ? error.errorCode : 'SETTLEMENT_ACK_UNKNOWN',
       );
     }
+    // Exact provider cost may exceed the admitted reservation while the
+    // physical call and durable output are fully known. The database records
+    // CAP_VARIANCE and disables further paid calls, but this is not an ACK
+    // ambiguity and must not discard the valid output.
+    if (decision === 'OVER_RESERVATION') return;
     if (decision !== 'SETTLED') {
       return this.freezeUnknownSettlement(input.scope, `SETTLEMENT_${decision}`);
     }

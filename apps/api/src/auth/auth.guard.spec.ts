@@ -6,6 +6,10 @@ import type { RequestContext } from './request-context';
 import { createRolesToScopesPolicy } from './scopes';
 import { TokenVerifier } from './token-verifier';
 
+const TEST_ROLE_POLICY = {
+  AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({ viewer: [] }),
+};
+
 class FakeVerifier extends TokenVerifier {
   constructor(private readonly context: RequestContext) {
     super();
@@ -64,7 +68,7 @@ describe('AuthGuard authorization context', () => {
     const verifier = {
       verify: vi.fn(),
     } as unknown as TokenVerifier;
-    const policy = createRolesToScopesPolicy({}, 'test');
+    const policy = createRolesToScopesPolicy(TEST_ROLE_POLICY, 'test');
     const guard = new AuthGuard(verifier, policy);
 
     const error = await guard
@@ -84,7 +88,7 @@ describe('AuthGuard authorization context', () => {
     } as unknown as TokenVerifier;
     const guard = new AuthGuard(
       verifier,
-      createRolesToScopesPolicy({}, 'test'),
+      createRolesToScopesPolicy(TEST_ROLE_POLICY, 'test'),
     );
 
     await expect(

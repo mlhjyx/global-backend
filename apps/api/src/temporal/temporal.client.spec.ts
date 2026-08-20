@@ -36,4 +36,22 @@ describe('TemporalClient.probe', () => {
     expect(result).toEqual({ connected: false, code: 'TEMPORAL_CONTROL_PLANE_UNAVAILABLE' });
     expect(JSON.stringify(result)).not.toContain('credential');
   });
+
+  it('starts degraded without aborting Nest bootstrap and reconnects on probe', async () => {
+    const client = new TemporalClient();
+    const connect = vi
+      .fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(new Error('temporal.internal:7233 secret'))
+      .mockResolvedValue({
+        withDeadline: vi.fn(async (_deadline: number, operation: () => Promise<unknown>) =>
+          operation(),
+        ),
+        workflowService: { getSystemInfo: vi.fn(async () => ({})) },
+      });
+    Object.assign(client as object, { connect });
+
+    await expect(client.onModuleInit()).resolves.toBeUndefined();
+    await expect(client.probe()).resolves.toEqual({ connected: true });
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
 });

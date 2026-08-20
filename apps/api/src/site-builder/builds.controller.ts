@@ -26,6 +26,11 @@ import { ScopesGuard } from "../auth/scopes.guard";
 import { ApiEnvelope } from "../common/api-envelope.decorator";
 import { Enveloped, envelope } from "../common/envelope";
 import { BuildsService } from "./builds.service";
+import {
+  SITE_BUILD_BUDGET_GRANT_HEADER,
+  SiteBuildBudgetGrantVerifier,
+} from "./site-build-budget-grant";
+import { buildRequestHash, normalizeBuildRequest } from "./build-request-contract";
 import { BUILD_PHASES } from "./build-progress";
 import { CreateBuildDto } from "./dto/build.dto";
 import { IDEMPOTENCY_KEY_PATTERN_SOURCE } from "./idempotency-key";
@@ -49,11 +54,12 @@ const COST_SUMMARY_SCHEMA = {
     "totals",
     "usage",
     "operations",
+    "reconciliation",
   ],
   properties: {
     schemaVersion: {
       type: "string",
-      enum: ["site-builder-cost-summary/v1"],
+      enum: ["site-builder-cost-summary/v2"],
     },
     currency: { type: "string", enum: ["USD"] },
     unit: { type: "string", enum: ["microusd"] },
@@ -62,18 +68,22 @@ const COST_SUMMARY_SCHEMA = {
       additionalProperties: false,
       required: [
         "capMicrousd",
+        "authorizedCapMicrousd",
         "reservedMicrousd",
         "chargedMicrousd",
+        "conservativeChargedMicrousd",
         "remainingMicrousd",
         "paidCallsEnabled",
         "disabledReason",
         "exhaustedAt",
       ],
       properties: {
-        capMicrousd: { type: "integer", minimum: 0 },
-        reservedMicrousd: { type: "integer", minimum: 0 },
-        chargedMicrousd: { type: "integer", minimum: 0 },
-        remainingMicrousd: { type: "integer", minimum: 0 },
+        authorizedCapMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        conservativeChargedMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        capMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        reservedMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        chargedMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        remainingMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
         paidCallsEnabled: { type: "boolean" },
         disabledReason: { type: "string", nullable: true },
         exhaustedAt: {
@@ -91,12 +101,16 @@ const COST_SUMMARY_SCHEMA = {
         "calculatedCostMicrousd",
         "estimatedCostMicrousd",
         "unknownOperations",
+        "exactCostMicrousd",
+        "upperBoundCostMicrousd",
       ],
       properties: {
-        reportedCostMicrousd: { type: "integer", minimum: 0 },
-        calculatedCostMicrousd: { type: "integer", minimum: 0 },
-        estimatedCostMicrousd: { type: "integer", minimum: 0 },
+        reportedCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        calculatedCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        estimatedCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
         unknownOperations: { type: "integer", minimum: 0 },
+        exactCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+        upperBoundCostMicrousd: { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
       },
     },
     usage: {
@@ -119,6 +133,24 @@ const COST_SUMMARY_SCHEMA = {
         failed: { type: "integer", minimum: 0 },
         unknown: { type: "integer", minimum: 0 },
         released: { type: "integer", minimum: 0 },
+      },
+    },
+    reconciliation: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "pendingOperations",
+        "resolvedOperations",
+        "conflictOperations",
+        "asOf",
+        "revision",
+      ],
+      properties: {
+        pendingOperations: { type: "integer", minimum: 0 },
+        resolvedOperations: { type: "integer", minimum: 0 },
+        conflictOperations: { type: "integer", minimum: 0 },
+        asOf: { type: "string", format: "date-time", nullable: true },
+        revision: { type: "integer", minimum: 0 },
       },
     },
   },
@@ -177,11 +209,46 @@ class BuildStatusResponseDto {
   })
   error!: string | null;
 
+  @ApiProperty({ type: String, nullable: true })
+  errorCode!: string | null;
+
   @ApiProperty({ type: String, format: "date-time", nullable: true })
   startedAt!: Date | null;
 
   @ApiProperty({ type: String, format: "date-time", nullable: true })
   finishedAt!: Date | null;
+}
+
+function publicBuildFailure(run: {
+  error: string | null;
+  phase: string | null;
+  steps: unknown;
+}): { code: string; message: string } | null {
+  if (!run.error) return null;
+  const failedStep = Array.isArray(run.steps)
+    ? [...run.steps]
+        .reverse()
+        .find(
+          (step): step is Record<string, unknown> =>
+            !!step && typeof step === "object" && step.status === "failed",
+        )
+    : undefined;
+  const candidate = failedStep?.errorCode;
+  const code =
+    typeof candidate === "string" && /^[A-Z][A-Z0-9_]{2,79}$/.test(candidate)
+      ? candidate
+      : "BUILD_FAILED";
+  const phase =
+    run.phase && BUILD_PHASES.includes(run.phase as (typeof BUILD_PHASES)[number])
+      ? run.phase
+      : "unknown_phase";
+  const message =
+    code.startsWith("BUDGET_") || code.includes("PAID_CALL")
+      ? `build budget authorization failed during ${phase}`
+      : code.includes("SETTLEMENT")
+        ? `model cost reconciliation is pending during ${phase}`
+        : `build could not complete during ${phase}`;
+  return { code, message };
 }
 
 const BUILD_ERROR_CODES = [
@@ -198,6 +265,13 @@ const BUILD_ERROR_CODES = [
   "BUILD_NOT_CANCELLABLE",
   "BUILD_ALREADY_TERMINAL",
   "BUILD_LAUNCH_UNAVAILABLE",
+  "BUDGET_GRANT_REQUIRED",
+  "BUDGET_GRANT_INVALID",
+  "BUDGET_GRANT_EXPIRED",
+  "BUDGET_GRANT_SCOPE_MISMATCH",
+  "BUDGET_GRANT_REUSED",
+  "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+  "SITE_BUILD_RUNTIME_NOT_READY",
   "BUILD_CANCEL_UNAVAILABLE",
   "QUOTA_EXCEEDED",
 ] as const;
@@ -224,7 +298,10 @@ const BUILD_ERROR_SCHEMA = {
 @UseGuards(AuthGuard, ScopesGuard)
 @RequireScopes("acquisition:read")
 export class BuildsController {
-  constructor(private readonly builds: BuildsService) {}
+  constructor(
+    private readonly builds: BuildsService,
+    private readonly budgetGrants: SiteBuildBudgetGrantVerifier,
+  ) {}
 
   @Post("sites/:id/builds")
   @RequireScopes("acquisition:write")
@@ -320,17 +397,46 @@ export class BuildsController {
     },
     description: "幂等键；同 key 异请求返回 409",
   })
+  @ApiHeader({
+    name: SITE_BUILD_BUDGET_GRANT_HEADER,
+    required: true,
+    schema: { type: "string", minLength: 1, maxLength: 16_384 },
+    description: "SaaS 签发、绑定本次构建请求的一次性费用授权 JWS",
+  })
+  @ApiResponse({
+    status: 402,
+    description: "BUDGET_GRANT_REQUIRED、BUDGET_GRANT_INVALID 或 BUDGET_GRANT_EXPIRED",
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 403,
+    description: "BUDGET_GRANT_SCOPE_MISMATCH",
+    schema: BUILD_ERROR_SCHEMA,
+  })
+  @ApiResponse({
+    status: 503,
+    description: "BUDGET_GRANT_VERIFICATION_UNAVAILABLE 或 SITE_BUILD_RUNTIME_NOT_READY",
+    schema: BUILD_ERROR_SCHEMA,
+  })
   async create(
     @Ctx() ctx: RequestContext,
     @Param("id", ParseUUIDPipe) siteId: string,
     @Body() dto: CreateBuildDto,
     @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers(SITE_BUILD_BUDGET_GRANT_HEADER) rawBudgetGrant?: string,
   ): Promise<Enveloped<{ buildId: string; status: string }>> {
+    const normalized = normalizeBuildRequest(dto);
+    const budgetGrant = await this.budgetGrants.verify(rawBudgetGrant, {
+      workspaceId: ctx.workspaceId,
+      siteId,
+      operation: "refurbish",
+      requestSha256: buildRequestHash(siteId, normalized),
+    });
     return envelope(
       await this.builds.create(ctx, siteId, {
         ...dto,
         idempotencyKey: idempotencyKey ?? null,
-      }),
+      }, budgetGrant),
     );
   }
 
@@ -352,6 +458,7 @@ export class BuildsController {
     @Param("id", ParseUUIDPipe) buildId: string,
   ): Promise<Enveloped<Record<string, unknown>>> {
     const run = await this.builds.get(ctx, buildId);
+    const failure = publicBuildFailure(run);
     return envelope({
       buildId: run.id,
       kind: run.kind,
@@ -360,8 +467,9 @@ export class BuildsController {
       progress: run.progress,
       steps: run.steps,
       costSummary: run.costSummary,
-      // DB error 供内部诊断，可能含 provider/网络细节；公共 API 只返回稳定泛化文本。
-      error: run.error ? "build failed" : null,
+      // DB error 供内部诊断，可能含 provider/网络细节；公共 API 只返回稳定 code/message。
+      error: failure?.message ?? null,
+      errorCode: failure?.code ?? null,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
     });

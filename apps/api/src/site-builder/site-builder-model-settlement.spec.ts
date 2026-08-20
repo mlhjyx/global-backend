@@ -1,7 +1,3 @@
-import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import { PaidModelPreflightError } from '../model-gateway/paid-model-settlement';
@@ -11,7 +7,6 @@ import {
 } from './agents/task-routes';
 import {
   NewApiSiteBuilderModelSettlement,
-  loadSiteBuilderModelSettlement,
   settlementAttestationSnapshotSha256,
   settlementChannelSnapshotSha256,
   settlementOpenOxPrice,
@@ -260,61 +255,6 @@ function paidContext() {
 }
 
 describe('Site Builder zero-generation model preflight', () => {
-  it('loads only a digest-bound, current, exact-scope attestation', () => {
-    const { attestation } = fixture();
-    const directory = mkdtempSync(join(tmpdir(), 'site-builder-settlement-'));
-    const path = join(directory, 'attestation.json');
-    const bytes = JSON.stringify(attestation);
-    writeFileSync(path, bytes, { mode: 0o600 });
-    try {
-      expect(() =>
-        loadSiteBuilderModelSettlement(
-          {
-            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
-            MODEL_GATEWAY_KEY: API_KEY,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: createHash(
-              'sha256',
-            )
-              .update(bytes)
-              .digest('hex'),
-          },
-          { now: () => NOW },
-        ),
-      ).not.toThrow();
-      expect(
-        loadSiteBuilderModelSettlement(
-          {
-            ...REVIEWED_RUNTIME_ROUTE_ENV,
-            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
-            MODEL_GATEWAY_KEY: API_KEY,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: createHash(
-              'sha256',
-            )
-              .update(bytes)
-              .digest('hex'),
-          },
-          { now: () => NOW, fetch: vi.fn(liveFetch) as typeof fetch },
-        ),
-      ).toBeInstanceOf(NewApiSiteBuilderModelSettlement);
-      expect(() =>
-        loadSiteBuilderModelSettlement(
-          {
-            ...REVIEWED_RUNTIME_ROUTE_ENV,
-            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
-            MODEL_GATEWAY_KEY: API_KEY,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: '0'.repeat(64),
-          },
-          { now: () => NOW },
-        ),
-      ).toThrow('attestation file digest mismatch');
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
   it('covers every current task route and produces bounded redacted evidence', async () => {
     const { attestation, entries } = fixture();
     const fetchMock = vi.fn(liveFetch);

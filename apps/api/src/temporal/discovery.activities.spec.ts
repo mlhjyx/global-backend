@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
-import { budgetLedger } from '../tools/budget';
+import { BudgetLedger } from '../tools/budget';
+import {
+  BudgetUnsettledOperationsError,
+  InMemoryBudgetStoreAdapter,
+  type BudgetStore,
+} from '../tools/budget-store';
+
+const budgetLedger = new BudgetLedger();
 import type {
   CompanyDiscoveryAdapter,
   EnrichmentResult,
@@ -58,7 +65,12 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
     withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> => fn(tx),
   };
   const providers = { routeCompanyDiscovery: async () => adapters };
-  return { prisma, providers, gateway: {} } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+  return {
+    prisma,
+    providers,
+    gateway: {},
+    budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+  } as unknown as Parameters<typeof createDiscoveryActivities>[0];
 }
 
 const QUERY = { source_class: 'public_intelligence', filters: {}, keywords: [], priority: 1 };
@@ -98,10 +110,32 @@ function makeEnrichDeps(enrichers: unknown[]) {
     withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> => fn(tx),
   };
   const providers = { routeEnrichment: async () => enrichers, routeSignalEnrichment: async () => enrichers };
-  return { prisma, providers, gateway: {} } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+  return {
+    prisma,
+    providers,
+    gateway: {},
+    budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+  } as unknown as Parameters<typeof createDiscoveryActivities>[0];
 }
 
 describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错', () => {
+  it('产品路径在调用 provider 和持久化之前拒绝 synthetic sandbox adapter', async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
+    const deps = makeDeps([
+      {
+        key: 'sandbox',
+        classes: ['public_intelligence'],
+        discoverCompanies,
+      } as CompanyDiscoveryAdapter,
+    ]);
+    const acts = createDiscoveryActivities(deps);
+
+    await expect(
+      acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-ok-x', query: QUERY }),
+    ).rejects.toMatchObject({ code: 'SYNTHETIC_DISCOVERY_PROVENANCE' });
+    expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+
   it('某源打穿 run 预算并被 fail-safe 吞掉 → wasExhausted 检出 budgetTruncated=true，其余源记录仍落库', async () => {
     const deps = makeDeps([budgetSwallowingAdapter('public_web'), okAdapter('wikidata', [REC])]);
     const acts = createDiscoveryActivities(deps);
@@ -120,6 +154,36 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
 });
 
 describe('canonicalizeRun —— suppression authority 线性化', () => {
+  it.each([
+    { providerKey: 'sandbox', payload: { name: 'Synthetic Co' } },
+    { providerKey: 'public_web', payload: { name: 'Synthetic Co', license: 'sandbox' } },
+  ])('quarantines historical synthetic raw rows from canonical materialization: %j', async (raw) => {
+    const canonicalUpsert = vi.fn();
+    const identityCreate = vi.fn();
+    const evidenceCreate = vi.fn();
+    const tx = {
+      $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+      rawSourceRecord: { findMany: async () => [{ id: 'raw-synthetic', ...raw }] },
+      suppressionRecord: { findMany: async () => [] },
+      canonicalCompany: { upsert: canonicalUpsert },
+      identityLink: { findFirst: vi.fn(), create: identityCreate },
+      fieldEvidence: { create: evidenceCreate },
+    };
+    const prisma = {
+      withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
+        callback(tx),
+    };
+    const activities = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
+
+    await expect(activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' })).resolves.toEqual({
+      companies: 0,
+      suppressed: 0,
+    });
+    expect(canonicalUpsert).not.toHaveBeenCalled();
+    expect(identityCreate).not.toHaveBeenCalled();
+    expect(evidenceCreate).not.toHaveBeenCalled();
+  });
+
   it('在读 suppression 和任何 canonical write 前先取 workspace policy lock', async () => {
     const order: string[] = [];
     const tx = {
@@ -223,7 +287,7 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
   });
 });
 
-describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃重试清账', () => {
+describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知调用不重试', () => {
   it('富集源打穿 run 预算并被 fail-safe 吞掉 → enrichRun.budgetTruncated=true（不假 DONE）', async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
     const acts = createDiscoveryActivities(deps);
@@ -245,7 +309,7 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃
     expect(r.budgetTruncated).toBe(true);
   });
 
-  it('resetRunBudget 清除同 runId 残留的打穿标记（崩溃重试防误报截断）', async () => {
+  it('没有未结算操作时，兼容 close 可清除同 runId 的旧打穿标记', async () => {
     const acts = createDiscoveryActivities(makeEnrichDeps([]));
     budgetLedger.open('run-leak', 10);
     try {
@@ -254,8 +318,33 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 崩溃
       /* expected：打穿即打标 */
     }
     expect(budgetLedger.wasExhausted('run-leak')).toBe(true);
-    await acts.resetRunBudget({ runId: 'run-leak' });
+    await acts.resetRunBudget({ workspaceId: 'ws-1', runId: 'run-leak' });
     expect(budgetLedger.wasExhausted('run-leak')).toBe(false);
+  });
+
+  it('force close 后仍传播 unresolved guard，崩溃中的物理调用不能重新执行', async () => {
+    const close = vi.fn(async () => undefined);
+    const open = vi.fn(async () => {
+      throw new BudgetUnsettledOperationsError('run-unknown');
+    });
+    const adapter = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const deps = makeDeps([{ ...okAdapter('public-web', []), discoverCompanies: adapter }]);
+    deps.budgetStore = {
+      open,
+      close,
+      reserve: vi.fn(),
+      settle: vi.fn(),
+      release: vi.fn(),
+      status: vi.fn(),
+    } as unknown as BudgetStore;
+    const acts = createDiscoveryActivities(deps);
+
+    await acts.resetRunBudget({ workspaceId: 'ws-1', runId: 'run-unknown' });
+    await expect(
+      acts.executeQuery({ workspaceId: 'ws-1', runId: 'run-unknown', query: QUERY }),
+    ).rejects.toBeInstanceOf(BudgetUnsettledOperationsError);
+    expect(close).toHaveBeenCalledWith({ workspaceId: 'ws-1', accountKey: 'run-unknown', force: true });
+    expect(adapter).not.toHaveBeenCalled();
   });
 });
 

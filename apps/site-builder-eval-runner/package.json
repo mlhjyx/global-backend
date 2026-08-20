@@ -1,0 +1,12 @@
+{
+  "name": "@global/site-builder-eval-runner",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --import tsx src/cli.ts",
+    "test": "node --import tsx --test src/*.spec.ts"
+  }
+}

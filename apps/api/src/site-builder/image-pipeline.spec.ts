@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
+import {
+  IsolatedImagePipelineRunner,
+  imagePipelineChildEnvironment,
+  resolveImagePipelineChildCommand,
+} from './image-pipeline-runner';
 import {
   IMAGE_PIPELINE_VERSION,
   RESPONSIVE_IMAGE_WIDTHS,
@@ -36,6 +40,27 @@ async function transparentPng(width = 3200, height = 2400): Promise<Buffer> {
 }
 
 describe('M1-c deterministic image policy', () => {
+  it('fails closed when a managed Linux image decoder has no native resource limiter', async () => {
+    const compiled = '/app/apps/api/dist/site-builder/image-pipeline-child.js';
+    await expect(
+      resolveImagePipelineChildCommand({
+        platform: 'linux',
+        processExecPath: '/usr/bin/node',
+        adjacentCompiled: compiled,
+        buildCompiled: '/missing/image-pipeline-child.js',
+        exists: async (candidate) => candidate === compiled,
+      }),
+    ).rejects.toThrow('IMAGE_PIPELINE_ISOLATION_UNAVAILABLE');
+  });
+
+  it('runs the image child with production semantics in every managed environment', () => {
+    expect(imagePipelineChildEnvironment({ PATH: '/usr/bin', NODE_ENV: 'development' })).toEqual({
+      PATH: '/usr/bin',
+      NODE_ENV: 'production',
+      VIPS_BLOCK_UNTRUSTED: '1',
+    });
+  });
+
   it('locks the versioned kind→role policy and responsive widths', () => {
     expect(IMAGE_PIPELINE_VERSION).toMatch(
       /^sharp-0\.35\.3-vips-[0-9.]+-m1c\.\d+$/,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { storageRightsContextForLead, PROCESSOR_JURISDICTION, resolveProcessorJurisdiction } from './data-rights.context';
+import { storageRightsContextForLead, resolveProcessorJurisdiction } from './data-rights.context';
 import { evaluateDataRights } from './data-rights.engine';
 import { JURISDICTION_POLICY_SEED } from './jurisdiction-policy.seed';
 
@@ -28,8 +28,10 @@ describe('storageRightsContextForLead（纯映射）', () => {
     expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }).suppressed).toBe(false);
   });
 
-  it('processor 默认取 PROCESSOR_JURISDICTION，可注入覆盖', () => {
-    expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }).processorJurisdiction).toBe(PROCESSOR_JURISDICTION);
+  it('processor 默认在调用时解析显式环境配置，可注入覆盖', () => {
+    expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }).processorJurisdiction).toBe(
+      resolveProcessorJurisdiction(process.env.DATA_PROCESSOR_JURISDICTION),
+    );
     expect(storageRightsContextForLead({ country: 'DE', status: 'ENRICHED', hasNamedContacts: true }, 'CN').processorJurisdiction).toBe('CN');
   });
 });
@@ -71,29 +73,24 @@ describe('storage_rights_decision 经真引擎 + 系统种子（STORE 动作 eff
 });
 
 /**
- * 处理地法域解析（Codex P1 on PR #72，fail-closed）：生产未设 DATA_PROCESSOR_JURISDICTION → 抛
- *（宁可 fail-fast 不启动也不静默缺省 EU 误判在华处理）；dev/test 未设 → 缺省 EU；非法值恒抛。
+ * 处理地法域解析（fail-closed）：任意运行方式未设 DATA_PROCESSOR_JURISDICTION 都抛；
+ * 测试通过测试配置显式注入，不在产品函数中保留测试分支。
  */
 describe('resolveProcessorJurisdiction（fail-closed）', () => {
-  it('生产未设 → 抛（fail-closed，不静默缺省 EU）', () => {
-    expect(() => resolveProcessorJurisdiction('', 'production')).toThrow(/DATA_PROCESSOR_JURISDICTION/);
-    expect(() => resolveProcessorJurisdiction(null, 'production')).toThrow();
-    expect(() => resolveProcessorJurisdiction(undefined, 'production')).toThrow();
+  it('未设 → 抛（fail-closed，不静默缺省 EU）', () => {
+    expect(() => resolveProcessorJurisdiction('')).toThrow(/DATA_PROCESSOR_JURISDICTION/);
+    expect(() => resolveProcessorJurisdiction(null)).toThrow();
+    expect(() => resolveProcessorJurisdiction(undefined)).toThrow();
   });
 
-  it('dev/test 未设 → 缺省 EU（便于本地/CI）', () => {
-    expect(resolveProcessorJurisdiction('', 'development')).toBe('EU');
-    expect(resolveProcessorJurisdiction(undefined, 'test')).toBe('EU');
+  it('已设合法值 → 采用（大小写无关）', () => {
+    expect(resolveProcessorJurisdiction('CN')).toBe('CN');
+    expect(resolveProcessorJurisdiction('cn')).toBe('CN');
+    expect(resolveProcessorJurisdiction('EU')).toBe('EU');
   });
 
-  it('已设合法值 → 采用（大小写无关），任何 env 下均不抛', () => {
-    expect(resolveProcessorJurisdiction('CN', 'production')).toBe('CN');
-    expect(resolveProcessorJurisdiction('cn', 'production')).toBe('CN');
-    expect(resolveProcessorJurisdiction('EU', 'production')).toBe('EU');
-  });
-
-  it('非法值 → 抛（fail-fast 防拼写），与 env 无关', () => {
-    expect(() => resolveProcessorJurisdiction('XX', 'production')).toThrow(/非法/);
-    expect(() => resolveProcessorJurisdiction('CHINA', 'development')).toThrow(/非法/);
+  it('非法值 → 抛（fail-fast 防拼写）', () => {
+    expect(() => resolveProcessorJurisdiction('XX')).toThrow(/非法/);
+    expect(() => resolveProcessorJurisdiction('CHINA')).toThrow(/非法/);
   });
 });

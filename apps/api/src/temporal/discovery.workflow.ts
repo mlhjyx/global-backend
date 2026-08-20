@@ -26,8 +26,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   let failures = 0;
   let discoveryBudgetTruncated = false;
 
-  // 起始清账：同 runId 重试时，清除上次崩溃 attempt 残留的预算账户/打穿标记（否则首个 executeQuery 误报截断）。
-  await acts.resetRunBudget({ runId });
+  // Compatibility close: drops stale holders, never reservations. If a prior
+  // physical call is unresolved, the first paid activity fails closed on open.
+  await acts.resetRunBudget({ workspaceId, runId });
 
   const { queries } = await acts.loadPlanQueries({ workspaceId, planId });
   for (const query of queries) {

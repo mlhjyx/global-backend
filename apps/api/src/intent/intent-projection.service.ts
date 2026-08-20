@@ -9,6 +9,10 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageKind, classifyPageKind } from './page-signals';
 import { WEB_WATCH_KEY } from './website-watch.service';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
+import {
+  assertProductDiscoveryProvenance,
+  isSyntheticDiscoveryProvenance,
+} from '../discovery/evidence-license';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
@@ -52,10 +56,19 @@ export class IntentProjectionService {
     },
   ): Promise<RegisterWatchResult> {
     const { prisma } = this.deps;
-    const company = await prisma.withWorkspace(workspaceId, (tx) =>
-      tx.canonicalCompany.findUnique({ where: { id: canonicalCompanyId }, select: { name: true, domain: true, region: true },
-      }),
-    );
+    const company = await prisma.withWorkspace(workspaceId, async (tx) => {
+      const candidate = await tx.canonicalCompany.findUnique({
+        where: { id: canonicalCompanyId },
+        select: { id: true, name: true, domain: true, region: true },
+      });
+      if (!candidate) return null;
+      const evidenceRows = await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: candidate.id },
+        select: { providerKey: true, license: true },
+      });
+      for (const evidence of evidenceRows) assertProductDiscoveryProvenance(evidence);
+      return candidate;
+    });
     if (!company) throw new Error(`canonical_company ${canonicalCompanyId} not found in workspace`);
     const domain = company.domain ? (normalizeDomain(company.domain) ?? undefined) : undefined;
     if (!domain) throw new Error(`company ${canonicalCompanyId} has no domain — cannot watch website`);
@@ -163,6 +176,11 @@ export class IntentProjectionService {
         });
         if (!materialization.allowed || !materialization.prior) return false;
         const company = materialization.prior;
+        const evidenceRows = await tx.fieldEvidence.findMany({
+          where: { entityType: 'company', entityId: company.id },
+          select: { providerKey: true, license: true },
+        });
+        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) return false;
 
         const events = changes.map(toIntentEvent);
         const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;

@@ -110,6 +110,7 @@ describe("QualityCandidateService fencing", () => {
       service.assembleQualityCandidate({
         identity,
         designBrief: golden.designBrief,
+        materializedRoot: identity.root!,
       }),
     ).resolves.toEqual(golden.spec);
 
@@ -118,6 +119,7 @@ describe("QualityCandidateService fencing", () => {
       service.assembleQualityCandidate({
         identity,
         designBrief: golden.designBrief,
+        materializedRoot: identity.root!,
       }),
     ).rejects.toThrow("RENDERER_OUTPUT_TREE_MISMATCH");
   });
@@ -152,6 +154,7 @@ describe("QualityCandidateService fencing", () => {
       service.evaluateQualityCandidate({
         identity,
         designBrief: golden.designBrief,
+        materializedRoot: identity.root!,
         quality: {
           round: 0,
           artifactPrefix: "quality/round-0",
@@ -220,6 +223,7 @@ describe("QualityCandidateService fencing", () => {
     );
     const repairInput = {
       identity,
+      materializedRoot: identity.root!,
       context: {
         spec: golden.spec,
         brief: golden.designBrief,
@@ -263,6 +267,7 @@ describe("QualityCandidateService fencing", () => {
     await expect(
       service.applyQualityRepair({
         identity,
+        materializedRoot: identity.root!,
         context: {
           spec: golden.spec,
           brief: golden.designBrief,

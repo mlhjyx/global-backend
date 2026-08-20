@@ -13,6 +13,7 @@ import {
   resolveCorsOrigin,
   resolveRuntimeSettings,
 } from './runtime/runtime-environment';
+import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-identity';
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
@@ -45,6 +46,11 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
 
 async function bootstrap(): Promise<void> {
   const runtimeSettings = resolveRuntimeSettings(process.env);
+  await initializeRuntimeReleaseIdentity({
+    mode: runtimeSettings.mode,
+    artifactRoot: resolve(__dirname),
+    env: process.env,
+  });
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });

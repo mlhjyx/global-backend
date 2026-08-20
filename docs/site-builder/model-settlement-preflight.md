@@ -1,10 +1,39 @@
 # Site Builder paid-model settlement preflight
 
-Status: implementation contract; runtime authorization remains blocked
+Status: `SUPERSEDED`
 
 Version: `site-builder-model-settlement-attestation/2026-07-29-v2`
 
-## Purpose and boundary
+Superseded on: `2026-08-16`
+
+Successor: [ADR-024 ENVIRONMENT-PARITY-AND-BUDGET-AUTHORITY](../adr/registry.md)
+
+## Supersession boundary
+
+This document is retained as 历史 provenance for the former 24-hour,
+operator-installed Site Builder model-settlement attestation. It is not a
+current product-runtime contract, dispatch authorization, deployment
+instruction, or justification for restoring either
+`SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH` /
+`SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256` or any
+`MODEL_PREFLIGHT_*ATTEST*` denial.
+
+ADR-024 replaces that normal-product gate with one product path in every
+managed environment: the SaaS Control Plane signs a one-time, short-lived,
+workspace/operation/request-bound Budget Grant (also site-bound when a Site
+already exists); this backend verifies and atomically consumes it, then performs durable reserve, settle, and append-only
+reconciliation. A valid product Grant does not authorize Codex/operator
+ad-hoc/evaluation dispatch, and ad-hoc/evaluation approval does not mint or
+replace a product Grant.
+
+The historical contract below remains only to explain why old artifacts,
+errors, environment variables, and evidence may exist. Imperative wording in
+that section describes the superseded design and must not be implemented or
+used to admit or deny a current product request.
+
+## Historical contract (provenance only)
+
+### Historical purpose and boundary
 
 Durable Site Builder model calls must not infer actual cost from new-api's
 local/default pricing table. OpenOx is the upstream vendor, so the only model
@@ -29,7 +58,7 @@ This contract does not:
 - store a bearer token, prompt, response body, or reversible credential in Git
   or in paid-operation metadata.
 
-## Runtime sequence
+### Historical runtime sequence
 
 1. Load the attestation from
    `SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH` and verify the exact file
@@ -82,7 +111,7 @@ broader/narrower model list, exhausted quota points, a changed/missing OpenOx
 price, an unattested alias/protocol, or an unsupported paid operation produces
 `PaidCallDeniedError` before reserve and before a generative endpoint.
 
-## Attestation inputs
+### Historical attestation inputs
 
 The reviewed attestation is a secret-adjacent operational artifact and remains
 outside Git. It contains only:
@@ -108,7 +137,7 @@ prices in CNY. The attestation preserves that native currency. Its
 `openox_1_to_1_balance_credit` conversion records OpenOx's documented 1:1
 recharge/balance-credit semantics; it is not a foreign-exchange claim.
 
-## Authorization gate
+### Historical authorization gate
 
 This code makes paid execution accountable; it does not authorize it. Before
 installing an attestation, the operator must present:

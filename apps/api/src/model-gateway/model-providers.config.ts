@@ -4,8 +4,6 @@ import {
   VERIFIED_GATEWAY_MODEL_TRANSPORTS,
 } from './model-transports';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
-import { loadSiteBuilderModelSettlement } from '../site-builder/site-builder-model-settlement';
-import type { PaidModelSettlementController } from './paid-model-settlement';
 
 export interface GatewayEvaluationConfig {
   /**
@@ -14,20 +12,6 @@ export interface GatewayEvaluationConfig {
    * immutable catalog explicitly.
    */
   visionEvalFixtureDigests?: Readonly<Record<string, string>>;
-}
-
-function loadPaidModelSettlementFailClosed(
-  env: NodeJS.ProcessEnv,
-): PaidModelSettlementController | undefined {
-  try {
-    return loadSiteBuilderModelSettlement(env);
-  } catch {
-    // A stale, unreadable, or otherwise invalid operational attestation must
-    // deny paid calls without taking the API or worker process down. The
-    // provider's preflightPaidCall reports ATTESTATION_UNAVAILABLE before
-    // reserve when this controller is absent.
-    return undefined;
-  }
 }
 
 /**
@@ -42,7 +26,7 @@ export function buildGatewayProvider(
 ): ModelProvider | null {
   const baseUrl = env.MODEL_GATEWAY_URL;
   const apiKey = env.MODEL_GATEWAY_KEY;
-  if (!baseUrl || !apiKey) return null; // not configured yet → stub covers it
+  if (!baseUrl || !apiKey) return null;
   return new OpenAICompatibleProvider({
     id: 'gateway',
     baseUrl,
@@ -50,18 +34,7 @@ export function buildGatewayProvider(
     // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',
     modelTransports: VERIFIED_GATEWAY_MODEL_TRANSPORTS,
-    paidModelSettlement: loadPaidModelSettlementFailClosed(env),
     visionModelTransports: CANDIDATE_GATEWAY_VISION_TRANSPORTS,
     visionEvalFixtureDigests: evaluation.visionEvalFixtureDigests,
   });
-}
-
-/**
- * Stub 只允许在非生产使用：生产环境模型不可用时必须失败并告警，
- * 绝不能静默合成假数据（数据真实性 P-04）。
- */
-export function stubAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  const declaredMode = env.APP_ENVIRONMENT?.trim();
-  if (declaredMode === 'pilot' || declaredMode === 'production') return false;
-  return env.NODE_ENV !== 'production';
 }

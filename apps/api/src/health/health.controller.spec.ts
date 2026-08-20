@@ -10,7 +10,8 @@ function controller(options: { readiness?: object; build?: object } = {}) {
     current: vi.fn(() =>
       options.build ?? {
         attested: false,
-        schema_version: 'global-runtime-build-attestation/v1',
+        schema_version: 'global-runtime-release-identity/v1',
+        code: 'TEST_RUNTIME_UNATTESTED',
       },
     ),
   };
@@ -40,10 +41,15 @@ describe('HealthController compatibility and layered probes', () => {
   it('returns the exact non-sensitive build identity', () => {
     const build = {
       attested: true,
-      schema_version: 'global-runtime-build-attestation/v1',
+      schema_version: 'global-runtime-release-identity/v1',
       build_sha: 'a'.repeat(40),
       built_at: '2026-08-10T00:00:00.000Z',
       artifact_digest: `sha256:${'b'.repeat(64)}`,
+      artifact_manifest_digest: `sha256:${'d'.repeat(64)}`,
+      sbom_digest: `sha256:${'e'.repeat(64)}`,
+      source_tree_digest: `sha256:${'f'.repeat(64)}`,
+      renderer_digest: `sha256:${'1'.repeat(64)}`,
+      image_digest: `sha256:${'2'.repeat(64)}`,
       migration_revision: '20260809010101_runtime_receipts',
       schema_digest: `sha256:${'c'.repeat(64)}`,
     };

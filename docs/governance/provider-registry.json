@@ -235,19 +235,6 @@
       "call_gates": ["data_provider_status", "lawful_basis", "candidate_budget", "smtp_self"],
       "test_paths": ["apps/api/src/discovery/email-guesser.spec.ts", "apps/api/src/discovery/email-guess-persist.spec.ts"],
       "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/discovery/email-guesser.spec.ts" }]
-    },
-    {
-      "key": "sandbox",
-      "status": "IMPLEMENTED",
-      "source_classes": ["trade_data", "b2b_company_person", "company_registry", "public_intelligence", "industry_data"],
-      "purpose": "Provide deterministic synthetic records for explicit offline and unit-test use only.",
-      "taxonomy": ["synthetic seed", "requested SourceClass", "fixture filters"],
-      "license": { "classification": "SYNTHETIC", "note": "Generated fixtures are not real data and must never be represented as runtime evidence." },
-      "personal_data_class": "NONE",
-      "default_enablement": "CONDITIONAL",
-      "call_gates": ["DISCOVERY_ALLOW_SANDBOX_true", "non_production_only", "not_runtime_evidence"],
-      "test_paths": ["apps/api/src/temporal/discovery.activities.spec.ts"],
-      "evidence_refs": [{ "kind": "TEST_ANCHOR", "path": "apps/api/src/temporal/discovery.activities.spec.ts" }]
     }
   ]
 }

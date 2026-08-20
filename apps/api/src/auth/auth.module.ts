@@ -1,7 +1,5 @@
 import { Global, Logger, Module } from '@nestjs/common';
-import { isIP } from 'node:net';
-import { TokenVerifier } from './token-verifier';
-import { DevTokenVerifier } from './dev-token-verifier';
+import { TokenVerifier, UnavailableTokenVerifier } from './token-verifier';
 import { JwksTokenVerifier } from './jwks-token-verifier';
 import { AuthGuard } from './auth.guard';
 import { ScopesGuard } from './scopes.guard';
@@ -12,23 +10,15 @@ import {
 } from './scopes';
 import {
   resolveRuntimeMode,
-  resolveRuntimeSettings,
 } from '../runtime/runtime-environment';
 
 /**
  * 身份 seam（PRD：身份归外部 SaaS 平台，我方只校验其签发的 token）。
  * 选择器（确定性）：
- *  - 配了 AUTH_JWKS_URI + AUTH_ISSUER → JwksTokenVerifier（真验签）。
- *  - DevTokenVerifier 只允许显式 development + 显式 opt-in + loopback bind。
- *  - 半配置 JWKS、test、pilot、production 或非 loopback 一律 fail-closed。
+ * 所有 managed runtime 都只接受 SaaS 平台通过 JWKS 签发的 token。
+ * development 仅替换 issuer/JWKS 信任根，不替换认证协议或授权语义。
  */
 const logger = new Logger('AuthModule');
-
-function isLoopbackBindHost(host: string): boolean {
-  if (host === '127.0.0.1') return true;
-  if (isIP(host) !== 6) return false;
-  return new URL(`http://[${host}]/`).hostname.slice(1, -1) === '::1';
-}
 
 export function createTokenVerifier(
   env: NodeJS.ProcessEnv = process.env,
@@ -36,37 +26,31 @@ export function createTokenVerifier(
   const hasJwksUri = Boolean(env.AUTH_JWKS_URI?.trim());
   const hasIssuer = Boolean(env.AUTH_ISSUER?.trim());
   const hasAudience = Boolean(env.AUTH_AUDIENCE?.trim());
-  if (
-    !(
-      (hasJwksUri && hasIssuer && hasAudience) ||
-      (!hasJwksUri && !hasIssuer && !hasAudience)
-    )
-  ) {
-    throw new Error(
-      'AUTH_JWKS_URI, AUTH_ISSUER, and AUTH_AUDIENCE must be configured together',
-    );
+  if (!(hasJwksUri && hasIssuer && hasAudience)) {
+    logger.error('JWKS authentication configuration is incomplete; verifier is unavailable');
+    return new UnavailableTokenVerifier();
   }
-  if (hasJwksUri && hasIssuer && hasAudience) {
+  try {
+    const verifier = new JwksTokenVerifier(env);
     logger.log('using JwksTokenVerifier (verifies SaaS-platform signed tokens)');
-    return new JwksTokenVerifier(env);
+    return verifier;
+  } catch {
+    logger.error('JWKS authentication configuration is invalid; verifier is unavailable');
+    return new UnavailableTokenVerifier();
   }
+}
 
-  const runtime = resolveRuntimeSettings(env);
-  if (
-    runtime.mode !== 'development' ||
-    env.AUTH_ALLOW_DEV_TOKENS !== 'true' ||
-    !isLoopbackBindHost(runtime.bindHost)
-  ) {
-    throw new Error(
-      'DevTokenVerifier requires APP_ENVIRONMENT=development, ' +
-        'AUTH_ALLOW_DEV_TOKENS=true, and a loopback API_BIND_HOST; ' +
-        'otherwise configure AUTH_JWKS_URI + AUTH_ISSUER + AUTH_AUDIENCE.',
-    );
+export function createRuntimeRolesToScopesPolicy(
+  env: NodeJS.ProcessEnv = process.env,
+): RolesToScopesPolicy {
+  try {
+    return createRolesToScopesPolicy(env, resolveRuntimeMode(env));
+  } catch {
+    logger.error('role-to-scope configuration is unavailable; authorization is deny-all');
+    return Object.freeze({
+      resolve: (): readonly [] => Object.freeze([]),
+    });
   }
-  logger.warn(
-    'using explicitly enabled DevTokenVerifier on a development loopback bind',
-  );
-  return new DevTokenVerifier();
 }
 
 @Global()
@@ -76,7 +60,7 @@ export function createTokenVerifier(
     {
       provide: ROLES_TO_SCOPES_POLICY,
       useFactory: (): RolesToScopesPolicy =>
-        createRolesToScopesPolicy(process.env, resolveRuntimeMode(process.env)),
+        createRuntimeRolesToScopesPolicy(process.env),
     },
     AuthGuard,
     ScopesGuard,

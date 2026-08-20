@@ -1,0 +1,190 @@
+{
+  "schema_version": "environment-parity-policy/v1",
+  "product_source_roots": [
+    "apps/api/src",
+    "apps/site-renderer/src",
+    "packages/contracts/src",
+    "packages/db/src"
+  ],
+  "product_runtime_manifests": [
+    "apps/api/package.json",
+    "apps/site-renderer/package.json",
+    "packages/contracts/package.json",
+    "packages/db/package.json"
+  ],
+  "excluded_path_patterns": [
+    "(?:^|/)__tests__(?:/|$)",
+    "\\.(?:spec|test)\\.[cm]?[jt]sx?$"
+  ],
+  "allowed_difference_categories": [
+    "trust",
+    "endpoint",
+    "secret",
+    "network",
+    "resource",
+    "observability",
+    "deployment",
+    "test-process"
+  ],
+  "configuration_allowlist": [
+    {
+      "id": "managed-runtime-node-environment",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-admission.ts",
+      "match_sha256": "sha256:0094c0d54d31079d1997e6c59a7193a0169a352c90185944931437245f77534b",
+      "category": "deployment",
+      "reason": "Every managed mode, including development, requires production-compiled Node runtime semantics and an explicit real data-processing jurisdiction; the business rules and failure semantics remain identical."
+    },
+    {
+      "id": "runtime-admission-test-process-only",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-admission.ts",
+      "match_sha256": "sha256:680db1242167b347fa4c645dc6ab213b2ad0aa3e2df35c7699e6d1d572f5f393",
+      "category": "test-process",
+      "reason": "Only the isolated test process is outside managed runtime admission and cannot accept product work."
+    },
+    {
+      "id": "development-loopback-jwks-trust-root",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-admission.ts",
+      "match_sha256": "sha256:d5b5d387f3dbb366785f1be5591e4d2dcdf01a36871e445f13a70087246409cd",
+      "category": "trust",
+      "reason": "Development may use a loopback HTTP SaaS/JWKS trust root while retaining the same verifier and claims contract."
+    },
+    {
+      "id": "budget-grant-loopback-jwks-trust-root",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/site-builder/site-build-budget-grant.ts",
+      "match_sha256": "sha256:b0f13b5ff9960d097317de126b9338235e601a31e67630ba9074542274c7faaf",
+      "category": "trust",
+      "reason": "Development and the isolated test process may use loopback HTTP SaaS Budget Grant trust roots while retaining the same asymmetric verifier, claims, scope, amount, and failure contracts."
+    },
+    {
+      "id": "pilot-gateway-loopback-network",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-admission.ts",
+      "match_sha256": "sha256:5bbfd2b7f0052430ff1a64bd8c2694dbd63e8eb46bcf6f78763a260afe458849",
+      "category": "network",
+      "reason": "The controlled pilot restricts the real gateway endpoint to loopback without changing provider or validation semantics."
+    },
+    {
+      "id": "declared-runtime-deployment-mode",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:590c8e0724509dd7792c30947bf7a1afae9c2f17e43859f8fe470dde7d617335",
+      "category": "deployment",
+      "reason": "APP_ENVIRONMENT selects only the declared deployment configuration from the closed runtime mode set."
+    },
+    {
+      "id": "controlled-runtime-production-compile-check",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:ffb48cd07498ba949d004c65333204d54174e78b544754892404b3c94c2229ff",
+      "category": "deployment",
+      "reason": "Controlled runtime declarations must use production-compiled Node semantics."
+    },
+    {
+      "id": "production-runtime-mode-default",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:800503e2a4945461f34caae2fab0e762ddf20fe120c5ddd4f56acbfa6d732ad5",
+      "category": "deployment",
+      "reason": "An undeclared production-compiled process defaults to the production deployment profile."
+    },
+    {
+      "id": "test-runtime-mode-default",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:d02fad3f1d2e1e1d1e269ba8ceeeb2abbd06ac9f9336c1bd0f062a0288af68ee",
+      "category": "test-process",
+      "reason": "NODE_ENV=test selects the isolated test process profile, which cannot accept managed product work."
+    },
+    {
+      "id": "runtime-bind-host-network-profile",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:deebcf75a38161a5679dc242cfc2db075f03a562b4fa01055d518ee83ab22e5e",
+      "category": "network",
+      "reason": "Bind-host requirements vary only with the deployment network exposure profile."
+    },
+    {
+      "id": "pilot-wildcard-bind-diagnostic",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:31f2885f1306ecd809c91c9bf7d132c127ce96ca3b05364c0234914e7fa0ab5c",
+      "category": "network",
+      "reason": "The pilot-specific wildcard rejection message documents its tighter network topology without changing product semantics."
+    },
+    {
+      "id": "pilot-loopback-bind-network",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:67f98e5c21b7c70faffecdff48ddad38f288d8e753e2ffe9838ae5e57b9e0b39",
+      "category": "network",
+      "reason": "The controlled pilot binds only to loopback as a network exposure restriction."
+    },
+    {
+      "id": "controlled-cors-network-origin",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:79d952051d98c275760336ffe6f0b3eabb1f470663e0b401cc06d9938dff83dd",
+      "category": "network",
+      "reason": "Controlled environments require HTTPS or loopback CORS origins as a network trust restriction."
+    },
+    {
+      "id": "test-process-default-cors",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-environment.ts",
+      "match_sha256": "sha256:304c588b0bca67e0e43c1707c49f3eff5dd5f8b3c605108e2b7e0d17243394d6",
+      "category": "test-process",
+      "reason": "Only the isolated test process receives permissive default CORS; every managed mode is fail-closed without configured origins."
+    },
+    {
+      "id": "build-attestation-test-process-only",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/build-attestation.ts",
+      "match_sha256": "sha256:142d1ccf9cb55bcd73aa58b702d7cfd512e6f4847fddd8603986b010bd7248e7",
+      "category": "test-process",
+      "reason": "The isolated test process may exercise malformed and absent receipts without becoming a managed runtime."
+    },
+    {
+      "id": "runtime-release-identity-test-process-only",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/runtime-release-identity.ts",
+      "match_sha256": "sha256:8414e0aa3339d93ab51798ba2ce7d052b588872e7143eb83bb9fcabadbfee42f",
+      "category": "test-process",
+      "reason": "The isolated test process is explicitly unattested and cannot accept managed product work."
+    },
+    {
+      "id": "image-pipeline-child-production-runtime",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/site-builder/image-pipeline-runner.ts",
+      "match_sha256": "sha256:4c0d28b781de8471789304d465306443a619a8459e9b51763d354701bc9d9ea4",
+      "category": "deployment",
+      "reason": "The product child process is always launched with production runtime semantics from the same managed artifact."
+    },
+    {
+      "id": "renderer-child-production-runtime",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/site-builder/renderer-build.ts",
+      "match_sha256": "sha256:3f227ca065daa60275d40b7e8a6b19ff9471b56b99d31fac67730c64caf36f74",
+      "category": "deployment",
+      "reason": "The product renderer child is always launched with production runtime semantics from the pinned renderer identity."
+    }
+  ],
+  "migration_allowlist": [
+    {
+      "id": "historical-sandbox-evidence-license",
+      "rule": "SYNTHETIC_PROVIDER_RUNTIME_PATH",
+      "path": "apps/api/src/discovery/evidence-license.ts",
+      "match_sha256": "sha256:37a81674f8d95fa0b18c2efaee131ac05806c688f5ee60e4263f27b5259b9018",
+      "reason": "Temporary compatibility logic identifies sandbox provenance for licensing decisions; it does not register or route a sandbox provider.",
+      "target_state": "Quarantine and exclude historical synthetic discovery records from product reads, releases, and evidence, then remove this compatibility branch."
+    }
+  ],
+  "forbidden_runtime_dependencies": [
+    "@global/test-support",
+    "@global/site-renderer-visual-harness",
+    "@global/site-builder-eval-runner"
+  ]
+}

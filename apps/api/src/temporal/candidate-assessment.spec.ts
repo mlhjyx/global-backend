@@ -24,6 +24,8 @@ vi.mock('../discovery/fit-judge', async (importOriginal) => {
 import { judgeFitCompany } from '../discovery/fit-judge';
 import { createDiscoveryActivities } from './discovery.activities';
 import { createBacklogActivities } from './backlog.activities';
+import { BudgetLedger } from '../tools/budget';
+import { InMemoryBudgetStoreAdapter } from '../tools/budget-store';
 
 const judgeFitMock = vi.mocked(judgeFitCompany);
 
@@ -113,6 +115,7 @@ function makeTx(store: Store) {
       findMany: async ({ where }: { where: { runId: string } }) =>
         store.raws.filter((r) => r.runId === where.runId).map((r) => ({ id: r.id })),
     },
+    fieldEvidence: { findMany: async () => [] },
     identityLink: {
       findMany: async ({ where }: { where: { rawRecordId: { in: string[] } } }) =>
         store.links
@@ -213,11 +216,13 @@ const leadFor = (store: Store, icpId: string) =>
 
 beforeEach(() => judgeFitMock.mockReset());
 
+const testBudgetStore = () => new InMemoryBudgetStoreAdapter(new BudgetLedger());
+
 describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 ICP 互不覆盖', () => {
   it('同一公司：ICP-A 判 match、ICP-B 判 mismatch → 两条独立 Lead，各自 fitVerdict 不被对方覆盖', async () => {
     const store = seedOneCompany();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any });
+    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any, budgetStore: testBudgetStore() });
 
     // ICP-A：match
     judgeFitMock.mockResolvedValue(judgment('match'));
@@ -242,7 +247,7 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
   it('幂等：同一 ICP 重跑不重复判（已有该 ICP 的已判 Lead 的公司离开待判集）', async () => {
     const store = seedOneCompany();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any });
+    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any, budgetStore: testBudgetStore() });
     judgeFitMock.mockResolvedValue(judgment('match'));
     await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
     const second = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
@@ -271,6 +276,7 @@ describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立�
       gateway: {} as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ownerDb: {} as any,
+      budgetStore: testBudgetStore(),
     });
 
     judgeFitMock.mockResolvedValue(judgment('match'));
@@ -299,6 +305,7 @@ describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立�
       providers: {} as never,
       gateway: {} as never,
       ownerDb: {} as never,
+      budgetStore: testBudgetStore(),
     });
     judgeFitMock.mockResolvedValue(judgment('match'));
     const result = await acts.qualifyFitBacklog({ workspaceId: WS, icpId: ICP_A });

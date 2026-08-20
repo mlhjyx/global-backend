@@ -4,7 +4,8 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import { EnrichmentResult, ExecutionContext, LawfulBasis, LawfulBasisKind, ProviderContactRecord,
 } from '../discovery/provider-contract';
-import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
+import { BudgetExceededError, sweepBudgetCents } from '../tools/budget';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
@@ -23,6 +24,7 @@ import { companyMayUseExternalProcessing,
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
 import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
+import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
 
 /**
  * 存量对账活动（backlog reconciliation）——漏斗总闸的解锁器。
@@ -42,6 +44,42 @@ import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-
  */
 
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 与 discovery.activities 的 SIGNAL_TTL_MS 对齐（信号时变，7 天刷新）
+const PRODUCT_CANDIDATE_SCAN_BATCH = 50;
+
+/**
+ * Reads bounded evidence pages before a company can enter any backlog product
+ * derivation. It keeps scanning past quarantined rows so a leading block of
+ * historical sandbox data cannot permanently consume `take` and starve real
+ * companies. Historical evidence remains immutable and is never watermarked.
+ */
+async function productBacklogCandidates<T extends { id: string }>(
+  tx: Prisma.TransactionClient,
+  limit: number,
+  fetch: (page: { skip: number; take: number }) => Promise<T[]>,
+): Promise<T[]> {
+  const result: T[] = [];
+  const take = Math.max(PRODUCT_CANDIDATE_SCAN_BATCH, limit);
+  let skip = 0;
+  while (result.length < limit) {
+    const candidates = await fetch({ skip, take });
+    if (!candidates.length) break;
+    const evidence = await tx.fieldEvidence.findMany({
+      where: {
+        entityType: 'company',
+        entityId: { in: candidates.map((company) => company.id) },
+      },
+      select: { entityId: true, providerKey: true, license: true },
+    });
+    const quarantined = syntheticDiscoveryEntityIds(evidence);
+    for (const company of candidates) {
+      if (!quarantined.has(company.id)) result.push(company);
+      if (result.length === limit) break;
+    }
+    skip += candidates.length;
+    if (candidates.length < take) break;
+  }
+  return result;
+}
 
 /** 引擎级 kill-switch 的 data_provider key（默认 DISABLED；见 provider.registry seed）。 */
 const EMAIL_GUESS_KEY = 'email_guess';
@@ -66,6 +104,8 @@ export function parseConfiguredLawfulBasis(config: unknown): LawfulBasis | undef
 
 export interface BacklogPage {
   workspaceId: string;
+  /** Stable Temporal run identity; managed workflow always supplies it to isolate budget generations. */
+  budgetScopeId?: string;
   limit?: number;
   /** 上一批最后扫描到的公司 id；null/缺省 = 从头。 */
   cursor?: string | null;
@@ -126,21 +166,33 @@ export function createBacklogActivities(deps: {
   /** 收口②：registerWatch 的 sitemap 探测出网经此闸门。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
+  budgetStore?: BudgetStore;
 }) {
+  const budgets = deps.budgetStore ?? new UnavailableBudgetStore('backlog activities require an authoritative BudgetStore');
   const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker,
   });
 
   /**
    * 收口② D：sweep 阶段预算——按「阶段×workspace」开账、**每页活动**结束配对 close
-   * （BudgetLedger 引用计数：并发同键页共享同一 cap，先完成者 close 不误删他人在用的账）。
+   * （持久账户引用计数：并发同键页共享同一 cap，先完成者 close 不误关闭他人在用的账）。
    * 语义如实：SWEEP_BUDGET_CENTS 是**单页×阶段**的硬上界（默认页 20-40 家 × est ≪ cap，正常
    * 打不到；打到即该页截断 + nextCursor=null 收手）。跨页的**整轮** sweep 硬上界需要持久化
-   * 账本（进程内 Map 撑不起 workflow 级生命周期）——已记档随收口⑤/R2 预算基建收紧。
+   * 账本；跨页共享状态不依赖具体 worker 进程。
    */
-  const openStageBudget = (stage: string, workspaceId: string): { key: string; close: () => void } => {
-    const key = `sweep:${stage}:${workspaceId}`;
-    budgetLedger.open(key, sweepBudgetCents());
-    return { key, close: () => budgetLedger.close(key) };
+  const openStageBudget = async (
+    stage: string,
+    workspaceId: string,
+    budgetScopeId?: string,
+  ): Promise<{ key: string; close: () => Promise<void>; exhausted: () => Promise<boolean> }> => {
+    const key = budgetScopeId
+      ? `sweep:${budgetScopeId}:${stage}:${workspaceId}`
+      : `sweep:${stage}:${workspaceId}`;
+    await budgets.open({ workspaceId, accountKey: key, capCents: sweepBudgetCents() });
+    return {
+      key,
+      close: () => budgets.close({ workspaceId, accountKey: key }),
+      exhausted: async () => (await budgets.status({ workspaceId, accountKey: key })).exhausted,
+    };
   };
 
   /** DAT-011：SUSPENDED 域名黑名单（平台治理表，无 RLS）。 */
@@ -208,28 +260,31 @@ export function createBacklogActivities(deps: {
       const limit = args.limit ?? 40;
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
-        const companies = await tx.canonicalCompany.findMany({
-          where: {
-            // 尚无「本 ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）→ 才判定（per-ICP，非公司级）。
-            NOT: {
-              leads: {
-                some: { icpId: args.icpId, fitVerdict: { not: null } },
+        const companies = await productBacklogCandidates(tx, limit, ({ skip, take }) =>
+          tx.canonicalCompany.findMany({
+            where: {
+              // 尚无「本 ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）→ 才判定（per-ICP，非公司级）。
+              NOT: {
+                leads: {
+                  some: { icpId: args.icpId, fitVerdict: { not: null } },
+                },
               },
+              status: { not: 'SUPPRESSED' },
+              ...(args.cursor ? { id: { gt: args.cursor } } : {}),
             },
-            status: { not: 'SUPPRESSED' },
-            ...(args.cursor ? { id: { gt: args.cursor } } : {}),
-          },
-          orderBy: { id: 'asc' },
-          take: limit,
-          select: {
-            id: true,
-            name: true,
-            domain: true,
-            country: true,
-            industry: true,
-            attributes: true,
-          },
-        });
+            orderBy: { id: 'asc' },
+            skip,
+            take,
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              industry: true,
+              attributes: true,
+            },
+          }),
+        );
         return { icpBrief, companies };
       });
 
@@ -240,7 +295,7 @@ export function createBacklogActivities(deps: {
       };
       let judged = 0;
       let skippedForBudget = 0;
-      const budget = openStageBudget('fit', args.workspaceId);
+      const budget = await openStageBudget('fit', args.workspaceId, args.budgetScopeId);
       try {
         for (let i = 0; i < companies.length; i++) {
           const c = companies[i];
@@ -272,7 +327,7 @@ export function createBacklogActivities(deps: {
           );
         }
       } finally {
-        budget.close();
+        await budget.close();
       }
       if (skippedForBudget > 0) {
         // 预算截断的行未获 fitVerdict → 仍在过滤集内，nextCursor 置 null 让本 ICP 本轮就此收手
@@ -302,22 +357,25 @@ export function createBacklogActivities(deps: {
       if (!enrichers.length) return { scanned: 0, attempted: 0, matched: 0, nextCursor: null };
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({
-            watermarkField: 'lastEnrichedAt',
-            now,
+        productBacklogCandidates(tx, limit, ({ skip, take }) =>
+          tx.canonicalCompany.findMany({
+            where: backlogEligibleWhere({
+              watermarkField: 'lastEnrichedAt',
+              now,
+            }),
+            orderBy: backlogEligibleOrderBy('lastEnrichedAt'),
+            skip,
+            take,
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              region: true,
+              attributes: true,
+            },
           }),
-          orderBy: backlogEligibleOrderBy('lastEnrichedAt'),
-          take: limit,
-          select: {
-            id: true,
-            name: true,
-            domain: true,
-            country: true,
-            region: true,
-            attributes: true,
-          },
-        }),
+        ),
       );
 
       let attempted = 0;
@@ -388,23 +446,26 @@ export function createBacklogActivities(deps: {
       const suspended = await suspendedDomains();
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({
-            watermarkField: 'lastSignalAt',
-            now,
-            requireDomain: true,
+        productBacklogCandidates(tx, limit, ({ skip, take }) =>
+          tx.canonicalCompany.findMany({
+            where: backlogEligibleWhere({
+              watermarkField: 'lastSignalAt',
+              now,
+              requireDomain: true,
+            }),
+            orderBy: backlogEligibleOrderBy('lastSignalAt'),
+            skip,
+            take,
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              region: true,
+              attributes: true,
+            },
           }),
-          orderBy: backlogEligibleOrderBy('lastSignalAt'),
-          take: limit,
-          select: {
-            id: true,
-            name: true,
-            domain: true,
-            country: true,
-            region: true,
-            attributes: true,
-          },
-        }),
+        ),
       );
 
       let attempted = 0;
@@ -412,12 +473,12 @@ export function createBacklogActivities(deps: {
       // 只 stamp 真正处理过的公司；预算耗尽的尾部保留水位、下轮重试（与 contact/fit 阶段同纪律，#51 P2）。
       const processedIds: string[] = [];
       let budgetExhausted = false;
-      const budget = openStageBudget('signals', args.workspaceId);
+      const budget = await openStageBudget('signals', args.workspaceId, args.budgetScopeId);
       try {
         for (const c of companies) {
           // 预算打穿（DigitalFootprint/StructuredHarvest 的 crawl4ai/http 计入 sweep:signals 账户）→ 停机：
           // 本家及后续不处理、不 stamp。provider fail-safe 会吞 BudgetExceededError，故用 ledger 唯一真相点判。
-          if (budgetLedger.wasExhausted(budget.key)) {
+          if (await budget.exhausted()) {
             budgetExhausted = true;
             break;
           }
@@ -449,7 +510,7 @@ export function createBacklogActivities(deps: {
           for (const e of pending) {
             // #82 P2：本家内**逐 enricher** 检 kill-switch——首个 enricher 打穿 sweep:signals 后（其 fail-safe 吞
             // BudgetExceededError），后续 enricher（如 structured_harvest 的 sitemap http.get）不得再在已耗尽账户上出网。
-            if (budgetLedger.wasExhausted(budget.key)) break;
+            if (await budget.exhausted()) break;
             if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
             try {
               const r = await e.enrichCompany(
@@ -467,7 +528,7 @@ export function createBacklogActivities(deps: {
             }
           }
           // 本家处理中打穿预算 → 本家未处理完：不 stamp、停机（下轮重试）。
-          if (budgetLedger.wasExhausted(budget.key)) {
+          if (await budget.exhausted()) {
             budgetExhausted = true;
             break;
           }
@@ -485,7 +546,7 @@ export function createBacklogActivities(deps: {
           if (committed) matched += 1;
         }
       } finally {
-        budget.close();
+        await budget.close();
       }
       // 水位：只 stamp **已处理**的公司（命中/未命中/DAT-011/TTL 新鲜跳过）；预算耗尽的尾部不 stamp、下轮重试。
       await stampProcessed(args.workspaceId, processedIds, {
@@ -508,16 +569,19 @@ export function createBacklogActivities(deps: {
       const now = new Date();
       const suspended = await suspendedDomains(); // DAT-011：SUSPENDED 域名连注册期 sitemap 探测都不发（与信号/联系人阶段一致）
       const companies = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({
-            watermarkField: 'lastWatchAt',
-            now,
-            requireDomain: true,
+        productBacklogCandidates(tx, limit, ({ skip, take }) =>
+          tx.canonicalCompany.findMany({
+            where: backlogEligibleWhere({
+              watermarkField: 'lastWatchAt',
+              now,
+              requireDomain: true,
+            }),
+            orderBy: backlogEligibleOrderBy('lastWatchAt'),
+            skip,
+            take,
+            select: { id: true, name: true, domain: true },
           }),
-          orderBy: backlogEligibleOrderBy('lastWatchAt'),
-          take: limit,
-          select: { id: true, name: true, domain: true },
-        }),
+        ),
       );
       if (!companies.length) return { scanned: 0, registered: 0, nextCursor: null };
 
@@ -589,23 +653,26 @@ export function createBacklogActivities(deps: {
             'email',
             (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
           );
-          const companies = await tx.canonicalCompany.findMany({
-            where: backlogEligibleWhere({
-              watermarkField: 'contactDiscoveryAttemptedAt',
-              now,
-              requireDomain: true,
-              requireNoPersonContact: true,
+          const companies = await productBacklogCandidates(tx, limit, ({ skip, take }) =>
+            tx.canonicalCompany.findMany({
+              where: backlogEligibleWhere({
+                watermarkField: 'contactDiscoveryAttemptedAt',
+                now,
+                requireDomain: true,
+                requireNoPersonContact: true,
+              }),
+              orderBy: backlogEligibleOrderBy('contactDiscoveryAttemptedAt'),
+              skip,
+              take,
+              select: {
+                id: true,
+                name: true,
+                domain: true,
+                country: true,
+                dedupeKey: true,
+              },
             }),
-            orderBy: backlogEligibleOrderBy('contactDiscoveryAttemptedAt'),
-            take: limit,
-            select: {
-              id: true,
-              name: true,
-              domain: true,
-              country: true,
-              dedupeKey: true,
-            },
-          });
+          );
           return { adapters, sellerCtx, suppressedEmails, companies };
         },
       );
@@ -623,14 +690,14 @@ export function createBacklogActivities(deps: {
       // 尾部不入此表 → 保留水位、下轮 sweep 重试（与 qualifyFitBacklog 同纪律）。
       const processedIds: string[] = [];
       let budgetExhausted = false;
-      const budget = openStageBudget('contact', args.workspaceId);
+      const budget = await openStageBudget('contact', args.workspaceId, args.budgetScopeId);
       try {
         for (const c of companies) {
           // 预算已打穿（本 sweep:contact 账户任一 reserve 失败）→ 停机：本家及后续不处理、不 stamp（下轮重试）。
           // 🔴 关键：adapter 的 fail-safe catch（decision_maker/public_web/companies_house 各自）会把
           // BudgetExceededError 吞成空结果，编排层区分不出「没决策人」还是「预算打穿被吞」——故用 BudgetLedger
           // 唯一真相点 wasExhausted 判，不靠源抛错（否则打穿后每家被误当「无决策人」stamp、离开水位永不重试）。
-          if (budgetLedger.wasExhausted(budget.key)) {
+          if (await budget.exhausted()) {
             budgetExhausted = true;
             break;
           }
@@ -675,7 +742,7 @@ export function createBacklogActivities(deps: {
             }
           }
           // 本家处理过程中打穿预算 → 本家未真正处理完：不计 attempted、不 stamp、停机（下轮 sweep 重试）。
-          if (budgetLedger.wasExhausted(budget.key)) {
+          if (await budget.exhausted()) {
             budgetExhausted = true;
             break;
           }
@@ -700,7 +767,7 @@ export function createBacklogActivities(deps: {
           contactsCreated += created;
         }
       } finally {
-        budget.close();
+        await budget.close();
       }
       // 水位：只对**已处理**的公司写 contactDiscoveryAttemptedAt（无具名决策人属常态，这条防「联系不上的
       // 公司」永占前排、每 sweep 重烧多页渲染+LLM——复审最尖锐的一条）。预算耗尽的尾部不 stamp、下轮重试。
@@ -789,17 +856,20 @@ export function createBacklogActivities(deps: {
             suppressedEmails: new Set<string>(),
           };
         }
-        const companies = await tx.canonicalCompany.findMany({
-          where: backlogEligibleWhere({
-            watermarkField: 'emailGuessAttemptedAt',
-            now,
-            requireDomain: true,
-            requireEmaillessContact: true,
+        const companies = await productBacklogCandidates(tx, limit, ({ skip, take }) =>
+          tx.canonicalCompany.findMany({
+            where: backlogEligibleWhere({
+              watermarkField: 'emailGuessAttemptedAt',
+              now,
+              requireDomain: true,
+              requireEmaillessContact: true,
+            }),
+            orderBy: backlogEligibleOrderBy('emailGuessAttemptedAt'),
+            skip,
+            take,
+            select: { id: true, name: true, domain: true },
           }),
-          orderBy: backlogEligibleOrderBy('emailGuessAttemptedAt'),
-          take: limit,
-          select: { id: true, name: true, domain: true },
-        });
+        );
         const suppressedEmails = canonicalizeSuppressionValues(
           'email',
           (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),

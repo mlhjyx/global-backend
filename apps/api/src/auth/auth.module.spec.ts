@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DevTokenVerifier } from './dev-token-verifier';
 import { JwksTokenVerifier } from './jwks-token-verifier';
-import { createTokenVerifier } from './auth.module';
+import {
+  createRuntimeRolesToScopesPolicy,
+  createTokenVerifier,
+} from './auth.module';
+import { UnavailableTokenVerifier } from './token-verifier';
 
 function developmentEnv(
   overrides: NodeJS.ProcessEnv = {},
@@ -15,32 +18,10 @@ function developmentEnv(
 }
 
 describe('AuthModule token verifier admission', () => {
-  it('allows the dev verifier only with explicit development, opt-in and loopback', () => {
-    expect(
-      createTokenVerifier(
-        developmentEnv({ AUTH_ALLOW_DEV_TOKENS: 'true' }),
-      ),
-    ).toBeInstanceOf(DevTokenVerifier);
-
-    expect(
-      createTokenVerifier(
-        developmentEnv({
-          API_BIND_HOST: '0:0:0:0:0:0:0:1',
-          AUTH_ALLOW_DEV_TOKENS: 'true',
-        }),
-      ),
-    ).toBeInstanceOf(DevTokenVerifier);
-  });
-
   it.each([
-    ['missing explicit opt-in', developmentEnv()],
-    [
-      'non-loopback bind',
-      developmentEnv({
-        API_BIND_HOST: '192.0.2.10',
-        AUTH_ALLOW_DEV_TOKENS: 'true',
-      }),
-    ],
+    ['development loopback', developmentEnv()],
+    ['development loopback with the retired opt-in', developmentEnv({ AUTH_ALLOW_DEV_TOKENS: 'true' })],
+    ['development non-loopback', developmentEnv({ API_BIND_HOST: '192.0.2.10', AUTH_ALLOW_DEV_TOKENS: 'true' })],
     [
       'test mode',
       {
@@ -59,28 +40,32 @@ describe('AuthModule token verifier admission', () => {
         AUTH_ALLOW_DEV_TOKENS: 'true',
       },
     ],
-  ])('rejects dev tokens for %s', (_case, env) => {
-    expect(() => createTokenVerifier(env)).toThrow(/DevTokenVerifier/);
+  ])('boots a fail-closed unavailable verifier for %s', async (_case, env) => {
+    const verifier = createTokenVerifier(env);
+    expect(verifier).toBeInstanceOf(UnavailableTokenVerifier);
+    await expect(verifier.verify('any-token')).rejects.toMatchObject({
+      response: { error: { code: 'AUTH_VERIFICATION_UNAVAILABLE' } },
+    });
   });
 
-  it('rejects partial JWKS configuration instead of falling back to dev tokens', () => {
-    expect(() =>
+  it('uses the unavailable verifier for partial configuration instead of throwing or falling back', () => {
+    expect(
       createTokenVerifier(
         developmentEnv({
           AUTH_ALLOW_DEV_TOKENS: 'true',
           AUTH_JWKS_URI: 'https://identity.example.test/jwks',
         }),
       ),
-    ).toThrow(/AUTH_JWKS_URI.*AUTH_ISSUER|AUTH_ISSUER.*AUTH_JWKS_URI/);
+    ).toBeInstanceOf(UnavailableTokenVerifier);
 
-    expect(() =>
+    expect(
       createTokenVerifier(
         developmentEnv({
           AUTH_JWKS_URI: 'https://identity.example.test/jwks',
           AUTH_ISSUER: 'https://identity.example.test/',
         }),
       ),
-    ).toThrow(/AUTH_AUDIENCE/);
+    ).toBeInstanceOf(UnavailableTokenVerifier);
   });
 
   it('selects the JWKS verifier without enabling the dev stub', () => {
@@ -93,5 +78,26 @@ describe('AuthModule token verifier admission', () => {
         }),
       ),
     ).toBeInstanceOf(JwksTokenVerifier);
+  });
+
+  it('boots a deny-all role policy for missing or malformed configuration', () => {
+    expect(createRuntimeRolesToScopesPolicy(developmentEnv()).resolve(['operator'])).toEqual([]);
+    expect(
+      createRuntimeRolesToScopesPolicy(
+        developmentEnv({ AUTH_ROLE_SCOPE_MAP_JSON: '{not-json' }),
+      ).resolve(['operator']),
+    ).toEqual([]);
+  });
+
+  it('uses the same strict configured role semantics when configuration is valid', () => {
+    expect(
+      createRuntimeRolesToScopesPolicy(
+        developmentEnv({
+          AUTH_ROLE_SCOPE_MAP_JSON: JSON.stringify({
+            viewer: ['acquisition:read'],
+          }),
+        }),
+      ).resolve(['viewer']),
+    ).toEqual(['acquisition:read']);
   });
 });

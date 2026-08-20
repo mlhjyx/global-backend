@@ -93,6 +93,7 @@ function fdaFakePrisma(
 ) {
   const companies = new Map<string, Record<string, unknown>>();
   const evidence: unknown[] = [];
+  const syntheticEntityIds = new Set<string>();
   const tx = {
     $queryRaw: async () => [{ locked: true }],
     suppressionRecord: {
@@ -122,12 +123,17 @@ function fdaFakePrisma(
       },
     },
     fieldEvidence: {
+      findMany: async ({ where }: { where: { entityId: string } }) =>
+        syntheticEntityIds.has(where.entityId)
+          ? [{ entityId: where.entityId, providerKey: 'public_web', license: 'fixture' }]
+          : [],
       create: async ({ data }: { data: unknown }) => (evidence.push(data), { id: 'fe' }),
     },
   };
   const prisma = {
     companies,
     evidence,
+    syntheticEntityIds,
     sourceSignal: {
       findMany: async ({ where, take }: { where: { status: string; occurredAt: { gte: Date } }; take: number }) =>
         signals
@@ -142,10 +148,33 @@ function fdaFakePrisma(
   return prisma as unknown as PrismaService & {
     companies: typeof companies;
     evidence: typeof evidence;
+    syntheticEntityIds: typeof syntheticEntityIds;
   };
 }
 
 describe('OpenFdaIntentProjectionService.projectClearances —— source_signal 只读投影', () => {
+  it('既有 canonical 带 synthetic evidence 时不派生 FDA intent 或新证据', async () => {
+    const signal = fdaSignal('Synthetic Applicant');
+    const prisma = fdaFakePrisma([signal]);
+    prisma.companies.set(signal.subjectKey as string, {
+      id: 'co-synthetic',
+      workspaceId: WS,
+      dedupeKey: signal.subjectKey,
+      name: signal.subjectName,
+      country: signal.subjectCountry,
+      status: 'NEW',
+      attributes: {},
+      version: 1,
+    });
+    prisma.syntheticEntityIds.add('co-synthetic');
+
+    await expect(
+      new OpenFdaIntentProjectionService({ prisma }).projectClearances(WS, { productCodes: ['QAS'] }),
+    ).resolves.toMatchObject({ companiesTouched: 0, eventsProjected: 0 });
+    expect((prisma.companies.get(signal.subjectKey as string)?.attributes as Record<string, unknown>).intent).toBeUndefined();
+    expect(prisma.evidence).toHaveLength(0);
+  });
+
   it('回归锁：wanted 码小写输入也命中 fda: 前缀键（真跑抓到 toUpperCase 整键永不相等 bug）', async () => {
     const prisma = fdaFakePrisma([fdaSignal('Aidoc Medical Ltd')]);
     const svc = new OpenFdaIntentProjectionService({ prisma });

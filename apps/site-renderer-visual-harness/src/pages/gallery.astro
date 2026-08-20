@@ -1,13 +1,14 @@
 ---
 /**
- * dev-only 组件画廊。遍历 fixtures/*.json 的 SiteSpec，用 Section 调度器渲染全部 block，
+ * 独立测试 workspace 的组件画廊。遍历 site-renderer fixtures 的 SiteSpec，
+ * 用 Section 调度器渲染全部 block，
  * 每段套各自 theme preset 的 CSS 变量。纯 live 渲染，不截图、不喂大模型。
- * 访问：pnpm dev -> http://localhost:4321/__gallery
+ * 访问：pnpm --filter @global/site-renderer-visual-harness dev -> http://localhost:4321/gallery
  */
-import Section from '../components/Section.astro';
-import { makeT } from '../lib/spec';
-import { themeToCssVars } from '../lib/themes';
-import '../styles/global.css';
+import Section from '../../../site-renderer/src/components/Section.astro';
+import { makeT } from '../../../site-renderer/src/lib/spec';
+import { themeToCssVars } from '../../../site-renderer/src/lib/themes';
+import '../../../site-renderer/src/styles/global.css';
 
 // 字体（与 Base.astro 一致，否则画廊无字体）
 import '@fontsource/noto-sans/latin-400.css';
@@ -33,17 +34,17 @@ import '@fontsource/instrument-serif/400.css';
 import '@fontsource/instrument-serif/400-italic.css';
 import 'remixicon/fonts/remixicon.css';
 
-import electrician from '../../fixtures/electrician-spec.json';
-import dispatch from '../../fixtures/dispatch-spec.json';
-import inkwell from '../../fixtures/inkwell-spec.json';
-import saffron from '../../fixtures/saffron-spec.json';
-import novacore from '../../fixtures/novacore-spec.json';
-import saas from '../../fixtures/saas-spec.json';
-import bullseye from '../../fixtures/bullseye-spec.json';
-import biotech from '../../fixtures/biotech-spec.json';
-import midwest from '../../fixtures/midwest-spec.json';
-import axiom from '../../fixtures/axiom-spec.json';
-import demo from '../../fixtures/demo-spec.json';
+import electrician from '../../../site-renderer/fixtures/electrician-spec.json';
+import dispatch from '../../../site-renderer/fixtures/dispatch-spec.json';
+import inkwell from '../../../site-renderer/fixtures/inkwell-spec.json';
+import saffron from '../../../site-renderer/fixtures/saffron-spec.json';
+import novacore from '../../../site-renderer/fixtures/novacore-spec.json';
+import saas from '../../../site-renderer/fixtures/saas-spec.json';
+import bullseye from '../../../site-renderer/fixtures/bullseye-spec.json';
+import biotech from '../../../site-renderer/fixtures/biotech-spec.json';
+import midwest from '../../../site-renderer/fixtures/midwest-spec.json';
+import axiom from '../../../site-renderer/fixtures/axiom-spec.json';
+import demo from '../../../site-renderer/fixtures/demo-spec.json';
 
 interface FixtureEntry { key: string; name: string; spec: any }
 const fixtures: FixtureEntry[] = [
@@ -59,9 +60,6 @@ const fixtures: FixtureEntry[] = [
   { key: 'axiom', name: 'Axiom', spec: axiom },
   { key: 'demo', name: 'Demo', spec: demo },
 ];
-
-// dev 模式，或本机 GALLERY_FORCE=1 build 时，渲染真画廊；否则（CI/prod build）渲染占位
-const isDev = import.meta.env.DEV || process.env.GALLERY_FORCE === '1';
 
 // 统计：覆盖的 block type 种类 + 总实例数
 const allBlockTypes = new Set<string>();
@@ -107,9 +105,7 @@ function blockCount(spec: any): number {
     <title>组件画廊 · site-renderer</title>
   </head>
   <body data-gallery>
-    {isDev ? (
-      <>
-        <nav class="gallery-bar">
+    <nav class="gallery-bar">
           <div class="gb-title">组件画廊 · site-renderer</div>
           <div class="gb-stats">
             {fixtures.length} 站 · {totalInstances} 组件实例 · {allBlockTypes.size} 种 block type
@@ -119,9 +115,9 @@ function blockCount(spec: any): number {
               <a href={`#fx-${f.key}`}>{f.key}</a>
             ))}
           </div>
-        </nav>
+    </nav>
 
-        <main class="gallery-main">
+    <main class="gallery-main">
           {fixtures.map((f) => {
             const t = safeT(f.spec);
             const preset = f.spec.site.theme.preset;
@@ -152,14 +148,7 @@ function blockCount(spec: any): number {
               </section>
             );
           })}
-        </main>
-      </>
-    ) : (
-      <div class="gallery-devonly">
-        <h1>组件画廊仅 dev 可用</h1>
-        <p>请用 <code>pnpm dev</code> 启动后访问 <code>/__gallery</code>。</p>
-      </div>
-    )}
+    </main>
 
     <script>
       // 画廊里让 scroll-reveal 元素立即可见（否则 opacity:0 看不见）
@@ -222,8 +211,6 @@ function blockCount(spec: any): number {
       }
       .gf-block:hover .gf-block-tag { opacity: 1; }
 
-      .gallery-devonly { padding: 4rem 2rem; color: #eee; text-align: center; }
-      .gallery-devonly code { background: #222; padding: 0.1rem 0.4rem; border-radius: 4px; }
     </style>
   </body>
 </html>

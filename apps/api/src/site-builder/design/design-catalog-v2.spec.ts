@@ -370,6 +370,9 @@ describe("M1-e-B v2 catalog and DesignBrief contracts", () => {
         pack.assets.filter((asset) => asset.role === "generic-process"),
       ).toHaveLength(2);
       for (const asset of pack.assets) {
+        expect(asset.repositoryPath).toMatch(
+          /^apps\/site-renderer\/product-assets\/design-demo-visuals\/[^/]+\.svg$/,
+        );
         const bytes = readFileSync(
           resolve(process.cwd(), "../..", asset.repositoryPath),
         );

@@ -73,13 +73,13 @@ test("CLAUDE.md remains a small compatibility pointer instead of a truth mirror"
   );
 });
 
-test("README reports completed M1 and the current nine-service Compose topology", () => {
+test("README reports completed M1 and the current ten-service Compose topology", () => {
   const readme = read("README.md");
   const serviceNames = composeServiceNames(read("docker-compose.yml"));
 
   assert.match(readme, /获客侧[^\n]*冻结已解除/);
   assert.match(readme, /Site Builder M1[^\n]*已完成/);
-  assert.equal(serviceNames.length, 9);
+  assert.equal(serviceNames.length, 10);
   assert.match(readme, new RegExp(`${serviceNames.length} 服务`));
   assert.ok(serviceNames.includes("openox-video-compat"));
   assert.match(readme, /openox-video-compat/);

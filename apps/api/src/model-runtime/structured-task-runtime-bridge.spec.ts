@@ -73,7 +73,7 @@ describe('executeStructuredTaskWithRuntime', () => {
     expect(generateStructured).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves the existing development-stub handoff for bounded business fallbacks', async () => {
+  it('validates output from every provider without a provider-id bypass', async () => {
     const generateStructured = vi.fn(async () => ({
       data: { code: null },
       provider: 'stub',
@@ -84,7 +84,7 @@ describe('executeStructuredTaskWithRuntime', () => {
       { generateStructured } as unknown as ModelGateway,
       { task: 'taxonomy.normalize', prompt: 'x', model: 'deepseek-v4-flash', schema: { ...schema, properties: { code: { type: 'string' } } } },
       { workspaceId: 'ws-1' },
-    )).resolves.toMatchObject({ provider: 'stub', data: { code: null } });
+    )).rejects.toThrow(/output invalid/i);
   });
 
   it('freezes a paid execution when the gateway returns no settlement observation', async () => {

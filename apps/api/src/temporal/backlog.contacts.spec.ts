@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createBacklogActivities } from './backlog.activities';
-import { budgetLedger } from '../tools/budget';
+import { BudgetLedger } from '../tools/budget';
+import { InMemoryBudgetStoreAdapter } from '../tools/budget-store';
+
+const budgetLedger = new BudgetLedger();
 import type { ContactDiscoveryResult, ExecutionContext } from '../discovery/provider-contract';
 
 /**
@@ -24,6 +27,7 @@ interface FakeCompany {
 
 function makeDeps(opts: {
   companies: FakeCompany[];
+  syntheticCompanyIds?: string[];
   suspendedDomains?: string[];
   suppressionRows?: { type: string; value: string }[];
   onDiscover: (company: { name: string }, ctx: ExecutionContext) => Promise<ContactDiscoveryResult>;
@@ -34,14 +38,20 @@ function makeDeps(opts: {
   const tx = {
     $queryRaw: async () => [{ locked: true }],
     canonicalCompany: {
-      findMany: async ({ take }: { take?: number }) =>
-        (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),
+      findMany: async ({ skip = 0, take }: { skip?: number; take?: number }) =>
+        (take != null ? opts.companies.slice(skip, skip + take) : opts.companies.slice(skip)).map((c) => ({ ...c })),
       updateMany: async ({ where, data }: { where: { id: { in: string[] } }; data: Record<string, unknown> }) => {
         const ids = Array.isArray(where.id.in) ? where.id.in : [where.id as unknown as string];
         updateManyCalls.push({ ids, data });
         return { count: ids.length };
       },
       findUnique: async ({ where }: { where: { id: string } }) => opts.companies.find((c) => c.id === where.id) ?? null,
+    },
+    fieldEvidence: {
+      findMany: async ({ where }: { where: { entityId: { in: string[] } } }) =>
+        where.entityId.in
+          .filter((id) => opts.syntheticCompanyIds?.includes(id))
+          .map((entityId) => ({ entityId, providerKey: 'sandbox', license: 'sandbox' })),
     },
     icpDefinition: {
       findUnique: async () => ({ company: { name: 'Seller', summary: null }, roles: [] as unknown[] }),
@@ -62,7 +72,13 @@ function makeDeps(opts: {
     },
   };
   const providers = { routeContactDiscovery: async () => [adapter] };
-  const deps = { prisma, providers, gateway: {}, ownerDb: {} } as unknown as Parameters<typeof createBacklogActivities>[0];
+  const deps = {
+    prisma,
+    providers,
+    gateway: {},
+    ownerDb: {},
+    budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+  } as unknown as Parameters<typeof createBacklogActivities>[0];
   return { deps, updateManyCalls, discoverCalls };
 }
 
@@ -135,5 +151,27 @@ describe('discoverContactsBacklog —— 预算打穿停机 + 不 stamp 跳过�
     expect(discoverCalls).toHaveLength(0);
     expect(r.attempted).toBe(0);
     expect(updateManyCalls.some((call) => call.data.status === 'SUPPRESSED')).toBe(true);
+  });
+
+  it('历史 sandbox evidence 在 backlog 候选加载时隔离，且不会占满 take 饿死后续产品公司', async () => {
+    const syntheticIds = Array.from({ length: 55 }, (_, index) => `sandbox-${index + 1}`);
+    const { deps, updateManyCalls, discoverCalls } = makeDeps({
+      companies: [
+        ...syntheticIds.map((id) => C(id, `${id}.example`)),
+        C('real-1', 'real.example'),
+      ],
+      syntheticCompanyIds: syntheticIds,
+      onDiscover: async () => ({ contacts: [], costCents: 0 }),
+    });
+
+    const result = await createBacklogActivities(deps).discoverContactsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+      limit: 1,
+    });
+
+    expect(discoverCalls).toEqual(['REAL-1']);
+    expect(updateManyCalls.at(-1)?.ids).toEqual(['real-1']);
+    expect(result.scanned).toBe(1);
   });
 });

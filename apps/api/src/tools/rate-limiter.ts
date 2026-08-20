@@ -11,7 +11,19 @@ interface Bucket {
   concurrency: number;
 }
 
-export class RateLimiter {
+export interface RateLimitSpec {
+  rps: number;
+  concurrency: number;
+}
+
+export interface RateLimitStore {
+  configure(toolId: string, rps: number, concurrency: number): void | Promise<void>;
+  acquire(toolId: string, nowMs?: number): Promise<() => void | Promise<void>>;
+  respectDomainDelay(domain: string, delayMs: number, nowMs?: number): Promise<void>;
+}
+
+/** Process-local implementation for explicit unit-test injection only. */
+export class RateLimiter implements RateLimitStore {
   private readonly buckets = new Map<string, Bucket>();
   private readonly lastDomainHit = new Map<string, number>();
 
@@ -22,7 +34,7 @@ export class RateLimiter {
   }
 
   /** 获取一个许可（受 rps + concurrency 限制）。返回释放函数。 */
-  async acquire(toolId: string, nowMs: number): Promise<() => void> {
+  async acquire(toolId: string, nowMs = Date.now()): Promise<() => void> {
     const b = this.buckets.get(toolId);
     if (!b) return () => {};
     // 简化的令牌补充（按经过时间）；nowMs 由调用方传入（避免 Date.now 在受限环境）
@@ -37,15 +49,11 @@ export class RateLimiter {
       }
       await sleep(50);
     }
-    // 兜底：放行但计数（避免死锁）
-    b.running += 1;
-    return () => {
-      b.running = Math.max(0, b.running - 1);
-    };
+    throw new Error(`RATE_LIMIT_ACQUIRE_TIMEOUT: ${toolId}`);
   }
 
   /** 每域串行延迟：同一域名两次抓取间至少 delayMs。 */
-  async respectDomainDelay(domain: string, delayMs: number, nowMs: number): Promise<void> {
+  async respectDomainDelay(domain: string, delayMs: number, nowMs = Date.now()): Promise<void> {
     if (!delayMs) return;
     const last = this.lastDomainHit.get(domain) ?? 0;
     const wait = last + delayMs - nowMs;
@@ -69,5 +77,3 @@ export class RateLimiter {
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, Math.max(0, ms)));
 }
-
-export const rateLimiter = new RateLimiter();

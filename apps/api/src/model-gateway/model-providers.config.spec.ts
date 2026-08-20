@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { buildGatewayProvider, stubAllowed } from './model-providers.config';
+import * as modelProviderConfig from './model-providers.config';
+import { buildGatewayProvider } from './model-providers.config';
+import type { ModelProvider } from './model-provider';
 
 function providerEnv(): NodeJS.ProcessEnv {
   return {
@@ -32,16 +34,8 @@ function request(): { url: string; headers: Record<string, string> } {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('buildGatewayProvider — verified production model transports', () => {
-  it('never allows a stub in pilot or production even when the legacy override is set', () => {
-    expect(stubAllowed({ APP_ENVIRONMENT: 'pilot', MODEL_ALLOW_STUB: 'true' })).toBe(false);
-    expect(
-      stubAllowed({
-        APP_ENVIRONMENT: 'production',
-        NODE_ENV: 'production',
-        MODEL_ALLOW_STUB: 'true',
-      }),
-    ).toBe(false);
-    expect(stubAllowed({ NODE_ENV: 'development' })).toBe(true);
+  it('does not expose an environment-controlled product stub policy', () => {
+    expect(modelProviderConfig).not.toHaveProperty('stubAllowed');
   });
 
   it('Terra uses the verified native Responses endpoint', async () => {
@@ -106,7 +100,11 @@ describe('buildGatewayProvider — verified production model transports', () => 
     expect(request().url).toBe('http://gw.test/v1/chat/completions');
   });
 
-  it('keeps the provider online but denies paid calls when the installed attestation is unreadable', async () => {
+  it('keeps the provider online without any settlement-attestation wiring', async () => {
+    // 24h settlement attestation 与逐请求 preflight 已整体移除：付费闸门
+    // 上移到 Router 的 reconciliation catalog（缺条目 fail closed）与
+    // Worker readiness（缺目录不 ready）。provider 不再读取这些环境变量，
+    // 也不再暴露 preflightPaidCall；普通调用保持在线。
     mockResponse({
       model: 'deepseek-v4-flash',
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
@@ -119,6 +117,9 @@ describe('buildGatewayProvider — verified production model transports', () => 
       SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: 'a'.repeat(64),
     });
     expect(provider).not.toBeNull();
+    expect(
+      (provider as Partial<ModelProvider>).preflightPaidCall,
+    ).toBeUndefined();
     await expect(
       provider!.generateStructured({
         task: 'legacy',
@@ -128,30 +129,6 @@ describe('buildGatewayProvider — verified production model transports', () => 
         maxTokens: 100,
       }),
     ).resolves.toMatchObject({ data: { ok: true } });
-    await expect(
-      provider!.preflightPaidCall!(
-        {
-          taskId: 'site_builder.copy',
-          op: 'generateStructured',
-          alias: 'deepseek-v4-flash',
-          promptUtf8BytesPerCall: 1,
-          maxOutputTokens: 100,
-          maximumWireCalls: 2,
-          reservationMicrousd: 100_000,
-        },
-        {
-          workspaceId: '11111111-1111-4111-8111-111111111111',
-          runId: '22222222-2222-4222-8222-222222222222',
-          paidCost: {
-            siteId: '33333333-3333-4333-8333-333333333333',
-            scopeKey: 'attempt:model:0',
-          },
-        },
-      ),
-    ).rejects.toMatchObject({
-      name: 'PaidModelPreflightError',
-      code: 'ATTESTATION_UNAVAILABLE',
-    });
     expect(fetch).toHaveBeenCalledOnce();
   });
 

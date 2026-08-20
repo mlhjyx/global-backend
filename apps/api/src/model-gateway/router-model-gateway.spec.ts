@@ -179,7 +179,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     expect(budget.remainingCents('run-1')).toBe(98); // ceil(0.02*100)=2¢
   });
 
-  it('全链失败 → 不计费（预留全额退还），错误原样上抛', async () => {
+  it('物理调用结果不明 → 保守扣减预留上界且不重试', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 100);
     const gw = gatewayWith(
@@ -191,7 +191,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     await expect(
       gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
     ).rejects.toThrow('model down');
-    expect(budget.remainingCents('run-1')).toBe(100);
+    expect(budget.remainingCents('run-1')).toBe(80);
   });
 
   it('无 runId → 按 workspaceId 归账（sweep 场景）', async () => {
@@ -325,6 +325,7 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
       route: () => [mismatched, fallback],
     } as unknown as ModelRouter;
     const gateway = new RouterModelGateway(router);
+    gateway.budget = new BudgetLedger();
 
     await expect(
       gateway.reviewVision(visionInput(), { workspaceId: 'ws-1' }),
@@ -686,7 +687,7 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
       provider,
       new BudgetLedger(),
     ).reviewVision(input, { workspaceId: 'ws-1' });
-    expect(provider.reviewVision).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(provider.reviewVision).toHaveBeenCalledTimes(1));
     input.schema = {};
     input.model = 'provider-fallback';
     resolveReview({
@@ -720,7 +721,7 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     expect(budget.remainingCents('run-1')).toBe(400);
   });
 
-  it('[real 抛 ProviderOutputError, stub 成功] → 只记 real 的真实消耗，stub 成功 settle no-op', async () => {
+  it('[real 抛 ProviderOutputError, stub 可用] → 结算 real 且不发送第二个物理请求', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 500);
     const real = fakeProvider(async () => {
@@ -736,9 +737,10 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     const router = { route: () => [real, stub] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router);
     gw.budget = budget;
-    const r = await gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' });
-    expect(r.data).toBe('ok'); // 回退到 stub
-    // 单次 settle：只记 real 的 100¢，stub 的 100¢ 不叠加（settled 标志维持）
+    await expect(
+      gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
+    ).rejects.toBeInstanceOf(ProviderOutputError);
+    expect(stub.generateText).not.toHaveBeenCalled();
     expect(budget.remainingCents('run-1')).toBe(400);
   });
 
@@ -757,7 +759,7 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     expect(budget.remainingCents('run-1')).toBe(480); // usage 缺失仍已发生 1 次调用 → 兜底 20¢
   });
 
-  it('普通 Error（非 ProviderOutputError）→ 维持旧行为不计费（全额退还）', async () => {
+  it('普通 Error（无可用输出/ACK 事实）→ 保守扣减预留上界', async () => {
     const budget = new BudgetLedger();
     budget.open('run-1', 500);
     const gw = gatewayWith(
@@ -769,7 +771,7 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     await expect(
       gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
     ).rejects.toThrow('model down');
-    expect(budget.remainingCents('run-1')).toBe(500);
+    expect(budget.remainingCents('run-1')).toBe(480);
   });
 });
 
@@ -963,7 +965,7 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
         status: 'ERROR',
         inputTokens: 7,
         outputTokens: 3,
-        errorMessage: expect.stringContaining('unsupported evidence'),
+        errorMessage: 'TaskOutputValidationError',
       }),
     );
     expect(trace.record).not.toHaveBeenCalledWith(
