@@ -42,6 +42,11 @@ export interface RuntimeReadinessReport {
   };
 }
 
+type RuntimeHardReadiness = Readonly<{
+  status: RuntimeReadinessReport['status'];
+  components: RuntimeReadinessReport['components'];
+}>;
+
 const READINESS_REFRESH_INTERVAL_MS = 10_000;
 const SNAPSHOT_UNAVAILABLE = 'RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE';
 
@@ -84,6 +89,7 @@ export class RuntimeReadinessService
 {
   private snapshot: RuntimeReadinessReport = initialReadinessSnapshot();
   private refreshInFlight?: Promise<RuntimeReadinessReport>;
+  private hardRefreshInFlight?: Promise<RuntimeHardReadiness>;
   private timer?: NodeJS.Timeout;
 
   constructor(
@@ -126,7 +132,55 @@ export class RuntimeReadinessService
     }
   }
 
+  async checkHardComponents(): Promise<RuntimeReadinessReport> {
+    const hard = await this.refreshHardComponents();
+    const report = this.report(hard, this.snapshot.capabilities);
+    this.snapshot = report;
+    return report;
+  }
+
   private async calculate(): Promise<RuntimeReadinessReport> {
+    const hard = await this.refreshHardComponents();
+    const [executionBudgetJwks, platformBudgetAuthority] = await Promise.all([
+      this.contributors.check('execution_budget_jwks'),
+      this.contributors.check('platform_budget_authority'),
+    ]);
+    const workspaceBudgetAuthority: ComponentStatus =
+      executionBudgetJwks.status !== 'ok'
+        ? {
+            status: 'failed',
+            code: 'WORKSPACE_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
+          }
+        : hard.components.database.status !== 'ok'
+          ? {
+              status: 'failed',
+              code: 'WORKSPACE_BUDGET_AUTHORITY_DATABASE_UNAVAILABLE',
+            }
+          : hard.components.migration.status !== 'ok'
+            ? {
+                status: 'failed',
+                code: 'WORKSPACE_BUDGET_AUTHORITY_MIGRATION_UNAVAILABLE',
+              }
+            : { status: 'ok' };
+    return this.report(hard, {
+      execution_budget_jwks: executionBudgetJwks,
+      workspace_budget_authority: workspaceBudgetAuthority,
+      platform_budget_authority: platformBudgetAuthority,
+    });
+  }
+
+  private async refreshHardComponents(): Promise<RuntimeHardReadiness> {
+    if (this.hardRefreshInFlight) return this.hardRefreshInFlight;
+    const refresh = this.calculateHardComponents();
+    this.hardRefreshInFlight = refresh;
+    try {
+      return await refresh;
+    } finally {
+      this.hardRefreshInFlight = undefined;
+    }
+  }
+
+  private async calculateHardComponents(): Promise<RuntimeHardReadiness> {
     const admission = this.admission.current();
     const identity = this.releaseIdentity.current();
     const [
@@ -142,8 +196,6 @@ export class RuntimeReadinessService
       browser,
       budgetGrantVerification,
       authJwks,
-      executionBudgetJwks,
-      platformBudgetAuthority,
     ] = await Promise.all([
       this.checkDatabaseAndMigration(),
       this.checkTemporal(),
@@ -161,8 +213,6 @@ export class RuntimeReadinessService
       this.contributors.check('browser'),
       this.contributors.check('budget_grant_verification'),
       this.contributors.check('auth_jwks'),
-      this.contributors.check('execution_budget_jwks'),
-      this.contributors.check('platform_budget_authority'),
     ]);
     const admissionStatus: ComponentStatus =
       admission.admitted && identity.attested
@@ -187,40 +237,22 @@ export class RuntimeReadinessService
     const ready = Object.values(components).every(
       (component) => component.status === 'ok',
     );
-    const workspaceBudgetAuthority: ComponentStatus =
-      executionBudgetJwks.status !== 'ok'
-        ? {
-            status: 'failed',
-            code: 'WORKSPACE_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
-          }
-        : databaseAndMigration.database.status !== 'ok'
-          ? {
-              status: 'failed',
-              code: 'WORKSPACE_BUDGET_AUTHORITY_DATABASE_UNAVAILABLE',
-            }
-          : databaseAndMigration.migration.status !== 'ok'
-            ? {
-                status: 'failed',
-                code: 'WORKSPACE_BUDGET_AUTHORITY_MIGRATION_UNAVAILABLE',
-              }
-            : { status: 'ok' };
-    const effectivePlatformBudgetAuthority: ComponentStatus =
-      executionBudgetJwks.status === 'ok'
-        ? platformBudgetAuthority
-        : {
-            status: 'failed',
-            code: 'PLATFORM_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
-          };
     return {
       status: ready ? 'ready' : 'not_ready',
+      components,
+    };
+  }
+
+  private report(
+    hard: RuntimeHardReadiness,
+    capabilities: RuntimeReadinessReport['capabilities'],
+  ): RuntimeReadinessReport {
+    return {
+      status: hard.status,
       service: 'global-api',
       ts: new Date().toISOString(),
-      capabilities: {
-        execution_budget_jwks: executionBudgetJwks,
-        workspace_budget_authority: workspaceBudgetAuthority,
-        platform_budget_authority: effectivePlatformBudgetAuthority,
-      },
-      components,
+      capabilities,
+      components: hard.components,
     };
   }
 

@@ -6,7 +6,7 @@ export class SiteBuildRuntimeGuard {
   constructor(private readonly readiness: RuntimeReadinessService) {}
 
   async assertReady(): Promise<void> {
-    const report = await this.readiness.check();
+    const report = await this.readiness.checkHardComponents();
     if (report.status === 'ready') return;
     const failedComponents = Object.entries(report.components)
       .filter(([, component]) => component.status !== 'ok')

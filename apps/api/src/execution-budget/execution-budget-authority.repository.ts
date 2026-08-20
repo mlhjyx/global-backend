@@ -56,6 +56,19 @@ export type ExecutionBudgetPlatformAuthorityFreshness =
       rows: readonly ExecutionBudgetPlatformAuthorityFreshnessRow[];
     }>;
 
+type PlatformWriterPrincipal = Readonly<{
+  sessionUser: string;
+  currentUser: string;
+  canLogin: boolean;
+  superuser: boolean;
+  bypassRls: boolean;
+  createDb: boolean;
+  createRole: boolean;
+  replication: boolean;
+  inherit: boolean;
+  memberships: string[];
+}>;
+
 type VerifiedWorkspaceExecutionBudgetAuthority =
   VerifiedExecutionBudgetAuthority & {
     authorityKind: 'WORKSPACE_GRANT';
@@ -307,6 +320,52 @@ function platformAuthorityFreshnessQuery(now: Date): Prisma.Sql {
   `;
 }
 
+function platformWriterPrincipalQuery(): Prisma.Sql {
+  return Prisma.sql`
+    SELECT
+      session_user::text AS "sessionUser",
+      current_user::text AS "currentUser",
+      principal.rolcanlogin AS "canLogin",
+      principal.rolsuper AS "superuser",
+      principal.rolbypassrls AS "bypassRls",
+      principal.rolcreatedb AS "createDb",
+      principal.rolcreaterole AS "createRole",
+      principal.rolreplication AS "replication",
+      principal.rolinherit AS "inherit",
+      COALESCE(ARRAY(
+        SELECT granted.rolname::text
+          FROM pg_catalog.pg_auth_members membership
+          JOIN pg_catalog.pg_roles granted
+            ON granted.oid = membership.roleid
+         WHERE membership.member = principal.oid
+         ORDER BY granted.rolname
+      ), ARRAY[]::text[]) AS "memberships"
+    FROM pg_catalog.pg_roles principal
+    WHERE principal.rolname = session_user
+  `;
+}
+
+function isAuthorizedPlatformWriterPrincipal(
+  rows: readonly PlatformWriterPrincipal[],
+): boolean {
+  const principal = rows[0];
+  return Boolean(
+    rows.length === 1 &&
+      principal &&
+      principal.sessionUser === principal.currentUser &&
+      principal.canLogin &&
+      !principal.superuser &&
+      !principal.bypassRls &&
+      !principal.createDb &&
+      !principal.createRole &&
+      !principal.replication &&
+      principal.inherit &&
+      Array.isArray(principal.memberships) &&
+      principal.memberships.length === 1 &&
+      principal.memberships[0] === 'execution_budget_platform_writer',
+  );
+}
+
 @Injectable()
 export class ExecutionBudgetAuthorityRepository {
   constructor(
@@ -413,16 +472,27 @@ export class ExecutionBudgetAuthorityRepository {
           await transaction.$executeRawUnsafe(
             'SET LOCAL statement_timeout = 2000',
           );
-          return transaction.$queryRaw<
+          const principal = await transaction.$queryRaw<
+            PlatformWriterPrincipal[]
+          >(platformWriterPrincipalQuery());
+          if (!isAuthorizedPlatformWriterPrincipal(principal)) {
+            return Object.freeze({
+              status: 'writer_unavailable' as const,
+            });
+          }
+          const freshness = await transaction.$queryRaw<
             ExecutionBudgetPlatformAuthorityFreshnessRow[]
           >(platformAuthorityFreshnessQuery(now));
+          return Object.freeze({
+            status: 'available' as const,
+            rows: Object.freeze(
+              freshness.map((row) => Object.freeze({ ...row })),
+            ),
+          });
         },
         { maxWait: 1_000, timeout: 2_500 },
       );
-      return Object.freeze({
-        status: 'available',
-        rows: Object.freeze(rows.map((row) => Object.freeze({ ...row }))),
-      });
+      return rows;
     } catch {
       return Object.freeze({ status: 'unavailable' });
     }

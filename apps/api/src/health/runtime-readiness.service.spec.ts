@@ -189,7 +189,7 @@ describe('RuntimeReadinessService', () => {
         },
         platform_budget_authority: {
           status: 'failed',
-          code: 'PLATFORM_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
+          code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
         },
       },
       components: {
@@ -198,6 +198,60 @@ describe('RuntimeReadinessService', () => {
       },
     });
   });
+
+  it.each([
+    'PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_MISSING',
+    'PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_EXPIRED',
+    'PLATFORM_BUDGET_AUTHORITY_PLATFORM_SANCTIONS_REVOKED',
+    'PLATFORM_BUDGET_AUTHORITY_PLATFORM_ACQUISITION_EXHAUSTED',
+    'PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_NOT_YET_VALID',
+  ])(
+    'preserves platform freshness code %s independently when execution JWKS fails',
+    async (platformCode) => {
+      const deps = dependencies({
+        contributors: {
+          check: vi.fn(async (name: string) => {
+            if (name === 'execution_budget_jwks') {
+              return {
+                status: 'failed',
+                code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+              };
+            }
+            if (name === 'platform_budget_authority') {
+              return { status: 'failed', code: platformCode };
+            }
+            return { status: 'ok' };
+          }),
+        },
+      });
+      const service = new RuntimeReadinessService(
+        deps.prisma as never,
+        deps.temporal as never,
+        deps.admission as never,
+        deps.releaseIdentity as never,
+        deps.leases as never,
+        deps.contributors as never,
+      );
+
+      await expect(service.check()).resolves.toMatchObject({
+        status: 'ready',
+        capabilities: {
+          execution_budget_jwks: {
+            status: 'failed',
+            code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+          },
+          workspace_budget_authority: {
+            status: 'failed',
+            code: 'WORKSPACE_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
+          },
+          platform_budget_authority: {
+            status: 'failed',
+            code: platformCode,
+          },
+        },
+      });
+    },
+  );
 
   it('reports workspace consumption capability from verifier plus app database and migration evidence without requiring a row', async () => {
     const deps = dependencies();

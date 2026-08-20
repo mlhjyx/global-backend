@@ -301,64 +301,193 @@
                       ],
                       "properties": {
                         "execution_budget_jwks": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "workspace_budget_authority": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "platform_budget_authority": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         }
                       }
                     },
@@ -383,284 +512,886 @@
                       ],
                       "properties": {
                         "database": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "migration": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "temporal_control_plane": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "worker": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "outbox_relay": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "api_runtime": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "storage": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "redis": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "model_gateway": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "renderer": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "browser": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "budget_grant_verification": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "auth_jwks": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "admission": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         }
                       }
                     }
@@ -711,64 +1442,193 @@
                       ],
                       "properties": {
                         "execution_budget_jwks": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "workspace_budget_authority": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "platform_budget_authority": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         }
                       }
                     },
@@ -793,284 +1653,886 @@
                       ],
                       "properties": {
                         "database": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "migration": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "temporal_control_plane": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "worker": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "outbox_relay": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "api_runtime": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "storage": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "redis": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "model_gateway": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "renderer": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "browser": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "budget_grant_verification": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "auth_jwks": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "admission": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         }
                       }
                     }

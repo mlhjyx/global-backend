@@ -1,13 +1,44 @@
 import type { SchemaObject } from "@nestjs/swagger/dist/interfaces/open-api-spec.interface";
 
 const COMPONENT_SCHEMA: SchemaObject = {
-  type: "object",
-  additionalProperties: false,
-  required: ["status"],
-  properties: {
-    status: { type: "string", enum: ["ok", "failed", "not_proven"] },
-    code: { type: "string" },
-  },
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status"],
+      properties: {
+        status: { type: "string", enum: ["ok"] },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "code"],
+      properties: {
+        status: { type: "string", enum: ["failed"] },
+        code: {
+          type: "string",
+          minLength: 2,
+          maxLength: 128,
+          pattern: "^[A-Z][A-Z0-9_]{1,127}$",
+        },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "code"],
+      properties: {
+        status: { type: "string", enum: ["not_proven"] },
+        code: {
+          type: "string",
+          minLength: 2,
+          maxLength: 128,
+          pattern: "^[A-Z][A-Z0-9_]{1,127}$",
+        },
+      },
+    },
+  ],
 };
 
 export const LIVE_HEALTH_RESPONSE_SCHEMA: SchemaObject = {

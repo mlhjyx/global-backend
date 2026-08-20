@@ -9,6 +9,18 @@ const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
 const ACCOUNT_ID = '8cf66f2a-1780-453e-8d7d-f70e36cb22a6';
 const ACCOUNT_KEY = `icp.design:company:f5ba98f2-a0e2-4e85-b799-e85568877702:${'a'.repeat(64)}`;
 const COMPACT_JWS = 'header.payload.signature';
+const safePlatformPrincipal = Object.freeze({
+  sessionUser: 'global_platform_writer',
+  currentUser: 'global_platform_writer',
+  canLogin: true,
+  superuser: false,
+  bypassRls: false,
+  createDb: false,
+  createRole: false,
+  replication: false,
+  inherit: true,
+  memberships: ['execution_budget_platform_writer'] as string[],
+});
 
 function workspaceAuthority(): VerifiedExecutionBudgetAuthority {
   return {
@@ -72,6 +84,27 @@ function fakePlatformWriter(
       } as never),
     ),
   } as unknown as PrismaClient;
+}
+
+function platformFreshnessWriter(
+  principalRows: readonly object[],
+  freshnessRows: readonly object[],
+) {
+  const transactionClient = {
+    $executeRawUnsafe: vi.fn(async () => 0),
+    $queryRaw: vi
+      .fn()
+      .mockResolvedValueOnce(principalRows)
+      .mockResolvedValueOnce(freshnessRows),
+  };
+  const writer = {
+    $transaction: vi.fn(
+      async (
+        operation: (client: typeof transactionClient) => Promise<unknown>,
+      ) => operation(transactionClient),
+    ),
+  };
+  return { writer: writer as unknown as PrismaClient, transactionClient };
 }
 
 function rawQueryMarkerError(
@@ -473,11 +506,8 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       { purpose: 'platform.intent_watch', state: 'expired' },
       { purpose: 'platform.sanctions', state: 'active' },
     ];
-    let query: { strings?: readonly string[]; values?: readonly unknown[] } = {};
-    const platformWriter = fakePlatformWriter(async (input) => {
-      query = input;
-      return rows;
-    });
+    const { writer: platformWriter, transactionClient } =
+      platformFreshnessWriter([safePlatformPrincipal], rows);
     const repository = new ExecutionBudgetAuthorityRepository(
       fakeWorkspacePrisma(async () => []),
       platformWriter,
@@ -486,7 +516,25 @@ describe('ExecutionBudgetAuthorityRepository', () => {
 
     await expect(repository.inspectPlatformAuthorityFreshness(now)).resolves.toEqual({ status: 'available', rows });
     expect(platformWriter.$transaction).toHaveBeenCalledWith(expect.any(Function), { maxWait: 1_000, timeout: 2_500 });
-    const source = query.strings?.join('') ?? '';
+    expect(transactionClient.$queryRaw).toHaveBeenCalledTimes(2);
+    const principalQuery = transactionClient.$queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    };
+    const freshnessQuery = transactionClient.$queryRaw.mock.calls[1]?.[0] as {
+      strings?: readonly string[];
+    };
+    const principalSource = principalQuery.strings?.join('') ?? '';
+    const source = freshnessQuery.strings?.join('') ?? '';
+    expect(principalSource).toContain('session_user');
+    expect(principalSource).toContain('current_user');
+    expect(principalSource).toContain('rolcanlogin');
+    expect(principalSource).toContain('rolsuper');
+    expect(principalSource).toContain('rolbypassrls');
+    expect(principalSource).toContain('rolcreatedb');
+    expect(principalSource).toContain('rolcreaterole');
+    expect(principalSource).toContain('rolreplication');
+    expect(principalSource).toContain('rolinherit');
+    expect(principalSource).toContain('pg_auth_members');
     expect(source).toContain('"not_before"');
     expect(source).toContain('"expires_at"');
     expect(source).toContain('"revoked_at"');
@@ -497,4 +545,69 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(source).not.toContain('"issuer"');
     expect(source).not.toContain('"schedule_id"');
   });
+
+  it.each([
+    ['missing row', []],
+    [
+      'session user mismatch',
+      [{ ...safePlatformPrincipal, sessionUser: 'database_owner' }],
+    ],
+    [
+      'current user substitution',
+      [{ ...safePlatformPrincipal, currentUser: 'database_owner' }],
+    ],
+    ['NOLOGIN principal', [{ ...safePlatformPrincipal, canLogin: false }]],
+    ['superuser', [{ ...safePlatformPrincipal, superuser: true }]],
+    ['BYPASSRLS', [{ ...safePlatformPrincipal, bypassRls: true }]],
+    ['CREATEDB', [{ ...safePlatformPrincipal, createDb: true }]],
+    ['CREATEROLE', [{ ...safePlatformPrincipal, createRole: true }]],
+    ['REPLICATION', [{ ...safePlatformPrincipal, replication: true }]],
+    ['NOINHERIT', [{ ...safePlatformPrincipal, inherit: false }]],
+    ['no membership', [{ ...safePlatformPrincipal, memberships: [] }]],
+    [
+      'wrong membership',
+      [{ ...safePlatformPrincipal, memberships: ['runtime_worker'] }],
+    ],
+    [
+      'extra membership',
+      [
+        {
+          ...safePlatformPrincipal,
+          memberships: [
+            'execution_budget_platform_writer',
+            'runtime_worker',
+          ],
+        },
+      ],
+    ],
+    ['duplicate readback', [safePlatformPrincipal, safePlatformPrincipal]],
+  ])(
+    'rejects %s as PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE before freshness SQL',
+    async (_name, principalRows) => {
+      const { writer, transactionClient } = platformFreshnessWriter(
+        principalRows,
+        [
+          { purpose: 'platform.acquisition', state: 'active' },
+          { purpose: 'platform.intent_watch', state: 'active' },
+          { purpose: 'platform.sanctions', state: 'active' },
+        ],
+      );
+      const repository = new ExecutionBudgetAuthorityRepository(
+        fakeWorkspacePrisma(async () => {
+          throw new Error('app principal must not be used');
+        }),
+        writer,
+      );
+
+      const result = await repository.inspectPlatformAuthorityFreshness(
+        new Date('2026-08-21T00:00:00.000Z'),
+      );
+
+      expect(result).toEqual({ status: 'writer_unavailable' });
+      expect(transactionClient.$queryRaw).toHaveBeenCalledOnce();
+      expect(JSON.stringify(result)).not.toContain('database_owner');
+      expect(JSON.stringify(result)).not.toContain('runtime_worker');
+      expect(JSON.stringify(result)).not.toContain('global_platform_writer');
+    },
+  );
 });
