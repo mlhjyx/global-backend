@@ -3,7 +3,8 @@ import { ToolRegistry } from './tool-registry';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
 import { BudgetLedger, BudgetExceededError } from './budget';
 import { RateLimiter } from './rate-limiter';
-import { BudgetStoreUnavailableError } from './budget-store';
+import { BudgetStoreUnavailableError, type BudgetStore } from './budget-store';
+import { projectGenericOperationResult } from './generic-operation-projection';
 import { RateLimitStoreUnavailableError } from './redis-rate-limit-store';
 import { Tool } from './tool-contract';
 
@@ -119,6 +120,50 @@ describe('ToolBroker — per-wire external-action authorization', () => {
 });
 
 describe('ToolBroker — 预算 reserve-then-settle', () => {
+  it('replays an approved durable projection without executing the physical tool again', async () => {
+    const tool = fakeTool('t.replay', 1, vi.fn(async () => ({ mustNotRun: true })));
+    tool.durableReplayResult = (result) => result;
+    const projectedResult = { data: { value: 'cached' }, costCents: 1 };
+    const projection = projectGenericOperationResult({
+      kind: 'tool', schema: 'tool-result/v1',
+      data: { toolId: tool.id, toolVersion: tool.version, result: projectedResult },
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1,
+        replay: true, replayProjection: projection,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' }))
+      .resolves.toEqual(projectedResult);
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it('atomically settles the scrubbed tool projection with the observed cost', async () => {
+    const tool = fakeTool('t.project', 1);
+    tool.durableReplayResult = (result) => result;
+    const settle = vi.fn(async () => ({ chargedCents: 1, observedCents: 1, capVariance: false, replay: false }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'w', accountKey: 'run', operationId: 'op', estimatedCents: 1, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await broker.invoke(tool.id, {}, { workspaceId: 'w', runId: 'run' });
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      1,
+      expect.objectContaining({
+        kind: 'tool', schema: 'tool-result/v1',
+        data: expect.objectContaining({ toolId: tool.id, toolVersion: tool.version }),
+      }),
+    );
+  });
+
   it('超预算 → BudgetExceededError，工具不执行', async () => {
     const exec = vi.fn(async () => ({ ok: true }));
     const budget = new BudgetLedger();
