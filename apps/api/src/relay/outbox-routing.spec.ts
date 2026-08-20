@@ -655,6 +655,41 @@ describe("OutboxRelayService degraded bootstrap and durable identity", () => {
     await service.onModuleDestroy();
     vi.useRealTimers();
   });
+
+  it("does not regress a previously registered relay lease to STARTING after a transient READY heartbeat failure", async () => {
+    vi.useFakeTimers();
+    const db = {
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+      outboxEvent: { findMany: vi.fn(async () => []) },
+    };
+    const leases = {
+      heartbeat: vi
+        .fn<() => Promise<void>>()
+        .mockResolvedValueOnce(undefined) // STARTING
+        .mockResolvedValueOnce(undefined) // READY
+        .mockRejectedValueOnce(new Error("transient lease writer failure"))
+        .mockResolvedValue(undefined),
+    };
+    const service = new (OutboxRelayService as any)(
+      makeTemporal(),
+      db,
+      vi.fn(),
+      leases,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+
+    await service.onModuleInit();
+    await service.managedTick(); // closes readiness after the failed READY heartbeat
+    await service.managedTick(); // reconnects without another STARTING transition
+
+    expect(
+      leases.heartbeat.mock.calls.filter(([, state]: [string, string]) => state === "STARTING"),
+    ).toHaveLength(1);
+    expect(service.getReadiness()).toEqual({ status: "ready" });
+    await service.onModuleDestroy();
+    vi.useRealTimers();
+  });
 });
 
 describe("tick — 轮询条件（parked 不毒化轮询）", () => {

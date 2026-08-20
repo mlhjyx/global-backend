@@ -25,6 +25,7 @@ export class ApiRuntimeProcessHeartbeat
   private readonly logger = new Logger(ApiRuntimeProcessHeartbeat.name);
   private timer?: NodeJS.Timeout;
   private ready = false;
+  private startingPublished = false;
   private leaseReadiness: RuntimeComponentStatus = Object.freeze({
     status: 'failed',
     code: 'API_RUNTIME_LEASE_NOT_READY',
@@ -60,7 +61,10 @@ export class ApiRuntimeProcessHeartbeat
         this.prisma,
         this.releaseIdentity.current(),
       );
-      await this.leases.heartbeat('API', 'STARTING', null);
+      if (!this.startingPublished) {
+        await this.leases.heartbeat('API', 'STARTING', null);
+        this.startingPublished = true;
+      }
       await this.leases.heartbeat('API', 'READY', null);
       this.ready = true;
       this.leaseReadiness = Object.freeze({ status: 'ok' });

@@ -650,6 +650,11 @@ BEGIN
   IF a."id" IS NULL OR a."ref_count"=0 THEN RAISE EXCEPTION 'TOOL_BUDGET_ACCOUNT_UNAVAILABLE'; END IF;
   SELECT * INTO o FROM "tool_budget_operation" WHERE "account_id"=a."id" AND "generation"=a."generation" AND "operation_key"=p_operation_key FOR UPDATE;
   IF o."id" IS NOT NULL THEN RETURN QUERY SELECT 'REPLAY',o."id",o."reserved_cents",a."cap_cents"-a."reserved_cents"-a."charged_cents",o."status"::text; RETURN; END IF;
+  -- A cap variance is a durable safety stop. Existing operation keys remain
+  -- replayable above, but no new physical operation may be reserved after it.
+  IF a."exhausted" THEN
+    RETURN QUERY SELECT 'DENIED',NULL::UUID,0::BIGINT,a."cap_cents"-a."reserved_cents"-a."charged_cents",'EXHAUSTED'; RETURN;
+  END IF;
   IF p_reservation_cents > a."cap_cents"-a."reserved_cents"-a."charged_cents" THEN
     UPDATE "tool_budget_account" SET "exhausted"=true,"updated_at"=clock_timestamp() WHERE "id"=a."id";
     RETURN QUERY SELECT 'DENIED',NULL::UUID,0::BIGINT,a."cap_cents"-a."reserved_cents"-a."charged_cents",'EXHAUSTED'; RETURN;

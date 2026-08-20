@@ -104,6 +104,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private expireCounter = 0;
   private initialized = false;
+  private leaseStartingPublished = false;
   private readiness:
     | Readonly<{ status: "ready" }>
     | Readonly<{
@@ -146,7 +147,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   async reconnect(): Promise<boolean> {
     try {
       await this.db.$connect();
-      await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
+      if (!this.leaseStartingPublished) {
+        await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
+        this.leaseStartingPublished = true;
+      }
       if (!this.initialized) {
         await this.initializePlatformState();
         this.initialized = true;
