@@ -45,39 +45,27 @@ export class ApiRuntimeProcessHeartbeat
       this.logger.error('API runtime admission is closed; readiness remains closed');
       return;
     }
-    try {
-      await assertMigrationCompatible(
-        this.prisma,
-        this.releaseIdentity.current(),
-      );
-    } catch {
-      this.logger.error('API runtime identity or migration admission failed');
-      return;
-    }
-    await this.publishInitialLease();
     this.timer = setInterval(() => void this.publishReadyLease(), HEARTBEAT_INTERVAL_MS);
     this.timer.unref();
+    await this.publishReadyLease();
   }
 
   getReadiness(): RuntimeComponentStatus {
     return this.leaseReadiness;
   }
 
-  private async publishInitialLease(): Promise<void> {
-    try {
-      await this.leases.heartbeat('API', 'STARTING', null);
-      await this.publishReadyLease();
-    } catch {
-      this.closeReadiness();
-    }
-  }
-
   private async publishReadyLease(): Promise<void> {
     try {
+      await assertMigrationCompatible(
+        this.prisma,
+        this.releaseIdentity.current(),
+      );
+      await this.leases.heartbeat('API', 'STARTING', null);
       await this.leases.heartbeat('API', 'READY', null);
       this.ready = true;
       this.leaseReadiness = Object.freeze({ status: 'ok' });
     } catch {
+      this.logger.error('API runtime identity, migration, or lease admission failed');
       this.closeReadiness();
     }
   }

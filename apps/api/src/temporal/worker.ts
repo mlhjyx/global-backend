@@ -70,6 +70,7 @@ import {
   rendererRuntimeIdentity,
 } from "../runtime/managed-dependency-readiness";
 import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
+import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -147,15 +148,14 @@ async function main(): Promise<void> {
       .catch(() => undefined);
   }, 10_000);
   startingHeartbeat.unref();
-  const queueAdmission = await runtimeLeases.inspectWorkerQueue(
-    UNDERSTANDING_TASK_QUEUE,
-    { requireReady: false },
-  );
-  if (queueAdmission.status !== "ok") {
-    clearInterval(startingHeartbeat);
-    await runtimeTelemetry.shutdown();
-    await holdWorkerNotReady(queueAdmission.code, runtimeLeases);
-  }
+  await waitForWorkerQueueAdmission({
+    leases: runtimeLeases,
+    taskQueue: UNDERSTANDING_TASK_QUEUE,
+    onBlocked: (code) =>
+      console.error(
+        `[worker] not ready: ${code}; Temporal polling remains disabled`,
+      ),
+  });
   const costLedger = new SiteBuildCostLedger(prisma);
   const siteBuilderStorage = new StorageService();
   await siteBuilderStorage.onModuleInit();

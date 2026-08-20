@@ -30,7 +30,7 @@ describe("worker runtime admission wiring", () => {
     const imageIsolation = source.indexOf(
       "checkImagePipelineIsolationReadiness",
     );
-    const queue = source.indexOf("inspectWorkerQueue");
+    const queue = source.lastIndexOf("waitForWorkerQueueAdmission");
     const poll = source.indexOf("worker.run()");
 
     expect(migration).toBeGreaterThan(-1);
