@@ -175,7 +175,10 @@ export function createBacklogActivities(deps: {
   activityRunId?: () => string | undefined;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('backlog activities require an authoritative BudgetStore');
-  const intentSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker,
+  const intentSvc = new IntentProjectionService({
+    prisma: deps.prisma,
+    broker: deps.broker,
+    budgetStore: budgets,
   });
 
   /**

@@ -8,7 +8,7 @@ describe('intent activities — durable budget lifecycle', () => {
     const fetch = vi.fn(async (_url, context) => {
       order.push('wire');
       expect(context).toEqual({
-        workspaceId: 'platform', runId: 'intent-watch:source-1', correlationId: 'intent-watch:source-1',
+        workspaceId: 'platform', runId: 'intent-watch:workflow-run-1:source-1', correlationId: 'intent-watch:workflow-run-1:source-1',
       });
       throw new BudgetOperationReplayError('crawl-op');
     });
@@ -28,13 +28,14 @@ describe('intent activities — durable budget lifecycle', () => {
     };
     const activities = createIntentActivities({
       prisma: prisma as never, fetcher: { fetch } as never, budgetStore: budgetStore as never,
+      activityRunId: () => 'workflow-run-1',
     });
 
     await expect(activities.watchSource({ sourceId: 'source-1' })).rejects.toBeInstanceOf(BudgetOperationReplayError);
     expect(budgetStore.open).toHaveBeenCalledWith({
-      workspaceId: 'platform', accountKey: 'intent-watch:source-1', capCents: expect.any(Number), replayScope: true,
+      workspaceId: 'platform', accountKey: 'intent-watch:workflow-run-1:source-1', capCents: expect.any(Number), replayScope: true,
     });
-    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'platform', accountKey: 'intent-watch:source-1' });
+    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'platform', accountKey: 'intent-watch:workflow-run-1:source-1' });
     expect(order).toEqual(['open', 'wire', 'close']);
   });
 });

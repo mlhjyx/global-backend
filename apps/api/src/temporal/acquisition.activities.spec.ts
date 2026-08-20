@@ -9,8 +9,8 @@ describe('acquisition activities — durable budget lifecycle', () => {
       order.push('wire');
       expect(context).toEqual({
         workspaceId: 'platform',
-        runId: 'acquisition:source-1',
-        correlationId: 'acquisition:source-1',
+        runId: 'acquisition:workflow-run-1:source-1',
+        correlationId: 'acquisition:workflow-run-1:source-1',
       });
       throw new Error('wire failed');
     });
@@ -30,13 +30,16 @@ describe('acquisition activities — durable budget lifecycle', () => {
       open: vi.fn(async () => { order.push('open'); }),
       close: vi.fn(async () => { order.push('close'); }),
     };
-    const activities = createAcquisitionActivities({ prisma: prisma as never, registry, budgetStore: budgetStore as never });
+    const activities = createAcquisitionActivities({
+      prisma: prisma as never, registry, budgetStore: budgetStore as never,
+      activityRunId: () => 'workflow-run-1',
+    });
 
     await expect(activities.acquireSource({ sourceId: 'source-1' })).resolves.toMatchObject({ status: 'FAILED' });
     expect(budgetStore.open).toHaveBeenCalledWith({
-      workspaceId: 'platform', accountKey: 'acquisition:source-1', capCents: expect.any(Number), replayScope: true,
+      workspaceId: 'platform', accountKey: 'acquisition:workflow-run-1:source-1', capCents: expect.any(Number), replayScope: true,
     });
-    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'platform', accountKey: 'acquisition:source-1' });
+    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'platform', accountKey: 'acquisition:workflow-run-1:source-1' });
     expect(order).toEqual(['open', 'wire', 'close']);
   });
 });

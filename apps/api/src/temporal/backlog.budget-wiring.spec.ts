@@ -14,6 +14,7 @@ describe('backlog durable budget wiring', () => {
 
   it('opens explicit replay accounts and binds every external context to that account', async () => {
     const activities = await readFile(activitiesUrl, 'utf8');
+    expect(activities).toMatch(/new IntentProjectionService\(\{[\s\S]*?budgetStore: budgets/);
     expect(activities).toContain("openStageBudget('enrich'");
     expect(activities).toContain("openStageBudget('watch'");
     expect(activities).toContain("openStageBudget('email-guess'");

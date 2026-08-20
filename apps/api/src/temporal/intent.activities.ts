@@ -1,11 +1,12 @@
 import { PrismaClient } from '@prisma/client';
+import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageFetcher } from '../intent/page-fetcher';
 import { WebsiteWatchService, WatchResult, WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { IntentProjectionService, ProjectIntentResult } from '../intent/intent-projection.service';
 import { sweepBudgetCents } from '../tools/budget';
-import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { BudgetStoreUnavailableError, type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 
 const DUE_LIMIT = 50;
@@ -25,6 +26,7 @@ export function createIntentActivities(deps: {
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker; // 收口②：registerWatch 的 sitemap 发现经 http.get 工具（无 broker → fail-closed 不出网）
   budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('intent activities require an authoritative BudgetStore');
   const projSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker, budgetStore: budgets });
@@ -52,7 +54,14 @@ export function createIntentActivities(deps: {
 
     /** 对一个 web_watch 源跑一次页面监控（抓每页→抽信号→diff→写 intent 事件）。幂等 by (source,url)。 */
     async watchSource(args: { sourceId: string }): Promise<WatchResult> {
-      const accountKey = `intent-watch:${args.sourceId}`;
+      let workflowRunId: string | undefined;
+      try {
+        workflowRunId = deps.activityRunId?.() ?? ActivityContext.current().info.workflowExecution?.runId;
+      } catch {
+        workflowRunId = undefined;
+      }
+      if (!workflowRunId) throw new BudgetStoreUnavailableError('intent activity workflow identity unavailable');
+      const accountKey = `intent-watch:${workflowRunId}:${args.sourceId}`;
       await budgets.open({ workspaceId: PLATFORM_WORKSPACE, accountKey, capCents: sweepBudgetCents(), replayScope: true });
       try {
         const watchSvc = new WebsiteWatchService({

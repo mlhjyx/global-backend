@@ -7,6 +7,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { RequestContext } from '../auth/request-context';
@@ -17,7 +18,8 @@ import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from
 import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
-import { type BudgetStore, TOOL_BUDGET_STORE } from '../tools/budget-store';
+import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
+import { executeIcpBudgetedTask } from './icp-budget-execution';
 
 interface IcpModelOutput {
   name: string;
@@ -93,18 +95,23 @@ export class IcpService {
       : '';
     const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
 
-    const result = await executeStructuredTaskWithRuntime<IcpModelOutput>(
-      this.gateway,
-      {
-        task: contract.id,
-        prompt,
-        system: contract.description,
-        model: contract.model,
-        schema: contract.outputSchema,
-      },
-      { workspaceId: ctx.workspaceId, userId: ctx.userId },
-      { telemetry: this.runtimeTelemetry },
-    );
+    const result = await executeIcpBudgetedTask<IcpModelOutput>({
+      budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP generation requires an authoritative BudgetStore'),
+      workspaceId: ctx.workspaceId,
+      accountKey: `icp:design:${companyId}:${createHash('sha256').update(prompt).digest('hex').slice(0, 24)}`,
+      execute: (budgetContext) => executeStructuredTaskWithRuntime<IcpModelOutput>(
+        this.gateway,
+        {
+          task: contract.id,
+          prompt,
+          system: contract.description,
+          model: contract.model,
+          schema: contract.outputSchema,
+        },
+        { workspaceId: ctx.workspaceId, userId: ctx.userId, ...budgetContext },
+        { telemetry: this.runtimeTelemetry },
+      ),
+    });
     const out = result.data;
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -435,18 +442,24 @@ export class IcpService {
       exclusions: icp.exclusions,
       rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
     };
-    const result = await executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
-      this.gateway,
-      {
-        task: contract.id,
-        prompt: `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`,
-        system: contract.description,
-        model: contract.model,
-        schema: contract.outputSchema,
-      },
-      { workspaceId: ctx.workspaceId, userId: ctx.userId },
-      { telemetry: this.runtimeTelemetry },
-    );
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`;
+    const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
+      budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
+      workspaceId: ctx.workspaceId,
+      accountKey: `icp:query-plan:${icpId}:${createHash('sha256').update(queryPlanPrompt).digest('hex').slice(0, 24)}`,
+      execute: (budgetContext) => executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
+        this.gateway,
+        {
+          task: contract.id,
+          prompt: queryPlanPrompt,
+          system: contract.description,
+          model: contract.model,
+          schema: contract.outputSchema,
+        },
+        { workspaceId: ctx.workspaceId, userId: ctx.userId, ...budgetContext },
+        { telemetry: this.runtimeTelemetry },
+      ),
+    });
     const out = result.data;
 
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
