@@ -318,6 +318,46 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
     accepts: ['keywords'],
   },
   idempotencyKey: (i) => `ted.search:${stableKey(i)}`,
+  durableReplayResult: (result) => ({
+    data: {
+      ...(result.data.awards
+        ? {
+            awards: result.data.awards.slice(0, 250).map((notice) => ({
+              publicationNumber: notice.publicationNumber,
+              publicationDate: notice.publicationDate,
+              noticeType: notice.noticeType,
+              formType: notice.formType,
+              cpvCodes: notice.cpvCodes.slice(0, 64),
+              buyerNames: notice.buyerNames.slice(0, 64),
+              buyerCountries: notice.buyerCountries.slice(0, 64),
+              winners: notice.winners.slice(0, 64).map((winner) => ({
+                name: winner.name,
+                country: winner.country,
+                identifier: winner.identifier,
+                internetAddress: winner.internetAddress,
+                city: winner.city,
+              })),
+            })),
+          }
+        : {}),
+      ...(result.data.notices
+        ? {
+            notices: result.data.notices.slice(0, 250).map((notice) => ({
+              publicationNumber: notice.publicationNumber,
+              publicationDate: notice.publicationDate,
+              publicationDateIso: notice.publicationDateIso,
+              noticeType: notice.noticeType,
+              cpvCodes: notice.cpvCodes.slice(0, 64),
+              buyerNames: notice.buyerNames.slice(0, 64),
+              buyerCountries: notice.buyerCountries.slice(0, 64),
+              deadlines: notice.deadlines.slice(0, 64),
+            })),
+          }
+        : {}),
+    },
+    costCents: result.costCents,
+    degraded: result.degraded,
+  }),
   healthCheck: async () => ({ healthy: true, detail: 'ted' }),
   execute: async (input, ctx) => {
     const beforeRequest = beforeExternalRequest(ctx);
