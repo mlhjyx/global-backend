@@ -1,10 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
-import {
-  ExecutionBudgetGrantError,
-  type VerifiedExecutionBudgetAuthority,
-} from './execution-budget-authority.types';
+import { ExecutionBudgetGrantError, type VerifiedExecutionBudgetAuthority } from './execution-budget-authority.types';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 
 const WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
@@ -60,9 +57,7 @@ function fakeWorkspacePrisma(
   handler: (query: { strings?: readonly string[]; values?: readonly unknown[] }) => Promise<unknown>,
 ): PrismaService {
   return {
-    withWorkspace: vi.fn(async (_workspaceId, callback) =>
-      callback({ $queryRaw: vi.fn(handler) } as never),
-    ),
+    withWorkspace: vi.fn(async (_workspaceId, callback) => callback({ $queryRaw: vi.fn(handler) } as never)),
   } as unknown as PrismaService;
 }
 
@@ -71,7 +66,10 @@ function fakePlatformWriter(
 ): PrismaClient {
   return {
     $transaction: vi.fn(async (callback) =>
-      callback({ $queryRaw: vi.fn(handler) } as never),
+      callback({
+        $executeRawUnsafe: vi.fn(async () => 0),
+        $queryRaw: vi.fn(handler),
+      } as never),
     ),
   } as unknown as PrismaClient;
 }
@@ -125,9 +123,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       compactJws: COMPACT_JWS,
     });
 
-    await expect(
-      repository.consumeWorkspaceAndOpen(authority, ACCOUNT_KEY),
-    ).resolves.toEqual({
+    await expect(repository.consumeWorkspaceAndOpen(authority, ACCOUNT_KEY)).resolves.toEqual({
       authorityId: AUTHORITY_ID,
       replay: false,
       accountId: ACCOUNT_ID,
@@ -136,27 +132,13 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     });
 
     expect(prisma.withWorkspace).toHaveBeenCalledTimes(1);
-    expect(prisma.withWorkspace).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      expect.any(Function),
-    );
+    expect(prisma.withWorkspace).toHaveBeenCalledWith(WORKSPACE_ID, expect.any(Function));
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(queries.map(({ receiver }) => receiver)).toEqual([tx, tx]);
-    expect(queries[0]?.query.strings?.join('')).toContain(
-      'consume_workspace_execution_authority',
-    );
-    expect(queries[1]?.query.strings?.join('')).toContain(
-      'open_authorized_tool_budget_v1',
-    );
-    expect(queries[1]?.query.values).toEqual([
-      WORKSPACE_ID,
-      AUTHORITY_ID,
-      ACCOUNT_KEY,
-      true,
-    ]);
-    expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(
-      COMPACT_JWS,
-    );
+    expect(queries[0]?.query.strings?.join('')).toContain('consume_workspace_execution_authority');
+    expect(queries[1]?.query.strings?.join('')).toContain('open_authorized_tool_budget_v1');
+    expect(queries[1]?.query.values).toEqual([WORKSPACE_ID, AUTHORITY_ID, ACCOUNT_KEY, true]);
+    expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(COMPACT_JWS);
   });
 
   it('rolls back a newly consumed authority when atomic account opening fails', async () => {
@@ -183,9 +165,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     } as unknown as PrismaService;
     const repository = new ExecutionBudgetAuthorityRepository(prisma);
 
-    await expect(
-      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
-    ).rejects.toEqual(
+    await expect(repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY)).rejects.toEqual(
       new ExecutionBudgetGrantError('EXECUTION_BUDGET_AUTHORITY_REVOKED'),
     );
 
@@ -195,17 +175,19 @@ describe('ExecutionBudgetAuthorityRepository', () => {
   });
 
   it('consumes verified workspace claims with parameterized SQL and returns exact replay identity', async () => {
-    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
-    const responses = [
-      [{ authority_id: AUTHORITY_ID, replay: false }],
-      [{ authority_id: AUTHORITY_ID, replay: true }],
-    ];
+    const queries: Array<{
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    }> = [];
+    const responses = [[{ authority_id: AUTHORITY_ID, replay: false }], [{ authority_id: AUTHORITY_ID, replay: true }]];
     const prisma = fakeWorkspacePrisma(async (query) => {
       queries.push(query);
       return responses.shift() ?? [];
     });
     const repository = new ExecutionBudgetAuthorityRepository(prisma);
-    const authority = Object.assign(workspaceAuthority(), { compactJws: COMPACT_JWS });
+    const authority = Object.assign(workspaceAuthority(), {
+      compactJws: COMPACT_JWS,
+    });
 
     await expect(repository.consumeWorkspace(authority)).resolves.toEqual({
       authorityId: AUTHORITY_ID,
@@ -260,11 +242,13 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     );
     const exact = workspaceAuthority();
 
-    await expect(repository.consumeWorkspace(exact)).resolves.toMatchObject({ replay: false });
-    await expect(repository.consumeWorkspace(exact)).resolves.toMatchObject({ replay: true });
-    await expect(
-      repository.consumeWorkspace({ ...exact, tokenSha256: 'c'.repeat(64) }),
-    ).rejects.toEqual(
+    await expect(repository.consumeWorkspace(exact)).resolves.toMatchObject({
+      replay: false,
+    });
+    await expect(repository.consumeWorkspace(exact)).resolves.toMatchObject({
+      replay: true,
+    });
+    await expect(repository.consumeWorkspace({ ...exact, tokenSha256: 'c'.repeat(64) })).rejects.toEqual(
       new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED'),
     );
   });
@@ -374,7 +358,10 @@ describe('ExecutionBudgetAuthorityRepository', () => {
   });
 
   it('appends a workspace-scoped revocation using only parameter values', async () => {
-    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
+    const queries: Array<{
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    }> = [];
     const prisma = fakeWorkspacePrisma(async (query) => {
       queries.push(query);
       return 1;
@@ -393,12 +380,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
 
     expect(prisma.withWorkspace).toHaveBeenCalledWith(WORKSPACE_ID, expect.any(Function));
     expect(queries[0]?.strings?.join('')).toContain('execution_budget_authority_revocation');
-    expect(queries[0]?.values).toEqual([
-      WORKSPACE_ID,
-      AUTHORITY_ID,
-      'CONTROL_PLANE_REVOKED',
-      revokedAt,
-    ]);
+    expect(queries[0]?.values).toEqual([WORKSPACE_ID, AUTHORITY_ID, 'CONTROL_PLANE_REVOKED', revokedAt]);
   });
 
   it('rejects platform revocation before any workspace or platform transaction', async () => {
@@ -406,13 +388,13 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     const platformWriter = fakePlatformWriter(async () => []);
     const repository = new ExecutionBudgetAuthorityRepository(prisma, platformWriter);
 
-    await expect(repository.revoke({
-      scopeKey: 'platform',
-      authorityId: AUTHORITY_ID,
-      reason: 'CONTROL_PLANE_REVOKED',
-    })).rejects.toEqual(
-      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'),
-    );
+    await expect(
+      repository.revoke({
+        scopeKey: 'platform',
+        authorityId: AUTHORITY_ID,
+        reason: 'CONTROL_PLANE_REVOKED',
+      }),
+    ).rejects.toEqual(new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'));
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
     expect(platformWriter.$transaction).not.toHaveBeenCalled();
   });
@@ -432,10 +414,12 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     const prisma = fakeWorkspacePrisma(async () => []);
     const repository = new ExecutionBudgetAuthorityRepository(prisma);
 
-    await expect(repository.revoke({
-      ...input,
-      reason: 'CONTROL_PLANE_REVOKED',
-    })).rejects.toEqual(new ExecutionBudgetGrantError(code));
+    await expect(
+      repository.revoke({
+        ...input,
+        reason: 'CONTROL_PLANE_REVOKED',
+      }),
+    ).rejects.toEqual(new ExecutionBudgetGrantError(code));
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
   });
 
@@ -454,9 +438,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     const prisma = fakeWorkspacePrisma(async () => []);
     const repository = new ExecutionBudgetAuthorityRepository(prisma);
 
-    await expect(repository.consumeWorkspace(authority)).rejects.toEqual(
-      new ExecutionBudgetGrantError(code),
-    );
+    await expect(repository.consumeWorkspace(authority)).rejects.toEqual(new ExecutionBudgetGrantError(code));
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
   });
 
@@ -465,13 +447,54 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     const platformWriter = fakePlatformWriter(async () => []);
     const repository = new ExecutionBudgetAuthorityRepository(prisma, platformWriter);
 
-    await expect(repository.ingestPlatform({
-      ...platformAuthority(),
-      jti: 'not-a-jti',
-    })).rejects.toEqual(
-      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID'),
-    );
+    await expect(
+      repository.ingestPlatform({
+        ...platformAuthority(),
+        jti: 'not-a-jti',
+      }),
+    ).rejects.toEqual(new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID'));
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
     expect(platformWriter.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('reports that platform freshness cannot be queried when deployment did not bind the writer', async () => {
+    const prisma = fakeWorkspacePrisma(async () => []);
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(repository.inspectPlatformAuthorityFreshness(new Date('2026-08-21T00:00:00.000Z'))).resolves.toEqual({
+      status: 'writer_unavailable',
+    });
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('queries only bounded platform authority lifecycle state through the platform writer', async () => {
+    const rows = [
+      { purpose: 'platform.acquisition', state: 'active' },
+      { purpose: 'platform.intent_watch', state: 'expired' },
+      { purpose: 'platform.sanctions', state: 'active' },
+    ];
+    let query: { strings?: readonly string[]; values?: readonly unknown[] } = {};
+    const platformWriter = fakePlatformWriter(async (input) => {
+      query = input;
+      return rows;
+    });
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => []),
+      platformWriter,
+    );
+    const now = new Date('2026-08-21T00:00:00.000Z');
+
+    await expect(repository.inspectPlatformAuthorityFreshness(now)).resolves.toEqual({ status: 'available', rows });
+    expect(platformWriter.$transaction).toHaveBeenCalledWith(expect.any(Function), { maxWait: 1_000, timeout: 2_500 });
+    const source = query.strings?.join('') ?? '';
+    expect(source).toContain('"not_before"');
+    expect(source).toContain('"expires_at"');
+    expect(source).toContain('"revoked_at"');
+    expect(source).toContain('"runs_consumed"');
+    expect(source).toContain('"max_runs"');
+    expect(source).not.toContain('"jti"');
+    expect(source).not.toContain('"token_sha256"');
+    expect(source).not.toContain('"issuer"');
+    expect(source).not.toContain('"schedule_id"');
   });
 });

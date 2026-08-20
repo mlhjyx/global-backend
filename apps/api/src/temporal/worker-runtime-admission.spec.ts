@@ -64,16 +64,31 @@ describe("worker runtime admission wiring", () => {
   it("shuts polling down when the durable READY lease is lost", () => {
     expect(source).toContain("startWorkerLeaseHeartbeat");
     expect(source).toContain("runtime lease lost; polling is shutting down");
-    expect(source).not.toContain('.heartbeat("WORKER", "READY", UNDERSTANDING_TASK_QUEUE)\n      .catch(() => undefined)');
+    expect(source).not.toContain(
+      '.heartbeat("WORKER", "READY", UNDERSTANDING_TASK_QUEUE)\n      .catch(() => undefined)',
+    );
   });
 
   it("retries managed dependency readiness without enabling polling or using a fallback", () => {
     const poll = source.indexOf("worker.run()");
-    const dependencyAdmission = source.indexOf("waitForWorkerDependencyAdmission");
+    const dependencyAdmission = source.indexOf(
+      "waitForWorkerDependencyAdmission",
+    );
     expect(dependencyAdmission).toBeGreaterThan(-1);
     expect(dependencyAdmission).toBeLessThan(poll);
-    expect(source).not.toContain("await holdWorkerNotReady(redisReadiness.code");
-    expect(source).not.toContain("await holdWorkerNotReady(gatewayReadiness.code");
+    expect(source).not.toContain(
+      "await holdWorkerNotReady(redisReadiness.code",
+    );
+    expect(source).not.toContain(
+      "await holdWorkerNotReady(gatewayReadiness.code",
+    );
+  });
+
+  it("does not promote additive execution authority capabilities into Worker polling admission", () => {
+    expect(source).not.toContain("checkExecutionBudgetJwksReadiness");
+    expect(source).not.toContain("checkPlatformBudgetAuthorityReadiness");
+    expect(source).not.toContain("workspace_budget_authority");
+    expect(source).not.toContain("platform_budget_authority");
   });
 
   it("retries app-user database and migration admission before creating a worker lease", () => {
@@ -82,8 +97,12 @@ describe("worker runtime admission wiring", () => {
     expect(databaseAdmission).toBeGreaterThan(-1);
     expect(databaseAdmission).toBeLessThan(lease);
     expect(source).toContain("check: async () => {");
-    expect(source).not.toContain("await holdWorkerNotReady(appDatabaseReadiness.code");
-    expect(source).not.toContain('await holdWorkerNotReady("MIGRATION_REVISION_MISMATCH")');
+    expect(source).not.toContain(
+      "await holdWorkerNotReady(appDatabaseReadiness.code",
+    );
+    expect(source).not.toContain(
+      'await holdWorkerNotReady("MIGRATION_REVISION_MISMATCH")',
+    );
   });
 
   it("starts a recurring managed dependency gate before worker polling", () => {
@@ -94,8 +113,12 @@ describe("worker runtime admission wiring", () => {
   });
 
   it("includes app-user database and exact migration compatibility in the recurring drain gate", () => {
-    const recurring = source.slice(source.indexOf("startWorkerDependencyHeartbeat"));
+    const recurring = source.slice(
+      source.indexOf("startWorkerDependencyHeartbeat"),
+    );
     expect(recurring).toContain("prisma.reconnect()");
-    expect(recurring).toContain("assertMigrationCompatible(prisma, releaseIdentity)");
+    expect(recurring).toContain(
+      "assertMigrationCompatible(prisma, releaseIdentity)",
+    );
   });
 });

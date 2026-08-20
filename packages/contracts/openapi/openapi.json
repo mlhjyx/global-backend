@@ -270,7 +270,8 @@
                     "status",
                     "service",
                     "ts",
-                    "components"
+                    "components",
+                    "capabilities"
                   ],
                   "properties": {
                     "status": {
@@ -290,6 +291,77 @@
                       "type": "string",
                       "format": "date-time"
                     },
+                    "capabilities": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "execution_budget_jwks",
+                        "workspace_budget_authority",
+                        "platform_budget_authority"
+                      ],
+                      "properties": {
+                        "execution_budget_jwks": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "workspace_budget_authority": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "platform_budget_authority": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
                     "components": {
                       "type": "object",
                       "additionalProperties": false,
@@ -306,6 +378,7 @@
                         "renderer",
                         "browser",
                         "budget_grant_verification",
+                        "auth_jwks",
                         "admission"
                       ],
                       "properties": {
@@ -530,6 +603,26 @@
                           }
                         },
                         "budget_grant_verification": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "auth_jwks": {
                           "type": "object",
                           "additionalProperties": false,
                           "required": [
@@ -587,7 +680,8 @@
                     "status",
                     "service",
                     "ts",
-                    "components"
+                    "components",
+                    "capabilities"
                   ],
                   "properties": {
                     "status": {
@@ -607,6 +701,77 @@
                       "type": "string",
                       "format": "date-time"
                     },
+                    "capabilities": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "execution_budget_jwks",
+                        "workspace_budget_authority",
+                        "platform_budget_authority"
+                      ],
+                      "properties": {
+                        "execution_budget_jwks": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "workspace_budget_authority": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "platform_budget_authority": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
                     "components": {
                       "type": "object",
                       "additionalProperties": false,
@@ -623,6 +788,7 @@
                         "renderer",
                         "browser",
                         "budget_grant_verification",
+                        "auth_jwks",
                         "admission"
                       ],
                       "properties": {
@@ -847,6 +1013,26 @@
                           }
                         },
                         "budget_grant_verification": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "status"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ok",
+                                "failed",
+                                "not_proven"
+                              ]
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "auth_jwks": {
                           "type": "object",
                           "additionalProperties": false,
                           "required": [

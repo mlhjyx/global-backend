@@ -104,11 +104,25 @@ export const BUILD_HEALTH_RESPONSE_SCHEMA: SchemaObject = {
 export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["status", "service", "ts", "components"],
+  required: ["status", "service", "ts", "components", "capabilities"],
   properties: {
     status: { type: "string", enum: ["ready", "not_ready"] },
     service: { type: "string", enum: ["global-api"] },
     ts: { type: "string", format: "date-time" },
+    capabilities: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "execution_budget_jwks",
+        "workspace_budget_authority",
+        "platform_budget_authority",
+      ],
+      properties: {
+        execution_budget_jwks: COMPONENT_SCHEMA,
+        workspace_budget_authority: COMPONENT_SCHEMA,
+        platform_budget_authority: COMPONENT_SCHEMA,
+      },
+    },
     components: {
       type: "object",
       additionalProperties: false,
@@ -125,6 +139,7 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         "renderer",
         "browser",
         "budget_grant_verification",
+        "auth_jwks",
         "admission",
       ],
       properties: {
@@ -140,6 +155,7 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         renderer: COMPONENT_SCHEMA,
         browser: COMPONENT_SCHEMA,
         budget_grant_verification: COMPONENT_SCHEMA,
+        auth_jwks: COMPONENT_SCHEMA,
         admission: COMPONENT_SCHEMA,
       },
     },

@@ -6,15 +6,15 @@ import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { RuntimeComponentStatus } from './runtime-readiness-registry';
 import { RuntimeReadinessContributorRegistry } from './runtime-readiness-registry';
-import {
-  RuntimeReleaseIdentityService,
-  type RuntimeReleaseIdentity,
-} from './runtime-release-identity';
+import { RuntimeReleaseIdentityService, type RuntimeReleaseIdentity } from './runtime-release-identity';
 import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
-import {
-  probeJwksDocument,
-} from '../auth/jwks-readiness';
+import { probeJwksDocument } from '../auth/jwks-readiness';
 import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
+import { ExecutionBudgetAuthorityRepository } from '../execution-budget/execution-budget-authority.repository';
+import {
+  EXECUTION_BUDGET_PLATFORM_PURPOSES,
+  type ExecutionBudgetPurpose,
+} from '../execution-budget/execution-budget-authority.types';
 import {
   loadExecutionBudgetJwks,
   validateExecutionBudgetGrantVerifierConfiguration,
@@ -29,12 +29,16 @@ interface RedisProbeClient {
 }
 
 type RedisProbeFactory = (url: string) => RedisProbeClient;
-type GatewayProbeFetch = (
-  input: string,
-  init: RequestInit,
-) => Promise<Pick<Response, 'ok' | 'body'>>;
+type GatewayProbeFetch = (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'body'>>;
 type BrowserProbe = (executable: string, args: readonly string[]) => Promise<void>;
 type ExecutableProbe = (executable: string) => Promise<boolean>;
+
+type PlatformAuthorityReadinessState = 'active' | 'missing' | 'expired' | 'revoked' | 'exhausted' | 'not_yet_valid';
+
+type PlatformAuthorityReadinessRow = Readonly<{
+  purpose: string;
+  state: string;
+}>;
 
 const execFileAsync = promisify(execFile);
 const BROWSER_PATHS = new Set(['/usr/bin/google-chrome', '/usr/bin/chromium']);
@@ -49,6 +53,14 @@ const BROWSER_PROBE_ARGS = Object.freeze([
   '--no-default-browser-check',
   '--dump-dom',
   'data:text/html,<title>runtime-readiness</title>',
+]);
+const PLATFORM_AUTHORITY_STATES = new Set<PlatformAuthorityReadinessState>([
+  'active',
+  'missing',
+  'expired',
+  'revoked',
+  'exhausted',
+  'not_yet_valid',
 ]);
 
 async function defaultExecutableProbe(executable: string): Promise<boolean> {
@@ -70,10 +82,7 @@ export async function checkImagePipelineIsolationReadiness(
     : { status: 'failed', code: 'IMAGE_PIPELINE_ISOLATION_UNAVAILABLE' };
 }
 
-async function defaultBrowserProbe(
-  executable: string,
-  args: readonly string[],
-): Promise<void> {
+async function defaultBrowserProbe(executable: string, args: readonly string[]): Promise<void> {
   await execFileAsync(executable, [...args], {
     timeout: 5_000,
     maxBuffer: 128 * 1024,
@@ -82,12 +91,7 @@ async function defaultBrowserProbe(
 }
 
 function loopback(hostname: string): boolean {
-  return (
-    hostname === '127.0.0.1' ||
-    hostname === 'localhost' ||
-    hostname === '[::1]' ||
-    hostname === '::1'
-  );
+  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]' || hostname === '::1';
 }
 
 function defaultRedisProbe(url: string): RedisProbeClient {
@@ -118,9 +122,7 @@ export async function checkRedisReadiness(
   try {
     client = factory(configured);
     if (client.status === 'wait' || client.status === 'end') await client.connect();
-    return (await client.ping()) === 'PONG'
-      ? { status: 'ok' }
-      : { status: 'failed', code: 'REDIS_UNAVAILABLE' };
+    return (await client.ping()) === 'PONG' ? { status: 'ok' } : { status: 'failed', code: 'REDIS_UNAVAILABLE' };
   } catch {
     return { status: 'failed', code: 'REDIS_UNAVAILABLE' };
   } finally {
@@ -128,9 +130,7 @@ export async function checkRedisReadiness(
   }
 }
 
-export async function checkAuthJwksReadiness(
-  env: NodeJS.ProcessEnv,
-): Promise<RuntimeComponentStatus> {
+export async function checkAuthJwksReadiness(env: NodeJS.ProcessEnv): Promise<RuntimeComponentStatus> {
   try {
     const config = validateJwksTokenVerifierConfiguration(env);
     return (await probeJwksDocument(config.jwks.href))
@@ -157,6 +157,71 @@ export async function checkExecutionBudgetJwksReadiness(
   }
 }
 
+function platformAuthorityCode(
+  purpose: ExecutionBudgetPurpose,
+  state: Exclude<PlatformAuthorityReadinessState, 'active'>,
+): string {
+  const purposeCode = purpose.replaceAll('.', '_').toUpperCase();
+  return `PLATFORM_BUDGET_AUTHORITY_${purposeCode}_${state.toUpperCase()}`;
+}
+
+export async function checkPlatformBudgetAuthorityReadiness(
+  repository: Pick<ExecutionBudgetAuthorityRepository, 'inspectPlatformAuthorityFreshness'> | undefined,
+  now: Date = new Date(),
+): Promise<RuntimeComponentStatus> {
+  if (!repository) {
+    return {
+      status: 'failed',
+      code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+    };
+  }
+  try {
+    const freshness = await repository.inspectPlatformAuthorityFreshness(now);
+    if (freshness.status === 'writer_unavailable') {
+      return {
+        status: 'failed',
+        code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+      };
+    }
+    if (freshness.status !== 'available') {
+      return {
+        status: 'failed',
+        code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE',
+      };
+    }
+    const rows: readonly PlatformAuthorityReadinessRow[] = freshness.rows;
+    if (rows.length !== EXECUTION_BUDGET_PLATFORM_PURPOSES.length) {
+      throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
+    }
+    const states = new Map<ExecutionBudgetPurpose, PlatformAuthorityReadinessState>();
+    for (const row of rows) {
+      if (
+        !EXECUTION_BUDGET_PLATFORM_PURPOSES.includes(
+          row.purpose as (typeof EXECUTION_BUDGET_PLATFORM_PURPOSES)[number],
+        ) ||
+        !PLATFORM_AUTHORITY_STATES.has(row.state as PlatformAuthorityReadinessState) ||
+        states.has(row.purpose as ExecutionBudgetPurpose)
+      ) {
+        throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
+      }
+      states.set(row.purpose as ExecutionBudgetPurpose, row.state as PlatformAuthorityReadinessState);
+    }
+    for (const purpose of EXECUTION_BUDGET_PLATFORM_PURPOSES) {
+      const state = states.get(purpose);
+      if (!state) throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
+      if (state !== 'active') {
+        return {
+          status: 'failed',
+          code: platformAuthorityCode(purpose, state),
+        };
+      }
+    }
+    return { status: 'ok' };
+  } catch {
+    return { status: 'failed', code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE' };
+  }
+}
+
 export async function checkModelGatewayReadiness(
   env: NodeJS.ProcessEnv,
   fetcher: GatewayProbeFetch = fetch,
@@ -173,8 +238,7 @@ export async function checkModelGatewayReadiness(
       base.password ||
       base.search ||
       base.hash ||
-      (base.protocol !== 'https:' &&
-        !(base.protocol === 'http:' && loopback(base.hostname)))
+      (base.protocol !== 'https:' && !(base.protocol === 'http:' && loopback(base.hostname)))
     ) {
       return { status: 'failed', code: 'MODEL_GATEWAY_CONFIG_INVALID' };
     }
@@ -193,9 +257,7 @@ export async function checkModelGatewayReadiness(
       signal: controller.signal,
     });
     await response.body?.cancel().catch(() => undefined);
-    return response.ok
-      ? { status: 'ok' }
-      : { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
+    return response.ok ? { status: 'ok' } : { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
   } catch {
     return { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
   } finally {
@@ -227,9 +289,7 @@ export async function checkBrowserReadiness(
 }
 
 @Injectable()
-export class ManagedDependencyReadinessContributors
-  implements OnModuleInit, OnModuleDestroy
-{
+export class ManagedDependencyReadinessContributors implements OnModuleInit, OnModuleDestroy {
   private unregister: ReadonlyArray<() => void> = [];
 
   constructor(
@@ -241,16 +301,18 @@ export class ManagedDependencyReadinessContributors
     this.unregister = Object.freeze([
       this.registry.register('redis', () => checkRedisReadiness(process.env)),
       this.registry.register('auth_jwks', () => checkAuthJwksReadiness(process.env)),
-      this.registry.register('model_gateway', () =>
-        checkModelGatewayReadiness(process.env),
-      ),
+      this.registry.register('execution_budget_jwks', () => checkExecutionBudgetJwksReadiness(process.env)),
+      this.registry.register('model_gateway', () => checkModelGatewayReadiness(process.env)),
       this.registry.register('browser', () => checkBrowserReadiness(process.env)),
       this.registry.register('renderer', () => {
         try {
           rendererRuntimeIdentity(this.releaseIdentity.current());
           return { status: 'ok' } as const;
         } catch {
-          return { status: 'not_proven', code: 'RENDERER_IDENTITY_NOT_PROVEN' } as const;
+          return {
+            status: 'not_proven',
+            code: 'RENDERER_IDENTITY_NOT_PROVEN',
+          } as const;
         }
       }),
     ]);
@@ -259,5 +321,26 @@ export class ManagedDependencyReadinessContributors
   onModuleDestroy(): void {
     for (const unregister of this.unregister) unregister();
     this.unregister = [];
+  }
+}
+
+@Injectable()
+export class ExecutionBudgetAuthorityReadinessContributors implements OnModuleInit, OnModuleDestroy {
+  private unregister?: () => void;
+
+  constructor(
+    private readonly registry: RuntimeReadinessContributorRegistry,
+    private readonly repository: ExecutionBudgetAuthorityRepository,
+  ) {}
+
+  onModuleInit(): void {
+    this.unregister = this.registry.register('platform_budget_authority', () =>
+      checkPlatformBudgetAuthorityReadiness(this.repository),
+    );
+  }
+
+  onModuleDestroy(): void {
+    this.unregister?.();
+    this.unregister = undefined;
   }
 }

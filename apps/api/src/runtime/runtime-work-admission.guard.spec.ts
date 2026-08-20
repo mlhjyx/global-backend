@@ -25,9 +25,12 @@ describe('RuntimeWorkAdmissionGuard', () => {
   });
 
   it('keeps diagnostics readable but rejects every HTTP mutation while managed admission is closed', () => {
-    const guard = new RuntimeWorkAdmissionGuard({
-      current: () => ({ admitted: false }),
-    } as never, { current: () => readySnapshot } as never);
+    const guard = new RuntimeWorkAdmissionGuard(
+      {
+        current: () => ({ admitted: false }),
+      } as never,
+      { current: () => readySnapshot } as never,
+    );
 
     expect(guard.canActivate(context('GET'))).toBe(true);
     expect(guard.canActivate(context('HEAD'))).toBe(true);
@@ -40,9 +43,21 @@ describe('RuntimeWorkAdmissionGuard', () => {
   });
 
   it('does not alter mutation routing after managed admission succeeds', () => {
-    const guard = new RuntimeWorkAdmissionGuard({
-      current: () => ({ admitted: true }),
-    } as never, { current: () => readySnapshot } as never);
+    const guard = new RuntimeWorkAdmissionGuard(
+      {
+        current: () => ({ admitted: true }),
+      } as never,
+      {
+        current: () => ({
+          ...readySnapshot,
+          capabilities: {
+            execution_budget_jwks: { status: 'failed' },
+            workspace_budget_authority: { status: 'failed' },
+            platform_budget_authority: { status: 'failed' },
+          },
+        }),
+      } as never,
+    );
     expect(guard.canActivate(context('POST'))).toBe(true);
   });
 
@@ -58,7 +73,10 @@ describe('RuntimeWorkAdmissionGuard', () => {
   });
 
   it('is registered as a global guard rather than relying on each controller to opt in', () => {
-    const source = readFileSync(join(import.meta.dirname, '..', 'app.module.ts'), 'utf8');
+    const source = readFileSync(
+      join(import.meta.dirname, '..', 'app.module.ts'),
+      'utf8',
+    );
     expect(source).toContain('useClass: RuntimeWorkAdmissionGuard');
   });
 });

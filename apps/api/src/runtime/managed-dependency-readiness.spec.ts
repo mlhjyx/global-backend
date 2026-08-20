@@ -4,7 +4,10 @@ import {
   checkExecutionBudgetJwksReadiness,
   checkImagePipelineIsolationReadiness,
   checkModelGatewayReadiness,
+  checkPlatformBudgetAuthorityReadiness,
   checkRedisReadiness,
+  ExecutionBudgetAuthorityReadinessContributors,
+  ManagedDependencyReadinessContributors,
   rendererRuntimeIdentity,
 } from './managed-dependency-readiness';
 
@@ -26,8 +29,7 @@ const identity = {
 const EXECUTION_BUDGET_ENV = {
   APP_ENVIRONMENT: 'test',
   NODE_ENV: 'test',
-  EXECUTION_BUDGET_GRANT_JWKS_URI:
-    'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
+  EXECUTION_BUDGET_GRANT_JWKS_URI: 'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
   EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
   EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
   EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
@@ -44,9 +46,23 @@ const EXECUTION_ES256_PUBLIC_JWK = {
 };
 
 describe('managed dependency readiness', () => {
+  const platformAuthorityRows = (overrides: Readonly<Record<string, string>> = {}) =>
+    ['platform.acquisition', 'platform.intent_watch', 'platform.sanctions'].map((purpose) => ({
+      purpose,
+      state: overrides[purpose] ?? 'active',
+    }));
+
+  function platformSource(rows: readonly object[] | Error) {
+    return {
+      inspectPlatformAuthorityFreshness: vi.fn(async () => {
+        if (rows instanceof Error) throw rows;
+        return { status: 'available' as const, rows };
+      }),
+    };
+  }
+
   it('rejects an unsafe execution-budget JWKS URL before network dispatch', async () => {
-    const unsafe =
-      'https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil';
+    const unsafe = 'https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil';
     const fetcher = vi.fn();
 
     const result = await checkExecutionBudgetJwksReadiness(
@@ -54,10 +70,8 @@ describe('managed dependency readiness', () => {
         APP_ENVIRONMENT: 'production',
         NODE_ENV: 'production',
         EXECUTION_BUDGET_GRANT_JWKS_URI: unsafe,
-        EXECUTION_BUDGET_GRANT_ISSUER:
-          'https://control-plane.example.test/',
-        EXECUTION_BUDGET_GRANT_AUDIENCE:
-          'global-backend:execution-budget',
+        EXECUTION_BUDGET_GRANT_ISSUER: 'https://control-plane.example.test/',
+        EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
         EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
       },
       fetcher,
@@ -73,21 +87,17 @@ describe('managed dependency readiness', () => {
   });
 
   it('probes the configured execution-budget JWKS with a bounded redirect-free request', async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          keys: [
-            EXECUTION_ES256_PUBLIC_JWK,
-          ],
-        }),
-        { status: 200 },
-      ),
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            keys: [EXECUTION_ES256_PUBLIC_JWK],
+          }),
+          { status: 200 },
+        ),
     );
 
-    const result = await checkExecutionBudgetJwksReadiness(
-      EXECUTION_BUDGET_ENV,
-      fetcher,
-    );
+    const result = await checkExecutionBudgetJwksReadiness(EXECUTION_BUDGET_ENV, fetcher);
 
     expect(result).toEqual({ status: 'ok' });
     expect(fetcher).toHaveBeenCalledWith(
@@ -120,16 +130,9 @@ describe('managed dependency readiness', () => {
       },
     ],
   ])('rejects an execution-budget JWKS containing %s', async (_name, key) => {
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ keys: [key] }), { status: 200 }),
-    );
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ keys: [key] }), { status: 200 }));
 
-    await expect(
-      checkExecutionBudgetJwksReadiness(
-        EXECUTION_BUDGET_ENV,
-        fetcher,
-      ),
-    ).resolves.toEqual({
+    await expect(checkExecutionBudgetJwksReadiness(EXECUTION_BUDGET_ENV, fetcher)).resolves.toEqual({
       status: 'failed',
       code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
     });
@@ -144,8 +147,7 @@ describe('managed dependency readiness', () => {
         NODE_ENV: 'production',
         EXECUTION_BUDGET_GRANT_JWKS_URI: 'http://127.0.0.1:3100/jwks',
         EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
-        EXECUTION_BUDGET_GRANT_AUDIENCE:
-          'global-backend:execution-budget',
+        EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
         EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
       },
       fetcher,
@@ -158,16 +160,104 @@ describe('managed dependency readiness', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('reports a missing deployment-owned platform writer without falling back to another principal', async () => {
+    await expect(checkPlatformBudgetAuthorityReadiness(undefined)).resolves.toEqual({
+      status: 'failed',
+      code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+    });
+  });
+
+  it('proves all three fixed platform purposes from the bounded repository readback', async () => {
+    const source = platformSource(platformAuthorityRows());
+
+    await expect(checkPlatformBudgetAuthorityReadiness(source, new Date('2026-08-21T00:00:00.000Z'))).resolves.toEqual({
+      status: 'ok',
+    });
+    expect(source.inspectPlatformAuthorityFreshness).toHaveBeenCalledWith(new Date('2026-08-21T00:00:00.000Z'));
+  });
+
+  it.each([
+    ['missing', 'MISSING'],
+    ['expired', 'EXPIRED'],
+    ['revoked', 'REVOKED'],
+    ['exhausted', 'EXHAUSTED'],
+    ['not_yet_valid', 'NOT_YET_VALID'],
+  ])('reports %s authority for the exact fixed platform purpose without row details', async (state, codeSuffix) => {
+    const source = platformSource(platformAuthorityRows({ 'platform.intent_watch': state }));
+
+    const result = await checkPlatformBudgetAuthorityReadiness(source, new Date('2026-08-21T00:00:00.000Z'));
+
+    expect(result).toEqual({
+      status: 'failed',
+      code: `PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_${codeSuffix}`,
+    });
+    expect(JSON.stringify(result)).not.toContain('schedule');
+    expect(JSON.stringify(result)).not.toContain('authority_id');
+  });
+
+  it('bounds malformed rows and raw platform database errors to one stable code', async () => {
+    for (const rows of [
+      platformAuthorityRows().slice(0, 2),
+      new Error('postgresql://writer:must-never-leak@db/platform'),
+    ]) {
+      const source = platformSource(rows);
+      const result = await checkPlatformBudgetAuthorityReadiness(source);
+      expect(result).toEqual({
+        status: 'failed',
+        code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE',
+      });
+      expect(JSON.stringify(result)).not.toContain('must-never-leak');
+    }
+  });
+
+  it('registers and unregisters the additive authority contributors without probing on registration', async () => {
+    const contributors = new Map<string, () => unknown>();
+    const unregister = vi.fn();
+    const registry = {
+      register: vi.fn((name: string, contributor: () => unknown) => {
+        contributors.set(name, contributor);
+        return unregister;
+      }),
+    };
+    const managed = new ManagedDependencyReadinessContributors(registry as never, { current: () => identity } as never);
+    managed.onModuleInit();
+    expect(contributors.has('execution_budget_jwks')).toBe(true);
+    expect(contributors.has('platform_budget_authority')).toBe(false);
+    expect(unregister).not.toHaveBeenCalled();
+    managed.onModuleDestroy();
+    expect(unregister).toHaveBeenCalledTimes(contributors.size);
+
+    const platformUnregister = vi.fn();
+    const platformRegistry = {
+      register: vi.fn((name: string, contributor: () => unknown) => {
+        contributors.set(name, contributor);
+        return platformUnregister;
+      }),
+    };
+    const platform = new ExecutionBudgetAuthorityReadinessContributors(
+      platformRegistry as never,
+      {
+        inspectPlatformAuthorityFreshness: vi.fn(async () => ({
+          status: 'writer_unavailable' as const,
+        })),
+      } as never,
+    );
+    platform.onModuleInit();
+    expect(platformRegistry.register).toHaveBeenCalledWith('platform_budget_authority', expect.any(Function));
+    await expect(contributors.get('platform_budget_authority')?.()).resolves.toEqual({
+      status: 'failed',
+      code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
+    });
+    platform.onModuleDestroy();
+    expect(platformUnregister).toHaveBeenCalledOnce();
+  });
+
   it('holds Worker readiness when the Linux image decoder limiter is absent', async () => {
-    await expect(
-      checkImagePipelineIsolationReadiness('linux', async () => false),
-    ).resolves.toEqual({
+    await expect(checkImagePipelineIsolationReadiness('linux', async () => false)).resolves.toEqual({
       status: 'failed',
       code: 'IMAGE_PIPELINE_ISOLATION_UNAVAILABLE',
     });
-    await expect(
-      checkImagePipelineIsolationReadiness('linux', async () => true),
-    ).resolves.toEqual({ status: 'ok' });
+    await expect(checkImagePipelineIsolationReadiness('linux', async () => true)).resolves.toEqual({ status: 'ok' });
   });
 
   it('requires an authoritative Redis PING and fails closed when config is missing', async () => {
@@ -201,7 +291,10 @@ describe('managed dependency readiness', () => {
   ])('rejects an unsafe Redis URL before constructing a client: %s', async (url) => {
     const factory = vi.fn();
     const result = await checkRedisReadiness({ REDIS_URL: url }, factory);
-    expect(result).toEqual({ status: 'failed', code: 'REDIS_CONFIG_INVALID' });
+    expect(result).toEqual({
+      status: 'failed',
+      code: 'REDIS_CONFIG_INVALID',
+    });
     expect(factory).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain(url);
   });
@@ -231,10 +324,7 @@ describe('managed dependency readiness', () => {
         fetcher as never,
       ),
     ).resolves.toEqual({ status: 'ok' });
-    expect(fetcher).toHaveBeenCalledWith(
-      'http://127.0.0.1:3001/v1/models',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(fetcher).toHaveBeenCalledWith('http://127.0.0.1:3001/v1/models', expect.objectContaining({ method: 'GET' }));
     expect(JSON.stringify(await checkModelGatewayReadiness({}, fetcher as never))).not.toContain(
       'must-not-be-returned',
     );
@@ -248,7 +338,10 @@ describe('managed dependency readiness', () => {
     ]) {
       const fetcher = vi.fn();
       const result = await checkModelGatewayReadiness(
-        { MODEL_GATEWAY_URL: url, MODEL_GATEWAY_KEY: 'never-dispatch-this-key' },
+        {
+          MODEL_GATEWAY_URL: url,
+          MODEL_GATEWAY_KEY: 'never-dispatch-this-key',
+        },
         fetcher,
       );
       expect(result).toEqual({
@@ -261,9 +354,7 @@ describe('managed dependency readiness', () => {
   });
 
   it('derives the renderer identity from the attested renderer component digest', () => {
-    expect(rendererRuntimeIdentity(identity)).toBe(
-      `site-renderer@${identity.renderer_digest}`,
-    );
+    expect(rendererRuntimeIdentity(identity)).toBe(`site-renderer@${identity.renderer_digest}`);
     expect(() =>
       rendererRuntimeIdentity({
         attested: false,
@@ -275,7 +366,9 @@ describe('managed dependency readiness', () => {
 
   it('launches only the fixed local Chromium binary with a zero-network data document', async () => {
     const probe = vi.fn(async () => undefined);
-    await expect(checkBrowserReadiness({}, probe)).resolves.toEqual({ status: 'ok' });
+    await expect(checkBrowserReadiness({}, probe)).resolves.toEqual({
+      status: 'ok',
+    });
     expect(probe).toHaveBeenCalledWith(
       '/usr/bin/chromium',
       expect.arrayContaining([
@@ -285,9 +378,7 @@ describe('managed dependency readiness', () => {
       ]),
     );
     const unsafe = vi.fn();
-    await expect(
-      checkBrowserReadiness({ CHROME_PATH: '/tmp/downloaded-chrome' }, unsafe),
-    ).resolves.toEqual({
+    await expect(checkBrowserReadiness({ CHROME_PATH: '/tmp/downloaded-chrome' }, unsafe)).resolves.toEqual({
       status: 'failed',
       code: 'BROWSER_RUNTIME_CONFIG_INVALID',
     });

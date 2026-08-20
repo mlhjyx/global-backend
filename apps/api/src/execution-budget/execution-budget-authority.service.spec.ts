@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RequestContext } from '../auth/request-context';
 import { AppModule } from '../app.module';
 import { ModelGatewayModule } from '../model-gateway/model-gateway.module';
+import { ExecutionBudgetAuthorityReadinessContributors } from '../runtime/managed-dependency-readiness';
 import { TOOL_BUDGET_STORE } from '../tools/budget-store';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 import {
@@ -213,9 +214,8 @@ describe('ExecutionBudgetAuthorityService', () => {
 
 describe('ExecutionBudgetModule product composition', () => {
   it('registers and exports the authority application services without a transport', async () => {
-    const { PlatformExecutionBudgetAuthorityIngestionService } = await import(
-      './platform-authority-ingestion.service'
-    );
+    const { PlatformExecutionBudgetAuthorityIngestionService } =
+      await import('./platform-authority-ingestion.service');
     const providers = Reflect.getMetadata(
       MODULE_METADATA.PROVIDERS,
       ExecutionBudgetModule,
@@ -233,6 +233,7 @@ describe('ExecutionBudgetModule product composition', () => {
       ExecutionBudgetAuthorityRepository,
       ExecutionBudgetAuthorityService,
       PlatformExecutionBudgetAuthorityIngestionService,
+      ExecutionBudgetAuthorityReadinessContributors,
     ]);
     expect(exports).toEqual([
       ExecutionBudgetAuthorityService,

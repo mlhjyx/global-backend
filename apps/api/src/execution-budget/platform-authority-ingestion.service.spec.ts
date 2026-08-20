@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
@@ -24,6 +25,7 @@ import {
 } from './execution-budget-grant.verifier';
 import { ExecutionBudgetModule } from './execution-budget.module';
 import { PlatformExecutionBudgetAuthorityIngestionService } from './platform-authority-ingestion.service';
+import { ExecutionBudgetAuthorityReadinessContributors } from '../runtime/managed-dependency-readiness';
 
 const COMPACT_JWS = 'header.payload.signature';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
@@ -79,7 +81,9 @@ function verifiedAuthority(): VerifiedExecutionBudgetAuthority {
 }
 
 function serviceWith(
-  verifyPlatform: (compactJws: string) => Promise<VerifiedExecutionBudgetAuthority>,
+  verifyPlatform: (
+    compactJws: string,
+  ) => Promise<VerifiedExecutionBudgetAuthority>,
   ingestPlatform: (
     authority: VerifiedExecutionBudgetAuthority,
   ) => Promise<{ authorityId: string; replay: boolean }>,
@@ -225,9 +229,7 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
       new Ajv2020({ allErrors: true, strict: true }),
     ).compile(schema);
 
-    expect(fixture.command).toBe(
-      PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND,
-    );
+    expect(fixture.command).toBe(PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND);
     expect(fixture.claims).toEqual(VALID_CLAIMS);
     expect(validate(fixture.claims), JSON.stringify(validate.errors)).toBe(
       true,
@@ -339,7 +341,9 @@ describe('PlatformExecutionBudgetAuthorityIngestionService', () => {
     const ingestPlatform = vi.fn();
     const service = new PlatformExecutionBudgetAuthorityIngestionService(
       verifier,
-      { ingestPlatform } as unknown as ExecutionBudgetAuthorityRepository,
+      {
+        ingestPlatform,
+      } as unknown as ExecutionBudgetAuthorityRepository,
     );
 
     await expect(service.ingest(input as string)).rejects.toEqual(
@@ -382,9 +386,19 @@ describe('PlatformExecutionBudgetAuthorityIngestionService', () => {
     expect(providers).toContain(
       PlatformExecutionBudgetAuthorityIngestionService,
     );
-    expect(exports).toContain(
-      PlatformExecutionBudgetAuthorityIngestionService,
+    expect(providers).toContain(ExecutionBudgetAuthorityReadinessContributors);
+    expect(exports).toContain(PlatformExecutionBudgetAuthorityIngestionService);
+    expect(providers).not.toContain(
+      'EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE',
     );
-    expect(providers).not.toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE');
+  });
+
+  it('retains the concrete PrismaService injection token for application composition', () => {
+    expect(
+      Reflect.getMetadata(
+        'design:paramtypes',
+        ExecutionBudgetAuthorityRepository,
+      )?.[0],
+    ).toBe(PrismaService);
   });
 });

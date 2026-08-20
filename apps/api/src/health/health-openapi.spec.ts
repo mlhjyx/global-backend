@@ -13,19 +13,13 @@ interface SchemaNode {
 
 function schema(path: string, status: string): SchemaNode | undefined {
   const document = JSON.parse(
-    readFileSync(
-      resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
-      'utf8',
-    ),
+    readFileSync(resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'), 'utf8'),
   ) as {
     paths: Record<
       string,
       {
         get?: {
-          responses?: Record<
-            string,
-            { content?: Record<string, { schema?: SchemaNode }> }
-          >;
+          responses?: Record<string, { content?: Record<string, { schema?: SchemaNode }> }>;
         };
       }
     >;
@@ -83,7 +77,12 @@ describe('layered health OpenAPI contract', () => {
     expect(success).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['status', 'service', 'ts', 'components'],
+      required: ['status', 'service', 'ts', 'components', 'capabilities'],
+    });
+    expect(success?.properties?.capabilities).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['execution_budget_jwks', 'workspace_budget_authority', 'platform_budget_authority'],
     });
     expect(success?.properties?.components).toMatchObject({
       type: 'object',
@@ -101,6 +100,7 @@ describe('layered health OpenAPI contract', () => {
         'renderer',
         'browser',
         'budget_grant_verification',
+        'auth_jwks',
         'admission',
       ],
     });

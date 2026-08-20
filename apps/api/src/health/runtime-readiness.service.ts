@@ -19,6 +19,11 @@ export interface RuntimeReadinessReport {
   status: 'ready' | 'not_ready';
   service: 'global-api';
   ts: string;
+  capabilities: {
+    execution_budget_jwks: ComponentStatus;
+    workspace_budget_authority: ComponentStatus;
+    platform_budget_authority: ComponentStatus;
+  };
   components: {
     database: ComponentStatus;
     migration: ComponentStatus;
@@ -49,6 +54,11 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
     status: 'not_ready' as const,
     service: 'global-api' as const,
     ts: new Date(0).toISOString(),
+    capabilities: Object.freeze({
+      execution_budget_jwks: unavailableComponent(),
+      workspace_budget_authority: unavailableComponent(),
+      platform_budget_authority: unavailableComponent(),
+    }),
     components: Object.freeze({
       database: unavailableComponent(),
       migration: unavailableComponent(),
@@ -87,7 +97,10 @@ export class RuntimeReadinessService
 
   async onApplicationBootstrap(): Promise<void> {
     void this.check();
-    this.timer = setInterval(() => void this.check(), READINESS_REFRESH_INTERVAL_MS);
+    this.timer = setInterval(
+      () => void this.check(),
+      READINESS_REFRESH_INTERVAL_MS,
+    );
     this.timer.unref();
   }
 
@@ -129,24 +142,28 @@ export class RuntimeReadinessService
       browser,
       budgetGrantVerification,
       authJwks,
+      executionBudgetJwks,
+      platformBudgetAuthority,
     ] = await Promise.all([
-        this.checkDatabaseAndMigration(),
-        this.checkTemporal(),
-        this.checkLease(() =>
-          this.leases.inspectWorkerQueue(
-            process.env.TEMPORAL_TASK_QUEUE ?? 'understanding',
-          ),
+      this.checkDatabaseAndMigration(),
+      this.checkTemporal(),
+      this.checkLease(() =>
+        this.leases.inspectWorkerQueue(
+          process.env.TEMPORAL_TASK_QUEUE ?? 'understanding',
         ),
-        this.checkLease(() => this.leases.inspectRole('OUTBOX_RELAY')),
-        this.contributors.check('api_runtime_lease'),
-        this.contributors.check('storage'),
-        this.contributors.check('redis'),
-        this.contributors.check('model_gateway'),
-        this.contributors.check('renderer'),
-        this.contributors.check('browser'),
-        this.contributors.check('budget_grant_verification'),
-        this.contributors.check('auth_jwks'),
-      ]);
+      ),
+      this.checkLease(() => this.leases.inspectRole('OUTBOX_RELAY')),
+      this.contributors.check('api_runtime_lease'),
+      this.contributors.check('storage'),
+      this.contributors.check('redis'),
+      this.contributors.check('model_gateway'),
+      this.contributors.check('renderer'),
+      this.contributors.check('browser'),
+      this.contributors.check('budget_grant_verification'),
+      this.contributors.check('auth_jwks'),
+      this.contributors.check('execution_budget_jwks'),
+      this.contributors.check('platform_budget_authority'),
+    ]);
     const admissionStatus: ComponentStatus =
       admission.admitted && identity.attested
         ? { status: 'ok' }
@@ -170,10 +187,39 @@ export class RuntimeReadinessService
     const ready = Object.values(components).every(
       (component) => component.status === 'ok',
     );
+    const workspaceBudgetAuthority: ComponentStatus =
+      executionBudgetJwks.status !== 'ok'
+        ? {
+            status: 'failed',
+            code: 'WORKSPACE_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
+          }
+        : databaseAndMigration.database.status !== 'ok'
+          ? {
+              status: 'failed',
+              code: 'WORKSPACE_BUDGET_AUTHORITY_DATABASE_UNAVAILABLE',
+            }
+          : databaseAndMigration.migration.status !== 'ok'
+            ? {
+                status: 'failed',
+                code: 'WORKSPACE_BUDGET_AUTHORITY_MIGRATION_UNAVAILABLE',
+              }
+            : { status: 'ok' };
+    const effectivePlatformBudgetAuthority: ComponentStatus =
+      executionBudgetJwks.status === 'ok'
+        ? platformBudgetAuthority
+        : {
+            status: 'failed',
+            code: 'PLATFORM_BUDGET_AUTHORITY_VERIFICATION_UNAVAILABLE',
+          };
     return {
       status: ready ? 'ready' : 'not_ready',
       service: 'global-api',
       ts: new Date().toISOString(),
+      capabilities: {
+        execution_budget_jwks: executionBudgetJwks,
+        workspace_budget_authority: workspaceBudgetAuthority,
+        platform_budget_authority: effectivePlatformBudgetAuthority,
+      },
       components,
     };
   }
@@ -196,10 +242,13 @@ export class RuntimeReadinessService
         }
       }
       const expected = this.releaseIdentity.current();
-      if (!expected.attested) throw new Error('RUNTIME_RELEASE_IDENTITY_UNAVAILABLE');
+      if (!expected.attested)
+        throw new Error('RUNTIME_RELEASE_IDENTITY_UNAVAILABLE');
       const revision = await this.prisma.$transaction(
         async (transaction) => {
-          await transaction.$executeRawUnsafe('SET LOCAL statement_timeout = 2000');
+          await transaction.$executeRawUnsafe(
+            'SET LOCAL statement_timeout = 2000',
+          );
           await transaction.$queryRawUnsafe('SELECT 1');
           return transaction.$queryRawUnsafe<Array<{ migration_name: string }>>(
             `SELECT migration_name
@@ -221,7 +270,10 @@ export class RuntimeReadinessService
     } catch {
       return {
         database: { status: 'failed', code: 'DATABASE_UNAVAILABLE' },
-        migration: { status: 'not_proven', code: 'MIGRATION_REVISION_NOT_PROVEN' },
+        migration: {
+          status: 'not_proven',
+          code: 'MIGRATION_REVISION_NOT_PROVEN',
+        },
       };
     }
   }
@@ -238,7 +290,9 @@ export class RuntimeReadinessService
   }
 
   private async checkLease(
-    inspect: () => Promise<{ status: 'ok' } | { status: 'failed'; code: string }>,
+    inspect: () => Promise<
+      { status: 'ok' } | { status: 'failed'; code: string }
+    >,
   ): Promise<ComponentStatus> {
     try {
       return await inspect();

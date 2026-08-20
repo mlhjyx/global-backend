@@ -92,8 +92,8 @@ export class HealthController {
     description: "至少一项必需证据失败或尚未证明",
     schema: RUNTIME_READINESS_RESPONSE_SCHEMA,
   })
-  async ready(@Res({ passthrough: true }) response: Response) {
-    const report = await this.readinessService.check();
+  ready(@Res({ passthrough: true }) response: Response) {
+    const report = this.readinessService.current();
     if (report.status !== "ready") response.status(503);
     return report;
   }
