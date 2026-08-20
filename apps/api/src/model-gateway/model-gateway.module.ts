@@ -26,7 +26,7 @@ import { PostgresBudgetStore, TOOL_BUDGET_STORE } from '../tools/budget-store';
     },
     { provide: ModelGateway, useClass: RouterModelGateway },
   ],
-  exports: [ModelGateway],
+  exports: [ModelGateway, TOOL_BUDGET_STORE],
 })
 export class ModelGatewayModule implements OnModuleInit {
   private readonly logger = new Logger('ModelGateway');

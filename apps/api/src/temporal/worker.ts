@@ -296,6 +296,7 @@ async function main(): Promise<void> {
     prisma,
     gateway,
     runtimeTelemetry.telemetry,
+    budgetStore,
   ); // discovery + external-intent sweep 共享一实例
   // 第五门制裁筛查引擎（worker 侧）：qualify 活动 screen 公司名 + 刷新活动重建索引。手工构造（非 Nest DI）；
   // 平台表无 RLS、app_user 只读 → prisma 读即可。DISABLED（Phase 1 默认）→ 空索引 → not_screened，no-op。
@@ -344,12 +345,14 @@ async function main(): Promise<void> {
       ...createAcquisitionActivities({
         prisma,
         registry: buildSourceAdapterRegistry(broker),
+        budgetStore,
       }),
       ...createIntentActivities({
         prisma,
         fetcher: new Crawl4aiPageFetcher(broker),
         ownerDb,
         broker,
+        budgetStore,
       }),
       ...createBacklogActivities({
         prisma,
