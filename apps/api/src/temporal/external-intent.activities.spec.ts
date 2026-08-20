@@ -52,6 +52,30 @@ describe('ingestExternalSignals — durable workflow budget scope', () => {
     }));
     expect(close).toHaveBeenCalledTimes(1);
   });
+
+  it('old histories derive the replay scope from activity workflow execution', async () => {
+    const open = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const budgetStore = { open, close } as unknown as BudgetStore;
+    const ownerDb = {
+      dataProvider: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+      budgetStore,
+      activityRunId: () => 'legacy-external-intent-run',
+    });
+
+    await acts.ingestExternalSignals({
+      targets: [{ ...TARGET }], tedEnabled: true, openfdaEnabled: false, samgovEnabled: false,
+    });
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({
+      replayScope: true,
+      accountKey: expect.stringContaining('legacy-external-intent-run'),
+    }));
+  });
 });
 
 /** 构造只喂投影路径所需依赖的活动集：sourceSignal.findMany 探针 + DataProvider live 状态（findProviders 探针=owner-DB 读计数）。 */

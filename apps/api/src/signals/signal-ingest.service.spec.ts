@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BudgetExceededError } from '../tools/budget';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ExecutionBroker, ToolContext } from '../tools/tool-contract';
@@ -211,6 +212,16 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     const svc = new SignalIngestService({ prisma, broker });
     await expect(svc.ingestTed(tedParams, { nowMs: NOW, budgetKey: 'sweep:external-intent' })).rejects.toBeInstanceOf(BudgetExceededError);
     expect([...prisma.ledger.values()].filter((r) => r.status === 'OK').length).toBe(0);
+  });
+
+  it('durable replay failure propagates instead of becoming a successful empty ingest ledger', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => new BudgetOperationReplayError('openfda-op'));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    await expect(
+      svc.ingestFda({ productCodes: ['LLZ'] }, { nowMs: NOW, budgetKey: 'sweep:external-intent' }),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
   });
 
   it('摄取幂等：同 externalId 复现 → 单行、observedAt 前移、status 绝不复活（EXPIRED 保持）', async () => {

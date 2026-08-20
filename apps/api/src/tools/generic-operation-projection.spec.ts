@@ -44,4 +44,11 @@ describe('generic durable operation projection', () => {
       schemaVersion: 'generic-operation-projection/v1', kind: 'tool', schema: 'bounded/v1', data: {}, digest: 'a'.repeat(64), extra: true,
     })).toThrow(/GENERIC_OPERATION_PROJECTION_INVALID/);
   });
+
+  it('reserves envelope and PostgreSQL JSONB overhead below the 128 KiB database cap', () => {
+    expect(() => projectGenericOperationResult({
+      kind: 'tool', schema: 'bounded/v1',
+      data: { values: Array.from({ length: 256 }, () => 'x'.repeat(490)) },
+    })).toThrow(/GENERIC_OPERATION_PROJECTION_INVALID/);
+  });
 });
