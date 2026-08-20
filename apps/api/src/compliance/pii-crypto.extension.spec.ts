@@ -74,6 +74,10 @@ describe('pii-crypto.extension 数据库 principal 读取', () => {
       join(import.meta.dirname, 'pii-crypto.extension.ts'),
       'utf8',
     );
-    expect(source).toContain('array_agg(granted.rolname::text ORDER BY granted.rolname)');
+    expect(source).toContain('session_user::text AS "sessionUser"');
+    expect(source).toContain('current_user::text AS "currentUser"');
+    expect(source).toContain(
+      'array_agg(granted.rolname::text ORDER BY granted.rolname)',
+    );
   });
 });
