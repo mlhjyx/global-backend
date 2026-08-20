@@ -258,6 +258,7 @@ export function createExternalIntentActivities(deps: {
         workspaceId: PLATFORM_WORKSPACE,
         accountKey: budgetKey,
         capCents: sweepBudgetCents(),
+        replayScope: Boolean(args.budgetScopeId),
       });
       try {
         const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {

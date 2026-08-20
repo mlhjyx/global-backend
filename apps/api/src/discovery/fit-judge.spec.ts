@@ -69,7 +69,7 @@ describe('judgeFitCompany provider-independent result semantics', () => {
     },
   );
 
-  it('keeps the durable replay projector closed, bounded, and usage-aware', async () => {
+  it('keeps the durable replay projector closed, bounded, and independent from fractional cost facts', async () => {
     executeTask.mockImplementation(async (_gateway, _input, context) => {
       const replay = context.genericReplay!;
       expect(replay.project({
@@ -80,7 +80,6 @@ describe('judgeFitCompany provider-independent result semantics', () => {
         data: output,
         provider: 'new-api',
         model: 'qualified-model',
-        usage: null,
       });
       expect(replay.project({
         data: output,

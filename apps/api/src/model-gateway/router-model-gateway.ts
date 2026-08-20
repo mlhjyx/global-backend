@@ -380,15 +380,19 @@ export class RouterModelGateway extends ModelGateway {
           typeof replay.data === 'object' &&
           !Array.isArray(replay.data)
         ) {
-          const stored = replay.data as Record<string, unknown>;
-          const restored = ctx.genericReplay.restore(stored.result);
-          const verified = projectGenericOperationResult({
-            kind: 'model',
-            schema: ctx.genericReplay.schema,
-            data: { result: ctx.genericReplay.project(restored) },
-          });
-          if (verified.digest === replay.digest) {
-            return restored as ModelResult<T>;
+          try {
+            const stored = replay.data as Record<string, unknown>;
+            const restored = ctx.genericReplay.restore(stored.result);
+            const verified = projectGenericOperationResult({
+              kind: 'model',
+              schema: ctx.genericReplay.schema,
+              data: { result: ctx.genericReplay.project(restored) },
+            });
+            if (verified.digest === replay.digest) {
+              return restored as ModelResult<T>;
+            }
+          } catch {
+            throw new BudgetOperationReplayError(operationKey);
           }
         }
         throw new BudgetOperationReplayError(operationKey);
@@ -413,41 +417,12 @@ export class RouterModelGateway extends ModelGateway {
     }
     const provider = chain[0]!;
     const started = Date.now();
+    let result: ModelResult<T>;
     try {
       if (ctx.authorizeExternalAction) {
         await this.assertExternalActionAuthorized(ctx);
       }
-      const result = await call(provider, ctx);
-      const costUsd = result.usage?.costUsd;
-      const projection = ctx.genericReplay
-        ? projectGenericOperationResult({
-            kind: 'model',
-            schema: ctx.genericReplay.schema,
-            data: { result: ctx.genericReplay.project(result as ModelResult<unknown>) },
-          })
-        : undefined;
-      await this.budgetStore.settle(
-        reservation,
-        costUsd != null
-          ? Math.ceil(costUsd * 100)
-          : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1)),
-        projection,
-      );
-      this.trace?.record({
-            workspaceId: ctx.workspaceId,
-            task: input.task,
-            op,
-            provider: result.provider,
-            model: result.model,
-            status: 'OK',
-            latencyMs: Date.now() - started,
-            inputTokens: result.usage?.inputTokens,
-            outputTokens: result.usage?.outputTokens,
-            costUsd: result.usage?.costUsd,
-            correlationId: ctx.correlationId,
-            modelPolicy: ctx.modelPolicy,
-      });
-      return result;
+      result = await call(provider, ctx);
     } catch (err) {
       const failedUsage = err instanceof ProviderOutputError ? err.usage : undefined;
       if (
@@ -482,6 +457,49 @@ export class RouterModelGateway extends ModelGateway {
       });
       throw err;
     }
+
+    let projection;
+    try {
+      projection = ctx.genericReplay
+        ? projectGenericOperationResult({
+            kind: 'model',
+            schema: ctx.genericReplay.schema,
+            data: { result: ctx.genericReplay.project(result as ModelResult<unknown>) },
+          })
+        : undefined;
+    } catch {
+      // A valid provider output exists, but it cannot be represented by the
+      // approved durable contract. Keep the operation unresolved so a retry
+      // cannot issue a second physical request or settle an empty result.
+      throw new BudgetOperationReplayError(operationKey);
+    }
+    const costUsd = result.usage?.costUsd;
+    const observedCents = costUsd != null
+      ? Math.ceil(costUsd * 100)
+      : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1));
+    const settlement = [reservation, observedCents, projection] as const;
+    try {
+      await this.budgetStore.settle(...settlement);
+    } catch {
+      // The first failure may be an ACK loss after commit. Repeating the exact
+      // same operation/cost/projection is safe; PostgreSQL rejects any drift.
+      await this.budgetStore.settle(...settlement);
+    }
+    this.trace?.record({
+      workspaceId: ctx.workspaceId,
+      task: input.task,
+      op,
+      provider: result.provider,
+      model: result.model,
+      status: 'OK',
+      latencyMs: Date.now() - started,
+      inputTokens: result.usage?.inputTokens,
+      outputTokens: result.usage?.outputTokens,
+      costUsd: result.usage?.costUsd,
+      correlationId: ctx.correlationId,
+      modelPolicy: ctx.modelPolicy,
+    });
+    return result;
   }
 
   private async runPersistent<T>(

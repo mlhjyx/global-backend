@@ -15,7 +15,11 @@ import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import { BudgetExceededError, runBudgetCents } from '../tools/budget';
-import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import {
+  BudgetOperationReplayError,
+  type BudgetStore,
+  UnavailableBudgetStore,
+} from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import {
   companyMayUseExternalProcessing,
@@ -176,6 +180,9 @@ export function createDiscoveryActivities(deps: {
         adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
       );
       for (const result of settled) {
+        if (result.status === 'rejected' && result.reason instanceof BudgetOperationReplayError) {
+          throw result.reason;
+        }
         if (result.status !== 'fulfilled') continue;
         assertProductDiscoveryProvenance({ providerKey: result.value.key });
         for (const record of result.value.r.records) {

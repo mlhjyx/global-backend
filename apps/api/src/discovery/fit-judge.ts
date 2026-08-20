@@ -144,7 +144,6 @@ export async function judgeFitCompany(
             data: result.data,
             provider: result.provider,
             model: result.model,
-            usage: result.usage ?? null,
           }),
           restore: (projection) => {
             if (!projection || typeof projection !== 'object' || Array.isArray(projection)) {
@@ -155,9 +154,6 @@ export async function judgeFitCompany(
               data: restored.data,
               provider: String(restored.provider ?? ''),
               model: String(restored.model ?? ''),
-              ...(restored.usage && typeof restored.usage === 'object'
-                ? { usage: restored.usage as never }
-                : {}),
             };
           },
         },

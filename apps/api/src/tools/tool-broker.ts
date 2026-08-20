@@ -266,10 +266,15 @@ export class ToolBroker implements ExecutionBroker {
           estimatedCents: tool.cost.estimatedCents,
         });
         if (reservation.replay) {
-          const replay = this.replayGenericToolProjection(
-            tool,
-            reservation.replayProjection,
-          );
+          let replay: ToolResult<O> | null;
+          try {
+            replay = this.replayGenericToolProjection(
+              tool,
+              reservation.replayProjection,
+            );
+          } catch {
+            throw new BudgetOperationReplayError(reservation.operationId);
+          }
           if (replay) return replay;
           throw new BudgetOperationReplayError(reservation.operationId);
         }

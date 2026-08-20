@@ -187,7 +187,12 @@ export function createBacklogActivities(deps: {
     const key = budgetScopeId
       ? `sweep:${budgetScopeId}:${stage}:${workspaceId}`
       : `sweep:${stage}:${workspaceId}`;
-    await budgets.open({ workspaceId, accountKey: key, capCents: sweepBudgetCents() });
+    await budgets.open({
+      workspaceId,
+      accountKey: key,
+      capCents: sweepBudgetCents(),
+      replayScope: Boolean(budgetScopeId),
+    });
     return {
       key,
       close: () => budgets.close({ workspaceId, accountKey: key }),
