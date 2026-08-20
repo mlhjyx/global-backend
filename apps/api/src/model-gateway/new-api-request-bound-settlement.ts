@@ -290,6 +290,7 @@ export class NewApiRequestBoundSettlementResolver {
       try {
         response = await this.fetchImpl(`${this.gatewayOrigin}/api/log/token`, {
           headers: { Authorization: `Bearer ${this.settings.apiKey}` },
+          redirect: "error",
           signal,
         });
         if (!response.ok) continue;
