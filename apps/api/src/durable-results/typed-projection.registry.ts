@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { types } from 'node:util';
 import Ajv, { type AnySchema, type ValidateFunction } from 'ajv';
 import {
   isTypedProjectionSchema,
@@ -91,7 +92,7 @@ function strictJson(value: unknown, seen = new WeakSet<object>(), depth = 0): St
     ) {
       invalid();
     }
-    if (seen.has(value)) invalid();
+    if (types.isProxy(value) || seen.has(value)) invalid();
     seen.add(value);
     try {
       if (Array.isArray(value)) {
@@ -136,7 +137,20 @@ function strictJson(value: unknown, seen = new WeakSet<object>(), depth = 0): St
 }
 
 function canonicalJson(value: StrictJson): string {
-  return JSON.stringify(value);
+  if (value === null) return 'null';
+  if (typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    const entries: string[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      entries.push(canonicalJson(value[index]!));
+    }
+    return `[${entries.join(',')}]`;
+  }
+  const objectValue = value as StrictJsonObject;
+  return `{${Object.keys(objectValue).sort().map(
+    (key) => `${JSON.stringify(key)}:${canonicalJson(objectValue[key]!)}`,
+  ).join(',')}}`;
 }
 
 function fieldNameTokens(value: string): readonly string[] {
@@ -154,8 +168,15 @@ function hasSequence(tokens: readonly string[], sequence: readonly string[]): bo
 
 function isProhibitedFieldName(value: string): boolean {
   const tokens = fieldNameTokens(value);
+  const compact = tokens.join('');
+  const prohibitedCompact = new Set([
+    'prompt', 'systemprompt', 'apikey', 'credential', 'credentials',
+    'credentialref', 'token', 'accesstoken', 'rawresponse',
+    'rawmodelresponse', 'responsebody', 'authorization', 'header', 'headers',
+    'password', 'secret', 'cookie',
+  ]);
   return (
-    tokens.includes('prompt') || tokens.includes('authorization') ||
+    prohibitedCompact.has(compact) || tokens.includes('prompt') || tokens.includes('authorization') ||
     tokens.includes('header') || tokens.includes('headers') ||
     tokens.includes('password') || tokens.includes('secret') ||
     tokens.includes('cookie') || hasSequence(tokens, ['api', 'key']) ||
@@ -165,6 +186,13 @@ function isProhibitedFieldName(value: string): boolean {
     hasSequence(tokens, ['raw', 'response']) ||
     hasSequence(tokens, ['raw', 'model', 'response'])
   );
+}
+
+function assertSchemaPropertyName(value: string): void {
+  const compatibility = value.normalize('NFKC');
+  if (value !== compatibility || !/^[A-Za-z][A-Za-z0-9]*$/.test(value) || isProhibitedFieldName(value)) {
+    schemaInvalid();
+  }
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
@@ -213,7 +241,7 @@ function assertSchema(value: StrictJson): void {
       if (new Set(required).size !== required.length || required.some((key) => !(key in properties))) schemaInvalid();
     }
     for (const [key, property] of Object.entries(properties)) {
-      if (isProhibitedFieldName(key)) schemaInvalid();
+      assertSchemaPropertyName(key);
       assertSchema(property);
     }
   } else if (node.additionalProperties !== undefined || node.properties !== undefined || node.required !== undefined) {

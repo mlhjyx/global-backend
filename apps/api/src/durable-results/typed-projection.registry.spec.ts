@@ -5,7 +5,9 @@ import {
   TypedProjectionRegistry,
 } from './typed-projection.registry';
 import {
+  ARTIFACT_PRIVACY_CLASSES,
   isDurableResultStrategy,
+  TYPED_PROJECTION_SCHEMAS,
   type DurableResultStrategy,
 } from './durable-result-strategy';
 import type { TypedProjectionDefinition } from './typed-projection.types';
@@ -79,6 +81,20 @@ describe('TypedProjectionRegistry', () => {
     expect(isDurableResultStrategy({ ...artifact, mediaTypes: [] })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, privacyClass: 'PUBLIC' })).toBe(false);
     expect(isDurableResultStrategy({ kind: 'typed_projection', schema: 'unknown/v1' })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, schema: '' })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, mediaTypes: [''] })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, ttlSeconds: Number.MAX_SAFE_INTEGER + 1 })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, unexpected: true })).toBe(false);
+  });
+
+  it('freezes exported schema and privacy tuples without weakening private validation', () => {
+    expect(Object.isFrozen(TYPED_PROJECTION_SCHEMAS)).toBe(true);
+    expect(Object.isFrozen(ARTIFACT_PRIVACY_CLASSES)).toBe(true);
+    expect(() => (TYPED_PROJECTION_SCHEMAS as unknown as string[]).push('unknown/v1')).toThrow();
+    expect(() => (ARTIFACT_PRIVACY_CLASSES as unknown as string[]).pop()).toThrow();
+    expect(isDurableResultStrategy({
+      kind: 'typed_projection', schema: 'taxonomy-code/v1',
+    })).toBe(true);
   });
 
   it('rejects every schema escape hatch instead of only validating direct properties', () => {
@@ -123,6 +139,20 @@ describe('TypedProjectionRegistry', () => {
       })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
     },
   );
+
+  it.each([
+    'apikey', 'APIKey', 'api_key', 'api.key', 'x.api.key', 'credentials',
+    'accessToken', 'rawresponse', 'responsebody', 'authorization', 'headers',
+    'password', 'secret', 'cookie', 'ａｐｉｋｅｙ', '𝗮𝗽𝗶𝗸𝗲𝘆',
+  ])('rejects normalized sensitive or confusable property name: %s', (fieldName) => {
+    expect(() => new TypedProjectionRegistry().register({
+      ...taxonomyDefinition(),
+      jsonSchema: {
+        type: 'object', additionalProperties: false,
+        properties: { [fieldName]: { type: 'string', maxLength: 20 } },
+      },
+    })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
+  });
 
   it('keeps its schema allowlist and frozen registrations private at runtime', () => {
     const registry = new TypedProjectionRegistry();
@@ -169,6 +199,9 @@ describe('TypedProjectionRegistry', () => {
         { code: 'A', provider: 'catalog' },
         { ownKeys: () => { throw new Error('trap'); } },
       )],
+      ['transparent object proxy', () => new Proxy(
+        { code: 'A', provider: 'catalog' }, {},
+      )],
     ];
 
     for (const [_name, produce] of cases) {
@@ -199,6 +232,48 @@ describe('TypedProjectionRegistry', () => {
     expect(() => arrays.project('icp-query-plan/v1', {
       values: arrayWithExtraProperty,
     })).toThrow('TYPED_PROJECTION_INVALID');
+    const transparentArrayProxy = new Proxy([1], {});
+    expect(() => arrays.project('icp-query-plan/v1', {
+      values: transparentArrayProxy,
+    })).toThrow('TYPED_PROJECTION_INVALID');
+  });
+
+  it('uses its own canonical encoder when Object and Array prototypes gain toJSON', () => {
+    const originalObjectToJson = Object.getOwnPropertyDescriptor(Object.prototype, 'toJSON');
+    const originalArrayToJson = Object.getOwnPropertyDescriptor(Array.prototype, 'toJSON');
+    Object.defineProperty(Object.prototype, 'toJSON', {
+      configurable: true,
+      value: () => 'poisoned-object',
+    });
+    Object.defineProperty(Array.prototype, 'toJSON', {
+      configurable: true,
+      value: () => [],
+    });
+    try {
+      const registry = new TypedProjectionRegistry();
+      registry.register(taxonomyDefinition());
+      const projected = registry.project('taxonomy-code/v1', {
+        code: 'A', provider: 'catalog',
+      });
+      expect(projected.digest).toBe(
+        '1103fbe3a173cf37ec1e011ad432d54c3bd290a4baa745d544d0e1c64751a197',
+      );
+      const arrayRegistry = new TypedProjectionRegistry();
+      arrayRegistry.register(numberListDefinition('icp-query-plan/v1', 1, 1));
+      expect(arrayRegistry.project('icp-query-plan/v1', { values: [1] }).digest).toBe(
+        'f6237cfb2c6e781d2c3ca9214e6d66de313aaa3b272686a68e98884cacd5d985',
+      );
+      const oversized = new TypedProjectionRegistry();
+      oversized.register(taxonomyDefinition('icp-design/v1', 130_000));
+      expect(() => oversized.project('icp-design/v1', {
+        code: 'x'.repeat(130_000), provider: 'catalog',
+      })).toThrow('TYPED_PROJECTION_TOO_LARGE');
+    } finally {
+      if (originalObjectToJson) Object.defineProperty(Object.prototype, 'toJSON', originalObjectToJson);
+      else delete (Object.prototype as { toJSON?: unknown }).toJSON;
+      if (originalArrayToJson) Object.defineProperty(Array.prototype, 'toJSON', originalArrayToJson);
+      else delete (Array.prototype as { toJSON?: unknown }).toJSON;
+    }
   });
   it('rejects a duplicate schema registration so one schema has one projector', () => {
     const registry = new TypedProjectionRegistry();

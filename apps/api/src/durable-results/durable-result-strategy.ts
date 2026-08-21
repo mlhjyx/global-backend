@@ -11,7 +11,7 @@ export const DURABLE_RESULT_STRATEGY_KINDS = [
 export type DurableResultStrategyKind =
   (typeof DURABLE_RESULT_STRATEGY_KINDS)[number];
 
-export const TYPED_PROJECTION_SCHEMAS = [
+const typedProjectionSchemaValues = [
   'icp-design/v1', 'icp-query-plan/v1', 'understanding-claims/v1',
   'understanding-profile/v1', 'understanding-offerings/v1', 'taxonomy-code/v1',
   'fit-judgment/v1', 'discovery-extract-company/v1', 'discovery-extract-list/v1',
@@ -22,21 +22,33 @@ export const TYPED_PROJECTION_SCHEMAS = [
   'google-patents-search/v1', 'tradefair-algolia/v1', 'mapyourshow-fetch/v1',
 ] as const;
 
-export type TypedProjectionSchema = (typeof TYPED_PROJECTION_SCHEMAS)[number];
+export const TYPED_PROJECTION_SCHEMAS = Object.freeze([
+  ...typedProjectionSchemaValues,
+]) as readonly [...typeof typedProjectionSchemaValues];
+
+export type TypedProjectionSchema = (typeof typedProjectionSchemaValues)[number];
 
 const TYPED_PROJECTION_SCHEMA_SET: ReadonlySet<string> = new Set(
-  TYPED_PROJECTION_SCHEMAS,
+  typedProjectionSchemaValues,
 );
 
 export function isTypedProjectionSchema(value: unknown): value is TypedProjectionSchema {
   return typeof value === 'string' && TYPED_PROJECTION_SCHEMA_SET.has(value);
 }
 
-export const ARTIFACT_PRIVACY_CLASSES = [
+const artifactPrivacyClassValues = [
   'PUBLIC_ORGANIZATION', 'CONFIDENTIAL_TENANT', 'PERSONAL_DATA',
 ] as const;
 
-export type ArtifactPrivacyClass = (typeof ARTIFACT_PRIVACY_CLASSES)[number];
+export const ARTIFACT_PRIVACY_CLASSES = Object.freeze([
+  ...artifactPrivacyClassValues,
+]) as readonly [...typeof artifactPrivacyClassValues];
+
+export type ArtifactPrivacyClass = (typeof artifactPrivacyClassValues)[number];
+
+const ARTIFACT_PRIVACY_CLASS_SET: ReadonlySet<string> = new Set(
+  artifactPrivacyClassValues,
+);
 
 export type DurableResultStrategy =
   | Readonly<{ kind: 'typed_projection'; schema: TypedProjectionSchema }>
@@ -75,7 +87,7 @@ export function isDurableResultStrategy(value: unknown): value is DurableResultS
     value.mediaTypes.length > 0 && value.mediaTypes.every(
       (mediaType) => typeof mediaType === 'string' && mediaType.length > 0,
     ) && typeof value.privacyClass === 'string' &&
-    (ARTIFACT_PRIVACY_CLASSES as readonly string[]).includes(value.privacyClass) &&
+    ARTIFACT_PRIVACY_CLASS_SET.has(value.privacyClass) &&
     isPositiveSafeInteger(value.ttlSeconds)
   );
 }
