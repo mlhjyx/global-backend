@@ -18,7 +18,7 @@ import {
   type ExecutionBudgetGrantExpectedScope,
 } from './execution-budget-grant.verifier';
 
-const NOW = new Date('2026-08-21T00:00:00.000Z');
+const NOW = new Date('2026-08-21T00:00:00.789Z');
 const NOW_SECONDS = Math.floor(NOW.getTime() / 1_000);
 const ISSUER = 'https://control-plane.example.test/';
 const AUDIENCE = 'global-backend:execution-budget';

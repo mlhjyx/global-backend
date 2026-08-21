@@ -35,6 +35,47 @@ const VALID_TIMES = Object.freeze({
   notBefore: new Date(TEST_STARTED_AT - 20_000),
   expiresAt: new Date(TEST_STARTED_AT + 240_000),
 });
+const FRACTIONAL_VERIFICATION_TIME = new Date("2026-08-21T00:00:00.789Z");
+const CLOCK_OFFSETS = Object.freeze([-61, -60, 0, 60, 61]);
+
+function signedOffset(offset) {
+  return `${offset >= 0 ? "+" : ""}${offset}`;
+}
+
+function authorityClockBoundaryCases() {
+  return [
+    ...CLOCK_OFFSETS.map((offset) => ({
+      name: `issued-at ${signedOffset(offset)}`,
+      offsets: {
+        issuedAt: offset,
+        notBefore: Math.max(offset, 0),
+        expiresAt: 120,
+      },
+      timeState: offset > 60 ? "INVALID" : "ACTIVE",
+      ingestMarker:
+        offset > 60 ? "EXECUTION_BUDGET_GRANT_INVALID" : undefined,
+    })),
+    ...CLOCK_OFFSETS.map((offset) => ({
+      name: `not-before ${signedOffset(offset)}`,
+      offsets: { issuedAt: -120, notBefore: offset, expiresAt: 120 },
+      timeState: offset > 60 ? "NOT_YET_VALID" : "ACTIVE",
+      ingestMarker:
+        offset > 60 ? "EXECUTION_BUDGET_GRANT_INVALID" : undefined,
+    })),
+    ...CLOCK_OFFSETS.map((offset) => ({
+      name: `expiry ${signedOffset(offset)}`,
+      offsets: { issuedAt: -120, notBefore: -120, expiresAt: offset },
+      timeState: offset < -60 ? "EXPIRED" : "ACTIVE",
+      ingestMarker:
+        offset < -60 ? "EXECUTION_BUDGET_GRANT_EXPIRED" : undefined,
+    })),
+  ];
+}
+
+function numericDateAtOffset(verificationTime, offset) {
+  const verificationSecond = Math.floor(verificationTime.getTime() / 1_000);
+  return new Date((verificationSecond + offset) * 1_000);
+}
 
 function requireDatabaseUrl(name, value) {
   assert.ok(value, `${name} is required`);
@@ -168,9 +209,12 @@ async function consumeWorkspaceAtOffsets(
     `SELECT * FROM consume_workspace_execution_authority(
       $1, $2, $3::uuid, $4, $5, $6::execution_budget_purpose,
       $7::uuid, $8, $9, $10, $11, $12, $13::bigint,
-      statement_timestamp() + $14::integer * interval '1 second',
-      statement_timestamp() + $15::integer * interval '1 second',
-      statement_timestamp() + $16::integer * interval '1 second'
+      date_trunc('second', statement_timestamp())
+        + $14::integer * interval '1 second',
+      date_trunc('second', statement_timestamp())
+        + $15::integer * interval '1 second',
+      date_trunc('second', statement_timestamp())
+        + $16::integer * interval '1 second'
     )`,
     overrideValue(overrides, "issuer", ISSUER),
     overrideValue(overrides, "audience", AUDIENCE),
@@ -205,9 +249,12 @@ async function ingestPlatformAtOffsets(
     `SELECT * FROM ingest_platform_execution_authority(
       $1, $2, $3::uuid, $4, $5, $6::execution_budget_purpose,
       $7, $8, $9, $10, $11, $12::bigint, $13::bigint, $14::bigint,
-      statement_timestamp() + $15::integer * interval '1 second',
-      statement_timestamp() + $16::integer * interval '1 second',
-      statement_timestamp() + $17::integer * interval '1 second'
+      date_trunc('second', statement_timestamp())
+        + $15::integer * interval '1 second',
+      date_trunc('second', statement_timestamp())
+        + $16::integer * interval '1 second',
+      date_trunc('second', statement_timestamp())
+        + $17::integer * interval '1 second'
     )`,
     overrideValue(overrides, "issuer", ISSUER),
     overrideValue(overrides, "audience", AUDIENCE),
@@ -227,6 +274,23 @@ async function ingestPlatformAtOffsets(
     notBefore,
     expiresAt,
   );
+}
+
+async function inspectAuthorityTimeState(
+  database,
+  { issuedAt, notBefore, expiresAt },
+  verificationTime = FRACTIONAL_VERIFICATION_TIME,
+) {
+  const [row] = await database.$queryRawUnsafe(
+    `SELECT execution_budget_authority_time_state(
+      $1::timestamptz, $2::timestamptz, $3::timestamptz, $4::timestamptz
+    ) AS state`,
+    numericDateAtOffset(verificationTime, issuedAt),
+    numericDateAtOffset(verificationTime, notBefore),
+    numericDateAtOffset(verificationTime, expiresAt),
+    verificationTime,
+  );
+  return row.state;
 }
 
 async function insertWorkspaceAuthority(database, overrides = {}) {
@@ -446,11 +510,11 @@ async function openWorkspaceAuthorizedAtOffsets(
     return transaction.$queryRawUnsafe(
       `WITH updated AS MATERIALIZED (
          UPDATE execution_budget_authority
-            SET issued_at=statement_timestamp()
+            SET issued_at=date_trunc('second', statement_timestamp())
                   + $4::integer * interval '1 second',
-                not_before=statement_timestamp()
+                not_before=date_trunc('second', statement_timestamp())
                   + $5::integer * interval '1 second',
-                expires_at=statement_timestamp()
+                expires_at=date_trunc('second', statement_timestamp())
                   + $6::integer * interval '1 second'
           WHERE id=$1::uuid
           RETURNING id
@@ -1304,42 +1368,19 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     assert.equal(count, 2);
   });
 
-  it("uses the same exact 60-second iat, nbf and exp tolerance for workspace and platform ingestion", async () => {
-    const cases = [
-      {
-        name: "not-before +60",
-        offsets: { issuedAt: 0, notBefore: 60, expiresAt: 120 },
-        accepted: true,
-      },
-      {
-        name: "not-before +61",
-        offsets: { issuedAt: 0, notBefore: 61, expiresAt: 120 },
-        accepted: false,
-        marker: "EXECUTION_BUDGET_GRANT_INVALID",
-      },
-      {
-        name: "expiry -60",
-        offsets: { issuedAt: -120, notBefore: -119, expiresAt: -60 },
-        accepted: true,
-      },
-      {
-        name: "expiry -61",
-        offsets: { issuedAt: -120, notBefore: -119, expiresAt: -61 },
-        accepted: false,
-        marker: "EXECUTION_BUDGET_GRANT_EXPIRED",
-      },
-      {
-        name: "issued-at +60",
-        offsets: { issuedAt: 60, notBefore: 60, expiresAt: 120 },
-        accepted: true,
-      },
-      {
-        name: "issued-at +61",
-        offsets: { issuedAt: 61, notBefore: 61, expiresAt: 120 },
-        accepted: false,
-        marker: "EXECUTION_BUDGET_GRANT_INVALID",
-      },
-    ];
+  it("classifies the full NumericDate matrix against an explicit fractional verification time", async () => {
+    assert.equal(FRACTIONAL_VERIFICATION_TIME.getMilliseconds(), 789);
+    for (const entry of authorityClockBoundaryCases()) {
+      assert.equal(
+        await inspectAuthorityTimeState(owner, entry.offsets),
+        entry.timeState,
+        entry.name,
+      );
+    }
+  });
+
+  it("uses the same full NumericDate matrix for workspace and platform ingestion", async () => {
+    const cases = authorityClockBoundaryCases();
     const issuer = `https://clock-ingest-${randomUUID()}.example.test`;
     let acceptedRows = 0;
 
@@ -1359,16 +1400,16 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
           tokenSha256: randomUUID().replaceAll("-", "").padEnd(64, "0"),
         });
 
-      if (entry.accepted) {
+      if (!entry.ingestMarker) {
         assert.equal((await workspaceCall()).length, 1, entry.name);
         assert.equal((await platformCall()).length, 1, entry.name);
         acceptedRows += 2;
       } else {
-        await rejectsSql(workspaceCall, entry.marker).catch((error) => {
+        await rejectsSql(workspaceCall, entry.ingestMarker).catch((error) => {
           error.message = `workspace ${entry.name}: ${error.message}`;
           throw error;
         });
-        await rejectsSql(platformCall, entry.marker).catch((error) => {
+        await rejectsSql(platformCall, entry.ingestMarker).catch((error) => {
           error.message = `platform ${entry.name}: ${error.message}`;
           throw error;
         });
@@ -1929,42 +1970,8 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     assert.equal(count, 0);
   });
 
-  it("applies exact 60-second clock tolerance again during authorized open", async () => {
-    const cases = [
-      {
-        name: "not-before +60",
-        offsets: { issuedAt: 0, notBefore: 60, expiresAt: 120 },
-        accepted: true,
-      },
-      {
-        name: "not-before +61",
-        offsets: { issuedAt: 0, notBefore: 61, expiresAt: 120 },
-        accepted: false,
-        marker: "EXECUTION_BUDGET_GRANT_INVALID",
-      },
-      {
-        name: "expiry -60",
-        offsets: { issuedAt: -120, notBefore: -119, expiresAt: -60 },
-        accepted: true,
-      },
-      {
-        name: "expiry -61",
-        offsets: { issuedAt: -120, notBefore: -119, expiresAt: -61 },
-        accepted: false,
-        marker: "EXECUTION_BUDGET_GRANT_EXPIRED",
-      },
-      {
-        name: "issued-at +60",
-        offsets: { issuedAt: 60, notBefore: 60, expiresAt: 120 },
-        accepted: true,
-      },
-      {
-        name: "issued-at +61",
-        offsets: { issuedAt: 61, notBefore: 61, expiresAt: 120 },
-        accepted: false,
-        marker: "EXECUTION_BUDGET_GRANT_INVALID",
-      },
-    ];
+  it("applies the full NumericDate matrix again during authorized open", async () => {
+    const cases = authorityClockBoundaryCases();
 
     await owner.$executeRawUnsafe(
       "GRANT UPDATE ON execution_budget_authority TO app_user",
@@ -1985,14 +1992,14 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
             ...entry.offsets,
           });
 
-        if (entry.accepted) {
+        if (!entry.ingestMarker) {
           const opened = await call().catch((error) => {
             error.message = `${entry.name}: ${error.message}`;
             throw error;
           });
           assert.equal(opened.length, 1, entry.name);
         } else {
-          await rejectsSql(call, entry.marker).catch((error) => {
+          await rejectsSql(call, entry.ingestMarker).catch((error) => {
             error.message = `${entry.name}: ${error.message}`;
             throw error;
           });
@@ -2460,22 +2467,15 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     });
   });
 
-  it("classifies campaign exhaustion and exact clock boundaries through the real freshness primitive", async () => {
+  it("classifies campaign exhaustion and the full fixed-time NumericDate matrix through real freshness", async () => {
     await owner.$executeRawUnsafe(
       `UPDATE execution_budget_authority
           SET revoked_at=GREATEST(statement_timestamp(), issued_at)
         WHERE authority_kind='PLATFORM_GRANT'`,
     );
-    const verificationTime = new Date(
-      Math.floor(Date.now() / 1_000) * 1_000,
-    );
-    const currentTimes = {
-      issuedAt: new Date(verificationTime.getTime() - 1_000),
-      notBefore: new Date(verificationTime.getTime() - 1_000),
-      expiresAt: new Date(verificationTime.getTime() + 120_000),
-    };
+    const verificationTime = FRACTIONAL_VERIFICATION_TIME;
+    assert.equal(verificationTime.getMilliseconds(), 789);
     const [acquisition] = await ingestPlatform(platform, {
-      ...currentTimes,
       jti: randomUUID(),
       purpose: "platform.acquisition",
       subjectId: "freshness-acquisition",
@@ -2495,75 +2495,68 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       accountKey: `freshness-acquisition-2-${randomUUID()}`,
     });
     const [intent] = await ingestPlatform(platform, {
-      ...currentTimes,
       jti: randomUUID(),
       purpose: "platform.intent_watch",
       subjectId: "freshness-intent",
       scheduleId: "freshness-intent",
     });
     const [sanctions] = await ingestPlatform(platform, {
-      ...currentTimes,
       jti: randomUUID(),
       purpose: "platform.sanctions",
       subjectId: "freshness-sanctions",
       scheduleId: "freshness-sanctions",
     });
 
-    await owner.$executeRawUnsafe(
-      `UPDATE execution_budget_authority
-          SET issued_at=$2::timestamptz,
-              not_before=$2::timestamptz + interval '60 seconds',
-              expires_at=$2::timestamptz + interval '120 seconds'
-        WHERE id=$1::uuid`,
-      intent.authority_id,
-      verificationTime,
-    );
-    await owner.$executeRawUnsafe(
-      `UPDATE execution_budget_authority
-          SET issued_at=$2::timestamptz - interval '120 seconds',
-              not_before=$2::timestamptz - interval '119 seconds',
-              expires_at=$2::timestamptz - interval '60 seconds'
-        WHERE id=$1::uuid`,
-      sanctions.authority_id,
-      verificationTime,
-    );
+    const activeTimes = {
+      issuedAt: numericDateAtOffset(verificationTime, -1),
+      notBefore: numericDateAtOffset(verificationTime, -1),
+      expiresAt: numericDateAtOffset(verificationTime, 120),
+    };
+    for (const authorityId of [acquisition.authority_id, sanctions.authority_id]) {
+      await owner.$executeRawUnsafe(
+        `UPDATE execution_budget_authority
+            SET issued_at=$2::timestamptz,
+                not_before=$3::timestamptz,
+                expires_at=$4::timestamptz
+          WHERE id=$1::uuid`,
+        authorityId,
+        activeTimes.issuedAt,
+        activeTimes.notBefore,
+        activeTimes.expiresAt,
+      );
+    }
 
-    const boundary = await platform.$queryRawUnsafe(
-      `SELECT * FROM inspect_platform_execution_authority_freshness_v1(
-        $1::timestamptz
-      )`,
-      verificationTime,
-    );
-    assert.deepEqual(boundary, [
-      { purpose: "platform.acquisition", state: "exhausted" },
-      { purpose: "platform.intent_watch", state: "active" },
-      { purpose: "platform.sanctions", state: "active" },
-    ]);
+    for (const entry of authorityClockBoundaryCases()) {
+      await owner.$executeRawUnsafe(
+        `UPDATE execution_budget_authority
+            SET issued_at=$2::timestamptz,
+                not_before=$3::timestamptz,
+                expires_at=$4::timestamptz
+          WHERE id=$1::uuid`,
+        intent.authority_id,
+        numericDateAtOffset(verificationTime, entry.offsets.issuedAt),
+        numericDateAtOffset(verificationTime, entry.offsets.notBefore),
+        numericDateAtOffset(verificationTime, entry.offsets.expiresAt),
+      );
 
-    await owner.$executeRawUnsafe(
-      `UPDATE execution_budget_authority
-          SET not_before=$2::timestamptz + interval '61 seconds'
-        WHERE id=$1::uuid`,
-      intent.authority_id,
-      verificationTime,
-    );
-    await owner.$executeRawUnsafe(
-      `UPDATE execution_budget_authority
-          SET expires_at=$2::timestamptz - interval '61 seconds'
-        WHERE id=$1::uuid`,
-      sanctions.authority_id,
-      verificationTime,
-    );
-    const outsideBoundary = await platform.$queryRawUnsafe(
-      `SELECT * FROM inspect_platform_execution_authority_freshness_v1(
-        $1::timestamptz
-      )`,
-      verificationTime,
-    );
-    assert.deepEqual(outsideBoundary, [
-      { purpose: "platform.acquisition", state: "exhausted" },
-      { purpose: "platform.intent_watch", state: "not_yet_valid" },
-      { purpose: "platform.sanctions", state: "expired" },
-    ]);
+      const freshness = await platform.$queryRawUnsafe(
+        `SELECT * FROM inspect_platform_execution_authority_freshness_v1(
+          $1::timestamptz
+        )`,
+        verificationTime,
+      );
+      assert.deepEqual(
+        freshness,
+        [
+          { purpose: "platform.acquisition", state: "exhausted" },
+          {
+            purpose: "platform.intent_watch",
+            state: entry.timeState.toLowerCase(),
+          },
+          { purpose: "platform.sanctions", state: "active" },
+        ],
+        entry.name,
+      );
+    }
   });
 });

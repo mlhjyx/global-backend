@@ -182,6 +182,7 @@ describe('managed dependency readiness', () => {
     ['revoked', 'REVOKED'],
     ['exhausted', 'EXHAUSTED'],
     ['not_yet_valid', 'NOT_YET_VALID'],
+    ['invalid', 'INVALID'],
   ])('reports %s authority for the exact fixed platform purpose without row details', async (state, codeSuffix) => {
     const source = platformSource(platformAuthorityRows({ 'platform.intent_watch': state }));
 
