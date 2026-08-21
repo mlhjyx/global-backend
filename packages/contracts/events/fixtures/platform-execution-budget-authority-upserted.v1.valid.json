@@ -1,6 +1,7 @@
 {
   "fixture_version": "platform-execution-budget-authority-conformance/v1",
   "command": "PlatformExecutionBudgetAuthorityUpserted/v1",
+  "verification_time": "2026-08-15T00:00:00.000Z",
   "public_jwk": {
     "kty": "RSA",
     "n": "vvU8Nm9m3YvIiOXCZqXomV3u-zjFalIISNGP8ofPvEvAEcgsHUQIYIaCttQGx3jRrHVlQT0jbvMM_D1IlpEDDJjutdcwD559OZ9FHV06i_gEcflKxXCmG4JaElRwFLzIdo2asc62_YjuBDsXTNJQAvyehc38rnz2dhIqmvTPRqQw3Ofaa0A571IbX5U-P1nlGcKT2FffpPqj7l636e3rU2HMM-vvJIEt4N3qEqK4kuYM0B9-DIOJ5WgH9vKize-SzZS8asDf_w0G3966N0ExKIa6aq51B-gO-e0EEhTd2Ag52kAH0u4O69t4OCtsnkcbsUU_3RCauR9qqgTyTGw1Zw",

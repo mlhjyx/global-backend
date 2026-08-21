@@ -102,14 +102,16 @@ export class ExecutionBudgetAuthorityService {
   async verifyWorkspaceGrant(
     input: WorkspaceExecutionBudgetGrantInput,
   ): Promise<VerifiedExecutionBudgetAuthority> {
-    return this.verifier.verify(input.compactJws, {
-      authorityKind: 'WORKSPACE_GRANT',
-      workspaceId: input.identity.workspaceId,
-      purpose: input.scope.purpose,
-      subjectType: input.scope.subjectType,
-      subjectId: input.scope.subjectId,
-      requestSha256: input.scope.requestSha256,
-    });
+    return exactVerifiedAuthority(
+      await this.verifier.verify(input.compactJws, {
+        authorityKind: 'WORKSPACE_GRANT',
+        workspaceId: input.identity.workspaceId,
+        purpose: input.scope.purpose,
+        subjectType: input.scope.subjectType,
+        subjectId: input.scope.subjectId,
+        requestSha256: input.scope.requestSha256,
+      }),
+    );
   }
 
   async consumeWorkspaceGrant(

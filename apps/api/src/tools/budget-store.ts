@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import {
+  attestExecutionBudgetPlatformWriterTransaction,
   assertExecutionBudgetAuthorityId,
   assertExecutionBudgetScopeKey,
   isExecutionBudgetUuid,
@@ -50,10 +51,10 @@ export interface BudgetStatus {
 }
 
 export interface BudgetAccountAuthorization {
-  accountId: string;
-  authorityId: string;
-  authorizedCapMicrousd: bigint;
-  generation: number;
+  readonly accountId: string;
+  readonly authorityId: string;
+  readonly authorizedCapMicrousd: bigint;
+  readonly generation: number;
 }
 
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
@@ -251,6 +252,19 @@ function isBudgetUnsettled(error: unknown): boolean {
   return error instanceof Error && error.message.includes('TOOL_BUDGET_UNSETTLED_OPERATIONS');
 }
 
+function isAuthorityLifecycleUnavailable(error: unknown): boolean {
+  return isTrustedExecutionBudgetDatabaseMarker(
+    error,
+    'EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE',
+  );
+}
+
+function authorityLifecycleUnavailable(): ExecutionBudgetGrantError {
+  return new ExecutionBudgetGrantError(
+    'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+  );
+}
+
 /**
  * PostgreSQL implementation backed by narrow, row-locking functions installed by the DB migration.
  * Workspace calls enter PrismaService.withWorkspace, so FORCE RLS and each function's workspace
@@ -284,7 +298,16 @@ export class PostgresBudgetStore implements BudgetStore {
           'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
         );
       }
-      return this.authorityPlatformWriter.$transaction(fn);
+      return this.authorityPlatformWriter.$transaction(
+        async (transaction) => {
+          await transaction.$executeRawUnsafe(
+            'SET LOCAL statement_timeout = 2000',
+          );
+          await attestExecutionBudgetPlatformWriterTransaction(transaction);
+          return fn(transaction);
+        },
+        { maxWait: 1_000, timeout: 2_500 },
+      );
     }
     return this.prisma.withWorkspace(scopeKey, fn);
   }
@@ -299,6 +322,9 @@ export class PostgresBudgetStore implements BudgetStore {
         );
       });
     } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
       if (isBudgetUnsettled(error)) throw new BudgetUnsettledOperationsError(input.accountKey);
       throw error;
     }
@@ -371,6 +397,9 @@ export class PostgresBudgetStore implements BudgetStore {
         ),
       );
     } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
       if (isBudgetAccountUnavailable(error)) throw new BudgetAccountUnavailableError(input.accountKey);
       throw error;
     }
@@ -403,16 +432,24 @@ export class PostgresBudgetStore implements BudgetStore {
     const durable = projection
       ? parseGenericOperationProjection(projection)
       : null;
-    const rows = await this.inScope(reservation.workspaceId, (tx) =>
-      tx.$queryRaw<SettleRow[]>(
-        Prisma.sql`SELECT * FROM settle_tool_budget(
-          ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-          ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
-          ${durable?.schema ?? null}, ${durable?.digest ?? null},
-          ${durable ? JSON.stringify(durable) : null}::jsonb
-        )`,
-      ),
-    );
+    let rows: SettleRow[];
+    try {
+      rows = await this.inScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<SettleRow[]>(
+          Prisma.sql`SELECT * FROM settle_tool_budget(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
+            ${durable?.schema ?? null}, ${durable?.digest ?? null},
+            ${durable ? JSON.stringify(durable) : null}::jsonb
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
     const row = rows[0];
     if (!row) throw new BudgetStoreUnavailableError('budget settle returned no result');
     return {
@@ -424,11 +461,19 @@ export class PostgresBudgetStore implements BudgetStore {
   }
 
   async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
-    const rows = await this.inScope(reservation.workspaceId, (tx) =>
-      tx.$queryRaw<SettleRow[]>(
-        Prisma.sql`SELECT * FROM release_tool_budget(${reservation.workspaceId}, ${reservation.operationId}::uuid)`,
-      ),
-    );
+    let rows: SettleRow[];
+    try {
+      rows = await this.inScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<SettleRow[]>(
+          Prisma.sql`SELECT * FROM release_tool_budget(${reservation.workspaceId}, ${reservation.operationId}::uuid)`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
     const row = rows[0];
     if (!row) throw new BudgetStoreUnavailableError('budget release returned no result');
     return {
@@ -441,11 +486,29 @@ export class PostgresBudgetStore implements BudgetStore {
 
   async status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus> {
     assertKey('accountKey', input.accountKey);
-    const rows = await this.inScope(input.workspaceId, (tx) =>
-      tx.$queryRaw<Array<{ remaining_cents: bigint; exhausted: boolean; ref_count: number }>>(
-        Prisma.sql`SELECT * FROM tool_budget_status(${input.workspaceId}, ${input.accountKey})`,
-      ),
-    );
+    let rows: Array<{
+      remaining_cents: bigint;
+      exhausted: boolean;
+      ref_count: number;
+    }>;
+    try {
+      rows = await this.inScope(input.workspaceId, (tx) =>
+        tx.$queryRaw<
+          Array<{
+            remaining_cents: bigint;
+            exhausted: boolean;
+            ref_count: number;
+          }>
+        >(
+          Prisma.sql`SELECT * FROM tool_budget_status(${input.workspaceId}, ${input.accountKey})`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
     const row = rows[0];
     return row
       ? {
@@ -460,10 +523,17 @@ export class PostgresBudgetStore implements BudgetStore {
     assertKey('accountKey', input.accountKey);
     // `force` only drops stale holders. It never releases operations or permits
     // a new generation while PostgreSQL still has RESERVED work.
-    await this.inScope(input.workspaceId, async (tx) => {
-      await tx.$queryRaw(
-        Prisma.sql`SELECT close_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.force ?? false})`,
-      );
-    });
+    try {
+      await this.inScope(input.workspaceId, async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT close_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.force ?? false})`,
+        );
+      });
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
   }
 }

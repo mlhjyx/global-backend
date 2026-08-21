@@ -3,7 +3,6 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertAuthorityPurposeShape,
-  EXECUTION_BUDGET_PLATFORM_PURPOSES,
   ExecutionBudgetGrantError,
   type ExecutionBudgetGrantErrorCode,
   type VerifiedExecutionBudgetAuthority,
@@ -25,10 +24,21 @@ export interface ExecutionBudgetWorkspaceAccountPersistenceResult extends Execut
 }
 
 export interface ExecutionBudgetAuthorityRevocationInput {
-  scopeKey: string;
-  authorityId: string;
-  reason: string;
-  revokedAt?: Date;
+  readonly scopeKey: string;
+  readonly authorityId: string;
+  readonly reason: string;
+  readonly revokedAt?: Date;
+}
+
+export interface ExecutionBudgetPlatformAuthorityRevocationInput {
+  readonly authorityId: string;
+  readonly reason: string;
+  readonly revokedAt?: Date;
+}
+
+export interface ExecutionBudgetPlatformAuthorityRevocationResult {
+  readonly revocationId: string;
+  readonly replay: boolean;
 }
 
 type AuthorityRow = {
@@ -41,6 +51,11 @@ type AuthorizedOpenRow = {
   generation: number;
   authority_id: string;
   authorized_cap_microusd: bigint;
+};
+
+type PlatformRevocationRow = {
+  revocation_id: string;
+  replay: boolean;
 };
 
 export type ExecutionBudgetPlatformAuthorityFreshnessRow = Readonly<{
@@ -90,7 +105,9 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type TrustedDatabaseMarker =
-  (typeof DATABASE_ERROR_CODES)[number] | 'TOOL_BUDGET_UNSETTLED_OPERATIONS';
+  | (typeof DATABASE_ERROR_CODES)[number]
+  | 'TOOL_BUDGET_UNSETTLED_OPERATIONS'
+  | 'EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE';
 
 function unavailable(): ExecutionBudgetGrantError {
   return new ExecutionBudgetGrantError(
@@ -168,6 +185,7 @@ function parseAuthorityRow(
 ): ExecutionBudgetAuthorityPersistenceResult {
   const row = rows[0];
   if (
+    rows.length !== 1 ||
     !row ||
     typeof row.authority_id !== 'string' ||
     !isExecutionBudgetUuid(row.authority_id) ||
@@ -176,6 +194,32 @@ function parseAuthorityRow(
     throw unavailable();
   }
   return { authorityId: row.authority_id, replay: row.replay };
+}
+
+function parsePlatformRevocationRow(
+  rows: readonly PlatformRevocationRow[],
+): ExecutionBudgetPlatformAuthorityRevocationResult {
+  const row = rows[0];
+  if (
+    rows.length !== 1 ||
+    !row ||
+    !isExecutionBudgetUuid(row.revocation_id) ||
+    typeof row.replay !== 'boolean'
+  ) {
+    throw unavailable();
+  }
+  return { revocationId: row.revocation_id, replay: row.replay };
+}
+
+function numericDateToDatabaseTimestamp(value: number): Date {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID');
+  }
+  const timestamp = new Date(value * 1_000);
+  if (!Number.isFinite(timestamp.getTime())) {
+    throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID');
+  }
+  return timestamp;
 }
 
 function parseAuthorizedOpenRow(
@@ -228,6 +272,9 @@ function consumeWorkspaceWithTransaction(
   tx: Prisma.TransactionClient,
   authority: VerifiedWorkspaceExecutionBudgetAuthority,
 ): Promise<AuthorityRow[]> {
+  const issuedAt = numericDateToDatabaseTimestamp(authority.issuedAt);
+  const notBefore = numericDateToDatabaseTimestamp(authority.notBefore);
+  const expiresAt = numericDateToDatabaseTimestamp(authority.expiresAt);
   return tx.$queryRaw<AuthorityRow[]>(
     Prisma.sql`SELECT * FROM consume_workspace_execution_authority(
       ${authority.issuer}, ${authority.audience}, ${authority.jti}::uuid,
@@ -236,88 +283,14 @@ function consumeWorkspaceWithTransaction(
       ${authority.workspaceId}::uuid, ${authority.subjectType},
       ${authority.subjectId}, ${authority.requestSha256},
       ${authority.currency}, ${authority.unit}, ${authority.capMicrousd},
-      ${authority.issuedAt}, ${authority.notBefore}, ${authority.expiresAt}
+      ${issuedAt}, ${notBefore}, ${expiresAt}
     )`,
   );
 }
 
 function platformAuthorityFreshnessQuery(now: Date): Prisma.Sql {
-  const requiredPurposeRows = Prisma.join(
-    EXECUTION_BUDGET_PLATFORM_PURPOSES.map(
-      (purpose) => Prisma.sql`(${purpose}::"execution_budget_purpose")`,
-    ),
-  );
-  const purposeOrder = Prisma.join(
-    EXECUTION_BUDGET_PLATFORM_PURPOSES.map((purpose) => Prisma.sql`${purpose}`),
-  );
-  return Prisma.sql`
-    WITH required("purpose") AS (
-      VALUES ${requiredPurposeRows}
-    ), observations AS (
-      SELECT
-        required."purpose",
-        count(authority."id") AS authority_count,
-        bool_or(
-          authority."id" IS NOT NULL
-          AND authority."revoked_at" IS NULL
-          AND revocation."authority_id" IS NULL
-          AND authority."not_before" <= ${now}
-          AND authority."expires_at" > ${now}
-          AND authority."runs_consumed" < authority."max_runs"
-        ) AS active,
-        bool_or(
-          authority."id" IS NOT NULL
-          AND authority."revoked_at" IS NULL
-          AND revocation."authority_id" IS NULL
-          AND authority."not_before" > ${now}
-          AND authority."expires_at" > ${now}
-          AND authority."runs_consumed" < authority."max_runs"
-        ) AS not_yet_valid,
-        bool_or(
-          authority."id" IS NOT NULL
-          AND authority."revoked_at" IS NULL
-          AND revocation."authority_id" IS NULL
-          AND authority."not_before" <= ${now}
-          AND authority."expires_at" > ${now}
-          AND authority."runs_consumed" >= authority."max_runs"
-        ) AS exhausted,
-        bool_or(
-          authority."id" IS NOT NULL
-          AND authority."revoked_at" IS NULL
-          AND revocation."authority_id" IS NULL
-          AND authority."expires_at" <= ${now}
-        ) AS expired,
-        bool_or(
-          authority."id" IS NOT NULL
-          AND (
-            authority."revoked_at" IS NOT NULL
-            OR revocation."authority_id" IS NOT NULL
-          )
-        ) AS revoked
-      FROM required
-      LEFT JOIN "execution_budget_authority" authority
-        ON authority."scope_key" = 'platform'
-       AND authority."authority_kind" = 'PLATFORM_GRANT'
-       AND authority."purpose" = required."purpose"
-      LEFT JOIN "execution_budget_authority_revocation" revocation
-        ON revocation."scope_key" = 'platform'
-       AND revocation."authority_id" = authority."id"
-      GROUP BY required."purpose"
-    )
-    SELECT
-      "purpose"::text AS purpose,
-      CASE
-        WHEN active THEN 'active'
-        WHEN authority_count = 0 THEN 'missing'
-        WHEN not_yet_valid THEN 'not_yet_valid'
-        WHEN exhausted THEN 'exhausted'
-        WHEN expired THEN 'expired'
-        WHEN revoked THEN 'revoked'
-        ELSE 'invalid'
-      END AS state
-    FROM observations
-    ORDER BY array_position(ARRAY[${purposeOrder}]::text[], "purpose"::text)
-  `;
+  return Prisma.sql`SELECT *
+    FROM inspect_platform_execution_authority_freshness_v1(${now})`;
 }
 
 function platformWriterPrincipalQuery(): Prisma.Sql {
@@ -364,6 +337,15 @@ function isAuthorizedPlatformWriterPrincipal(
       principal.memberships.length === 1 &&
       principal.memberships[0] === 'execution_budget_platform_writer',
   );
+}
+
+export async function attestExecutionBudgetPlatformWriterTransaction(
+  transaction: Prisma.TransactionClient,
+): Promise<void> {
+  const principal = await transaction.$queryRaw<PlatformWriterPrincipal[]>(
+    platformWriterPrincipalQuery(),
+  );
+  if (!isAuthorizedPlatformWriterPrincipal(principal)) throw unavailable();
 }
 
 @Injectable()
@@ -436,9 +418,15 @@ export class ExecutionBudgetAuthorityRepository {
       }
       assertExecutionBudgetAuthorityId(authority.jti);
       if (!this.platformWriter) throw unavailable();
+      const issuedAt = numericDateToDatabaseTimestamp(authority.issuedAt);
+      const notBefore = numericDateToDatabaseTimestamp(authority.notBefore);
+      const expiresAt = numericDateToDatabaseTimestamp(authority.expiresAt);
 
-      const rows = await this.platformWriter.$transaction((tx) =>
-        tx.$queryRaw<AuthorityRow[]>(
+      const rows = await this.platformWriter.$transaction(
+        async (tx) => {
+          await tx.$executeRawUnsafe('SET LOCAL statement_timeout = 2000');
+          await attestExecutionBudgetPlatformWriterTransaction(tx);
+          return tx.$queryRaw<AuthorityRow[]>(
           Prisma.sql`SELECT * FROM ingest_platform_execution_authority(
             ${authority.issuer}, ${authority.audience}, ${authority.jti}::uuid,
             ${authority.tokenSha256}, ${authority.schemaVersion},
@@ -446,10 +434,12 @@ export class ExecutionBudgetAuthorityRepository {
             ${authority.subjectType}, ${authority.subjectId},
             ${authority.scheduleId}, ${authority.currency}, ${authority.unit},
             ${authority.capPerRunMicrousd}, ${authority.campaignCapMicrousd},
-            ${authority.maxRuns}, ${authority.issuedAt}, ${authority.notBefore},
-            ${authority.expiresAt}
+            ${authority.maxRuns}, ${issuedAt}, ${notBefore},
+            ${expiresAt}
           )`,
-        ),
+          );
+        },
+        { maxWait: 1_000, timeout: 2_500 },
       );
       return parseAuthorityRow(rows);
     } catch (error) {
@@ -472,10 +462,9 @@ export class ExecutionBudgetAuthorityRepository {
           await transaction.$executeRawUnsafe(
             'SET LOCAL statement_timeout = 2000',
           );
-          const principal = await transaction.$queryRaw<
-            PlatformWriterPrincipal[]
-          >(platformWriterPrincipalQuery());
-          if (!isAuthorizedPlatformWriterPrincipal(principal)) {
+          try {
+            await attestExecutionBudgetPlatformWriterTransaction(transaction);
+          } catch {
             return Object.freeze({
               status: 'writer_unavailable' as const,
             });
@@ -519,6 +508,38 @@ export class ExecutionBudgetAuthorityRepository {
         );
 
       await this.prisma.withWorkspace(input.scopeKey, append);
+    } catch (error) {
+      throw mapExecutionBudgetPersistenceError(error);
+    }
+  }
+
+  async revokePlatform(
+    input: ExecutionBudgetPlatformAuthorityRevocationInput,
+  ): Promise<ExecutionBudgetPlatformAuthorityRevocationResult> {
+    try {
+      assertExecutionBudgetAuthorityId(input.authorityId);
+      assertBoundedText(input.reason, 80, 'EXECUTION_BUDGET_GRANT_INVALID');
+      const revokedAt = input.revokedAt ?? new Date();
+      if (!Number.isFinite(revokedAt.getTime())) {
+        throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_INVALID');
+      }
+      if (!this.platformWriter) throw unavailable();
+
+      const rows = await this.platformWriter.$transaction(
+        async (transaction) => {
+          await transaction.$executeRawUnsafe(
+            'SET LOCAL statement_timeout = 2000',
+          );
+          await attestExecutionBudgetPlatformWriterTransaction(transaction);
+          return transaction.$queryRaw<PlatformRevocationRow[]>(
+            Prisma.sql`SELECT * FROM revoke_platform_execution_authority_v1(
+              ${input.authorityId}::uuid, ${input.reason}, ${revokedAt}
+            )`,
+          );
+        },
+        { maxWait: 1_000, timeout: 2_500 },
+      );
+      return parsePlatformRevocationRow(rows);
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }

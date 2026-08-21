@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import {
   createRemoteJWKSet,
+  compactVerify,
   customFetch,
   decodeProtectedHeader,
   errors as joseErrors,
   importJWK,
-  jwtVerify,
+  type CompactVerifyGetKey,
   type JWK,
-  type JWTVerifyGetKey,
   type JWTPayload,
 } from 'jose';
 import { resolveRuntimeMode } from '../runtime/runtime-environment';
@@ -115,7 +115,7 @@ interface ExecutionBudgetJwksDocument {
 }
 
 interface VerifierDependencies {
-  readonly keyResolver?: JWTVerifyGetKey;
+  readonly keyResolver?: CompactVerifyGetKey;
   readonly fetcher?: ExecutionBudgetJwksFetch;
   readonly now?: () => Date;
 }
@@ -376,7 +376,7 @@ export async function loadExecutionBudgetJwks(
 function createBoundedRemoteJwkSet(
   configuration: ExecutionBudgetGrantVerifierConfiguration,
   fetcher: ExecutionBudgetJwksFetch,
-): JWTVerifyGetKey {
+): CompactVerifyGetKey {
   return createRemoteJWKSet(configuration.jwks, {
     timeoutDuration: JWKS_TIMEOUT_MS,
     [customFetch]: async (url, request) => {
@@ -474,7 +474,7 @@ function assertExpectedScope(
 @Injectable()
 export class ExecutionBudgetGrantVerifier {
   private readonly configuration: ExecutionBudgetGrantVerifierConfiguration | null;
-  private readonly keyResolver: JWTVerifyGetKey | null;
+  private readonly keyResolver: CompactVerifyGetKey | null;
   private readonly now: () => Date;
 
   constructor(
@@ -482,7 +482,7 @@ export class ExecutionBudgetGrantVerifier {
     dependencies: VerifierDependencies = {},
   ) {
     let configuration: ExecutionBudgetGrantVerifierConfiguration | null = null;
-    let keyResolver: JWTVerifyGetKey | null = null;
+    let keyResolver: CompactVerifyGetKey | null = null;
     try {
       configuration = validateExecutionBudgetGrantVerifierConfiguration(env);
       keyResolver =
@@ -554,20 +554,27 @@ export class ExecutionBudgetGrantVerifier {
 
     let payload: JWTPayload;
     try {
-      ({ payload } = await jwtVerify(compactJws, this.keyResolver, {
-        issuer: this.configuration.issuer,
-        audience: this.configuration.audience,
+      const verified = await compactVerify(compactJws, this.keyResolver, {
         algorithms: [...this.configuration.algorithms],
-        typ: EXECUTION_BUDGET_GRANT_TYPE,
-        clockTolerance: CLOCK_TOLERANCE_SECONDS,
-        currentDate: this.now(),
-      }));
+      });
+      const decoded = JSON.parse(
+        Buffer.from(verified.payload).toString('utf8'),
+      ) as unknown;
+      if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
+        throw invalid();
+      }
+      payload = decoded as JWTPayload;
     } catch (error) {
       throw this.classifyVerificationFailure(error);
     }
 
     try {
-      if (payload.aud !== EXECUTION_BUDGET_GRANT_AUDIENCE) throw invalid();
+      if (
+        payload.iss !== this.configuration.issuer ||
+        payload.aud !== EXECUTION_BUDGET_GRANT_AUDIENCE
+      ) {
+        throw invalid();
+      }
       if (
         exactPlatformClaims &&
         Object.keys(payload).some((claim) => !PLATFORM_COMMAND_CLAIMS.has(claim))
@@ -578,11 +585,17 @@ export class ExecutionBudgetGrantVerifier {
       const notBefore = numericDate(payload, 'nbf');
       const expiresAt = numericDate(payload, 'exp');
       const nowSeconds = Math.floor(this.now().getTime() / 1_000);
+      if (issuedAt > nowSeconds + CLOCK_TOLERANCE_SECONDS) throw invalid();
+      if (notBefore > nowSeconds + CLOCK_TOLERANCE_SECONDS) throw invalid();
+      if (expiresAt < nowSeconds - CLOCK_TOLERANCE_SECONDS) {
+        throw new ExecutionBudgetGrantError(
+          'EXECUTION_BUDGET_GRANT_EXPIRED',
+        );
+      }
       if (
         issuedAt > notBefore ||
         notBefore >= expiresAt ||
-        expiresAt - issuedAt > MAX_TTL_SECONDS ||
-        issuedAt > nowSeconds + CLOCK_TOLERANCE_SECONDS
+        expiresAt - issuedAt > MAX_TTL_SECONDS
       ) {
         throw invalid();
       }
@@ -625,9 +638,9 @@ export class ExecutionBudgetGrantVerifier {
         ),
         maxRuns: nullablePositiveBigInt(payload.max_runs),
         tokenSha256: createHash('sha256').update(compactJws).digest('hex'),
-        issuedAt: new Date(issuedAt * 1_000),
-        notBefore: new Date(notBefore * 1_000),
-        expiresAt: new Date(expiresAt * 1_000),
+        issuedAt,
+        notBefore,
+        expiresAt,
       }) satisfies VerifiedExecutionBudgetAuthority;
 
       assertAuthorityPurposeShape(authority);
@@ -640,15 +653,7 @@ export class ExecutionBudgetGrantVerifier {
   }
 
   private classifyVerificationFailure(error: unknown): ExecutionBudgetGrantError {
-    if (error instanceof joseErrors.JWTExpired) {
-      return new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_EXPIRED');
-    }
-    if (
-      error instanceof joseErrors.JWTClaimValidationFailed &&
-      error.claim === 'nbf'
-    ) {
-      return new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_EXPIRED');
-    }
+    if (error instanceof ExecutionBudgetGrantError) return error;
     if (
       error instanceof ExecutionBudgetJwksUnavailableError ||
       error instanceof joseErrors.JWKSTimeout ||

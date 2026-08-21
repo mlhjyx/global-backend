@@ -1214,7 +1214,7 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     const expiredTimes = {
       issuedAt: new Date(TEST_STARTED_AT - 130_000),
       notBefore: new Date(TEST_STARTED_AT - 120_000),
-      expiresAt: new Date(TEST_STARTED_AT - 10_000),
+      expiresAt: new Date(TEST_STARTED_AT - 70_000),
     };
     const workspaceClaims = {
       ...expiredTimes,
@@ -1388,7 +1388,7 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     const expiredFixtureTimes = {
       issuedAt: new Date(TEST_STARTED_AT - 130_000),
       notBefore: new Date(TEST_STARTED_AT - 120_000),
-      expiresAt: new Date(TEST_STARTED_AT - 10_000),
+      expiresAt: new Date(TEST_STARTED_AT - 70_000),
     };
     const workspaceClaims = {
       ...expiredFixtureTimes,
@@ -1463,6 +1463,7 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
       () =>
         ingestPlatform(platform, {
           ...platformClaims,
+          subjectId: "changed-fixture-expired-schedule",
           scheduleId: "changed-fixture-expired-schedule",
         }),
       "EXECUTION_BUDGET_GRANT_REUSED",
@@ -1888,13 +1889,15 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
     });
     await owner.$executeRawUnsafe(
       `UPDATE execution_budget_authority
-       SET not_before=clock_timestamp() + interval '1 minute'
+       SET not_before=clock_timestamp() + interval '61 seconds'
        WHERE id=$1::uuid`,
       futureAuthority.authority_id,
     );
     await owner.$executeRawUnsafe(
       `UPDATE execution_budget_authority
-       SET expires_at=clock_timestamp() - interval '1 millisecond'
+       SET issued_at=clock_timestamp() - interval '120 seconds',
+           not_before=clock_timestamp() - interval '119 seconds',
+           expires_at=clock_timestamp() - interval '61 seconds'
        WHERE id=$1::uuid`,
       expiredAuthority.authority_id,
     );
@@ -1983,7 +1986,10 @@ describe("execution budget authority PostgreSQL, RLS and concurrency", () => {
           });
 
         if (entry.accepted) {
-          const opened = await call();
+          const opened = await call().catch((error) => {
+            error.message = `${entry.name}: ${error.message}`;
+            throw error;
+          });
           assert.equal(opened.length, 1, entry.name);
         } else {
           await rejectsSql(call, entry.marker).catch((error) => {

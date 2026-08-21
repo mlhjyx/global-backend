@@ -19,27 +19,30 @@ export const EXECUTION_BUDGET_PLATFORM_PURPOSES = [
 ] as const satisfies readonly ExecutionBudgetPurpose[];
 
 export interface VerifiedExecutionBudgetAuthority {
-  schemaVersion: 'execution-budget-grant/v1';
-  authorityKind: ExecutionBudgetAuthorityKind;
-  issuer: string;
-  audience: 'global-backend:execution-budget';
-  jti: string;
-  purpose: ExecutionBudgetPurpose;
-  workspaceId: string | null;
-  subjectType: string;
-  subjectId: string;
-  requestSha256: string | null;
-  scheduleId: string | null;
-  currency: 'USD';
-  unit: 'microusd';
-  capMicrousd: bigint | null;
-  capPerRunMicrousd: bigint | null;
-  campaignCapMicrousd: bigint | null;
-  maxRuns: bigint | null;
-  tokenSha256: string;
-  issuedAt: Date;
-  notBefore: Date;
-  expiresAt: Date;
+  readonly schemaVersion: 'execution-budget-grant/v1';
+  readonly authorityKind: ExecutionBudgetAuthorityKind;
+  readonly issuer: string;
+  readonly audience: 'global-backend:execution-budget';
+  readonly jti: string;
+  readonly purpose: ExecutionBudgetPurpose;
+  readonly workspaceId: string | null;
+  readonly subjectType: string;
+  readonly subjectId: string;
+  readonly requestSha256: string | null;
+  readonly scheduleId: string | null;
+  readonly currency: 'USD';
+  readonly unit: 'microusd';
+  readonly capMicrousd: bigint | null;
+  readonly capPerRunMicrousd: bigint | null;
+  readonly campaignCapMicrousd: bigint | null;
+  readonly maxRuns: bigint | null;
+  readonly tokenSha256: string;
+  /** Immutable JWT NumericDate epoch seconds. */
+  readonly issuedAt: number;
+  /** Immutable JWT NumericDate epoch seconds. */
+  readonly notBefore: number;
+  /** Immutable JWT NumericDate epoch seconds. */
+  readonly expiresAt: number;
 }
 
 export type ExecutionBudgetGrantErrorCode =

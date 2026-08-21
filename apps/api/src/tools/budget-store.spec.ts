@@ -116,7 +116,10 @@ describe('PostgresBudgetStore', () => {
         authorized_cap_microusd: 1_000_000n,
       }]);
     const platformWriter = {
-      $transaction: vi.fn(async (fn) => fn({ $queryRaw: queryRaw } as never)),
+      $transaction: vi.fn(async (fn) => fn({
+        $executeRawUnsafe: vi.fn(async () => 0),
+        $queryRaw: queryRaw,
+      } as never)),
     } as unknown as PrismaClient;
     const store = new PostgresBudgetStore(fakePrisma([]), ownerDb, platformWriter);
 
@@ -145,7 +148,10 @@ describe('PostgresBudgetStore', () => {
       ],
     }]);
     const platformWriter = {
-      $transaction: vi.fn(async (fn) => fn({ $queryRaw: queryRaw } as never)),
+      $transaction: vi.fn(async (fn) => fn({
+        $executeRawUnsafe: vi.fn(async () => 0),
+        $queryRaw: queryRaw,
+      } as never)),
     } as unknown as PrismaClient;
     const store = new PostgresBudgetStore(
       fakePrisma([]),

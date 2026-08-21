@@ -71,7 +71,10 @@ import {
 } from "../runtime/managed-dependency-readiness";
 import { startWorkerLeaseHeartbeat } from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
-import { waitForWorkerDependencyAdmission } from "../runtime/worker-dependency-admission";
+import {
+  selectWorkerDependencyAdmissionBeforeAuthorityCutover,
+  waitForWorkerDependencyAdmission,
+} from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
@@ -450,7 +453,10 @@ async function main(): Promise<void> {
         checkBrowserReadiness(process.env),
         checkImagePipelineIsolationReadiness(),
       ]);
-      return checks.find((check) => check.status !== "ok") ?? { status: "ok" };
+      return selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+        hardChecks: checks,
+        authorityCapabilities: [],
+      });
     },
     leases: runtimeLeases,
     worker,
