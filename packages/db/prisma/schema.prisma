@@ -195,24 +195,30 @@ model ExecutionBudgetAuthorityRevocation {
 }
 
 model ToolBudgetOperation {
-  id            String                    @id @default(uuid()) @db.Uuid
-  scopeKey      String                    @map("scope_key") @db.VarChar(200)
-  accountId     String                    @map("account_id") @db.Uuid
-  generation    Int
-  operationKey  String                    @map("operation_key") @db.VarChar(200)
-  reservedCents BigInt                    @map("reserved_cents")
-  observedCents BigInt?                   @map("observed_cents")
-  chargedCents  BigInt?                   @map("charged_cents")
-  resultSchemaVersion String?             @map("result_schema_version") @db.VarChar(80)
-  resultSchema        String?             @map("result_schema") @db.VarChar(100)
-  resultDigest        String?             @map("result_digest") @db.VarChar(64)
-  resultJson          Json?               @map("result_json")
-  expectedArtifact    Json?               @map("expected_artifact")
-  status        ToolBudgetOperationStatus @default(RESERVED)
-  createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
-  settledAt     DateTime?                 @map("settled_at") @db.Timestamptz(3)
+  id                    String                    @id @default(uuid()) @db.Uuid
+  scopeKey              String                    @map("scope_key") @db.VarChar(200)
+  accountId             String                    @map("account_id") @db.Uuid
+  generation            Int
+  operationKey          String                    @map("operation_key") @db.VarChar(200)
+  reservedCents         BigInt                    @map("reserved_cents")
+  observedCents         BigInt?                   @map("observed_cents")
+  chargedCents          BigInt?                   @map("charged_cents")
+  resultSchemaVersion   String?                   @map("result_schema_version") @db.VarChar(80)
+  resultSchema          String?                   @map("result_schema") @db.VarChar(100)
+  resultDigest          String?                   @map("result_digest") @db.VarChar(64)
+  resultJson            Json?                     @map("result_json")
+  expectedArtifact      Json?                     @map("expected_artifact")
+  expectedHttpStatus    Int?                      @map("expected_http_status") @db.SmallInt
+  expectedHttpOk        Boolean?                  @map("expected_http_ok")
+  expectedSanitizedUrl  String?                   @map("expected_sanitized_url") @db.VarChar(2000)
+  expectedContentHash   String?                   @map("expected_content_hash") @db.Char(24)
+  expectedBlockedCode   String?                   @map("expected_blocked_code") @db.VarChar(80)
+  expectedRobotsBlocked Boolean?                  @map("expected_robots_blocked")
+  status                ToolBudgetOperationStatus @default(RESERVED)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  settledAt             DateTime?                 @map("settled_at") @db.Timestamptz(3)
 
-  account ToolBudgetAccount @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
+  account  ToolBudgetAccount         @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
   artifact GenericOperationArtifact?
 
   @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
@@ -224,20 +230,26 @@ model ToolBudgetOperation {
 /// Immutable metadata for a large durable Tool result. The body remains in
 /// content-addressed object storage and never enters PostgreSQL JSONB.
 model GenericOperationArtifact {
-  id           String   @id @default(uuid()) @db.Uuid
-  scopeKey     String   @map("scope_key") @db.VarChar(200)
-  workspaceId  String?  @map("workspace_id") @db.Uuid
-  authorityId  String   @map("authority_id") @db.Uuid
-  operationId  String   @map("operation_id") @db.Uuid
-  resultSchema String   @map("result_schema") @db.VarChar(100)
-  objectKey    String   @map("object_key") @db.VarChar(200)
-  sha256       String   @db.Char(64)
-  sizeBytes    BigInt   @map("size_bytes")
-  mediaType    String   @map("media_type") @db.VarChar(160)
-  privacyClass String   @map("privacy_class") @db.VarChar(40)
-  sourceDigest String?  @map("source_digest") @db.Char(64)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
+  id                    String   @id @default(uuid()) @db.Uuid
+  scopeKey              String   @map("scope_key") @db.VarChar(200)
+  workspaceId           String?  @map("workspace_id") @db.Uuid
+  authorityId           String   @map("authority_id") @db.Uuid
+  operationId           String   @map("operation_id") @db.Uuid
+  resultSchema          String   @map("result_schema") @db.VarChar(100)
+  objectKey             String   @map("object_key") @db.VarChar(200)
+  sha256                String   @db.Char(64)
+  sizeBytes             BigInt   @map("size_bytes")
+  mediaType             String   @map("media_type") @db.VarChar(160)
+  privacyClass          String   @map("privacy_class") @db.VarChar(40)
+  sourceDigest          String?  @map("source_digest") @db.Char(64)
+  expectedHttpStatus    Int?     @map("expected_http_status") @db.SmallInt
+  expectedHttpOk        Boolean? @map("expected_http_ok")
+  expectedSanitizedUrl  String?  @map("expected_sanitized_url") @db.VarChar(2000)
+  expectedContentHash   String?  @map("expected_content_hash") @db.Char(24)
+  expectedBlockedCode   String?  @map("expected_blocked_code") @db.VarChar(80)
+  expectedRobotsBlocked Boolean? @map("expected_robots_blocked")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt             DateTime @map("expires_at") @db.Timestamptz(3)
 
   workspace Workspace?                     @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
   authority ExecutionBudgetAuthority       @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")

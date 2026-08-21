@@ -6,6 +6,13 @@ import {
 } from "../../execution-budget/execution-budget-authority.repository";
 import { PrismaService } from "../../prisma/prisma.service";
 import { contentAddressedObjectKey } from "./artifact-key";
+import {
+  artifactExpectedFactsColumns,
+  parseArtifactExpectedFactsColumns,
+  parseArtifactExpectedFactsForResultSchema,
+  type ArtifactExpectedFactsColumns,
+  type GenericOperationArtifactSnapshot,
+} from "./artifact-expected-facts";
 import { parseArtifactReference } from "./artifact-reference.schema";
 import {
   GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
@@ -61,6 +68,12 @@ const ROW_KEYS = new Set([
   "source_digest",
   "created_at",
   "expires_at",
+  "expected_http_status",
+  "expected_http_ok",
+  "expected_sanitized_url",
+  "expected_content_hash",
+  "expected_blocked_code",
+  "expected_robots_blocked",
   "replay",
 ]);
 
@@ -79,6 +92,12 @@ type ArtifactRow = Readonly<{
   source_digest: unknown;
   created_at: unknown;
   expires_at: unknown;
+  expected_http_status: unknown;
+  expected_http_ok: unknown;
+  expected_sanitized_url: unknown;
+  expected_content_hash: unknown;
+  expected_blocked_code: unknown;
+  expected_robots_blocked: unknown;
   replay?: unknown;
 }>;
 
@@ -223,7 +242,38 @@ export function parseGenericOperationArtifactManifest(
   });
 }
 
-function parseRow(row: unknown): GenericOperationArtifactManifest {
+export function parseGenericOperationArtifactSnapshot(
+  value: unknown,
+): GenericOperationArtifactSnapshot {
+  if (!isPlainClosedObject(value, new Set(["manifest", "expectedFacts"]), 2)) {
+    return invalidGenericOperationArtifact();
+  }
+  const manifest = parseGenericOperationArtifactManifest(value.manifest);
+  const expectedFacts = parseArtifactExpectedFactsForResultSchema(
+    manifest.resultSchema,
+    value.expectedFacts,
+  );
+  return Object.freeze({ manifest, expectedFacts });
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null) return null;
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? value
+    : invalidGenericOperationArtifact();
+}
+
+function nullableBoolean(value: unknown): boolean | null {
+  if (value === null) return null;
+  return typeof value === "boolean" ? value : invalidGenericOperationArtifact();
+}
+
+function nullableString(value: unknown): string | null {
+  if (value === null) return null;
+  return typeof value === "string" ? value : invalidGenericOperationArtifact();
+}
+
+function parseRow(row: unknown): GenericOperationArtifactSnapshot {
   if (!isPlainClosedObject(row, ROW_KEYS, ROW_KEYS.size)) {
     return invalidGenericOperationArtifact();
   }
@@ -236,7 +286,7 @@ function parseRow(row: unknown): GenericOperationArtifactManifest {
   if (typeof typed.size_bytes !== "bigint" || typed.size_bytes < 0n) {
     return invalidGenericOperationArtifact();
   }
-  return parseGenericOperationArtifactManifest({
+  const manifest = parseGenericOperationArtifactManifest({
     schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
     artifactId: typed.artifact_id,
     scopeKind,
@@ -253,11 +303,26 @@ function parseRow(row: unknown): GenericOperationArtifactManifest {
     createdAt: canonicalTimestamp(typed.created_at),
     expiresAt: canonicalTimestamp(typed.expires_at),
   });
+  const columns: ArtifactExpectedFactsColumns = Object.freeze({
+    expectedHttpStatus: nullableNumber(typed.expected_http_status),
+    expectedHttpOk: nullableBoolean(typed.expected_http_ok),
+    expectedSanitizedUrl: nullableString(typed.expected_sanitized_url),
+    expectedContentHash: nullableString(typed.expected_content_hash),
+    expectedBlockedCode: nullableString(typed.expected_blocked_code),
+    expectedRobotsBlocked: nullableBoolean(typed.expected_robots_blocked),
+  });
+  return Object.freeze({
+    manifest,
+    expectedFacts: parseArtifactExpectedFactsColumns(
+      manifest.resultSchema,
+      columns,
+    ),
+  });
 }
 
 function parseOptionalSingleRow(
   rows: readonly unknown[],
-): GenericOperationArtifactManifest | null {
+): GenericOperationArtifactSnapshot | null {
   if (rows.length === 0) return null;
   if (rows.length !== 1) return invalidGenericOperationArtifact();
   return parseRow(rows[0]);
@@ -270,35 +335,45 @@ function sameManifest(
   return MANIFEST_KEYS.every((key) => left[key] === right[key]);
 }
 
+function sameSnapshot(
+  left: GenericOperationArtifactSnapshot,
+  right: GenericOperationArtifactSnapshot,
+): boolean {
+  return (
+    sameManifest(left.manifest, right.manifest) &&
+    JSON.stringify(left.expectedFacts) === JSON.stringify(right.expectedFacts)
+  );
+}
+
 function matchesExactLookup(
-  manifest: GenericOperationArtifactManifest,
+  snapshot: GenericOperationArtifactSnapshot,
   input: FindExactGenericOperationArtifactInput,
   reference: GenericOperationArtifactReference,
 ): boolean {
   return (
-    manifest.scopeKind === input.scopeKind &&
-    manifest.workspaceId === input.workspaceId &&
-    manifest.authorityId === input.authorityId &&
-    manifest.artifactId === reference.artifactId &&
-    manifest.operationId === reference.operationId &&
-    manifest.resultSchema === reference.resultSchema &&
-    manifest.sha256 === reference.sha256 &&
-    manifest.sizeBytes === reference.sizeBytes &&
-    manifest.mediaType === reference.mediaType &&
-    manifest.expiresAt === reference.expiresAt
+    snapshot.manifest.scopeKind === input.scopeKind &&
+    snapshot.manifest.workspaceId === input.workspaceId &&
+    snapshot.manifest.authorityId === input.authorityId &&
+    snapshot.manifest.artifactId === reference.artifactId &&
+    snapshot.manifest.operationId === reference.operationId &&
+    snapshot.manifest.resultSchema === reference.resultSchema &&
+    snapshot.manifest.sha256 === reference.sha256 &&
+    snapshot.manifest.sizeBytes === reference.sizeBytes &&
+    snapshot.manifest.mediaType === reference.mediaType &&
+    snapshot.manifest.expiresAt === reference.expiresAt
   );
 }
 
 function matchesBinding(
-  manifest: GenericOperationArtifactManifest,
+  snapshot: GenericOperationArtifactSnapshot,
   binding: GenericOperationArtifactBinding,
 ): boolean {
   return (
-    manifest.scopeKind === binding.scopeKind &&
-    manifest.workspaceId === binding.workspaceId &&
-    manifest.authorityId === binding.authorityId &&
-    manifest.operationId === binding.operationId &&
-    manifest.resultSchema === binding.resultSchema
+    snapshot.manifest.scopeKind === binding.scopeKind &&
+    snapshot.manifest.workspaceId === binding.workspaceId &&
+    snapshot.manifest.authorityId === binding.authorityId &&
+    snapshot.manifest.operationId === binding.operationId &&
+    snapshot.manifest.resultSchema === binding.resultSchema
   );
 }
 
@@ -332,37 +407,52 @@ export class GenericOperationArtifactRepository {
 
   async appendManifest(
     input: GenericOperationArtifactManifest,
-  ): Promise<GenericOperationArtifactManifest> {
+    expectedFacts: unknown,
+  ): Promise<GenericOperationArtifactSnapshot> {
     try {
       const value = parseGenericOperationArtifactManifest(input);
+      const snapshot = parseGenericOperationArtifactSnapshot({
+        manifest: value,
+        expectedFacts,
+      });
+      const facts = artifactExpectedFactsColumns(
+        value.resultSchema,
+        snapshot.expectedFacts,
+      );
       const rows =
         value.scopeKind === "workspace"
           ? await this.runWorkspace(value.workspaceId as string, (tx) =>
               tx.$queryRaw<ArtifactRow[]>(Prisma.sql`
-                SELECT * FROM append_workspace_generic_operation_artifact_v1(
+                SELECT * FROM append_workspace_generic_operation_artifact_v2(
                   ${value.workspaceId}::uuid, ${value.artifactId}::uuid,
                   ${value.authorityId}::uuid, ${value.operationId}::uuid,
                   ${value.resultSchema}, ${value.objectKey}, ${value.sha256},
                   ${BigInt(value.sizeBytes)}, ${value.mediaType},
                   ${value.privacyClass}, ${value.sourceDigest},
-                  ${new Date(value.createdAt)}, ${new Date(value.expiresAt)}
+                  ${new Date(value.createdAt)}, ${new Date(value.expiresAt)},
+                  ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+                  ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
+                  ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked}
                 )
               `),
             )
           : await this.runPlatform((tx) =>
               tx.$queryRaw<ArtifactRow[]>(Prisma.sql`
-                SELECT * FROM append_platform_generic_operation_artifact_v1(
+                SELECT * FROM append_platform_generic_operation_artifact_v2(
                   ${value.artifactId}::uuid, ${value.authorityId}::uuid,
                   ${value.operationId}::uuid, ${value.resultSchema},
                   ${value.objectKey}, ${value.sha256}, ${BigInt(value.sizeBytes)},
                   ${value.mediaType}, ${value.privacyClass},
                   ${value.sourceDigest}, ${new Date(value.createdAt)},
-                  ${new Date(value.expiresAt)}
+                  ${new Date(value.expiresAt)}, ${facts.expectedHttpStatus},
+                  ${facts.expectedHttpOk}, ${facts.expectedSanitizedUrl},
+                  ${facts.expectedContentHash}, ${facts.expectedBlockedCode},
+                  ${facts.expectedRobotsBlocked}
                 )
               `),
             );
       const stored = parseOptionalSingleRow(rows);
-      return stored && sameManifest(stored, value)
+      return stored && sameSnapshot(stored, snapshot)
         ? stored
         : invalidGenericOperationArtifact();
     } catch (error) {
@@ -372,7 +462,7 @@ export class GenericOperationArtifactRepository {
 
   async findExact(
     input: FindExactGenericOperationArtifactInput,
-  ): Promise<GenericOperationArtifactManifest | null> {
+  ): Promise<GenericOperationArtifactSnapshot | null> {
     try {
       assertScope(input.scopeKind, input.workspaceId);
       if (!isCanonicalArtifactUuid(input.authorityId)) {
@@ -383,7 +473,7 @@ export class GenericOperationArtifactRepository {
         input.scopeKind === "workspace"
           ? await this.runWorkspace(input.workspaceId as string, (tx) =>
               tx.$queryRaw<ArtifactRow[]>(Prisma.sql`
-                SELECT * FROM find_exact_workspace_generic_operation_artifact_v1(
+                SELECT * FROM find_exact_workspace_generic_operation_artifact_v2(
                   ${input.workspaceId}::uuid, ${reference.artifactId}::uuid,
                   ${input.authorityId}::uuid, ${reference.operationId}::uuid,
                   ${reference.resultSchema}, ${reference.sha256},
@@ -394,7 +484,7 @@ export class GenericOperationArtifactRepository {
             )
           : await this.runPlatform((tx) =>
               tx.$queryRaw<ArtifactRow[]>(Prisma.sql`
-                SELECT * FROM find_exact_platform_generic_operation_artifact_v1(
+                SELECT * FROM find_exact_platform_generic_operation_artifact_v2(
                   ${reference.artifactId}::uuid, ${input.authorityId}::uuid,
                   ${reference.operationId}::uuid, ${reference.resultSchema},
                   ${reference.sha256}, ${BigInt(reference.sizeBytes)},
@@ -413,14 +503,14 @@ export class GenericOperationArtifactRepository {
 
   async findByOperation(
     input: GenericOperationArtifactBinding,
-  ): Promise<GenericOperationArtifactManifest | null> {
+  ): Promise<GenericOperationArtifactSnapshot | null> {
     try {
       const binding = assertBinding(input);
       const rows =
         binding.scopeKind === "workspace"
           ? await this.runWorkspace(binding.workspaceId as string, (tx) =>
               tx.$queryRaw<ArtifactRow[]>(Prisma.sql`
-                SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v1(
+                SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v2(
                   ${binding.workspaceId}::uuid, ${binding.authorityId}::uuid,
                   ${binding.operationId}::uuid, ${binding.resultSchema}
                 )
@@ -428,7 +518,7 @@ export class GenericOperationArtifactRepository {
             )
           : await this.runPlatform((tx) =>
               tx.$queryRaw<ArtifactRow[]>(Prisma.sql`
-                SELECT * FROM find_platform_generic_operation_artifact_by_operation_v1(
+                SELECT * FROM find_platform_generic_operation_artifact_by_operation_v2(
                   ${binding.authorityId}::uuid, ${binding.operationId}::uuid,
                   ${binding.resultSchema}
                 )

@@ -78,6 +78,13 @@ const manifest: GenericOperationArtifactManifest = Object.freeze({
   createdAt: CREATED_AT,
   expiresAt: EXPIRES_AT,
 });
+const expectedFacts = Object.freeze({
+  status: 200,
+  ok: true,
+  sanitizedUrl: 'https://example.com/final',
+  blocked: null,
+});
+const snapshot = Object.freeze({ manifest, expectedFacts });
 
 async function* bytes(value = BODY): AsyncIterable<Uint8Array> {
   yield value;
@@ -130,8 +137,8 @@ function dependencies(overrides: {
     checkReadiness: vi.fn(),
   } satisfies GenericOperationArtifactStore;
   const repository = {
-    findExact: vi.fn(overrides.findExact ?? (async () => manifest)),
-    findByOperation: vi.fn(overrides.findByOperation ?? (async () => manifest)),
+    findExact: vi.fn(overrides.findExact ?? (async () => snapshot)),
+    findByOperation: vi.fn(overrides.findByOperation ?? (async () => snapshot)),
   } as unknown as GenericOperationArtifactRepository;
   const budgetStore = {
     markResultUnknown: vi.fn(async () => {
@@ -140,7 +147,7 @@ function dependencies(overrides: {
     }),
     loadResultUnknownArtifact: vi.fn(overrides.loadResultUnknownArtifact ?? (async () => {
       order.push('load-expected');
-      return manifest;
+      return snapshot;
     })),
     settleArtifactManifest: vi.fn(async () => {
       order.push('atomic-settle');
@@ -176,6 +183,7 @@ function persistInput() {
     privacyClass: 'CONFIDENTIAL_TENANT' as const,
     expiresAt: EXPIRES_AT,
     actualCents: 13,
+    expectedFacts,
   };
 }
 
@@ -243,7 +251,7 @@ describe('GenericOperationArtifactService', () => {
     expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(
       reservation,
       code === 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN'
-        ? manifest
+        ? snapshot
         : undefined,
     );
   });
@@ -280,6 +288,51 @@ describe('GenericOperationArtifactService', () => {
     expect(deps.store.stage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['missing', undefined],
+    ['cross-schema', {
+      sanitizedUrl: 'https://example.com/',
+      contentHash: 'a'.repeat(24),
+    }],
+    ['raw PII', {
+      status: 200,
+      ok: true,
+      sanitizedUrl: 'https://example.com/person@example.com',
+      blocked: null,
+    }],
+    ['numeric-only host', {
+      status: 200,
+      ok: true,
+      sanitizedUrl: 'https://127.0.0.1/',
+      blocked: null,
+    }],
+    ['digit-heavy path', {
+      status: 200,
+      ok: true,
+      sanitizedUrl: 'https://example.com/2026/08/22/123',
+      blocked: null,
+    }],
+  ])('rejects %s expected facts before consuming or staging a producer result', async (_name, invalidFacts) => {
+    let producerReads = 0;
+    const deps = dependencies();
+
+    await expect(deps.service.persist({
+      ...persistInput(),
+      expectedFacts: invalidFacts,
+      source: source(() => {
+        producerReads += 1;
+      }),
+    })).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+
+    expect(producerReads).toBe(0);
+    expect(deps.store.stage).not.toHaveBeenCalled();
+    expect(deps.store.promote).not.toHaveBeenCalled();
+    expect(deps.budgetStore.markResultUnknown).not.toHaveBeenCalled();
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
+  });
+
   it('derives platform scope without accepting a workspace id', async () => {
     const deps = dependencies();
     const platformReservation = Object.freeze({
@@ -295,9 +348,12 @@ describe('GenericOperationArtifactService', () => {
       platformReservation,
       13,
       expect.objectContaining({
-        scopeKind: 'platform',
-        workspaceId: null,
-        authorityId: AUTHORITY_ID,
+        manifest: expect.objectContaining({
+          scopeKind: 'platform',
+          workspaceId: null,
+          authorityId: AUTHORITY_ID,
+        }),
+        expectedFacts,
       }),
     );
   });
@@ -433,6 +489,7 @@ describe('GenericOperationArtifactService', () => {
       new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID'),
     );
     expect(verified.manifest).toEqual(manifest);
+    expect(verified.expectedFacts).toEqual(expectedFacts);
   });
 
   it('streams a verified read without buffering it in the service', async () => {
@@ -462,12 +519,15 @@ describe('GenericOperationArtifactService', () => {
     { name: 'absent manifest', findExact: async () => null, inspect: undefined },
     {
       name: 'expired manifest',
-      findExact: async () => ({ ...manifest, expiresAt: CREATED_AT }),
+      findExact: async () => ({
+        manifest: { ...manifest, expiresAt: CREATED_AT },
+        expectedFacts,
+      }),
       inspect: undefined,
     },
     {
       name: 'mismatched object',
-      findExact: async () => manifest,
+      findExact: async () => snapshot,
       inspect: async () => ({ ...stored, mediaType: 'application/json' }),
     },
   ])('fails readVerified closed for $name', async ({ findExact, inspect }) => {

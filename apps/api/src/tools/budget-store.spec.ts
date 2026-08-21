@@ -58,6 +58,15 @@ const ARTIFACT_MANIFEST: GenericOperationArtifactManifest = Object.freeze({
   createdAt: '2026-08-21T12:00:00.000Z',
   expiresAt: ARTIFACT_REFERENCE.expiresAt,
 });
+const ARTIFACT_SNAPSHOT = Object.freeze({
+  manifest: ARTIFACT_MANIFEST,
+  expectedFacts: Object.freeze({
+    status: 200,
+    ok: true,
+    sanitizedUrl: 'https://example.com/final',
+    blocked: null,
+  }),
+});
 
 function fakePrisma(rows: unknown[][]): PrismaService {
   const queue = [...rows];
@@ -714,7 +723,7 @@ describe('UnavailableBudgetStore', () => {
       reservation,
       ARTIFACT_MANIFEST.authorityId,
     )).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
-    await expect(store.settleArtifactManifest(reservation, 1, ARTIFACT_MANIFEST)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+    await expect(store.settleArtifactManifest(reservation, 1, ARTIFACT_SNAPSHOT)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.release(reservation)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.status({ workspaceId: 'w', accountKey: 'a' })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.close({ workspaceId: 'w', accountKey: 'a' })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
@@ -770,7 +779,7 @@ describe('InMemoryBudgetStoreAdapter', () => {
       code: 'BUDGET_STORE_UNAVAILABLE',
     });
     await expect(
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
+      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
     ).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
   });
 });

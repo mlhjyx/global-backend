@@ -16,6 +16,16 @@ const AUTHORITY_ID = "42c863b9-7c7e-4d28-8678-60ef9a20219b";
 const OPERATION_ID = "8cf66f2a-1780-453e-8d7d-f70e36cb22a6";
 const ARTIFACT_ID = "9c621e96-9ec9-4712-aa51-cbb312d6a8f1";
 const SHA256 = "ab".padEnd(64, "0");
+const EXPECTED_FACTS = Object.freeze({
+  status: 200,
+  ok: true,
+  sanitizedUrl: "https://example.com/final",
+  blocked: null,
+});
+
+function snapshot(value = manifest()) {
+  return { manifest: value, expectedFacts: EXPECTED_FACTS };
+}
 
 function manifest(
   overrides: Partial<GenericOperationArtifactManifest> = {},
@@ -73,6 +83,12 @@ function row(value = manifest()) {
     source_digest: value.sourceDigest,
     created_at: new Date(value.createdAt),
     expires_at: new Date(value.expiresAt),
+    expected_http_status: 200,
+    expected_http_ok: true,
+    expected_sanitized_url: "https://example.com/final",
+    expected_content_hash: null,
+    expected_blocked_code: null,
+    expected_robots_blocked: null,
     replay: false,
   };
 }
@@ -127,10 +143,12 @@ describe("GenericOperationArtifactRepository", () => {
     const repository = new GenericOperationArtifactRepository(database.prisma);
     const input = manifest();
 
-    const stored = await repository.appendManifest(input);
+    const stored = await repository.appendManifest(input, EXPECTED_FACTS);
 
-    expect(stored).toEqual(manifest());
+    expect(stored).toEqual(snapshot());
     expect(Object.isFrozen(stored)).toBe(true);
+    expect(Object.isFrozen(stored.manifest)).toBe(true);
+    expect(Object.isFrozen(stored.expectedFacts)).toBe(true);
     expect(database.withWorkspace).toHaveBeenCalledWith(
       WORKSPACE_ID,
       expect.any(Function),
@@ -138,7 +156,7 @@ describe("GenericOperationArtifactRepository", () => {
     );
     const query = database.queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
     expect(query.strings.join("")).toContain(
-      "append_workspace_generic_operation_artifact_v1",
+      "append_workspace_generic_operation_artifact_v2",
     );
     expect(query.values).toEqual([
       WORKSPACE_ID,
@@ -154,6 +172,12 @@ describe("GenericOperationArtifactRepository", () => {
       "cd".padEnd(64, "0"),
       new Date("2026-08-21T01:02:03.004Z"),
       new Date("2026-08-22T01:02:03.004Z"),
+      200,
+      true,
+      "https://example.com/final",
+      null,
+      null,
+      null,
     ]);
     expect(query.values).not.toEqual(
       expect.arrayContaining([
@@ -179,8 +203,12 @@ describe("GenericOperationArtifactRepository", () => {
     });
     const repository = new GenericOperationArtifactRepository(database.prisma);
 
-    await expect(repository.appendManifest(first)).resolves.toEqual(first);
-    await expect(repository.appendManifest(second)).resolves.toEqual(second);
+    await expect(
+      repository.appendManifest(first, EXPECTED_FACTS),
+    ).resolves.toEqual(snapshot(first));
+    await expect(
+      repository.appendManifest(second, EXPECTED_FACTS),
+    ).resolves.toEqual(snapshot(second));
 
     expect(first.objectKey).toBe(second.objectKey);
     expect(first.operationId).not.toBe(second.operationId);
@@ -203,11 +231,11 @@ describe("GenericOperationArtifactRepository", () => {
         authorityId: AUTHORITY_ID,
         reference: reference(),
       }),
-    ).resolves.toEqual(manifest());
+    ).resolves.toEqual(snapshot());
 
     const query = database.queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
     expect(query.strings.join("")).toContain(
-      "find_exact_workspace_generic_operation_artifact_v1",
+      "find_exact_workspace_generic_operation_artifact_v2",
     );
     expect(query.values).toEqual([
       WORKSPACE_ID,
@@ -238,7 +266,7 @@ describe("GenericOperationArtifactRepository", () => {
 
     const query = database.queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
     expect(query.strings.join("")).toContain(
-      "find_workspace_generic_operation_artifact_by_operation_v1",
+      "find_workspace_generic_operation_artifact_by_operation_v2",
     );
     expect(query.values).toEqual([
       WORKSPACE_ID,
@@ -277,7 +305,9 @@ describe("GenericOperationArtifactRepository", () => {
       platform.database,
     );
 
-    await expect(repository.appendManifest(value)).resolves.toEqual(value);
+    await expect(
+      repository.appendManifest(value, EXPECTED_FACTS),
+    ).resolves.toEqual(snapshot(value));
     await expect(
       repository.findByOperation({
         scopeKind: "platform",
@@ -286,21 +316,21 @@ describe("GenericOperationArtifactRepository", () => {
         operationId: OPERATION_ID,
         resultSchema: "http-get/v1",
       }),
-    ).resolves.toEqual(value);
+    ).resolves.toEqual(snapshot(value));
 
     expect(workspace.withWorkspace).not.toHaveBeenCalled();
     expect(
       platform.queryRaw.mock.calls.some(([query]) =>
         (query as Prisma.Sql).strings
           .join("")
-          .includes("append_platform_generic_operation_artifact_v1"),
+          .includes("append_platform_generic_operation_artifact_v2"),
       ),
     ).toBe(true);
     expect(
       platform.queryRaw.mock.calls.some(([query]) =>
         (query as Prisma.Sql).strings
           .join("")
-          .includes("find_platform_generic_operation_artifact_by_operation_v1"),
+          .includes("find_platform_generic_operation_artifact_by_operation_v2"),
       ),
     ).toBe(true);
   });
@@ -312,6 +342,7 @@ describe("GenericOperationArtifactRepository", () => {
     await expect(
       repository.appendManifest(
         manifest({ scopeKind: "platform", workspaceId: null }),
+        EXPECTED_FACTS,
       ),
     ).rejects.toSatisfy(expectStableInvalid);
     expect(database.withWorkspace).not.toHaveBeenCalled();
@@ -337,7 +368,7 @@ describe("GenericOperationArtifactRepository", () => {
     const repository = new GenericOperationArtifactRepository(database.prisma);
 
     await expect(
-      repository.appendManifest(manifest(overrides)),
+      repository.appendManifest(manifest(overrides), EXPECTED_FACTS),
     ).rejects.toSatisfy(expectStableInvalid);
     expect(database.withWorkspace).not.toHaveBeenCalled();
   });
@@ -350,9 +381,9 @@ describe("GenericOperationArtifactRepository", () => {
     });
     const repository = new GenericOperationArtifactRepository(database.prisma);
 
-    await expect(repository.appendManifest(manifest())).rejects.toSatisfy(
-      expectStableInvalid,
-    );
+    await expect(
+      repository.appendManifest(manifest(), EXPECTED_FACTS),
+    ).rejects.toSatisfy(expectStableInvalid);
   });
 
   it("rejects malformed or extra database rows instead of returning partial metadata", async () => {
@@ -361,9 +392,9 @@ describe("GenericOperationArtifactRepository", () => {
     ]);
     const repository = new GenericOperationArtifactRepository(database.prisma);
 
-    await expect(repository.appendManifest(manifest())).rejects.toSatisfy(
-      expectStableInvalid,
-    );
+    await expect(
+      repository.appendManifest(manifest(), EXPECTED_FACTS),
+    ).rejects.toSatisfy(expectStableInvalid);
   });
 
   it("rejects a well-formed row outside the requested authority binding", async () => {
@@ -389,8 +420,8 @@ describe("GenericOperationArtifactRepository", () => {
     ]);
     const repository = new GenericOperationArtifactRepository(database.prisma);
 
-    await expect(repository.appendManifest(manifest())).rejects.toSatisfy(
-      expectStableInvalid,
-    );
+    await expect(
+      repository.appendManifest(manifest(), EXPECTED_FACTS),
+    ).rejects.toSatisfy(expectStableInvalid);
   });
 });

@@ -17,10 +17,14 @@ import {
 import {
   invalidGenericOperationArtifact,
   isCanonicalArtifactUuid,
-  type GenericOperationArtifactManifest,
 } from '../durable-results/artifact/artifact.types';
-import { parseGenericOperationArtifactManifest } from '../durable-results/artifact/generic-operation-artifact.repository';
-
+import { parseGenericOperationArtifactSnapshot } from '../durable-results/artifact/generic-operation-artifact.repository';
+import {
+  expectedFactsFromUnknownRow,
+  parseBoundArtifactBudgetSnapshot,
+  type GenericOperationArtifactSnapshot,
+  type UnknownArtifactRow,
+} from './artifact-budget-expected-facts';
 const MAX_KEY_LENGTH = 200;
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
@@ -85,18 +89,18 @@ export interface BudgetStore {
   /** Physical execution started, but the result/object acknowledgement is unknown. */
   markResultUnknown(
     reservation: BudgetReservation,
-    expected?: GenericOperationArtifactManifest,
+    expected?: GenericOperationArtifactSnapshot,
   ): Promise<BudgetResultUnknownTransition>;
   /** Loads only facts atomically bound when the original physical result became unknown. */
   loadResultUnknownArtifact(
     reservation: BudgetReservation,
     authorityId: string,
-  ): Promise<GenericOperationArtifactManifest | null>;
+  ): Promise<GenericOperationArtifactSnapshot | null>;
   /** Atomically appends the manifest and settles its exact closed reference. */
   settleArtifactManifest(
     reservation: BudgetReservation,
     actualCents: number,
-    manifest: GenericOperationArtifactManifest,
+    snapshot: GenericOperationArtifactSnapshot,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -168,7 +172,7 @@ export class UnavailableBudgetStore implements BudgetStore {
     return this.unavailable();
   }
 
-  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactManifest | null> {
+  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactSnapshot | null> {
     return this.unavailable();
   }
 
@@ -225,7 +229,7 @@ export class InMemoryBudgetStoreAdapter implements BudgetStore {
     );
   }
 
-  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactManifest | null> {
+  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactSnapshot | null> {
     throw new BudgetStoreUnavailableError(
       'in-memory budget store cannot recover unknown artifact results',
     );
@@ -278,13 +282,13 @@ type ResultUnknownRow = {
   replay: boolean;
   recoverable: boolean;
 };
-type UnknownArtifactRow = { expected_manifest: unknown };
 type AuthorizedOpenRow = {
   account_id: string;
   generation: number;
   authority_id: string;
   authorized_cap_microusd: bigint;
 };
+
 
 function assertKey(name: string, value: string): void {
   if (!value || value.length > MAX_KEY_LENGTH || [...value].some((character) => character.charCodeAt(0) < 32)) {
@@ -531,28 +535,26 @@ export class PostgresBudgetStore implements BudgetStore {
 
   async markResultUnknown(
     reservation: BudgetReservation,
-    expected?: GenericOperationArtifactManifest,
+    expected?: GenericOperationArtifactSnapshot,
   ): Promise<BudgetResultUnknownTransition> {
-    const durable = expected
-      ? parseGenericOperationArtifactManifest(expected)
+    const bound = expected
+      ? parseBoundArtifactBudgetSnapshot(expected, reservation)
       : null;
-    if (
-      durable &&
-      (durable.operationId !== reservation.operationId ||
-        (reservation.workspaceId === 'platform'
-          ? durable.scopeKind !== 'platform' || durable.workspaceId !== null
-          : durable.scopeKind !== 'workspace' ||
-            durable.workspaceId !== reservation.workspaceId))
-    ) {
-      return invalidGenericOperationArtifact();
-    }
+    const durable = bound?.snapshot ?? null;
+    const facts = bound?.columns ?? null;
     let rows: ResultUnknownRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<ResultUnknownRow[]>(
-          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v2(
+          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v3(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${durable ? JSON.stringify(durable) : null}::jsonb
+            ${durable ? JSON.stringify(durable.manifest) : null}::jsonb,
+            ${facts?.expectedHttpStatus ?? null},
+            ${facts?.expectedHttpOk ?? null},
+            ${facts?.expectedSanitizedUrl ?? null},
+            ${facts?.expectedContentHash ?? null},
+            ${facts?.expectedBlockedCode ?? null},
+            ${facts?.expectedRobotsBlocked ?? null}
           )`,
         ),
       );
@@ -599,7 +601,7 @@ export class PostgresBudgetStore implements BudgetStore {
   async loadResultUnknownArtifact(
     reservation: BudgetReservation,
     authorityId: string,
-  ): Promise<GenericOperationArtifactManifest | null> {
+  ): Promise<GenericOperationArtifactSnapshot | null> {
     if (
       !isCanonicalArtifactUuid(reservation.operationId) ||
       !isCanonicalArtifactUuid(authorityId) ||
@@ -612,7 +614,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<UnknownArtifactRow[]>(
-          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v2(
+          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v3(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${authorityId}::uuid
           )`,
@@ -640,9 +642,12 @@ export class PostgresBudgetStore implements BudgetStore {
         'budget unknown-result recovery returned no result',
       );
     }
-    const manifest = parseGenericOperationArtifactManifest(
-      rows[0].expected_manifest,
-    );
+    const row = rows[0];
+    const snapshot = parseGenericOperationArtifactSnapshot({
+      manifest: row.expected_manifest,
+      expectedFacts: expectedFactsFromUnknownRow(row),
+    });
+    const manifest = snapshot.manifest;
     if (
       manifest.authorityId !== authorityId ||
       manifest.operationId !== reservation.operationId ||
@@ -653,32 +658,28 @@ export class PostgresBudgetStore implements BudgetStore {
     ) {
       return invalidGenericOperationArtifact();
     }
-    return manifest;
+    return snapshot;
   }
 
   async settleArtifactManifest(
     reservation: BudgetReservation,
     actualCents: number,
-    manifest: GenericOperationArtifactManifest,
+    snapshot: GenericOperationArtifactSnapshot,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
-    const durable = parseGenericOperationArtifactManifest(manifest);
-    if (
-      durable.operationId !== reservation.operationId ||
-      (reservation.workspaceId === 'platform'
-        ? durable.scopeKind !== 'platform' || durable.workspaceId !== null
-        : durable.scopeKind !== 'workspace' ||
-          durable.workspaceId !== reservation.workspaceId)
-    ) {
-      return invalidGenericOperationArtifact();
-    }
+    const { snapshot: durable, columns: facts } =
+      parseBoundArtifactBudgetSnapshot(snapshot, reservation);
+    const manifest = durable.manifest;
     let rows: SettleRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v2(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v3(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${BigInt(actualCents)}, ${JSON.stringify(durable)}::jsonb
+            ${BigInt(actualCents)}, ${JSON.stringify(manifest)}::jsonb,
+            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
+            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked}
           )`,
         ),
       );

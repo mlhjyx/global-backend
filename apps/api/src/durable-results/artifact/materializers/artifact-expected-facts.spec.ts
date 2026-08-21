@@ -34,6 +34,24 @@ describe('parseArtifactExpectedFacts', () => {
     ['raw PII URL', 'crawl4ai-fetch/v1', {
       sanitizedUrl: 'https://example.com/person@example.com', contentHash: 'a'.repeat(24),
     }],
+    ['query-bearing URL', 'crawl4ai-fetch/v1', {
+      sanitizedUrl: 'https://example.com/?page=1', contentHash: 'a'.repeat(24),
+    }],
+    ['uppercase host URL', 'crawl4ai-fetch/v1', {
+      sanitizedUrl: 'https://EXAMPLE.com/', contentHash: 'a'.repeat(24),
+    }],
+    ['missing canonical slash URL', 'crawl4ai-fetch/v1', {
+      sanitizedUrl: 'https://example.com', contentHash: 'a'.repeat(24),
+    }],
+    ['invalid percent URL', 'crawl4ai-fetch/v1', {
+      sanitizedUrl: 'https://%zz/', contentHash: 'a'.repeat(24),
+    }],
+    ['numeric-only host URL', 'crawl4ai-fetch/v1', {
+      sanitizedUrl: 'https://127.0.0.1/', contentHash: 'a'.repeat(24),
+    }],
+    ['digit-heavy path URL', 'crawl4ai-fetch/v1', {
+      sanitizedUrl: 'https://example.com/2026/08/22/123', contentHash: 'a'.repeat(24),
+    }],
     ['wrong hash', 'crawl4ai-fetch/v1', {
       sanitizedUrl: 'https://example.com/', contentHash: 'A'.repeat(24),
     }],

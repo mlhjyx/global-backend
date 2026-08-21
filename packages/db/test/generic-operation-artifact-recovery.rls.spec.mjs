@@ -6,7 +6,10 @@ import { spawnSync } from "node:child_process";
 import { after, before, describe, it } from "node:test";
 import { PrismaClient } from "@prisma/client";
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const repositoryRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;
 const PLATFORM_LOGIN = "generic_operation_artifact_recovery_platform_test";
@@ -71,6 +74,12 @@ function artifactInput(binding, overrides = {}) {
     sourceDigest: null,
     createdAt: CREATED_AT,
     expiresAt: EXPIRES_AT,
+    expectedHttpStatus: 200,
+    expectedHttpOk: true,
+    expectedSanitizedUrl: "https://example.com/final",
+    expectedContentHash: null,
+    expectedBlockedCode: null,
+    expectedRobotsBlocked: null,
     ...overrides,
   };
 }
@@ -97,32 +106,47 @@ function artifactManifest(input) {
 
 async function markUnknown(transaction, binding, input) {
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM mark_tool_budget_result_unknown_v2(
-      $1, $2::uuid, $3::jsonb
+    `SELECT * FROM mark_tool_budget_result_unknown_v3(
+      $1, $2::uuid, $3::jsonb, $4::smallint, $5::boolean,
+      $6, $7, $8, $9::boolean
     )`,
     binding.workspaceId ?? "platform",
     binding.operationId,
     input === null ? null : JSON.stringify(artifactManifest(input)),
+    input?.expectedHttpStatus ?? null,
+    input?.expectedHttpOk ?? null,
+    input?.expectedSanitizedUrl ?? null,
+    input?.expectedContentHash ?? null,
+    input?.expectedBlockedCode ?? null,
+    input?.expectedRobotsBlocked ?? null,
   );
 }
 
 async function settleManifest(transaction, binding, input, observedCents) {
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM settle_tool_budget_artifact_manifest_v2(
-      $1, $2::uuid, $3::bigint, $4::jsonb
+    `SELECT * FROM settle_tool_budget_artifact_manifest_v3(
+      $1, $2::uuid, $3::bigint, $4::jsonb, $5::smallint,
+      $6::boolean, $7, $8, $9, $10::boolean
     )`,
     binding.workspaceId ?? "platform",
     binding.operationId,
     observedCents,
     JSON.stringify(artifactManifest(input)),
+    input.expectedHttpStatus,
+    input.expectedHttpOk,
+    input.expectedSanitizedUrl,
+    input.expectedContentHash,
+    input.expectedBlockedCode,
+    input.expectedRobotsBlocked,
   );
 }
 
 async function appendWorkspace(transaction, input) {
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM append_workspace_generic_operation_artifact_v1(
+    `SELECT * FROM append_workspace_generic_operation_artifact_v2(
       $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7,
-      $8::bigint, $9, $10, $11, $12::timestamptz, $13::timestamptz
+      $8::bigint, $9, $10, $11, $12::timestamptz, $13::timestamptz,
+      $14::smallint, $15::boolean, $16, $17, $18, $19::boolean
     )`,
     input.workspaceId,
     input.artifactId,
@@ -137,6 +161,12 @@ async function appendWorkspace(transaction, input) {
     input.sourceDigest,
     input.createdAt,
     input.expiresAt,
+    input.expectedHttpStatus,
+    input.expectedHttpOk,
+    input.expectedSanitizedUrl,
+    input.expectedContentHash,
+    input.expectedBlockedCode,
+    input.expectedRobotsBlocked,
   );
 }
 
@@ -285,7 +315,10 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
   });
 
   it("atomically binds expected facts and settles nonzero arithmetic without changing either cap", async () => {
-    const binding = await seedBinding(owner, { capCents: 100n, reservedCents: 17n });
+    const binding = await seedBinding(owner, {
+      capCents: 100n,
+      reservedCents: 17n,
+    });
     const input = artifactInput(binding);
     const [unknown] = await withWorkspace(app, WS_ID, (tx) =>
       markUnknown(tx, binding, input),
@@ -298,6 +331,12 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
     });
     const [bound] = await owner.$queryRawUnsafe(
       `SELECT operation.expected_artifact, operation.generation,
+              operation.expected_http_status,
+              operation.expected_http_ok,
+              operation.expected_sanitized_url,
+              operation.expected_content_hash,
+              operation.expected_blocked_code,
+              operation.expected_robots_blocked,
               account.account_key, account.cap_cents,
               account.reserved_cents, account.charged_cents,
               account.authorized_cap_microusd
@@ -317,11 +356,49 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
     assert.equal(bound.charged_cents, 0n);
     assert.equal(bound.authorized_cap_microusd, 5_000_000n);
     assert.equal(bound.generation, 1);
+    assert.equal(bound.expected_http_status, 200);
+    assert.equal(bound.expected_http_ok, true);
+    assert.equal(bound.expected_sanitized_url, "https://example.com/final");
+    assert.equal(bound.expected_content_hash, null);
+    assert.equal(bound.expected_blocked_code, null);
+    assert.equal(bound.expected_robots_blocked, null);
+    const [loaded] = await withWorkspace(app, WS_ID, (tx) =>
+      tx.$queryRawUnsafe(
+        `SELECT * FROM load_tool_budget_result_unknown_artifact_v3(
+          $1, $2::uuid, $3::uuid
+        )`,
+        WS_ID,
+        binding.operationId,
+        binding.authorityId,
+      ),
+    );
+    assert.deepEqual(loaded.expected_manifest, artifactManifest(input));
+    assert.equal(loaded.expected_http_status, 200);
+    assert.equal(loaded.expected_http_ok, true);
+    assert.equal(loaded.expected_sanitized_url, "https://example.com/final");
 
     const substitute = artifactInput(binding);
     await rejectsSql(
-      () => withWorkspace(app, WS_ID, (tx) =>
-        settleManifest(tx, binding, substitute, 13n)),
+      () =>
+        withWorkspace(app, WS_ID, (tx) =>
+          settleManifest(tx, binding, substitute, 13n),
+        ),
+      "GENERIC_OPERATION_ARTIFACT_INVALID",
+    );
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_ID, (tx) =>
+          settleManifest(
+            tx,
+            binding,
+            {
+              ...input,
+              expectedSanitizedUrl:
+                "https://user:password@example.com/?token=secret",
+            },
+            13n,
+          ),
+        ),
       "GENERIC_OPERATION_ARTIFACT_INVALID",
     );
     const [settled] = await withWorkspace(app, WS_ID, (tx) =>
@@ -342,11 +419,17 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
       `SELECT account.cap_cents, account.reserved_cents,
               account.charged_cents, account.authorized_cap_microusd,
               operation.expected_artifact,
+              artifact.expected_http_status,
+              artifact.expected_http_ok,
+              artifact.expected_sanitized_url,
               (SELECT count(*)::int FROM generic_operation_artifact artifact
                WHERE artifact.scope_key=operation.scope_key
                  AND artifact.operation_id=operation.id) AS manifests
        FROM tool_budget_operation operation
        JOIN tool_budget_account account ON account.id=operation.account_id
+       JOIN generic_operation_artifact artifact
+         ON artifact.scope_key=operation.scope_key
+        AND artifact.operation_id=operation.id
        WHERE operation.scope_key=$1 AND operation.id=$2::uuid`,
       WS_ID,
       binding.operationId,
@@ -356,30 +439,40 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
     assert.equal(final.charged_cents, 17n);
     assert.equal(final.authorized_cap_microusd, 5_000_000n);
     assert.deepEqual(final.expected_artifact, bound.expected_artifact);
+    assert.equal(final.expected_http_status, 200);
+    assert.equal(final.expected_http_ok, true);
+    assert.equal(final.expected_sanitized_url, "https://example.com/final");
     assert.equal(final.manifests, 1);
   });
 
   it("keeps stage ACK unknown unrecoverable and rejects later substitute facts", async () => {
-    const binding = await seedBinding(owner, { capCents: 50n, reservedCents: 9n });
+    const binding = await seedBinding(owner, {
+      capCents: 50n,
+      reservedCents: 9n,
+    });
     const [unknown] = await withWorkspace(app, WS_ID, (tx) =>
       markUnknown(tx, binding, null),
     );
     assert.equal(unknown.recoverable, false);
     await rejectsSql(
-      () => withWorkspace(app, WS_ID, (tx) =>
-        tx.$queryRawUnsafe(
-          `SELECT * FROM load_tool_budget_result_unknown_artifact_v2(
+      () =>
+        withWorkspace(app, WS_ID, (tx) =>
+          tx.$queryRawUnsafe(
+            `SELECT * FROM load_tool_budget_result_unknown_artifact_v3(
             $1, $2::uuid, $3::uuid
           )`,
-          WS_ID,
-          binding.operationId,
-          binding.authorityId,
-        )),
+            WS_ID,
+            binding.operationId,
+            binding.authorityId,
+          ),
+        ),
       "GENERIC_OPERATION_ARTIFACT_INVALID",
     );
     await rejectsSql(
-      () => withWorkspace(app, WS_ID, (tx) =>
-        markUnknown(tx, binding, artifactInput(binding))),
+      () =>
+        withWorkspace(app, WS_ID, (tx) =>
+          markUnknown(tx, binding, artifactInput(binding)),
+        ),
       "GENERIC_OPERATION_ARTIFACT_INVALID",
     );
     const [{ count }] = await owner.$queryRawUnsafe(
@@ -392,14 +485,19 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
   });
 
   it("rejects expired settlement with the trusted database clock", async () => {
-    const binding = await seedBinding(owner, { capCents: 50n, reservedCents: 11n });
+    const binding = await seedBinding(owner, {
+      capCents: 50n,
+      reservedCents: 11n,
+    });
     const input = artifactInput(binding, {
       createdAt: new Date(Date.now() - 2_000),
       expiresAt: new Date(Date.now() - 1_000),
     });
     await rejectsSql(
-      () => withWorkspace(app, WS_ID, (tx) =>
-        settleManifest(tx, binding, input, 7n)),
+      () =>
+        withWorkspace(app, WS_ID, (tx) =>
+          settleManifest(tx, binding, input, 7n),
+        ),
       "GENERIC_OPERATION_ARTIFACT_INVALID",
     );
     const [state] = await owner.$queryRawUnsafe(
@@ -425,7 +523,10 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
   });
 
   it("records cap variance while charging only the full reservation", async () => {
-    const binding = await seedBinding(owner, { capCents: 100n, reservedCents: 17n });
+    const binding = await seedBinding(owner, {
+      capCents: 100n,
+      reservedCents: 17n,
+    });
     const input = artifactInput(binding);
     await withWorkspace(app, WS_ID, (tx) => markUnknown(tx, binding, input));
     const [settled] = await withWorkspace(app, WS_ID, (tx) =>
@@ -450,7 +551,10 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
   });
 
   it("settles an exact existing manifest and rolls back a new append on later account failure", async () => {
-    const existing = await seedBinding(owner, { capCents: 40n, reservedCents: 8n });
+    const existing = await seedBinding(owner, {
+      capCents: 40n,
+      reservedCents: 8n,
+    });
     const existingInput = artifactInput(existing);
     await withWorkspace(app, WS_ID, (tx) => appendWorkspace(tx, existingInput));
     const [settled] = await withWorkspace(app, WS_ID, (tx) =>
@@ -458,7 +562,10 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
     );
     assert.equal(settled.status, "SETTLED");
 
-    const rollback = await seedBinding(owner, { capCents: 100n, reservedCents: 17n });
+    const rollback = await seedBinding(owner, {
+      capCents: 100n,
+      reservedCents: 17n,
+    });
     const rollbackInput = artifactInput(rollback);
     await owner.$executeRawUnsafe(
       `UPDATE tool_budget_account SET reserved_cents=0
@@ -467,8 +574,10 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
       rollback.accountId,
     );
     await rejectsSql(
-      () => withWorkspace(app, WS_ID, (tx) =>
-        settleManifest(tx, rollback, rollbackInput, 13n)),
+      () =>
+        withWorkspace(app, WS_ID, (tx) =>
+          settleManifest(tx, rollback, rollbackInput, 13n),
+        ),
       "tool_budget_account_amounts_check",
     );
     const [state] = await owner.$queryRawUnsafe(
@@ -481,18 +590,26 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
       WS_ID,
       rollback.operationId,
     );
-    assert.deepEqual(state, { status: "RESERVED", result_json: null, manifests: 0 });
+    assert.deepEqual(state, {
+      status: "RESERVED",
+      result_json: null,
+      manifests: 0,
+    });
   });
 
   it("serializes predecessor append and v2 settle without reversing lock order", async () => {
-    const binding = await seedBinding(owner, { capCents: 40n, reservedCents: 8n });
+    const binding = await seedBinding(owner, {
+      capCents: 40n,
+      reservedCents: 8n,
+    });
     const input = artifactInput(binding);
     const concurrentApp = client(APP_URL);
     try {
       const [appended, settled] = await Promise.all([
         withWorkspace(app, WS_ID, (tx) => appendWorkspace(tx, input)),
         withWorkspace(concurrentApp, WS_ID, (tx) =>
-          settleManifest(tx, binding, input, 8n)),
+          settleManifest(tx, binding, input, 8n),
+        ),
       ]);
       assert.equal(appended.length, 1);
       assert.equal(settled.length, 1);
@@ -505,25 +622,45 @@ describe("generic operation artifact atomic recovery PostgreSQL", () => {
   it("enforces workspace scope and the fixed platform writer principal", async () => {
     const workspace = await seedBinding(owner);
     await rejectsSql(
-      () => withWorkspace(app, OTHER_WS_ID, (tx) =>
-        markUnknown(tx, workspace, artifactInput(workspace))),
+      () =>
+        withWorkspace(app, OTHER_WS_ID, (tx) =>
+          markUnknown(tx, workspace, artifactInput(workspace)),
+        ),
+      "GENERIC_OPERATION_ARTIFACT_INVALID",
+    );
+
+    const unsafePlatform = await seedBinding(owner, { platform: true });
+    await rejectsSql(
+      () =>
+        markUnknown(
+          platform,
+          unsafePlatform,
+          artifactInput(unsafePlatform, {
+            expectedSanitizedUrl:
+              "https://example.com/person@example.com",
+          }),
+        ),
       "GENERIC_OPERATION_ARTIFACT_INVALID",
     );
 
     const binding = await seedBinding(owner, { platform: true });
-    const input = artifactInput(binding, { privacyClass: "PUBLIC_ORGANIZATION" });
+    const input = artifactInput(binding, {
+      privacyClass: "PUBLIC_ORGANIZATION",
+    });
     const [unknown] = await markUnknown(platform, binding, input);
     assert.equal(unknown.status, "RESULT_UNKNOWN");
     const [settled] = await settleManifest(platform, binding, input, 0n);
     assert.equal(settled.status, "SETTLED");
     await rejectsSql(
-      () => app.$queryRawUnsafe(
-        `SELECT * FROM mark_tool_budget_result_unknown_v2(
-          'platform', $1::uuid, $2::jsonb
+      () =>
+        app.$queryRawUnsafe(
+          `SELECT * FROM mark_tool_budget_result_unknown_v3(
+          'platform', $1::uuid, $2::jsonb, 200::smallint, true,
+          'https://example.com/final', NULL, NULL, NULL
         )`,
-        binding.operationId,
-        JSON.stringify(artifactManifest(input)),
-      ),
+          binding.operationId,
+          JSON.stringify(artifactManifest(input)),
+        ),
       "permission denied|PRINCIPAL_INVALID",
     );
   });

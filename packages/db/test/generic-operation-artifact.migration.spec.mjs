@@ -22,6 +22,8 @@ const laterMigrationNames = [
   "20260821115000_generic_operation_artifact_result_unknown_enum",
   "20260821120000_generic_operation_artifact_result_unknown",
   "20260822000000_generic_operation_artifact_atomic_recovery",
+  "20260822010000_generic_operation_artifact_expected_facts",
+  "20260822011000_generic_operation_artifact_expected_facts_validate",
 ];
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;

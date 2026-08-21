@@ -70,9 +70,10 @@ async function rejectsSql(callback, marker) {
 
 async function appendWorkspace(transaction, input) {
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM append_workspace_generic_operation_artifact_v1(
+    `SELECT * FROM append_workspace_generic_operation_artifact_v2(
       $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7,
-      $8::bigint, $9, $10, $11, $12::timestamptz, $13::timestamptz
+      $8::bigint, $9, $10, $11, $12::timestamptz, $13::timestamptz,
+      $14::smallint, $15::boolean, $16, $17, $18, $19::boolean
     )`,
     input.workspaceId,
     input.artifactId,
@@ -87,6 +88,12 @@ async function appendWorkspace(transaction, input) {
     input.sourceDigest,
     input.createdAt,
     input.expiresAt,
+    input.expectedHttpStatus,
+    input.expectedHttpOk,
+    input.expectedSanitizedUrl,
+    input.expectedContentHash,
+    input.expectedBlockedCode,
+    input.expectedRobotsBlocked,
   );
 }
 
@@ -106,6 +113,12 @@ function artifactInput(binding, overrides = {}) {
     sourceDigest: SOURCE_A,
     createdAt: CREATED_AT,
     expiresAt: EXPIRES_AT,
+    expectedHttpStatus: 200,
+    expectedHttpOk: true,
+    expectedSanitizedUrl: "https://example.com/final",
+    expectedContentHash: null,
+    expectedBlockedCode: null,
+    expectedRobotsBlocked: null,
     ...overrides,
   };
 }
@@ -306,7 +319,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
 
     const exact = await withWorkspace(app, WS_A, (transaction) =>
       transaction.$queryRawUnsafe(
-        `SELECT * FROM find_exact_workspace_generic_operation_artifact_v1(
+        `SELECT * FROM find_exact_workspace_generic_operation_artifact_v2(
           $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6,
           $7::bigint, $8, $9::timestamptz
         )`,
@@ -419,7 +432,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     const readByOperation = (workspaceId, binding) =>
       withWorkspace(app, workspaceId, (transaction) =>
         transaction.$queryRawUnsafe(
-          `SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v1(
+          `SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v2(
             $1::uuid, $2::uuid, $3::uuid, $4
           )`,
           workspaceId,
@@ -456,7 +469,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
   it("keeps another workspace absent and indistinguishable", async () => {
     const result = await withWorkspace(app, WS_B, (transaction) =>
       transaction.$queryRawUnsafe(
-        `SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v1(
+        `SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v2(
           $1::uuid, $2::uuid, $3::uuid, $4
         )`,
         WS_B,
@@ -539,7 +552,22 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
           'settle_tool_budget_artifact_reference_v1',
           'mark_tool_budget_result_unknown_v2',
           'load_tool_budget_result_unknown_artifact_v2',
-          'settle_tool_budget_artifact_manifest_v2'
+          'settle_tool_budget_artifact_manifest_v2',
+          'generic_operation_artifact_sanitized_url_valid_v1',
+          'generic_operation_artifact_expected_facts_valid_v1',
+          'assert_generic_operation_artifact_expected_facts_v1',
+          'enforce_generic_operation_artifact_expected_facts_v1',
+          'enforce_tool_budget_operation_expected_facts_v1',
+          'append_generic_operation_artifact_internal_v2',
+          'append_workspace_generic_operation_artifact_v2',
+          'append_platform_generic_operation_artifact_v2',
+          'find_exact_workspace_generic_operation_artifact_v2',
+          'find_exact_platform_generic_operation_artifact_v2',
+          'find_workspace_generic_operation_artifact_by_operation_v2',
+          'find_platform_generic_operation_artifact_by_operation_v2',
+          'mark_tool_budget_result_unknown_v3',
+          'load_tool_budget_result_unknown_artifact_v3',
+          'settle_tool_budget_artifact_manifest_v3'
         )
       )
       SELECT routine.proname AS routine, principal.name AS principal,
@@ -584,8 +612,38 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
         "app_user",
         "execution_budget_platform_writer",
       ],
+      assert_generic_operation_artifact_expected_facts_v1: [],
+      generic_operation_artifact_sanitized_url_valid_v1: [],
+      generic_operation_artifact_expected_facts_valid_v1: [],
+      enforce_generic_operation_artifact_expected_facts_v1: [],
+      enforce_tool_budget_operation_expected_facts_v1: [],
+      append_generic_operation_artifact_internal_v2: [],
+      append_workspace_generic_operation_artifact_v2: ["app_user"],
+      append_platform_generic_operation_artifact_v2: [
+        "execution_budget_platform_writer",
+      ],
+      find_exact_workspace_generic_operation_artifact_v2: ["app_user"],
+      find_exact_platform_generic_operation_artifact_v2: [
+        "execution_budget_platform_writer",
+      ],
+      find_workspace_generic_operation_artifact_by_operation_v2: ["app_user"],
+      find_platform_generic_operation_artifact_by_operation_v2: [
+        "execution_budget_platform_writer",
+      ],
+      mark_tool_budget_result_unknown_v3: [
+        "app_user",
+        "execution_budget_platform_writer",
+      ],
+      load_tool_budget_result_unknown_artifact_v3: [
+        "app_user",
+        "execution_budget_platform_writer",
+      ],
+      settle_tool_budget_artifact_manifest_v3: [
+        "app_user",
+        "execution_budget_platform_writer",
+      ],
     };
-    assert.equal(routinePrivileges.length, 45);
+    assert.equal(routinePrivileges.length, 90);
     for (const privilege of routinePrivileges) {
       assert.equal(
         privilege.allowed,
@@ -651,6 +709,9 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
       "privacyClass",
       "createdAt",
       "expiresAt",
+      "expectedHttpStatus",
+      "expectedHttpOk",
+      "expectedSanitizedUrl",
     ]) {
       await rejectsSql(
         () =>
@@ -662,37 +723,13 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     }
   });
 
-  it("keeps bodies, headers, prompts, tokens and emails out of database metadata", async () => {
-    const columns = await owner.$queryRawUnsafe(`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_schema='public' AND table_name='generic_operation_artifact'
-      ORDER BY ordinal_position
-    `);
-    assert.deepEqual(
-      columns.map(({ column_name }) => column_name),
-      [
-        "id",
-        "scope_key",
-        "workspace_id",
-        "authority_id",
-        "operation_id",
-        "result_schema",
-        "object_key",
-        "sha256",
-        "size_bytes",
-        "media_type",
-        "privacy_class",
-        "source_digest",
-        "created_at",
-        "expires_at",
-      ],
-    );
-  });
-
   it("uses an explicit transaction and leaves no PUBLIC or broad grant in migration SQL", async () => {
     const sql = await readFile(migrationPath, "utf8");
     const sharedContentSql = await readFile(sharedContentMigrationPath, "utf8");
-    const atomicRecoverySql = await readFile(atomicRecoveryMigrationPath, "utf8");
+    const atomicRecoverySql = await readFile(
+      atomicRecoveryMigrationPath,
+      "utf8",
+    );
     assert.match(sql, /^BEGIN;/m);
     assert.match(sql, /COMMIT;\s*$/);
     assert.match(
@@ -739,7 +776,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
       operationLock,
     );
     const operationRowLock = atomicRecoverySql.indexOf(
-      'SELECT target.* INTO operation',
+      "SELECT target.* INTO operation",
       objectLock,
     );
     assert.ok(

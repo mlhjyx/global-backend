@@ -36,6 +36,28 @@ const ARTIFACT_MANIFEST: GenericOperationArtifactManifest = Object.freeze({
   createdAt: "2036-08-21T12:00:00.000Z",
   expiresAt: ARTIFACT_REFERENCE.expiresAt,
 });
+const EXPECTED_FACTS = Object.freeze({
+  status: 200,
+  ok: true,
+  sanitizedUrl: "https://example.com/final",
+  blocked: null,
+});
+const ARTIFACT_SNAPSHOT = Object.freeze({
+  manifest: ARTIFACT_MANIFEST,
+  expectedFacts: EXPECTED_FACTS,
+});
+
+function unknownRow(manifest = ARTIFACT_MANIFEST) {
+  return {
+    expected_manifest: manifest,
+    expected_http_status: 200,
+    expected_http_ok: true,
+    expected_sanitized_url: "https://example.com/final",
+    expected_content_hash: null,
+    expected_blocked_code: null,
+    expected_robots_blocked: null,
+  };
+}
 
 function fakePrisma(rows: unknown[][]): PrismaService {
   const queue = [...rows];
@@ -91,18 +113,24 @@ describe("PostgresBudgetStore artifact recovery", () => {
     };
 
     await expect(
-      store.markResultUnknown(reservation, ARTIFACT_MANIFEST),
+      store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
     ).resolves.toEqual({
       reservedCents: 17,
       replay: false,
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "mark_tool_budget_result_unknown_v2",
+      "mark_tool_budget_result_unknown_v3",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
       ARTIFACT_REFERENCE.operationId,
       JSON.stringify(ARTIFACT_MANIFEST),
+      200,
+      true,
+      "https://example.com/final",
+      null,
+      null,
+      null,
     ]);
   });
 
@@ -142,9 +170,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
   });
 
   it("loads only the original database-bound expectation for recovery", async () => {
-    const store = new PostgresBudgetStore(
-      fakePrisma([[{ expected_manifest: ARTIFACT_MANIFEST }]]),
-    );
+    const store = new PostgresBudgetStore(fakePrisma([[unknownRow()]]));
     await expect(
       store.loadResultUnknownArtifact(
         {
@@ -156,7 +182,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
         },
         ARTIFACT_MANIFEST.authorityId,
       ),
-    ).resolves.toEqual(ARTIFACT_MANIFEST);
+    ).resolves.toEqual(ARTIFACT_SNAPSHOT);
   });
 
   it("rejects malformed recovery identity and mismatched durable bindings", async () => {
@@ -174,9 +200,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
     ).rejects.toMatchObject({ code: "GENERIC_OPERATION_ARTIFACT_INVALID" });
     expect(invalidPrisma.withWorkspace).not.toHaveBeenCalled();
 
-    const mismatchStore = new PostgresBudgetStore(
-      fakePrisma([[{ expected_manifest: ARTIFACT_MANIFEST }]]),
-    );
+    const mismatchStore = new PostgresBudgetStore(fakePrisma([[unknownRow()]]));
     await expect(
       mismatchStore.loadResultUnknownArtifact(
         reservation,
@@ -238,7 +262,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
           replay: false,
         },
         13,
-        ARTIFACT_MANIFEST,
+        ARTIFACT_SNAPSHOT,
       ),
     ).resolves.toEqual({
       chargedCents: 17,
@@ -247,13 +271,19 @@ describe("PostgresBudgetStore artifact recovery", () => {
       replay: false,
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v2",
+      "settle_tool_budget_artifact_manifest_v3",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
       ARTIFACT_REFERENCE.operationId,
       13n,
       JSON.stringify(ARTIFACT_MANIFEST),
+      200,
+      true,
+      "https://example.com/final",
+      null,
+      null,
+      null,
     ]);
   });
 
@@ -272,9 +302,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
         },
         13,
         {
-          ...ARTIFACT_MANIFEST,
-          body: "caller-controlled",
-        } as unknown as GenericOperationArtifactManifest,
+          manifest: {
+            ...ARTIFACT_MANIFEST,
+            body: "caller-controlled",
+          } as unknown as GenericOperationArtifactManifest,
+          expectedFacts: EXPECTED_FACTS,
+        },
       ),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
@@ -302,12 +335,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
     };
 
     await expect(
-      store.markResultUnknown(reservation, ARTIFACT_MANIFEST),
+      store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
     await expect(
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
+      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
@@ -341,8 +374,8 @@ describe("PostgresBudgetStore artifact recovery", () => {
     };
 
     const results = await Promise.allSettled([
-      store.markResultUnknown(reservation, ARTIFACT_MANIFEST),
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
+      store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
+      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
       store.loadResultUnknownArtifact(
         reservation,
         ARTIFACT_MANIFEST.authorityId,

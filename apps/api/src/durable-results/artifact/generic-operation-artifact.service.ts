@@ -6,6 +6,11 @@ import type {
   BudgetStore,
 } from '../../tools/budget-store';
 import { contentAddressedObjectKey } from './artifact-key';
+import {
+  parseArtifactExpectedFactsForResultSchema,
+  type ArtifactExpectedFacts,
+  type GenericOperationArtifactSnapshot,
+} from './artifact-expected-facts';
 import { parseArtifactReference } from './artifact-reference.schema';
 import type {
   GenericOperationArtifactBinding,
@@ -76,6 +81,8 @@ export interface PersistGenericOperationArtifactInput {
   readonly privacyClass: ArtifactPrivacyClass;
   readonly expiresAt: string;
   readonly actualCents: number;
+  /** Small closed facts captured from the same physical operation result. */
+  readonly expectedFacts?: unknown;
   readonly signal?: AbortSignal;
 }
 
@@ -96,6 +103,7 @@ export interface ReadVerifiedGenericOperationArtifactInput {
 
 export interface VerifiedGenericOperationArtifact {
   readonly manifest: GenericOperationArtifactManifest;
+  readonly expectedFacts: ArtifactExpectedFacts | undefined;
   readonly body: AsyncIterable<Uint8Array>;
 }
 
@@ -267,6 +275,19 @@ function buildManifest(
   );
 }
 
+function buildSnapshot(
+  manifest: GenericOperationArtifactManifest,
+  expectedFacts: unknown,
+): GenericOperationArtifactSnapshot {
+  return Object.freeze({
+    manifest,
+    expectedFacts: parseArtifactExpectedFactsForResultSchema(
+      manifest.resultSchema,
+      expectedFacts,
+    ),
+  });
+}
+
 export class GenericOperationArtifactService {
   private readonly createArtifactId: () => string;
   private readonly now: () => Date;
@@ -289,6 +310,10 @@ export class GenericOperationArtifactService {
     input: PersistGenericOperationArtifactInput,
   ): Promise<GenericOperationArtifactReference> {
     assertReservationBinding(input.reservation, input.authorityId);
+    const expectedFacts = parseArtifactExpectedFactsForResultSchema(
+      input.resultSchema,
+      input.expectedFacts,
+    );
     const artifactId = this.createArtifactId();
     if (!isCanonicalArtifactUuid(artifactId)) return invalid();
 
@@ -332,6 +357,7 @@ export class GenericOperationArtifactService {
       now.toISOString(),
       staged.sourceDigest,
     );
+    const snapshot = buildSnapshot(manifest, expectedFacts);
 
     let promoted: StoredArtifact;
     try {
@@ -340,7 +366,7 @@ export class GenericOperationArtifactService {
       await this.markUnknownOnAmbiguousWrite(
         error,
         input.reservation,
-        manifest,
+        snapshot,
       );
       throw error;
     }
@@ -359,7 +385,7 @@ export class GenericOperationArtifactService {
     await this.budgetStore.settleArtifactManifest(
       input.reservation,
       input.actualCents,
-      manifest,
+      snapshot,
     );
     await this.cleanup(staged.artifactId);
     return reference;
@@ -375,11 +401,12 @@ export class GenericOperationArtifactService {
     );
     if (loaded === null) return invalid();
     const expected = snapshotExpectedManifest(
-      loaded,
+      loaded.manifest,
       input.reservation,
       input.authorityId,
       true,
     );
+    const snapshot = buildSnapshot(expected, loaded.expectedFacts);
     const inspected = await this.store.inspect(expected.sha256, input.signal);
     if (!sameStoredArtifact(inspected, expected)) return invalid();
     await this.drainVerifiedBody(expected, input.signal);
@@ -388,7 +415,7 @@ export class GenericOperationArtifactService {
     await this.budgetStore.settleArtifactManifest(
       input.reservation,
       input.actualCents,
-      expected,
+      snapshot,
     );
     await this.cleanup(expected.artifactId);
     return reference;
@@ -399,28 +426,32 @@ export class GenericOperationArtifactService {
   ): Promise<VerifiedGenericOperationArtifact> {
     const reference = parseArtifactReference(input.reference);
     if (!isCanonicalArtifactUuid(input.authorityId)) return invalid();
-    const manifest = await this.repository.findExact({
+    const snapshot = await this.repository.findExact({
       scopeKind: input.scopeKind,
       workspaceId: input.workspaceId,
       authorityId: input.authorityId,
       reference,
     });
-    if (!manifest || Date.parse(manifest.expiresAt) <= this.now().getTime()) {
+    if (
+      !snapshot ||
+      Date.parse(snapshot.manifest.expiresAt) <= this.now().getTime()
+    ) {
       return invalid();
     }
     const inspected = await this.store.inspect(reference.sha256, input.signal);
-    if (!sameStoredArtifact(inspected, manifest)) return invalid();
+    if (!sameStoredArtifact(inspected, snapshot.manifest)) return invalid();
     const body = await this.store.read(reference.sha256, input.signal);
     return Object.freeze({
-      manifest,
-      body: this.verifiedBody(body, manifest, input.signal),
+      manifest: snapshot.manifest,
+      expectedFacts: snapshot.expectedFacts,
+      body: this.verifiedBody(body, snapshot.manifest, input.signal),
     });
   }
 
   private async markUnknownOnAmbiguousWrite(
     error: unknown,
     reservation: BudgetReservation,
-    expected?: GenericOperationArtifactManifest,
+    expected?: GenericOperationArtifactSnapshot,
   ): Promise<void> {
     if (
       error instanceof ArtifactStorageError &&
