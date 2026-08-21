@@ -1,13 +1,14 @@
 import { PrismaClient } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  assertPostgresJsonbEnvelopeByteLimit,
   TypedProjectionRegistry,
 } from './typed-projection.registry';
-import type {
-  TypedProjectionDefinition,
-  TypedProjectionEnvelope,
-} from './typed-projection.types';
+import {
+  isDurableResultStrategy,
+  type DurableResultStrategy,
+} from './durable-result-strategy';
+import type { TypedProjectionDefinition } from './typed-projection.types';
 
 interface TaxonomyCode {
   code: string;
@@ -37,7 +38,168 @@ function taxonomyDefinition(
   };
 }
 
+function numberListDefinition(
+  schema: 'icp-design/v1' | 'icp-query-plan/v1',
+  maxItems: number,
+  maximum: number,
+): TypedProjectionDefinition<{ values: number[] }, { values: number[] }> {
+  return {
+    schema,
+    jsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['values'],
+      properties: {
+        values: {
+          type: 'array',
+          maxItems,
+          items: { type: 'number', minimum: 0, maximum },
+        },
+      },
+    },
+    project: (raw) => ({ values: raw.values }),
+    restore: (projected) => ({ values: projected.values }),
+  };
+}
+
 describe('TypedProjectionRegistry', () => {
+  it('accepts only complete durable strategy declarations at runtime', () => {
+    const artifact = {
+      kind: 'artifact_reference',
+      schema: 'sanctions-download/v1',
+      maxBytes: 1,
+      mediaTypes: Object.freeze(['application/xml']),
+      privacyClass: 'PUBLIC_ORGANIZATION',
+      ttlSeconds: 1,
+    } as const satisfies DurableResultStrategy;
+
+    expect(isDurableResultStrategy(artifact)).toBe(true);
+    expect(isDurableResultStrategy({ kind: 'artifact_reference', schema: 'x/v1' })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, maxBytes: 0 })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, mediaTypes: [] })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, privacyClass: 'PUBLIC' })).toBe(false);
+    expect(isDurableResultStrategy({ kind: 'typed_projection', schema: 'unknown/v1' })).toBe(false);
+  });
+
+  it('rejects every schema escape hatch instead of only validating direct properties', () => {
+    const validLeaf = { type: 'string', maxLength: 20 };
+    const bypasses: readonly [string, Record<string, unknown>][] = [
+      ['oneOf branch with unbounded string', {
+        oneOf: [{
+          type: 'object', additionalProperties: false,
+          properties: { code: { type: 'string' }, provider: validLeaf },
+        }],
+      }],
+      ['prompt patternProperties', {
+        type: 'object', additionalProperties: false, properties: {},
+        patternProperties: { '^prompt$': validLeaf },
+      }],
+      ['$ref cycle', {
+        $ref: '#/$defs/cycle',
+        $defs: { cycle: { $ref: '#/$defs/cycle' } },
+      }],
+      ['conditional branch', {
+        type: 'object', additionalProperties: false, properties: {},
+        if: { type: 'object', additionalProperties: false, properties: {} },
+      }],
+    ];
+
+    for (const [_name, jsonSchema] of bypasses) {
+      expect(() => new TypedProjectionRegistry().register({
+        ...taxonomyDefinition(), jsonSchema,
+      })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
+    }
+  });
+
+  it.each(['api.key', 'credentialRef', 'systemPrompt', 'rawModelResponse'])(
+    'rejects a sensitive field-name bypass: %s',
+    (fieldName) => {
+      expect(() => new TypedProjectionRegistry().register({
+        ...taxonomyDefinition(),
+        jsonSchema: {
+          type: 'object', additionalProperties: false,
+          properties: { [fieldName]: { type: 'string', maxLength: 20 } },
+        },
+      })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
+    },
+  );
+
+  it('keeps its schema allowlist and frozen registrations private at runtime', () => {
+    const registry = new TypedProjectionRegistry();
+    expect(() => registry.register({
+      ...taxonomyDefinition(), schema: 'unknown/v1',
+    } as unknown as TypedProjectionDefinition<TaxonomyCode, TaxonomyCode>)).toThrow(
+      'TYPED_PROJECTION_SCHEMA_INVALID',
+    );
+    registry.register(taxonomyDefinition());
+    registry.freeze();
+
+    const invasive = registry as unknown as {
+      registrationsFrozen: boolean;
+      definitions: Map<string, unknown>;
+    };
+    invasive.registrationsFrozen = false;
+    invasive.definitions = new Map();
+
+    expect(() => registry.register(taxonomyDefinition('icp-design/v1'))).toThrow(
+      'DURABLE_RESULT_REGISTRY_FROZEN',
+    );
+    expect(registry.project('taxonomy-code/v1', {
+      code: 'A', provider: 'catalog',
+    })).toMatchObject({ schema: 'taxonomy-code/v1' });
+  });
+
+  it('rejects non-JSON, non-canonical, accessor, and trap-backed projected values', () => {
+    const cases: readonly [string, () => unknown][] = [
+      ['NUL string', () => ({ code: 'A\0', provider: 'catalog' })],
+      ['unpaired surrogate', () => ({
+        code: String.fromCharCode(0xd800), provider: 'catalog',
+      })],
+      ['non-NFC string', () => ({ code: 'e\u0301', provider: 'catalog' })],
+      ['accessor', () => Object.defineProperties({}, {
+        code: { enumerable: true, get: () => 'A' },
+        provider: { enumerable: true, value: 'catalog' },
+      })],
+      ['non-enumerable property', () => {
+        const value = { code: 'A', provider: 'catalog' };
+        Object.defineProperty(value, 'hidden', { value: true });
+        return value;
+      }],
+      ['proxy trap', () => new Proxy(
+        { code: 'A', provider: 'catalog' },
+        { ownKeys: () => { throw new Error('trap'); } },
+      )],
+    ];
+
+    for (const [_name, produce] of cases) {
+      const registry = new TypedProjectionRegistry();
+      if (_name === 'unpaired surrogate') {
+        expect((produce() as { code: string }).code.charCodeAt(0)).toBe(0xd800);
+      }
+      registry.register({ ...taxonomyDefinition(), project: () => produce() as TaxonomyCode });
+      try {
+        registry.project('taxonomy-code/v1', {});
+      } catch (error) {
+        expect(error).toMatchObject({ message: 'TYPED_PROJECTION_INVALID' });
+        continue;
+      }
+      throw new Error(`expected ${_name} to be rejected`);
+    }
+
+    const numeric = new TypedProjectionRegistry();
+    numeric.register(numberListDefinition('icp-design/v1', 1, 1));
+    expect(() => numeric.project('icp-design/v1', { values: [-0] })).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const arrayWithExtraProperty = [1];
+    Object.assign(arrayWithExtraProperty, { extra: true });
+    const arrays = new TypedProjectionRegistry();
+    arrays.register(numberListDefinition('icp-query-plan/v1', 2, 1));
+    expect(() => arrays.project('icp-query-plan/v1', {
+      values: arrayWithExtraProperty,
+    })).toThrow('TYPED_PROJECTION_INVALID');
+  });
   it('rejects a duplicate schema registration so one schema has one projector', () => {
     const registry = new TypedProjectionRegistry();
     registry.register(taxonomyDefinition());
@@ -275,10 +437,30 @@ describe('TypedProjectionRegistry', () => {
       provider: 'catalog',
     })).toThrow('TYPED_PROJECTION_TOO_LARGE');
   });
+
+  it('rejects a digest-valid stored envelope that is one byte over the application cap', () => {
+    const registry = new TypedProjectionRegistry();
+    registry.register(taxonomyDefinition('icp-design/v1', 122_689));
+    const data = { code: 'x'.repeat(122_689), provider: 'catalog' };
+    const base = JSON.stringify({
+      data,
+      schema: 'icp-design/v1',
+      schemaVersion: 'generic-operation-projection/v2',
+    });
+    const stored = {
+      schemaVersion: 'generic-operation-projection/v2' as const,
+      schema: 'icp-design/v1' as const,
+      data,
+      digest: createHash('sha256').update(base).digest('hex'),
+    };
+
+    expect(Buffer.byteLength(JSON.stringify(stored), 'utf8')).toBe(120 * 1024 + 1);
+    expect(() => registry.restore(stored)).toThrow('TYPED_PROJECTION_TOO_LARGE');
+  });
 });
 
-const APP_DATABASE_URL = process.env.APP_DATABASE_URL;
-const databaseDescribe = APP_DATABASE_URL == null ? describe.skip : describe;
+const APP_DATABASE_URL = process.env.APP_DATABASE_URL?.trim();
+const databaseDescribe = APP_DATABASE_URL ? describe : describe.skip;
 
 databaseDescribe('TypedProjectionRegistry PostgreSQL JSONB byte gate', () => {
   let database: PrismaClient;
@@ -289,29 +471,20 @@ databaseDescribe('TypedProjectionRegistry PostgreSQL JSONB byte gate', () => {
     });
     await database.$connect();
   });
-  afterAll(async () => database.$disconnect());
+  afterAll(async () => database?.$disconnect());
 
-  it('accepts an application-valid envelope and rejects JSONB text over 128 KiB', async () => {
+  it('accepts an application-valid envelope and rejects JSONB expansion over 128 KiB', async () => {
     const registry = new TypedProjectionRegistry();
-    registry.register(taxonomyDefinition());
-    const projected = registry.project('taxonomy-code/v1', {
-      code: 'A',
-      provider: 'catalog',
+    registry.register(numberListDefinition('icp-design/v1', 1_500, 1e100));
+    const projected = registry.project('icp-design/v1', {
+      values: Array.from({ length: 1_500 }, () => 1e100),
     });
 
     await expect(
-      assertPostgresJsonbEnvelopeByteLimit(database, projected),
-    ).resolves.toBeLessThanOrEqual(128 * 1024);
-
-    const oversizedStoredEnvelope = Object.freeze({
-      schemaVersion: 'generic-operation-projection/v2' as const,
-      schema: 'icp-query-plan/v1' as const,
-      data: Object.freeze({ value: 'x'.repeat(130_897) }),
-      digest: '0'.repeat(64),
-    }) as TypedProjectionEnvelope;
-
-    await expect(
-      assertPostgresJsonbEnvelopeByteLimit(database, oversizedStoredEnvelope),
+      registry.assertPostgresJsonbEnvelopeByteLimit(database, projected),
     ).rejects.toThrow('TYPED_PROJECTION_POSTGRES_TOO_LARGE');
+    expect(Buffer.byteLength(JSON.stringify(projected), 'utf8')).toBeLessThanOrEqual(
+      120 * 1024,
+    );
   });
 });

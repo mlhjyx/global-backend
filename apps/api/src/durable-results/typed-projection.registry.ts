@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import Ajv, { type ValidateFunction } from 'ajv';
-import type { TypedProjectionSchema } from './durable-result-strategy';
+import Ajv, { type AnySchema, type ValidateFunction } from 'ajv';
+import {
+  isTypedProjectionSchema,
+  type TypedProjectionSchema,
+} from './durable-result-strategy';
 import {
   TYPED_PROJECTION_ENVELOPE_VERSION,
   type PostgresJsonbByteExecutor,
@@ -10,21 +13,16 @@ import {
 
 const APPLICATION_MAX_BYTES = 120 * 1024;
 const POSTGRES_JSONB_MAX_BYTES = 128 * 1024;
+const MAX_JSON_DEPTH = 32;
+const MAX_JSON_ARRAY_LENGTH = 65_536;
 const DIGEST = /^[0-9a-f]{64}$/;
-const PROHIBITED_FIELD_NAMES = new Set([
-  'authorization',
-  'attributes',
-  'apikey',
-  'credential',
-  'credentials',
-  'cookie',
-  'headers',
-  'password',
-  'prompt',
-  'rawresponse',
-  'responsebody',
-  'secret',
-  'token',
+const SCHEMA_KEYS = new Set([
+  '$defs', 'additionalProperties', 'allOf', 'anyOf', 'const', 'enum',
+  'items', 'maxItems', 'maxLength', 'maximum', 'minItems', 'minLength',
+  'minimum', 'oneOf', 'properties', 'required', 'type',
+]);
+const JSON_TYPES = new Set([
+  'array', 'boolean', 'integer', 'null', 'number', 'object', 'string',
 ]);
 
 interface RegisteredDefinition {
@@ -33,114 +31,217 @@ interface RegisteredDefinition {
   readonly restore: (projected: unknown) => unknown;
 }
 
+type StrictJsonArray = readonly StrictJson[];
+
+interface StrictJsonObject {
+  readonly [key: string]: StrictJson;
+}
+
+type StrictJson = null | boolean | number | string | StrictJsonArray | StrictJsonObject;
+
 function invalid(): never {
   throw new Error('TYPED_PROJECTION_INVALID');
 }
 
-function plainRecord(value: unknown): value is Record<string, unknown> {
+function schemaInvalid(): never {
+  throw new Error('TYPED_PROJECTION_SCHEMA_INVALID');
+}
+
+function tooLarge(): never {
+  throw new Error('TYPED_PROJECTION_TOO_LARGE');
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(
-    value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      Object.getPrototypeOf(value) === Object.prototype,
+    value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype,
   );
 }
 
-function canonicalize(value: unknown): unknown {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
-    return value;
+function assertUnicode(value: string): void {
+  if (value.includes('\0') || value !== value.normalize('NFC')) invalid();
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) invalid();
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      invalid();
+    }
   }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) invalid();
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map(canonicalize));
-  }
-  if (!plainRecord(value)) invalid();
-
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    const entry = value[key];
-    if (entry === undefined) invalid();
-    result[key] = canonicalize(entry);
-  }
-  return Object.freeze(result);
 }
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value));
+function strictJson(value: unknown, seen = new WeakSet<object>(), depth = 0): StrictJson {
+  try {
+    if (depth > MAX_JSON_DEPTH) invalid();
+    if (value === null || typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      assertUnicode(value);
+      return value;
+    }
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || Object.is(value, -0)) invalid();
+      return value;
+    }
+    if (
+      typeof value === 'undefined' || typeof value === 'bigint' ||
+      typeof value === 'function' || typeof value === 'symbol' ||
+      !value || typeof value !== 'object'
+    ) {
+      invalid();
+    }
+    if (seen.has(value)) invalid();
+    seen.add(value);
+    try {
+      if (Array.isArray(value)) {
+        if (Object.getPrototypeOf(value) !== Array.prototype || value.length > MAX_JSON_ARRAY_LENGTH) {
+          invalid();
+        }
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        if (Reflect.ownKeys(value).some((key) => typeof key === 'symbol')) invalid();
+        for (const [key, descriptor] of Object.entries(descriptors)) {
+          if (key === 'length') continue;
+          if (!/^(0|[1-9][0-9]*)$/.test(key) || !descriptor.enumerable || !('value' in descriptor)) {
+            invalid();
+          }
+        }
+        const result: StrictJson[] = [];
+        for (let index = 0; index < value.length; index += 1) {
+          const descriptor = descriptors[String(index)];
+          if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) invalid();
+          result.push(strictJson(descriptor.value, seen, depth + 1));
+        }
+        return Object.freeze(result);
+      }
+      if (Object.getPrototypeOf(value) !== Object.prototype) invalid();
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      const keys = Reflect.ownKeys(value);
+      if (keys.some((key) => typeof key !== 'string')) invalid();
+      const result: Record<string, StrictJson> = {};
+      for (const key of (keys as string[]).sort()) {
+        assertUnicode(key);
+        const descriptor = descriptors[key];
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) invalid();
+        result[key] = strictJson(descriptor.value, seen, depth + 1);
+      }
+      return Object.freeze(result);
+    } finally {
+      seen.delete(value);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'TYPED_PROJECTION_INVALID') throw error;
+    invalid();
+  }
 }
 
-function assertClosedBoundedSchema(
-  value: unknown,
-  path = '$',
-): void {
-  if (!plainRecord(value)) {
-    throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}`);
+function canonicalJson(value: StrictJson): string {
+  return JSON.stringify(value);
+}
+
+function fieldNameTokens(value: string): readonly string[] {
+  const separated = value.normalize('NFKC')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase();
+  return separated.split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function hasSequence(tokens: readonly string[], sequence: readonly string[]): boolean {
+  return sequence.every((token, index) => tokens[index] === token) ||
+    tokens.some((_, offset) => sequence.every((token, index) => tokens[offset + index] === token));
+}
+
+function isProhibitedFieldName(value: string): boolean {
+  const tokens = fieldNameTokens(value);
+  return (
+    tokens.includes('prompt') || tokens.includes('authorization') ||
+    tokens.includes('header') || tokens.includes('headers') ||
+    tokens.includes('password') || tokens.includes('secret') ||
+    tokens.includes('cookie') || hasSequence(tokens, ['api', 'key']) ||
+    hasSequence(tokens, ['access', 'token']) ||
+    hasSequence(tokens, ['credential', 'ref']) ||
+    hasSequence(tokens, ['response', 'body']) ||
+    hasSequence(tokens, ['raw', 'response']) ||
+    hasSequence(tokens, ['raw', 'model', 'response'])
+  );
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function schemaRecord(value: StrictJson): Readonly<Record<string, StrictJson>> {
+  if (!isPlainRecord(value)) schemaInvalid();
+  return value;
+}
+
+function schemaTypes(node: Readonly<Record<string, StrictJson>>): readonly string[] {
+  const type = node.type;
+  const types = typeof type === 'string' ? [type] : Array.isArray(type) ? type : undefined;
+  if (!types || types.length === 0 || !types.every((entry) => typeof entry === 'string' && JSON_TYPES.has(entry))) {
+    schemaInvalid();
   }
+  return types;
+}
 
-  const type = value.type;
-  const types = Array.isArray(type) ? type : [type];
-  const hasType = (expected: string) => types.includes(expected);
-  const properties = value.properties;
-
-  if (hasType('object') || properties !== undefined) {
-    if (value.additionalProperties !== false || !plainRecord(properties)) {
-      throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}`);
+function assertSchema(value: StrictJson): void {
+  const node = schemaRecord(value);
+  if (Object.keys(node).some((key) => !SCHEMA_KEYS.has(key))) schemaInvalid();
+  const combinations = ['oneOf', 'anyOf', 'allOf'] as const;
+  for (const key of combinations) {
+    if (node[key] === undefined) continue;
+    if (!Array.isArray(node[key]) || node[key].length === 0) schemaInvalid();
+    for (const branch of node[key]) assertSchema(branch);
+  }
+  if (node.$defs !== undefined) {
+    const definitions = schemaRecord(node.$defs);
+    for (const definition of Object.values(definitions)) assertSchema(definition);
+  }
+  if (node.type === undefined) {
+    if (!combinations.some((key) => node[key] !== undefined)) schemaInvalid();
+    return;
+  }
+  const types = schemaTypes(node);
+  const has = (type: string) => types.includes(type);
+  if (has('object')) {
+    if (node.additionalProperties !== false || !isPlainRecord(node.properties)) schemaInvalid();
+    const properties = schemaRecord(node.properties);
+    if (node.required !== undefined) {
+      if (!Array.isArray(node.required) || !node.required.every((key) => typeof key === 'string')) schemaInvalid();
+      const required = node.required as readonly string[];
+      if (new Set(required).size !== required.length || required.some((key) => !(key in properties))) schemaInvalid();
     }
     for (const [key, property] of Object.entries(properties)) {
-      if (PROHIBITED_FIELD_NAMES.has(key.toLowerCase().replace(/[_-]/g, ''))) {
-        throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}.${key}`);
-      }
-      assertClosedBoundedSchema(property, `${path}.${key}`);
+      if (isProhibitedFieldName(key)) schemaInvalid();
+      assertSchema(property);
     }
+  } else if (node.additionalProperties !== undefined || node.properties !== undefined || node.required !== undefined) {
+    schemaInvalid();
   }
-
-  if (hasType('string') && !Number.isSafeInteger(value.maxLength)) {
-    throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}`);
+  if (has('string') && !isNonNegativeSafeInteger(node.maxLength)) schemaInvalid();
+  if (has('array')) {
+    if (!isNonNegativeSafeInteger(node.maxItems) || node.items === undefined) schemaInvalid();
+    assertSchema(node.items);
+  } else if (node.maxItems !== undefined || node.items !== undefined) {
+    schemaInvalid();
   }
-  if (
-    hasType('array') &&
-    (!Number.isSafeInteger(value.maxItems) || value.items === undefined)
-  ) {
-    throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}`);
-  }
-  if (hasType('array')) {
-    assertClosedBoundedSchema(value.items, `${path}[]`);
-  }
-  if (
-    (hasType('number') || hasType('integer')) &&
-    (!Number.isFinite(value.minimum) || !Number.isFinite(value.maximum))
-  ) {
-    throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}`);
-  }
-
-  for (const [key, child] of Object.entries(value)) {
-    if (
-      key === 'properties' ||
-      key === 'items' ||
-      key === 'additionalProperties' ||
-      key === 'type'
-    ) {
-      continue;
+  if (has('number') || has('integer')) {
+    if (typeof node.minimum !== 'number' || typeof node.maximum !== 'number' ||
+      !Number.isFinite(node.minimum) || !Number.isFinite(node.maximum) || node.minimum > node.maximum) {
+      schemaInvalid();
     }
-    if (key === '$defs' || key === 'definitions') {
-      if (!plainRecord(child)) {
-        throw new Error(`TYPED_PROJECTION_SCHEMA_INVALID: ${path}.${key}`);
-      }
-      for (const [definitionName, definition] of Object.entries(child)) {
-        assertClosedBoundedSchema(definition, `${path}.${key}.${definitionName}`);
-      }
-    }
+  } else if (node.minimum !== undefined || node.maximum !== undefined) {
+    schemaInvalid();
   }
+  if (node.enum !== undefined && (!Array.isArray(node.enum) || node.enum.length === 0)) schemaInvalid();
 }
 
-function envelopeBase(schema: TypedProjectionSchema, data: unknown) {
+function envelopeBase(schema: TypedProjectionSchema, data: StrictJson) {
   return Object.freeze({
-    schemaVersion: TYPED_PROJECTION_ENVELOPE_VERSION,
+    data,
     schema,
-    data: canonicalize(data),
+    schemaVersion: TYPED_PROJECTION_ENVELOPE_VERSION,
   });
 }
 
@@ -149,125 +250,109 @@ function envelopeDigest(base: ReturnType<typeof envelopeBase>): string {
 }
 
 function projectionSize(envelope: TypedProjectionEnvelope): number {
-  return Buffer.byteLength(canonicalJson(envelope), 'utf8');
+  return Buffer.byteLength(canonicalJson(strictJson(envelope)), 'utf8');
 }
 
-/**
- * Registry construction is additive.  Call freeze after bootstrap to make
- * the declaration set immutable before any durable result is processed.
- */
 export class TypedProjectionRegistry {
-  private readonly definitions = new Map<TypedProjectionSchema, RegisteredDefinition>();
-  private registrationsFrozen = false;
+  #definitions = new Map<TypedProjectionSchema, RegisteredDefinition>();
+  #registrationsFrozen = false;
 
-  register<Raw, Projected>(
-    definition: TypedProjectionDefinition<Raw, Projected>,
-  ): this {
-    if (this.registrationsFrozen) {
-      throw new Error('DURABLE_RESULT_REGISTRY_FROZEN');
-    }
-    if (this.definitions.has(definition.schema)) {
-      throw new Error('DURABLE_RESULT_SCHEMA_DUPLICATE');
-    }
-    if (
-      typeof definition.project !== 'function' ||
-      typeof definition.restore !== 'function'
-    ) {
-      throw new Error('TYPED_PROJECTION_SCHEMA_INVALID');
-    }
-
-    assertClosedBoundedSchema(definition.jsonSchema);
-    let validate: ValidateFunction;
+  register<Raw, Projected>(definition: TypedProjectionDefinition<Raw, Projected>): this {
+    if (this.#registrationsFrozen) throw new Error('DURABLE_RESULT_REGISTRY_FROZEN');
     try {
-      validate = new Ajv({ allErrors: true, strict: true }).compile(
-        definition.jsonSchema,
-      );
-    } catch {
-      throw new Error('TYPED_PROJECTION_SCHEMA_INVALID');
-    }
-    this.definitions.set(
-      definition.schema,
-      Object.freeze({
+      if (!isTypedProjectionSchema(definition.schema)) schemaInvalid();
+      if (this.#definitions.has(definition.schema)) throw new Error('DURABLE_RESULT_SCHEMA_DUPLICATE');
+      if (typeof definition.project !== 'function' || typeof definition.restore !== 'function') schemaInvalid();
+      const schema = strictJson(definition.jsonSchema);
+      assertSchema(schema);
+      const validate = new Ajv({ allErrors: true, strict: true }).compile(schema as AnySchema);
+      this.#definitions.set(definition.schema, Object.freeze({
         validate,
         project: definition.project as (raw: unknown) => unknown,
         restore: definition.restore as (projected: unknown) => unknown,
-      }),
-    );
-    return this;
+      }));
+      return this;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'DURABLE_RESULT_SCHEMA_DUPLICATE') throw error;
+      schemaInvalid();
+    }
   }
 
   freeze(): void {
-    this.registrationsFrozen = true;
+    this.#registrationsFrozen = true;
   }
 
   project(schema: TypedProjectionSchema, raw: unknown): TypedProjectionEnvelope {
-    const definition = this.definitions.get(schema);
-    if (!definition) invalid();
-
-    let data: unknown;
     try {
-      data = definition.project(raw);
-    } catch {
+      if (!isTypedProjectionSchema(schema)) invalid();
+      const definition = this.#definitions.get(schema);
+      if (!definition) invalid();
+      const data = strictJson(definition.project(raw));
+      if (!definition.validate(data)) invalid();
+      const base = envelopeBase(schema, data);
+      const envelope = Object.freeze({ ...base, digest: envelopeDigest(base) });
+      if (projectionSize(envelope) > APPLICATION_MAX_BYTES) tooLarge();
+      return envelope;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'TYPED_PROJECTION_TOO_LARGE') throw error;
       invalid();
     }
-    if (!definition.validate(data)) invalid();
+  }
 
-    const base = envelopeBase(schema, data);
-    const envelope = Object.freeze({
-      ...base,
-      digest: envelopeDigest(base),
-    });
-    if (projectionSize(envelope) > APPLICATION_MAX_BYTES) {
-      throw new Error('TYPED_PROJECTION_TOO_LARGE');
+  #validatedEnvelope(envelope: unknown): TypedProjectionEnvelope {
+    try {
+      const stored = schemaRecord(strictJson(envelope));
+      if (
+        Object.keys(stored).sort().join(',') !== 'data,digest,schema,schemaVersion' ||
+        stored.schemaVersion !== TYPED_PROJECTION_ENVELOPE_VERSION ||
+        !isTypedProjectionSchema(stored.schema) || typeof stored.digest !== 'string' ||
+        !DIGEST.test(stored.digest)
+      ) invalid();
+      const definition = this.#definitions.get(stored.schema);
+      if (!definition || !definition.validate(stored.data)) invalid();
+      const base = envelopeBase(stored.schema, stored.data);
+      const validated = Object.freeze({ ...base, digest: stored.digest });
+      if (envelopeDigest(base) !== validated.digest) invalid();
+      if (projectionSize(validated) > APPLICATION_MAX_BYTES) tooLarge();
+      return validated;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'TYPED_PROJECTION_TOO_LARGE') throw error;
+      invalid();
     }
-    return envelope;
   }
 
   restore(envelope: unknown): unknown {
-    if (!plainRecord(envelope)) invalid();
-    if (
-      Object.keys(envelope).sort().join(',') !== 'data,digest,schema,schemaVersion' ||
-      envelope.schemaVersion !== TYPED_PROJECTION_ENVELOPE_VERSION ||
-      typeof envelope.schema !== 'string' ||
-      typeof envelope.digest !== 'string' ||
-      !DIGEST.test(envelope.digest)
-    ) {
-      invalid();
-    }
-
-    const schema = envelope.schema as TypedProjectionSchema;
-    const definition = this.definitions.get(schema);
+    const validated = this.#validatedEnvelope(envelope);
+    const definition = this.#definitions.get(validated.schema);
     if (!definition) invalid();
-    if (!definition.validate(envelope.data)) invalid();
-
-    const base = envelopeBase(schema, envelope.data);
-    if (envelopeDigest(base) !== envelope.digest) invalid();
-    const canonicalData = base.data;
     try {
-      return definition.restore(canonicalData);
+      return definition.restore(validated.data);
     } catch {
       invalid();
     }
   }
-}
 
-/**
- * Integration-only physical byte gate.  It does no persistence and callers
- * must pass a result already projected by this registry.
- */
-export async function assertPostgresJsonbEnvelopeByteLimit(
-  executor: PostgresJsonbByteExecutor,
-  envelope: TypedProjectionEnvelope,
-): Promise<number> {
-  const rows = await executor.$queryRaw<readonly { byteLength: number | bigint }[]>`
-    SELECT octet_length(${JSON.stringify(envelope)}::jsonb::text) AS "byteLength"
-  `;
-  const byteLength = rows[0]?.byteLength;
-  if (
-    (typeof byteLength !== 'number' && typeof byteLength !== 'bigint') ||
-    byteLength > POSTGRES_JSONB_MAX_BYTES
-  ) {
-    throw new Error('TYPED_PROJECTION_POSTGRES_TOO_LARGE');
+  async assertPostgresJsonbEnvelopeByteLimit(
+    executor: PostgresJsonbByteExecutor,
+    envelope: unknown,
+  ): Promise<number> {
+    const validated = this.#validatedEnvelope(envelope);
+    try {
+      const rows = await executor.$queryRaw<readonly { byteLength: number | bigint }[]>`
+        SELECT octet_length(${canonicalJson(strictJson(validated))}::jsonb::text) AS "byteLength"
+      `;
+      const byteLength = rows[0]?.byteLength;
+      const numeric = typeof byteLength === 'bigint' ? Number(byteLength) : byteLength;
+      if (
+        !Array.isArray(rows) || rows.length !== 1 || !Number.isSafeInteger(numeric) ||
+        numeric < 0 || numeric > POSTGRES_JSONB_MAX_BYTES
+      ) {
+        throw new Error('TYPED_PROJECTION_POSTGRES_TOO_LARGE');
+      }
+      return numeric;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'TYPED_PROJECTION_POSTGRES_TOO_LARGE') throw error;
+      invalid();
+    }
   }
-  return Number(byteLength);
 }
