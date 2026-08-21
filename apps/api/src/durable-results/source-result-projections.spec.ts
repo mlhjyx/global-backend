@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { map510k, mapRegistration } from '../adapters/openfda-api';
 import {
   openFdaSearchTool,
   samgovSearchTool,
@@ -67,11 +68,13 @@ function resignEnvelope<T extends {
   };
 }
 
-function deviceFacts(count = 64): JsonRecord {
-  return Object.fromEntries(Array.from({ length: count }, (_, index) => [
-    `fact${String(index).padStart(2, '0')}`,
-    index === 0 ? 'v'.repeat(1000) : `value-${index}`,
-  ]));
+function deviceFacts(): JsonRecord {
+  return {
+    deviceName: 'v'.repeat(1000),
+    deviceClass: '2',
+    medicalSpecialtyDescription: 'Cardiovascular',
+    regulationNumber: '870.0000',
+  };
 }
 
 const TED_RAW: RawToolResult = {
@@ -240,6 +243,17 @@ function bounds(value: unknown, path = '$', result: JsonRecord = {}): JsonRecord
   return result;
 }
 
+function expectSchemaDeeplyFrozen(value: unknown, seen = new Set<object>()): void {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  expect(Object.isFrozen(value)).toBe(true);
+  for (const child of Array.isArray(value)
+    ? value
+    : Object.values(value as JsonRecord)) {
+    expectSchemaDeeplyFrozen(child, seen);
+  }
+}
+
 const COMMON_RESULT_BOUNDS = {
   '$.costCents.minimum': 0,
   '$.costCents.maximum': 1_000_000_000,
@@ -290,6 +304,56 @@ describe('closed source Tool result projections', () => {
         );
       }
     }
+  });
+
+  it('deep-freezes every exported definition and every nested JSON Schema object/array', () => {
+    for (const definition of SOURCE_RESULT_PROJECTION_DEFINITIONS) {
+      expect(Object.isFrozen(definition)).toBe(true);
+      expectSchemaDeeplyFrozen(definition.jsonSchema);
+    }
+  });
+
+  it('prevents schema/project/restore mutation without changing later registration behavior', () => {
+    const definition = SOURCE_RESULT_PROJECTION_DEFINITIONS[1];
+    const jsonSchema = definition.jsonSchema as JsonRecord;
+    const rootProperties = jsonSchema.properties as JsonRecord;
+    const dataSchema = rootProperties.data as JsonRecord;
+    const dataProperties = dataSchema.properties as JsonRecord;
+    const establishments = dataProperties.establishments as JsonRecord;
+    const required = jsonSchema.required as unknown[];
+    const originalProject = definition.project;
+    const originalRestore = definition.restore;
+    const originalSchema = definition.schema;
+    const originalMaxItems = establishments.maxItems;
+    const originalRequired = required[0];
+    const outcomes: boolean[] = [];
+
+    const attempt = (
+      target: object,
+      key: PropertyKey,
+      replacement: unknown,
+      original: unknown,
+    ) => {
+      const changed = Reflect.set(target, key, replacement);
+      outcomes.push(changed);
+      if (changed) Reflect.set(target, key, original);
+    };
+    attempt(definition as object, 'schema', 'ted-search/v1', originalSchema);
+    attempt(definition as object, 'project', () => ({ tampered: true }), originalProject);
+    attempt(definition as object, 'restore', () => ({ tampered: true }), originalRestore);
+    attempt(establishments, 'maxItems', 999, originalMaxItems);
+    attempt(required, '0', 'tampered', originalRequired);
+
+    expect(outcomes).toEqual([false, false, false, false, false]);
+    expect(definition.schema).toBe(originalSchema);
+    expect(definition.project).toBe(originalProject);
+    expect(definition.restore).toBe(originalRestore);
+    expect(establishments.maxItems).toBe(originalMaxItems);
+    expect(required[0]).toBe(originalRequired);
+
+    const registry = registerSourceResultProjections(new TypedProjectionRegistry());
+    expect(registry.restore(registry.project('openfda-search/v1', OPENFDA_RAW)))
+      .toEqual(OPENFDA_RAW);
   });
 
   it.each(REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES)(
@@ -456,6 +520,27 @@ describe('closed source Tool result projections', () => {
     });
   });
 
+  it('locks both OpenFDA fact-entry key schemas to the exact authoritative four-key allowlist', () => {
+    const root = SOURCE_RESULT_PROJECTION_DEFINITIONS[1].jsonSchema as JsonRecord;
+    const data = ((root.properties as JsonRecord).data as JsonRecord);
+    const properties = data.properties as JsonRecord;
+    const entryKeyEnum = (collection: 'establishments' | 'clearances') => {
+      const array = properties[collection] as JsonRecord;
+      const item = array.items as JsonRecord;
+      const factEntries = (item.properties as JsonRecord).factEntries as JsonRecord;
+      const entry = factEntries.items as JsonRecord;
+      const key = (entry.properties as JsonRecord).key as JsonRecord;
+      return key.enum;
+    };
+    const expected = [
+      'deviceName', 'deviceClass', 'medicalSpecialtyDescription', 'regulationNumber',
+    ];
+    expect(entryKeyEnum('establishments')).toEqual(expected);
+    expect(entryKeyEnum('clearances')).toEqual(expected);
+    expect(Object.isFrozen(entryKeyEnum('establishments'))).toBe(true);
+    expect(Object.isFrozen(entryKeyEnum('clearances'))).toBe(true);
+  });
+
   it('locks every SAM and SMTP schema bound exactly', () => {
     expect(bounds(SOURCE_RESULT_PROJECTION_DEFINITIONS[2].jsonSchema)).toEqual({
       ...COMMON_RESULT_BOUNDS,
@@ -504,9 +589,6 @@ describe('closed source Tool result projections', () => {
     }],
     ['OpenFDA nested list maxItems + 1', 'openfda.search', OPENFDA_RAW, (raw: RawToolResult) => {
       ((raw.data.establishments as JsonRecord[])[0].productCodes as string[]).push('LLZ');
-    }],
-    ['OpenFDA factEntries maxItems + 1', 'openfda.search', OPENFDA_RAW, (raw: RawToolResult) => {
-      (raw.data.establishments as JsonRecord[])[0].deviceFacts = deviceFacts(65);
     }],
     ['OpenFDA fact key maxLength + 1', 'openfda.search', OPENFDA_RAW, (raw: RawToolResult) => {
       (raw.data.establishments as JsonRecord[])[0].deviceFacts = { ['k'.repeat(121)]: 'value' };
@@ -611,12 +693,17 @@ describe('closed source Tool result projections', () => {
     const registry = registerSourceResultProjections(new TypedProjectionRegistry());
     const raw = cloneRaw(OPENFDA_RAW);
     (raw.data.establishments as JsonRecord[])[0].deviceFacts = {
-      zeta: 'z', alpha: 'a', middle: 'm',
+      regulationNumber: '870.0000',
+      deviceName: 'Pump',
+      medicalSpecialtyDescription: 'Cardiovascular',
+      deviceClass: '2',
     };
     const envelope = registry.project('openfda-search/v1', raw);
     const entries = (((envelope.data as JsonRecord).data as JsonRecord)
       .establishments as JsonRecord[])[0].factEntries as JsonRecord[];
-    expect(entries.map((entry) => entry.key)).toEqual(['alpha', 'middle', 'zeta']);
+    expect(entries.map((entry) => entry.key)).toEqual([
+      'deviceClass', 'deviceName', 'medicalSpecialtyDescription', 'regulationNumber',
+    ]);
 
     const duplicate = structuredClone(envelope) as typeof envelope;
     const duplicateEntries = (((duplicate.data as JsonRecord).data as JsonRecord)
@@ -633,6 +720,88 @@ describe('closed source Tool result projections', () => {
       outOfOrderEntries[1], outOfOrderEntries[0],
     ];
     expect(() => registry.restore(resignEnvelope(outOfOrder))).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
+  it('keeps the OpenFDA fact-entry schema at 64 but rejects a digest-valid max+1 array', () => {
+    const registry = registerSourceResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('openfda-search/v1', OPENFDA_RAW);
+    const tampered = structuredClone(envelope) as typeof envelope;
+    const establishment = ((((tampered.data as JsonRecord).data as JsonRecord)
+      .establishments as JsonRecord[])[0]);
+    establishment.factEntries = Array.from({ length: 65 }, () => ({
+      key: 'deviceName', value: 'Pump',
+    }));
+    expect(() => registry.restore(resignEnvelope(tampered))).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
+  it('accepts actual adapter partial deviceFacts and omits exactly-undefined keys', () => {
+    const establishment = mapRegistration({
+      registration: {
+        name: 'Pump Inc', registration_number: 'REG-1', fei_number: 'FEI-1',
+        iso_country_code: 'US', initial_importer_flag: 'N',
+      },
+      establishment_type: ['Manufacturer'],
+      products: [{
+        product_code: 'LLZ', owner_operator_number: 'OO-1',
+        openfda: { device_name: ['Pump'] },
+      }],
+    }, ['LLZ']);
+    const clearance = map510k({
+      k_number: 'K123456', applicant: 'Pump Inc', country_code: 'US',
+      product_code: 'LLZ', decision_date: '20260820', decision_code: 'SESE',
+      device_name: 'Pump', openfda: { device_name: ['Pump'] },
+    });
+    expect(establishment).not.toBeNull();
+    expect(clearance).not.toBeNull();
+    expect(Object.hasOwn(establishment!.deviceFacts!, 'deviceClass')).toBe(true);
+    expect(establishment!.deviceFacts!.deviceClass).toBeUndefined();
+    expect(Object.hasOwn(clearance!.deviceFacts!, 'regulationNumber')).toBe(true);
+    expect(clearance!.deviceFacts!.regulationNumber).toBeUndefined();
+
+    const replay = openFdaSearchTool.durableReplayResult!({
+      data: { establishments: [establishment!], clearances: [clearance!] },
+      costCents: 0,
+    });
+    const registry = registerSourceResultProjections(new TypedProjectionRegistry());
+    const restored = registry.restore(
+      registry.project('openfda-search/v1', replay),
+    ) as RawToolResult;
+    expect(restored).toEqual(jsonRoundTrip(replay));
+    const restoredEstablishment = (restored.data.establishments as JsonRecord[])[0];
+    const restoredClearance = (restored.data.clearances as JsonRecord[])[0];
+    expect(restoredEstablishment.deviceFacts).toEqual({ deviceName: 'Pump' });
+    expect(restoredClearance.deviceFacts).toEqual({ deviceName: 'Pump' });
+    expect(Object.hasOwn(restoredEstablishment.deviceFacts as object, 'deviceClass')).toBe(false);
+    expect(Object.hasOwn(restoredClearance.deviceFacts as object, 'regulationNumber')).toBe(false);
+  });
+
+  it.each([
+    'primaryContactEmail',
+    'responseBodySnippet',
+    'rawResponseText',
+    'apiCredentialValue',
+    'systemPromptText',
+  ])('rejects non-authoritative OpenFDA fact key %s in project and digest-valid restore', (key) => {
+    const registry = registerSourceResultProjections(new TypedProjectionRegistry());
+    const raw = cloneRaw(OPENFDA_RAW);
+    (raw.data.establishments as JsonRecord[])[0].deviceFacts = {
+      deviceName: 'Pump',
+      [key]: 'forbidden',
+    };
+    expect(() => registry.project('openfda-search/v1', raw)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const envelope = registry.project('openfda-search/v1', OPENFDA_RAW);
+    const tampered = structuredClone(envelope) as typeof envelope;
+    const entries = (((tampered.data as JsonRecord).data as JsonRecord)
+      .establishments as JsonRecord[])[0].factEntries as JsonRecord[];
+    entries[0].key = key;
+    expect(() => registry.restore(resignEnvelope(tampered))).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
   });

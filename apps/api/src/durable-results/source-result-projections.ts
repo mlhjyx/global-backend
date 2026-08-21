@@ -47,6 +47,12 @@ const SAM_NOTICE_KEYS = [
   'noticeId', 'title', 'department', 'subTier', 'office', 'postedDateIso',
   'naicsCode', 'responseDeadlineIso', 'popCountry', 'link',
 ] as const;
+const OPENFDA_DEVICE_FACT_KEYS = Object.freeze([
+  'deviceName',
+  'deviceClass',
+  'medicalSpecialtyDescription',
+  'regulationNumber',
+] as const);
 const SMTP_REASON_CODES = Object.freeze([
   'ip_literal_not_allowed',
   'blocked_hostname',
@@ -55,13 +61,6 @@ const SMTP_REASON_CODES = Object.freeze([
   'non_global_address',
   'unsafe',
 ] as const);
-const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const PROHIBITED_DYNAMIC_KEYS = new Set([
-  'prompt', 'systemprompt', 'apikey', 'credential', 'credentials',
-  'credentialref', 'token', 'accesstoken', 'rawresponse', 'responsebody',
-  'authorization', 'header', 'headers', 'password', 'secret', 'cookie',
-  'attributes',
-]);
 
 function projectionInvalid(): never {
   throw new Error('SOURCE_RESULT_PROJECTION_INVALID');
@@ -139,12 +138,10 @@ function projectStringArray(value: unknown): unknown[] {
   return denseArray(value).map((entry) => entry);
 }
 
-function assertDynamicKey(key: string): void {
-  const compact = key.normalize('NFKC').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
-  if (
-    !key || key !== key.normalize('NFC') || RESERVED_DYNAMIC_KEYS.has(key) ||
-    PROHIBITED_DYNAMIC_KEYS.has(compact)
-  ) projectionInvalid();
+function assertOpenFdaFactKey(key: unknown): asserts key is string {
+  if (typeof key !== 'string' || !OPENFDA_DEVICE_FACT_KEYS.includes(
+    key as (typeof OPENFDA_DEVICE_FACT_KEYS)[number],
+  )) projectionInvalid();
 }
 
 function projectFactEntries(value: unknown): UnknownRecord[] {
@@ -157,13 +154,16 @@ function projectFactEntries(value: unknown): UnknownRecord[] {
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const keys = Reflect.ownKeys(value);
     if (keys.some((key) => typeof key !== 'string')) projectionInvalid();
-    return (keys as string[]).sort().map((key) => {
-      assertDynamicKey(key);
+    const entries: UnknownRecord[] = [];
+    for (const key of (keys as string[]).sort()) {
+      assertOpenFdaFactKey(key);
       const descriptor = descriptors[key];
-      if (!descriptor?.enumerable || !('value' in descriptor) ||
-        typeof descriptor.value !== 'string') projectionInvalid();
-      return { key, value: descriptor.value };
-    });
+      if (!descriptor?.enumerable || !('value' in descriptor)) projectionInvalid();
+      if (descriptor.value === undefined) continue;
+      if (typeof descriptor.value !== 'string') projectionInvalid();
+      entries.push({ key, value: descriptor.value });
+    }
+    return entries;
   } catch (error) {
     if (error instanceof Error && error.message === 'SOURCE_RESULT_PROJECTION_INVALID') {
       throw error;
@@ -179,8 +179,8 @@ function restoreFactEntries(value: unknown): UnknownRecord {
     const entry = ownDataRecord(rawEntry, ['key', 'value'], ['key', 'value']);
     const key = field(entry, 'key');
     const factValue = field(entry, 'value');
-    if (typeof key !== 'string' || typeof factValue !== 'string') projectionInvalid();
-    assertDynamicKey(key);
+    assertOpenFdaFactKey(key);
+    if (typeof factValue !== 'string') projectionInvalid();
     if (previousKey !== undefined && key <= previousKey) projectionInvalid();
     previousKey = key;
     Object.defineProperty(restored, key, {
@@ -249,6 +249,24 @@ function objectSchema(
   required: readonly string[],
 ): JsonSchema {
   return { type: 'object', additionalProperties: false, required, properties };
+}
+
+function deepFreezeSchema(value: unknown, seen = new Set<object>()): void {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  for (const child of Array.isArray(value)
+    ? value
+    : Object.values(value as UnknownRecord)) {
+    deepFreezeSchema(child, seen);
+  }
+  Object.freeze(value);
+}
+
+function freezeDefinition<Raw, Projected>(
+  definition: TypedProjectionDefinition<Raw, Projected>,
+): TypedProjectionDefinition<Raw, Projected> {
+  deepFreezeSchema(definition.jsonSchema);
+  return Object.freeze(definition);
 }
 
 function toolResultSchema(data: JsonSchema): JsonSchema {
@@ -378,7 +396,7 @@ function restoreTedNotice(raw: unknown): UnknownRecord {
   };
 }
 
-const tedDefinition: TypedProjectionDefinition<unknown, unknown> = {
+const tedDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinition({
   schema: 'ted-search/v1',
   jsonSchema: toolResultSchema(objectSchema({
     awards: arraySchema(32, tedAwardSchema),
@@ -410,10 +428,10 @@ const tedDefinition: TypedProjectionDefinition<unknown, unknown> = {
         : {}),
     });
   },
-};
+});
 
 const factEntrySchema = objectSchema({
-  key: stringSchema(120),
+  key: stringSchema(120, { enum: [...OPENFDA_DEVICE_FACT_KEYS] }),
   value: stringSchema(1000),
 }, ['key', 'value']);
 
@@ -537,7 +555,7 @@ function restoreOpenFdaClearance(raw: unknown): UnknownRecord {
   };
 }
 
-const openFdaDefinition: TypedProjectionDefinition<unknown, unknown> = {
+const openFdaDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinition({
   schema: 'openfda-search/v1',
   jsonSchema: toolResultSchema(objectSchema({
     establishments: arraySchema(12, openFdaEstablishmentSchema),
@@ -581,7 +599,7 @@ const openFdaDefinition: TypedProjectionDefinition<unknown, unknown> = {
         : {}),
     });
   },
-};
+});
 
 const samNoticeSchema = objectSchema({
   noticeId: stringSchema(500),
@@ -618,7 +636,7 @@ function projectSamNotice(raw: unknown): UnknownRecord {
   };
 }
 
-const samDefinition: TypedProjectionDefinition<unknown, unknown> = {
+const samDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinition({
   schema: 'samgov-search/v1',
   jsonSchema: toolResultSchema(objectSchema({
     notices: arraySchema(32, samNoticeSchema),
@@ -643,7 +661,7 @@ const samDefinition: TypedProjectionDefinition<unknown, unknown> = {
         : {}),
     });
   },
-};
+});
 
 function assertSmtpReason(value: unknown): void {
   if (typeof value !== 'string' || !SMTP_REASON_CODES.includes(
@@ -651,7 +669,7 @@ function assertSmtpReason(value: unknown): void {
   )) projectionInvalid();
 }
 
-const smtpDefinition: TypedProjectionDefinition<unknown, unknown> = {
+const smtpDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinition({
   schema: 'smtp-probe-verdict/v1',
   jsonSchema: toolResultSchema(objectSchema({
     reachable: { type: 'boolean' },
@@ -694,7 +712,7 @@ const smtpDefinition: TypedProjectionDefinition<unknown, unknown> = {
       ...optionalField(data, 'egressBlocked'),
     });
   },
-};
+});
 
 export const SOURCE_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   tedDefinition,
