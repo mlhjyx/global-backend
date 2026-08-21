@@ -82,8 +82,6 @@ export interface PersistGenericOperationArtifactInput {
 export interface RecoverUnknownGenericOperationArtifactInput {
   readonly reservation: BudgetReservation;
   readonly authorityId: string;
-  /** Durable expected facts from the original single physical generation. */
-  readonly expected: GenericOperationArtifactManifest;
   readonly actualCents: number;
   readonly signal?: AbortSignal;
 }
@@ -116,9 +114,10 @@ function canonicalTimestamp(value: unknown): string | null {
 function assertReservationBinding(
   reservation: BudgetReservation,
   authorityId: string,
+  allowReplay = false,
 ): GenericOperationArtifactBinding {
   if (
-    reservation.replay ||
+    (!allowReplay && reservation.replay) ||
     !isCanonicalArtifactUuid(reservation.operationId) ||
     !isCanonicalArtifactUuid(authorityId)
   ) {
@@ -180,6 +179,7 @@ function snapshotExpectedManifest(
   value: GenericOperationArtifactManifest,
   reservation: BudgetReservation,
   authorityId: string,
+  allowReplay = false,
 ): GenericOperationArtifactManifest {
   try {
     if (
@@ -203,7 +203,11 @@ function snapshotExpectedManifest(
       return invalid();
     }
 
-    const binding = assertReservationBinding(reservation, authorityId);
+    const binding = assertReservationBinding(
+      reservation,
+      authorityId,
+      allowReplay,
+    );
     const reference = referenceFromManifest(value);
     const createdAt = canonicalTimestamp(value.createdAt);
     if (
@@ -312,11 +316,32 @@ export class GenericOperationArtifactService {
       return invalid();
     }
 
+    const now = this.now();
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return invalid();
+    const manifest = buildManifest(
+      input,
+      {
+        objectKey: contentAddressedObjectKey(staged.sha256),
+        sha256: staged.sha256,
+        sizeBytes: staged.sizeBytes,
+        mediaType: staged.mediaType,
+        resultSchema: staged.resultSchema,
+        privacyClass: staged.privacyClass,
+      },
+      staged.artifactId,
+      now.toISOString(),
+      staged.sourceDigest,
+    );
+
     let promoted: StoredArtifact;
     try {
       promoted = await this.store.promote(staged);
     } catch (error) {
-      await this.markUnknownOnAmbiguousWrite(error, input.reservation);
+      await this.markUnknownOnAmbiguousWrite(
+        error,
+        input.reservation,
+        manifest,
+      );
       throw error;
     }
     if (!sameStoredArtifact(promoted, {
@@ -330,21 +355,11 @@ export class GenericOperationArtifactService {
     if (!sameStoredArtifact(inspected, promoted)) return invalid();
     await this.drainVerifiedBody(promoted, input.signal);
 
-    const now = this.now();
-    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return invalid();
-    const manifest = buildManifest(
-      input,
-      promoted,
-      staged.artifactId,
-      now.toISOString(),
-      staged.sourceDigest,
-    );
-    const storedManifest = await this.repository.appendManifest(manifest);
-    const reference = referenceFromManifest(storedManifest);
-    await this.budgetStore.settleArtifactReference(
+    const reference = referenceFromManifest(manifest);
+    await this.budgetStore.settleArtifactManifest(
       input.reservation,
       input.actualCents,
-      reference,
+      manifest,
     );
     await this.cleanup(staged.artifactId);
     return reference;
@@ -353,21 +368,27 @@ export class GenericOperationArtifactService {
   async recoverUnknown(
     input: RecoverUnknownGenericOperationArtifactInput,
   ): Promise<GenericOperationArtifactReference> {
-    const expected = snapshotExpectedManifest(
-      input.expected,
+    assertReservationBinding(input.reservation, input.authorityId, true);
+    const loaded = await this.budgetStore.loadResultUnknownArtifact(
       input.reservation,
       input.authorityId,
+    );
+    if (loaded === null) return invalid();
+    const expected = snapshotExpectedManifest(
+      loaded,
+      input.reservation,
+      input.authorityId,
+      true,
     );
     const inspected = await this.store.inspect(expected.sha256, input.signal);
     if (!sameStoredArtifact(inspected, expected)) return invalid();
     await this.drainVerifiedBody(expected, input.signal);
 
-    const storedManifest = await this.repository.appendManifest(expected);
-    const reference = referenceFromManifest(storedManifest);
-    await this.budgetStore.settleArtifactReference(
+    const reference = referenceFromManifest(expected);
+    await this.budgetStore.settleArtifactManifest(
       input.reservation,
       input.actualCents,
-      reference,
+      expected,
     );
     await this.cleanup(expected.artifactId);
     return reference;
@@ -399,13 +420,14 @@ export class GenericOperationArtifactService {
   private async markUnknownOnAmbiguousWrite(
     error: unknown,
     reservation: BudgetReservation,
+    expected?: GenericOperationArtifactManifest,
   ): Promise<void> {
     if (
       error instanceof ArtifactStorageError &&
       (error.code === 'GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN' ||
         error.code === 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN')
     ) {
-      await this.budgetStore.markResultUnknown(reservation);
+      await this.budgetStore.markResultUnknown(reservation, expected);
     }
   }
 

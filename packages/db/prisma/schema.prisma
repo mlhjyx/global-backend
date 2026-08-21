@@ -207,6 +207,7 @@ model ToolBudgetOperation {
   resultSchema        String?             @map("result_schema") @db.VarChar(100)
   resultDigest        String?             @map("result_digest") @db.VarChar(64)
   resultJson          Json?               @map("result_json")
+  expectedArtifact    Json?               @map("expected_artifact")
   status        ToolBudgetOperationStatus @default(RESERVED)
   createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   settledAt     DateTime?                 @map("settled_at") @db.Timestamptz(3)

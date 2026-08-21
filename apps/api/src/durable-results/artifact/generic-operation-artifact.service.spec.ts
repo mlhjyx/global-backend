@@ -36,6 +36,10 @@ const reservation: BudgetReservation = Object.freeze({
   estimatedCents: 17,
   replay: false,
 });
+const recoveryReservation: BudgetReservation = Object.freeze({
+  ...reservation,
+  replay: true,
+});
 
 const staged: StagedArtifact = Object.freeze({
   artifactId: ARTIFACT_ID,
@@ -302,7 +306,7 @@ describe('GenericOperationArtifactService', () => {
     const deps = dependencies();
 
     await expect(deps.service.recoverUnknown({
-      reservation,
+      reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
       actualCents: 13,
     })).resolves.toMatchObject({
@@ -333,7 +337,7 @@ describe('GenericOperationArtifactService', () => {
     const deps = dependencies({ inspect: async () => inspected });
 
     await expect(deps.service.recoverUnknown({
-      reservation,
+      reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
       actualCents: 13,
     })).rejects.toEqual(
@@ -346,17 +350,20 @@ describe('GenericOperationArtifactService', () => {
 
   it('ignores caller-supplied substitute facts and uses only the database-bound expectation', async () => {
     const deps = dependencies();
-
-    await expect(deps.service.recoverUnknown({
-      reservation,
+    const hostileRecoveryInput = {
+      reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
       expected: {
         ...manifest,
         sha256: 'ff'.repeat(32),
         body: 'forbidden',
-      } as unknown as GenericOperationArtifactManifest,
+      },
       actualCents: 13,
-    })).resolves.toMatchObject({ sha256: SHA256 });
+    };
+
+    await expect(
+      deps.service.recoverUnknown(hostileRecoveryInput),
+    ).resolves.toMatchObject({ sha256: SHA256 });
     expect(deps.store.inspect).toHaveBeenCalledWith(SHA256, undefined);
     expect(deps.store.inspect).not.toHaveBeenCalledWith('ff'.repeat(32), undefined);
   });
@@ -367,7 +374,7 @@ describe('GenericOperationArtifactService', () => {
     });
 
     await expect(deps.service.recoverUnknown({
-      reservation,
+      reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
       actualCents: 13,
     })).rejects.toMatchObject({

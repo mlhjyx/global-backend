@@ -14,16 +14,16 @@ import {
   parseGenericOperationProjection,
   type GenericOperationProjection,
 } from './generic-operation-projection';
-import { parseArtifactReference } from '../durable-results/artifact/artifact-reference.schema';
 import {
   invalidGenericOperationArtifact,
-  type GenericOperationArtifactReference,
+  isCanonicalArtifactUuid,
+  type GenericOperationArtifactManifest,
 } from '../durable-results/artifact/artifact.types';
+import { parseGenericOperationArtifactManifest } from '../durable-results/artifact/generic-operation-artifact.repository';
 
 const MAX_KEY_LENGTH = 200;
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
-
 export { BudgetExceededError } from './budget';
 
 export interface BudgetReservationRequest {
@@ -85,12 +85,18 @@ export interface BudgetStore {
   /** Physical execution started, but the result/object acknowledgement is unknown. */
   markResultUnknown(
     reservation: BudgetReservation,
+    expected?: GenericOperationArtifactManifest,
   ): Promise<BudgetResultUnknownTransition>;
-  /** Settles only the closed, body-free reference already bound by the artifact manifest. */
-  settleArtifactReference(
+  /** Loads only facts atomically bound when the original physical result became unknown. */
+  loadResultUnknownArtifact(
+    reservation: BudgetReservation,
+    authorityId: string,
+  ): Promise<GenericOperationArtifactManifest | null>;
+  /** Atomically appends the manifest and settles its exact closed reference. */
+  settleArtifactManifest(
     reservation: BudgetReservation,
     actualCents: number,
-    reference: GenericOperationArtifactReference,
+    manifest: GenericOperationArtifactManifest,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -109,7 +115,6 @@ export class BudgetStoreUnavailableError extends Error {
     this.name = 'BudgetStoreUnavailableError';
   }
 }
-
 export class BudgetAccountUnavailableError extends Error {
   readonly code = 'BUDGET_ACCOUNT_UNAVAILABLE';
 
@@ -118,7 +123,6 @@ export class BudgetAccountUnavailableError extends Error {
     this.name = 'BudgetAccountUnavailableError';
   }
 }
-
 /** A previous physical operation is still unresolved; reopening would permit an unsafe retry. */
 export class BudgetUnsettledOperationsError extends Error {
   readonly code = 'BUDGET_UNSETTLED_OPERATIONS';
@@ -128,7 +132,6 @@ export class BudgetUnsettledOperationsError extends Error {
     this.name = 'BudgetUnsettledOperationsError';
   }
 }
-
 export class BudgetOperationReplayError extends Error {
   readonly code = 'BUDGET_OPERATION_REPLAY_UNAVAILABLE';
 
@@ -165,7 +168,11 @@ export class UnavailableBudgetStore implements BudgetStore {
     return this.unavailable();
   }
 
-  async settleArtifactReference(): Promise<BudgetSettlement> {
+  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactManifest | null> {
+    return this.unavailable();
+  }
+
+  async settleArtifactManifest(): Promise<BudgetSettlement> {
     return this.unavailable();
   }
 
@@ -218,7 +225,13 @@ export class InMemoryBudgetStoreAdapter implements BudgetStore {
     );
   }
 
-  async settleArtifactReference(): Promise<BudgetSettlement> {
+  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactManifest | null> {
+    throw new BudgetStoreUnavailableError(
+      'in-memory budget store cannot recover unknown artifact results',
+    );
+  }
+
+  async settleArtifactManifest(): Promise<BudgetSettlement> {
     throw new BudgetStoreUnavailableError(
       'in-memory budget store cannot persist artifact references',
     );
@@ -263,8 +276,9 @@ type ResultUnknownRow = {
   reserved_cents: bigint;
   status: string;
   replay: boolean;
+  recoverable: boolean;
 };
-
+type UnknownArtifactRow = { expected_manifest: unknown };
 type AuthorizedOpenRow = {
   account_id: string;
   generation: number;
@@ -517,13 +531,28 @@ export class PostgresBudgetStore implements BudgetStore {
 
   async markResultUnknown(
     reservation: BudgetReservation,
+    expected?: GenericOperationArtifactManifest,
   ): Promise<BudgetResultUnknownTransition> {
+    const durable = expected
+      ? parseGenericOperationArtifactManifest(expected)
+      : null;
+    if (
+      durable &&
+      (durable.operationId !== reservation.operationId ||
+        (reservation.workspaceId === 'platform'
+          ? durable.scopeKind !== 'platform' || durable.workspaceId !== null
+          : durable.scopeKind !== 'workspace' ||
+            durable.workspaceId !== reservation.workspaceId))
+    ) {
+      return invalidGenericOperationArtifact();
+    }
     let rows: ResultUnknownRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<ResultUnknownRow[]>(
-          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v1(
-            ${reservation.workspaceId}, ${reservation.operationId}::uuid
+          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v2(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${durable ? JSON.stringify(durable) : null}::jsonb
           )`,
         ),
       );
@@ -550,7 +579,9 @@ export class PostgresBudgetStore implements BudgetStore {
       !row ||
       row.status !== 'RESULT_UNKNOWN' ||
       typeof row.reserved_cents !== 'bigint' ||
-      typeof row.replay !== 'boolean'
+      typeof row.replay !== 'boolean' ||
+      typeof row.recoverable !== 'boolean' ||
+      row.recoverable !== Boolean(durable)
     ) {
       throw new BudgetStoreUnavailableError(
         'budget unknown-result transition returned no result',
@@ -565,21 +596,87 @@ export class PostgresBudgetStore implements BudgetStore {
     return { reservedCents, replay: row.replay };
   }
 
-  async settleArtifactReference(
+  async loadResultUnknownArtifact(
+    reservation: BudgetReservation,
+    authorityId: string,
+  ): Promise<GenericOperationArtifactManifest | null> {
+    if (
+      !isCanonicalArtifactUuid(reservation.operationId) ||
+      !isCanonicalArtifactUuid(authorityId) ||
+      (reservation.workspaceId !== 'platform' &&
+        !isCanonicalArtifactUuid(reservation.workspaceId))
+    ) {
+      return invalidGenericOperationArtifact();
+    }
+    let rows: UnknownArtifactRow[];
+    try {
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<UnknownArtifactRow[]>(
+          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v2(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${authorityId}::uuid
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
+      if (
+        error instanceof BudgetStoreUnavailableError ||
+        error instanceof ExecutionBudgetGrantError
+      ) {
+        throw error;
+      }
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result recovery unavailable',
+      );
+    }
+    if (rows.length !== 1 || !rows[0]) {
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result recovery returned no result',
+      );
+    }
+    const manifest = parseGenericOperationArtifactManifest(
+      rows[0].expected_manifest,
+    );
+    if (
+      manifest.authorityId !== authorityId ||
+      manifest.operationId !== reservation.operationId ||
+      (reservation.workspaceId === 'platform'
+        ? manifest.scopeKind !== 'platform' || manifest.workspaceId !== null
+        : manifest.scopeKind !== 'workspace' ||
+          manifest.workspaceId !== reservation.workspaceId)
+    ) {
+      return invalidGenericOperationArtifact();
+    }
+    return manifest;
+  }
+
+  async settleArtifactManifest(
     reservation: BudgetReservation,
     actualCents: number,
-    reference: GenericOperationArtifactReference,
+    manifest: GenericOperationArtifactManifest,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
-    const durable = parseArtifactReference(reference);
-    if (durable.operationId !== reservation.operationId) {
+    const durable = parseGenericOperationArtifactManifest(manifest);
+    if (
+      durable.operationId !== reservation.operationId ||
+      (reservation.workspaceId === 'platform'
+        ? durable.scopeKind !== 'platform' || durable.workspaceId !== null
+        : durable.scopeKind !== 'workspace' ||
+          durable.workspaceId !== reservation.workspaceId)
+    ) {
       return invalidGenericOperationArtifact();
     }
     let rows: SettleRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_reference_v1(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v2(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${JSON.stringify(durable)}::jsonb
           )`,

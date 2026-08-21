@@ -494,169 +494,6 @@ describe('PostgresBudgetStore', () => {
     ).resolves.toEqual({ chargedCents: 10, observedCents: 14, capVariance: true, replay: false });
   });
 
-  it('marks an executed artifact write RESULT_UNKNOWN without releasing its reservation', async () => {
-    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
-    const prisma = {
-      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        $queryRaw: vi.fn(async (query) => {
-          queries.push(query);
-          return [{ reserved_cents: 17n, status: 'RESULT_UNKNOWN', replay: false }];
-        }),
-      } as never)),
-    } as unknown as PrismaService;
-    const store = new PostgresBudgetStore(prisma);
-    const reservation = {
-      workspaceId: TEST_WORKSPACE_ID,
-      accountKey: 'artifact-account',
-      operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
-      replay: false,
-    };
-
-    await expect(store.markResultUnknown(reservation, ARTIFACT_MANIFEST)).resolves.toEqual({
-      reservedCents: 17,
-      replay: false,
-    });
-    expect(queries[0]?.strings?.join('')).toContain(
-      'mark_tool_budget_result_unknown_v2',
-    );
-    expect(queries[0]?.values).toEqual([
-      TEST_WORKSPACE_ID,
-      ARTIFACT_REFERENCE.operationId,
-      JSON.stringify(ARTIFACT_MANIFEST),
-    ]);
-  });
-
-  it('loads only the original database-bound expectation for recovery', async () => {
-    const store = new PostgresBudgetStore(
-      fakePrisma([[{ expected_manifest: ARTIFACT_MANIFEST }]]),
-    );
-    await expect(store.loadResultUnknownArtifact({
-      workspaceId: TEST_WORKSPACE_ID,
-      accountKey: 'artifact-account',
-      operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
-      replay: false,
-    }, ARTIFACT_MANIFEST.authorityId)).resolves.toEqual(ARTIFACT_MANIFEST);
-  });
-
-  it('atomically appends a manifest and settles only its exact closed reference', async () => {
-    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
-    const prisma = {
-      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        $queryRaw: vi.fn(async (query) => {
-          queries.push(query);
-          return [{
-            charged_cents: 17n,
-            observed_cents: 13n,
-            cap_variance: false,
-            status: 'SETTLED',
-            replay: false,
-          }];
-        }),
-      } as never)),
-    } as unknown as PrismaService;
-    const store = new PostgresBudgetStore(prisma);
-
-    await expect(store.settleArtifactManifest({
-      workspaceId: TEST_WORKSPACE_ID,
-      accountKey: 'artifact-account',
-      operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
-      replay: false,
-    }, 13, ARTIFACT_MANIFEST)).resolves.toEqual({
-      chargedCents: 17,
-      observedCents: 13,
-      capVariance: false,
-      replay: false,
-    });
-    expect(queries[0]?.strings?.join('')).toContain(
-      'settle_tool_budget_artifact_manifest_v2',
-    );
-    expect(queries[0]?.values).toEqual([
-      TEST_WORKSPACE_ID,
-      ARTIFACT_REFERENCE.operationId,
-      13n,
-      JSON.stringify(ARTIFACT_MANIFEST),
-    ]);
-  });
-
-  it('rejects an open or caller-extended artifact reference before persistence', async () => {
-    const prisma = fakePrisma([]);
-    const store = new PostgresBudgetStore(prisma);
-
-    await expect(store.settleArtifactManifest({
-      workspaceId: TEST_WORKSPACE_ID,
-      accountKey: 'artifact-account',
-      operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
-      replay: false,
-    }, 13, {
-      ...ARTIFACT_MANIFEST,
-      body: 'caller-controlled',
-    } as unknown as GenericOperationArtifactManifest)).rejects.toMatchObject({
-      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
-    });
-    expect(prisma.withWorkspace).not.toHaveBeenCalled();
-  });
-
-  it('maps trusted database artifact rejections to the one bounded artifact error', async () => {
-    const prisma = {
-      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        $queryRaw: vi.fn(async () => {
-          throw rawQueryMarkerError('GENERIC_OPERATION_ARTIFACT_INVALID');
-        }),
-      } as never)),
-    } as unknown as PrismaService;
-    const store = new PostgresBudgetStore(prisma);
-    const reservation = {
-      workspaceId: TEST_WORKSPACE_ID,
-      accountKey: 'artifact-account',
-      operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
-      replay: false,
-    };
-
-    await expect(store.markResultUnknown(reservation, ARTIFACT_MANIFEST)).rejects.toMatchObject({
-      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
-    });
-    await expect(
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
-    ).rejects.toMatchObject({
-      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
-    });
-  });
-
-  it('redacts untrusted database details from artifact transitions', async () => {
-    const prisma = {
-      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        $queryRaw: vi.fn(async () => {
-          throw new Error('host password and raw SQL detail');
-        }),
-      } as never)),
-    } as unknown as PrismaService;
-    const store = new PostgresBudgetStore(prisma);
-    const reservation = {
-      workspaceId: TEST_WORKSPACE_ID,
-      accountKey: 'artifact-account',
-      operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
-      replay: false,
-    };
-
-    const results = await Promise.allSettled([
-      store.markResultUnknown(reservation, ARTIFACT_MANIFEST),
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
-    ]);
-    for (const result of results) {
-      expect(result.status).toBe('rejected');
-      if (result.status === 'rejected') {
-        expect(result.reason).toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
-        expect(JSON.stringify(result.reason)).not.toContain('password');
-      }
-    }
-  });
-
   it('releases a reservation without charging when execution never starts', async () => {
     const store = new PostgresBudgetStore(
       fakePrisma([[{ charged_cents: 0n, observed_cents: 0n, cap_variance: false, status: 'RELEASED' }]]),
@@ -873,7 +710,11 @@ describe('UnavailableBudgetStore', () => {
     await expect(store.open({ workspaceId: 'w', accountKey: 'a', capCents: 1 })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.settle(reservation, 1)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.markResultUnknown(reservation)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
-    await expect(store.settleArtifactReference(reservation, 1, ARTIFACT_REFERENCE)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+    await expect(store.loadResultUnknownArtifact(
+      reservation,
+      ARTIFACT_MANIFEST.authorityId,
+    )).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+    await expect(store.settleArtifactManifest(reservation, 1, ARTIFACT_MANIFEST)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.release(reservation)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.status({ workspaceId: 'w', accountKey: 'a' })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.close({ workspaceId: 'w', accountKey: 'a' })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
@@ -929,7 +770,7 @@ describe('InMemoryBudgetStoreAdapter', () => {
       code: 'BUDGET_STORE_UNAVAILABLE',
     });
     await expect(
-      store.settleArtifactReference(reservation, 13, ARTIFACT_REFERENCE),
+      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
     ).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
   });
 });

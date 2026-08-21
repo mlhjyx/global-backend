@@ -174,7 +174,9 @@ function assertScope(
   }
 }
 
-function snapshotManifest(value: unknown): GenericOperationArtifactManifest {
+export function parseGenericOperationArtifactManifest(
+  value: unknown,
+): GenericOperationArtifactManifest {
   if (!isPlainClosedObject(value, MANIFEST_KEY_SET, MANIFEST_KEYS.length)) {
     return invalidGenericOperationArtifact();
   }
@@ -234,7 +236,7 @@ function parseRow(row: unknown): GenericOperationArtifactManifest {
   if (typeof typed.size_bytes !== "bigint" || typed.size_bytes < 0n) {
     return invalidGenericOperationArtifact();
   }
-  return snapshotManifest({
+  return parseGenericOperationArtifactManifest({
     schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
     artifactId: typed.artifact_id,
     scopeKind,
@@ -332,7 +334,7 @@ export class GenericOperationArtifactRepository {
     input: GenericOperationArtifactManifest,
   ): Promise<GenericOperationArtifactManifest> {
     try {
-      const value = snapshotManifest(input);
+      const value = parseGenericOperationArtifactManifest(input);
       const rows =
         value.scopeKind === "workspace"
           ? await this.runWorkspace(value.workspaceId as string, (tx) =>
