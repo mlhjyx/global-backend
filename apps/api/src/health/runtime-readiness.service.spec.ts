@@ -46,9 +46,17 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe('RuntimeReadinessService', () => {
-  it('refreshes immediately, every ten seconds, and stops cleanly without unhandled rejection', async () => {
+  it('contains a rejected bootstrap refresh without replacing the fail-closed snapshot', async () => {
     vi.useFakeTimers();
-    const deps = dependencies();
+    const rejectedRefresh = new Error('bounded background failure');
+    const deps = dependencies({
+      contributors: {
+        check: vi
+          .fn()
+          .mockRejectedValueOnce(rejectedRefresh)
+          .mockResolvedValue({ status: 'ok' }),
+      },
+    });
     const service = new RuntimeReadinessService(
       deps.prisma as never,
       deps.temporal as never,
@@ -58,30 +66,34 @@ describe('RuntimeReadinessService', () => {
       deps.contributors as never,
     );
     const initial = service.current();
-    const check = vi
-      .spyOn(service, 'check')
-      .mockResolvedValueOnce(initial)
-      .mockRejectedValueOnce(new Error('bounded background failure'))
-      .mockResolvedValue(initial);
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
 
     try {
       await service.onApplicationBootstrap();
+      const bootstrapTurn = new Promise<void>((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(0);
+      await bootstrapTurn;
       await Promise.resolve();
-      expect(check).toHaveBeenCalledOnce();
-
-      await vi.advanceTimersByTimeAsync(10_000);
-      await Promise.resolve();
-      expect(check).toHaveBeenCalledTimes(2);
+      expect(service.current()).toBe(initial);
       expect(unhandled).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(check).toHaveBeenCalledTimes(3);
+      const intervalTurn = new Promise<void>((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(0);
+      await intervalTurn;
+      expect(service.current()).not.toBe(initial);
+      expect(unhandled).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(unhandled).not.toHaveBeenCalled();
 
       service.onApplicationShutdown();
+      const contributorCallsAtShutdown = deps.contributors.check.mock.calls.length;
       await vi.advanceTimersByTimeAsync(30_000);
-      expect(check).toHaveBeenCalledTimes(3);
+      expect(deps.contributors.check).toHaveBeenCalledTimes(
+        contributorCallsAtShutdown,
+      );
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       service.onApplicationShutdown();

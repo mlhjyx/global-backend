@@ -102,9 +102,9 @@ export class RuntimeReadinessService
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    void this.check();
+    this.refreshInBackground();
     this.timer = setInterval(
-      () => void this.check(),
+      () => this.refreshInBackground(),
       READINESS_REFRESH_INTERVAL_MS,
     );
     this.timer.unref();
@@ -130,6 +130,10 @@ export class RuntimeReadinessService
     } finally {
       this.refreshInFlight = undefined;
     }
+  }
+
+  private refreshInBackground(): void {
+    void this.check().catch(() => undefined);
   }
 
   async checkHardComponents(): Promise<RuntimeReadinessReport> {
