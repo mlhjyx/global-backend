@@ -34,8 +34,8 @@ Task 7 的 `capabilities.execution_budget_jwks`、`workspace_budget_authority` �
 | Task 1–7 最终实现 | `bea4d7392344cd44cbfbc5379a7d620f418122fc` |
 | Task 8 Copy successor 测试 | `907936bc8b9f296d9b7eaca0d302222ab6391d6b` |
 | Task 8 Copy successor 实现/机器 receipt | `7b34625c67bb8ecce431660a0d6b169d54d3201e` |
-| Final review RED checkpoint | `a9696006c5da8262fc1ecf2fc57c704364d845e8` |
-| Final review GREEN implementation | `6b0aaa0108adf40325e39be403f4fd7ac53e3aef` |
+| Final review RED checkpoint | `0ba3849778f470f9413f72feb877ca62979a4d68` |
+| Final review GREEN implementation | `98a7d6008682bf80f0e88db0b039368758c90890` |
 | `origin/main` 本地合流基底（核验时） | `a5948b85d355eccb53732aa50e5f40c85167437b` |
 
 Tasks 1–7 的完整提交序列如下；subject 只记录 Git provenance，状态裁决以本页和源码为准：
@@ -76,7 +76,7 @@ Task 7 的首个 subject 使用了 “gate work”，但最终实现按 ledger r
 | 6 | `f7674d613d209a34ebb259f656c25b5dcaaa5b01..7847f51240f30e4c5616f83ee3ad7e6a09372962` | `7847f51240f30e4c5616f83ee3ad7e6a09372962..e2a340146652bf921d2200438d4a3b9b31a2303f`；`e2a340146652bf921d2200438d4a3b9b31a2303f..db30ce5ebc7303512ac76a9dd5df4fb844817d6a` | 3 Important 已关闭 |
 | 7 | `db30ce5ebc7303512ac76a9dd5df4fb844817d6a..3bcc328493a49c529bb03cdd6372ad53cc86f855` | `3bcc328493a49c529bb03cdd6372ad53cc86f855..bea4d7392344cd44cbfbc5379a7d620f418122fc` | 1 Critical + 3 Important 已关闭 |
 
-Final whole-branch review 的 6 个 Important 与低成本 deferred 项在 `a9696006…` RED → `6b0aaa01…` GREEN 波次收口：
+Final whole-branch review 的 6 个 Important 与低成本 deferred 项在 `0ba38497…` RED → `98a7d600…` GREEN 波次收口：
 
 - microusd/cents UNIT fence：authority-bound `cap_cents=0`，六个 legacy lifecycle 函数统一拒绝，真实 PG 证明 reserve 零 operation、owner/app 均不可花费，legacy unbound lifecycle 不变。
 - principal 与 revocation：同一个 PostgreSQL SECURITY DEFINER helper 验证 LOGIN/INHERIT、非 privileged flags、唯一直接 membership、安全 NOLOGIN group 与无 nested/outbound membership；ingest/open/revoke 同事务调用，repository 仍做独立 runtime readback。Platform revoke 只有窄 DB/repository primitive，transport 仍 external-owned。
@@ -178,7 +178,7 @@ Mutation tests 证明少一路、额外一路、以及用 predecessor 的旧 10-
 
 ## 7. Fresh verification
 
-### Final-review fix wave（`a9696006…` RED → `6b0aaa01…` GREEN）
+### Final-review fix wave（`0ba38497…` RED → `98a7d600…` GREEN）
 
 完整 changed-scope denominator 使用以下 exact command；相较 Task 8 历史命令新增 executable Worker non-cutover seam：
 
