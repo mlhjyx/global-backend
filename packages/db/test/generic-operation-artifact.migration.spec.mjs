@@ -18,6 +18,10 @@ const sourceMigrations = resolve(dbRoot, "prisma/migrations");
 const forwardMigrationName =
   "20260821110000_generic_operation_artifact_shared_content";
 const forwardMigration = resolve(sourceMigrations, forwardMigrationName);
+const laterMigrationNames = [
+  "20260821115000_generic_operation_artifact_result_unknown_enum",
+  "20260821120000_generic_operation_artifact_result_unknown",
+];
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;
 const WS_ID = "00000000-0000-4000-8000-0000000000c3";
@@ -60,6 +64,12 @@ async function prepareMigrationSet() {
     recursive: true,
     force: true,
   });
+  for (const migrationName of laterMigrationNames) {
+    await rm(resolve(migrations, migrationName), {
+      recursive: true,
+      force: true,
+    });
+  }
   return {
     root,
     schema: resolve(root, "schema.prisma"),

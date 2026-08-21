@@ -41,6 +41,7 @@ enum SiteBuildSpendReconciliationStatus {
 
 enum ToolBudgetOperationStatus {
   RESERVED
+  RESULT_UNKNOWN
   SETTLED
   RELEASED
 
@@ -203,7 +204,7 @@ model ToolBudgetOperation {
   observedCents BigInt?                   @map("observed_cents")
   chargedCents  BigInt?                   @map("charged_cents")
   resultSchemaVersion String?             @map("result_schema_version") @db.VarChar(80)
-  resultSchema        String?             @map("result_schema") @db.VarChar(80)
+  resultSchema        String?             @map("result_schema") @db.VarChar(100)
   resultDigest        String?             @map("result_digest") @db.VarChar(64)
   resultJson          Json?               @map("result_json")
   status        ToolBudgetOperationStatus @default(RESERVED)

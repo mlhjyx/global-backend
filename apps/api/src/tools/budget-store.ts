@@ -14,6 +14,11 @@ import {
   parseGenericOperationProjection,
   type GenericOperationProjection,
 } from './generic-operation-projection';
+import { parseArtifactReference } from '../durable-results/artifact/artifact-reference.schema';
+import {
+  invalidGenericOperationArtifact,
+  type GenericOperationArtifactReference,
+} from '../durable-results/artifact/artifact.types';
 
 const MAX_KEY_LENGTH = 200;
 
@@ -44,6 +49,11 @@ export interface BudgetSettlement {
   replay: boolean;
 }
 
+export interface BudgetResultUnknownTransition {
+  reservedCents: number;
+  replay: boolean;
+}
+
 export interface BudgetStatus {
   remainingCents: number;
   exhausted: boolean;
@@ -71,6 +81,16 @@ export interface BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     projection?: GenericOperationProjection,
+  ): Promise<BudgetSettlement>;
+  /** Physical execution started, but the result/object acknowledgement is unknown. */
+  markResultUnknown(
+    reservation: BudgetReservation,
+  ): Promise<BudgetResultUnknownTransition>;
+  /** Settles only the closed, body-free reference already bound by the artifact manifest. */
+  settleArtifactReference(
+    reservation: BudgetReservation,
+    actualCents: number,
+    reference: GenericOperationArtifactReference,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -141,6 +161,14 @@ export class UnavailableBudgetStore implements BudgetStore {
     return this.unavailable();
   }
 
+  async markResultUnknown(): Promise<BudgetResultUnknownTransition> {
+    return this.unavailable();
+  }
+
+  async settleArtifactReference(): Promise<BudgetSettlement> {
+    return this.unavailable();
+  }
+
   async release(): Promise<BudgetSettlement> {
     return this.unavailable();
   }
@@ -184,6 +212,18 @@ export class InMemoryBudgetStoreAdapter implements BudgetStore {
     return { chargedCents: actualCents, observedCents: actualCents, capVariance: false, replay: false };
   }
 
+  async markResultUnknown(): Promise<BudgetResultUnknownTransition> {
+    throw new BudgetStoreUnavailableError(
+      'in-memory budget store cannot persist unknown artifact results',
+    );
+  }
+
+  async settleArtifactReference(): Promise<BudgetSettlement> {
+    throw new BudgetStoreUnavailableError(
+      'in-memory budget store cannot persist artifact references',
+    );
+  }
+
   async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
     this.ledger.settle({ runId: reservation.accountKey, estCents: reservation.estimatedCents }, 0);
     return { chargedCents: 0, observedCents: 0, capVariance: false, replay: false };
@@ -217,6 +257,12 @@ type SettleRow = {
   cap_variance: boolean;
   status: string;
   replay?: boolean;
+};
+
+type ResultUnknownRow = {
+  reserved_cents: bigint;
+  status: string;
+  replay: boolean;
 };
 
 type AuthorizedOpenRow = {
@@ -256,6 +302,15 @@ function isAuthorityLifecycleUnavailable(error: unknown): boolean {
   return isTrustedExecutionBudgetDatabaseMarker(
     error,
     'EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE',
+  );
+}
+
+function isTrustedArtifactDatabaseInvalid(error: unknown): boolean {
+  return Boolean(
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2010' &&
+    error.meta?.code === 'P0001' &&
+    error.meta?.message === 'ERROR: GENERIC_OPERATION_ARTIFACT_INVALID',
   );
 }
 
@@ -457,6 +512,114 @@ export class PostgresBudgetStore implements BudgetStore {
       observedCents: toSafeNumber('observedCents', row.observed_cents),
       capVariance: row.cap_variance,
       replay: row.replay ?? row.status !== 'SETTLED',
+    };
+  }
+
+  async markResultUnknown(
+    reservation: BudgetReservation,
+  ): Promise<BudgetResultUnknownTransition> {
+    let rows: ResultUnknownRow[];
+    try {
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<ResultUnknownRow[]>(
+          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v1(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
+      if (
+        error instanceof BudgetStoreUnavailableError ||
+        error instanceof ExecutionBudgetGrantError
+      ) {
+        throw error;
+      }
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result transition unavailable',
+      );
+    }
+    const row = rows[0];
+    if (
+      rows.length !== 1 ||
+      !row ||
+      row.status !== 'RESULT_UNKNOWN' ||
+      typeof row.reserved_cents !== 'bigint' ||
+      typeof row.replay !== 'boolean'
+    ) {
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result transition returned no result',
+      );
+    }
+    const reservedCents = toSafeNumber('reservedCents', row.reserved_cents);
+    if (reservedCents !== reservation.estimatedCents) {
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result transition changed the reservation',
+      );
+    }
+    return { reservedCents, replay: row.replay };
+  }
+
+  async settleArtifactReference(
+    reservation: BudgetReservation,
+    actualCents: number,
+    reference: GenericOperationArtifactReference,
+  ): Promise<BudgetSettlement> {
+    assertCents('actualCents', actualCents, true);
+    const durable = parseArtifactReference(reference);
+    if (durable.operationId !== reservation.operationId) {
+      return invalidGenericOperationArtifact();
+    }
+    let rows: SettleRow[];
+    try {
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<SettleRow[]>(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_reference_v1(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${BigInt(actualCents)}, ${JSON.stringify(durable)}::jsonb
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
+      if (
+        error instanceof BudgetStoreUnavailableError ||
+        error instanceof ExecutionBudgetGrantError
+      ) {
+        throw error;
+      }
+      throw new BudgetStoreUnavailableError(
+        'budget artifact settlement unavailable',
+      );
+    }
+    const row = rows[0];
+    if (
+      rows.length !== 1 ||
+      !row ||
+      row.status !== 'SETTLED' ||
+      typeof row.charged_cents !== 'bigint' ||
+      typeof row.observed_cents !== 'bigint' ||
+      typeof row.cap_variance !== 'boolean'
+    ) {
+      throw new BudgetStoreUnavailableError(
+        'budget artifact settlement returned no result',
+      );
+    }
+    return {
+      chargedCents: toSafeNumber('chargedCents', row.charged_cents),
+      observedCents: toSafeNumber('observedCents', row.observed_cents),
+      capVariance: row.cap_variance,
+      replay: row.replay ?? false,
     };
   }
 
