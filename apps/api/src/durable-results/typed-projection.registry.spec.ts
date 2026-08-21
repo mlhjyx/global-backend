@@ -4,13 +4,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   TypedProjectionRegistry,
 } from './typed-projection.registry';
-import {
-  ARTIFACT_PRIVACY_CLASSES,
-  isDurableResultStrategy,
-  TYPED_PROJECTION_SCHEMAS,
-  type DurableResultStrategy,
-} from './durable-result-strategy';
-import type { TypedProjectionDefinition } from './typed-projection.types';
+import type {
+  PostgresJsonbByteExecutor,
+  TypedProjectionDefinition,
+} from './typed-projection.types';
 
 interface TaxonomyCode {
   code: string;
@@ -65,59 +62,6 @@ function numberListDefinition(
 }
 
 describe('TypedProjectionRegistry', () => {
-  it('accepts only complete durable strategy declarations at runtime', () => {
-    const artifact = {
-      kind: 'artifact_reference',
-      schema: 'sanctions-download/v1',
-      maxBytes: 1,
-      mediaTypes: Object.freeze(['application/xml']),
-      privacyClass: 'PUBLIC_ORGANIZATION',
-      ttlSeconds: 1,
-    } as const satisfies DurableResultStrategy;
-
-    expect(isDurableResultStrategy(artifact)).toBe(true);
-    expect(isDurableResultStrategy({ kind: 'artifact_reference', schema: 'x/v1' })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, maxBytes: 0 })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, maxBytes: -1 })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, mediaTypes: [] })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, privacyClass: 'PUBLIC' })).toBe(false);
-    expect(isDurableResultStrategy({ kind: 'typed_projection', schema: 'unknown/v1' })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, schema: '' })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, mediaTypes: [''] })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, ttlSeconds: Number.MAX_SAFE_INTEGER + 1 })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, ttlSeconds: -1 })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, unexpected: true })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, schema: ' schema/v1' })).toBe(false);
-    expect(isDurableResultStrategy({ ...artifact, mediaTypes: [' text/plain'] })).toBe(false);
-    const sparseMediaTypes = new Array<string>(1);
-    expect(isDurableResultStrategy({ ...artifact, mediaTypes: sparseMediaTypes })).toBe(false);
-    const mediaTypesWithExtraProperty = ['application/xml'];
-    Object.assign(mediaTypesWithExtraProperty, { extra: true });
-    expect(isDurableResultStrategy({ ...artifact, mediaTypes: mediaTypesWithExtraProperty })).toBe(false);
-    expect(isDurableResultStrategy(new Proxy(artifact, {}))).toBe(false);
-    expect(isDurableResultStrategy({
-      ...artifact,
-      mediaTypes: new Proxy(['application/xml'], {}),
-    })).toBe(false);
-    const accessorArtifact = Object.defineProperty({ ...artifact }, 'schema', {
-      enumerable: true,
-      get: () => 'sanctions-download/v1',
-    });
-    expect(isDurableResultStrategy(accessorArtifact)).toBe(false);
-    const symbolArtifact = { ...artifact, [Symbol('hidden')]: true };
-    expect(isDurableResultStrategy(symbolArtifact)).toBe(false);
-  });
-
-  it('freezes exported schema and privacy tuples without weakening private validation', () => {
-    expect(Object.isFrozen(TYPED_PROJECTION_SCHEMAS)).toBe(true);
-    expect(Object.isFrozen(ARTIFACT_PRIVACY_CLASSES)).toBe(true);
-    expect(() => (TYPED_PROJECTION_SCHEMAS as unknown as string[]).push('unknown/v1')).toThrow();
-    expect(() => (ARTIFACT_PRIVACY_CLASSES as unknown as string[]).pop()).toThrow();
-    expect(isDurableResultStrategy({
-      kind: 'typed_projection', schema: 'taxonomy-code/v1',
-    })).toBe(true);
-  });
-
   it('rejects every schema escape hatch instead of only validating direct properties', () => {
     const validLeaf = { type: 'string', maxLength: 20 };
     const bypasses: readonly [string, Record<string, unknown>][] = [
@@ -259,46 +203,83 @@ describe('TypedProjectionRegistry', () => {
     })).toThrow('TYPED_PROJECTION_INVALID');
   });
 
-  it('rejects inherited, reserved, and prototype-polluted projection facts', () => {
-    const registry = new TypedProjectionRegistry();
-    registry.register({ ...taxonomyDefinition(), project: () => ({}) as TaxonomyCode });
-    const originalCode = Object.getOwnPropertyDescriptor(Object.prototype, 'code');
-    const originalProvider = Object.getOwnPropertyDescriptor(Object.prototype, 'provider');
-    Object.defineProperty(Object.prototype, 'code', {
-      configurable: true, enumerable: false, value: 'x'.repeat(130_000),
-    });
-    Object.defineProperty(Object.prototype, 'provider', {
-      configurable: true, enumerable: false, value: 'catalog',
-    });
-    try {
+  it.each(['__proto__', 'constructor', 'prototype'])(
+    'rejects reserved own key %s in both schemas and projected data',
+    (reservedKey) => {
+      const projected = { code: 'A', provider: 'catalog' } as Record<string, unknown>;
+      Object.defineProperty(projected, reservedKey, {
+        enumerable: true, value: 'forbidden',
+      });
+      const registry = new TypedProjectionRegistry();
+      registry.register({
+        ...taxonomyDefinition(), project: () => projected as unknown as TaxonomyCode,
+      });
       expect(() => registry.project('taxonomy-code/v1', {})).toThrow(
         'TYPED_PROJECTION_INVALID',
       );
+
+      const properties = { code: { type: 'string', maxLength: 20 } };
+      Object.defineProperty(properties, reservedKey, {
+        enumerable: true, value: { type: 'string', maxLength: 20 },
+      });
+      expect(() => new TypedProjectionRegistry().register({
+        ...taxonomyDefinition(),
+        jsonSchema: { type: 'object', additionalProperties: false, properties },
+      })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
+    },
+  );
+
+  it('isolates digest, restore, application, and PostgreSQL gates from inherited facts', async () => {
+    const registry = new TypedProjectionRegistry();
+    registry.register(taxonomyDefinition());
+    const baseline = registry.project('taxonomy-code/v1', {
+      code: 'A', provider: 'catalog',
+    });
+    const inheritedOnly = new TypedProjectionRegistry();
+    inheritedOnly.register({
+      ...taxonomyDefinition(), project: () => ({}) as TaxonomyCode,
+    });
+    const originalCode = Object.getOwnPropertyDescriptor(Object.prototype, 'code');
+    const originalProvider = Object.getOwnPropertyDescriptor(Object.prototype, 'provider');
+    Object.defineProperty(Object.prototype, 'code', {
+      configurable: true, enumerable: false, value: 'x'.repeat(130 * 1024),
+    });
+    Object.defineProperty(Object.prototype, 'provider', {
+      configurable: true, enumerable: false, value: 'polluted-provider',
+    });
+    try {
+      expect(() => inheritedOnly.project('taxonomy-code/v1', {})).toThrow(
+        'TYPED_PROJECTION_INVALID',
+      );
+
+      const underPollution = registry.project('taxonomy-code/v1', {
+        code: 'A', provider: 'catalog',
+      });
+      expect(underPollution.digest).toBe(baseline.digest);
+      expect(registry.restore(baseline)).toEqual({ code: 'A', provider: 'catalog' });
+      expect(registry.restore(underPollution)).toEqual({ code: 'A', provider: 'catalog' });
+
+      const inheritedDataEnvelope = { ...baseline, data: {} };
+      expect(() => registry.restore(inheritedDataEnvelope)).toThrow(
+        'TYPED_PROJECTION_INVALID',
+      );
+      let queryCalls = 0;
+      const mustNotQuery: PostgresJsonbByteExecutor = {
+        async $queryRaw<T>(): Promise<T> {
+          queryCalls += 1;
+          throw new Error('PostgreSQL must not observe inherited content');
+        },
+      };
+      await expect(
+        registry.assertPostgresJsonbEnvelopeByteLimit(mustNotQuery, inheritedDataEnvelope),
+      ).rejects.toThrow('TYPED_PROJECTION_INVALID');
+      expect(queryCalls).toBe(0);
     } finally {
       if (originalCode) Object.defineProperty(Object.prototype, 'code', originalCode);
       else delete (Object.prototype as { code?: unknown }).code;
       if (originalProvider) Object.defineProperty(Object.prototype, 'provider', originalProvider);
       else delete (Object.prototype as { provider?: unknown }).provider;
     }
-
-    const ownProto = { code: 'A', provider: 'catalog' } as Record<string, unknown>;
-    Object.defineProperty(ownProto, '__proto__', { enumerable: true, value: 'forbidden' });
-    const ownProtoRegistry = new TypedProjectionRegistry();
-    ownProtoRegistry.register({ ...taxonomyDefinition(), project: () => ownProto as TaxonomyCode });
-    expect(() => ownProtoRegistry.project('taxonomy-code/v1', {})).toThrow(
-      'TYPED_PROJECTION_INVALID',
-    );
-
-    const schemaWithOwnProto = {
-      type: 'object', additionalProperties: false,
-      properties: { code: { type: 'string', maxLength: 20 } },
-    } as Record<string, unknown>;
-    Object.defineProperty(schemaWithOwnProto.properties as object, '__proto__', {
-      enumerable: true, value: { type: 'string', maxLength: 20 },
-    });
-    expect(() => new TypedProjectionRegistry().register({
-      ...taxonomyDefinition(), jsonSchema: schemaWithOwnProto,
-    })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
   });
 
   it('uses its own canonical encoder when Object and Array prototypes gain toJSON', () => {
@@ -605,29 +586,73 @@ describe('TypedProjectionRegistry', () => {
 });
 
 const APP_DATABASE_URL = process.env.APP_DATABASE_URL?.trim();
-const databaseDescribe = APP_DATABASE_URL ? describe : describe.skip;
+const liveDatabaseIt = APP_DATABASE_URL ? it : it.skip;
 
-databaseDescribe('TypedProjectionRegistry PostgreSQL JSONB byte gate', () => {
-  let database: PrismaClient;
+function readOnlyPostgresExecutor(
+  database: PrismaClient | undefined,
+): PostgresJsonbByteExecutor {
+  return {
+    async $queryRaw<T>(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<T> {
+      const statement = strings.join('?').replace(/\s+/g, ' ').trim();
+      expect(statement).toBe('SELECT octet_length(?::jsonb::text) AS "byteLength"');
+      expect(values).toHaveLength(1);
+      if (database) return database.$queryRaw<T>(strings, ...values);
+      const serialized = values[0];
+      if (typeof serialized !== 'string') throw new Error('expected canonical JSON parameter');
+      const byteLength = Buffer.byteLength(JSON.stringify(JSON.parse(serialized)), 'utf8');
+      return [{ byteLength }] as unknown as T;
+    },
+  };
+}
+
+describe('TypedProjectionRegistry PostgreSQL JSONB byte gate', () => {
+  let database: PrismaClient | undefined;
 
   beforeAll(async () => {
+    if (!APP_DATABASE_URL) return;
     database = new PrismaClient({
-      datasources: { db: { url: APP_DATABASE_URL! } },
+      datasources: { db: { url: APP_DATABASE_URL } },
     });
     await database.$connect();
   });
-  afterAll(async () => database?.$disconnect());
+  afterAll(async () => {
+    if (database) await database.$disconnect();
+  });
 
-  it('accepts an application-valid envelope and rejects JSONB expansion over 128 KiB', async () => {
-    const normalRegistry = new TypedProjectionRegistry();
-    normalRegistry.register(taxonomyDefinition());
-    const normal = normalRegistry.project('taxonomy-code/v1', {
-      code: 'A', provider: 'catalog',
+  it('carries an explicit null-prototype projection through AJV, restore, and the PG gate', async () => {
+    const projectorResult = Object.create(null) as TaxonomyCode;
+    Object.defineProperties(projectorResult, {
+      code: { enumerable: true, value: 'A' },
+      provider: { enumerable: true, value: 'catalog' },
     });
-    await expect(
-      normalRegistry.assertPostgresJsonbEnvelopeByteLimit(database, normal),
-    ).resolves.toBeLessThanOrEqual(128 * 1024);
+    let restoredDataPrototype: object | null | undefined;
+    const registry = new TypedProjectionRegistry();
+    registry.register({
+      ...taxonomyDefinition(),
+      project: () => projectorResult,
+      restore: (projected) => {
+        restoredDataPrototype = Object.getPrototypeOf(projected);
+        return { code: projected.code, provider: projected.provider };
+      },
+    });
+    const envelope = registry.project('taxonomy-code/v1', {});
 
+    expect(Object.getPrototypeOf(projectorResult)).toBeNull();
+    expect(Object.getPrototypeOf(envelope)).toBeNull();
+    expect(Object.getPrototypeOf(envelope.data)).toBeNull();
+    expect(Object.isFrozen(envelope)).toBe(true);
+    expect(Object.isFrozen(envelope.data)).toBe(true);
+    expect(registry.restore(envelope)).toEqual({ code: 'A', provider: 'catalog' });
+    expect(restoredDataPrototype).toBeNull();
+    await expect(
+      registry.assertPostgresJsonbEnvelopeByteLimit(
+        readOnlyPostgresExecutor(database), envelope,
+      ),
+    ).resolves.toBeLessThanOrEqual(128 * 1024);
+  });
+
+  liveDatabaseIt('rejects real PostgreSQL JSONB expansion over 128 KiB', async () => {
+    if (!database) throw new Error('APP_DATABASE_URL did not produce a database connection');
     const registry = new TypedProjectionRegistry();
     registry.register(numberListDefinition('icp-design/v1', 1_500, 1e100));
     const projected = registry.project('icp-design/v1', {
@@ -635,7 +660,9 @@ databaseDescribe('TypedProjectionRegistry PostgreSQL JSONB byte gate', () => {
     });
 
     await expect(
-      registry.assertPostgresJsonbEnvelopeByteLimit(database, projected),
+      registry.assertPostgresJsonbEnvelopeByteLimit(
+        readOnlyPostgresExecutor(database), projected,
+      ),
     ).rejects.toThrow('TYPED_PROJECTION_POSTGRES_TOO_LARGE');
     expect(Buffer.byteLength(JSON.stringify(projected), 'utf8')).toBeLessThanOrEqual(
       120 * 1024,

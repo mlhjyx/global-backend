@@ -115,14 +115,23 @@ function isDenseMediaTypeArray(value: unknown): value is readonly string[] {
 
 /** Runtime guard for declarations read from configuration or a future registry. */
 export function isDurableResultStrategy(value: unknown): value is DurableResultStrategy {
-  if (!isPlainOwnDataRecord(value) || typeof value.kind !== 'string') return false;
-  if (value.kind === 'typed_projection') {
-    return exactKeys(value, ['kind', 'schema']) && isTypedProjectionSchema(value.schema);
+  if (!isPlainOwnDataRecord(value)) return false;
+  const kindDescriptor = Object.getOwnPropertyDescriptor(value, 'kind');
+  if (!kindDescriptor || !('value' in kindDescriptor) || typeof kindDescriptor.value !== 'string') {
+    return false;
   }
-  if (value.kind === 'no_physical_call') return exactKeys(value, ['kind']);
-  if (value.kind !== 'artifact_reference') return false;
+  const kind = kindDescriptor.value;
+  if (kind === 'typed_projection') {
+    if (!exactKeys(value, ['kind', 'schema'])) return false;
+    return isTypedProjectionSchema(value.schema);
+  }
+  if (kind === 'no_physical_call') return exactKeys(value, ['kind']);
+  if (kind !== 'artifact_reference') return false;
+  if (!exactKeys(
+    value,
+    ['kind', 'maxBytes', 'mediaTypes', 'privacyClass', 'schema', 'ttlSeconds'],
+  )) return false;
   return (
-    exactKeys(value, ['kind', 'maxBytes', 'mediaTypes', 'privacyClass', 'schema', 'ttlSeconds']) &&
     isBoundedTrimmedString(value.schema, ARTIFACT_SCHEMA_MAX_LENGTH) &&
     isPositiveSafeInteger(value.maxBytes) && isDenseMediaTypeArray(value.mediaTypes) &&
     typeof value.privacyClass === 'string' &&
