@@ -4,29 +4,30 @@
  * 产物统一带 provenance，延续字段级 Evidence。
  */
 
-import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
+import type { DurableResultStrategy } from "../durable-results/durable-result-strategy";
+import type { PaidCostContext } from "../site-builder/site-build-cost-ledger";
 
 export type ToolCategory =
-  | 'search' // 元搜索（searxng）
-  | 'fetch' // 抓取（crawl4ai）
-  | 'structured_source' // SPARQL/Overpass/registry API（wikidata/osm/gleif/opencorporates）
-  | 'certificate' // crt.sh
-  | 'archive_index' // common crawl
-  | 'trade' // 海关/贸易
-  | 'verify'; // 邮箱验证
+  | "search" // 元搜索（searxng）
+  | "fetch" // 抓取（crawl4ai）
+  | "structured_source" // SPARQL/Overpass/registry API（wikidata/osm/gleif/opencorporates）
+  | "certificate" // crt.sh
+  | "archive_index" // common crawl
+  | "trade" // 海关/贸易
+  | "verify"; // 邮箱验证
 
 /** 复用现有七类 SourceClass —— 工具产物落回 raw_source_record.source_class。 */
 export type ToolSourceClass =
-  | 'trade_data'
-  | 'b2b_company_person'
-  | 'company_registry'
-  | 'contact_discovery'
-  | 'email_verification'
-  | 'public_intelligence'
-  | 'industry_data';
+  | "trade_data"
+  | "b2b_company_person"
+  | "company_registry"
+  | "contact_discovery"
+  | "email_verification"
+  | "public_intelligence"
+  | "industry_data";
 
 export interface CostModel {
-  unit: 'request' | 'row' | 'page' | 'token' | 'call';
+  unit: "request" | "row" | "page" | "token" | "call";
   estimatedCents: number; // 每单位估算（供预算 reserve；执行后按实际 settle）
   external: boolean; // 是否外部付费/计额度
 }
@@ -46,7 +47,7 @@ export interface RateLimitSpec {
  *    source_policy 不是 SSRF 防线；抓取出站校验由独立 egress gate 负责（R1-safety）。
  *  - none：自托管基座（searxng），无外部源治理对象。
  */
-export type SourcePolicyMode = 'required' | 'advisory' | 'none';
+export type SourcePolicyMode = "required" | "advisory" | "none";
 
 export interface ComplianceMeta {
   sourcePolicy: SourcePolicyMode; // Broker 执行前的 source_policy 闸门模式（见上）
@@ -57,7 +58,7 @@ export interface ComplianceMeta {
   allowedPurpose: string[]; // ['discovery','enrichment']
   reversible: boolean; // 只读采集 = true；对外动作 = false（走 ActionProposal→OPA→approval）
   authRequired: boolean; // 需外部密钥（密钥管理，业务码不见 SDK）
-  risk: 'low' | 'medium' | 'high';
+  risk: "low" | "medium" | "high";
 }
 
 /** 执行上下文——由 Broker 注入，工具只读取，不自造。 */
@@ -83,15 +84,15 @@ export interface ToolContext {
   /** Broker 查过的 source_policy 快照（工具据此避免重复查库）。 */
   sourcePolicySnapshot?: Record<string, unknown>;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
-  paidCost?: Omit<PaidCostContext, 'siteId'>;
+  paidCost?: Omit<PaidCostContext, "siteId">;
 }
 
 export class ExternalToolActionDeniedError extends Error {
-  readonly decision = 'suppression_action_gate';
+  readonly decision = "suppression_action_gate";
 
   constructor(options?: { cause?: unknown }) {
-    super('external action denied: suppression_action_gate', options);
-    this.name = 'ExternalToolActionDeniedError';
+    super("external action denied: suppression_action_gate", options);
+    this.name = "ExternalToolActionDeniedError";
   }
 }
 
@@ -103,19 +104,28 @@ export class ExternalToolActionDeniedError extends Error {
  */
 export function isTerminalExternalActionPolicyDenied(error: unknown): boolean {
   if (error instanceof ExternalToolActionDeniedError) return true;
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { decision?: unknown; name?: unknown; reason?: unknown; toolId?: unknown };
-  if (candidate.decision === 'suppression_action_gate' || candidate.reason === 'suppression_action_gate') return true;
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as {
+    decision?: unknown;
+    name?: unknown;
+    reason?: unknown;
+    toolId?: unknown;
+  };
+  if (
+    candidate.decision === "suppression_action_gate" ||
+    candidate.reason === "suppression_action_gate"
+  )
+    return true;
   return (
-    candidate.name === 'ToolPolicyDenied' &&
-    typeof candidate.toolId === 'string' &&
-    typeof candidate.reason === 'string'
+    candidate.name === "ToolPolicyDenied" &&
+    typeof candidate.toolId === "string" &&
+    typeof candidate.reason === "string"
   );
 }
 
 /** Reusable fail-closed guard for tools that contain more than one wire. */
 export async function assertToolExternalActionAuthorized(
-  ctx: Pick<ToolContext, 'authorizeExternalAction'>,
+  ctx: Pick<ToolContext, "authorizeExternalAction">,
 ): Promise<void> {
   if (!ctx.authorizeExternalAction) return;
   try {
@@ -139,16 +149,24 @@ export interface ToolResult<T = unknown> {
 }
 
 /** source_policy 闸门的拒绝原因（checkSourcePolicy 与 invoke 共用词表）。 */
-export type SourcePolicyDenyReason = 'suspended' | 'purpose_not_allowed' | 'unregistered' | 'policy_unavailable';
+export type SourcePolicyDenyReason =
+  "suspended" | "purpose_not_allowed" | "unregistered" | "policy_unavailable";
 
 /**
  * Broker 的最小执行面（provider/service 依赖注入用，测试可注假实现；ToolBroker 实现之）。
  * 所有原始出网（HTTP/SMTP）必须经 invoke —— 白名单/source_policy/预算/限流/Trace 在闸门内强制。
  */
 export interface ExecutionBroker {
-  checkSourcePolicy(toolId: string, domain: string, purpose?: string | string[],
+  checkSourcePolicy(
+    toolId: string,
+    domain: string,
+    purpose?: string | string[],
   ): Promise<{ allowed: boolean; reason?: SourcePolicyDenyReason }>;
-  invoke<I, O>(toolId: string, input: I, ctx: ToolContext): Promise<ToolResult<O>>;
+  invoke<I, O>(
+    toolId: string,
+    input: I,
+    ctx: ToolContext,
+  ): Promise<ToolResult<O>>;
 }
 
 export interface Tool<I = unknown, O = unknown> {
@@ -161,12 +179,21 @@ export interface Tool<I = unknown, O = unknown> {
   compliance: ComplianceMeta;
   /** 声明消费/产出什么，供确定性 SourceSelector 连接工具图（非运行时 LLM）。 */
   capabilities: {
-    produces: ('company' | 'domain' | 'contact' | 'relation' | 'certificate' | 'trade_record')[];
-    accepts: ('keywords' | 'domain' | 'lei' | 'coordinates' | 'hs_code')[];
+    produces: (
+      | "company"
+      | "domain"
+      | "contact"
+      | "relation"
+      | "certificate"
+      | "trade_record"
+    )[];
+    accepts: ("keywords" | "domain" | "lei" | "coordinates" | "hs_code")[];
     enrichesOnly?: boolean;
   };
   /** 纯函数：由归一化 input 派生稳定幂等键（与 raw_source_record 去重统一）。 */
   idempotencyKey(input: I): string;
+  /** Required declaration for the one durable-result path; v1 replay callbacks remain until cutover. */
+  durableResultStrategy: DurableResultStrategy;
   /**
    * Optional fail-closed durable replay projection. Paid ToolBroker calls only
    * persist this bounded/scrubbed shape; raw provider payloads are never copied

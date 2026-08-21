@@ -311,6 +311,24 @@ git commit -m "feat(replay): bound catalog tool projections"
 
 ### Task 5: Make strategy mandatory in ToolRegistry
 
+**Task-5 artifact policy ruling (approved):** all four first artifact Tools use
+`privacyClass: PERSONAL_DATA` and `ttlSeconds: 86400`. `http.get` declares a
+normalized `text/plain` body with `maxBytes: 3000000`; `crawl4ai.fetch`
+declares the existing PII-scrubbed `text/markdown` representation with
+`maxBytes: 300000` UTF-8 bytes; `crawl4ai.render` declares an HTML-only
+artifact body with `maxBytes: 3000000`; and `sanctions.download` declares only
+`application/xml` or `text/xml` with `maxBytes: 33554432`. The Tool code must
+enforce each applicable current output/media boundary before its declaration is
+registered; a declaration must never promise an unimplemented cap.
+
+`crawl4ai.render` response headers remain transient first-run data in this task:
+`DigitalFootprintProvider` currently uses them for platform detection. They are
+explicitly excluded from future artifacts, references and replay payloads. The
+Artifact+Broker task may not wire render replay until it either records a
+bounded header-derived domain acknowledgement or proves that the current result
+can be recomputed from persisted HTML alone. Task 5 does not change that
+provider, ToolBroker, Router, settlement, replay or object-store behavior.
+
 **Files:**
 
 - Modify: `apps/api/src/tools/tool-contract.ts`

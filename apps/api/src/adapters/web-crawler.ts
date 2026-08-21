@@ -8,35 +8,40 @@
  * through its pinning proxy. Ubuntu fake-IP compatibility is an all-198.18/15-only DoH
  * fallback; the broad allow-internal switch is forbidden.
  */
-import { resolvePublicHttpUrl, type PublicUrlResolver } from './url-guard';
+import { resolvePublicHttpUrl, type PublicUrlResolver } from "./url-guard";
+
+export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES = 3_000_000;
 export interface CrawlResult {
   url: string;
   text: string;
 }
 
-export async function crawlUrl(url: string,
+export async function crawlUrl(
+  url: string,
   authorizeExternalAction?: () => Promise<void>,
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
 ): Promise<CrawlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
-  const base = process.env.CRAWLER_URL ?? 'http://localhost:11235';
-  const token = process.env.CRAWLER_TOKEN ?? '';
+  const base = process.env.CRAWLER_URL ?? "http://localhost:11235";
+  const token = process.env.CRAWLER_TOKEN ?? "";
   await authorizeExternalAction?.();
   const res = await fetch(`${base}/md`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ url: target.url.toString() }),
     signal: AbortSignal.timeout(75_000),
   });
   if (!res.ok) {
-    throw new Error(`crawler ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(
+      `crawler ${res.status}: ${(await res.text()).slice(0, 200)}`,
+    );
   }
   const json = (await res.json()) as { markdown?: string; success?: boolean };
-  return { url: target.url.toString(), text: json.markdown ?? '' };
+  return { url: target.url.toString(), text: json.markdown ?? "" };
 }
 
 /** 渲染后的原始 HTML + 响应头（`/md` 只给 markdown，数字足迹/结构化收割需要原始 HTML）。 */
@@ -57,41 +62,50 @@ export async function crawlHtml(
 ): Promise<CrawlHtmlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
-  const base = process.env.CRAWLER_URL ?? 'http://localhost:11235';
-  const token = process.env.CRAWLER_TOKEN ?? '';
+  const base = process.env.CRAWLER_URL ?? "http://localhost:11235";
+  const token = process.env.CRAWLER_TOKEN ?? "";
   await authorizeExternalAction?.();
   const res = await fetch(`${base}/crawl`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({
       urls: [target.url.toString()],
-      browser_config: { type: 'BrowserConfig', params: { headless: true } },
+      browser_config: { type: "BrowserConfig", params: { headless: true } },
       crawler_config: {
-        type: 'CrawlerRunConfig',
+        type: "CrawlerRunConfig",
         params: {
           delay_before_return_html: 3.0,
           page_timeout: 45000,
-          cache_mode: 'BYPASS',
+          cache_mode: "BYPASS",
         },
       },
     }),
     signal: AbortSignal.timeout(75_000),
   });
   if (!res.ok) {
-    throw new Error(`crawler ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(
+      `crawler ${res.status}: ${(await res.text()).slice(0, 200)}`,
+    );
   }
   const data = (await res.json()) as {
     results?: { html?: string; response_headers?: Record<string, string> }[];
     detail?: unknown;
   };
   const r = Array.isArray(data.results) ? data.results[0] : undefined;
-  if (!r) throw new Error(`crawler /crawl: ${JSON.stringify(data.detail ?? data).slice(0, 160)}`);
+  if (!r)
+    throw new Error(
+      `crawler /crawl: ${JSON.stringify(data.detail ?? data).slice(0, 160)}`,
+    );
+  const html = r.html ?? "";
+  if (Buffer.byteLength(html, "utf8") > MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES) {
+    throw new Error("CRAWL4AI_RENDER_RESULT_TOO_LARGE");
+  }
   return {
     url: target.url.toString(),
-    html: r.html ?? '',
+    html,
     headers: r.response_headers ?? {},
   };
 }
