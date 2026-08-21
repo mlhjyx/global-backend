@@ -78,13 +78,34 @@ describe('TypedProjectionRegistry', () => {
     expect(isDurableResultStrategy(artifact)).toBe(true);
     expect(isDurableResultStrategy({ kind: 'artifact_reference', schema: 'x/v1' })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, maxBytes: 0 })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, maxBytes: -1 })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, mediaTypes: [] })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, privacyClass: 'PUBLIC' })).toBe(false);
     expect(isDurableResultStrategy({ kind: 'typed_projection', schema: 'unknown/v1' })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, schema: '' })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, mediaTypes: [''] })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, ttlSeconds: Number.MAX_SAFE_INTEGER + 1 })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, ttlSeconds: -1 })).toBe(false);
     expect(isDurableResultStrategy({ ...artifact, unexpected: true })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, schema: ' schema/v1' })).toBe(false);
+    expect(isDurableResultStrategy({ ...artifact, mediaTypes: [' text/plain'] })).toBe(false);
+    const sparseMediaTypes = new Array<string>(1);
+    expect(isDurableResultStrategy({ ...artifact, mediaTypes: sparseMediaTypes })).toBe(false);
+    const mediaTypesWithExtraProperty = ['application/xml'];
+    Object.assign(mediaTypesWithExtraProperty, { extra: true });
+    expect(isDurableResultStrategy({ ...artifact, mediaTypes: mediaTypesWithExtraProperty })).toBe(false);
+    expect(isDurableResultStrategy(new Proxy(artifact, {}))).toBe(false);
+    expect(isDurableResultStrategy({
+      ...artifact,
+      mediaTypes: new Proxy(['application/xml'], {}),
+    })).toBe(false);
+    const accessorArtifact = Object.defineProperty({ ...artifact }, 'schema', {
+      enumerable: true,
+      get: () => 'sanctions-download/v1',
+    });
+    expect(isDurableResultStrategy(accessorArtifact)).toBe(false);
+    const symbolArtifact = { ...artifact, [Symbol('hidden')]: true };
+    expect(isDurableResultStrategy(symbolArtifact)).toBe(false);
   });
 
   it('freezes exported schema and privacy tuples without weakening private validation', () => {
@@ -236,6 +257,48 @@ describe('TypedProjectionRegistry', () => {
     expect(() => arrays.project('icp-query-plan/v1', {
       values: transparentArrayProxy,
     })).toThrow('TYPED_PROJECTION_INVALID');
+  });
+
+  it('rejects inherited, reserved, and prototype-polluted projection facts', () => {
+    const registry = new TypedProjectionRegistry();
+    registry.register({ ...taxonomyDefinition(), project: () => ({}) as TaxonomyCode });
+    const originalCode = Object.getOwnPropertyDescriptor(Object.prototype, 'code');
+    const originalProvider = Object.getOwnPropertyDescriptor(Object.prototype, 'provider');
+    Object.defineProperty(Object.prototype, 'code', {
+      configurable: true, enumerable: false, value: 'x'.repeat(130_000),
+    });
+    Object.defineProperty(Object.prototype, 'provider', {
+      configurable: true, enumerable: false, value: 'catalog',
+    });
+    try {
+      expect(() => registry.project('taxonomy-code/v1', {})).toThrow(
+        'TYPED_PROJECTION_INVALID',
+      );
+    } finally {
+      if (originalCode) Object.defineProperty(Object.prototype, 'code', originalCode);
+      else delete (Object.prototype as { code?: unknown }).code;
+      if (originalProvider) Object.defineProperty(Object.prototype, 'provider', originalProvider);
+      else delete (Object.prototype as { provider?: unknown }).provider;
+    }
+
+    const ownProto = { code: 'A', provider: 'catalog' } as Record<string, unknown>;
+    Object.defineProperty(ownProto, '__proto__', { enumerable: true, value: 'forbidden' });
+    const ownProtoRegistry = new TypedProjectionRegistry();
+    ownProtoRegistry.register({ ...taxonomyDefinition(), project: () => ownProto as TaxonomyCode });
+    expect(() => ownProtoRegistry.project('taxonomy-code/v1', {})).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const schemaWithOwnProto = {
+      type: 'object', additionalProperties: false,
+      properties: { code: { type: 'string', maxLength: 20 } },
+    } as Record<string, unknown>;
+    Object.defineProperty(schemaWithOwnProto.properties as object, '__proto__', {
+      enumerable: true, value: { type: 'string', maxLength: 20 },
+    });
+    expect(() => new TypedProjectionRegistry().register({
+      ...taxonomyDefinition(), jsonSchema: schemaWithOwnProto,
+    })).toThrow('TYPED_PROJECTION_SCHEMA_INVALID');
   });
 
   it('uses its own canonical encoder when Object and Array prototypes gain toJSON', () => {
@@ -456,6 +519,13 @@ describe('TypedProjectionRegistry', () => {
     expect(() => registry.restore({ ...stored, data: { code: 'A' } })).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
+    const inheritedEnvelope = Object.create({
+      ...stored,
+      data: { code: 'changed-through-prototype', provider: 'catalog' },
+    });
+    expect(() => registry.restore(inheritedEnvelope)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
   });
 
   it('rejects an envelope for an unregistered schema and a failing restorer', () => {
@@ -549,6 +619,15 @@ databaseDescribe('TypedProjectionRegistry PostgreSQL JSONB byte gate', () => {
   afterAll(async () => database?.$disconnect());
 
   it('accepts an application-valid envelope and rejects JSONB expansion over 128 KiB', async () => {
+    const normalRegistry = new TypedProjectionRegistry();
+    normalRegistry.register(taxonomyDefinition());
+    const normal = normalRegistry.project('taxonomy-code/v1', {
+      code: 'A', provider: 'catalog',
+    });
+    await expect(
+      normalRegistry.assertPostgresJsonbEnvelopeByteLimit(database, normal),
+    ).resolves.toBeLessThanOrEqual(128 * 1024);
+
     const registry = new TypedProjectionRegistry();
     registry.register(numberListDefinition('icp-design/v1', 1_500, 1e100));
     const projected = registry.project('icp-design/v1', {

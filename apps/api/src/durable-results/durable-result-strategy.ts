@@ -2,6 +2,7 @@
  * Durable result strategies are declarative only. Product composition and
  * strategy selection remain deliberately outside this foundation layer.
  */
+import { types } from 'node:util';
 export const DURABLE_RESULT_STRATEGY_KINDS = [
   'typed_projection',
   'artifact_reference',
@@ -59,8 +60,21 @@ export type DurableResultStrategy =
     }>
   | Readonly<{ kind: 'no_physical_call' }>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const ARTIFACT_SCHEMA_MAX_LENGTH = 256;
+const ARTIFACT_MEDIA_TYPE_MAX_LENGTH = 128;
+
+function isPlainOwnDataRecord(value: unknown): value is Record<string, unknown> {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || types.isProxy(value)) return false;
+    if (Object.getPrototypeOf(value) !== Object.prototype) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    return Reflect.ownKeys(value).every((key) =>
+      typeof key === 'string' && Boolean(descriptors[key]) &&
+      descriptors[key]!.enumerable && 'value' in descriptors[key]!,
+    );
+  } catch {
+    return false;
+  }
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -72,9 +86,36 @@ function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
+function isBoundedTrimmedString(value: unknown, maximumLength: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maximumLength && value.trim() === value;
+}
+
+function isDenseMediaTypeArray(value: unknown): value is readonly string[] {
+  try {
+    if (!Array.isArray(value) || types.isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const length = Object.getOwnPropertyDescriptor(value, 'length')?.value;
+    if (!Number.isSafeInteger(length) || length <= 0) return false;
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key === 'symbol') return false;
+      if (key === 'length') continue;
+      const descriptor = descriptors[key];
+      if (!/^(0|[1-9][0-9]*)$/.test(key) || !descriptor?.enumerable || !('value' in descriptor)) return false;
+    }
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor || !descriptor.enumerable || !('value' in descriptor) ||
+        !isBoundedTrimmedString(descriptor.value, ARTIFACT_MEDIA_TYPE_MAX_LENGTH)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Runtime guard for declarations read from configuration or a future registry. */
 export function isDurableResultStrategy(value: unknown): value is DurableResultStrategy {
-  if (!isRecord(value) || typeof value.kind !== 'string') return false;
+  if (!isPlainOwnDataRecord(value) || typeof value.kind !== 'string') return false;
   if (value.kind === 'typed_projection') {
     return exactKeys(value, ['kind', 'schema']) && isTypedProjectionSchema(value.schema);
   }
@@ -82,11 +123,9 @@ export function isDurableResultStrategy(value: unknown): value is DurableResultS
   if (value.kind !== 'artifact_reference') return false;
   return (
     exactKeys(value, ['kind', 'maxBytes', 'mediaTypes', 'privacyClass', 'schema', 'ttlSeconds']) &&
-    typeof value.schema === 'string' && value.schema.length > 0 &&
-    isPositiveSafeInteger(value.maxBytes) && Array.isArray(value.mediaTypes) &&
-    value.mediaTypes.length > 0 && value.mediaTypes.every(
-      (mediaType) => typeof mediaType === 'string' && mediaType.length > 0,
-    ) && typeof value.privacyClass === 'string' &&
+    isBoundedTrimmedString(value.schema, ARTIFACT_SCHEMA_MAX_LENGTH) &&
+    isPositiveSafeInteger(value.maxBytes) && isDenseMediaTypeArray(value.mediaTypes) &&
+    typeof value.privacyClass === 'string' &&
     ARTIFACT_PRIVACY_CLASS_SET.has(value.privacyClass) &&
     isPositiveSafeInteger(value.ttlSeconds)
   );

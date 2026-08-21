@@ -25,6 +25,7 @@ const SCHEMA_KEYS = new Set([
 const JSON_TYPES = new Set([
   'array', 'boolean', 'integer', 'null', 'number', 'object', 'string',
 ]);
+const RESERVED_PROPERTY_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 
 interface RegisteredDefinition {
   readonly validate: ValidateFunction;
@@ -52,10 +53,10 @@ function tooLarge(): never {
   throw new Error('TYPED_PROJECTION_TOO_LARGE');
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
+function isCanonicalRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(
     value && typeof value === 'object' && !Array.isArray(value) &&
-    Object.getPrototypeOf(value) === Object.prototype,
+    Object.getPrototypeOf(value) === null,
   );
 }
 
@@ -71,6 +72,25 @@ function assertUnicode(value: string): void {
       invalid();
     }
   }
+}
+
+function assertSafePropertyName(value: string): void {
+  assertUnicode(value);
+  if (RESERVED_PROPERTY_NAMES.has(value)) invalid();
+}
+
+function frozenRecord(entries: readonly (readonly [string, StrictJson])[]): StrictJsonObject {
+  const result = Object.create(null) as Record<string, StrictJson>;
+  for (const [key, value] of entries) {
+    assertSafePropertyName(key);
+    Object.defineProperty(result, key, {
+      configurable: false,
+      enumerable: true,
+      value,
+      writable: false,
+    });
+  }
+  return Object.freeze(result);
 }
 
 function strictJson(value: unknown, seen = new WeakSet<object>(), depth = 0): StrictJson {
@@ -115,18 +135,19 @@ function strictJson(value: unknown, seen = new WeakSet<object>(), depth = 0): St
         }
         return Object.freeze(result);
       }
-      if (Object.getPrototypeOf(value) !== Object.prototype) invalid();
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) invalid();
       const descriptors = Object.getOwnPropertyDescriptors(value);
       const keys = Reflect.ownKeys(value);
       if (keys.some((key) => typeof key !== 'string')) invalid();
-      const result: Record<string, StrictJson> = {};
+      const entries: [string, StrictJson][] = [];
       for (const key of (keys as string[]).sort()) {
-        assertUnicode(key);
+        assertSafePropertyName(key);
         const descriptor = descriptors[key];
         if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) invalid();
-        result[key] = strictJson(descriptor.value, seen, depth + 1);
+        entries.push([key, strictJson(descriptor.value, seen, depth + 1)]);
       }
-      return Object.freeze(result);
+      return frozenRecord(entries);
     } finally {
       seen.delete(value);
     }
@@ -151,6 +172,25 @@ function canonicalJson(value: StrictJson): string {
   return `{${Object.keys(objectValue).sort().map(
     (key) => `${JSON.stringify(key)}:${canonicalJson(objectValue[key]!)}`,
   ).join(',')}}`;
+}
+
+/** AJV accepts ordinary own-data containers; canonical data stays null-prototype. */
+function cloneForAjv(value: StrictJson): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(cloneForAjv);
+  const objectValue = value as StrictJsonObject;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(objectValue)) {
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      value: cloneForAjv(objectValue[key]!),
+      writable: true,
+    });
+  }
+  return result;
 }
 
 function fieldNameTokens(value: string): readonly string[] {
@@ -200,7 +240,7 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 }
 
 function schemaRecord(value: StrictJson): Readonly<Record<string, StrictJson>> {
-  if (!isPlainRecord(value)) schemaInvalid();
+  if (!isCanonicalRecord(value)) schemaInvalid();
   return value;
 }
 
@@ -233,12 +273,12 @@ function assertSchema(value: StrictJson): void {
   const types = schemaTypes(node);
   const has = (type: string) => types.includes(type);
   if (has('object')) {
-    if (node.additionalProperties !== false || !isPlainRecord(node.properties)) schemaInvalid();
+    if (node.additionalProperties !== false || !isCanonicalRecord(node.properties)) schemaInvalid();
     const properties = schemaRecord(node.properties);
     if (node.required !== undefined) {
       if (!Array.isArray(node.required) || !node.required.every((key) => typeof key === 'string')) schemaInvalid();
       const required = node.required as readonly string[];
-      if (new Set(required).size !== required.length || required.some((key) => !(key in properties))) schemaInvalid();
+      if (new Set(required).size !== required.length || required.some((key) => !Object.hasOwn(properties, key))) schemaInvalid();
     }
     for (const [key, property] of Object.entries(properties)) {
       assertSchemaPropertyName(key);
@@ -266,14 +306,14 @@ function assertSchema(value: StrictJson): void {
 }
 
 function envelopeBase(schema: TypedProjectionSchema, data: StrictJson) {
-  return Object.freeze({
-    data,
-    schema,
-    schemaVersion: TYPED_PROJECTION_ENVELOPE_VERSION,
-  });
+  return frozenRecord([
+    ['data', data],
+    ['schema', schema],
+    ['schemaVersion', TYPED_PROJECTION_ENVELOPE_VERSION],
+  ]);
 }
 
-function envelopeDigest(base: ReturnType<typeof envelopeBase>): string {
+function envelopeDigest(base: StrictJsonObject): string {
   return createHash('sha256').update(canonicalJson(base)).digest('hex');
 }
 
@@ -293,7 +333,9 @@ export class TypedProjectionRegistry {
       if (typeof definition.project !== 'function' || typeof definition.restore !== 'function') schemaInvalid();
       const schema = strictJson(definition.jsonSchema);
       assertSchema(schema);
-      const validate = new Ajv({ allErrors: true, strict: true }).compile(schema as AnySchema);
+      const validate = new Ajv({ allErrors: true, ownProperties: true, strict: true }).compile(
+        cloneForAjv(schema) as AnySchema,
+      );
       this.#definitions.set(definition.schema, Object.freeze({
         validate,
         project: definition.project as (raw: unknown) => unknown,
@@ -318,7 +360,12 @@ export class TypedProjectionRegistry {
       const data = strictJson(definition.project(raw));
       if (!definition.validate(data)) invalid();
       const base = envelopeBase(schema, data);
-      const envelope = Object.freeze({ ...base, digest: envelopeDigest(base) });
+      const envelope = frozenRecord([
+        ['data', base.data!],
+        ['digest', envelopeDigest(base)],
+        ['schema', base.schema!],
+        ['schemaVersion', base.schemaVersion!],
+      ]) as unknown as TypedProjectionEnvelope;
       if (projectionSize(envelope) > APPLICATION_MAX_BYTES) tooLarge();
       return envelope;
     } catch (error) {
@@ -339,7 +386,12 @@ export class TypedProjectionRegistry {
       const definition = this.#definitions.get(stored.schema);
       if (!definition || !definition.validate(stored.data)) invalid();
       const base = envelopeBase(stored.schema, stored.data);
-      const validated = Object.freeze({ ...base, digest: stored.digest });
+      const validated = frozenRecord([
+        ['data', base.data!],
+        ['digest', stored.digest],
+        ['schema', base.schema!],
+        ['schemaVersion', base.schemaVersion!],
+      ]) as unknown as TypedProjectionEnvelope;
       if (envelopeDigest(base) !== validated.digest) invalid();
       if (projectionSize(validated) > APPLICATION_MAX_BYTES) tooLarge();
       return validated;
