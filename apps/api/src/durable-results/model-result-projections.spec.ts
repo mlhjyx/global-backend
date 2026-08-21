@@ -265,7 +265,7 @@ const contactDecisionMakersData: JsonRecord = {
 };
 const contactDecisionMakersRaw = rawResult(contactDecisionMakersData);
 
-const FIXTURES: readonly ProjectionFixture[] = [
+const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   {
     taskId: 'icp.design', schema: 'icp-design/v1', raw: icpDesignRaw,
     restored: restoredResult(icpDesignData),
@@ -537,7 +537,7 @@ describe('non-Site-Builder model result projection registry', () => {
     }
   });
 
-  it.each(FIXTURES)('$taskId projects/restores its maximum fixture below 120 KiB', (fixture) => {
+  it.each(REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES)('$taskId projects/restores its representative legal boundary fixture below 120 KiB', (fixture) => {
     const registry = new TypedProjectionRegistry();
     registerModelResultProjections(registry);
     registry.freeze();
@@ -551,7 +551,7 @@ describe('non-Site-Builder model result projection registry', () => {
     expect(JSON.stringify(envelope.data)).not.toContain('inputTokens');
   });
 
-  it.each(FIXTURES)('$taskId rejects each over-bound, open, forbidden, or non-canonical mutation', (fixture) => {
+  it.each(REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES)('$taskId rejects each over-bound, open, forbidden, or non-canonical mutation', (fixture) => {
     const registry = new TypedProjectionRegistry();
     registerModelResultProjections(registry);
     for (const mutation of fixture.invalid) {
@@ -562,7 +562,7 @@ describe('non-Site-Builder model result projection registry', () => {
     }
   });
 
-  it.each(FIXTURES)('$taskId refuses prompt, reasoning, raw response, and credential fields', (fixture) => {
+  it.each(REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES)('$taskId refuses prompt, reasoning, raw response, and credential fields', (fixture) => {
     const registry = new TypedProjectionRegistry();
     registerModelResultProjections(registry);
     const validate = new Ajv({ allErrors: true, strict: false }).compile(
@@ -653,7 +653,7 @@ describe('non-Site-Builder model result projection registry', () => {
     ]);
   });
 
-  it('still rejects a schema-valid cartesian claim maximum at the 120 KiB envelope gate', () => {
+  it('rejects the all-leaf-max cartesian claim fixture as aggregate oversize at the 120 KiB gate', () => {
     const raw = {
       data: {
         claims: Array.from({ length: 64 }, () => ({
@@ -715,7 +715,7 @@ describe('non-Site-Builder model result projection registry', () => {
 describe('provider-facing model task schemas are pre-wire closed and no wider than projections', () => {
   const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
 
-  it.each(FIXTURES)('$taskId accepts the maximum fixture and rejects every data mutation', (fixture) => {
+  it.each(REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES)('$taskId accepts the representative legal boundary fixture and rejects every data mutation', (fixture) => {
     const contract = getTask(fixture.taskId);
     expect(contract).toBeTruthy();
     expectRecursivelyClosedAndBounded(contract!.outputSchema);
@@ -753,11 +753,11 @@ describe('model result projection PostgreSQL JSONB byte gate', () => {
     await database?.$disconnect();
   });
 
-  liveDatabaseIt('keeps all ten maximum envelopes below the real 128 KiB JSONB text limit', async () => {
+  liveDatabaseIt('keeps all ten representative legal boundary envelopes below the real 128 KiB JSONB text limit', async () => {
     if (!database) throw new Error('APP_DATABASE_URL did not produce a database connection');
     const registry = new TypedProjectionRegistry();
     registerModelResultProjections(registry);
-    for (const fixture of FIXTURES) {
+    for (const fixture of REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES) {
       const envelope = registry.project(getModelResultProjectionSchema(fixture.taskId), fixture.raw);
       const postgresBytes = await registry.assertPostgresJsonbEnvelopeByteLimit(
         postgresExecutor(database), envelope,
