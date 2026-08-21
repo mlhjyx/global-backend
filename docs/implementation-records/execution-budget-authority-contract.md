@@ -87,6 +87,16 @@ Final whole-branch review 的 6 个 Important 与低成本 deferred 项在 `0ba3
 
 仍未完成且不能由本波次推导：writer-only microusd reserve/settle/status/close、产品 caller/header 切换、API/Worker admission 切换、外部 command/revoke transport、retained migration、部署、RuntimeEvidence 与 release。
 
+### NumericDate 与 readiness correction（`51f61391…` → `c29e5742…`）
+
+Authority foundation 的后续独立 review 发现两个跨层/生命周期残余，而不是新的产品授权路径：JOSE verifier 以 `floor(now / 1000)` 比较 NumericDate，数据库 helper 却以带毫秒的时间戳比较；以及 bootstrap/interval 使用 `void check()` 时会让失败的后台 refresh 成为未处理 rejection。修正保持 Authority additive、observe-only 与 non-spendable：
+
+- `51f613912e33526750af4fc230763bc7aece9940` 先固定非零毫秒时钟下的 RED；`b2847d9c537156faabfe67de992f8cc93f5f1e98` 使 SQL `execution_budget_authority_time_state` 仅将比较时钟 `date_trunc('second', p_verification_time)`，不改已签 claim 的存储时间；`fcf4b15ba99c3b0b7cad9f3321a87ec79b093ebb` 补足 readiness contributor closures。
+- 整秒矩阵固定为：`iat`/`nbf` 在 verification second 的 `-61/-60/0/+60` 接受、`+61` invalid；`exp=-61` expired，而 `-60/0/+60/+61` 接受。Platform freshness 的 TypeScript 闭合 vocabulary 现在包含 `invalid`，且只能产生固定 purpose-derived `*_INVALID` code，不能泄露 authority 原始数据。
+- `c29e57424f6219690768877792d79efc66a38801` 将 bootstrap 和 interval 均收敛到 `refreshInBackground()` 的有界 `.catch(() => undefined)`；它保留上一次 fail-closed snapshot，未让 `/health/ready` 发起 probe，也未改变 hard/capability admission。独立 scoped review 已 PASS；Task 2 的 full API 结果为 333 files / 5,168 tests PASS，build/lint 通过。
+- 这次 correction 的 fresh disposable PostgreSQL 16 验证为 29/29 RLS/ACL/concurrency tests PASS、84 migrations up to date；另一个全新临时 cluster 对比“空库 `migrate deploy`”与“旧 migrations 后只应用 `20260821090000_execution_budget_authority`”，`prisma migrate diff --exit-code` 输出 `No difference detected.`。两个 cluster 只用 internal Docker network 加 `127.0.0.1` relay，结束后 container/network/relay 均回读不存在；`global-postgres` 未被用作测试目标。
+- Copy generator/readback 没有发现新的 bound-file fingerprint：receipt 未被手改或重写，继续是既有 11-path `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`。这次证据不等于 RuntimeEvidence、retained migration、deployment、JWKS/provider/model invocation 或产品 cutover。
+
 ## 4. 数据库合同
 
 唯一 Authority 迁移为：
