@@ -15,6 +15,10 @@ const migrationPath = resolve(
   repositoryRoot,
   "packages/db/prisma/migrations/20260821100000_generic_operation_artifact/migration.sql",
 );
+const sharedContentMigrationPath = resolve(
+  repositoryRoot,
+  "packages/db/prisma/migrations/20260821110000_generic_operation_artifact_shared_content/migration.sql",
+);
 
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;
@@ -307,16 +311,25 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     }
   });
 
-  it("deploys the immutable manifest relation and all six narrow functions", async () => {
-    const [relation] = await owner.$queryRawUnsafe(`
+  it("deploys the immutable manifest relation, object metadata relation and all six narrow functions", async () => {
+    const relations = await owner.$queryRawUnsafe(`
       SELECT relname, relrowsecurity, relforcerowsecurity
-      FROM pg_class WHERE relname='generic_operation_artifact'
+      FROM pg_class WHERE relname IN (
+        'generic_operation_artifact', 'generic_operation_artifact_object'
+      ) ORDER BY relname
     `);
-    assert.deepEqual(relation, {
-      relname: "generic_operation_artifact",
-      relrowsecurity: true,
-      relforcerowsecurity: true,
-    });
+    assert.deepEqual(relations, [
+      {
+        relname: "generic_operation_artifact",
+        relrowsecurity: true,
+        relforcerowsecurity: true,
+      },
+      {
+        relname: "generic_operation_artifact_object",
+        relrowsecurity: false,
+        relforcerowsecurity: false,
+      },
+    ]);
 
     const functions = await owner.$queryRawUnsafe(`
       SELECT proname, prosecdef, proconfig
@@ -440,19 +453,72 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     }
   });
 
-  it("rejects content-key reuse by a different operation in the same scope", async () => {
-    const binding = await seedWorkspaceBinding(owner, WS_B);
-    const input = artifactInput(binding, {
-      sha256: SHA_B,
-      objectKey: objectKey(SHA_B),
+  it("lets distinct operation and authority bindings share one immutable content object", async () => {
+    const firstBinding = await seedWorkspaceBinding(owner, WS_A);
+    const secondBinding = await seedWorkspaceBinding(owner, WS_A);
+    const digest = randomUUID().replaceAll("-", "").repeat(2);
+    const firstInput = artifactInput(firstBinding, {
+      sha256: digest,
+      objectKey: objectKey(digest),
     });
-    await rejectsSql(
-      () =>
-        withWorkspace(app, WS_B, (transaction) =>
-          appendWorkspace(transaction, input),
+    const secondInput = artifactInput(secondBinding, {
+      sha256: digest,
+      objectKey: objectKey(digest),
+    });
+    const concurrentApp = client(APP_URL);
+    let results;
+    try {
+      results = await Promise.all([
+        withWorkspace(app, WS_A, (transaction) =>
+          appendWorkspace(transaction, firstInput),
         ),
-      "GENERIC_OPERATION_ARTIFACT_INVALID",
+        withWorkspace(concurrentApp, WS_A, (transaction) =>
+          appendWorkspace(transaction, secondInput),
+        ),
+      ]);
+    } finally {
+      await concurrentApp.$disconnect();
+    }
+    assert.deepEqual(
+      results.map(([row]) => row.object_key),
+      [objectKey(digest), objectKey(digest)],
     );
+
+    const readByOperation = (workspaceId, binding) =>
+      withWorkspace(app, workspaceId, (transaction) =>
+        transaction.$queryRawUnsafe(
+          `SELECT * FROM find_workspace_generic_operation_artifact_by_operation_v1(
+            $1::uuid, $2::uuid, $3::uuid, $4
+          )`,
+          workspaceId,
+          binding.authorityId,
+          binding.operationId,
+          "http-get/v1",
+        ),
+      );
+    const [firstRead, secondRead] = await Promise.all([
+      readByOperation(WS_A, firstBinding),
+      readByOperation(WS_A, secondBinding),
+    ]);
+    assert.deepEqual(
+      firstRead.map(({ artifact_id }) => artifact_id),
+      [firstInput.artifactId],
+    );
+    assert.deepEqual(
+      secondRead.map(({ artifact_id }) => artifact_id),
+      [secondInput.artifactId],
+    );
+    assert.deepEqual(await readByOperation(WS_B, firstBinding), []);
+
+    const [counts] = await owner.$queryRawUnsafe(
+      `SELECT
+         (SELECT count(*)::int FROM generic_operation_artifact
+          WHERE sha256=$1) AS manifests,
+         (SELECT count(*)::int FROM generic_operation_artifact_object
+          WHERE sha256=$1) AS objects`,
+      digest,
+    );
+    assert.deepEqual(counts, { manifests: 2, objects: 1 });
   });
 
   it("keeps another workspace absent and indistinguishable", async () => {
@@ -491,8 +557,11 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
   });
 
   it("requires the fixed platform role and denies arbitrary workspace sessions", async () => {
+    const digest = randomUUID().replaceAll("-", "").repeat(2);
     const input = artifactInput(platformBinding, {
       artifactId: randomUUID(),
+      sha256: digest,
+      objectKey: objectKey(digest),
       privacyClass: "PUBLIC_ORGANIZATION",
       sourceDigest: null,
     });
@@ -517,7 +586,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     assert.deepEqual(hidden, []);
   });
 
-  it("denies PUBLIC and direct app/platform table DML including UPDATE and DELETE", async () => {
+  it("denies PUBLIC and direct app/platform DML on manifests and object metadata", async () => {
     const privileges = await owner.$queryRawUnsafe(`
       WITH principal(name) AS (
         VALUES ('PUBLIC'::text), ('app_user'::text),
@@ -526,10 +595,13 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
         VALUES ('SELECT'::text), ('INSERT'::text),
                ('UPDATE'::text), ('DELETE'::text)
       ), relation AS (
-        SELECT oid, relacl, relowner FROM pg_class
-        WHERE relname='generic_operation_artifact'
+        SELECT oid, relname, relacl, relowner FROM pg_class
+        WHERE relname IN (
+          'generic_operation_artifact', 'generic_operation_artifact_object'
+        )
       )
-      SELECT principal.name AS principal, requested.name AS privilege,
+      SELECT relation.relname AS relation, principal.name AS principal,
+        requested.name AS privilege,
         CASE WHEN principal.name='PUBLIC' THEN EXISTS (
           SELECT 1 FROM aclexplode(
             COALESCE(relation.relacl, acldefault('r', relation.relowner))
@@ -539,9 +611,9 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
           principal.name, relation.oid, requested.name
         ) END AS allowed
       FROM principal CROSS JOIN requested CROSS JOIN relation
-      ORDER BY principal.name, requested.name
+      ORDER BY relation.relname, principal.name, requested.name
     `);
-    assert.equal(privileges.length, 12);
+    assert.equal(privileges.length, 24);
     assert.ok(privileges.every(({ allowed }) => allowed === false));
 
     const routinePrivileges = await owner.$queryRawUnsafe(`
@@ -597,6 +669,11 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
 
     await rejectsSql(
       () => app.$queryRawUnsafe("SELECT * FROM generic_operation_artifact"),
+      "permission denied",
+    );
+    await rejectsSql(
+      () =>
+        app.$queryRawUnsafe("SELECT * FROM generic_operation_artifact_object"),
       "permission denied",
     );
     await rejectsSql(
@@ -658,7 +735,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     }
   });
 
-  it("keeps bodies, headers, prompts, tokens and emails out of the manifest schema", async () => {
+  it("keeps bodies, headers, prompts, tokens and emails out of database metadata", async () => {
     const columns = await owner.$queryRawUnsafe(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='generic_operation_artifact'
@@ -687,6 +764,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
 
   it("uses an explicit transaction and leaves no PUBLIC or broad grant in migration SQL", async () => {
     const sql = await readFile(migrationPath, "utf8");
+    const sharedContentSql = await readFile(sharedContentMigrationPath, "utf8");
     assert.match(sql, /^BEGIN;/m);
     assert.match(sql, /COMMIT;\s*$/);
     assert.match(
@@ -699,6 +777,20 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     assert.doesNotMatch(
       sql,
       /GRANT\s+(?:ALL|SELECT|INSERT|UPDATE|DELETE)[\s\S]*generic_operation_artifact[\s\S]*TO\s+(?:app_user|execution_budget_platform_writer)/i,
+    );
+    assert.match(sharedContentSql, /^BEGIN;/m);
+    assert.match(sharedContentSql, /COMMIT;\s*$/);
+    assert.match(
+      sharedContentSql,
+      /DROP CONSTRAINT "generic_operation_artifact_scope_digest_schema_key"/,
+    );
+    assert.match(
+      sharedContentSql,
+      /REVOKE ALL ON TABLE "generic_operation_artifact_object" FROM PUBLIC/,
+    );
+    assert.doesNotMatch(
+      sharedContentSql,
+      /GRANT\s+(?:ALL|SELECT|INSERT|UPDATE|DELETE)[\s\S]*generic_operation_artifact_object[\s\S]*TO\s+(?:app_user|execution_budget_platform_writer)/i,
     );
   });
 });

@@ -232,7 +232,17 @@ manifest v1：
 
 表约束：
 
-- `UNIQUE(scope,sha256,resultSchema)` 用于内容去重。
+- `UNIQUE(scope,operationId)` 保证一个受管 operation 只能追加一个 byte-exact
+  manifest；不同 authority/operation 可以引用同一个内容对象，不能用 digest
+  唯一性把合法引用误判为 replay。
+- 物理对象元数据单独规范化为全局 `GenericOperationArtifactObject`：以
+  `sha256` 为主键，并由复合外键固定 `objectKey + sizeBytes + mediaType +
+  privacyClass`。同一 digest 的并发引用先按 digest 串行化，再复用同一对象
+  行；任何固有元数据冲突 fail closed。
+- `sourceDigest` 是每次 provider/operation 的来源回执，`createdAt/expiresAt`
+  是每个 manifest 的 lineage 与读取有效期，允许在引用同一字节对象时不同；
+  对象回收必须等所有引用过期，并遵守其中最严格的隐私删除/权利处理链，
+  不能由单个 manifest 的过期时间提前删除共享对象。
 - object key 必须从 sha256 机械派生。
 - size 必须在 provider/schema 固定上限内。
 - app role 只允许 append/read，禁止改写/删除 manifest。

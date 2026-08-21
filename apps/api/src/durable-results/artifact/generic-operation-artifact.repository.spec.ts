@@ -166,6 +166,32 @@ describe("GenericOperationArtifactRepository", () => {
     );
   });
 
+  it("appends separate operation bindings that reference the same derived object key", async () => {
+    const first = manifest();
+    const second = manifest({
+      artifactId: "bd37a8a1-5647-47dd-94a8-97221041e79b",
+      authorityId: "0399f53f-69bf-40ee-9712-65c71ce56f81",
+      operationId: "41d632b3-c0b5-4fcb-96fb-1fe747215fb2",
+    });
+    const database = workspaceDatabase(async (query) => {
+      const operationId = query.values[3];
+      return [row(operationId === first.operationId ? first : second)];
+    });
+    const repository = new GenericOperationArtifactRepository(database.prisma);
+
+    await expect(repository.appendManifest(first)).resolves.toEqual(first);
+    await expect(repository.appendManifest(second)).resolves.toEqual(second);
+
+    expect(first.objectKey).toBe(second.objectKey);
+    expect(first.operationId).not.toBe(second.operationId);
+    expect(database.queryRaw).toHaveBeenCalledTimes(2);
+    expect(
+      database.queryRaw.mock.calls.map(
+        ([query]) => (query as Prisma.Sql).values[3],
+      ),
+    ).toEqual([first.operationId, second.operationId]);
+  });
+
   it("finds an exact workspace reference only with the supplied authority binding", async () => {
     const database = workspaceDatabase(async () => [row()]);
     const repository = new GenericOperationArtifactRepository(database.prisma);

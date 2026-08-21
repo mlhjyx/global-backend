@@ -146,11 +146,17 @@ git commit -m "feat(artifacts): define operation artifact contract"
 **Interfaces:**
 
 - Consumes: Task 1 manifest/reference types.
-- Produces: `appendManifest`, `findExact`, `findByOperation`, unique scope/digest/schema guarantees.
+- Produces: `appendManifest`, `findExact`, `findByOperation`, unique
+  scope/operation manifests, and coherent shared content-object metadata.
 
 - [ ] **Step 1: Write RED real-DB and repository tests**
 
-Assert append/read only, cross-workspace invisibility, exact idempotency, conflicting size/media/source digest rejection, operation/authority binding and app-role UPDATE/DELETE denial. Platform scope must use the fixed platform DB role and cannot be read through an arbitrary workspace session.
+Assert append/read only, cross-workspace invisibility, exact operation
+idempotency, shared digest-derived objects across distinct operation/authority
+bindings, conflicting physical size/media/privacy rejection, per-operation
+source/expiry lineage, operation/authority binding and app-role UPDATE/DELETE
+denial. Platform scope must use the fixed platform DB role and cannot be read
+through an arbitrary workspace session.
 
 - [ ] **Step 2: Run RED**
 
@@ -179,7 +185,12 @@ model GenericOperationArtifact {
 }
 ```
 
-Migration constraints derive/check the object key from digest and bind the operation/authority/scope. Repository calls only narrow SECURITY DEFINER functions with fixed search path and parameterized SQL.
+Migration constraints derive/check the object key from digest and bind the
+operation/authority/scope. A normalized object-metadata row keyed by digest
+keeps object key, size, media type and privacy class immutable while multiple
+manifests retain independent operation, authority, source and expiry bindings.
+Repository calls only narrow SECURITY DEFINER functions with fixed search path
+and parameterized SQL.
 
 - [ ] **Step 4: Run GREEN**
 

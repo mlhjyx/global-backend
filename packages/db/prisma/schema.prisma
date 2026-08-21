@@ -237,17 +237,34 @@ model GenericOperationArtifact {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
 
-  workspace Workspace?               @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
-  authority ExecutionBudgetAuthority @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
-  operation ToolBudgetOperation      @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+  workspace Workspace?                     @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
+  authority ExecutionBudgetAuthority       @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
+  operation ToolBudgetOperation            @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+  object    GenericOperationArtifactObject @relation(fields: [sha256, objectKey, sizeBytes, mediaType, privacyClass], references: [sha256, objectKey, sizeBytes, mediaType, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_metadata_fkey")
 
   @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
   @@unique([scopeKey, operationId], map: "generic_operation_artifact_scope_operation_key")
-  @@unique([scopeKey, sha256, resultSchema], map: "generic_operation_artifact_scope_digest_schema_key")
   @@index([scopeKey, authorityId, operationId], map: "generic_operation_artifact_scope_authority_operation_idx")
+  @@index([scopeKey, sha256, resultSchema], map: "generic_operation_artifact_scope_digest_schema_idx")
   @@index([workspaceId, expiresAt], map: "generic_operation_artifact_workspace_expiry_idx")
   @@index([privacyClass, expiresAt], map: "generic_operation_artifact_privacy_expiry_idx")
   @@map("generic_operation_artifact")
+}
+
+/// Physical metadata for one globally content-addressed immutable object.
+/// Source receipts and expiry remain per-operation manifest policy.
+model GenericOperationArtifactObject {
+  sha256       String   @id @db.Char(64)
+  objectKey    String   @unique(map: "generic_operation_artifact_object_key_key") @map("object_key") @db.VarChar(200)
+  sizeBytes    BigInt   @map("size_bytes")
+  mediaType    String   @map("media_type") @db.VarChar(160)
+  privacyClass String   @map("privacy_class") @db.VarChar(40)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  artifacts GenericOperationArtifact[]
+
+  @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
+  @@map("generic_operation_artifact_object")
 }
 
 /// AI 调用追踪（PRD 9.10）：每次 ModelGateway 调用一行 — task/model/延迟/tokens/结果。
