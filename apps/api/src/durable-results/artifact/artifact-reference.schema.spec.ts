@@ -49,4 +49,92 @@ describe('parseArtifactReference', () => {
   ])('rejects %s', (_label, mutation) => {
     expectInvalid({ ...VALID_REFERENCE, ...mutation });
   });
+
+  it.each([
+    ['an offset UTC representation', '2026-08-22T08:00:00.000+08:00'],
+    ['a UTC representation without milliseconds', '2026-08-22T00:00:00Z'],
+    ['a lowercase RFC3339 representation', '2026-08-22t00:00:00.000z'],
+  ])('rejects a non-canonical expiry representation: %s', (_label, expiresAt) => {
+    expectInvalid({ ...VALID_REFERENCE, expiresAt });
+  });
+
+  it.each([
+    ['a Proxy', new Proxy({ ...VALID_REFERENCE }, {})],
+    ['a null-prototype object', Object.assign(Object.create(null), VALID_REFERENCE)],
+    [
+      'a custom-prototype object',
+      Object.assign(Object.create({}), VALID_REFERENCE),
+    ],
+  ])('rejects %s before schema validation', (_label, value) => {
+    expectInvalid(value);
+  });
+
+  it.each([
+    ['objectKey', 'caller-controlled'],
+    ['body', 'sensitive result'],
+  ])('rejects a non-enumerable forbidden %s', (key, value) => {
+    const input = { ...VALID_REFERENCE };
+    Object.defineProperty(input, key, {
+      configurable: true,
+      enumerable: false,
+      value,
+    });
+
+    expectInvalid(input);
+  });
+
+  it('rejects symbol and non-enumerable toJSON own keys', () => {
+    const input = { ...VALID_REFERENCE };
+    Object.defineProperty(input, Symbol('body'), {
+      configurable: true,
+      enumerable: false,
+      value: 'sensitive result',
+    });
+    Object.defineProperty(input, 'toJSON', {
+      configurable: true,
+      enumerable: false,
+      value: () => VALID_REFERENCE,
+    });
+
+    expectInvalid(input);
+  });
+
+  it('rejects an alternating accessor without reading it', () => {
+    const input = { ...VALID_REFERENCE };
+    let reads = 0;
+    Object.defineProperty(input, 'sha256', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return reads % 2 === 0 ? 'not-a-digest' : VALID_REFERENCE.sha256;
+      },
+    });
+
+    expectInvalid(input);
+    expect(reads).toBe(0);
+  });
+
+  it('contains a throwing accessor behind the bounded invalid error', () => {
+    const input = { ...VALID_REFERENCE };
+    let reads = 0;
+    Object.defineProperty(input, 'expiresAt', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        throw new Error('untrusted getter error');
+      },
+    });
+
+    expectInvalid(input);
+    expect(reads).toBe(0);
+  });
+
+  it('rejects cyclic input without surfacing a reflection or validator error', () => {
+    const input: Record<string, unknown> = { ...VALID_REFERENCE };
+    input.resultSchema = input;
+
+    expectInvalid(input);
+  });
 });

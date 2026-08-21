@@ -1,5 +1,6 @@
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
+import { types as nodeUtilTypes } from 'node:util';
 import {
   GENERIC_OPERATION_ARTIFACT_REFERENCE_SCHEMA,
   invalidGenericOperationArtifact,
@@ -17,6 +18,17 @@ const SHA256_PATTERN = '^[0-9a-f]{64}$';
 const CANONICAL_SIZE_BYTES_PATTERN = '^(?:0|[1-9][0-9]*)$';
 const RESULT_SCHEMA_PATTERN = '^[a-z0-9][a-z0-9._/-]*$';
 const MEDIA_TYPE_PATTERN = '^[a-z0-9][a-z0-9!#$&^_.+-]{0,78}/[a-z0-9][a-z0-9!#$&^_.+-]{0,78}$';
+const ARTIFACT_REFERENCE_KEYS = [
+  'schemaVersion',
+  'artifactId',
+  'operationId',
+  'resultSchema',
+  'sha256',
+  'sizeBytes',
+  'mediaType',
+  'expiresAt',
+] as const satisfies readonly (keyof GenericOperationArtifactReference)[];
+const ARTIFACT_REFERENCE_KEY_SET = new Set<string>(ARTIFACT_REFERENCE_KEYS);
 
 const artifactReferenceValidator = addFormats(
   new Ajv2020({ allErrors: true, strict: true }),
@@ -59,17 +71,55 @@ const artifactReferenceValidator = addFormats(
   },
 });
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
+function snapshotArtifactReference(
+  value: unknown,
+): GenericOperationArtifactReference | null {
+  try {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      Array.isArray(value) ||
+      nodeUtilTypes.isProxy(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype
+    ) {
+      return null;
+    }
+
+    const ownKeys = Reflect.ownKeys(value);
+    if (
+      ownKeys.length !== ARTIFACT_REFERENCE_KEYS.length ||
+      ownKeys.some(
+        (key) => typeof key !== 'string' || !ARTIFACT_REFERENCE_KEY_SET.has(key),
+      )
+    ) {
+      return null;
+    }
+
+    const snapshot: Record<string, unknown> = {};
+    for (const key of ARTIFACT_REFERENCE_KEYS) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        !descriptor ||
+        !descriptor.enumerable ||
+        !Object.hasOwn(descriptor, 'value')
+      ) {
+        return null;
+      }
+      snapshot[key] = descriptor.value;
+    }
+
+    // The exact key loop above populates a fresh data-only snapshot. AJV and
+    // semantic validation below establish the string-level contract.
+    return snapshot as unknown as GenericOperationArtifactReference;
+  } catch {
+    return null;
   }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
-function isRfc3339Time(value: string): boolean {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp);
+function isCanonicalUtcMillisecondsTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const timestamp = new Date(value);
+  return Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === value;
 }
 
 /**
@@ -79,29 +129,23 @@ function isRfc3339Time(value: string): boolean {
 export function parseArtifactReference(
   value: unknown,
 ): GenericOperationArtifactReference {
-  if (!isPlainRecord(value) || !artifactReferenceValidator(value)) {
+  const snapshot = snapshotArtifactReference(value);
+  if (!snapshot) return invalidGenericOperationArtifact();
+
+  try {
+    if (
+      !artifactReferenceValidator(snapshot) ||
+      !isCanonicalArtifactUuid(snapshot.artifactId) ||
+      !isCanonicalArtifactUuid(snapshot.operationId) ||
+      !isCanonicalArtifactSha256(snapshot.sha256) ||
+      !isCanonicalArtifactSizeBytes(snapshot.sizeBytes) ||
+      !isCanonicalUtcMillisecondsTimestamp(snapshot.expiresAt)
+    ) {
+      return invalidGenericOperationArtifact();
+    }
+
+    return Object.freeze(snapshot);
+  } catch {
     return invalidGenericOperationArtifact();
   }
-
-  const candidate = value as GenericOperationArtifactReference;
-  if (
-    !isCanonicalArtifactUuid(candidate.artifactId) ||
-    !isCanonicalArtifactUuid(candidate.operationId) ||
-    !isCanonicalArtifactSha256(candidate.sha256) ||
-    !isCanonicalArtifactSizeBytes(candidate.sizeBytes) ||
-    !isRfc3339Time(candidate.expiresAt)
-  ) {
-    return invalidGenericOperationArtifact();
-  }
-
-  return Object.freeze({
-    schemaVersion: GENERIC_OPERATION_ARTIFACT_REFERENCE_SCHEMA,
-    artifactId: candidate.artifactId,
-    operationId: candidate.operationId,
-    resultSchema: candidate.resultSchema,
-    sha256: candidate.sha256,
-    sizeBytes: candidate.sizeBytes,
-    mediaType: candidate.mediaType,
-    expiresAt: candidate.expiresAt,
-  });
 }
