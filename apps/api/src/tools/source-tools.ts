@@ -172,6 +172,7 @@ export interface HttpGetOutput {
 
 const HTTP_GET_UA = "Mozilla/5.0 (compatible; GlobalBot/1.0)";
 const MAX_REDIRECT_HOPS = 3;
+const MAX_HTTP_GET_ARTIFACT_BYTES = 3_000_000;
 export const HTTP_GET_ARTIFACT_MEDIA_TYPE = "text/plain" as const;
 export const MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES = 33_554_432;
 const SANCTIONS_DOWNLOAD_MEDIA_TYPES = new Set(["application/xml", "text/xml"]);
@@ -218,6 +219,19 @@ async function readSanctionsBodyBounded(response: Response): Promise<string> {
   );
 }
 
+function decodeHttpGetArtifactText(body: Buffer): string {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    throw new Error("HTTP_GET_ARTIFACT_UTF8_INVALID");
+  }
+  if (Buffer.byteLength(text, "utf8") > MAX_HTTP_GET_ARTIFACT_BYTES) {
+    throw new Error("HTTP_GET_ARTIFACT_TOO_LARGE");
+  }
+  return text;
+}
+
 /**
  * http.get —— 标的站点的轻量 GET/HEAD（sitemap/careers 探测）。SSRF 护栏在内强制：
  * 初始 URL + **每一跳重定向目标**都先解析为公网 IP，且实际 socket 固定到该 IP；
@@ -259,7 +273,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
           method: input.method ?? "GET",
           headers: { "User-Agent": HTTP_GET_UA, ...input.headers },
           timeoutMs: input.timeoutMs ?? 15_000,
-          maxBytes: 3_000_000,
+          maxBytes: MAX_HTTP_GET_ARTIFACT_BYTES,
           maxRedirects: MAX_REDIRECT_HOPS,
         },
         {
@@ -270,13 +284,15 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
       let buf = res.body;
       if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
         try {
-          buf = gunzipSync(buf, { maxOutputLength: 3_000_000 });
+          buf = gunzipSync(buf, {
+            maxOutputLength: MAX_HTTP_GET_ARTIFACT_BYTES,
+          });
         } catch {
-          // 损坏的 gz → 保留原字节的文本化（下游解析器自然解不出内容，fail-safe）
+          throw new Error("HTTP_GET_ARTIFACT_GZIP_INVALID_OR_TOO_LARGE");
         }
       }
       const text =
-        input.method === "HEAD" ? "" : buf.toString("utf8").slice(0, 3_000_000);
+        input.method === "HEAD" ? "" : decodeHttpGetArtifactText(buf);
       return {
         data: {
           status: res.status,
