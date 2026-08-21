@@ -103,7 +103,8 @@ Authority foundation 的后续独立 review 发现两个跨层/生命周期残�
 
 `packages/db/prisma/migrations/20260821090000_execution_budget_authority/migration.sql`
 
-- SHA-256：`f535ff3629ca4f05a1af7cc02406dd217f204829d0b18501205193572f314602`
+- SHA-256：`34cd53faeb3cc1a9ce3ef9fc118afbce792a3343d05c3e2ecc6ace7f705cd35f`
+- 本次 source 指纹更正只适用于尚未在数据库迁移账本记录该 migration checksum 的 source/disposable 环境。任何 retained database 若已经记录旧 checksum，必须新增显式 forward migration；禁止覆盖、重放或改写既有 migration 记录。
 - 单一显式事务：`BEGIN` / `COMMIT`，`SET LOCAL lock_timeout = '5s'`。
 - 新表：`execution_budget_authority`、`execution_budget_authority_revocation`，二者均 ENABLE + FORCE RLS。
 - additive account fields：`tool_budget_account.authority_id` 与 `authorized_cap_microusd` 保持 nullable；bound pair 额外强制 `cap_cents=0`，未绑定 legacy product traffic 保持 cents 兼容。
