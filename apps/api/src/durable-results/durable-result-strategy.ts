@@ -96,12 +96,16 @@ function isDenseMediaTypeArray(value: unknown): value is readonly string[] {
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const length = Object.getOwnPropertyDescriptor(value, 'length')?.value;
     if (!Number.isSafeInteger(length) || length <= 0) return false;
-    for (const key of Reflect.ownKeys(value)) {
+    const ownKeys = Reflect.ownKeys(value);
+    for (const key of ownKeys) {
       if (typeof key === 'symbol') return false;
       if (key === 'length') continue;
       const descriptor = descriptors[key];
-      if (!/^(0|[1-9][0-9]*)$/.test(key) || !descriptor?.enumerable || !('value' in descriptor)) return false;
+      const index = Number(key);
+      if (!/^(0|[1-9][0-9]*)$/.test(key) || !Number.isSafeInteger(index) ||
+        index < 0 || index >= length || !descriptor?.enumerable || !('value' in descriptor)) return false;
     }
+    if (ownKeys.length !== length + 1) return false;
     for (let index = 0; index < length; index += 1) {
       const descriptor = descriptors[String(index)];
       if (!descriptor || !descriptor.enumerable || !('value' in descriptor) ||

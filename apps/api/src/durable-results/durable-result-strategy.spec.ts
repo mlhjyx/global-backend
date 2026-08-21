@@ -116,6 +116,22 @@ describe('isDurableResultStrategy', () => {
     expect(isDurableResultStrategy(make())).toBe(false);
   });
 
+  it.each(['01', '4294967295', '9007199254740991'])(
+    'rejects a media array with non-index own key %s',
+    (key) => {
+      const candidate = mediaProperty(key, {
+        enumerable: true,
+        value: { hidden: true },
+      });
+      let result: boolean | undefined;
+
+      expect(() => {
+        result = isDurableResultStrategy(candidate);
+      }).not.toThrow();
+      expect(result).toBe(false);
+    },
+  );
+
   it('does not execute an inherited Object.prototype.kind getter', () => {
     const originalKind = Object.getOwnPropertyDescriptor(Object.prototype, 'kind');
     let calls = 0;
