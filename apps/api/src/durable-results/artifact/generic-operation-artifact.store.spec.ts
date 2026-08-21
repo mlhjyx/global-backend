@@ -15,21 +15,17 @@ import {
   type ArtifactS3Client,
   type StagedArtifact,
 } from './generic-operation-artifact.store';
-
 const ARTIFACT_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
 const BUCKET = 'generic-artifacts-test';
 const RESULT_SCHEMA = 'http-get/v1';
-
 interface MemoryObject {
   readonly chunks: readonly Uint8Array[];
   readonly contentType: string;
   readonly metadata: Readonly<Record<string, string>>;
 }
-
 interface Failure extends Error {
   readonly $metadata?: Readonly<{ httpStatusCode?: number }>;
 }
-
 function failure(
   name: string,
   message: string,
@@ -42,17 +38,14 @@ function failure(
       : { $metadata: { httpStatusCode } }),
   });
 }
-
 function bytes(...values: number[]): Uint8Array {
   return Uint8Array.from(values);
 }
-
 function sha256(chunks: readonly Uint8Array[]): string {
   const hash = createHash('sha256');
   for (const chunk of chunks) hash.update(chunk);
   return hash.digest('hex');
 }
-
 async function collect(body: unknown): Promise<readonly Uint8Array[]> {
   if (
     typeof body !== 'object' ||
@@ -61,7 +54,6 @@ async function collect(body: unknown): Promise<readonly Uint8Array[]> {
   ) {
     throw new Error('test transport requires an async iterable body');
   }
-
   const chunks: Uint8Array[] = [];
   for await (const value of body as AsyncIterable<unknown>) {
     if (!(value instanceof Uint8Array)) {
@@ -71,20 +63,24 @@ async function collect(body: unknown): Promise<readonly Uint8Array[]> {
   }
   return chunks;
 }
-
 class MemoryS3Client implements ArtifactS3Client {
   readonly objects = new Map<string, MemoryObject>();
   readonly commands: object[] = [];
   stagingPutFailure: Error | null = null;
   stagingPutAckFailure = false;
+  stagingPutAckAbort: AbortController | null = null;
   finalPutFailure: 'before_commit' | 'after_commit' | null = null;
+  finalReadbackChunks: readonly Uint8Array[] | null = null;
+  finalReadbackContentLength: number | null = null;
+  finalReadbackMetadata: Readonly<Record<string, string>> | null = null;
   getFailure: Error | null = null;
   headFailure: Error | null = null;
   readinessFailure: Error | null = null;
-
-  async send(command: object): Promise<unknown> {
+  async send(
+    command: object,
+    options?: Readonly<{ abortSignal?: AbortSignal }>,
+  ): Promise<unknown> {
     this.commands.push(command);
-
     if (command instanceof PutObjectCommand) {
       const input = command.input;
       if (input.Bucket !== BUCKET || typeof input.Key !== 'string') {
@@ -98,7 +94,6 @@ class MemoryS3Client implements ArtifactS3Client {
       if (isFinal && this.finalPutFailure === 'before_commit') {
         throw failure('TimeoutError', 'https://secret.invalid before ACK');
       }
-
       const chunks = await collect(input.Body);
       this.objects.set(input.Key, {
         chunks,
@@ -106,6 +101,7 @@ class MemoryS3Client implements ArtifactS3Client {
         metadata: Object.freeze({ ...(input.Metadata ?? {}) }),
       });
       if (!isFinal && this.stagingPutAckFailure) {
+        this.stagingPutAckAbort?.abort();
         throw failure('TimeoutError', 'https://secret.invalid staging ACK');
       }
       if (isFinal && this.finalPutFailure === 'after_commit') {
@@ -113,7 +109,6 @@ class MemoryS3Client implements ArtifactS3Client {
       }
       return {};
     }
-
     if (command instanceof HeadObjectCommand) {
       if (this.headFailure) throw this.headFailure;
       const key = command.input.Key;
@@ -128,35 +123,44 @@ class MemoryS3Client implements ArtifactS3Client {
         Metadata: value.metadata,
       };
     }
-
     if (command instanceof GetObjectCommand) {
+      if (options?.abortSignal?.aborted) {
+        throw failure('AbortError', 'aborted recovery signal');
+      }
       if (this.getFailure) throw this.getFailure;
       const key = command.input.Key;
       const value = key === undefined ? undefined : this.objects.get(key);
       if (!value) throw failure('NoSuchKey', 'not found', 404);
+      const isFinalKey = typeof key === 'string' && key.includes('/sha256/');
+      const chunks =
+        isFinalKey
+          ? (this.finalReadbackChunks ?? value.chunks)
+          : value.chunks;
       return {
+        ContentLength:
+          (isFinalKey ? this.finalReadbackContentLength : null) ??
+          chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
+        ContentType: value.contentType,
+        Metadata:
+          (isFinalKey ? this.finalReadbackMetadata : null) ?? value.metadata,
         Body: (async function* () {
-          for (const chunk of value.chunks) yield Uint8Array.from(chunk);
+          for (const chunk of chunks) yield Uint8Array.from(chunk);
         })(),
       };
     }
-
     if (command instanceof DeleteObjectCommand) {
       if (typeof command.input.Key === 'string') {
         this.objects.delete(command.input.Key);
       }
       return {};
     }
-
     if (command instanceof HeadBucketCommand) {
       if (this.readinessFailure) throw this.readinessFailure;
       return {};
     }
-
     throw new Error(`unsupported test command: ${command.constructor.name}`);
   }
 }
-
 function store(client = new MemoryS3Client()): {
   readonly client: MemoryS3Client;
   readonly store: S3GenericOperationArtifactStore;
@@ -166,7 +170,6 @@ function store(client = new MemoryS3Client()): {
     store: new S3GenericOperationArtifactStore({ bucket: BUCKET, client }),
   };
 }
-
 function source(
   chunks: readonly Uint8Array[],
   overrides: Readonly<{
@@ -187,11 +190,11 @@ function source(
       : { sourceDigest: overrides.sourceDigest }),
   };
 }
-
 async function stage(
   target: S3GenericOperationArtifactStore,
   chunks: readonly Uint8Array[],
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<StagedArtifact> {
   return target.stage({
     artifactId: ARTIFACT_ID,
@@ -199,9 +202,9 @@ async function stage(
     maxBytes,
     resultSchema: RESULT_SCHEMA,
     privacyClass: 'CONFIDENTIAL_TENANT',
+    signal,
   });
 }
-
 function expectStorageCode(
   promise: Promise<unknown>,
   code:
@@ -219,13 +222,10 @@ function expectStorageCode(
     message: code,
   });
 }
-
 describe('S3GenericOperationArtifactStore stage', () => {
   it('streams and hashes a zero-byte source without rejecting an empty result', async () => {
     const { client, store: target } = store();
-
     const staged = await stage(target, [], 8);
-
     expect(staged).toEqual({
       artifactId: ARTIFACT_ID,
       stagingKey: stagingObjectKey(ARTIFACT_ID),
@@ -264,7 +264,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
     };
     const { client, store: target } = store();
     const bufferConcat = vi.spyOn(Buffer, 'concat');
-
     const staged = await target.stage({
       artifactId: ARTIFACT_ID,
       source: source([], { body }),
@@ -272,7 +271,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
       resultSchema: RESULT_SCHEMA,
       privacyClass: 'PERSONAL_DATA',
     });
-
     expect(staged.sizeBytes).toBe('6');
     expect(staged.sha256).toBe(sha256(chunks));
     expect(client.objects.get(staged.stagingKey)?.chunks).toEqual(chunks);
@@ -283,7 +281,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
 
   it('rejects maximum + 1 before yielding the overflowing chunk', async () => {
     const { client, store: target } = store();
-
     await expectStorageCode(
       stage(target, [bytes(1, 2), bytes(3, 4), bytes(5)], 4),
       'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED',
@@ -297,7 +294,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
       throw new Error('provider token=https://secret.invalid/access-key');
     })();
     const { store: target } = store();
-
     const result = target.stage({
       artifactId: ARTIFACT_ID,
       source: source([], { body }),
@@ -305,7 +301,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
       resultSchema: RESULT_SCHEMA,
       privacyClass: 'PUBLIC_ORGANIZATION',
     });
-
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_SOURCE_FAILED',
@@ -320,7 +315,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
     );
     const { store: target } = store(client);
     const result = stage(target, [bytes(1)], 4);
-
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
@@ -329,17 +323,18 @@ describe('S3GenericOperationArtifactStore stage', () => {
   });
 
   it('recovers only the UUID-derived staging object after a lost staging ACK', async () => {
+    const abort = new AbortController();
     const client = new MemoryS3Client();
     client.stagingPutAckFailure = true;
+    client.stagingPutAckAbort = abort;
     const { store: target } = store(client);
-
-    await expect(stage(target, [bytes(1), bytes(2, 3)], 3)).resolves.toMatchObject(
-      {
+    await expect(stage(target, [bytes(1), bytes(2, 3)], 3, abort.signal))
+      .resolves.toMatchObject({
         stagingKey: stagingObjectKey(ARTIFACT_ID),
         sizeBytes: '3',
         sha256: sha256([bytes(1), bytes(2, 3)]),
-      },
-    );
+      });
+    expect(abort.signal.aborted).toBe(true);
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
       .map((command) => (command as GetObjectCommand).input.Key);
@@ -347,19 +342,21 @@ describe('S3GenericOperationArtifactStore stage', () => {
   });
 
   it('returns a fixed stage ACK-unknown error when staging recovery is unavailable', async () => {
+    const abort = new AbortController();
     const client = new MemoryS3Client();
     client.stagingPutAckFailure = true;
+    client.stagingPutAckAbort = abort;
     client.getFailure = new Error(
       'endpoint=https://secret.invalid credential=secret',
     );
     const { store: target } = store(client);
-    const result = stage(target, [bytes(1)], 1);
-
+    const result = stage(target, [bytes(1)], 1, abort.signal);
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN',
     );
     await expect(result).rejects.not.toThrow(/secret|credential/i);
+    expect(abort.signal.aborted).toBe(true);
   });
 
   it.each([
@@ -377,7 +374,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
       privacyClass: 'PERSONAL_DATA',
       ...mutation,
     };
-
     await expectStorageCode(
       target.stage(input as Parameters<typeof target.stage>[0]),
       'GENERIC_OPERATION_ARTIFACT_INVALID',
@@ -396,7 +392,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
     ],
   ])('rejects %s at the stage boundary', async (_label, mutation) => {
     const { client, store: target } = store();
-
     await expectStorageCode(
       target.stage({
         artifactId: ARTIFACT_ID,
@@ -416,7 +411,6 @@ describe('S3GenericOperationArtifactStore stage', () => {
     const abort = new AbortController();
     abort.abort();
     const { client, store: target } = store();
-
     await expectStorageCode(
       target.stage({
         artifactId: ARTIFACT_ID,
@@ -447,9 +441,15 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   it('promotes with immutable digest, size, schema and privacy metadata', async () => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(1, 2), bytes(3)], 3);
-
-    const stored = await target.promote(staged);
-
+    const mutable = { ...staged };
+    const result = target.promote(mutable);
+    Object.assign(mutable, {
+      artifactId: '11111111-1111-4111-8111-111111111111',
+      stagingKey: '../attacker', sha256: 'ab'.repeat(32), sizeBytes: '999',
+      mediaType: 'text/plain', sourceDigest: 'cd'.repeat(32),
+      resultSchema: 'attacker/v1', privacyClass: 'PERSONAL_DATA',
+    });
+    const stored = await result;
     expect(stored).toEqual({
       objectKey: contentAddressedObjectKey(staged.sha256),
       sha256: staged.sha256,
@@ -465,6 +465,18 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       'result-schema': RESULT_SCHEMA,
       'privacy-class': 'CONFIDENTIAL_TENANT',
     });
+    const getKeys = client.commands
+      .filter((command) => command instanceof GetObjectCommand)
+      .map((command) => (command as GetObjectCommand).input.Key);
+    expect(getKeys).toEqual([
+      staged.stagingKey, contentAddressedObjectKey(staged.sha256),
+    ]);
+    const finalPut = client.commands.find(
+      (command) => command instanceof PutObjectCommand && command.input.IfNoneMatch === '*',
+    ) as PutObjectCommand;
+    expect(finalPut.input).toMatchObject({
+      Key: stored.objectKey, ContentLength: 3, ContentType: staged.mediaType,
+    });
   });
 
   it('recovers a matching immutable target when the promote ACK is unknown', async () => {
@@ -472,7 +484,6 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const { store: target } = store(client);
     const staged = await stage(target, [bytes(7, 8)], 2);
     client.finalPutFailure = 'after_commit';
-
     await expect(target.promote(staged)).resolves.toMatchObject({
       sha256: staged.sha256,
       sizeBytes: '2',
@@ -481,6 +492,12 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       .filter((command) => command instanceof HeadObjectCommand)
       .map((command) => (command as HeadObjectCommand).input.Key);
     expect(headKeys).toEqual([contentAddressedObjectKey(staged.sha256)]);
+    const getKeys = client.commands
+      .filter((command) => command instanceof GetObjectCommand)
+      .map((command) => (command as GetObjectCommand).input.Key);
+    expect(getKeys).toEqual([
+      staged.stagingKey, contentAddressedObjectKey(staged.sha256),
+    ]);
   });
 
   it('returns a fixed ACK-unknown error when the digest-derived target is absent', async () => {
@@ -488,11 +505,39 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const { store: target } = store(client);
     const staged = await stage(target, [bytes(7, 8)], 2);
     client.finalPutFailure = 'before_commit';
-
     await expectStorageCode(
       target.promote(staged),
       'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
     );
+  });
+
+  it.each(['successful PUT', 'promote ACK recovery', 'existing target'])(
+    'rejects corrupt final readback after %s',
+    async (path) => {
+      const client = new MemoryS3Client();
+      const target = store(client).store;
+      const staged = await stage(target, [bytes(1, 2)], 2);
+      if (path === 'existing target') await target.promote(staged);
+      if (path === 'promote ACK recovery') client.finalPutFailure = 'after_commit';
+      client.finalReadbackChunks = [bytes(1, 3)];
+      await expectStorageCode(
+        target.promote(staged),
+        'GENERIC_OPERATION_ARTIFACT_INVALID',
+      );
+    },
+  );
+
+  it.each(['ContentLength', 'Metadata'])('rejects conflicting final GET %s', async (field) => {
+    const client = new MemoryS3Client();
+    const target = store(client).store;
+    const staged = await stage(target, [bytes(4, 5)], 2);
+    if (field === 'ContentLength') client.finalReadbackContentLength = 3;
+    else client.finalReadbackMetadata = {
+      sha256: staged.sha256, 'size-bytes': '2',
+      schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+      'result-schema': staged.resultSchema, 'privacy-class': 'PERSONAL_DATA',
+    };
+    await expectStorageCode(target.promote(staged), 'GENERIC_OPERATION_ARTIFACT_INVALID');
   });
 
   it('accepts an already-existing immutable target only when all metadata matches', async () => {
@@ -510,12 +555,67 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
         'privacy-class': staged.privacyClass,
       },
     });
-
     await expect(target.promote(staged)).resolves.toMatchObject({
       objectKey: key,
       sha256: staged.sha256,
     });
     expect(client.objects.get(key)?.chunks).toEqual([bytes(9, 10)]);
+    const getKeys = client.commands
+      .filter((command) => command instanceof GetObjectCommand)
+      .map((command) => (command as GetObjectCommand).input.Key);
+    expect(getKeys).toEqual([staged.stagingKey, key]);
+  });
+
+  it('rejects an existing target whose final GET bytes contradict matching metadata', async () => {
+    const client = new MemoryS3Client();
+    const { store: target } = store(client);
+    const staged = await stage(target, [bytes(9, 10)], 2);
+    const key = contentAddressedObjectKey(staged.sha256);
+    client.objects.set(key, {
+      chunks: [bytes(9, 11)],
+      contentType: staged.mediaType,
+      metadata: {
+        sha256: staged.sha256,
+        'size-bytes': staged.sizeBytes,
+        schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+        'result-schema': staged.resultSchema,
+        'privacy-class': staged.privacyClass,
+      },
+    });
+    await expectStorageCode(
+      target.promote(staged),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
+  });
+
+  it('rejects Proxy, accessor, exotic, non-enumerable, symbol and extra-field staged inputs before S3', async () => {
+    const { client, store: target } = store();
+    const staged = await stage(target, [bytes(21, 22)], 2);
+    const commandCount = client.commands.length;
+    let getterReads = 0;
+    const accessor = { ...staged };
+    Object.defineProperty(accessor, 'stagingKey', {
+      enumerable: true,
+      get: () => (++getterReads === 1 ? staged.stagingKey : '../attacker-key'),
+    });
+    const nonEnumerable = { ...staged };
+    Object.defineProperty(nonEnumerable, 'mediaType', { enumerable: false });
+    const cases = [
+      new Proxy(staged, {}), accessor,
+      Object.assign(Object.create({}), staged),
+      Object.assign(Object.create(null), staged),
+      nonEnumerable,
+      { ...staged, [Symbol('attacker')]: '../attacker-key' },
+      { ...staged, attackerKey: '../attacker-key' },
+    ] as const;
+    for (const value of cases) {
+      await expectStorageCode(
+        target.promote(value as StagedArtifact),
+        'GENERIC_OPERATION_ARTIFACT_INVALID',
+      );
+      expect(client.commands).toHaveLength(commandCount);
+    }
+    expect(getterReads).toBe(0);
   });
 
   it.each([
@@ -539,7 +639,6 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
         'privacy-class': mutation.privacyClass ?? staged.privacyClass,
       },
     });
-
     await expectStorageCode(
       target.promote(staged),
       'GENERIC_OPERATION_ARTIFACT_INVALID',
@@ -548,7 +647,6 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
 
   it('returns null only for an absent digest-derived object', async () => {
     const { store: target } = store();
-
     await expect(target.inspect('cd'.repeat(32))).resolves.toBeNull();
   });
 
@@ -564,7 +662,6 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
     );
     await expect(result).rejects.not.toThrow(/secret|credential/i);
-
     const abort = new AbortController();
     abort.abort();
     await expectStorageCode(
@@ -579,9 +676,7 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(1), bytes(2, 3)], 3);
     const stored = await target.promote(staged);
-
     const body = await target.read(stored.sha256);
-
     await expect(collect(body)).resolves.toEqual([bytes(1), bytes(2, 3)]);
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
@@ -596,7 +691,6 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
     );
     const { store: target } = store(client);
     const result = target.read('ef'.repeat(32));
-
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
@@ -645,7 +739,6 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
   it('deletes only the UUID-derived staging key', async () => {
     const { client, store: target } = store();
     const staged = await stage(target, [bytes(1)], 1);
-
     await target.deleteStaging(ARTIFACT_ID);
 
     expect(client.objects.has(staged.stagingKey)).toBe(false);
