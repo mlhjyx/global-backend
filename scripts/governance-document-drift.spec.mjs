@@ -68,6 +68,26 @@ test("the Authority closeout coverage preserves the complete budget and readines
   assert.match(record, /branches 88\.21% \(479\/543\)/i);
 });
 
+test("the Authority durable record uses the code-first health path and executable local verification commands", () => {
+  const record = read(
+    "docs/implementation-records/execution-budget-authority-contract.md",
+  );
+  const requiredTokens = [
+    "GET /api/v1/health/ready",
+    "pnpm --filter @global/db exec prisma validate",
+    "pnpm --filter @global/db generate",
+    "pnpm docs:verify",
+    "pnpm code-intelligence:scan",
+    "pnpm --filter @global/code-intelligence exec tsx src/cli.ts status --repo ../..",
+    "pnpm --filter @global/code-intelligence exec tsx src/cli.ts impact",
+  ];
+
+  for (const token of requiredTokens) {
+    assert.ok(record.includes(token), `Authority record omits ${token}`);
+  }
+  assert.doesNotMatch(record, /GET \/health\/ready\b/u);
+});
+
 test("the Copy fixed-source governance document reflects the active reviewed successor", () => {
   const governance = read(
     "docs/implementation-records/copy-fixed-source-impact-governance.md",

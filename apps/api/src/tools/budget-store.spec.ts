@@ -13,6 +13,20 @@ import {
 import { BudgetLedger } from './budget';
 import { projectGenericOperationResult } from './generic-operation-projection';
 
+const SAFE_PLATFORM_PRINCIPAL = Object.freeze({
+  sessionUser: 'global_platform_writer',
+  currentUser: 'global_platform_writer',
+  canLogin: true,
+  superuser: false,
+  bypassRls: false,
+  createDb: false,
+  createRole: false,
+  replication: false,
+  inherit: true,
+  memberships: ['execution_budget_platform_writer'],
+});
+const TEST_WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
+
 function fakePrisma(rows: unknown[][]): PrismaService {
   const queue = [...rows];
   return {
@@ -51,7 +65,7 @@ describe('PostgresBudgetStore', () => {
 
     await expect(store.openAuthorized({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      scopeKey: TEST_WORKSPACE_ID,
       accountKey: 'icp:design:req',
       replayScope: true,
     })).resolves.toEqual({
@@ -92,15 +106,17 @@ describe('PostgresBudgetStore', () => {
     const ownerDb = {
       $transaction: vi.fn(async () => []),
     } as unknown as PrismaClient;
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([SAFE_PLATFORM_PRINCIPAL])
+      .mockResolvedValueOnce([{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+        generation: 1,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        authorized_cap_microusd: 1_000_000n,
+      }]);
     const platformWriter = {
-      $transaction: vi.fn(async (fn) => fn({
-        $queryRaw: vi.fn(async () => [{
-          account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
-          generation: 1,
-          authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-          authorized_cap_microusd: 1_000_000n,
-        }]),
-      } as never)),
+      $transaction: vi.fn(async (fn) => fn({ $queryRaw: queryRaw } as never)),
     } as unknown as PrismaClient;
     const store = new PostgresBudgetStore(fakePrisma([]), ownerDb, platformWriter);
 
@@ -111,6 +127,90 @@ describe('PostgresBudgetStore', () => {
     })).resolves.toMatchObject({ authorizedCapMicrousd: 1_000_000n });
     expect(ownerDb.$transaction).not.toHaveBeenCalled();
     expect(platformWriter.$transaction).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(
+      (queryRaw.mock.calls[0]?.[0] as { strings?: readonly string[] }).strings?.join(''),
+    ).toContain('pg_auth_members');
+    expect(
+      (queryRaw.mock.calls[1]?.[0] as { strings?: readonly string[] }).strings?.join(''),
+    ).toContain('open_authorized_tool_budget_v1');
+  });
+
+  it('rejects an unsafe platform principal before authorized open', async () => {
+    const queryRaw = vi.fn().mockResolvedValueOnce([{
+      ...SAFE_PLATFORM_PRINCIPAL,
+      memberships: [
+        'execution_budget_platform_writer',
+        'runtime_worker',
+      ],
+    }]);
+    const platformWriter = {
+      $transaction: vi.fn(async (fn) => fn({ $queryRaw: queryRaw } as never)),
+    } as unknown as PrismaClient;
+    const store = new PostgresBudgetStore(
+      fakePrisma([]),
+      undefined,
+      platformWriter,
+    );
+
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'platform',
+      accountKey: 'acquisition-hourly:run-1',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError(
+        'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      ),
+    );
+    expect(queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it('maps the authority lifecycle fence to one non-leaking unavailable error', async () => {
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async () => {
+          throw rawQueryMarkerError(
+            'EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE',
+          );
+        }),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+    const reservation = {
+      workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      accountKey: 'authority-bound',
+      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      estimatedCents: 1,
+      replay: false,
+    };
+    const expected = new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    );
+
+    await expect(store.open({
+      workspaceId: reservation.workspaceId,
+      accountKey: reservation.accountKey,
+      capCents: 1,
+    })).rejects.toEqual(expected);
+    await expect(store.reserve({
+      workspaceId: reservation.workspaceId,
+      accountKey: reservation.accountKey,
+      operationKey: 'operation',
+      estimatedCents: 1,
+    })).rejects.toEqual(expected);
+    await expect(store.settle(reservation, 1)).rejects.toEqual(expected);
+    await expect(store.release(reservation)).rejects.toEqual(expected);
+    await expect(store.status({
+      workspaceId: reservation.workspaceId,
+      accountKey: reservation.accountKey,
+    })).rejects.toEqual(expected);
+    await expect(store.close({
+      workspaceId: reservation.workspaceId,
+      accountKey: reservation.accountKey,
+    })).rejects.toEqual(expected);
+    expect(JSON.stringify(expected)).not.toContain(
+      'EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE',
+    );
   });
 
   it.each([
@@ -132,7 +232,7 @@ describe('PostgresBudgetStore', () => {
 
     await expect(store.openAuthorized({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      scopeKey: TEST_WORKSPACE_ID,
       accountKey: 'icp:design:req',
     })).rejects.toEqual(new ExecutionBudgetGrantError(marker));
   });
@@ -575,6 +675,15 @@ describe('UnavailableBudgetStore', () => {
     await expect(store.status({ workspaceId: 'w', accountKey: 'a' })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.close({ workspaceId: 'w', accountKey: 'a' })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
   });
+
+  it('fails authorized open directly without fabricating an account', async () => {
+    const store = new UnavailableBudgetStore();
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: TEST_WORKSPACE_ID,
+      accountKey: 'authority-bound',
+    })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+  });
 });
 
 describe('InMemoryBudgetStoreAdapter', () => {
@@ -588,5 +697,18 @@ describe('InMemoryBudgetStoreAdapter', () => {
     await expect(store.release(released)).resolves.toMatchObject({ chargedCents: 0 });
     await store.close({ workspaceId: 'w', accountKey: 'run', force: true });
     await expect(store.status({ workspaceId: 'w', accountKey: 'run' })).resolves.toMatchObject({ open: false });
+  });
+
+  it('cannot emulate an externally signed authority account', async () => {
+    const store = new InMemoryBudgetStoreAdapter(new BudgetLedger());
+    await expect(store.openAuthorized({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: TEST_WORKSPACE_ID,
+      accountKey: 'authority-bound',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError(
+        'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      ),
+    );
   });
 });

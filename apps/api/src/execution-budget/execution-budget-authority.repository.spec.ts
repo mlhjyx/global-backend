@@ -42,9 +42,9 @@ function workspaceAuthority(): VerifiedExecutionBudgetAuthority {
     campaignCapMicrousd: null,
     maxRuns: null,
     tokenSha256: 'b'.repeat(64),
-    issuedAt: new Date('2026-08-21T00:00:00.000Z'),
-    notBefore: new Date('2026-08-21T00:00:01.000Z'),
-    expiresAt: new Date('2026-08-21T00:04:00.000Z'),
+    issuedAt: 1_787_270_400,
+    notBefore: 1_787_270_401,
+    expiresAt: 1_787_270_640,
   };
 }
 
@@ -251,9 +251,9 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       authority.currency,
       authority.unit,
       authority.capMicrousd,
-      authority.issuedAt,
-      authority.notBefore,
-      authority.expiresAt,
+      new Date(authority.issuedAt * 1_000),
+      new Date(authority.notBefore * 1_000),
+      new Date(authority.expiresAt * 1_000),
     ]);
     expect(queries[0]?.values).not.toContain(COMPACT_JWS);
   });
@@ -286,9 +286,11 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     );
   });
 
-  it('ingests platform authority only through the injected platform-writer transaction', async () => {
-    const queryRaw = vi.fn(async () => [{ authority_id: AUTHORITY_ID, replay: false }]);
-    const platformWriter = fakePlatformWriter(queryRaw);
+  it('attests and ingests platform authority through one injected platform-writer transaction', async () => {
+    const { writer: platformWriter, transactionClient } =
+      platformFreshnessWriter([safePlatformPrincipal], [
+        { authority_id: AUTHORITY_ID, replay: false },
+      ]);
     const prisma = fakeWorkspacePrisma(async () => {
       throw new Error('workspace principal must not be used');
     });
@@ -302,10 +304,15 @@ describe('ExecutionBudgetAuthorityRepository', () => {
 
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
     expect(platformWriter.$transaction).toHaveBeenCalledTimes(1);
-    const query = queryRaw.mock.calls[0]?.[0] as {
+    expect(transactionClient.$queryRaw).toHaveBeenCalledTimes(2);
+    const principalQuery = transactionClient.$queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    };
+    const query = transactionClient.$queryRaw.mock.calls[1]?.[0] as {
       strings?: readonly string[];
       values?: readonly unknown[];
     };
+    expect(principalQuery.strings?.join('')).toContain('pg_auth_members');
     expect(query.strings?.join('')).toContain('ingest_platform_execution_authority');
     expect(query.values).toEqual([
       authority.issuer,
@@ -322,11 +329,58 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       authority.capPerRunMicrousd,
       authority.campaignCapMicrousd,
       authority.maxRuns,
-      authority.issuedAt,
-      authority.notBefore,
-      authority.expiresAt,
+      new Date(authority.issuedAt * 1_000),
+      new Date(authority.notBefore * 1_000),
+      new Date(authority.expiresAt * 1_000),
     ]);
   });
+
+  it.each([
+    [
+      'current-user substitution',
+      [{ ...safePlatformPrincipal, currentUser: 'database_owner' }],
+    ],
+    [
+      'an extra direct membership',
+      [
+        {
+          ...safePlatformPrincipal,
+          memberships: [
+            'execution_budget_platform_writer',
+            'runtime_worker',
+          ],
+        },
+      ],
+    ],
+  ])(
+    'rejects platform ingestion for %s before calling the ingest primitive',
+    async (_name, principalRows) => {
+      const { writer, transactionClient } = platformFreshnessWriter(
+        principalRows,
+        [{ authority_id: AUTHORITY_ID, replay: false }],
+      );
+      const repository = new ExecutionBudgetAuthorityRepository(
+        fakeWorkspacePrisma(async () => {
+          throw new Error('app principal must not be used');
+        }),
+        writer,
+      );
+
+      await expect(repository.ingestPlatform(platformAuthority())).rejects.toEqual(
+        new ExecutionBudgetGrantError(
+          'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+        ),
+      );
+      expect(transactionClient.$queryRaw).toHaveBeenCalledOnce();
+      const source = (
+        transactionClient.$queryRaw.mock.calls[0]?.[0] as {
+          strings?: readonly string[];
+        }
+      ).strings?.join('');
+      expect(source).toContain('pg_auth_members');
+      expect(source).not.toContain('ingest_platform_execution_authority');
+    },
+  );
 
   it('fails platform ingestion closed when the deployment-owned writer connection is absent', async () => {
     const prisma = fakeWorkspacePrisma(async () => []);
@@ -390,6 +444,29 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     );
   });
 
+  it.each([
+    ['no rows', []],
+    [
+      'multiple rows',
+      [
+        { authority_id: AUTHORITY_ID, replay: false },
+        { authority_id: AUTHORITY_ID, replay: true },
+      ],
+    ],
+    ['a malformed authority id', [{ authority_id: 'not-a-uuid', replay: false }]],
+    ['a malformed replay flag', [{ authority_id: AUTHORITY_ID, replay: 'false' }]],
+  ])('fails authority readback closed for %s', async (_name, rows) => {
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => rows),
+    );
+
+    await expect(repository.consumeWorkspace(workspaceAuthority())).rejects.toEqual(
+      new ExecutionBudgetGrantError(
+        'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      ),
+    );
+  });
+
   it('appends a workspace-scoped revocation using only parameter values', async () => {
     const queries: Array<{
       strings?: readonly string[];
@@ -430,6 +507,43 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     ).rejects.toEqual(new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH'));
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
     expect(platformWriter.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('appends platform revocation only through the attested writer primitive', async () => {
+    const REVOCATION_ID = '6123531b-c238-489f-b2ac-bbf154302f40';
+    const revokedAt = new Date('2026-08-21T00:02:00.000Z');
+    const { writer, transactionClient } = platformFreshnessWriter(
+      [safePlatformPrincipal],
+      [{ revocation_id: REVOCATION_ID, replay: false }],
+    );
+    const repository = new ExecutionBudgetAuthorityRepository(
+      fakeWorkspacePrisma(async () => {
+        throw new Error('workspace principal must not be used');
+      }),
+      writer,
+    );
+
+    await expect(
+      repository.revokePlatform({
+        authorityId: AUTHORITY_ID,
+        reason: 'CONTROL_PLANE_REVOKED',
+        revokedAt,
+      }),
+    ).resolves.toEqual({ revocationId: REVOCATION_ID, replay: false });
+
+    expect(transactionClient.$queryRaw).toHaveBeenCalledTimes(2);
+    const query = transactionClient.$queryRaw.mock.calls[1]?.[0] as {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    };
+    expect(query.strings?.join('')).toContain(
+      'revoke_platform_execution_authority_v1',
+    );
+    expect(query.values).toEqual([
+      AUTHORITY_ID,
+      'CONTROL_PLANE_REVOKED',
+      revokedAt,
+    ]);
   });
 
   it.each([
@@ -535,11 +649,8 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(principalSource).toContain('rolreplication');
     expect(principalSource).toContain('rolinherit');
     expect(principalSource).toContain('pg_auth_members');
-    expect(source).toContain('"not_before"');
-    expect(source).toContain('"expires_at"');
-    expect(source).toContain('"revoked_at"');
-    expect(source).toContain('"runs_consumed"');
-    expect(source).toContain('"max_runs"');
+    expect(source).toContain('inspect_platform_execution_authority_freshness_v1');
+    expect(freshnessQuery.values).toEqual([now]);
     expect(source).not.toContain('"jti"');
     expect(source).not.toContain('"token_sha256"');
     expect(source).not.toContain('"issuer"');

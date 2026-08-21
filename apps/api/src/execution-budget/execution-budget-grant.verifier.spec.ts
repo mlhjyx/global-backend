@@ -242,9 +242,9 @@ describe('ExecutionBudgetGrantVerifier', () => {
         campaignCapMicrousd: null,
         maxRuns: null,
         tokenSha256: createHash('sha256').update(compactJws).digest('hex'),
-        issuedAt: NOW,
-        notBefore: NOW,
-        expiresAt: new Date(NOW.getTime() + 300_000),
+        issuedAt: NOW_SECONDS,
+        notBefore: NOW_SECONDS,
+        expiresAt: NOW_SECONDS + 300,
       });
       expect(Object.isFrozen(authority)).toBe(true);
       expect(
@@ -422,11 +422,82 @@ describe('ExecutionBudgetGrantVerifier', () => {
         }),
       ),
     ).resolves.toMatchObject({
-      issuedAt: NOW,
-      notBefore: NOW,
-      expiresAt: new Date(NOW.getTime() + 300_000),
+      issuedAt: NOW_SECONDS,
+      notBefore: NOW_SECONDS,
+      expiresAt: NOW_SECONDS + 300,
     });
   });
+
+  it.each([-61, -60, 0, 60, 61])(
+    'applies the exact 60-second not-before tolerance at %+d seconds',
+    async (offset) => {
+      const verification = verifier().verify(
+        await signedToken({
+          issuedAt: NOW_SECONDS - 120,
+          notBefore: NOW_SECONDS + offset,
+          expiresAt: NOW_SECONDS + 120,
+        }),
+        EXPECTED_SCOPE,
+      );
+
+      if (offset <= 60) {
+        await expect(verification).resolves.toMatchObject({
+          notBefore: NOW_SECONDS + offset,
+        });
+      } else {
+        await expect(verification).rejects.toMatchObject({
+          code: 'EXECUTION_BUDGET_GRANT_INVALID',
+        });
+      }
+    },
+  );
+
+  it.each([-61, -60, 0, 60, 61])(
+    'applies the exact 60-second expiry tolerance at %+d seconds',
+    async (offset) => {
+      const verification = verifier().verify(
+        await signedToken({
+          issuedAt: NOW_SECONDS - 120,
+          notBefore: NOW_SECONDS - 120,
+          expiresAt: NOW_SECONDS + offset,
+        }),
+        EXPECTED_SCOPE,
+      );
+
+      if (offset >= -60) {
+        await expect(verification).resolves.toMatchObject({
+          expiresAt: NOW_SECONDS + offset,
+        });
+      } else {
+        await expect(verification).rejects.toMatchObject({
+          code: 'EXECUTION_BUDGET_GRANT_EXPIRED',
+        });
+      }
+    },
+  );
+
+  it.each([-61, -60, 0, 60, 61])(
+    'applies the exact 60-second issued-at tolerance at %+d seconds',
+    async (offset) => {
+      const issuedAt = NOW_SECONDS + offset;
+      const verification = verifier().verify(
+        await signedToken({
+          issuedAt,
+          notBefore: Math.max(NOW_SECONDS, issuedAt),
+          expiresAt: NOW_SECONDS + 120,
+        }),
+        EXPECTED_SCOPE,
+      );
+
+      if (offset <= 60) {
+        await expect(verification).resolves.toMatchObject({ issuedAt });
+      } else {
+        await expect(verification).rejects.toMatchObject({
+          code: 'EXECUTION_BUDGET_GRANT_INVALID',
+        });
+      }
+    },
+  );
 
   it('rejects a signed platform command when iat, nbf and exp are equal', async () => {
     const sameFutureSecond = NOW_SECONDS + 30;

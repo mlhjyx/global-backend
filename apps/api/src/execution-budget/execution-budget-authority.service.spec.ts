@@ -57,9 +57,9 @@ function verifiedAuthority(): VerifiedExecutionBudgetAuthority {
     campaignCapMicrousd: null,
     maxRuns: null,
     tokenSha256: TOKEN_SHA256,
-    issuedAt: new Date('2026-08-21T00:00:00.000Z'),
-    notBefore: new Date('2026-08-21T00:00:01.000Z'),
-    expiresAt: new Date('2026-08-21T00:04:00.000Z'),
+    issuedAt: 1_787_270_400,
+    notBefore: 1_787_270_401,
+    expiresAt: 1_787_270_640,
   });
 }
 
@@ -248,7 +248,7 @@ describe('ExecutionBudgetModule product composition', () => {
     );
   });
 
-  it('adds the authority module without duplicating the global BudgetStore provider', () => {
+  it('does not add a second BudgetStore provider to ModelGatewayModule', () => {
     const imports = Reflect.getMetadata(
       MODULE_METADATA.IMPORTS,
       AppModule,

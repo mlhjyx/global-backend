@@ -46,6 +46,82 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe('RuntimeReadinessService', () => {
+  it('refreshes immediately, every ten seconds, and stops cleanly without unhandled rejection', async () => {
+    vi.useFakeTimers();
+    const deps = dependencies();
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+    const initial = service.current();
+    const check = vi
+      .spyOn(service, 'check')
+      .mockResolvedValueOnce(initial)
+      .mockRejectedValueOnce(new Error('bounded background failure'))
+      .mockResolvedValue(initial);
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+
+    try {
+      await service.onApplicationBootstrap();
+      await Promise.resolve();
+      expect(check).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await Promise.resolve();
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(unhandled).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(check).toHaveBeenCalledTimes(3);
+
+      service.onApplicationShutdown();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(check).toHaveBeenCalledTimes(3);
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      service.onApplicationShutdown();
+      process.off('unhandledRejection', unhandled);
+      vi.useRealTimers();
+    }
+  });
+
+  it('deduplicates an in-flight immediate and interval refresh', async () => {
+    let releaseProbe: (() => void) | undefined;
+    const probeGate = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const deps = dependencies({
+      temporal: {
+        probe: vi.fn(async () => {
+          await probeGate;
+          return { connected: true };
+        }),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+
+    const first = service.check();
+    const second = service.check();
+    await Promise.resolve();
+    expect(deps.temporal.probe).toHaveBeenCalledOnce();
+    releaseProbe?.();
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    expect(deps.prisma.$transaction).toHaveBeenCalledOnce();
+    expect(deps.contributors.check).toHaveBeenCalledTimes(10);
+  });
+
   it('starts fail-closed and publishes a dynamic worker failure into the mutation snapshot', async () => {
     const deps = dependencies({
       leases: {

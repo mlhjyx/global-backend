@@ -1,7 +1,34 @@
 import { describe, expect, it, vi } from 'vitest';
-import { waitForWorkerDependencyAdmission } from './worker-dependency-admission';
+import {
+  selectWorkerDependencyAdmissionBeforeAuthorityCutover,
+  waitForWorkerDependencyAdmission,
+} from './worker-dependency-admission';
 
 describe('waitForWorkerDependencyAdmission', () => {
+  it('keeps additive authority observations out of Worker polling admission before cutover', () => {
+    expect(
+      selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+        hardChecks: [{ status: 'ok' }, { status: 'ok' }],
+        authorityCapabilities: [
+          {
+            status: 'failed',
+            code: 'PLATFORM_BUDGET_AUTHORITY_UNAVAILABLE',
+          },
+        ],
+      }),
+    ).toEqual({ status: 'ok' });
+
+    expect(
+      selectWorkerDependencyAdmissionBeforeAuthorityCutover({
+        hardChecks: [
+          { status: 'ok' },
+          { status: 'failed', code: 'REDIS_UNAVAILABLE' },
+        ],
+        authorityCapabilities: [{ status: 'ok' }],
+      }),
+    ).toEqual({ status: 'failed', code: 'REDIS_UNAVAILABLE' });
+  });
+
   it('keeps polling disabled and retries a transient managed dependency until it becomes ready', async () => {
     const check = vi
       .fn<() => Promise<{ status: 'ok' } | { status: 'failed'; code: string }>>()

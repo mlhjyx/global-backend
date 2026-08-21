@@ -2,6 +2,10 @@ import 'reflect-metadata';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
+  importJWK,
+  type JWK,
+} from 'jose';
+import {
   EXECUTION_BUDGET_AUTHORITY_AUDIENCE,
   PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND,
   PLATFORM_EXECUTION_BUDGET_AUTHORITY_SCHEMA_VERSION,
@@ -74,9 +78,9 @@ function verifiedAuthority(): VerifiedExecutionBudgetAuthority {
     campaignCapMicrousd: 10_000_000n,
     maxRuns: 10n,
     tokenSha256: 'b'.repeat(64),
-    issuedAt: new Date('2026-08-15T00:00:00.000Z'),
-    notBefore: new Date('2026-08-15T00:00:00.000Z'),
-    expiresAt: new Date('2026-08-15T00:05:00.000Z'),
+    issuedAt: 1_786_752_000,
+    notBefore: 1_786_752_000,
+    expiresAt: 1_786_752_300,
   });
 }
 
@@ -230,6 +234,7 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
     ).compile(schema);
 
     expect(fixture.command).toBe(PLATFORM_EXECUTION_BUDGET_AUTHORITY_COMMAND);
+    expect(fixture.verification_time).toBe('2026-08-15T00:00:00.000Z');
     expect(fixture.claims).toEqual(VALID_CLAIMS);
     expect(validate(fixture.claims), JSON.stringify(validate.errors)).toBe(
       true,
@@ -239,10 +244,27 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
       alg: 'RS256',
       use: 'sig',
     });
-    expect(fixture.public_jwk).not.toHaveProperty('d');
-    expect(fixture.public_jwk).not.toHaveProperty('p');
-    expect(fixture.public_jwk).not.toHaveProperty('q');
-    expect(fixture.public_jwk).not.toHaveProperty('k');
+    for (const privateField of [
+      'd',
+      'p',
+      'q',
+      'dp',
+      'dq',
+      'qi',
+      'oth',
+      'k',
+    ]) {
+      expect(fixture.public_jwk).not.toHaveProperty(privateField);
+    }
+    await expect(
+      importJWK(fixture.public_jwk as JWK, 'RS256'),
+    ).resolves.toBeDefined();
+    expect(fixture.expected).toEqual({
+      accepted: true,
+      authority_kind: 'PLATFORM_GRANT',
+      schedule_id: SCHEDULE_ID,
+      replay_on_exact_redelivery: true,
+    });
   });
 
   it.each([
