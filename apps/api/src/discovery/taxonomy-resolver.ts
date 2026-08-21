@@ -36,6 +36,21 @@ export interface CanonicalNode {
 
 const norm = (s: string): string => s.normalize('NFC').toLowerCase().trim();
 
+function taxonomyEnumSchema(
+  contract: NonNullable<ReturnType<typeof getTask>>,
+  codes: readonly string[],
+  description: string,
+): Record<string, unknown> {
+  const properties = contract.outputSchema.properties as Record<string, Record<string, unknown>>;
+  return {
+    ...contract.outputSchema,
+    properties: {
+      ...properties,
+      code: { ...properties.code, enum: [...codes, null], description },
+    },
+  };
+}
+
 /**
  * CPV 层级前缀：去尾零占位符（'42120000'→'4212'）。CPV 全为 8 位、子码自第一个非零位起分叉，
  * 故对全码做 startsWith 只命中锚自身；取有效前缀才能覆盖子树（42122000/42122130/42123000…）。
@@ -111,13 +126,9 @@ export class TaxonomyResolver {
     if (!nodes.length) return null;
     const catalog = nodes.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
 
-    const schema = {
-      type: 'object',
-      required: ['code'],
-      properties: {
-        code: { type: ['string', 'null'], enum: [...nodes.map((n) => n.code), null], description: '归一到的标准码；无法归一则 null' },
-      },
-    };
+    const schema = taxonomyEnumSchema(
+      contract, nodes.map((node) => node.code), '归一到的标准码；无法归一则 null',
+    );
     try {
       const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
@@ -178,17 +189,9 @@ export class TaxonomyResolver {
     const contract = getTask('taxonomy.normalize');
     if (!contract) return null;
     const catalog = rows.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
-    const schema = {
-      type: 'object',
-      required: ['code'],
-      properties: {
-        code: {
-          type: ['string', 'null'],
-          enum: [...rows.map((n) => n.code), null],
-          description: '子树内最匹配的 CPV 码；无则 null',
-        },
-      },
-    };
+    const schema = taxonomyEnumSchema(
+      contract, rows.map((row) => row.code), '子树内最匹配的 CPV 码；无则 null',
+    );
     try {
       const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
@@ -252,13 +255,9 @@ export class TaxonomyResolver {
     const contract = getTask('taxonomy.normalize');
     if (!contract) return null;
     const catalog = rows.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
-    const schema = {
-      type: 'object',
-      required: ['code'],
-      properties: {
-        code: { type: ['string', 'null'], enum: [...rows.map((n) => n.code), null], description: '子树内最匹配的 NAICS 码；无则 null' },
-      },
-    };
+    const schema = taxonomyEnumSchema(
+      contract, rows.map((row) => row.code), '子树内最匹配的 NAICS 码；无则 null',
+    );
     try {
       const result = await this.executeBudgetedTask<{ code: string | null }>(
         {
@@ -322,13 +321,9 @@ export class TaxonomyResolver {
     const contract = getTask('taxonomy.normalize');
     if (!contract) return null;
     const catalog = rows.map((n) => ({ code: n.code, en: n.labelEn, zh: (n.labels as Record<string, string>)?.zh }));
-    const schema = {
-      type: 'object',
-      required: ['code'],
-      properties: {
-        code: { type: ['string', 'null'], enum: [...rows.map((n) => n.code), null], description: 'panel 子树内最匹配的 FDA product code；无则 null' },
-      },
-    };
+    const schema = taxonomyEnumSchema(
+      contract, rows.map((row) => row.code), 'panel 子树内最匹配的 FDA product code；无则 null',
+    );
     try {
       const result = await this.executeBudgetedTask<{ code: string | null }>(
         {

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import Ajv from 'ajv';
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getTask } from '../ai-tasks/task-registry';
 import type { PostgresJsonbByteExecutor } from './typed-projection.types';
@@ -62,6 +63,32 @@ function restoredResult(data: JsonRecord): RawModelResult {
 
 function cloneRaw(raw: RawModelResult): RawModelResult & JsonRecord {
   return structuredClone(raw) as RawModelResult & JsonRecord;
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as JsonRecord;
+  return `{${Object.keys(record).sort().map(
+    (key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`,
+  ).join(',')}}`;
+}
+
+function resignEnvelope<T extends {
+  data: unknown; schema: string; schemaVersion: string; digest: string;
+}>(envelope: T): T {
+  const base = {
+    data: envelope.data,
+    schema: envelope.schema,
+    schemaVersion: envelope.schemaVersion,
+  };
+  return {
+    ...envelope,
+    digest: createHash('sha256').update(canonicalJson(base)).digest('hex'),
+  };
 }
 
 function invalid(
@@ -649,6 +676,39 @@ describe('non-Site-Builder model result projection registry', () => {
     expect(() => registry.project('understanding-claims/v1', raw)).toThrow(
       'TYPED_PROJECTION_TOO_LARGE',
     );
+  });
+
+  it.each([
+    {
+      schema: 'icp-design/v1' as const,
+      raw: icpDesignRaw,
+      entries: (data: JsonRecord) => ((data.data as JsonRecord).companyAttributeEntries as JsonRecord[]),
+    },
+    {
+      schema: 'icp-query-plan/v1' as const,
+      raw: icpQueryPlanRaw,
+      entries: (data: JsonRecord) => ((((data.data as JsonRecord).queries as JsonRecord[])[0])
+        .filterEntries as JsonRecord[]),
+    },
+    {
+      schema: 'understanding-offerings/v1' as const,
+      raw: understandingOfferingsRaw,
+      entries: (data: JsonRecord) => ((((data.data as JsonRecord).offerings as JsonRecord[])[0])
+        .factEntries as JsonRecord[]),
+    },
+  ])('$schema rejects digest-valid duplicate and out-of-order fact entries', ({ schema, raw, entries }) => {
+    const registry = new TypedProjectionRegistry();
+    registerModelResultProjections(registry);
+    const projected = registry.project(schema, raw);
+    const duplicate = structuredClone(projected) as typeof projected;
+    const duplicateEntries = entries(duplicate.data as JsonRecord);
+    duplicateEntries[1] = structuredClone(duplicateEntries[0]);
+    const outOfOrder = structuredClone(projected) as typeof projected;
+    const outOfOrderEntries = entries(outOfOrder.data as JsonRecord);
+    [outOfOrderEntries[0], outOfOrderEntries[1]] = [outOfOrderEntries[1], outOfOrderEntries[0]];
+
+    expect(() => registry.restore(resignEnvelope(duplicate))).toThrow('TYPED_PROJECTION_INVALID');
+    expect(() => registry.restore(resignEnvelope(outOfOrder))).toThrow('TYPED_PROJECTION_INVALID');
   });
 });
 

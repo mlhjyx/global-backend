@@ -134,7 +134,10 @@ function restoreFactValue(value: unknown): unknown {
 }
 function restoreFactEntries(value: unknown): UnknownRecord {
   const restored: UnknownRecord = {};
+  let previousKey: string | undefined;
   for (const entry of value as readonly { key: string; value: unknown }[]) {
+    if (previousKey !== undefined && entry.key <= previousKey) projectionInvalid();
+    previousKey = entry.key;
     Object.defineProperty(restored, entry.key, {
       configurable: true,
       enumerable: true,
@@ -144,15 +147,11 @@ function restoreFactEntries(value: unknown): UnknownRecord {
   }
   return restored;
 }
-const stringSchema = (maxLength: number, extra?: JsonSchema): JsonSchema => (
-  { type: 'string', maxLength, ...extra }
-);
+const stringSchema = (maxLength: number, extra?: JsonSchema): JsonSchema => ({ type: 'string', maxLength, ...extra });
 const numberSchema = (minimum: number, maximum: number, integer = false): JsonSchema => (
   { type: integer ? 'integer' : 'number', minimum, maximum }
 );
-const arraySchema = (maxItems: number, items: JsonSchema): JsonSchema => (
-  { type: 'array', maxItems, items }
-);
+const arraySchema = (maxItems: number, items: JsonSchema): JsonSchema => ({ type: 'array', maxItems, items });
 function objectSchema(
   properties: Readonly<Record<string, JsonSchema>>,
   required: readonly string[],
