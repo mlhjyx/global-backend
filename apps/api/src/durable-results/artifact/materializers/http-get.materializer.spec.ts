@@ -1,48 +1,85 @@
 import { describe, expect, it } from 'vitest';
 import { httpGetMaterializer } from './http-get.materializer';
 import {
-  jsonBytes,
+  encoded,
   manifestFor,
   streamed,
 } from './materializer-fixtures.spec-helper';
 
+const expected = Object.freeze({
+  status: 200,
+  ok: true,
+  sanitizedUrl: 'https://example.com/final',
+  blocked: null,
+});
+
 describe('httpGetMaterializer', () => {
-  it('restores only the existing closed HttpGetOutput shape from a streamed JSON envelope', async () => {
-    const bytes = jsonBytes({
+  it('combines the verified raw text/plain body only with closed trusted facts', async () => {
+    const bytes = encoded('hello 中');
+    await expect(
+      httpGetMaterializer.materialize(
+        streamed(bytes, [1]),
+        manifestFor('http-get/v1', 'text/plain', bytes),
+        expected,
+      ),
+    ).resolves.toEqual({
       status: 200,
       ok: true,
       mediaType: 'text/plain',
       text: 'hello 中',
       finalUrl: 'https://example.com/final',
     });
-    const output = await httpGetMaterializer.materialize(
-      streamed(bytes, [1]),
-      manifestFor('http-get/v1', 'text/plain', bytes),
-    );
-    expect(output).toEqual({
-      status: 200,
-      ok: true,
-      mediaType: 'text/plain',
-      text: 'hello 中',
-      finalUrl: 'https://example.com/final',
-    });
-    expect(Object.keys(output).sort()).toEqual([
-      'finalUrl', 'mediaType', 'ok', 'status', 'text',
-    ]);
   });
 
-  it('restores the bounded blocked result variant without inventing response facts', async () => {
-    const bytes = jsonBytes({
-      status: 0,
+  it('treats JSON-looking text as raw body and never as a result envelope', async () => {
+    const oldEnvelope = JSON.stringify({
+      status: 500,
       ok: false,
       mediaType: 'text/plain',
-      text: '',
-      blocked: 'non_global_address',
+      text: 'must not be decoded as metadata',
     });
+    const bytes = encoded(oldEnvelope);
     await expect(
       httpGetMaterializer.materialize(
         streamed(bytes),
         manifestFor('http-get/v1', 'text/plain', bytes),
+        expected,
+      ),
+    ).resolves.toMatchObject({
+      status: 200,
+      ok: true,
+      text: oldEnvelope,
+    });
+  });
+
+  it('rejects the prior JSON-envelope path when trusted facts are absent', async () => {
+    const bytes = encoded(JSON.stringify({
+      status: 200,
+      ok: true,
+      mediaType: 'text/plain',
+      text: 'old envelope',
+    }));
+    await expect(
+      httpGetMaterializer.materialize(
+        streamed(bytes),
+        manifestFor('http-get/v1', 'text/plain', bytes),
+        undefined,
+      ),
+    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+  });
+
+  it('restores the existing blocked shape only from explicit blocked facts', async () => {
+    const bytes = new Uint8Array();
+    await expect(
+      httpGetMaterializer.materialize(
+        streamed(bytes),
+        manifestFor('http-get/v1', 'text/plain', bytes),
+        {
+          status: 0,
+          ok: false,
+          sanitizedUrl: null,
+          blocked: 'non_global_address',
+        },
       ),
     ).resolves.toEqual({
       status: 0,
@@ -51,60 +88,45 @@ describe('httpGetMaterializer', () => {
       text: '',
       blocked: 'non_global_address',
     });
-  });
 
-  it.each([
-    ['missing required field', { status: 200, ok: true, mediaType: 'text/plain' }],
-    ['unknown raw headers', { status: 200, ok: true, mediaType: 'text/plain', text: '', headers: { authorization: 'secret' } }],
-    ['prompt field', { status: 200, ok: true, mediaType: 'text/plain', text: '', prompt: 'secret' }],
-    ['token field', { status: 200, ok: true, mediaType: 'text/plain', text: '', token: 'secret' }],
-    ['email field', { status: 200, ok: true, mediaType: 'text/plain', text: '', email: 'person@example.com' }],
-    ['inconsistent status', { status: 500, ok: true, mediaType: 'text/plain', text: '' }],
-    ['invalid final URL type', { status: 200, ok: true, mediaType: 'text/plain', text: '', finalUrl: 1 }],
-    ['invalid final URL scheme', { status: 200, ok: true, mediaType: 'text/plain', text: '', finalUrl: 'file:///etc/passwd' }],
-    ['status zero without block', { status: 0, ok: false, mediaType: 'text/plain', text: '' }],
-    ['invalid block code', { status: 0, ok: false, mediaType: 'text/plain', text: '', blocked: 'NOT SAFE' }],
-    ['blocked result with final URL', { status: 0, ok: false, mediaType: 'text/plain', text: '', blocked: 'invalid_url', finalUrl: 'https://example.com/' }],
-  ])('rejects %s', async (_name, value) => {
-    const bytes = jsonBytes(value);
+    const nonEmpty = encoded('must be empty when no wire occurred');
     await expect(
       httpGetMaterializer.materialize(
-        streamed(bytes),
-        manifestFor('http-get/v1', 'text/plain', bytes),
+        streamed(nonEmpty),
+        manifestFor('http-get/v1', 'text/plain', nonEmpty),
+        {
+          status: 0,
+          ok: false,
+          sanitizedUrl: null,
+          blocked: 'non_global_address',
+        },
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });
 
-  it('rejects invalid UTF-8, media mismatch, over-depth JSON, and trailing data', async () => {
-    const invalidUtf8 = Uint8Array.of(0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d);
+  it('rejects invalid UTF-8, media mismatch, and mismatched expected facts', async () => {
+    const invalidUtf8 = Uint8Array.of(0xc3, 0x28);
     await expect(
       httpGetMaterializer.materialize(
         streamed(invalidUtf8),
         manifestFor('http-get/v1', 'text/plain', invalidUtf8),
+        expected,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
 
-    const valid = jsonBytes({ status: 200, ok: true, mediaType: 'text/plain', text: '' });
+    const valid = encoded('body');
     await expect(
       httpGetMaterializer.materialize(
         streamed(valid),
         manifestFor('http-get/v1', 'application/json', valid),
+        expected,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-
-    const deep = new TextEncoder().encode(`${'['.repeat(33)}null${']'.repeat(33)}`);
     await expect(
       httpGetMaterializer.materialize(
-        streamed(deep),
-        manifestFor('http-get/v1', 'text/plain', deep),
-      ),
-    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-
-    const trailing = new TextEncoder().encode(`${new TextDecoder().decode(valid)} {}`);
-    await expect(
-      httpGetMaterializer.materialize(
-        streamed(trailing),
-        manifestFor('http-get/v1', 'text/plain', trailing),
+        streamed(valid),
+        manifestFor('http-get/v1', 'text/plain', valid),
+        { ...expected, ok: false },
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });

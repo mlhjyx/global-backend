@@ -56,6 +56,8 @@ export interface ArtifactMaterializer<T> {
   materialize(
     input: AsyncIterable<Uint8Array>,
     manifest: GenericOperationArtifactManifest,
+    /** Closed facts loaded with the manifest; never caller/provider metadata. */
+    expectedFacts: unknown,
   ): Promise<T>;
 }
 

@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
-import type { CrawlHtmlResult } from '../../../adapters/web-crawler';
 import {
   normalizeEvidenceText,
-  sanitizeEvidenceUrl,
 } from '../../../site-builder/agents/evidence-ref';
 import {
-  closedJsonRecord,
-  readBoundedArtifactJson,
+  parseArtifactExpectedFacts,
+  type Crawl4aiFetchArtifactExpectedFacts,
+  type Crawl4aiRenderArtifactExpectedFacts,
+} from '../artifact-expected-facts';
+import {
+  readBoundedArtifactUtf8,
   type ArtifactPayloadContract,
 } from '../artifact-materializer.registry';
 import {
@@ -34,23 +36,23 @@ export interface Crawl4aiFetchOutput {
   readonly contentHash: string;
 }
 
-export type Crawl4aiRenderOutput = CrawlHtmlResult & {
-  readonly robotsBlocked?: boolean;
-};
+/** Response headers are transient transport data and are not reconstructed. */
+export interface Crawl4aiRenderOutput {
+  readonly url: string;
+  readonly html: string;
+  readonly robotsBlocked?: true;
+}
 
 function invalid(): never {
   return invalidGenericOperationArtifact();
 }
 
-function safeUrl(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 2_000) return invalid();
-  const sanitized = sanitizeEvidenceUrl(value);
-  if (!sanitized) return invalid();
-  return sanitized;
-}
-
 function shortHash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+function isHtmlBody(value: string): boolean {
+  return /^\s*<(?:!doctype\s+html\b|[a-z][a-z0-9:-]*\b)/i.test(value);
 }
 
 export const crawl4aiFetchMaterializer: ArtifactMaterializer<Crawl4aiFetchOutput> =
@@ -59,28 +61,20 @@ export const crawl4aiFetchMaterializer: ArtifactMaterializer<Crawl4aiFetchOutput
     async materialize(
       input: AsyncIterable<Uint8Array>,
       manifest: GenericOperationArtifactManifest,
+      expectedFacts: unknown,
     ): Promise<Crawl4aiFetchOutput> {
-      const value = closedJsonRecord(
-        await readBoundedArtifactJson(input, manifest, FETCH_CONTRACT),
-        ['url', 'text', 'contentHash'],
+      const facts = parseArtifactExpectedFacts(
+        'crawl4ai-fetch/v1',
+        expectedFacts,
+      ) as Crawl4aiFetchArtifactExpectedFacts;
+      const text = normalizeEvidenceText(
+        await readBoundedArtifactUtf8(input, manifest, FETCH_CONTRACT),
       );
-      if (
-        typeof value.text !== 'string' ||
-        typeof value.contentHash !== 'string'
-      ) {
-        return invalid();
-      }
-      const text = normalizeEvidenceText(value.text);
-      if (
-        Buffer.byteLength(text, 'utf8') > MAX_FETCH_BYTES ||
-        value.contentHash !== shortHash(text)
-      ) {
-        return invalid();
-      }
+      if (facts.contentHash !== shortHash(text)) return invalid();
       return Object.freeze({
-        url: safeUrl(value.url),
+        url: facts.sanitizedUrl,
         text,
-        contentHash: value.contentHash,
+        contentHash: facts.contentHash,
       });
     },
   });
@@ -91,27 +85,29 @@ export const crawl4aiRenderMaterializer: ArtifactMaterializer<Crawl4aiRenderOutp
     async materialize(
       input: AsyncIterable<Uint8Array>,
       manifest: GenericOperationArtifactManifest,
+      expectedFacts: unknown,
     ): Promise<Crawl4aiRenderOutput> {
-      const value = closedJsonRecord(
-        await readBoundedArtifactJson(input, manifest, RENDER_CONTRACT),
-        ['url', 'html'],
-        ['robotsBlocked'],
+      const facts = parseArtifactExpectedFacts(
+        'crawl4ai-render/v1',
+        expectedFacts,
+      ) as Crawl4aiRenderArtifactExpectedFacts;
+      const html = await readBoundedArtifactUtf8(
+        input,
+        manifest,
+        RENDER_CONTRACT,
       );
-      if (
-        typeof value.html !== 'string' ||
-        Buffer.byteLength(value.html, 'utf8') > MAX_RENDER_BYTES ||
-        (value.robotsBlocked !== undefined &&
-          typeof value.robotsBlocked !== 'boolean')
-      ) {
-        return invalid();
+      if (facts.blocked) {
+        if (html !== '') return invalid();
+        return Object.freeze({
+          url: facts.sanitizedUrl,
+          html: '',
+          robotsBlocked: true,
+        });
       }
+      if (!isHtmlBody(html)) return invalid();
       return Object.freeze({
-        url: safeUrl(value.url),
-        html: value.html,
-        headers: Object.freeze({}),
-        ...(value.robotsBlocked === undefined
-          ? {}
-          : { robotsBlocked: value.robotsBlocked }),
+        url: facts.sanitizedUrl,
+        html,
       });
     },
   });

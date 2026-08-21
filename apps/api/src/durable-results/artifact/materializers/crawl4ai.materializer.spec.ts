@@ -5,7 +5,7 @@ import {
   crawl4aiRenderMaterializer,
 } from './crawl4ai.materializer';
 import {
-  jsonBytes,
+  encoded,
   manifestFor,
   streamed,
 } from './materializer-fixtures.spec-helper';
@@ -14,124 +14,128 @@ const shortHash = (value: string): string =>
   createHash('sha256').update(value).digest('hex').slice(0, 24);
 
 describe('crawl4ai materializers', () => {
-  it('restores the exact bounded fetch result and verifies its content hash', async () => {
+  it('materializes the raw markdown body with closed trusted URL/hash facts', async () => {
     const text = '# ACME\n\nbounded evidence';
-    const bytes = jsonBytes({
+    const bytes = encoded(text);
+    await expect(
+      crawl4aiFetchMaterializer.materialize(
+        streamed(bytes),
+        manifestFor('crawl4ai-fetch/v1', 'text/markdown', bytes),
+        {
+          sanitizedUrl: 'https://example.com/',
+          contentHash: shortHash(text),
+        },
+      ),
+    ).resolves.toEqual({
       url: 'https://example.com/',
       text,
       contentHash: shortHash(text),
     });
-    const output = await crawl4aiFetchMaterializer.materialize(
-      streamed(bytes, [2, 1, 4]),
-      manifestFor('crawl4ai-fetch/v1', 'text/markdown', bytes),
-    );
-    expect(output).toEqual({
-      url: 'https://example.com/',
-      text,
-      contentHash: shortHash(text),
-    });
-    expect(Object.keys(output).sort()).toEqual(['contentHash', 'text', 'url']);
   });
 
-  it('restores render output without persisting or returning raw response headers', async () => {
-    const bytes = jsonBytes({
+  it('rejects missing or mismatched fetch facts and does not decode the old JSON envelope', async () => {
+    const oldEnvelope = JSON.stringify({
       url: 'https://example.com/',
-      html: '<!doctype html><html><body>ok</body></html>',
-      robotsBlocked: false,
+      text: 'old envelope',
+      contentHash: shortHash('old envelope'),
     });
+    const bytes = encoded(oldEnvelope);
+    const manifest = manifestFor('crawl4ai-fetch/v1', 'text/markdown', bytes);
+    await expect(
+      crawl4aiFetchMaterializer.materialize(streamed(bytes), manifest, undefined),
+    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+    await expect(
+      crawl4aiFetchMaterializer.materialize(streamed(bytes), manifest, {
+        sanitizedUrl: 'https://example.com/',
+        contentHash: shortHash('old envelope'),
+      }),
+    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+  });
+
+  it('materializes raw HTML without reconstructing transient headers', async () => {
+    const html = '<!doctype html><html><body>ok</body></html>';
+    const bytes = encoded(html);
     const output = await crawl4aiRenderMaterializer.materialize(
       streamed(bytes),
       manifestFor('crawl4ai-render/v1', 'text/html', bytes),
+      {
+        sanitizedUrl: 'https://example.com/',
+        blocked: false,
+      },
     );
     expect(output).toEqual({
       url: 'https://example.com/',
-      html: '<!doctype html><html><body>ok</body></html>',
-      headers: {},
-      robotsBlocked: false,
+      html,
     });
-    expect(output.headers).toEqual({});
+    expect(output).not.toHaveProperty('headers');
   });
 
-  it('restores the render shape without the optional robots flag', async () => {
-    const bytes = jsonBytes({
-      url: 'https://example.com/',
-      html: '<html/>',
-    });
+  it('restores only the existing explicit robots-blocked status', async () => {
+    const bytes = new Uint8Array();
     await expect(
       crawl4aiRenderMaterializer.materialize(
         streamed(bytes),
         manifestFor('crawl4ai-render/v1', 'text/html', bytes),
+        {
+          sanitizedUrl: 'https://example.com/',
+          blocked: true,
+        },
       ),
     ).resolves.toEqual({
       url: 'https://example.com/',
+      html: '',
+      robotsBlocked: true,
+    });
+
+    const nonEmpty = encoded('<html/>');
+    await expect(
+      crawl4aiRenderMaterializer.materialize(
+        streamed(nonEmpty),
+        manifestFor('crawl4ai-render/v1', 'text/html', nonEmpty),
+        {
+          sanitizedUrl: 'https://example.com/',
+          blocked: true,
+        },
+      ),
+    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+  });
+
+  it('rejects old render JSON envelopes, wrong media, HTML above max, and bad facts', async () => {
+    const oldEnvelope = encoded(JSON.stringify({
+      url: 'https://example.com/',
       html: '<html/>',
-      headers: {},
-    });
-  });
-
-  it.each([
-    ['missing fetch url', { text: 'x', contentHash: shortHash('x') }],
-    ['wrong fetch hash', { url: 'https://example.com/', text: 'x', contentHash: '0'.repeat(24) }],
-    ['invalid fetch url', { url: 'file:///tmp/private', text: 'x', contentHash: shortHash('x') }],
-    ['invalid fetch text', { url: 'https://example.com/', text: 1, contentHash: shortHash('x') }],
-    ['raw render headers', { url: 'https://example.com/', html: '<html/>', headers: { cookie: 'secret' } }],
-    ['render token', { url: 'https://example.com/', html: '<html/>', token: 'secret' }],
-    ['render invalid robots flag', { url: 'https://example.com/', html: '<html/>', robotsBlocked: 'false' }],
-  ])('rejects %s', async (name, value) => {
-    const isRender = name.includes('render');
-    const schema = isRender ? 'crawl4ai-render/v1' : 'crawl4ai-fetch/v1';
-    const mediaType = isRender ? 'text/html' : 'text/markdown';
-    const materializer = isRender ? crawl4aiRenderMaterializer : crawl4aiFetchMaterializer;
-    const bytes = jsonBytes(value);
+    }));
     await expect(
-      materializer.materialize(
-        streamed(bytes),
-        manifestFor(schema, mediaType, bytes),
-      ),
-    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-  });
-
-  it('rejects media mismatch and HTML above the fixed artifact maximum', async () => {
-    const valid = jsonBytes({
-      url: 'https://example.com/',
-      text: '',
-      contentHash: shortHash(''),
-    });
-    await expect(
-      crawl4aiFetchMaterializer.materialize(
-        streamed(valid),
-        manifestFor('crawl4ai-fetch/v1', 'text/html', valid),
+      crawl4aiRenderMaterializer.materialize(
+        streamed(oldEnvelope),
+        manifestFor('crawl4ai-render/v1', 'text/html', oldEnvelope),
+        { sanitizedUrl: 'https://example.com/', blocked: false },
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
 
-    const oversized = jsonBytes({
-      url: 'https://example.com/',
-      html: 'x'.repeat(3_000_001),
-    });
+    const html = encoded('<html/>');
+    await expect(
+      crawl4aiRenderMaterializer.materialize(
+        streamed(html),
+        manifestFor('crawl4ai-render/v1', 'text/plain', html),
+        { sanitizedUrl: 'https://example.com/', blocked: false },
+      ),
+    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+
+    const oversized = encoded(`<html>${'x'.repeat(3_000_001)}</html>`);
     await expect(
       crawl4aiRenderMaterializer.materialize(
         streamed(oversized),
         manifestFor('crawl4ai-render/v1', 'text/html', oversized),
-      ),
-    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-  });
-
-  it('rejects over-depth JSON and trailing documents before result restoration', async () => {
-    const deep = new TextEncoder().encode(`${'{"x":'.repeat(33)}null${'}'.repeat(33)}`);
-    await expect(
-      crawl4aiFetchMaterializer.materialize(
-        streamed(deep),
-        manifestFor('crawl4ai-fetch/v1', 'text/markdown', deep),
+        { sanitizedUrl: 'https://example.com/', blocked: false },
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
 
-    const trailing = new TextEncoder().encode(
-      `${JSON.stringify({ url: 'https://example.com/', html: '<html/>' })}[]`,
-    );
     await expect(
       crawl4aiRenderMaterializer.materialize(
-        streamed(trailing),
-        manifestFor('crawl4ai-render/v1', 'text/html', trailing),
+        streamed(html),
+        manifestFor('crawl4ai-render/v1', 'text/html', html),
+        { sanitizedUrl: 'https://example.com/person@example.com', blocked: false },
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });

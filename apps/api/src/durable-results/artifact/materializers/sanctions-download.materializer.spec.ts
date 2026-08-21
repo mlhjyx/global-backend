@@ -28,6 +28,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sanctionsDownloadMaterializer.materialize(
         streamed(bytes, [1, 1, 2, 7]),
         manifestFor('sanctions-download/v1', mediaType, bytes),
+        undefined,
       ),
     ).resolves.toEqual({
       body: xml,
@@ -42,6 +43,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sanctionsDownloadMaterializer.materialize(
         streamed(invalidUtf8),
         manifestFor('sanctions-download/v1', 'application/xml', invalidUtf8),
+        undefined,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
 
@@ -50,6 +52,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sanctionsDownloadMaterializer.materialize(
         streamed(xml),
         manifestFor('sanctions-download/v1', 'application/json', xml),
+        undefined,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });
@@ -64,6 +67,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sanctionsDownloadMaterializer.materialize(
         streamed(bytes),
         manifestFor('sanctions-download/v1', 'application/xml', bytes),
+        undefined,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });
@@ -74,6 +78,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sanctionsDownloadMaterializer.materialize(
         streamed(trailing),
         manifestFor('sanctions-download/v1', 'application/xml', trailing),
+        undefined,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
 
@@ -83,7 +88,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sizeBytes: String(MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES + 1),
     };
     await expect(
-      sanctionsDownloadMaterializer.materialize(streamed(empty), manifest),
+      sanctionsDownloadMaterializer.materialize(streamed(empty), manifest, undefined),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });
 
@@ -98,6 +103,7 @@ describe('sanctionsDownloadMaterializer', () => {
       sanctionsDownloadMaterializer.materialize(
         streamed(bytes),
         manifestFor('sanctions-download/v1', 'application/xml', bytes),
+        undefined,
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });
@@ -112,7 +118,11 @@ describe('sanctionsDownloadMaterializer', () => {
       yield bytes;
     }
     await expect(
-      sanctionsDownloadMaterializer.materialize(mutatingStream(), manifest),
+      sanctionsDownloadMaterializer.materialize(
+        mutatingStream(),
+        manifest,
+        undefined,
+      ),
     ).resolves.toMatchObject({ contentType: 'application/xml' });
   });
 });

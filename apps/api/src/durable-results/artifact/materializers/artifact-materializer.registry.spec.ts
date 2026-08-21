@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ArtifactMaterializerRegistry,
   REQUIRED_ARTIFACT_RESULT_SCHEMAS,
-  closedJsonRecord,
-  readBoundedArtifactJson,
   readBoundedArtifactUtf8,
   type ArtifactPayloadContract,
 } from '../artifact-materializer.registry';
@@ -13,7 +11,6 @@ import { httpGetMaterializer } from './http-get.materializer';
 import { sanctionsDownloadMaterializer } from './sanctions-download.materializer';
 import {
   encoded,
-  jsonBytes,
   manifestFor,
   streamed,
 } from './materializer-fixtures.spec-helper';
@@ -30,55 +27,61 @@ const HTTP_CONTRACT: ArtifactPayloadContract = Object.freeze({
 });
 
 describe('ArtifactMaterializerRegistry', () => {
-  it('registers exactly the four approved schema IDs and dispatches by the bound manifest schema', async () => {
+  it('registers exactly four schemas and dispatches raw body with trusted expected facts', async () => {
     const registry = new ArtifactMaterializerRegistry(definitions);
     expect(registry.resultSchemas()).toEqual(REQUIRED_ARTIFACT_RESULT_SCHEMAS);
 
-    const bytes = jsonBytes({
-      status: 200,
-      ok: true,
-      mediaType: 'text/plain',
-      text: 'bounded',
-    });
+    const bytes = encoded('bounded raw body');
     await expect(
       registry.materialize(
         'http-get/v1',
         streamed(bytes),
         manifestFor('http-get/v1', 'text/plain', bytes),
+        {
+          status: 200,
+          ok: true,
+          sanitizedUrl: 'https://example.com/',
+          blocked: null,
+        },
       ),
     ).resolves.toEqual({
       status: 200,
       ok: true,
       mediaType: 'text/plain',
-      text: 'bounded',
+      text: 'bounded raw body',
+      finalUrl: 'https://example.com/',
     });
   });
 
-  it('rejects duplicate, missing, and unapproved schema definitions at startup', () => {
+  it('rejects missing expected facts instead of inventing HTTP result metadata', async () => {
+    const registry = new ArtifactMaterializerRegistry(definitions);
+    const bytes = encoded('raw body');
+    await expect(
+      registry.materialize(
+        'http-get/v1',
+        streamed(bytes),
+        manifestFor('http-get/v1', 'text/plain', bytes),
+        undefined,
+      ),
+    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+  });
+
+  it('rejects duplicate, missing, unapproved, and non-closed schema definitions', () => {
     expect(
       () => new ArtifactMaterializerRegistry([...definitions, httpGetMaterializer]),
     ).toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
     expect(
       () => new ArtifactMaterializerRegistry(definitions.slice(1)),
     ).toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-    expect(
-      () =>
-        new ArtifactMaterializerRegistry([
-          ...definitions.slice(0, -1),
-          Object.freeze({
-            resultSchema: 'caller-selected/v1',
-            materialize: async () => ({}),
-          }),
-        ]),
-    ).toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-  });
-
-  it('rejects non-closed, accessor-backed, and reflection-hostile definitions', () => {
     const invalidDefinitions: unknown[] = [
       null,
       [],
       Object.create(null),
       { resultSchema: 'crawl4ai-render/v1', materialize: async () => ({}), extra: true },
+      Object.freeze({
+        resultSchema: 'caller-selected/v1',
+        materialize: async () => ({}),
+      }),
       Object.defineProperties({}, {
         resultSchema: { enumerable: true, get: () => 'crawl4ai-render/v1' },
         materialize: { enumerable: true, value: async () => ({}) },
@@ -95,84 +98,29 @@ describe('ArtifactMaterializerRegistry', () => {
     }
   });
 
-  it('snapshots trusted definition functions so post-startup mutation cannot replace dispatch', async () => {
+  it('snapshots trusted definitions and rejects manifest/schema mismatch', async () => {
     const mutable: ArtifactMaterializer<unknown>[] = definitions.map(
       (definition) => ({ ...definition }),
     );
-    const original = mutable[1]!.materialize;
     const registry = new ArtifactMaterializerRegistry(mutable);
     mutable[1]!.materialize = async () => ({ compromised: true });
-
-    const bytes = jsonBytes({
-      status: 200,
-      ok: true,
-      mediaType: 'text/plain',
-      text: 'original',
-    });
-    const result = await registry.materialize<Record<string, unknown>>(
-      'http-get/v1',
-      streamed(bytes),
-      manifestFor('http-get/v1', 'text/plain', bytes),
-    );
-    expect(original).not.toBe(mutable[1]!.materialize);
-    expect(result).toMatchObject({ text: 'original' });
-    expect(result).not.toHaveProperty('compromised');
-  });
-
-  it('rejects a requested schema that differs from the closed manifest binding', async () => {
-    const registry = new ArtifactMaterializerRegistry(definitions);
     const bytes = encoded('<sdnList/>');
     await expect(
       registry.materialize(
         'http-get/v1',
         streamed(bytes),
         manifestFor('sanctions-download/v1', 'application/xml', bytes),
+        {
+          status: 200,
+          ok: true,
+          sanitizedUrl: 'https://example.com/',
+          blocked: null,
+        },
       ),
     ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
   });
 
-  it('parses strict bounded JSON primitives, arrays, escapes, and null-prototype records', async () => {
-    const bytes = encoded(
-      ' { "empty": {}, "array": [true, false, null, 1.5e2], "escaped": "a\\\\b\\u4e2d" } ',
-    );
-    const parsed = await readBoundedArtifactJson(
-      streamed(bytes),
-      manifestFor('http-get/v1', 'text/plain', bytes),
-      HTTP_CONTRACT,
-    );
-    const record = closedJsonRecord(parsed, ['empty', 'array', 'escaped']);
-    expect(Object.getPrototypeOf(record)).toBeNull();
-    expect(record.array).toEqual([true, false, null, 150]);
-    expect(record.escaped).toBe('a\\b中');
-  });
-
-  it.each([
-    ['duplicate key', '{"x":1,"x":2}'],
-    ['reserved key', '{"__proto__":1}'],
-    ['missing colon', '{"x" 1}'],
-    ['missing comma', '{"x":1 "y":2}'],
-    ['trailing object comma', '{"x":1,}'],
-    ['trailing array comma', '[1,]'],
-    ['invalid number', '{"x":-}'],
-    ['negative zero', '{"x":-0}'],
-    ['non-finite number', `{"x":${'9'.repeat(400)}}`],
-    ['unterminated string', '{"x":"unterminated}'],
-    ['raw control', '{"x":"line\nbreak"}'],
-    ['NUL escape', '{"x":"\\u0000"}'],
-    ['unpaired high surrogate', '{"x":"\\ud800"}'],
-    ['unpaired low surrogate', '{"x":"\\udc00"}'],
-  ])('rejects strict JSON violation: %s', async (_name, text) => {
-    const bytes = encoded(text);
-    await expect(
-      readBoundedArtifactJson(
-        streamed(bytes),
-        manifestFor('http-get/v1', 'text/plain', bytes),
-        HTTP_CONTRACT,
-      ),
-    ).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
-  });
-
-  it('rejects byte type, length, digest, stream, NUL, and invalid contract failures with one code', async () => {
+  it('keeps byte type, length, digest, stream and NUL checks on the raw body', async () => {
     const bytes = encoded('ok');
     const manifest = manifestFor('http-get/v1', 'text/plain', bytes);
     const cases: readonly (() => Promise<unknown>)[] = [
@@ -203,30 +151,9 @@ describe('ArtifactMaterializerRegistry', () => {
           HTTP_CONTRACT,
         );
       },
-      () => readBoundedArtifactUtf8(streamed(bytes), manifest, {
-        ...HTTP_CONTRACT,
-        maxBytes: -1,
-      }),
     ];
     for (const run of cases) {
       await expect(run()).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
-  });
-
-  it('rejects non-record JSON and closed-record key mismatch', async () => {
-    for (const value of [null, [], 'text', 1]) {
-      expect(() => closedJsonRecord(value, [])).toThrow(
-        'GENERIC_OPERATION_ARTIFACT_INVALID',
-      );
-    }
-    const bytes = encoded('{"only":true}');
-    const parsed = await readBoundedArtifactJson(
-      streamed(bytes),
-      manifestFor('http-get/v1', 'text/plain', bytes),
-      HTTP_CONTRACT,
-    );
-    expect(() => closedJsonRecord(parsed, ['required'])).toThrow(
-      'GENERIC_OPERATION_ARTIFACT_INVALID',
-    );
   });
 });
