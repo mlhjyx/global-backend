@@ -225,6 +225,28 @@ describe('managed dependency readiness', () => {
     expect(contributors.has('execution_budget_jwks')).toBe(true);
     expect(contributors.has('platform_budget_authority')).toBe(false);
     expect(unregister).not.toHaveBeenCalled();
+    vi.stubEnv('TOOL_RATE_LIMIT_REDIS_URL', '');
+    vi.stubEnv('REDIS_URL', '');
+    vi.stubEnv('MODEL_GATEWAY_URL', '');
+    vi.stubEnv('MODEL_GATEWAY_KEY', '');
+    vi.stubEnv('CHROME_PATH', '/not-an-allowed-browser');
+    try {
+      await expect(contributors.get('redis')?.()).resolves.toEqual({
+        status: 'failed',
+        code: 'REDIS_CONFIG_REQUIRED',
+      });
+      await expect(contributors.get('model_gateway')?.()).resolves.toEqual({
+        status: 'failed',
+        code: 'MODEL_GATEWAY_CONFIG_REQUIRED',
+      });
+      await expect(contributors.get('browser')?.()).resolves.toEqual({
+        status: 'failed',
+        code: 'BROWSER_RUNTIME_CONFIG_INVALID',
+      });
+      expect(contributors.get('renderer')?.()).toEqual({ status: 'ok' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
     managed.onModuleDestroy();
     expect(unregister).toHaveBeenCalledTimes(contributors.size);
 
