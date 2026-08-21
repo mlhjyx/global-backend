@@ -33,7 +33,14 @@ type GatewayProbeFetch = (input: string, init: RequestInit) => Promise<Pick<Resp
 type BrowserProbe = (executable: string, args: readonly string[]) => Promise<void>;
 type ExecutableProbe = (executable: string) => Promise<boolean>;
 
-type PlatformAuthorityReadinessState = 'active' | 'missing' | 'expired' | 'revoked' | 'exhausted' | 'not_yet_valid';
+type PlatformAuthorityReadinessState =
+  | 'active'
+  | 'missing'
+  | 'expired'
+  | 'revoked'
+  | 'exhausted'
+  | 'not_yet_valid'
+  | 'invalid';
 
 type PlatformAuthorityReadinessRow = Readonly<{
   purpose: string;
@@ -61,6 +68,7 @@ const PLATFORM_AUTHORITY_STATES = new Set<PlatformAuthorityReadinessState>([
   'revoked',
   'exhausted',
   'not_yet_valid',
+  'invalid',
 ]);
 
 async function defaultExecutableProbe(executable: string): Promise<boolean> {

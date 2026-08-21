@@ -384,18 +384,23 @@ IMMUTABLE
 STRICT
 SET search_path = pg_catalog, public
 AS $$
+  WITH comparison_clock AS (
+    SELECT date_trunc('second', p_verification_time)::timestamptz(3)
+      AS verification_time
+  )
   SELECT CASE
-    WHEN p_issued_at::timestamptz(3) > p_verification_time::timestamptz(3)
+    WHEN p_issued_at::timestamptz(3) > comparison_clock.verification_time
       + INTERVAL '60 seconds'
       THEN 'INVALID'
-    WHEN p_not_before::timestamptz(3) > p_verification_time::timestamptz(3)
+    WHEN p_not_before::timestamptz(3) > comparison_clock.verification_time
       + INTERVAL '60 seconds'
       THEN 'NOT_YET_VALID'
-    WHEN p_expires_at::timestamptz(3) < p_verification_time::timestamptz(3)
+    WHEN p_expires_at::timestamptz(3) < comparison_clock.verification_time
       - INTERVAL '60 seconds'
       THEN 'EXPIRED'
     ELSE 'ACTIVE'
   END
+  FROM comparison_clock
 $$;
 
 CREATE FUNCTION execution_budget_authority_campaign_remaining_microusd(
