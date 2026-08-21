@@ -95,9 +95,9 @@ function dependencies(overrides: {
   inspect?: GenericOperationArtifactStore['inspect'];
   read?: GenericOperationArtifactStore['read'];
   deleteStaging?: GenericOperationArtifactStore['deleteStaging'];
-  appendManifest?: GenericOperationArtifactRepository['appendManifest'];
   findExact?: GenericOperationArtifactRepository['findExact'];
   findByOperation?: GenericOperationArtifactRepository['findByOperation'];
+  loadResultUnknownArtifact?: BudgetStore['loadResultUnknownArtifact'];
 } = {}) {
   const order: string[] = [];
   const store = {
@@ -126,10 +126,6 @@ function dependencies(overrides: {
     checkReadiness: vi.fn(),
   } satisfies GenericOperationArtifactStore;
   const repository = {
-    appendManifest: vi.fn(overrides.appendManifest ?? (async (value) => {
-      order.push('manifest');
-      return value;
-    })),
     findExact: vi.fn(overrides.findExact ?? (async () => manifest)),
     findByOperation: vi.fn(overrides.findByOperation ?? (async () => manifest)),
   } as unknown as GenericOperationArtifactRepository;
@@ -138,8 +134,12 @@ function dependencies(overrides: {
       order.push('unknown');
       return { reservedCents: reservation.estimatedCents, replay: false };
     }),
-    settleArtifactReference: vi.fn(async () => {
-      order.push('settle');
+    loadResultUnknownArtifact: vi.fn(overrides.loadResultUnknownArtifact ?? (async () => {
+      order.push('load-expected');
+      return manifest;
+    })),
+    settleArtifactManifest: vi.fn(async () => {
+      order.push('atomic-settle');
       return {
         chargedCents: reservation.estimatedCents,
         observedCents: 13,
@@ -194,8 +194,7 @@ describe('GenericOperationArtifactService', () => {
       'promote',
       'inspect',
       'read',
-      'manifest',
-      'settle',
+      'atomic-settle',
       'cleanup',
     ]);
     expect(deps.budgetStore.markResultUnknown).not.toHaveBeenCalled();
@@ -232,10 +231,16 @@ describe('GenericOperationArtifactService', () => {
 
     expect(producerReads).toBe(1);
     expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
-    expect(deps.budgetStore.settleArtifactReference).not.toHaveBeenCalled();
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
     expect(deps.store.stage).toHaveBeenCalledOnce();
     expect(deps.store.promote).toHaveBeenCalledTimes(
       code === 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN' ? 1 : 0,
+    );
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(
+      reservation,
+      code === 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN'
+        ? manifest
+        : undefined,
     );
   });
 
@@ -282,7 +287,9 @@ describe('GenericOperationArtifactService', () => {
       ...persistInput(),
       reservation: platformReservation,
     })).resolves.toMatchObject({ artifactId: ARTIFACT_ID });
-    expect(deps.repository.appendManifest).toHaveBeenCalledWith(
+    expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
+      platformReservation,
+      13,
       expect.objectContaining({
         scopeKind: 'platform',
         workspaceId: null,
@@ -291,13 +298,12 @@ describe('GenericOperationArtifactService', () => {
     );
   });
 
-  it('recovers only the expected immutable object, appends its manifest, and settles', async () => {
+  it('recovers only the database-bound immutable object and atomically appends and settles it', async () => {
     const deps = dependencies();
 
     await expect(deps.service.recoverUnknown({
       reservation,
       authorityId: AUTHORITY_ID,
-      expected: manifest,
       actualCents: 13,
     })).resolves.toMatchObject({
       artifactId: ARTIFACT_ID,
@@ -309,10 +315,10 @@ describe('GenericOperationArtifactService', () => {
     expect(deps.store.promote).not.toHaveBeenCalled();
     expect(deps.store.inspect).toHaveBeenCalledWith(SHA256, undefined);
     expect(deps.order).toEqual([
+      'load-expected',
       'inspect',
       'read',
-      'manifest',
-      'settle',
+      'atomic-settle',
       'cleanup',
     ]);
   });
@@ -329,18 +335,16 @@ describe('GenericOperationArtifactService', () => {
     await expect(deps.service.recoverUnknown({
       reservation,
       authorityId: AUTHORITY_ID,
-      expected: manifest,
       actualCents: 13,
     })).rejects.toEqual(
       new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID'),
     );
     expect(deps.store.stage).not.toHaveBeenCalled();
     expect(deps.store.promote).not.toHaveBeenCalled();
-    expect(deps.repository.appendManifest).not.toHaveBeenCalled();
-    expect(deps.budgetStore.settleArtifactReference).not.toHaveBeenCalled();
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
   });
 
-  it('rejects a caller-extended recovery expectation before probing storage', async () => {
+  it('ignores caller-supplied substitute facts and uses only the database-bound expectation', async () => {
     const deps = dependencies();
 
     await expect(deps.service.recoverUnknown({
@@ -348,13 +352,29 @@ describe('GenericOperationArtifactService', () => {
       authorityId: AUTHORITY_ID,
       expected: {
         ...manifest,
+        sha256: 'ff'.repeat(32),
         body: 'forbidden',
       } as unknown as GenericOperationArtifactManifest,
+      actualCents: 13,
+    })).resolves.toMatchObject({ sha256: SHA256 });
+    expect(deps.store.inspect).toHaveBeenCalledWith(SHA256, undefined);
+    expect(deps.store.inspect).not.toHaveBeenCalledWith('ff'.repeat(32), undefined);
+  });
+
+  it('keeps a stage ACK unknown without a known digest permanently unrecoverable', async () => {
+    const deps = dependencies({
+      loadResultUnknownArtifact: async () => null,
+    });
+
+    await expect(deps.service.recoverUnknown({
+      reservation,
+      authorityId: AUTHORITY_ID,
       actualCents: 13,
     })).rejects.toMatchObject({
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });
     expect(deps.store.inspect).not.toHaveBeenCalled();
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
   });
 
   it('returns success and logs only a bounded code when staging cleanup fails', async () => {
@@ -485,6 +505,6 @@ describe('GenericOperationArtifactService', () => {
     await expect(deps.service.persist(persistInput())).rejects.toEqual(
       new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID'),
     );
-    expect(deps.repository.appendManifest).not.toHaveBeenCalled();
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
   });
 });

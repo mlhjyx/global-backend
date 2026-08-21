@@ -11,7 +11,11 @@ import {
   UnavailableBudgetStore,
 } from './budget-store';
 import { BudgetLedger } from './budget';
-import type { GenericOperationArtifactReference } from '../durable-results/artifact/artifact.types';
+import {
+  GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
+  type GenericOperationArtifactManifest,
+  type GenericOperationArtifactReference,
+} from '../durable-results/artifact/artifact.types';
 import { projectGenericOperationResult } from './generic-operation-projection';
 
 const SAFE_PLATFORM_PRINCIPAL = Object.freeze({
@@ -36,6 +40,23 @@ const ARTIFACT_REFERENCE: GenericOperationArtifactReference = Object.freeze({
   sizeBytes: '123',
   mediaType: 'text/html',
   expiresAt: '2026-08-22T12:00:00.000Z',
+});
+const ARTIFACT_MANIFEST: GenericOperationArtifactManifest = Object.freeze({
+  schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
+  artifactId: ARTIFACT_REFERENCE.artifactId,
+  scopeKind: 'workspace',
+  workspaceId: TEST_WORKSPACE_ID,
+  authorityId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+  operationId: ARTIFACT_REFERENCE.operationId,
+  resultSchema: ARTIFACT_REFERENCE.resultSchema,
+  objectKey: `generic-operation-results/v1/sha256/${ARTIFACT_REFERENCE.sha256.slice(0, 2)}/${ARTIFACT_REFERENCE.sha256}`,
+  sha256: ARTIFACT_REFERENCE.sha256,
+  sizeBytes: ARTIFACT_REFERENCE.sizeBytes,
+  mediaType: ARTIFACT_REFERENCE.mediaType,
+  privacyClass: 'CONFIDENTIAL_TENANT',
+  sourceDigest: null,
+  createdAt: '2026-08-21T12:00:00.000Z',
+  expiresAt: ARTIFACT_REFERENCE.expiresAt,
 });
 
 function fakePrisma(rows: unknown[][]): PrismaService {
@@ -492,20 +513,34 @@ describe('PostgresBudgetStore', () => {
       replay: false,
     };
 
-    await expect(store.markResultUnknown(reservation)).resolves.toEqual({
+    await expect(store.markResultUnknown(reservation, ARTIFACT_MANIFEST)).resolves.toEqual({
       reservedCents: 17,
       replay: false,
     });
     expect(queries[0]?.strings?.join('')).toContain(
-      'mark_tool_budget_result_unknown_v1',
+      'mark_tool_budget_result_unknown_v2',
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
       ARTIFACT_REFERENCE.operationId,
+      JSON.stringify(ARTIFACT_MANIFEST),
     ]);
   });
 
-  it('settles only a closed artifact reference through the dedicated function', async () => {
+  it('loads only the original database-bound expectation for recovery', async () => {
+    const store = new PostgresBudgetStore(
+      fakePrisma([[{ expected_manifest: ARTIFACT_MANIFEST }]]),
+    );
+    await expect(store.loadResultUnknownArtifact({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'artifact-account',
+      operationId: ARTIFACT_REFERENCE.operationId,
+      estimatedCents: 17,
+      replay: false,
+    }, ARTIFACT_MANIFEST.authorityId)).resolves.toEqual(ARTIFACT_MANIFEST);
+  });
+
+  it('atomically appends a manifest and settles only its exact closed reference', async () => {
     const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
@@ -523,26 +558,26 @@ describe('PostgresBudgetStore', () => {
     } as unknown as PrismaService;
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.settleArtifactReference({
+    await expect(store.settleArtifactManifest({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'artifact-account',
       operationId: ARTIFACT_REFERENCE.operationId,
       estimatedCents: 17,
       replay: false,
-    }, 13, ARTIFACT_REFERENCE)).resolves.toEqual({
+    }, 13, ARTIFACT_MANIFEST)).resolves.toEqual({
       chargedCents: 17,
       observedCents: 13,
       capVariance: false,
       replay: false,
     });
     expect(queries[0]?.strings?.join('')).toContain(
-      'settle_tool_budget_artifact_reference_v1',
+      'settle_tool_budget_artifact_manifest_v2',
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
       ARTIFACT_REFERENCE.operationId,
       13n,
-      JSON.stringify(ARTIFACT_REFERENCE),
+      JSON.stringify(ARTIFACT_MANIFEST),
     ]);
   });
 
@@ -550,16 +585,16 @@ describe('PostgresBudgetStore', () => {
     const prisma = fakePrisma([]);
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.settleArtifactReference({
+    await expect(store.settleArtifactManifest({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'artifact-account',
       operationId: ARTIFACT_REFERENCE.operationId,
       estimatedCents: 17,
       replay: false,
     }, 13, {
-      ...ARTIFACT_REFERENCE,
-      objectKey: 'caller-controlled',
-    } as unknown as GenericOperationArtifactReference)).rejects.toMatchObject({
+      ...ARTIFACT_MANIFEST,
+      body: 'caller-controlled',
+    } as unknown as GenericOperationArtifactManifest)).rejects.toMatchObject({
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
@@ -582,11 +617,11 @@ describe('PostgresBudgetStore', () => {
       replay: false,
     };
 
-    await expect(store.markResultUnknown(reservation)).rejects.toMatchObject({
+    await expect(store.markResultUnknown(reservation, ARTIFACT_MANIFEST)).rejects.toMatchObject({
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });
     await expect(
-      store.settleArtifactReference(reservation, 13, ARTIFACT_REFERENCE),
+      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
     ).rejects.toMatchObject({
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });
@@ -610,8 +645,8 @@ describe('PostgresBudgetStore', () => {
     };
 
     const results = await Promise.allSettled([
-      store.markResultUnknown(reservation),
-      store.settleArtifactReference(reservation, 13, ARTIFACT_REFERENCE),
+      store.markResultUnknown(reservation, ARTIFACT_MANIFEST),
+      store.settleArtifactManifest(reservation, 13, ARTIFACT_MANIFEST),
     ]);
     for (const result of results) {
       expect(result.status).toBe('rejected');

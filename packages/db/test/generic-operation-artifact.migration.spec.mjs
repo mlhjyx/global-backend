@@ -21,6 +21,7 @@ const forwardMigration = resolve(sourceMigrations, forwardMigrationName);
 const laterMigrationNames = [
   "20260821115000_generic_operation_artifact_result_unknown_enum",
   "20260821120000_generic_operation_artifact_result_unknown",
+  "20260822000000_generic_operation_artifact_atomic_recovery",
 ];
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;

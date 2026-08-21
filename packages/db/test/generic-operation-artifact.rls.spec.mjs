@@ -19,6 +19,10 @@ const sharedContentMigrationPath = resolve(
   repositoryRoot,
   "packages/db/prisma/migrations/20260821110000_generic_operation_artifact_shared_content/migration.sql",
 );
+const atomicRecoveryMigrationPath = resolve(
+  repositoryRoot,
+  "packages/db/prisma/migrations/20260822000000_generic_operation_artifact_atomic_recovery/migration.sql",
+);
 
 const OWNER_URL = process.env.DATABASE_URL;
 const APP_URL = process.env.APP_DATABASE_URL;
@@ -134,10 +138,56 @@ function artifactInput(binding, overrides = {}) {
   };
 }
 
-async function seedWorkspaceBinding(owner, workspaceId) {
+function artifactManifest(input) {
+  return {
+    schemaVersion: "generic-operation-artifact/v1",
+    artifactId: input.artifactId,
+    scopeKind: input.workspaceId === null ? "platform" : "workspace",
+    workspaceId: input.workspaceId,
+    authorityId: input.authorityId,
+    operationId: input.operationId,
+    resultSchema: input.resultSchema,
+    objectKey: input.objectKey,
+    sha256: input.sha256,
+    sizeBytes: input.sizeBytes.toString(),
+    mediaType: input.mediaType,
+    privacyClass: input.privacyClass,
+    sourceDigest: input.sourceDigest,
+    createdAt: input.createdAt.toISOString(),
+    expiresAt: input.expiresAt.toISOString(),
+  };
+}
+
+async function markUnknownV2(transaction, binding, input) {
+  return transaction.$queryRawUnsafe(
+    `SELECT * FROM mark_tool_budget_result_unknown_v2(
+      $1, $2::uuid, $3::jsonb
+    )`,
+    binding.workspaceId ?? "platform",
+    binding.operationId,
+    input === null ? null : JSON.stringify(artifactManifest(input)),
+  );
+}
+
+async function settleManifestV2(transaction, binding, input, observedCents) {
+  return transaction.$queryRawUnsafe(
+    `SELECT * FROM settle_tool_budget_artifact_manifest_v2(
+      $1, $2::uuid, $3::bigint, $4::jsonb
+    )`,
+    binding.workspaceId ?? "platform",
+    binding.operationId,
+    observedCents,
+    JSON.stringify(artifactManifest(input)),
+  );
+}
+
+async function seedWorkspaceBinding(owner, workspaceId, amounts = {}) {
   const authorityId = randomUUID();
   const accountId = randomUUID();
   const operationId = randomUUID();
+  const capCents = amounts.capCents ?? 0n;
+  const reservedCents = amounts.reservedCents ?? 0n;
+  const chargedCents = amounts.chargedCents ?? 0n;
   await owner.$executeRawUnsafe(
     `INSERT INTO execution_budget_authority (
       id, scope_key, authority_kind, workspace_id, issuer, audience, jti,
@@ -167,25 +217,38 @@ async function seedWorkspaceBinding(owner, workspaceId) {
       charged_cents, exhausted, ref_count, authority_id,
       authorized_cap_microusd, created_at, updated_at
     ) VALUES (
-      $1::uuid, $2, $3, 1, 0, 0, 0, false, 1, $4::uuid,
+      $1::uuid, $2, $3, 1, $5::bigint, $6::bigint, $7::bigint,
+      false, 1, $4::uuid,
       5000000, statement_timestamp(), statement_timestamp()
     )`,
     accountId,
     workspaceId,
     `artifact-account-${randomUUID()}`,
     authorityId,
+    capCents,
+    reservedCents,
+    chargedCents,
   );
   await owner.$executeRawUnsafe(
     `INSERT INTO tool_budget_operation (
       id, scope_key, account_id, generation, operation_key,
       reserved_cents, status, created_at
-    ) VALUES ($1::uuid, $2, $3::uuid, 1, $4, 0, 'RESERVED', now())`,
+    ) VALUES ($1::uuid, $2, $3::uuid, 1, $4, $5::bigint, 'RESERVED', now())`,
     operationId,
     workspaceId,
     accountId,
     `artifact-operation-${randomUUID()}`,
+    reservedCents,
   );
-  return { workspaceId, authorityId, accountId, operationId };
+  return {
+    workspaceId,
+    authorityId,
+    accountId,
+    operationId,
+    capCents,
+    reservedCents,
+    chargedCents,
+  };
 }
 
 async function seedPlatformBinding(owner) {
@@ -489,6 +552,215 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     assert.deepEqual(settledState.result, reference);
     assert.equal(settledState.account_reserved, 0n);
     assert.equal(settledState.account_charged, 0n);
+  });
+
+  it("atomically binds unknown facts, rejects substitutes, and preserves nonzero account arithmetic and cap", async () => {
+    const binding = await seedWorkspaceBinding(owner, WS_A, {
+      capCents: 100n,
+      reservedCents: 17n,
+    });
+    const digest = randomUUID().replaceAll("-", "").repeat(2);
+    const input = artifactInput(binding, {
+      sha256: digest,
+      objectKey: objectKey(digest),
+      sizeBytes: 23n,
+    });
+
+    const [unknown] = await withWorkspace(app, WS_A, (transaction) =>
+      markUnknownV2(transaction, binding, input),
+    );
+    assert.deepEqual(unknown, {
+      reserved_cents: 17n,
+      status: "RESULT_UNKNOWN",
+      replay: false,
+      recoverable: true,
+    });
+
+    const [durableUnknown] = await owner.$queryRawUnsafe(
+      `SELECT operation.expected_artifact,
+              operation.account_id, operation.operation_key,
+              account.account_key, account.authority_id,
+              account.cap_cents, account.reserved_cents,
+              account.charged_cents, account.authorized_cap_microusd
+       FROM tool_budget_operation operation
+       JOIN tool_budget_account account ON account.id=operation.account_id
+       WHERE operation.scope_key=$1 AND operation.id=$2::uuid`,
+      WS_A,
+      binding.operationId,
+    );
+    assert.equal(
+      durableUnknown.expected_artifact.schemaVersion,
+      "generic-operation-artifact-unknown/v1",
+    );
+    assert.equal(durableUnknown.expected_artifact.accountId, binding.accountId);
+    assert.equal(
+      durableUnknown.expected_artifact.accountKey,
+      durableUnknown.account_key,
+    );
+    assert.equal(
+      durableUnknown.expected_artifact.authorityId,
+      binding.authorityId,
+    );
+    assert.equal(
+      durableUnknown.expected_artifact.operationId,
+      binding.operationId,
+    );
+    assert.deepEqual(
+      durableUnknown.expected_artifact.manifest,
+      artifactManifest(input),
+    );
+
+    const substitute = {
+      ...input,
+      artifactId: randomUUID(),
+      sha256: SHA_B,
+      objectKey: objectKey(SHA_B),
+    };
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          settleManifestV2(transaction, binding, substitute, 13n),
+        ),
+      "GENERIC_OPERATION_ARTIFACT_INVALID",
+    );
+    const [{ count: beforeExact }] = await owner.$queryRawUnsafe(
+      `SELECT count(*)::int AS count FROM generic_operation_artifact
+       WHERE scope_key=$1 AND operation_id=$2::uuid`,
+      WS_A,
+      binding.operationId,
+    );
+    assert.equal(beforeExact, 0);
+
+    const [settled] = await withWorkspace(app, WS_A, (transaction) =>
+      settleManifestV2(transaction, binding, input, 13n),
+    );
+    assert.deepEqual(settled, {
+      charged_cents: 17n,
+      observed_cents: 13n,
+      cap_variance: false,
+      status: "SETTLED",
+      replay: false,
+    });
+    const [replay] = await withWorkspace(app, WS_A, (transaction) =>
+      settleManifestV2(transaction, binding, input, 13n),
+    );
+    assert.equal(replay.replay, true);
+
+    const [finalState] = await owner.$queryRawUnsafe(
+      `SELECT operation.status::text AS status,
+              operation.expected_artifact,
+              account.cap_cents, account.reserved_cents,
+              account.charged_cents, account.exhausted,
+              account.authorized_cap_microusd,
+              (SELECT count(*)::int FROM generic_operation_artifact artifact
+               WHERE artifact.scope_key=operation.scope_key
+                 AND artifact.operation_id=operation.id) AS manifests
+       FROM tool_budget_operation operation
+       JOIN tool_budget_account account ON account.id=operation.account_id
+       WHERE operation.scope_key=$1 AND operation.id=$2::uuid`,
+      WS_A,
+      binding.operationId,
+    );
+    assert.equal(finalState.status, "SETTLED");
+    assert.deepEqual(
+      finalState.expected_artifact,
+      durableUnknown.expected_artifact,
+    );
+    assert.equal(finalState.cap_cents, 100n);
+    assert.equal(finalState.reserved_cents, 0n);
+    assert.equal(finalState.charged_cents, 17n);
+    assert.equal(finalState.exhausted, false);
+    assert.equal(finalState.authorized_cap_microusd, 5_000_000n);
+    assert.equal(finalState.manifests, 1);
+  });
+
+  it("keeps stage ACK unknown unrecoverable and rejects expired settlement by database clock", async () => {
+    const stageBinding = await seedWorkspaceBinding(owner, WS_A, {
+      capCents: 50n,
+      reservedCents: 9n,
+    });
+    const stageInput = artifactInput(stageBinding);
+    const [stageUnknown] = await withWorkspace(app, WS_A, (transaction) =>
+      markUnknownV2(transaction, stageBinding, null),
+    );
+    assert.equal(stageUnknown.recoverable, false);
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          transaction.$queryRawUnsafe(
+            `SELECT * FROM load_tool_budget_result_unknown_artifact_v2(
+              $1, $2::uuid, $3::uuid
+            )`,
+            WS_A,
+            stageBinding.operationId,
+            stageBinding.authorityId,
+          ),
+        ),
+      "GENERIC_OPERATION_ARTIFACT_INVALID",
+    );
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          markUnknownV2(transaction, stageBinding, stageInput),
+        ),
+      "GENERIC_OPERATION_ARTIFACT_INVALID",
+    );
+
+    const expiredBinding = await seedWorkspaceBinding(owner, WS_A, {
+      capCents: 50n,
+      reservedCents: 11n,
+    });
+    const expiredInput = artifactInput(expiredBinding, {
+      createdAt: new Date(Date.now() - 2_000),
+      expiresAt: new Date(Date.now() - 1_000),
+    });
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (transaction) =>
+          settleManifestV2(transaction, expiredBinding, expiredInput, 7n),
+        ),
+      "GENERIC_OPERATION_ARTIFACT_INVALID",
+    );
+    const [expiredState] = await owner.$queryRawUnsafe(
+      `SELECT operation.status::text AS status,
+              account.cap_cents, account.reserved_cents,
+              account.charged_cents,
+              (SELECT count(*)::int FROM generic_operation_artifact artifact
+               WHERE artifact.scope_key=operation.scope_key
+                 AND artifact.operation_id=operation.id) AS manifests
+       FROM tool_budget_operation operation
+       JOIN tool_budget_account account ON account.id=operation.account_id
+       WHERE operation.scope_key=$1 AND operation.id=$2::uuid`,
+      WS_A,
+      expiredBinding.operationId,
+    );
+    assert.deepEqual(expiredState, {
+      status: "RESERVED",
+      cap_cents: 50n,
+      reserved_cents: 11n,
+      charged_cents: 0n,
+      manifests: 0,
+    });
+  });
+
+  it("settles an exact pre-existing manifest in the same atomic primitive", async () => {
+    const binding = await seedWorkspaceBinding(owner, WS_A, {
+      capCents: 40n,
+      reservedCents: 8n,
+    });
+    const digest = randomUUID().replaceAll("-", "").repeat(2);
+    const input = artifactInput(binding, {
+      sha256: digest,
+      objectKey: objectKey(digest),
+    });
+    await withWorkspace(app, WS_A, (transaction) =>
+      appendWorkspace(transaction, input),
+    );
+    const [settled] = await withWorkspace(app, WS_A, (transaction) =>
+      settleManifestV2(transaction, binding, input, 8n),
+    );
+    assert.equal(settled.status, "SETTLED");
+    assert.equal(settled.charged_cents, 8n);
   });
 
   it("makes conflicting size, media, source digest, digest, id and expiry non-idempotent", async () => {
@@ -905,6 +1177,7 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
   it("uses an explicit transaction and leaves no PUBLIC or broad grant in migration SQL", async () => {
     const sql = await readFile(migrationPath, "utf8");
     const sharedContentSql = await readFile(sharedContentMigrationPath, "utf8");
+    const atomicRecoverySql = await readFile(atomicRecoveryMigrationPath, "utf8");
     assert.match(sql, /^BEGIN;/m);
     assert.match(sql, /COMMIT;\s*$/);
     assert.match(
@@ -931,6 +1204,13 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     assert.doesNotMatch(
       sharedContentSql,
       /GRANT\s+(?:ALL|SELECT|INSERT|UPDATE|DELETE)[\s\S]*generic_operation_artifact_object[\s\S]*TO\s+(?:app_user|execution_budget_platform_writer)/i,
+    );
+    assert.match(atomicRecoverySql, /^BEGIN;/m);
+    assert.match(atomicRecoverySql, /COMMIT;\s*$/);
+    assert.match(atomicRecoverySql, /clock_timestamp\(\)/);
+    assert.match(
+      atomicRecoverySql,
+      /settle_tool_budget_artifact_manifest_v2\(TEXT, UUID, BIGINT, JSONB\)/,
     );
   });
 });
