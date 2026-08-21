@@ -79,6 +79,7 @@ model Workspace {
   outboxEvents               OutboxEvent[]
   outboxDeliveries           OutboxDelivery[]
   executionBudgetAuthorities ExecutionBudgetAuthority[]
+  genericOperationArtifacts  GenericOperationArtifact[]
 
   @@map("workspace")
 }
@@ -167,6 +168,7 @@ model ExecutionBudgetAuthority {
   workspace   Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
   accounts    ToolBudgetAccount[]
   revocations ExecutionBudgetAuthorityRevocation[]
+  artifacts   GenericOperationArtifact[]
 
   @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
@@ -209,10 +211,43 @@ model ToolBudgetOperation {
   settledAt     DateTime?                 @map("settled_at") @db.Timestamptz(3)
 
   account ToolBudgetAccount @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
+  artifact GenericOperationArtifact?
 
   @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
+  @@unique([scopeKey, id], map: "tool_budget_operation_scope_id_key")
   @@index([scopeKey, accountId, status], map: "tool_budget_operation_scope_account_status_idx")
   @@map("tool_budget_operation")
+}
+
+/// Immutable metadata for a large durable Tool result. The body remains in
+/// content-addressed object storage and never enters PostgreSQL JSONB.
+model GenericOperationArtifact {
+  id           String   @id @default(uuid()) @db.Uuid
+  scopeKey     String   @map("scope_key") @db.VarChar(200)
+  workspaceId  String?  @map("workspace_id") @db.Uuid
+  authorityId  String   @map("authority_id") @db.Uuid
+  operationId  String   @map("operation_id") @db.Uuid
+  resultSchema String   @map("result_schema") @db.VarChar(100)
+  objectKey    String   @map("object_key") @db.VarChar(200)
+  sha256       String   @db.Char(64)
+  sizeBytes    BigInt   @map("size_bytes")
+  mediaType    String   @map("media_type") @db.VarChar(160)
+  privacyClass String   @map("privacy_class") @db.VarChar(40)
+  sourceDigest String?  @map("source_digest") @db.Char(64)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
+
+  workspace Workspace?               @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
+  authority ExecutionBudgetAuthority @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
+  operation ToolBudgetOperation      @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+
+  @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
+  @@unique([scopeKey, operationId], map: "generic_operation_artifact_scope_operation_key")
+  @@unique([scopeKey, sha256, resultSchema], map: "generic_operation_artifact_scope_digest_schema_key")
+  @@index([scopeKey, authorityId, operationId], map: "generic_operation_artifact_scope_authority_operation_idx")
+  @@index([workspaceId, expiresAt], map: "generic_operation_artifact_workspace_expiry_idx")
+  @@index([privacyClass, expiresAt], map: "generic_operation_artifact_privacy_expiry_idx")
+  @@map("generic_operation_artifact")
 }
 
 /// AI 调用追踪（PRD 9.10）：每次 ModelGateway 调用一行 — task/model/延迟/tokens/结果。
