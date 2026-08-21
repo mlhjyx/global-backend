@@ -290,27 +290,25 @@ const wikidataSparqlDefinition = definition(
   true,
 );
 
-const OSM_SAFE_TAG_KEYS = Object.freeze([
-  'amenity', 'building', 'craft', 'industrial', 'landuse', 'man_made', 'office', 'shop',
-] as const);
-function assertOsmTagKey(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || !OSM_SAFE_TAG_KEYS.includes(value as never)) {
-    projectionInvalid();
-  }
+const OSM_SAFE_TAG_PAIRS = Object.freeze([
+  Object.freeze(['craft', 'blacksmith'] as const),
+  Object.freeze(['craft', 'metal_construction'] as const),
+]);
+function isOsmSafeTagPair(key: unknown, value: unknown): key is string {
+  return typeof key === 'string' && typeof value === 'string' &&
+    OSM_SAFE_TAG_PAIRS.some(([allowedKey, allowedValue]) => (
+      key === allowedKey && value === allowedValue
+    ));
 }
-function assertOsmTagValue(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_:;.-]{0,119}$/.test(value)) {
-    projectionInvalid();
-  }
+function assertOsmSafeTagPair(key: unknown, value: unknown): asserts key is string {
+  if (!isOsmSafeTagPair(key, value)) projectionInvalid();
 }
 
 function projectTagEntries(value: unknown): UnknownRecord[] {
   const tags = ownOpenDataRecord(value);
-  return Object.keys(tags).filter((key) => OSM_SAFE_TAG_KEYS.includes(key as never)).sort().map((key) => {
-    assertOsmTagKey(key);
+  return Object.keys(tags).sort().flatMap((key) => {
     const tagValue = field(tags, key);
-    assertOsmTagValue(tagValue);
-    return { key, value: tagValue };
+    return isOsmSafeTagPair(key, tagValue) ? [{ key, value: tagValue }] : [];
   });
 }
 
@@ -321,8 +319,7 @@ function restoreTagEntries(value: unknown): UnknownRecord {
     const entry = ownDataRecord(rawEntry, ['key', 'value'], ['key', 'value']);
     const key = field(entry, 'key');
     const tagValue = field(entry, 'value');
-    assertOsmTagKey(key);
-    assertOsmTagValue(tagValue);
+    assertOsmSafeTagPair(key, tagValue);
     if (previous !== undefined && key <= previous) projectionInvalid();
     previous = key;
     tags[key] = tagValue;
@@ -330,14 +327,14 @@ function restoreTagEntries(value: unknown): UnknownRecord {
   return tags;
 }
 
-const tagEntrySchema = objectSchema({
-  key: stringSchema(120, { enum: [...OSM_SAFE_TAG_KEYS] }), value: stringSchema(120),
-}, ['key', 'value']);
+const tagEntrySchema = { oneOf: OSM_SAFE_TAG_PAIRS.map(([key, value]) => objectSchema({
+  key: stringSchema(120, { const: key }), value: stringSchema(120, { const: value }),
+}, ['key', 'value'])) };
 const osmPlaceSchema = objectSchema({
   osmId: stringSchema(120), name: stringSchema(500), website: stringSchema(2048),
   city: stringSchema(500), countryCode: stringSchema(16),
   latitude: numberSchema(-90, 90), longitude: numberSchema(-180, 180),
-  tagEntries: arraySchema(OSM_SAFE_TAG_KEYS.length, tagEntrySchema),
+  tagEntries: arraySchema(1, tagEntrySchema),
 }, ['osmId', 'name', 'latitude', 'longitude', 'tagEntries']);
 function projectOsmPlace(value: unknown): UnknownRecord {
   const place = ownDataRecord(value, OSM_PLACE_KEYS, [
@@ -513,11 +510,25 @@ function restoreClaim(value: unknown): readonly [string, unknown[]] {
   return [property, mapArray(field(entry, 'times'), rawTime)];
 }
 
+function assertCanonicalEntityMetadata(entity: UnknownRecord): void {
+  for (const name of ['pageid', 'ns']) {
+    if (hasDefinedField(entity, name) && !Number.isSafeInteger(field(entity, name))) {
+      projectionInvalid();
+    }
+  }
+  if (hasDefinedField(entity, 'title')) {
+    const title = field(entity, 'title');
+    if (typeof title !== 'string' || title.length > 500 || title.includes('\0') ||
+      title !== title.normalize('NFC')) projectionInvalid();
+  }
+}
 function projectEntity(entityId: string, value: unknown): UnknownRecord {
   if (!/^Q[1-9][0-9]*$/.test(entityId)) projectionInvalid();
   const entity = ownDataRecord(value, [
-    'claims', 'labels', 'id', 'type', 'lastrevid', 'modified', 'sitelinks',
+    'claims', 'labels', 'id', 'type', 'pageid', 'ns', 'title',
+    'lastrevid', 'modified', 'sitelinks',
   ], []);
+  assertCanonicalEntityMetadata(entity);
   let label: unknown;
   if (hasDefinedField(entity, 'labels')) {
     const labels = ownOpenDataRecord(field(entity, 'labels'));

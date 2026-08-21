@@ -5,6 +5,7 @@ import { MAX_APPLICANTS_PER_PATENT } from '../adapters/bigquery-patents';
 import { parseCompanyFacts, referencedQids } from '../adapters/wikidata';
 import { GooglePatentsInventorProvider } from '../discovery/providers/bigquery-patents.provider';
 import { InpiRneContactProvider } from '../discovery/providers/inpi-rne.provider';
+import { OsmDiscoveryProvider } from '../discovery/providers/osm.provider';
 import type { ExecutionBroker, ToolResult } from '../tools/tool-contract';
 import {
   osmOverpassTool,
@@ -116,16 +117,11 @@ function timeSnak(time: string): JsonRecord {
   return { mainsnak: { datavalue: { value: { time } } } };
 }
 
-const OSM_SAFE_TAGS = {
-  amenity: 'research_institute',
-  building: 'industrial',
-  craft: 'metal_construction',
-  industrial: 'factory',
-  landuse: 'industrial',
-  man_made: 'works',
-  office: 'company',
-  shop: 'trade',
-};
+const OSM_SAFE_TAGS = { craft: 'metal_construction' };
+const OSM_SAFE_TAG_PAIRS = [
+  { key: 'craft', value: 'blacksmith' },
+  { key: 'craft', value: 'metal_construction' },
+] as const;
 
 const SEARX_RAW: RawToolResult = {
   data: {
@@ -233,6 +229,9 @@ const FIRST_WIKIDATA_ENTITY: JsonRecord = {
 const CANONICAL_WIKIDATA_ENTITY: JsonRecord = {
   id: 'Q999',
   type: 'item',
+  pageid: 999,
+  ns: 0,
+  title: 't'.repeat(500),
   lastrevid: 123456,
   modified: '2026-08-21T00:00:00Z',
   sitelinks: {
@@ -584,9 +583,11 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.places[].latitude.maximum': 90,
     '$.data.places[].longitude.minimum': -180,
     '$.data.places[].longitude.maximum': 180,
-    '$.data.places[].tagEntries.maxItems': 8,
-    '$.data.places[].tagEntries[].key.maxLength': 120,
-    '$.data.places[].tagEntries[].value.maxLength': 120,
+    '$.data.places[].tagEntries.maxItems': 1,
+    '$.data.places[].tagEntries[].oneOf[0].key.maxLength': 120,
+    '$.data.places[].tagEntries[].oneOf[0].value.maxLength': 120,
+    '$.data.places[].tagEntries[].oneOf[1].key.maxLength': 120,
+    '$.data.places[].tagEntries[].oneOf[1].value.maxLength': 120,
   },
   'wikidata-entity/v1': {
     ...COMMON_RESULT_BOUNDS,
@@ -961,7 +962,7 @@ describe('closed catalog Tool result projections', () => {
     );
   });
 
-  it('retains only the fixed OSM industrial classification allowlist', () => {
+  it('retains only the exact fixed OSM classification pair allowlist', () => {
     const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
     const envelope = registry.project('osm-overpass/v1', OSM_RAW);
     const entries = (((envelope.data as JsonRecord).data as JsonRecord)
@@ -976,17 +977,84 @@ describe('closed catalog Tool result projections', () => {
   });
 
   it.each([
+    ['craft', 'john_doe'],
+    ['craft', '123456'],
+    ['craft', '@john'],
     ['craft', 'person@example.test'],
-    ['industrial', '+49 30 1234'],
-    ['landuse', '123 Main Street'],
-    ['office', 'https://person.example/profile'],
-  ])('rejects PII-like OSM value under allowlisted key %s', (key, value) => {
+    ['addr:full', '123 Main Street'],
+    ['addr:unit', 'Unit 4'],
+    ['contact:person', 'Named Person'],
+    ['contact:whatsapp', '+49 30 1234'],
+    ['contact:telegram', '@private'],
+    ['operator', 'Named Operator'],
+    ['owner', 'Named Owner'],
+  ])('omits unallowlisted OSM project pair %s=%s', (key, value) => {
     const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
     const raw = cloneRaw(OSM_RAW);
     (raw.data.places as JsonRecord[])[0].tags = { [key]: value };
-    expect(() => registry.project('osm-overpass/v1', raw)).toThrow(
-      'TYPED_PROJECTION_INVALID',
-    );
+    const envelope = registry.project('osm-overpass/v1', raw);
+    const entries = (((envelope.data as JsonRecord).data as JsonRecord)
+      .places as JsonRecord[])[0].tagEntries;
+    expect(entries).toEqual([]);
+    const restored = registry.restore(envelope) as RawToolResult;
+    expect((restored.data.places as JsonRecord[])[0].tags).toEqual({});
+  });
+
+  it.each(OSM_SAFE_TAG_PAIRS)(
+    'accepts the exact OSM pair $key=$value',
+    ({ key, value }) => {
+      const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+      const raw = cloneRaw(OSM_RAW);
+      (raw.data.places as JsonRecord[])[0].tags = { [key]: value };
+      const envelope = registry.project('osm-overpass/v1', raw);
+      const restored = registry.restore(envelope) as RawToolResult;
+      expect((restored.data.places as JsonRecord[])[0].tags).toEqual({ [key]: value });
+    },
+  );
+
+  it('rejects digest-valid OSM restore entries outside the exact pair allowlist', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('osm-overpass/v1', OSM_RAW);
+    for (const [key, value] of [
+      ['craft', 'john_doe'],
+      ['industrial', 'factory'],
+    ] as const) {
+      const tampered = structuredClone(envelope) as typeof envelope;
+      const entries = ((((tampered.data as JsonRecord).data as JsonRecord)
+        .places as JsonRecord[])[0].tagEntries as JsonRecord[]);
+      entries[0] = { key, value };
+      expect(() => registry.restore(resignEnvelope(tampered))).toThrow(
+        'TYPED_PROJECTION_INVALID',
+      );
+    }
+  });
+
+  it('keeps the OSM consumer working when durable minimization omits every raw tag', async () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const raw: RawToolResult = {
+      data: {
+        places: [{
+          osmId: 'node/1', name: 'Factory', website: 'https://factory.example/',
+          latitude: 50, longitude: 8,
+          tags: { operator: 'Named Operator', 'contact:person': 'Named Person' },
+        }],
+      },
+      costCents: 0,
+      provenance: { fetchedAt: '2026-08-21', parserVersion: 'osm/1' },
+    };
+    const restored = registry.restore(registry.project('osm-overpass/v1', raw)) as RawToolResult;
+    const result = await new OsmDiscoveryProvider({
+      broker: resultBroker(restored),
+    }).discoverCompanies({
+      sourceClass: 'industry_data', filters: {
+        industry: 'metal fabrication', region: 'germany',
+      }, keywords: [], limit: 10,
+    }, PROVIDER_CTX);
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]).toMatchObject({
+      externalId: 'osm:node/1', name: 'Factory', domain: 'factory.example',
+      attributes: { osm_tags: {} },
+    });
   });
 
   it('rejects Proxy, accessor, sparse, custom-prototype, and symbol containers', () => {
@@ -1114,7 +1182,7 @@ describe('closed catalog Tool result projections', () => {
       referencedQids(CANONICAL_WIKIDATA_ENTITY),
     );
     expect(JSON.stringify(envelope)).not.toMatch(
-      /sitelinks|lastrevid|modified|rank|references|qualifiers-order|numeric-id|entity-type|upperBound|lowerBound|precision|calendarmodel|P999999/,
+      /pageid|"ns"|"title"|sitelinks|lastrevid|modified|rank|references|qualifiers-order|numeric-id|entity-type|upperBound|lowerBound|precision|calendarmodel|P999999/,
     );
   });
 
@@ -1152,6 +1220,22 @@ describe('closed catalog Tool result projections', () => {
     ((topLevel.data.entities as JsonRecord).Q999 as JsonRecord).personalEmail =
       'person@example.test';
     expect(() => registry.project('wikidata-entity/v1', topLevel)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
+  it.each([
+    ['pageid', 1.5],
+    ['ns', 0.5],
+    ['title', 'x'.repeat(501)],
+  ])('rejects invalid canonical Wikidata input-only metadata %s', (key, value) => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const raw = cloneRaw({
+      data: { entities: { Q999: structuredClone(CANONICAL_WIKIDATA_ENTITY) } },
+      costCents: 0,
+    });
+    ((raw.data.entities as JsonRecord).Q999 as JsonRecord)[key] = value;
+    expect(() => registry.project('wikidata-entity/v1', raw)).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
   });
