@@ -35,6 +35,14 @@ const MAX_ROWS_CEIL = 2000;
  * （Siemens/Philips 五年数千发明人）刷新只落 ≤25，不把上千无用发明人 PII 静态化到 TTL 到期。
  */
 export const MAX_INVENTORS_PER_ASSIGNEE = 25;
+/**
+ * Per-publication applicant ceiling for the Tool output contract. More than
+ * this cannot be truncated safely: applicant count decides whether a patent
+ * is sole-owned, and every name participates in conservative company
+ * alignment. The direct query therefore fails closed instead of changing that
+ * meaning after a physical BigQuery result.
+ */
+export const MAX_APPLICANTS_PER_PATENT = 32;
 
 // publication_date 为 INT64 YYYYMMDD（如 20200115）。
 const yearToStart = (y: number): number => y * 10000 + 101; // Jan 01
@@ -64,6 +72,7 @@ export interface PatentInventor {
   name: string;
 }
 export interface PatentRecord {
+  /** ≤ MAX_APPLICANTS_PER_PATENT; normalizeRow rejects larger rows fail-closed. */
   applicants: PatentApplicant[];
   inventors: PatentInventor[];
 }
@@ -332,8 +341,14 @@ function normCountry(v: unknown): string | undefined {
 
 /** BigQuery 行 → PatentRecord（🔴 inventor **只留 name**，丢 country_code 等 = 数据最小化）。 */
 export function normalizeRow(row: Record<string, unknown>): PatentRecord {
-  const applicants = Array.isArray(row.applicants)
-    ? (row.applicants as Array<Record<string, unknown>>)
+  const rawApplicants = Array.isArray(row.applicants)
+    ? row.applicants as Array<Record<string, unknown>>
+    : [];
+  if (rawApplicants.length > MAX_APPLICANTS_PER_PATENT) {
+    throw new Error('GOOGLE_PATENTS_APPLICANTS_LIMIT_EXCEEDED');
+  }
+  const applicants = rawApplicants.length
+    ? rawApplicants
         .map((a) => ({ name: String(a?.name ?? '').trim(), country: normCountry(a?.country),
         }))
         .filter((a) => a.name)

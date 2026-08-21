@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BigQueryPatentsClient,
   BigQueryLike,
+  MAX_APPLICANTS_PER_PATENT,
   assigneeLikeAnchor,
   normalizeRow,
 } from './bigquery-patents';
@@ -76,6 +77,14 @@ describe('BigQueryPatents · normalizeRow（🔴 数据最小化）', () => {
   });
   it('缺字段/非数组 → 空数组（防御式）', () => {
     expect(normalizeRow({})).toEqual({ applicants: [], inventors: [] });
+  });
+  it('applicant 数超过 Tool output contract 时 fail closed，而不是盲截断改变 sole-applicant 语义', () => {
+    expect(() => normalizeRow({
+      applicants: Array.from({ length: MAX_APPLICANTS_PER_PATENT + 1 }, (_, index) => ({
+        name: `Applicant ${index}`, country: 'DE',
+      })),
+      inventors: [{ name: 'Inventor' }],
+    })).toThrow('GOOGLE_PATENTS_APPLICANTS_LIMIT_EXCEEDED');
   });
 });
 

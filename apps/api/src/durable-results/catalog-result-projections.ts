@@ -1,4 +1,6 @@
 import { types } from 'node:util';
+import { normForMatch } from '../discovery/name-match';
+import { normalizePersonName } from '../discovery/person-name';
 import type { TypedProjectionSchema } from './durable-result-strategy';
 import { TypedProjectionRegistry } from './typed-projection.registry';
 import type { TypedProjectionDefinition } from './typed-projection.types';
@@ -288,24 +290,26 @@ const wikidataSparqlDefinition = definition(
   true,
 );
 
+const OSM_SAFE_TAG_KEYS = Object.freeze([
+  'amenity', 'building', 'craft', 'industrial', 'landuse', 'man_made', 'office', 'shop',
+] as const);
 function assertOsmTagKey(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || !/^[a-z][a-z0-9:_-]{0,119}$/.test(value)) {
+  if (typeof value !== 'string' || !OSM_SAFE_TAG_KEYS.includes(value as never)) {
     projectionInvalid();
   }
-  if (value === 'contact:website') return;
-  const tokens = value.split(/[:_-]/);
-  if (tokens.some((token) => [
-    'email', 'phone', 'mobile', 'fax', 'address', 'street', 'housenumber',
-    'postcode', 'prompt', 'credential', 'secret', 'token', 'header', 'cookie',
-  ].includes(token))) projectionInvalid();
+}
+function assertOsmTagValue(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_:;.-]{0,119}$/.test(value)) {
+    projectionInvalid();
+  }
 }
 
 function projectTagEntries(value: unknown): UnknownRecord[] {
   const tags = ownOpenDataRecord(value);
-  return Object.keys(tags).sort().map((key) => {
+  return Object.keys(tags).filter((key) => OSM_SAFE_TAG_KEYS.includes(key as never)).sort().map((key) => {
     assertOsmTagKey(key);
     const tagValue = field(tags, key);
-    if (typeof tagValue !== 'string') projectionInvalid();
+    assertOsmTagValue(tagValue);
     return { key, value: tagValue };
   });
 }
@@ -318,9 +322,8 @@ function restoreTagEntries(value: unknown): UnknownRecord {
     const key = field(entry, 'key');
     const tagValue = field(entry, 'value');
     assertOsmTagKey(key);
-    if (typeof tagValue !== 'string' || (previous !== undefined && key <= previous)) {
-      projectionInvalid();
-    }
+    assertOsmTagValue(tagValue);
+    if (previous !== undefined && key <= previous) projectionInvalid();
     previous = key;
     tags[key] = tagValue;
   }
@@ -328,13 +331,13 @@ function restoreTagEntries(value: unknown): UnknownRecord {
 }
 
 const tagEntrySchema = objectSchema({
-  key: stringSchema(120), value: stringSchema(1000),
+  key: stringSchema(120, { enum: [...OSM_SAFE_TAG_KEYS] }), value: stringSchema(120),
 }, ['key', 'value']);
 const osmPlaceSchema = objectSchema({
   osmId: stringSchema(120), name: stringSchema(500), website: stringSchema(2048),
   city: stringSchema(500), countryCode: stringSchema(16),
   latitude: numberSchema(-90, 90), longitude: numberSchema(-180, 180),
-  tagEntries: arraySchema(64, tagEntrySchema),
+  tagEntries: arraySchema(OSM_SAFE_TAG_KEYS.length, tagEntrySchema),
 }, ['osmId', 'name', 'latitude', 'longitude', 'tagEntries']);
 function projectOsmPlace(value: unknown): UnknownRecord {
   const place = ownDataRecord(value, OSM_PLACE_KEYS, [
@@ -371,10 +374,17 @@ const osmDefinition = definition(
   true,
 );
 
-function statementValue(value: unknown): { value: unknown; qualifiers?: UnknownRecord } {
-  const statement = ownDataRecord(value, ['mainsnak', 'qualifiers'], ['mainsnak']);
-  const mainsnak = ownDataRecord(field(statement, 'mainsnak'), ['datavalue'], ['datavalue']);
-  const datavalue = ownDataRecord(field(mainsnak, 'datavalue'), ['value'], ['value']);
+function statementValue(value: unknown): {
+  value: unknown; qualifiers?: UnknownRecord;
+} | null {
+  const statement = ownDataRecord(value, [
+    'mainsnak', 'qualifiers', 'qualifiers-order', 'id', 'type', 'rank', 'references',
+  ], ['mainsnak']);
+  const mainsnak = ownDataRecord(field(statement, 'mainsnak'), [
+    'datavalue', 'snaktype', 'property', 'datatype',
+  ], []);
+  if (!hasDefinedField(mainsnak, 'datavalue')) return null;
+  const datavalue = ownDataRecord(field(mainsnak, 'datavalue'), ['value', 'type'], ['value']);
   return {
     value: field(datavalue, 'value'),
     ...(hasDefinedField(statement, 'qualifiers')
@@ -385,19 +395,21 @@ function statementValue(value: unknown): { value: unknown; qualifiers?: UnknownR
 
 function projectPointInTime(qualifiers: UnknownRecord | undefined): unknown {
   if (!qualifiers) return undefined;
-  ownDataRecord(qualifiers, ['P585'], []);
+  if (Object.keys(qualifiers).some((key) => !/^P[1-9][0-9]*$/.test(key))) {
+    projectionInvalid();
+  }
   if (!hasDefinedField(qualifiers, 'P585')) return undefined;
   const entries = denseArray(field(qualifiers, 'P585'));
-  if (entries.length > 1) projectionInvalid();
   if (!entries.length) return undefined;
-  const qualifier = ownDataRecord(entries[0], ['datavalue'], ['datavalue']);
-  const datavalue = ownDataRecord(field(qualifier, 'datavalue'), ['value'], ['value']);
-  const timeValue = ownDataRecord(field(datavalue, 'value'), ['time'], ['time']);
+  const qualifier = ownDataRecord(entries[0], [
+    'datavalue', 'hash', 'snaktype', 'property', 'datatype',
+  ], []);
+  if (!hasDefinedField(qualifier, 'datavalue')) return undefined;
+  const datavalue = ownDataRecord(field(qualifier, 'datavalue'), ['value', 'type'], ['value']);
+  const timeValue = ownDataRecord(field(datavalue, 'value'), [
+    'time', 'timezone', 'before', 'after', 'precision', 'calendarmodel',
+  ], ['time']);
   return field(timeValue, 'time');
-}
-
-function rejectUnusedQualifiers(qualifiers: UnknownRecord | undefined): void {
-  if (qualifiers && Object.keys(qualifiers).length > 0) projectionInvalid();
 }
 
 function projectClaim(property: string, value: unknown): UnknownRecord {
@@ -405,46 +417,52 @@ function projectClaim(property: string, value: unknown): UnknownRecord {
   if (ENTITY_PROPERTIES.includes(property as never)) {
     return {
       property,
-      entityIds: statements.map((statement) => {
+      entityIds: statements.flatMap((statement) => {
         const parsed = statementValue(statement);
-        rejectUnusedQualifiers(parsed.qualifiers);
-        const entity = ownDataRecord(parsed.value, ['id'], ['id']);
-        return field(entity, 'id');
+        if (!parsed) return [];
+        const entity = ownDataRecord(parsed.value, [
+          'id', 'numeric-id', 'entity-type',
+        ], ['id']);
+        return [field(entity, 'id')];
       }),
     };
   }
   if (STRING_PROPERTIES.includes(property as never)) {
     return {
       property,
-      stringValues: statements.map((statement) => {
+      stringValues: statements.flatMap((statement) => {
         const parsed = statementValue(statement);
-        rejectUnusedQualifiers(parsed.qualifiers);
-        return parsed.value;
+        return parsed ? [parsed.value] : [];
       }),
     };
   }
   if (property === 'P1128') {
     return {
       property,
-      quantities: statements.map((statement) => {
+      quantities: statements.flatMap((statement) => {
         const parsed = statementValue(statement);
-        const quantity = ownDataRecord(parsed.value, ['amount'], ['amount']);
+        if (!parsed) return [];
+        const quantity = ownDataRecord(parsed.value, [
+          'amount', 'unit', 'upperBound', 'lowerBound',
+        ], ['amount']);
         const pointInTime = projectPointInTime(parsed.qualifiers);
-        return {
+        return [{
           amount: field(quantity, 'amount'),
           ...(pointInTime === undefined ? {} : { pointInTime }),
-        };
+        }];
       }),
     };
   }
   if (property !== 'P571') projectionInvalid();
   return {
     property,
-    times: statements.map((statement) => {
+    times: statements.flatMap((statement) => {
       const parsed = statementValue(statement);
-      rejectUnusedQualifiers(parsed.qualifiers);
-      const timeValue = ownDataRecord(parsed.value, ['time'], ['time']);
-      return field(timeValue, 'time');
+      if (!parsed) return [];
+      const timeValue = ownDataRecord(parsed.value, [
+        'time', 'timezone', 'before', 'after', 'precision', 'calendarmodel',
+      ], ['time']);
+      return [field(timeValue, 'time')];
     }),
   };
 }
@@ -497,19 +515,29 @@ function restoreClaim(value: unknown): readonly [string, unknown[]] {
 
 function projectEntity(entityId: string, value: unknown): UnknownRecord {
   if (!/^Q[1-9][0-9]*$/.test(entityId)) projectionInvalid();
-  const entity = ownDataRecord(value, ['claims', 'labels'], []);
+  const entity = ownDataRecord(value, [
+    'claims', 'labels', 'id', 'type', 'lastrevid', 'modified', 'sitelinks',
+  ], []);
   let label: unknown;
   if (hasDefinedField(entity, 'labels')) {
-    const labels = ownDataRecord(field(entity, 'labels'), ['en'], []);
+    const labels = ownOpenDataRecord(field(entity, 'labels'));
+    if (Object.keys(labels).some((key) => !/^[a-z]{2,3}(?:-[a-z0-9]{1,8})*$/.test(key))) {
+      projectionInvalid();
+    }
     if (hasDefinedField(labels, 'en')) {
-      const english = ownDataRecord(field(labels, 'en'), ['value'], ['value']);
+      const english = ownDataRecord(field(labels, 'en'), ['value', 'language'], ['value']);
       label = field(english, 'value');
     }
   }
   let claimEntries: UnknownRecord[] | undefined;
   if (hasDefinedField(entity, 'claims')) {
-    const claims = ownDataRecord(field(entity, 'claims'), ALL_CLAIM_PROPERTIES, []);
-    claimEntries = Object.keys(claims).sort().map(
+    const claims = ownOpenDataRecord(field(entity, 'claims'));
+    if (Object.keys(claims).some((key) => !/^P[1-9][0-9]*$/.test(key))) {
+      projectionInvalid();
+    }
+    claimEntries = Object.keys(claims).filter(
+      (property) => ALL_CLAIM_PROPERTIES.includes(property as never),
+    ).sort().map(
       (property) => projectClaim(property, field(claims, property)),
     );
   }
@@ -684,12 +712,27 @@ const inpiCompanySchema = objectSchema({
   siren: stringSchema(32), name: stringSchema(500), etatAdministratif: stringSchema(16),
   dirigeants: arraySchema(25, dirigeantSchema),
 }, ['siren', 'name', 'etatAdministratif', 'dirigeants']);
+function projectInpiDirigeants(value: unknown): unknown[] {
+  const entries = mapArray(value, (entry) => (
+    mapClosedRecord(entry, INPI_DIRIGEANT_KEYS, ['nom', 'qualite'])
+  ));
+  const selected: unknown[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries as UnknownRecord[]) {
+    const key = normalizePersonName([
+      field(entry, 'prenoms'), field(entry, 'nom'),
+    ].filter((part): part is string => typeof part === 'string').join(' '));
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    selected.push(entry);
+    if (selected.length === 25) break;
+  }
+  return selected;
+}
 const inpiData = (value: unknown) => mapClosedRecord(value, ['companies'], [], {
   companies: (items) => mapArray(items, (item) => mapClosedRecord(
     item, INPI_COMPANY_KEYS, ['siren', 'name', 'etatAdministratif', 'dirigeants'], {
-      dirigeants: (entries) => mapArray(entries, (entry) => (
-        mapClosedRecord(entry, INPI_DIRIGEANT_KEYS, ['nom', 'qualite'])
-      )),
+      dirigeants: projectInpiDirigeants,
     },
   )),
 });
@@ -707,17 +750,37 @@ const patentSchema = objectSchema({
   applicants: arraySchema(32, patentApplicantSchema),
   inventors: arraySchema(25, patentInventorSchema),
 }, ['applicants', 'inventors']);
+function projectPatentRecords(value: unknown): unknown[] {
+  const groupSeen = new Map<string, Set<string>>();
+  return mapArray(value, (item) => {
+    const patent = ownDataRecord(item, PATENT_KEYS, ['applicants', 'inventors']);
+    const applicants = mapArray(field(patent, 'applicants'), (entry) => (
+      mapClosedRecord(entry, PATENT_APPLICANT_KEYS, ['name'])
+    )) as UnknownRecord[];
+    const inputInventors = mapArray(field(patent, 'inventors'), (entry) => (
+      mapClosedRecord(entry, PATENT_INVENTOR_KEYS, ['name'])
+    )) as UnknownRecord[];
+    if (applicants.length !== 1) return { applicants, inventors: [] };
+    const sole = applicants[0];
+    const applicantKey = normForMatch(String(field(sole, 'name') ?? ''));
+    if (!applicantKey) return { applicants, inventors: [] };
+    const country = typeof field(sole, 'country') === 'string'
+      ? String(field(sole, 'country')).toLowerCase() : '';
+    const groupKey = `${applicantKey}\0${country}`;
+    const seen = groupSeen.get(groupKey) ?? new Set<string>();
+    groupSeen.set(groupKey, seen);
+    const inventors: UnknownRecord[] = [];
+    for (const inventor of inputInventors) {
+      const nameKey = normalizePersonName(String(field(inventor, 'name') ?? ''));
+      if (!nameKey || seen.has(nameKey) || seen.size >= 25) continue;
+      seen.add(nameKey);
+      inventors.push(inventor);
+    }
+    return { applicants, inventors };
+  });
+}
 const patentsData = (value: unknown) => mapClosedRecord(value, ['patents'], [], {
-  patents: (items) => mapArray(items, (item) => mapClosedRecord(
-    item, PATENT_KEYS, ['applicants', 'inventors'], {
-      applicants: (entries) => mapArray(entries, (entry) => (
-        mapClosedRecord(entry, PATENT_APPLICANT_KEYS, ['name'])
-      )),
-      inventors: (entries) => mapArray(entries, (entry) => (
-        mapClosedRecord(entry, PATENT_INVENTOR_KEYS, ['name'])
-      )),
-    },
-  )),
+  patents: projectPatentRecords,
 });
 const googlePatentsDefinition = definition(
   'google-patents-search/v1',

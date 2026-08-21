@@ -1,7 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { parseCompanyFacts } from '../adapters/wikidata';
+import { MAX_APPLICANTS_PER_PATENT } from '../adapters/bigquery-patents';
+import { parseCompanyFacts, referencedQids } from '../adapters/wikidata';
+import { GooglePatentsInventorProvider } from '../discovery/providers/bigquery-patents.provider';
+import { InpiRneContactProvider } from '../discovery/providers/inpi-rne.provider';
+import type { ExecutionBroker, ToolResult } from '../tools/tool-contract';
 import {
   osmOverpassTool,
   searxngSearchTool,
@@ -44,9 +48,18 @@ interface ProjectionFixture {
   readonly toolId: string;
   readonly schema: string;
   readonly raw: RawToolResult;
+  readonly restored?: RawToolResult;
 }
 
 const URL_2048 = `https://x/${'u'.repeat(2038)}`;
+const PROVIDER_CTX = { workspaceId: 'ws-1', runId: 'run-1' };
+
+function resultBroker(result: RawToolResult): ExecutionBroker {
+  return {
+    checkSourcePolicy: async () => ({ allowed: true }),
+    invoke: async () => result as ToolResult<never>,
+  };
+}
 
 function jsonRoundTrip<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -103,12 +116,16 @@ function timeSnak(time: string): JsonRecord {
   return { mainsnak: { datavalue: { value: { time } } } };
 }
 
-function osmTags(): JsonRecord {
-  return Object.fromEntries(Array.from({ length: 64 }, (_, index) => [
-    index === 0 ? 'k'.repeat(120) : `tag${String(index).padStart(3, '0')}`,
-    index === 0 ? 'v'.repeat(1000) : `value-${index}`,
-  ]));
-}
+const OSM_SAFE_TAGS = {
+  amenity: 'research_institute',
+  building: 'industrial',
+  craft: 'metal_construction',
+  industrial: 'factory',
+  landuse: 'industrial',
+  man_made: 'works',
+  office: 'company',
+  shop: 'trade',
+};
 
 const SEARX_RAW: RawToolResult = {
   data: {
@@ -153,7 +170,18 @@ const OSM_RAW: RawToolResult = {
       countryCode: index === 0 ? 'D'.repeat(16) : 'DE',
       latitude: index === 0 ? -90 : 50,
       longitude: index === 0 ? -180 : 8,
-      tags: index === 0 ? osmTags() : { craft: 'metal_construction' },
+      tags: index === 0
+        ? {
+            ...OSM_SAFE_TAGS,
+            'addr:full': 'Private address',
+            'addr:unit': 'Unit 4',
+            'contact:person': 'Named Person',
+            'contact:whatsapp': '+49 30 1234',
+            'contact:telegram': '@private',
+            operator: 'Named Operator',
+            owner: 'Named Owner',
+          }
+        : { craft: 'metal_construction', operator: 'Named Operator' },
     })),
   },
   costCents: 0,
@@ -163,6 +191,18 @@ const OSM_RAW: RawToolResult = {
     fetchedAt: 'f'.repeat(100),
     contentHash: 'h'.repeat(128),
     parserVersion: 'p'.repeat(120),
+  },
+};
+
+const OSM_RESTORED: RawToolResult = {
+  ...OSM_RAW,
+  data: {
+    places: (OSM_RAW.data.places as JsonRecord[]).map((place) => ({
+      ...place,
+      tags: Object.fromEntries(Object.entries(place.tags as JsonRecord).filter(
+        ([key]) => Object.hasOwn(OSM_SAFE_TAGS, key),
+      )),
+    })),
   },
 };
 
@@ -187,6 +227,90 @@ const FIRST_WIKIDATA_ENTITY: JsonRecord = {
     P17: [entityIdSnak('Q183')],
     P159: [entityIdSnak('Q500')],
     P414: [entityIdSnak('Q600')],
+  },
+};
+
+const CANONICAL_WIKIDATA_ENTITY: JsonRecord = {
+  id: 'Q999',
+  type: 'item',
+  lastrevid: 123456,
+  modified: '2026-08-21T00:00:00Z',
+  sitelinks: {
+    enwiki: { site: 'enwiki', title: 'ACME Manufacturing', badges: [] },
+  },
+  labels: { en: { language: 'en', value: 'ACME Manufacturing AG' } },
+  claims: {
+    P31: [{
+      id: 'Q999$P31', type: 'statement', rank: 'normal', references: [{ hash: 'ref' }],
+      mainsnak: {
+        snaktype: 'value', property: 'P31', datatype: 'wikibase-item',
+        datavalue: {
+          type: 'wikibase-entityid',
+          value: { id: 'Q4830453', 'numeric-id': 4830453, 'entity-type': 'item' },
+        },
+      },
+    }],
+    P452: [{
+      id: 'Q999$P452', type: 'statement', rank: 'preferred', references: [],
+      mainsnak: {
+        snaktype: 'value', property: 'P452', datatype: 'wikibase-item',
+        datavalue: {
+          type: 'wikibase-entityid',
+          value: { id: 'Q100', 'numeric-id': 100, 'entity-type': 'item' },
+        },
+      },
+    }],
+    P1128: [{
+      id: 'Q999$P1128', type: 'statement', rank: 'normal', references: [{ hash: 'ref' }],
+      'qualifiers-order': ['P585', 'P1480'],
+      mainsnak: {
+        snaktype: 'value', property: 'P1128', datatype: 'quantity',
+        datavalue: {
+          type: 'quantity',
+          value: { amount: '+1500', unit: '1', upperBound: '+1501', lowerBound: '+1499' },
+        },
+      },
+      qualifiers: {
+        P585: [{
+          hash: 'qualifier', snaktype: 'value', property: 'P585', datatype: 'time',
+          datavalue: {
+            type: 'time',
+            value: {
+              time: '+2023-01-01T00:00:00Z', timezone: 0, before: 0, after: 0,
+              precision: 11, calendarmodel: 'http://www.wikidata.org/entity/Q1985727',
+            },
+          },
+        }],
+        P1480: [{ snaktype: 'value', property: 'P1480', datatype: 'wikibase-item' }],
+      },
+    }],
+    P571: [{
+      id: 'Q999$P571', type: 'statement', rank: 'normal', references: [],
+      mainsnak: {
+        snaktype: 'value', property: 'P571', datatype: 'time',
+        datavalue: {
+          type: 'time',
+          value: {
+            time: '+1965-00-00T00:00:00Z', timezone: 0, before: 0, after: 0,
+            precision: 9, calendarmodel: 'http://www.wikidata.org/entity/Q1985727',
+          },
+        },
+      },
+    }],
+    P856: [{
+      id: 'Q999$P856', type: 'statement', rank: 'normal', references: [],
+      mainsnak: {
+        snaktype: 'value', property: 'P856', datatype: 'url',
+        datavalue: { type: 'string', value: 'https://acme.example/' },
+      },
+    }],
+    P999999: [{
+      id: 'Q999$ignored', type: 'statement', rank: 'normal', references: [],
+      mainsnak: {
+        snaktype: 'value', property: 'P999999', datatype: 'string',
+        datavalue: { type: 'string', value: 'ignored transport fact' },
+      },
+    }],
   },
 };
 
@@ -272,8 +396,8 @@ const GOOGLE_PATENTS_RAW: RawToolResult = {
             name: itemIndex === 0 ? 'a'.repeat(500) : `Applicant ${itemIndex}`,
             country: itemIndex === 0 ? 'c'.repeat(16) : 'DE',
           }))
-        : [],
-      inventors: index === 0
+        : index === 1 ? [{ name: 'Sole Applicant', country: 'DE' }] : [],
+      inventors: index === 0 || index === 1
         ? Array.from({ length: 25 }, (_, itemIndex) => ({
             name: itemIndex === 0 ? 'i'.repeat(500) : `Inventor ${itemIndex}`,
           }))
@@ -282,6 +406,16 @@ const GOOGLE_PATENTS_RAW: RawToolResult = {
   },
   costCents: 0,
   degraded: true,
+};
+
+const GOOGLE_PATENTS_RESTORED: RawToolResult = {
+  ...GOOGLE_PATENTS_RAW,
+  data: {
+    patents: (GOOGLE_PATENTS_RAW.data.patents as JsonRecord[]).map((patent, index) => ({
+      ...patent,
+      ...(index === 0 ? { inventors: [] } : {}),
+    })),
+  },
 };
 
 const TRADE_FAIR_RAW: RawToolResult = {
@@ -332,12 +466,15 @@ const MAPYOURSHOW_RAW: RawToolResult = {
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'searxng.search', schema: 'searxng-search/v1', raw: SEARX_RAW },
   { toolId: 'wikidata.sparql', schema: 'wikidata-sparql/v1', raw: WIKIDATA_SPARQL_RAW },
-  { toolId: 'osm.overpass', schema: 'osm-overpass/v1', raw: OSM_RAW },
+  { toolId: 'osm.overpass', schema: 'osm-overpass/v1', raw: OSM_RAW, restored: OSM_RESTORED },
   { toolId: 'wikidata.entity', schema: 'wikidata-entity/v1', raw: WIKIDATA_ENTITY_RAW },
   { toolId: 'gleif.fetch', schema: 'gleif-fetch/v1', raw: GLEIF_RAW },
   { toolId: 'companies_house.search', schema: 'companies-house-search/v1', raw: COMPANIES_HOUSE_RAW },
   { toolId: 'inpi_rne.search', schema: 'inpi-rne-search/v1', raw: INPI_RAW },
-  { toolId: 'google_patents.search', schema: 'google-patents-search/v1', raw: GOOGLE_PATENTS_RAW },
+  {
+    toolId: 'google_patents.search', schema: 'google-patents-search/v1',
+    raw: GOOGLE_PATENTS_RAW, restored: GOOGLE_PATENTS_RESTORED,
+  },
   { toolId: 'tradefair.algolia', schema: 'tradefair-algolia/v1', raw: TRADE_FAIR_RAW },
   { toolId: 'mapyourshow.fetch', schema: 'mapyourshow-fetch/v1', raw: MAPYOURSHOW_RAW },
 ];
@@ -447,9 +584,9 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.places[].latitude.maximum': 90,
     '$.data.places[].longitude.minimum': -180,
     '$.data.places[].longitude.maximum': 180,
-    '$.data.places[].tagEntries.maxItems': 64,
+    '$.data.places[].tagEntries.maxItems': 8,
     '$.data.places[].tagEntries[].key.maxLength': 120,
-    '$.data.places[].tagEntries[].value.maxLength': 1000,
+    '$.data.places[].tagEntries[].value.maxLength': 120,
   },
   'wikidata-entity/v1': {
     ...COMMON_RESULT_BOUNDS,
@@ -721,7 +858,7 @@ describe('closed catalog Tool result projections', () => {
       );
       expect(envelope.schema).toBe(fixture.schema);
       expect(Buffer.byteLength(JSON.stringify(envelope), 'utf8')).toBeLessThanOrEqual(120 * 1024);
-      expect(registry.restore(envelope)).toEqual(jsonRoundTrip(fixture.raw));
+      expect(registry.restore(envelope)).toEqual(jsonRoundTrip(fixture.restored ?? fixture.raw));
     },
   );
 
@@ -761,7 +898,7 @@ describe('closed catalog Tool result projections', () => {
       })()],
       ['wikidata raw response', 'wikidata-entity/v1', (() => {
         const raw = cloneRaw(WIKIDATA_ENTITY_RAW);
-        ((raw.data.entities as JsonRecord).Q1 as JsonRecord).sitelinks = {};
+        ((raw.data.entities as JsonRecord).Q1 as JsonRecord).rawProviderResponse = {};
         return raw;
       })()],
       ['top-level credential', 'gleif-fetch/v1', { ...cloneRaw(GLEIF_RAW), credentialRef: 'vault://x' }],
@@ -822,10 +959,32 @@ describe('closed catalog Tool result projections', () => {
     expect(() => registry.project('mapyourshow-fetch/v1', map)).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
-    const osm = cloneRaw(OSM_RAW);
-    (((osm.data.places as JsonRecord[])[0].tags as JsonRecord))['contact:email'] =
-      'person@example.test';
-    expect(() => registry.project('osm-overpass/v1', osm)).toThrow(
+  });
+
+  it('retains only the fixed OSM industrial classification allowlist', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('osm-overpass/v1', OSM_RAW);
+    const entries = (((envelope.data as JsonRecord).data as JsonRecord)
+      .places as JsonRecord[])[0].tagEntries as JsonRecord[];
+    expect(entries).toEqual(Object.entries(OSM_SAFE_TAGS).sort(([left], [right]) => (
+      left.localeCompare(right)
+    )).map(([key, value]) => ({ key, value })));
+    expect(JSON.stringify(envelope)).not.toMatch(
+      /addr|contact|operator|owner|person|whatsapp|telegram|Private address|Named/i,
+    );
+    expect(registry.restore(envelope)).toEqual(jsonRoundTrip(OSM_RESTORED));
+  });
+
+  it.each([
+    ['craft', 'person@example.test'],
+    ['industrial', '+49 30 1234'],
+    ['landuse', '123 Main Street'],
+    ['office', 'https://person.example/profile'],
+  ])('rejects PII-like OSM value under allowlisted key %s', (key, value) => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const raw = cloneRaw(OSM_RAW);
+    (raw.data.places as JsonRecord[])[0].tags = { [key]: value };
+    expect(() => registry.project('osm-overpass/v1', raw)).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
   });
@@ -938,6 +1097,65 @@ describe('closed catalog Tool result projections', () => {
     expect(after).toEqual(before);
   });
 
+  it('accepts canonical wbgetentities metadata while persisting only the consumed subset', () => {
+    const raw: RawToolResult = {
+      data: { entities: { Q999: CANONICAL_WIKIDATA_ENTITY } },
+      costCents: 0,
+    };
+    expect(wikidataEntityTool.id).toBe('wikidata.entity');
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('wikidata-entity/v1', raw);
+    const restored = registry.restore(envelope) as RawToolResult;
+    const restoredEntity = (restored.data.entities as JsonRecord).Q999;
+    expect(parseCompanyFacts('Q999', restoredEntity, {})).toEqual(
+      parseCompanyFacts('Q999', CANONICAL_WIKIDATA_ENTITY, {}),
+    );
+    expect(referencedQids(restoredEntity)).toEqual(
+      referencedQids(CANONICAL_WIKIDATA_ENTITY),
+    );
+    expect(JSON.stringify(envelope)).not.toMatch(
+      /sitelinks|lastrevid|modified|rank|references|qualifiers-order|numeric-id|entity-type|upperBound|lowerBound|precision|calendarmodel|P999999/,
+    );
+  });
+
+  it('rejects unsupported or personal Wikidata datavalue shapes', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const personal = cloneRaw({
+      data: { entities: { Q999: structuredClone(CANONICAL_WIKIDATA_ENTITY) } },
+      costCents: 0,
+    });
+    (((((personal.data.entities as JsonRecord).Q999 as JsonRecord).claims as JsonRecord)
+      .P31 as JsonRecord[])[0].mainsnak as JsonRecord).datavalue = {
+      type: 'wikibase-entityid',
+      value: { id: 'Q4830453', email: 'person@example.test' },
+    };
+    expect(() => registry.project('wikidata-entity/v1', personal)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const unsupported = cloneRaw({
+      data: { entities: { Q999: structuredClone(CANONICAL_WIKIDATA_ENTITY) } },
+      costCents: 0,
+    });
+    (((((unsupported.data.entities as JsonRecord).Q999 as JsonRecord).claims as JsonRecord)
+      .P856 as JsonRecord[])[0].mainsnak as JsonRecord).datavalue = {
+      type: 'string', value: { raw: 'https://acme.example/' },
+    };
+    expect(() => registry.project('wikidata-entity/v1', unsupported)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const topLevel = cloneRaw({
+      data: { entities: { Q999: structuredClone(CANONICAL_WIKIDATA_ENTITY) } },
+      costCents: 0,
+    });
+    ((topLevel.data.entities as JsonRecord).Q999 as JsonRecord).personalEmail =
+      'person@example.test';
+    expect(() => registry.project('wikidata-entity/v1', topLevel)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
   it('does not add runtime callbacks or declarations to the other nine current Tools', () => {
     const currentTools = [
       wikidataTool, osmOverpassTool, wikidataEntityTool, gleifFetchTool,
@@ -954,7 +1172,7 @@ describe('closed catalog Tool result projections', () => {
         data: {
           places: [{
             osmId: 'node/1', name: 'Factory', latitude: 50, longitude: 8,
-            tags: { 'contact:website': 'https://factory.example/' },
+            tags: { craft: 'metal_construction' },
           }],
         },
         costCents: 0,
@@ -987,6 +1205,93 @@ describe('closed catalog Tool result projections', () => {
       const restored = registry.restore(registry.project(schema as never, raw));
       expect(restored, schema).toEqual(jsonRoundTrip(expected));
     }
+  });
+
+  it('minimizes INPI dirigeants exactly like the normalized-name consumer cap', async () => {
+    const dirigeants = [
+      { nom: 'DUPONT', prenoms: 'JEAN', qualite: 'Gérant' },
+      { nom: 'DUPONT', prenoms: 'JEAN', qualite: 'Président' },
+      ...Array.from({ length: 39 }, (_, index) => ({
+        nom: `NOM${index}`, prenoms: `PRENOM${index}`, qualite: 'Directeur',
+      })),
+    ];
+    const raw: RawToolResult = {
+      data: {
+        companies: [{
+          siren: '123456789', name: 'ACME', etatAdministratif: 'A', dirigeants,
+        }],
+      },
+      costCents: 0,
+    };
+    const original = await new InpiRneContactProvider({
+      broker: resultBroker(raw),
+    }).discoverContacts({ name: 'ACME', country: 'FR' }, PROVIDER_CTX);
+    expect(original.contacts).toHaveLength(25);
+
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('inpi-rne-search/v1', raw);
+    const restored = registry.restore(envelope) as RawToolResult;
+    const minimized = (((restored.data.companies as JsonRecord[])[0]
+      .dirigeants as JsonRecord[]));
+    expect(minimized).toHaveLength(25);
+    expect(new Set(minimized.map((entry) => `${entry.prenoms} ${entry.nom}`)).size).toBe(25);
+
+    const replayed = await new InpiRneContactProvider({
+      broker: resultBroker(restored),
+    }).discoverContacts({ name: 'ACME', country: 'FR' }, PROVIDER_CTX);
+    expect(replayed.contacts).toEqual(original.contacts);
+  });
+
+  it('minimizes patent inventors by sole-applicant/name/country without changing contacts', async () => {
+    expect(MAX_APPLICANTS_PER_PATENT).toBe(32);
+    const inventor = (name: string) => ({ name });
+    const raw: RawToolResult = {
+      data: {
+        patents: [
+          {
+            applicants: [{ name: 'Siemens AG', country: 'de' }],
+            inventors: Array.from({ length: 15 }, (_, index) => inventor(`Home Inventor ${index}`)),
+          },
+          {
+            applicants: [{ name: 'Siemens Aktiengesellschaft', country: 'de' }],
+            inventors: [
+              inventor('Home Inventor 0'),
+              ...Array.from({ length: 30 }, (_, index) => inventor(`Later Inventor ${index}`)),
+            ],
+          },
+          {
+            applicants: [
+              { name: 'Siemens AG', country: 'de' },
+              { name: 'Bosch GmbH', country: 'de' },
+            ],
+            inventors: [inventor('Coauthor Must Not Survive')],
+          },
+          {
+            applicants: [{ name: 'Siemens Inc', country: 'us' }],
+            inventors: Array.from({ length: 30 }, (_, index) => inventor(`US Inventor ${index}`)),
+          },
+        ],
+      },
+      costCents: 0,
+    };
+    const original = await new GooglePatentsInventorProvider({
+      broker: resultBroker(raw), now: () => Date.UTC(2026, 0, 1), mode: 'direct',
+    }).discoverContacts({ name: 'Siemens', country: 'DE' }, PROVIDER_CTX);
+    expect(original.contacts).toHaveLength(25);
+
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('google-patents-search/v1', raw);
+    const restored = registry.restore(envelope) as RawToolResult;
+    const patents = restored.data.patents as JsonRecord[];
+    expect((patents[2].inventors as unknown[])).toEqual([]);
+    expect((patents[0].inventors as unknown[]).length +
+      (patents[1].inventors as unknown[]).length).toBe(25);
+    expect((patents[3].inventors as unknown[])).toHaveLength(25);
+
+    const replayed = await new GooglePatentsInventorProvider({
+      broker: resultBroker(restored), now: () => Date.UTC(2026, 0, 1), mode: 'direct',
+    }).discoverContacts({ name: 'Siemens', country: 'DE' }, PROVIDER_CTX);
+    expect(replayed.contacts).toEqual(original.contacts);
   });
 
   it('rejects the all-field-max trade-fair cartesian fixture at the aggregate gate', () => {
