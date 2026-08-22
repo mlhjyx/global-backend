@@ -7,6 +7,7 @@ import { normForMatch } from '../discovery/name-match';
 import { parseOfacXml, type ParsedSanctionsEntity, type ParsedSanctionsList } from '../adapters/ofac-xml';
 import { parseEuFsf } from '../adapters/eu-fsf-xml';
 import type { SanctionsDownloadInput, SanctionsDownloadOutput } from '../tools/source-tools';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 /**
  * 制裁名单刷新服务（Temporal 每日 Schedule 活动 + verify 脚本用）。owner 连接写平台表（绕 RLS）。
@@ -167,6 +168,7 @@ export class SanctionsRefreshService {
         await this.deps.ownerDb.sanctionsSource
           .update({ where: { id: src.id }, data: { lastRefreshedAt: new Date(), lastFetchStatus: 'FAILED' } })
           .catch(() => undefined);
+        if (isExecutionControlError(err)) throw err;
         out.push({ sourceKey: src.key, status: 'FAILED', total: 0, added: 0, updated: 0, unchanged: 0, withdrawn: 0, publishDate: null, error: msg });
       }
     }

@@ -23,6 +23,7 @@ import {
   SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
 } from './understanding.constants';
+import { isPlatformScheduleId, platformScheduleWorkflowInput } from './platform-schedule-authority';
 
 /**
  * 幂等保障平台三个周期 Schedule 存在（采集 sweep / intent sweep / 存量对账 sweep）。
@@ -59,6 +60,7 @@ export async function ensurePlatformSchedules(): Promise<void> {
         const isKbRecovery = s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID;
         const isCostReconciliation =
           s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID;
+        const authorityInput = isPlatformScheduleId(s.id) ? platformScheduleWorkflowInput(s.id) : undefined;
         await client.schedule.create({
           scheduleId: s.id,
           spec: { intervals: [{ every: (process.env[s.everyEnv] ?? s.everyDefault) as Duration }] },
@@ -66,11 +68,9 @@ export async function ensurePlatformSchedules(): Promise<void> {
             type: 'startWorkflow',
             workflowType: s.workflowType,
             taskQueue: UNDERSTANDING_TASK_QUEUE,
-            args: isKbRecovery
+            args: authorityInput ? [authorityInput] : isKbRecovery
               ? [{ limit: 10 }]
-              : isCostReconciliation
-                ? [{ limit: 50 }]
-                : [{}],
+              : isCostReconciliation ? [{ limit: 50 }] : [{}],
             // KB workflow 自身也只有两轮 10m activity；Schedule 再加顶层硬截止，防异常 history 长占 SKIP 锁。
             ...(isKbRecovery ? { workflowExecutionTimeout: '22 minutes' } : {}),
             ...(isCostReconciliation ? { workflowExecutionTimeout: '3 minutes' } : {}),
@@ -80,7 +80,7 @@ export async function ensurePlatformSchedules(): Promise<void> {
         console.log(`[worker] schedule '${s.id}' created (every ${process.env[s.everyEnv] ?? s.everyDefault}, overlap=SKIP)`);
       } catch (e) {
           if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) {
-          if (s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID || s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID) {
+          if (isPlatformScheduleId(s.id) || s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID || s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID) {
             // R2-A2 的有界执行参数属于正确性门，不能让已存在的开发/生产 Schedule 永久沿用旧 action。
             // 只更新 action；频率、overlap、暂停状态与 ops note 全部保留。
             const limit =
@@ -91,11 +91,14 @@ export async function ensurePlatformSchedules(): Promise<void> {
                 : s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID
                   ? '3 minutes'
                   : undefined;
+            const args = isPlatformScheduleId(s.id) ? [platformScheduleWorkflowInput(s.id)] : [{ limit }];
             await client.schedule.getHandle(s.id).update((previous) => ({
               spec: previous.spec,
               action: {
                 ...previous.action,
-                args: [{ limit }],
+                workflowType: s.workflowType,
+                taskQueue: UNDERSTANDING_TASK_QUEUE,
+                args,
                 ...(workflowExecutionTimeout ? { workflowExecutionTimeout } : {}),
               },
               policies: previous.policies,

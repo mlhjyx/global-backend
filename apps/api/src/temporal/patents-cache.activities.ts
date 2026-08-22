@@ -1,6 +1,20 @@
 import type { PrismaClient } from '@prisma/client';
-import { bigqueryPatents } from '../adapters/bigquery-patents';
 import { refreshPatentCache, type PatentRefreshDb, type PatentRefreshSummary } from '../adapters/patent-inventor-cache';
+import type { BudgetStore } from '../tools/budget-store';
+import { UnavailableBudgetStore } from '../tools/budget-store';
+import type { ExecutionBroker } from '../tools/tool-contract';
+import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
+import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
+import { createPatentCacheBrokerScanner } from './patent-cache-broker-scanner';
+import { PATENTS_CACHE_REFRESH_SCHEDULE_ID } from './understanding.constants';
+
+export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
+
+function boundedMaxAnchors(value: number | undefined): number {
+  return Number.isSafeInteger(value) && value !== undefined && value > 0
+    ? Math.min(value, PATENT_CACHE_BROKER_MAX_ANCHORS)
+    : PATENT_CACHE_BROKER_MAX_ANCHORS;
+}
 
 /**
  * 专利发明人缓存刷新的 Temporal 活动（scale-safe #89，第 5 个周期 Schedule 驱动）。
@@ -8,13 +22,22 @@ import { refreshPatentCache, type PatentRefreshDb, type PatentRefreshSummary } f
  * 一次共享大扫（BigQuery Job User 只读，护栏②④⑥ 下推）→ 落 postgres 缓存。空队列 → 零 BQ 成本跳过。
  * 🔴 §8.8 用途门自守 + 保留期清理 + encryptPii 落盘 均在 {@link refreshPatentCache} 内。
  */
-export function createPatentsCacheActivities(deps: { ownerDb: PrismaClient }) {
+export function createPatentsCacheActivities(deps: {
+  ownerDb: PrismaClient;
+  broker: ExecutionBroker;
+  budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
+}) {
+  const budgets = deps.budgetStore ?? new UnavailableBudgetStore('patents cache activities require an authoritative BudgetStore');
   return {
-    async refreshPatentCacheActivity(input?: { maxAnchors?: number }): Promise<PatentRefreshSummary> {
+    async refreshPatentCacheActivity(input: ({ maxAnchors?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<PatentRefreshSummary> {
+      const binding = await attestPlatformScheduleActivity({
+        args: input, budgetStore: budgets, scheduleId: PATENTS_CACHE_REFRESH_SCHEDULE_ID, activityRunId: deps.activityRunId,
+      });
       return refreshPatentCache({
         db: deps.ownerDb as unknown as PatentRefreshDb, // 全 delegate ⊇ PatentRefreshDb 子集
-        bq: bigqueryPatents, // env 驱动惰性建真 client；无 SA key → 天然 no-op（扫描返空）
-        maxAnchors: input?.maxAnchors,
+        bq: createPatentCacheBrokerScanner({ broker: deps.broker, accountKey: binding.accountKey }),
+        maxAnchors: boundedMaxAnchors(input.maxAnchors),
         log: (msg) => console.warn(`[patents-cache-refresh] ${msg}`),
       });
     },

@@ -29,6 +29,7 @@ import {
 import { normForMatch } from '../discovery/name-match';
 import { foldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
 import { encryptPii, decryptPii, blindContactKey, piiKeyConfigured } from '../compliance/pii-crypto';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 /** §8.8 治理域（与 googlePatentsSearchTool.compliance.policyDomain 一致）。 */
 export const PATENT_POLICY_DOMAIN = 'bigquery.googleapis.com';
@@ -391,6 +392,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
       where: { id: audit.id },
       data: { finishedAt: new Date(), status: 'FAILED', detail: String(err).slice(0, 300) },
     });
+    if (isExecutionControlError(err)) throw err;
     return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0 };
   }
 

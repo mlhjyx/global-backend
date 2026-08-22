@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MISS_THRESHOLD, computeNextFetchAt } from '../acquisition/monitored-source.lifecycle';
 import { PageFetcher } from './page-fetcher';
 import { BudgetExceededError } from '../tools/budget';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageKind, PageSignals } from './page-signals';
 
 const PARSER_VERSION = 'web-watch/v1';
@@ -92,7 +93,7 @@ export class WebsiteWatchService {
       try {
         page = await fetcher.fetch(url);
       } catch (error) {
-        if (error instanceof BudgetExceededError || isBudgetControlError(error)) throw error;
+        if (error instanceof BudgetExceededError || isExecutionControlError(error)) throw error;
         page = null;
       }
       const prev = existingByUrl.get(url);
@@ -192,11 +193,6 @@ export class WebsiteWatchService {
     });
     return { deleted: res.count };
   }
-}
-
-function isBudgetControlError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
 }
 
 // ─────────────────────── helpers ───────────────────────

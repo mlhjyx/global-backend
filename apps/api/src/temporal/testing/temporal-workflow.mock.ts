@@ -53,6 +53,12 @@ export function setPatched(fn: (patchId: string) => boolean): void {
   patchedFn = fn;
 }
 
+let currentWorkflowInfo: Readonly<{ runId: string }> = Object.freeze({ runId: 'test-workflow-run' });
+export function workflowInfo(): Readonly<{ runId: string }> { return currentWorkflowInfo; }
+export function setWorkflowInfo(value: Readonly<{ runId: string }>): void {
+  currentWorkflowInfo = Object.freeze({ runId: value.runId });
+}
+
 /**
  * 模拟 `@temporalio/workflow` 的 `isCancellation`：按错误名判定（测试用
  * `Object.assign(new Error('…'), { name: 'CancelledFailure' })` 构造取消）。
@@ -93,6 +99,7 @@ export const log = {
 export function resetActivities(): void {
   for (const key of Object.keys(registry)) delete registry[key];
   patchedFn = () => true;
+  currentWorkflowInfo = Object.freeze({ runId: 'test-workflow-run' });
   log.debug.mockReset();
   log.info.mockReset();
   log.warn.mockReset();

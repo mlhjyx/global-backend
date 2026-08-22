@@ -132,4 +132,23 @@ describe('SanctionsRefreshService — budget context', () => {
       },
     );
   });
+
+  it('rethrows nested authority denial and does not continue to a later source', async () => {
+    const failure = { name: 'ActivityFailure', cause: { type: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' } };
+    const invoke = vi.fn(async () => Promise.reject(failure));
+    const update = vi.fn(async () => undefined);
+    const sources = [
+      { id: 'source-1', key: 'ofac', format: 'ofac_sdn_xml', url: 'https://example.test/1.xml', config: null },
+      { id: 'source-2', key: 'eu', format: 'eu_fsf_xml', url: 'https://example.test/2.xml', config: null },
+    ];
+    const ownerDb = { sanctionsSource: {
+      findMany: vi.fn(async () => sources),
+      findUniqueOrThrow: vi.fn(async ({ where }: { where: { id: string } }) => sources.find((source) => source.id === where.id)),
+      update,
+    } } as unknown as PrismaClient;
+    const service = new SanctionsRefreshService({ ownerDb, broker: { invoke } as unknown as ExecutionBroker });
+    await expect(service.refreshAll('platform-account')).rejects.toBe(failure);
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'source-1' }, data: expect.objectContaining({ lastFetchStatus: 'FAILED' }) }));
+  });
 });

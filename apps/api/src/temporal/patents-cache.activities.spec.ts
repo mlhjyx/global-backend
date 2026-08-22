@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import type { BudgetStore } from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { createPatentsCacheActivities } from './patents-cache.activities';
+import { PATENT_CACHE_BROKER_MAX_ANCHORS, createPatentsCacheActivities } from './patents-cache.activities';
 import { PLATFORM_SCHEDULE_AUTHORITY_SCOPES } from './platform-schedule-authority';
+import { googlePatentsSearchTool } from '../tools/source-tools';
 
 const scope = PLATFORM_SCHEDULE_AUTHORITY_SCOPES['patents-cache-refresh'];
 const binding = {
@@ -17,12 +18,39 @@ const binding = {
 };
 
 describe('patents cache schedule authority and ToolBroker route', () => {
+  it('does not copy personal patent names into the generic budget replay JSON', () => {
+    expect(googlePatentsSearchTool.compliance.personalData).toBe(true);
+    expect(googlePatentsSearchTool.durableReplayResult).toBeUndefined();
+  });
+
+  it('caps product refresh fan-out independently of a larger schedule payload', () => {
+    expect(PATENT_CACHE_BROKER_MAX_ANCHORS).toBe(25);
+  });
+
   it('contains no direct BigQuery singleton import or batch scanner call', async () => {
-    const source = await readFile(new URL('./patents-cache.activities.ts', import.meta.url), 'utf8');
-    expect(source).not.toContain("from '../adapters/bigquery-patents'");
-    expect(source).not.toContain('bigqueryPatents');
-    expect(source).not.toContain('searchInventorsForAnchorsWithStats');
-    expect(source).toContain("broker.invoke('google_patents.search'");
+    const [activitySource, scannerSource] = await Promise.all([
+      readFile(new URL('./patents-cache.activities.ts', import.meta.url), 'utf8'),
+      readFile(new URL('./patent-cache-broker-scanner.ts', import.meta.url), 'utf8'),
+    ]);
+    expect(activitySource).not.toContain("from '../adapters/bigquery-patents'");
+    expect(activitySource).not.toContain('bigqueryPatents');
+    expect(scannerSource).not.toContain('bigqueryPatents');
+    expect(scannerSource).toContain('google_patents.search');
+    expect(scannerSource).toContain('input.broker.invoke');
+  });
+
+  it('parks a pending pre-cutover activity before cache mutation or broker invocation', async () => {
+    const deleteMany = vi.fn();
+    const broker = { invoke: vi.fn() } as unknown as ExecutionBroker;
+    const activities = createPatentsCacheActivities({
+      ownerDb: { patentInventorCache: { deleteMany } } as unknown as PrismaClient,
+      broker,
+      budgetStore: { attestAuthorized: vi.fn() } as unknown as BudgetStore,
+      activityRunId: () => 'workflow-run-1',
+    });
+    await expect(activities.refreshPatentCacheActivity()).rejects.toMatchObject({ type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED', nonRetryable: true });
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(broker.invoke).not.toHaveBeenCalled();
   });
 
   it('attests before any cache read/write or ToolBroker invocation', async () => {
@@ -46,6 +74,7 @@ describe('patents cache schedule authority and ToolBroker route', () => {
       ownerDb,
       broker,
       budgetStore: { attestAuthorized } as unknown as BudgetStore,
+      activityRunId: () => 'workflow-run-1',
     });
 
     await expect(activities.refreshPatentCacheActivity({

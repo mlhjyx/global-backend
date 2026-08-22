@@ -1,10 +1,11 @@
 import { PrismaService } from '../prisma/prisma.service';
-import { Context as ActivityContext } from '@temporalio/activity';
 import { SourceAdapterRegistry } from '../acquisition/source-adapter';
 import { AcquisitionService, AcquireResult } from '../acquisition/acquisition.service';
-import { sweepBudgetCents } from '../tools/budget';
-import { BudgetStoreUnavailableError, type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
+import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
+import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
+import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
 
 const DUE_LIMIT = 50;
 
@@ -20,10 +21,18 @@ export function createAcquisitionActivities(deps: {
 }) {
   const svc = new AcquisitionService({ prisma: deps.prisma, registry: deps.registry });
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('acquisition activities require an authoritative BudgetStore');
+  const attest = (args: PlatformScheduleAuthorityActivityInput) =>
+    attestPlatformScheduleActivity({
+      args,
+      budgetStore: budgets,
+      scheduleId: ACQ_SWEEP_SCHEDULE_ID,
+      activityRunId: deps.activityRunId,
+    });
   return {
     /** 到期的自动源：ACTIVE + 有 cadence.everyMs>0 + (从未抓 或 nextFetchAt 到点)。手动源（无 cadence）不自动扫。
      *  cadence 过滤下推到 DB（JSON path）——否则大量手动源(nextFetchAt=null 排最前)会挤占 take、把真正到期的自动源饿死。 */
-    async listDueSources(args?: { limit?: number }): Promise<{ sourceIds: string[] }> {
+    async listDueSources(args: ({ limit?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ sourceIds: string[] }> {
+      await attest(args);
       const now = new Date();
       const limit = args?.limit ?? DUE_LIMIT;
       const rows = await deps.prisma.monitoredSource.findMany({
@@ -44,24 +53,12 @@ export function createAcquisitionActivities(deps: {
     },
 
     /** 对一个源跑一次 acquire（抓取→清洗→落库→增量）。幂等 by externalId，可安全重试。 */
-    async acquireSource(args: { sourceId: string; limit?: number }): Promise<AcquireResult> {
-      let workflowRunId: string | undefined;
-      try {
-        workflowRunId = deps.activityRunId?.() ?? ActivityContext.current().info.workflowExecution?.runId;
-      } catch {
-        workflowRunId = undefined;
-      }
-      if (!workflowRunId) throw new BudgetStoreUnavailableError('acquisition activity workflow identity unavailable');
-      const accountKey = `acquisition:${workflowRunId}:${args.sourceId}`;
-      await budgets.open({ workspaceId: PLATFORM_WORKSPACE, accountKey, capCents: sweepBudgetCents(), replayScope: true });
-      try {
-        return await svc.acquire(args.sourceId, {
-          ...(args.limit ? { limit: args.limit } : {}),
-          context: { workspaceId: PLATFORM_WORKSPACE, runId: accountKey, correlationId: accountKey },
-        });
-      } finally {
-        await budgets.close({ workspaceId: PLATFORM_WORKSPACE, accountKey });
-      }
+    async acquireSource(args: { sourceId: string; limit?: number } & PlatformScheduleAuthorityActivityInput): Promise<AcquireResult> {
+      const binding = await attest(args);
+      return svc.acquire(args.sourceId, {
+        ...(args.limit ? { limit: args.limit } : {}),
+        context: { workspaceId: PLATFORM_WORKSPACE, runId: binding.accountKey, correlationId: binding.accountKey },
+      });
     },
   };
 }

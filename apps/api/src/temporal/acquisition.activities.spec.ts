@@ -14,6 +14,18 @@ const executionBudget = {
 };
 
 describe('acquisition activities — platform authority lifecycle', () => {
+  it('parks a pending pre-cutover activity before its first database read', async () => {
+    const findMany = vi.fn();
+    const activities = createAcquisitionActivities({
+      prisma: { monitoredSource: { findMany } } as never,
+      registry: new SourceAdapterRegistry(),
+      budgetStore: { attestAuthorized: vi.fn() } as never,
+      activityRunId: () => 'workflow-run-1',
+    });
+    await expect(activities.listDueSources({ limit: 1 })).rejects.toMatchObject({ type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED', nonRetryable: true });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it('read-only attests before the adapter call and never reopens or closes the admitted account', async () => {
     const order: string[] = [];
     const fetch = vi.fn(async (_config, _limit, context) => {

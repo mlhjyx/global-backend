@@ -5,6 +5,7 @@ import { cleanEntity, CleanedEntity } from './clean';
 import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
 import type { ToolContext } from '../tools/tool-contract';
 import { BudgetExceededError } from '../tools/budget';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'acquisition/v1';
 const CHUNK = 50;
@@ -62,7 +63,7 @@ export class AcquisitionService {
       }
       cleaned = [...byExt.values()];
     } catch (err) {
-      if (err instanceof BudgetExceededError || isBudgetControlError(err)) throw err;
+      if (err instanceof BudgetExceededError || isExecutionControlError(err)) throw err;
       await prisma.sourceFetch.update({
         where: { id: fetch.id },
         data: { status: 'FAILED', error: String(err).slice(0, 300), finishedAt: new Date() },
@@ -150,11 +151,6 @@ export class AcquisitionService {
     });
     return result;
   }
-}
-
-function isBudgetControlError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
 }
 
 /** 判定变更子类型：产品变→PRODUCTS_CHANGED、联系方式变→CONTACT_CHANGED、否则 UPDATED。 */

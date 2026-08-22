@@ -161,4 +161,19 @@ describe('WebsiteWatchService', () => {
     const r = await svc.watch('src1');
     expect(r.status).toBe('SKIPPED');
   });
+
+  it.each([
+    { code: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' },
+    { name: 'ActivityFailure', cause: { type: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE' } },
+  ])('rethrows execution-control failure before page diff persistence', async (failure) => {
+    let calls = 0;
+    const controlled = new WebsiteWatchService({
+      prisma: prisma as unknown as PrismaService,
+      fetcher: { fetch: async () => { calls += 1; throw failure; } },
+    });
+    await expect(controlled.watch('src1')).rejects.toBe(failure);
+    expect(calls).toBe(1);
+    expect(prisma.entities).toEqual([]);
+    expect(prisma.changes).toEqual([]);
+  });
 });

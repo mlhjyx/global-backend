@@ -371,6 +371,8 @@ describe('PostgresBudgetStore', () => {
         generation: 1,
         authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
         authorized_cap_microusd: 1_000_000n,
+        campaign_cap_microusd: 10_000_000n,
+        max_runs: 10n,
         replay: false,
       }]);
     const platformWriter = {

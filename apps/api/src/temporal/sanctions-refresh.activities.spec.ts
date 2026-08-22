@@ -27,6 +27,18 @@ function budgetStoreSpies() {
 }
 
 describe('sanctions-refresh.activities — durable platform authority lifecycle', () => {
+  it('parks a pending pre-cutover activity before reading a sanctions source', async () => {
+    const findMany = vi.fn();
+    const activities = createSanctionsRefreshActivities({
+      ownerDb: { sanctionsSource: { findMany } } as unknown as PrismaClient,
+      broker: {} as ExecutionBroker,
+      budgetStore: { attestAuthorized: vi.fn() } as unknown as BudgetStore,
+      activityRunId: () => 'workflow-run-1',
+    });
+    await expect(activities.refreshSanctionsLists()).rejects.toMatchObject({ type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED', nonRetryable: true });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it('attests the admitted workflow account without reopening or closing it', async () => {
     const budget = budgetStoreSpies();
     const ownerDb = {
@@ -36,7 +48,7 @@ describe('sanctions-refresh.activities — durable platform authority lifecycle'
       ownerDb,
       broker: {} as ExecutionBroker,
       budgetStore: budget.store,
-      activityRunId: () => 'sanctions-workflow-run',
+      activityRunId: () => 'workflow-run-1',
     });
 
     await expect(acts.refreshSanctionsLists({
@@ -62,7 +74,7 @@ describe('sanctions-refresh.activities — durable platform authority lifecycle'
       ownerDb,
       broker: {} as ExecutionBroker,
       budgetStore: budget.store,
-      activityRunId: () => 'sanctions-workflow-run',
+      activityRunId: () => 'workflow-run-1',
     });
 
     await expect(acts.refreshSanctionsLists({

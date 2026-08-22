@@ -14,6 +14,18 @@ const executionBudget = {
 };
 
 describe('intent activities — platform authority lifecycle', () => {
+  it('parks a pending pre-cutover activity before retention mutation', async () => {
+    const findMany = vi.fn();
+    const activities = createIntentActivities({
+      prisma: { monitoredSource: { findMany } } as never,
+      fetcher: {} as never,
+      budgetStore: { attestAuthorized: vi.fn() } as never,
+      activityRunId: () => 'workflow-run-1',
+    });
+    await expect(activities.purgeStaleIntentEvents({})).rejects.toMatchObject({ type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED', nonRetryable: true });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it('read-only attests a stable workflow account around a website watch', async () => {
     const order: string[] = [];
     const fetch = vi.fn(async (_url, context) => {
