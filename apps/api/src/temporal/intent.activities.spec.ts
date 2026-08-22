@@ -1,14 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 import { createIntentActivities } from './intent.activities';
+import { PLATFORM_SCHEDULE_AUTHORITY_SCOPES } from './platform-schedule-authority';
 
-describe('intent activities — durable budget lifecycle', () => {
-  it('opens and closes a stable replay scope around a website watch', async () => {
+const scope = PLATFORM_SCHEDULE_AUTHORITY_SCOPES['intent-sweep'];
+const executionBudget = {
+  authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+  scopeKey: 'platform' as const,
+  accountKey: `platform:${scope.requestSha256}:workflow-run-1`,
+  ...scope,
+  workflowRunId: 'workflow-run-1',
+  admissionReplay: false,
+};
+
+describe('intent activities — platform authority lifecycle', () => {
+  it('read-only attests a stable workflow account around a website watch', async () => {
     const order: string[] = [];
     const fetch = vi.fn(async (_url, context) => {
       order.push('wire');
       expect(context).toEqual({
-        workspaceId: 'platform', runId: 'intent-watch:workflow-run-1:source-1', correlationId: 'intent-watch:workflow-run-1:source-1',
+        workspaceId: 'platform', runId: executionBudget.accountKey, correlationId: executionBudget.accountKey,
       });
       throw new BudgetOperationReplayError('crawl-op');
     });
@@ -23,19 +34,27 @@ describe('intent activities — durable budget lifecycle', () => {
       sourceEntity: { findMany: vi.fn(async () => []) },
     };
     const budgetStore = {
-      open: vi.fn(async () => { order.push('open'); }),
-      close: vi.fn(async () => { order.push('close'); }),
+      attestAuthorized: vi.fn(async () => { order.push('attest'); }),
+      openAuthorized: vi.fn(),
+      open: vi.fn(),
+      close: vi.fn(),
     };
     const activities = createIntentActivities({
       prisma: prisma as never, fetcher: { fetch } as never, budgetStore: budgetStore as never,
       activityRunId: () => 'workflow-run-1',
     });
 
-    await expect(activities.watchSource({ sourceId: 'source-1' })).rejects.toBeInstanceOf(BudgetOperationReplayError);
-    expect(budgetStore.open).toHaveBeenCalledWith({
-      workspaceId: 'platform', accountKey: 'intent-watch:workflow-run-1:source-1', capCents: expect.any(Number), replayScope: true,
+    await expect(activities.watchSource({
+      sourceId: 'source-1', executionContractVersion: 1, executionBudget,
+    })).rejects.toBeInstanceOf(BudgetOperationReplayError);
+    expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({
+      authorityId: executionBudget.authorityId,
+      scopeKey: 'platform',
+      accountKey: executionBudget.accountKey,
     });
-    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'platform', accountKey: 'intent-watch:workflow-run-1:source-1' });
-    expect(order).toEqual(['open', 'wire', 'close']);
+    expect(budgetStore.open).not.toHaveBeenCalled();
+    expect(budgetStore.openAuthorized).not.toHaveBeenCalled();
+    expect(budgetStore.close).not.toHaveBeenCalled();
+    expect(order).toEqual(['attest', 'wire']);
   });
 });

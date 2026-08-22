@@ -359,6 +359,84 @@ describe('PostgresBudgetStore', () => {
     ).toContain('open_authorized_tool_budget_v1');
   });
 
+  it('admits a platform schedule run atomically through the writer with no caller cap or owner fallback', async () => {
+    const ownerDb = {
+      $transaction: vi.fn(async () => []),
+    } as unknown as PrismaClient;
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([SAFE_PLATFORM_PRINCIPAL])
+      .mockResolvedValueOnce([{
+        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+        generation: 1,
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        authorized_cap_microusd: 1_000_000n,
+        replay: false,
+      }]);
+    const platformWriter = {
+      $transaction: vi.fn(async (fn) => fn({
+        $executeRawUnsafe: vi.fn(async () => 0),
+        $queryRaw: queryRaw,
+      } as never)),
+    } as unknown as PrismaClient;
+    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb, platformWriter);
+    const input = {
+      purpose: 'platform.acquisition' as const,
+      subjectType: 'schedule' as const,
+      subjectId: 'acq-sweep',
+      scheduleId: 'acq-sweep',
+      requestSha256: '5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e',
+      workflowRunId: 'workflow-run-1',
+      accountKey: 'platform:5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e:workflow-run-1',
+    };
+
+    await expect(store.admitPlatformRun(input)).resolves.toEqual({
+      accountId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      authorizedCapMicrousd: 1_000_000n,
+      generation: 1,
+      replay: false,
+    });
+
+    expect(ownerDb.$transaction).not.toHaveBeenCalled();
+    expect(platformWriter.$transaction).toHaveBeenCalledOnce();
+    const admission = queryRaw.mock.calls[1]?.[0] as {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    };
+    expect(admission.strings?.join('')).toContain('admit_platform_execution_budget_run_v1');
+    expect(admission.strings?.join('')).not.toMatch(/cap|workspace/i);
+    expect(admission.values).toEqual([
+      input.purpose,
+      input.subjectType,
+      input.subjectId,
+      input.scheduleId,
+      input.requestSha256,
+      input.workflowRunId,
+      input.accountKey,
+    ]);
+  });
+
+  it('does not use the legacy owner connection when the platform writer is absent', async () => {
+    const ownerDb = {
+      $transaction: vi.fn(async () => []),
+    } as unknown as PrismaClient;
+    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb);
+
+    await expect(store.admitPlatformRun({
+      purpose: 'platform.sanctions',
+      subjectType: 'schedule',
+      subjectId: 'sanctions-refresh',
+      scheduleId: 'sanctions-refresh',
+      requestSha256: '50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe',
+      workflowRunId: 'workflow-run-1',
+      accountKey: 'platform:50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe:workflow-run-1',
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
+    );
+    expect(ownerDb.$transaction).not.toHaveBeenCalled();
+  });
+
   it('attests an existing authority account without calling the holder-incrementing open function', async () => {
     const queryRaw = vi.fn().mockResolvedValue([{
       account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
