@@ -300,6 +300,149 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
           },
         }),
       }),
+      {
+        usage: {
+          currency: "USD",
+          unit: "microusd",
+          callCount: 1,
+          upperBoundMicrousd: "10000",
+        },
+        costBasis: "estimated_upper_bound",
+      },
+    );
+  });
+
+  it("projects and replays every typed Tool directly from its central schema without a replay hook", async () => {
+    const execute = vi.fn(async () => ({
+      results: [{ url: "https://example.com/result", title: "Example" }],
+    }));
+    const tool = fakeTool("searxng.search", 1, execute);
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "searxng-search/v1",
+    };
+    delete tool.durableReplayResult;
+    const settle = vi.fn(async () => ({
+      chargedCents: 1,
+      observedCents: 1,
+      capVariance: false,
+      replay: false,
+    }));
+    const reserve = vi.fn()
+      .mockResolvedValueOnce({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: false,
+      });
+    const budgetStore = { reserve, settle } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    const live = await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    const projection = settle.mock.calls[0]?.[2];
+    expect(projection).toMatchObject({
+      kind: "tool",
+      schema: "searxng-search/v1",
+      data: expect.objectContaining({ schema: "searxng-search/v1" }),
+    });
+
+    reserve.mockResolvedValueOnce({
+      workspaceId: "w",
+      accountKey: "run",
+      operationId: "op",
+      estimatedCents: 1,
+      replay: true,
+      replayProjection: projection,
+      receipt: {
+        ...DURABLE_RECEIPT,
+        resultSchema: "searxng-search/v1",
+        resultDigest: projection!.digest,
+      },
+    });
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).resolves.toEqual({
+      ...live,
+      durableReceipt: {
+        ...DURABLE_RECEIPT,
+        resultSchema: "searxng-search/v1",
+        resultDigest: projection!.digest,
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects the exact Google Patents result and canonical cost facts without a replay hook", async () => {
+    const tool = fakeTool("google_patents.search", 2, async () => ({
+      patents: [{
+        publicationNumber: "US-123-A1",
+        applicants: [{ name: "Example GmbH", country: "DE" }],
+        inventors: [{ name: "Ada Example" }],
+      }],
+      costFacts: {
+        costBasis: "provider_reported",
+        maximumBytesBilled: "214748364800",
+        observedBytesBilled: "4096",
+        maxRows: 50,
+      },
+    }));
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "google-patents-search/v1",
+    };
+    delete tool.durableReplayResult;
+    const settle = vi.fn(async () => ({
+      chargedCents: 2,
+      observedCents: 2,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 2,
+        replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: "op" }),
+      2,
+      expect.objectContaining({
+        kind: "tool",
+        schema: "google-patents-search/v1",
+        data: expect.objectContaining({
+          data: expect.objectContaining({
+            data: expect.objectContaining({
+              patents: [expect.objectContaining({ publicationNumber: "US-123-A1" })],
+              costFacts: {
+                costBasis: "provider_reported",
+                maximumBytesBilled: "214748364800",
+                observedBytesBilled: "4096",
+                maxRows: 50,
+              },
+            }),
+          }),
+        }),
+      }),
+      {
+        usage: {
+          currency: "USD",
+          unit: "microusd",
+          callCount: 1,
+          bytesBilled: "4096",
+          maximumBytesBilled: "214748364800",
+          chargedMicrousd: "20000",
+          upperBoundMicrousd: "20000",
+        },
+        costBasis: "provider_reported",
+      },
     );
   });
 

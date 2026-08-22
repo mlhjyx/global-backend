@@ -33,6 +33,16 @@ const SAFE_PLATFORM_PRINCIPAL = Object.freeze({
   memberships: ['execution_budget_platform_writer'],
 });
 const TEST_WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
+const PROVIDER_REPORTED_FACTS = Object.freeze({
+  usage: Object.freeze({
+    currency: 'USD' as const,
+    unit: 'microusd' as const,
+    callCount: 1,
+    chargedMicrousd: '10000',
+    upperBoundMicrousd: '30000',
+  }),
+  costBasis: 'provider_reported' as const,
+});
 const ARTIFACT_REFERENCE: GenericOperationArtifactReference = Object.freeze({
   schemaVersion: 'generic-operation-artifact-ref/v1',
   artifactId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
@@ -203,7 +213,7 @@ describe('PostgresBudgetStore', () => {
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
       estimatedCents: 3,
       replay: false,
-    }, 1, projection)).resolves.toMatchObject({
+    }, 1, projection, PROVIDER_REPORTED_FACTS)).resolves.toMatchObject({
       chargedCents: 1,
       observedCents: 1,
       receipt: {
@@ -256,7 +266,7 @@ describe('PostgresBudgetStore', () => {
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
       estimatedCents: 9,
       replay: false,
-    }, 2, projection)).resolves.not.toHaveProperty('receipt');
+    }, 2, projection)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
   });
 
   it('reconstructs receipt usage and cost basis only from explicit locked ledger facts', async () => {
@@ -300,7 +310,18 @@ describe('PostgresBudgetStore', () => {
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
       estimatedCents: 9,
       replay: false,
-    }, 2, projection)).resolves.toMatchObject({
+    }, 2, projection, {
+      usage: {
+        currency: 'USD',
+        unit: 'microusd',
+        callCount: 1,
+        inputTokens: 7,
+        outputTokens: 3,
+        chargedMicrousd: '777',
+        upperBoundMicrousd: '90000',
+      },
+      costBasis: 'token_pricing',
+    })).resolves.toMatchObject({
       receipt: {
         usage: {
           chargedMicrousd: '777',
@@ -327,6 +348,77 @@ describe('PostgresBudgetStore', () => {
     expect(migration).toContain('reserve_tool_budget_microusd_v1');
     expect(migration).toContain('settle_tool_budget_microusd_v1');
     expect(migration).not.toContain('open_authorized_tool_budget_microusd');
+    const budgetStore = await readFile(new URL('./budget-store.ts', import.meta.url), 'utf8');
+    expect(budgetStore).toContain('reserve_tool_budget_microusd_with_receipt_v1');
+    expect(budgetStore).toContain('settle_tool_budget_microusd_with_receipt_v1');
+    expect(budgetStore).not.toMatch(/SELECT \* FROM reserve_tool_budget_microusd_v1\(/);
+    expect(budgetStore).not.toMatch(/SELECT \* FROM settle_tool_budget_microusd_v1\(/);
+  });
+
+  it('persists and reconstructs explicit receipt facts on the native microusd path', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
+    });
+    const facts = {
+      usage: {
+        currency: 'USD' as const,
+        unit: 'microusd' as const,
+        callCount: 1,
+        inputTokens: 7,
+        outputTokens: 3,
+        chargedMicrousd: '777',
+        upperBoundMicrousd: '10000',
+      },
+      costBasis: 'token_pricing' as const,
+    };
+    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async (query) => {
+          queries.push(query);
+          return [{
+            charged_microusd: 777n,
+            observed_microusd: 777n,
+            reserved_microusd: 10_000n,
+            cap_variance: false,
+            status: 'SETTLED',
+            replay: false,
+            account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+            authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+            operation_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+            operation_key: 'workspace:model:taxonomy.normalize:request-1',
+            result_schema_version: projection.schemaVersion,
+            result_schema: projection.schema,
+            result_digest: projection.digest,
+            result_json: projection,
+            receipt_usage: facts.usage,
+            receipt_cost_basis: facts.costBasis,
+          }];
+        }),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    await expect(store.settleMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      estimatedMicrousd: 10_000n,
+      replay: false,
+    }, 777n, projection, facts)).resolves.toMatchObject({
+      receipt: {
+        resultSchema: 'taxonomy-code/v1',
+        usage: facts.usage,
+        costBasis: 'token_pricing',
+      },
+    });
+    expect(queries[0]?.strings?.join('')).toContain(
+      'settle_tool_budget_microusd_with_receipt_v1',
+    );
+    expect(queries[0]?.values).toContainEqual(facts.usage);
+    expect(queries[0]?.values).toContain(facts.costBasis);
   });
 
   it('reconstructs the same durable receipt for a replay reservation', async () => {

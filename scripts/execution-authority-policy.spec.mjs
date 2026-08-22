@@ -35,7 +35,15 @@ async function materializePolicyRepo(mutations = {}) {
     "apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.ts",
     "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts",
     "apps/api/src/durable-results/artifact/materializers/sanctions-download.materializer.ts",
+    "apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.spec.ts",
+    "apps/api/src/durable-results/artifact/materializers/http-get.materializer.spec.ts",
+    "apps/api/src/durable-results/artifact/materializers/sanctions-download.materializer.spec.ts",
     "apps/api/src/temporal/patents-cache.activities.ts",
+    "apps/api/src/temporal/discovery.activities.ts",
+    "apps/api/src/temporal/understanding.activities.ts",
+    "apps/api/src/sanctions/sanctions-refresh.service.ts",
+    "apps/api/src/signals/signal-ingest.service.ts",
+    "apps/api/src/intent/intent-projection.service.ts",
     "apps/api/src/temporal/patent-cache-broker-scanner.ts",
     "apps/api/src/discovery/providers/bigquery-patents.provider.ts",
     "apps/api/src/discovery/providers/public-web.provider.ts",
@@ -217,4 +225,73 @@ test("scanner catches unclassified product genericReplay seams anywhere under ap
   });
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_GENERIC_REPLAY_UNCLASSIFIED"));
+});
+
+test("scanner catches missing executable consumer imports and transaction calls", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/icp/icp.service.ts": (source) =>
+      source.replaceAll("applyDomainAckConsumerTransaction", "staticDomainAckCatalogLookup"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_CONSUMER_CALL_MISSING"));
+});
+
+test("scanner catches PUBLIC SECURITY DEFINER access and broad principal admission", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql": (source) =>
+      source
+        .replace(
+          "REVOKE ALL ON FUNCTION\n  apply_execution_domain_ack_v1",
+          "REVOKE ALL ON FUNCTION\n  missing_apply_execution_domain_ack_v1",
+        )
+        .replace(
+          "ELSIF session_user IS DISTINCT FROM 'app_user'",
+          "ELSIF session_user <> 'app_user'",
+        ),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_FUNCTION_ACL_INVALID"));
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_PRINCIPAL_INVALID"));
+});
+
+test("scanner catches caller-authored ACK strategy, artifact and ack identity", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql": (source) =>
+      source
+        .replace("operation.\"result_schema_version\"", "p_ack->>'resultStrategy'")
+        .replace("operation.\"result_json\"->>'artifactId'", "p_ack->>'artifactId'")
+        .replace("public.digest", "p_ack->>'ackId' /* public.digest */"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_DERIVATION_INVALID"));
+});
+
+test("scanner catches per-path receipt fact and old microusd wrapper regressions", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "docs/governance/durable-result-strategies.json": (source) => {
+      const manifest = JSON.parse(source);
+      delete manifest.tools[0].receiptFacts;
+      return `${JSON.stringify(manifest, null, 2)}\n`;
+    },
+    "apps/api/src/tools/budget-store.ts": (source) => source
+      .replaceAll("reserve_tool_budget_microusd_with_receipt_v1", "reserve_tool_budget_microusd_v1")
+      .replaceAll("settle_tool_budget_microusd_with_receipt_v1", "settle_tool_budget_microusd_v1"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING"));
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_MICROUSD_RECEIPT_WRAPPER_MISSING"));
+});
+
+test("scanner catches optional-hook typed projection and missing materializer tests", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/tools/tool-broker.ts": (source) => source.replace(
+      "this.projectionRegistry.project(\n          tool.durableResultStrategy.schema,\n          result,",
+      "this.projectionRegistry.project(\n          tool.durableResultStrategy.schema,\n          tool.durableReplayResult?.(result),",
+    ),
+    "apps/api/src/durable-results/artifact/materializers/http-get.materializer.spec.ts": (source) =>
+      source.replaceAll("http-get/v1", "missing-http-get/v1"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_TOOLBROKER_TYPED_PROJECTION_MISSING"));
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_ARTIFACT_MATERIALIZER_TEST_MISSING"));
 });

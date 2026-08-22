@@ -55,8 +55,14 @@ function canonical(value: unknown): string {
   )).join(',')}}`;
 }
 
-function ackRecord(domainAckKey = 'taxonomy:cpv:pump', domainRevision = '0') {
+function opaque(value: string): string {
+  return createHash('sha256').update(value.normalize('NFC')).digest('hex');
+}
+
+function ackRecord(domainAggregateId = 'taxonomy:cpv:pump', revision = '0') {
   const durableReceipt = receipt();
+  const domainAckKey = opaque(domainAggregateId);
+  const domainRevision = opaque(revision);
   const ackInput = {
     operationId: durableReceipt.operationId,
     consumer: 'TaxonomyResolver',
@@ -103,7 +109,7 @@ describe('DomainAckService', () => {
       ack: {
         consumer: 'TaxonomyResolver',
         domainAggregateType: 'TermAlias',
-        domainAckKey: 'taxonomy:cpv:pump',
+        domainAckKey: opaque('taxonomy:cpv:pump'),
         resultDigest: 'a'.repeat(64),
       },
     });
@@ -112,7 +118,7 @@ describe('DomainAckService', () => {
       value: undefined,
       ack: {
         operationId: UUID_C,
-        domainAckKey: 'taxonomy:cpv:pump',
+        domainAckKey: opaque('taxonomy:cpv:pump'),
       },
     });
     expect(apply).toHaveBeenCalledTimes(1);
@@ -161,14 +167,20 @@ describe('DomainAckService', () => {
       service.applyWithAck({ ...base, domainRevision: '1' } as never, () => apply('CPV-123')),
     ).resolves.toMatchObject({
       status: 'APPLIED',
-      ack: { domainAckKey: 'taxonomy:cpv:pump', domainRevision: '1' },
+      ack: {
+        domainAckKey: opaque('taxonomy:cpv:pump'),
+        domainRevision: opaque('1'),
+      },
     });
     await expect(
       service.applyWithAck({ ...base, domainRevision: '2' } as never, () => apply('CPV-456')),
     ).resolves.toMatchObject({
       status: 'APPLIED',
       value: { code: 'CPV-456' },
-      ack: { domainAckKey: 'taxonomy:cpv:pump', domainRevision: '2' },
+      ack: {
+        domainAckKey: opaque('taxonomy:cpv:pump'),
+        domainRevision: opaque('2'),
+      },
     });
     expect(apply).toHaveBeenCalledTimes(2);
   });
@@ -235,8 +247,8 @@ describe('DomainAckService', () => {
       ack: {
         consumer: 'EmailVerificationProvider',
         domainAggregateType: 'EmailVerification',
-        domainAckKey: 'smtp-rcpt:sha256:abc123',
-        domainRevision: '1',
+        domainAckKey: opaque('smtp-rcpt:sha256:abc123'),
+        domainRevision: opaque('1'),
       },
     });
     expect(apply).toHaveBeenCalledTimes(1);
@@ -263,7 +275,7 @@ describe('DomainAckService', () => {
     expect(migration).toContain('FORCE ROW LEVEL SECURITY');
     expect(migration).toContain('REVOKE ALL ON TABLE "execution_domain_ack" FROM PUBLIC');
     expect(migration).toContain('SECURITY DEFINER');
-    expect(migration).toContain('SET search_path = public, pg_temp');
+    expect(migration).toContain('SET search_path = pg_catalog, public');
     expect(migration).toContain('pg_advisory_xact_lock');
     expect(migration).toContain('jsonb_object_keys');
     expect(migration).toContain('FOR UPDATE');
@@ -271,13 +283,33 @@ describe('DomainAckService', () => {
     expect(migration).toContain('jsonb_typeof');
     expect(migration).toContain('DOMAIN_ACK_CONFLICT');
     expect(migration).toContain('p_reserved_microusd BIGINT');
-    expect(migration).toContain('operation."reserved_cents" * 10000');
+    expect(migration).not.toContain('operation."reserved_cents" * 10000');
     expect(migration).toContain('operation."reserved_microusd"');
+    expect(migration).not.toContain("session_user <> 'app_user'");
+    expect(migration).toContain('PERFORM assert_execution_budget_platform_writer_principal()');
+    expect(migration).toMatch(
+      /ELSIF session_user IS DISTINCT FROM 'app_user'[\s\S]*?current_setting\('role', true\) IS DISTINCT FROM 'none'[\s\S]*?current_workspace_id\(\)::text/,
+    );
+    expect(migration).toMatch(
+      /REVOKE ALL ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?FROM PUBLIC/,
+    );
+    expect(migration).toMatch(
+      /GRANT EXECUTE ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?TO app_user/,
+    );
+    expect(migration).toMatch(
+      /GRANT EXECUTE ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?TO execution_budget_platform_writer/,
+    );
+    expect(migration).not.toContain("p_ack->>'resultStrategy'");
+    expect(migration).not.toContain("p_ack->>'artifactId'");
+    expect(migration).not.toContain("p_ack->>'ackId'");
+    expect(migration).toContain('operation."result_schema_version"');
+    expect(migration).toContain("operation.\"result_json\"->>'artifactId'");
+    expect(migration).toContain('public.digest');
   });
 
   it('passes the same database transaction object into the domain mutation callback', async () => {
     const transaction = {
-      $queryRaw: vi.fn(async () => [{
+      $queryRaw: vi.fn(async (_query: unknown) => [{
         status: 'APPLIED',
         ack_json: ackRecord(),
       }]),
@@ -298,6 +330,20 @@ describe('DomainAckService', () => {
       value: { code: 'CPV-123' },
     });
     expect(apply).toHaveBeenCalledTimes(1);
+    const query = transaction.$queryRaw.mock.calls[0]?.[0] as {
+      readonly values: readonly unknown[];
+    };
+    expect(query.values).toEqual([
+      'workspace-1',
+      UUID_C,
+      'TaxonomyResolver',
+      'TermAlias',
+      opaque('taxonomy:cpv:pump'),
+      opaque('0'),
+    ]);
+    expect(query.values).not.toContainEqual(expect.objectContaining({
+      resultStrategy: expect.anything(),
+    }));
   });
 
   it('returns APPLIED from the transaction repository only after the domain callback succeeds', async () => {
@@ -358,5 +404,34 @@ describe('DomainAckService', () => {
       domainAckKey: 'taxonomy:cpv:pump',
     }, apply)).rejects.toMatchObject({ code: 'DOMAIN_ACK_CONFLICT' });
     expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('wires actual product consumers to the receipt-aware helper inside their domain transaction', async () => {
+    const paths = [
+      '../icp/icp.service.ts',
+      '../temporal/understanding.activities.ts',
+      '../temporal/discovery.activities.ts',
+      '../temporal/patents-cache.activities.ts',
+      '../sanctions/sanctions-refresh.service.ts',
+      '../signals/signal-ingest.service.ts',
+      '../intent/intent-projection.service.ts',
+    ];
+    const sources = await Promise.all(paths.map((path) => readFile(
+      new URL(path, import.meta.url),
+      'utf8',
+    )));
+
+    for (const [index, source] of sources.entries()) {
+      expect(source, paths[index]).toContain('applyDomainAckConsumerTransaction');
+      expect(source, paths[index]).toContain('durableReceipt');
+    }
+    expect(sources[0]).toContain("producerId: 'icp.design'");
+    expect(sources[0]).toContain("producerId: 'discovery.query_plan'");
+    expect(sources[1]).toContain("producerId: 'company_understanding.extract_profile'");
+    expect(sources[2]).toContain("producerId: 'discovery.qualify_fit'");
+    expect(sources[3]).toContain("producerId: 'google_patents.search'");
+    expect(sources[4]).toContain("producerId: 'sanctions.download'");
+    expect(sources[5]).toContain("producerId: 'ted.search'");
+    expect(sources[6]).toContain("producerId: 'http.get'");
   });
 });

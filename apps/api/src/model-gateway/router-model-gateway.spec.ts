@@ -135,6 +135,83 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       },
       { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
     )).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
+    expect(budgetStore.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      expect.any(Number),
+      expect.objectContaining({
+        kind: 'model',
+        schema: 'taxonomy-code/v1',
+      }),
+      {
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          upperBoundMicrousd: '400000',
+        },
+        costBasis: 'estimated_upper_bound',
+      },
+    );
+  });
+
+  it('persists explicit token-pricing receipt facts for a registered Model task', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-123' },
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 7, outputTokens: 3 },
+      callCount: 1,
+    });
+    const settle = vi.fn(async () => ({
+      chargedCents: 1,
+      observedCents: 1,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    );
+
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      expect.any(Number),
+      expect.objectContaining({ schema: 'taxonomy-code/v1' }),
+      {
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          inputTokens: 7,
+          outputTokens: 3,
+          chargedMicrousd: '10000',
+          upperBoundMicrousd: '400000',
+        },
+        costBasis: 'token_pricing',
+      },
+    );
   });
 
   it('replays a registered typed model projection without a second provider wire', async () => {
