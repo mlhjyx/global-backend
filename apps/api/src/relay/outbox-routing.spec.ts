@@ -353,6 +353,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     ] as const) {
       const ev = makeEvent({
         eventType,
+        schemaVersion: eventType === "QualifyRequested" ? 1 : 2,
         aggregateType,
         aggregateId: `agg-${eventType}`,
         publishedAt: null,
@@ -390,8 +391,10 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
   it("B 边界：AlreadyStarted 之外的错误照旧不标 published（下轮重试）", async () => {
     const ev = makeEvent({
       eventType: "CompanyProfileCreated",
+      schemaVersion: 2,
       aggregateType: "Company",
       publishedAt: null,
+      payload: { website: "https://acme.example/", executionBudget: EXECUTION_BUDGET },
     });
     const temporal = makeTemporal(async () => {
       throw new Error("temporal down");
@@ -441,6 +444,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
   it("CompanyProfileCreated preserves the immutable authority binding in workflow args", async () => {
     const ev = makeEvent({
       eventType: "CompanyProfileCreated",
+      schemaVersion: 2,
       aggregateType: "Company",
       aggregateId: "33333333-3333-4333-8333-333333333333",
       payload: {
@@ -459,6 +463,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
         args: [
           expect.objectContaining({
             workspaceId: WS,
+            executionContractVersion: 2,
             executionBudget: EXECUTION_BUDGET,
           }),
         ],
@@ -469,8 +474,8 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
   it.each([
     ["CompanyProfileCreated", "Company", { website: "https://acme.example/" }],
     ["DiscoveryRunRequested", "DiscoveryRun", { planId: "plan-1", icpId: "icp-1" }],
-  ])("%s fails closed instead of starting a workflow without authority", async (eventType, aggregateType, payload) => {
-    const ev = makeEvent({ eventType, aggregateType, payload });
+  ])("%s parks the legacy command instead of retrying forever without authority", async (eventType, aggregateType, payload) => {
+    const ev = makeEvent({ eventType, aggregateType, schemaVersion: 1, payload });
     const temporal = makeTemporal();
     const { db } = makeDb([ev]);
 
@@ -478,13 +483,20 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
 
     expect(temporal.client.workflow.start).not.toHaveBeenCalled();
     expect(ev.publishedAt).toBeNull();
+    expect(ev.parkedAt).toBeInstanceOf(Date);
   });
 
   it("internal command dispatch 失败 → 不标 published（下轮重试）", async () => {
     const ev = makeEvent({
       eventType: "DiscoveryRunRequested",
+      schemaVersion: 2,
       aggregateType: "DiscoveryRun",
       aggregateId: "run-1",
+      payload: {
+        planId: "plan-1",
+        icpId: "icp-1",
+        executionBudget: DISCOVERY_EXECUTION_BUDGET,
+      },
     });
     const { db } = makeDb([ev]);
     const temporal = makeTemporal(async () => {

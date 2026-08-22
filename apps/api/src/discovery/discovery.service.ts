@@ -37,6 +37,7 @@ import {
   type GuessEmailsHttpRequestBody,
   type VerifyContactPointHttpRequestBody,
 } from '../execution-budget/execution-budget-request-scope';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -103,6 +104,7 @@ export class DiscoveryService {
         data: {
           workspaceId: ctx.workspaceId,
           eventType: 'DiscoveryRunRequested',
+          schemaVersion: 2,
           aggregateType: 'DiscoveryRun',
           aggregateId: run.id,
           payload: {
@@ -274,11 +276,10 @@ export class DiscoveryService {
       );
     const accountKey = binding.accountKey;
     const budgets = this.budgets();
-    await budgets.openAuthorized({
+    await budgets.attestAuthorized({
       authorityId: binding.authorityId,
       scopeKey: binding.scopeKey,
       accountKey,
-      replayScope: true,
     });
     for (const adapter of loaded.adapters) {
         try {
@@ -450,11 +451,10 @@ export class DiscoveryService {
     }[] = [];
     const accountKey = binding.accountKey;
     const budgets = this.budgets();
-    await budgets.openAuthorized({
+    await budgets.attestAuthorized({
       authorityId: binding.authorityId,
       scopeKey: binding.scopeKey,
       accountKey,
-      replayScope: true,
     });
     for (const c of targets) {
         const authorized = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
@@ -704,11 +704,10 @@ export class DiscoveryService {
       };
       const accountKey = binding.accountKey;
       const budgets = this.budgets();
-      await budgets.openAuthorized({
+      await budgets.attestAuthorized({
         authorityId: binding.authorityId,
         scopeKey: binding.scopeKey,
         accountKey,
-        replayScope: true,
       });
       verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
       providerKey = loaded.adapter.key;
@@ -1057,15 +1056,6 @@ export class DiscoveryService {
   listProviders(ctx: RequestContext) {
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) => tx.dataProvider.findMany({ orderBy: { key: 'asc' } }));
   }
-}
-
-function isExecutionControlError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: unknown }).code;
-  return (
-    typeof code === 'string' &&
-    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'))
-  );
 }
 
 function assertSameSuppressionCommand(

@@ -359,6 +359,38 @@ describe('PostgresBudgetStore', () => {
     ).toContain('open_authorized_tool_budget_v1');
   });
 
+  it('attests an existing authority account without calling the holder-incrementing open function', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{
+      account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+      generation: 1,
+      authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      authorized_cap_microusd: 1_000_000n,
+    }]);
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({ $queryRaw: queryRaw } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+
+    const input = {
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: TEST_WORKSPACE_ID,
+      accountKey: 'icp:design:req',
+    };
+    const retries = await Promise.all(
+      Array.from({ length: 20 }, () => store.attestAuthorized(input)),
+    );
+    expect(retries).toHaveLength(20);
+    expect(retries[0]).toMatchObject({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      generation: 1,
+    });
+
+    const sql = (queryRaw.mock.calls[0]?.[0] as { strings?: readonly string[] }).strings?.join('') ?? '';
+    expect(sql).toContain('attest_authorized_tool_budget_v1');
+    expect(sql).not.toContain('open_authorized_tool_budget_v1');
+    expect(queryRaw).toHaveBeenCalledTimes(20);
+  });
+
   it('rejects an unsafe platform principal before authorized open', async () => {
     const queryRaw = vi.fn().mockResolvedValueOnce([{
       ...SAFE_PLATFORM_PRINCIPAL,

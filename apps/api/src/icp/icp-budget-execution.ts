@@ -8,11 +8,10 @@ export async function executeIcpBudgetedTask<Output>(input: {
   binding: ExecutionBudgetBinding;
   execute: (context: Pick<AiContext, 'runId' | 'genericReplay'>) => Promise<ModelResult<Output>>;
 }): Promise<ModelResult<Output>> {
-  await input.budgetStore.openAuthorized({
+  await input.budgetStore.attestAuthorized({
     authorityId: input.binding.authorityId,
     scopeKey: input.binding.scopeKey,
     accountKey: input.binding.accountKey,
-    replayScope: true,
   });
   return input.execute({
       runId: input.binding.accountKey,

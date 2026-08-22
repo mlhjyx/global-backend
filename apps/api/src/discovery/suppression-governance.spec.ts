@@ -543,7 +543,7 @@ describe('Suppression governance', () => {
     };
     const budgetStore = {
       open: vi.fn(async () => undefined),
-      openAuthorized: vi.fn(async () => undefined),
+      attestAuthorized: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
     };
     const service = new DiscoveryService(
@@ -556,11 +556,10 @@ describe('Suppression governance', () => {
     const result = await service.verifyContactPoint(CTX, point.id);
 
     expect(verifyEmail).toHaveBeenCalledTimes(1);
-    expect(budgetStore.openAuthorized).toHaveBeenCalledWith({
+    expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({
       authorityId: '44444444-4444-4444-8444-444444444444',
       scopeKey: WORKSPACE_ID,
       accountKey: VERIFY_ACCOUNT_KEY,
-      replayScope: true,
     });
     expect(verifyEmail.mock.calls[0]?.[1]).toMatchObject({ runId: VERIFY_ACCOUNT_KEY });
     expect(budgetStore.open).not.toHaveBeenCalled();

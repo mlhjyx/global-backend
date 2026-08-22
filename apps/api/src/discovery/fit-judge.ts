@@ -5,6 +5,7 @@ import { BudgetExceededError } from '../tools/budget';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -164,7 +165,11 @@ export async function judgeFitCompany(
   } catch (err) {
     // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
     // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
-    if (err instanceof BudgetExceededError || err instanceof BudgetOperationReplayError) throw err;
+    if (
+      err instanceof BudgetExceededError ||
+      err instanceof BudgetOperationReplayError ||
+      isExecutionControlError(err)
+    ) throw err;
     return null;
   }
   const verdict = (

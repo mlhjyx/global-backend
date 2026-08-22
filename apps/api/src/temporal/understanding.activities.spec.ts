@@ -8,7 +8,7 @@ import { createUnderstandingActivities } from './understanding.activities';
 
 function budgetStoreSpies() {
   const open = vi.fn(async () => undefined);
-  const openAuthorized = vi.fn(async () => ({
+  const attestAuthorized = vi.fn(async () => ({
     accountId: '40000000-0000-4000-8000-000000000004',
     authorityId: '20000000-0000-4000-8000-000000000002',
     authorizedCapMicrousd: 1_000_000n,
@@ -17,9 +17,9 @@ function budgetStoreSpies() {
   const close = vi.fn(async () => undefined);
   return {
     open,
-    openAuthorized,
+    attestAuthorized,
     close,
-    store: { open, openAuthorized, close } as unknown as BudgetStore,
+    store: { open, attestAuthorized, close } as unknown as BudgetStore,
   };
 }
 
@@ -35,6 +35,7 @@ const UNDERSTANDING_BINDING = Object.freeze({
 });
 const AUTHORITY_ARGS = Object.freeze({
   workspaceId: UNDERSTANDING_BINDING.scopeKey,
+  executionContractVersion: 2 as const,
   executionBudget: UNDERSTANDING_BINDING,
 });
 
@@ -107,14 +108,14 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     await acts.crawlWebsite({
       workspaceId: UNDERSTANDING_BINDING.scopeKey,
       website: 'https://acme.example/',
+      executionContractVersion: 2,
       executionBudget: UNDERSTANDING_BINDING,
     });
 
-    expect(budget.openAuthorized).toHaveBeenCalledWith({
+    expect(budget.attestAuthorized).toHaveBeenCalledWith({
       authorityId: UNDERSTANDING_BINDING.authorityId,
       scopeKey: UNDERSTANDING_BINDING.scopeKey,
       accountKey: UNDERSTANDING_BINDING.accountKey,
-      replayScope: true,
     });
     expect(budget.open).not.toHaveBeenCalled();
     expect(budget.close).not.toHaveBeenCalled();
@@ -143,7 +144,10 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
         workspaceId: UNDERSTANDING_BINDING.scopeKey,
         website: 'https://acme.example/',
       } as never),
-    ).rejects.toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+    ).rejects.toMatchObject({
+      type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      nonRetryable: true,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(budget.open).not.toHaveBeenCalled();
   });
@@ -187,13 +191,12 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     });
 
     const accountKey = UNDERSTANDING_BINDING.accountKey;
-    expect(budget.openAuthorized).toHaveBeenCalledTimes(5);
-    for (const [input] of budget.openAuthorized.mock.calls) {
+    expect(budget.attestAuthorized).toHaveBeenCalledTimes(5);
+    for (const [input] of budget.attestAuthorized.mock.calls) {
       expect(input).toEqual({
         authorityId: UNDERSTANDING_BINDING.authorityId,
         scopeKey: UNDERSTANDING_BINDING.scopeKey,
         accountKey,
-        replayScope: true,
       });
     }
     expect(budget.open).not.toHaveBeenCalled();

@@ -111,6 +111,12 @@ export interface BudgetStore {
     accountKey: string;
     replayScope?: boolean;
   }): Promise<BudgetAccountAuthorization>;
+  /** Read-only verification of an account opened by HTTP/schedule admission. */
+  attestAuthorized(input: {
+    authorityId: string;
+    scopeKey: string;
+    accountKey: string;
+  }): Promise<BudgetAccountAuthorization>;
   reserve(input: BudgetReservationRequest): Promise<BudgetReservation>;
   settle(
     reservation: BudgetReservation,
@@ -227,6 +233,10 @@ export class UnavailableBudgetStore implements BudgetStore {
     return this.unavailable();
   }
 
+  async attestAuthorized(): Promise<BudgetAccountAuthorization> {
+    return this.unavailable();
+  }
+
   async reserve(): Promise<BudgetReservation> {
     return this.unavailable();
   }
@@ -289,6 +299,12 @@ export class InMemoryBudgetStoreAdapter implements BudgetStore {
   }
 
   async openAuthorized(): Promise<BudgetAccountAuthorization> {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    );
+  }
+
+  async attestAuthorized(): Promise<BudgetAccountAuthorization> {
     throw new ExecutionBudgetGrantError(
       'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
     );
@@ -419,6 +435,33 @@ type AuthorizedOpenRow = {
   authorized_cap_microusd: bigint;
 };
 
+function parseBudgetAccountAuthorization(
+  rows: readonly AuthorizedOpenRow[],
+  authorityId: string,
+): BudgetAccountAuthorization {
+  const row = rows[0];
+  if (
+    rows.length !== 1 ||
+    !row ||
+    !isExecutionBudgetUuid(row.account_id) ||
+    !isExecutionBudgetUuid(row.authority_id) ||
+    row.authority_id !== authorityId ||
+    !Number.isSafeInteger(row.generation) ||
+    row.generation < 1 ||
+    typeof row.authorized_cap_microusd !== 'bigint' ||
+    row.authorized_cap_microusd < 1n
+  ) {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+    );
+  }
+  return {
+    accountId: row.account_id,
+    authorityId: row.authority_id,
+    authorizedCapMicrousd: row.authorized_cap_microusd,
+    generation: row.generation,
+  };
+}
 
 function assertKey(name: string, value: string): void {
   if (!value || value.length > MAX_KEY_LENGTH || [...value].some((character) => character.charCodeAt(0) < 32)) {
@@ -551,28 +594,7 @@ export class PostgresBudgetStore implements BudgetStore {
           )`,
         ),
       );
-      const row = rows[0];
-      if (
-        rows.length !== 1 ||
-        !row ||
-        !isExecutionBudgetUuid(row.account_id) ||
-        !isExecutionBudgetUuid(row.authority_id) ||
-        row.authority_id !== input.authorityId ||
-        !Number.isSafeInteger(row.generation) ||
-        row.generation < 1 ||
-        typeof row.authorized_cap_microusd !== 'bigint' ||
-        row.authorized_cap_microusd < 1n
-      ) {
-        throw new ExecutionBudgetGrantError(
-          'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-        );
-      }
-      return {
-        accountId: row.account_id,
-        authorityId: row.authority_id,
-        authorizedCapMicrousd: row.authorized_cap_microusd,
-        generation: row.generation,
-      };
+      return parseBudgetAccountAuthorization(rows, input.authorityId);
     } catch (error) {
       if (
         isTrustedExecutionBudgetDatabaseMarker(
@@ -582,6 +604,28 @@ export class PostgresBudgetStore implements BudgetStore {
       ) {
         throw new BudgetUnsettledOperationsError(input.accountKey);
       }
+      throw mapExecutionBudgetPersistenceError(error);
+    }
+  }
+
+  async attestAuthorized(input: {
+    authorityId: string;
+    scopeKey: string;
+    accountKey: string;
+  }): Promise<BudgetAccountAuthorization> {
+    assertExecutionBudgetScopeKey(input.scopeKey, { allowPlatform: true });
+    assertExecutionBudgetAuthorityId(input.authorityId);
+    assertKey('accountKey', input.accountKey);
+    try {
+      const rows = await this.inAuthorityScope(input.scopeKey, (tx) =>
+        tx.$queryRaw<AuthorizedOpenRow[]>(
+          Prisma.sql`SELECT * FROM attest_authorized_tool_budget_v1(
+            ${input.scopeKey}, ${input.authorityId}::uuid, ${input.accountKey}
+          )`,
+        ),
+      );
+      return parseBudgetAccountAuthorization(rows, input.authorityId);
+    } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }
   }

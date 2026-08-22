@@ -8,7 +8,7 @@ describe('ICP product model budget execution', () => {
     const accountKey = `icp.design:company:30000000-0000-4000-8000-000000000003:${requestSha256}`;
     const budgetStore = {
       open: vi.fn(async () => { order.push('legacy-open'); }),
-      openAuthorized: vi.fn(async () => { order.push('authority-open'); }),
+      attestAuthorized: vi.fn(async () => { order.push('authority-attest'); }),
       close: vi.fn(async () => { order.push('legacy-close'); }),
     };
     const execute = vi.fn(async (context) => {
@@ -34,14 +34,13 @@ describe('ICP product model budget execution', () => {
       },
       execute,
     })).resolves.toMatchObject({ data: { name: 'ICP', weight: 0.75 } });
-    expect(budgetStore.openAuthorized).toHaveBeenCalledWith({
+    expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({
       authorityId: '20000000-0000-4000-8000-000000000002',
       scopeKey: '10000000-0000-4000-8000-000000000001',
       accountKey,
-      replayScope: true,
     });
     expect(budgetStore.open).not.toHaveBeenCalled();
     expect(budgetStore.close).not.toHaveBeenCalled();
-    expect(order).toEqual(['authority-open', 'model']);
+    expect(order).toEqual(['authority-attest', 'model']);
   });
 });

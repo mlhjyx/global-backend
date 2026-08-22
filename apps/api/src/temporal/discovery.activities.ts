@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
@@ -16,7 +17,6 @@ import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import { BudgetExceededError } from '../tools/budget';
 import {
-  BudgetOperationReplayError,
   type BudgetStore,
   UnavailableBudgetStore,
 } from '../tools/budget-store';
@@ -31,18 +31,21 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
   runId: string;
   planId: string;
   icpId: string;
-  executionBudget: ExecutionBudgetBinding;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
 }
 
 type DiscoveryActivityInput = Readonly<{
   workspaceId: string;
-  executionBudget: ExecutionBudgetBinding;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
 }>;
 
 export interface PlanQuery {
@@ -79,16 +82,24 @@ export function createDiscoveryActivities(deps: {
   const ensureRunBudget = async (
     args: DiscoveryActivityInput,
   ): Promise<ExecutionBudgetBinding> => {
-    const binding = parseExecutionBudgetBinding(args.executionBudget, {
-      scopeKey: args.workspaceId,
-      purpose: 'discovery.run',
-      subjectType: 'discovery_run',
-    });
-    await budgets.openAuthorized({
+    let binding: ExecutionBudgetBinding;
+    try {
+      if (args.executionContractVersion !== 2) throw new Error('invalid version');
+      binding = parseExecutionBudgetBinding(args.executionBudget, {
+        scopeKey: args.workspaceId,
+        purpose: 'discovery.run',
+        subjectType: 'discovery_run',
+      });
+    } catch {
+      throw ApplicationFailure.nonRetryable(
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      );
+    }
+    await budgets.attestAuthorized({
       authorityId: binding.authorityId,
       scopeKey: binding.scopeKey,
       accountKey: binding.accountKey,
-      replayScope: true,
     });
     return binding;
   };
@@ -99,20 +110,16 @@ export function createDiscoveryActivities(deps: {
 
   return {
     /**
-     * Compatibility activity at the start of an existing workflow history.
-     * `force` drops stale holder references only. PostgreSQL preserves every
-     * reservation and refuses the next open while any operation is unresolved,
-     * so a worker crash can never turn an unknown physical call into a retry.
+     * Frozen compatibility activity name/shape for pre-authority histories.
+     * Replayed completions remain deterministic; a still-pending legacy command
+     * has no v2 envelope and is parked non-retryably by ensureRunBudget.
      */
     async resetRunBudget(args: DiscoveryActivityInput & { runId: string }): Promise<void> {
-      parseExecutionBudgetBinding(args.executionBudget, {
-        scopeKey: args.workspaceId,
-        purpose: 'discovery.run',
-        subjectType: 'discovery_run',
-      });
+      await ensureRunBudget(args);
     },
 
     async loadPlanQueries(args: DiscoveryActivityInput & { planId: string }): Promise<{ queries: PlanQuery[] }> {
+      await ensureRunBudget(args);
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: args.planId },
         });
@@ -302,6 +309,7 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
     }): Promise<{ companies: number; suppressed: number }> {
+      await ensureRunBudget(args);
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         // Canonical materialization participates in the same linearization
         // protocol as suppression creation and downstream PII commits. This
@@ -539,6 +547,7 @@ export function createDiscoveryActivities(deps: {
       provider: string | null;
       budgetTruncated: boolean;
     }> {
+      const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
       );
@@ -583,7 +592,6 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
-      const binding = await ensureRunBudget(args);
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
@@ -658,6 +666,7 @@ export function createDiscoveryActivities(deps: {
       provider: string | null;
       budgetTruncated: boolean;
     }> {
+      const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
       );
@@ -712,7 +721,6 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
-      const binding = await ensureRunBudget(args);
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
@@ -854,6 +862,7 @@ export function createDiscoveryActivities(deps: {
       runId: string;
       icpId: string;
     }): Promise<{ candidates: number; enqueued: number }> {
+      await ensureRunBudget(args);
       // 🔴 P1-1 kill-switch（Codex PR #93）：google_patents 非 ENABLED（seed=DISABLED，未签 LIA/DPIA）→ 不 enqueue。
       // PII 物化的真正闸在 refreshPatentCache（DISABLED 时不扫）；此处止住队列积压——「DISABLED=不物化」不变式
       // 的前哨（也免翻 ENABLED 瞬间冷启动把历史积压一次性全扫）。data_provider 平台表无 RLS，app_user 有 SELECT。
@@ -914,6 +923,7 @@ export function createDiscoveryActivities(deps: {
       status: 'DONE' | 'PARTIAL' | 'FAILED';
       stats: Record<string, unknown>;
     }): Promise<void> {
+      await ensureRunBudget(args);
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         await tx.discoveryRun.update({
           where: { id: args.runId },
@@ -964,11 +974,3 @@ export function createDiscoveryActivities(deps: {
 }
 
 export type DiscoveryActivities = ReturnType<typeof createDiscoveryActivities>;
-
-function isExecutionControlError(error: unknown): boolean {
-  if (error instanceof BudgetOperationReplayError) return true;
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' &&
-    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
-}

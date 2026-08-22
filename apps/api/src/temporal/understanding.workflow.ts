@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { ApplicationFailure, patched, proxyActivities } from '@temporalio/workflow';
 import type { UnderstandingActivities } from './understanding.activities';
 import {
   parseExecutionBudgetBinding,
@@ -27,7 +27,18 @@ export interface UnderstandingWorkflowInput {
   workspaceId: string;
   companyId: string;
   website: string;
-  executionBudget: ExecutionBudgetBinding;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
+}
+
+export const UNDERSTANDING_AUTHORITY_PATCH = 'understanding-workspace-authority-v2';
+const EXECUTION_CONTRACT_VERSION = 2 as const;
+
+function invalidAuthorityInput(): never {
+  throw ApplicationFailure.nonRetryable(
+    'EXECUTION_BUDGET_WORKFLOW_INPUT_INVALID',
+    'EXECUTION_BUDGET_WORKFLOW_INPUT_INVALID',
+  );
 }
 
 /**
@@ -41,16 +52,34 @@ export interface UnderstandingWorkflowInput {
  */
 export async function understandingWorkflow(input: UnderstandingWorkflowInput): Promise<void> {
   const { workspaceId, companyId, website } = input;
-  const executionBudget = parseExecutionBudgetBinding(input.executionBudget, {
-    scopeKey: workspaceId,
-    purpose: 'understanding.run',
-    subjectType: 'company',
-  });
-  await dbActs.setStatus({ companyId, workspaceId, executionBudget, status: 'ENRICHING' });
+  const usesAuthority = patched(UNDERSTANDING_AUTHORITY_PATCH);
+  let executionBudget: ExecutionBudgetBinding | undefined;
+  if (usesAuthority) {
+    if (input.executionContractVersion !== EXECUTION_CONTRACT_VERSION) {
+      invalidAuthorityInput();
+    }
+    try {
+      executionBudget = parseExecutionBudgetBinding(input.executionBudget, {
+        scopeKey: workspaceId,
+        purpose: 'understanding.run',
+        subjectType: 'company',
+      });
+    } catch {
+      invalidAuthorityInput();
+    }
+  }
+  const authorityArgs = usesAuthority
+    ? { executionContractVersion: EXECUTION_CONTRACT_VERSION, executionBudget: executionBudget! }
+    : {};
+  await dbActs.setStatus({ companyId, workspaceId, ...authorityArgs, status: 'ENRICHING' });
 
-  const home = await crawlActs.crawlWebsite({ workspaceId, website, executionBudget });
-  const subUrls = await dbActs.selectSubpages({ workspaceId, executionBudget, markdown: home.text, website });
-  const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, executionBudget, urls: subUrls });
+  const home = await crawlActs.crawlWebsite({ workspaceId, website, ...authorityArgs });
+  const subUrls = await dbActs.selectSubpages({
+    markdown: home.text,
+    website,
+    ...(usesAuthority ? { workspaceId, ...authorityArgs } : {}),
+  });
+  const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, urls: subUrls, ...authorityArgs });
   const pages = [home, ...subPages];
 
   // Per-page extraction so every Evidence row points at the page it came from.
@@ -59,22 +88,22 @@ export async function understandingWorkflow(input: UnderstandingWorkflowInput): 
     Promise.all(
       pages.map(async (p) => ({
         url: p.url,
-        claims: (await modelActs.extractClaims({ workspaceId, executionBudget, text: p.text })).claims,
+        claims: (await modelActs.extractClaims({ workspaceId, text: p.text, ...authorityArgs })).claims,
       })),
     ),
     Promise.all(
       pages.map(async (p) => ({
         url: p.url,
-        offerings: (await modelActs.extractOfferings({ workspaceId, executionBudget, text: p.text })).offerings,
+        offerings: (await modelActs.extractOfferings({ workspaceId, text: p.text, ...authorityArgs })).offerings,
       })),
     ),
   ]);
 
-  await dbActs.persistClaims({ workspaceId, companyId, website, executionBudget, pages: claimPages });
-  await dbActs.persistOfferings({ workspaceId, companyId, website, executionBudget, pages: offeringPages });
-  await dbActs.persistPublicContacts({ workspaceId, companyId, website, executionBudget, pages });
-  await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, executionBudget, text: home.text });
+  await dbActs.persistClaims({ workspaceId, companyId, website, pages: claimPages, ...authorityArgs });
+  await dbActs.persistOfferings({ workspaceId, companyId, website, pages: offeringPages, ...authorityArgs });
+  await dbActs.persistPublicContacts({ workspaceId, companyId, website, pages, ...authorityArgs });
+  await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, text: home.text, ...authorityArgs });
 
   // 5.2.7：理解完成 ≠ 可用。落 REVIEW，等待人工审批（Claim 审批达阈值或显式 confirm）→ ACTIVE。
-  await dbActs.setStatus({ companyId, workspaceId, executionBudget, status: 'REVIEW' });
+  await dbActs.setStatus({ companyId, workspaceId, ...authorityArgs, status: 'REVIEW' });
 }

@@ -228,13 +228,7 @@ beforeEach(() => judgeFitMock.mockReset());
 
 const testBudgetStore = () => {
   const store = new InMemoryBudgetStoreAdapter(new BudgetLedger());
-  store.openAuthorized = vi.fn(async (input) => {
-    await store.open({
-      workspaceId: input.scopeKey,
-      accountKey: input.accountKey,
-      capCents: 100,
-      replayScope: true,
-    });
+  store.attestAuthorized = vi.fn(async (input) => {
     return {
       accountId: '30000000-0000-4000-8000-000000000003',
       authorityId: input.authorityId,
@@ -249,6 +243,7 @@ const runArgs = (icpId: string) => ({
   workspaceId: WS,
   runId: RUN,
   icpId,
+  executionContractVersion: 2 as const,
   executionBudget: RUN_BINDING,
 });
 

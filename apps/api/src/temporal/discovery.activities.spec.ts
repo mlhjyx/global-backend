@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
-import { BudgetLedger } from '../tools/budget';
+import { BudgetExceededError, BudgetLedger } from '../tools/budget';
 import {
   BudgetOperationReplayError,
   BudgetUnsettledOperationsError,
@@ -88,8 +88,10 @@ const DISCOVERY_BINDING = Object.freeze({
 
 function authorityBudgetStore(): BudgetStore {
   const store = new InMemoryBudgetStoreAdapter(budgetLedger);
-  store.openAuthorized = vi.fn(async (input) => {
-    budgetLedger.open(input.accountKey, 100);
+  if (!Number.isFinite(budgetLedger.remainingCents(DISCOVERY_BINDING.accountKey))) {
+    budgetLedger.open(DISCOVERY_BINDING.accountKey, 100);
+  }
+  store.attestAuthorized = vi.fn(async (input) => {
     return {
       accountId: '40000000-0000-4000-8000-000000000004',
       authorityId: input.authorityId,
@@ -104,6 +106,7 @@ function discoveryArgs<T extends object>(runId: string, extra: T) {
   return {
     workspaceId: DISCOVERY_BINDING.scopeKey,
     runId,
+    executionContractVersion: 2 as const,
     executionBudget: DISCOVERY_BINDING,
     ...extra,
   };
@@ -157,7 +160,7 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
   it('uses the relayed authority account and rejects missing binding before provider execution', async () => {
     const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
     const open = vi.fn(async () => undefined);
-    const openAuthorized = vi.fn(async () => ({
+    const attestAuthorized = vi.fn(async () => ({
       accountId: '40000000-0000-4000-8000-000000000004',
       authorityId: DISCOVERY_BINDING.authorityId,
       authorizedCapMicrousd: 1_000_000n,
@@ -168,7 +171,7 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     ]);
     deps.budgetStore = {
       open,
-      openAuthorized,
+      attestAuthorized,
       status: vi.fn(async () => ({ remainingCents: 100, exhausted: false, open: true })),
     } as never;
     const acts = createDiscoveryActivities(deps);
@@ -177,14 +180,14 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       workspaceId: DISCOVERY_BINDING.scopeKey,
       runId: 'run-row-id',
       query: QUERY,
+      executionContractVersion: 2,
       executionBudget: DISCOVERY_BINDING,
     });
 
-    expect(openAuthorized).toHaveBeenCalledWith({
+    expect(attestAuthorized).toHaveBeenCalledWith({
       authorityId: DISCOVERY_BINDING.authorityId,
       scopeKey: DISCOVERY_BINDING.scopeKey,
       accountKey: DISCOVERY_BINDING.accountKey,
-      replayScope: true,
     });
     expect(open).not.toHaveBeenCalled();
     expect(discoverCompanies).toHaveBeenCalledWith(
@@ -203,7 +206,10 @@ describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         runId: 'run-row-id',
         query: QUERY,
       } as never),
-    ).rejects.toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+    ).rejects.toMatchObject({
+      type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      nonRetryable: true,
+    });
     expect(discoverCompanies).not.toHaveBeenCalled();
   });
 
@@ -273,9 +279,11 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
         callback(tx),
     };
-    const activities = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
+    const activities = createDiscoveryActivities({
+      prisma, providers: {}, gateway: {}, budgetStore: authorityBudgetStore(),
+    } as never);
 
-    await expect(activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' })).resolves.toEqual({
+    await expect(activities.canonicalizeRun(discoveryArgs('run-1', {}))).resolves.toEqual({
       companies: 0,
       suppressed: 0,
     });
@@ -330,9 +338,10 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       prisma,
       providers: {},
       gateway: {},
+      budgetStore: authorityBudgetStore(),
     } as never);
 
-    await activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' });
+    await activities.canonicalizeRun(discoveryArgs('run-1', {}));
 
     expect(order).toEqual(['lock', 'suppression-read', 'canonical-write']);
   });
@@ -374,9 +383,11 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
       withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
         callback(tx),
     };
-    const activities = createDiscoveryActivities({ prisma, providers: {}, gateway: {} } as never);
+    const activities = createDiscoveryActivities({
+      prisma, providers: {}, gateway: {}, budgetStore: authorityBudgetStore(),
+    } as never);
 
-    await expect(activities.canonicalizeRun({ workspaceId: 'ws-1', runId: 'run-1' })).resolves.toEqual({
+    await expect(activities.canonicalizeRun(discoveryArgs('run-1', {}))).resolves.toEqual({
       companies: 0,
       suppressed: 1,
     });
@@ -388,11 +399,40 @@ describe('canonicalizeRun —— suppression authority 线性化', () => {
 });
 
 describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知调用不重试', () => {
-  it('富集源打穿 run 预算并被 fail-safe 吞掉 → enrichRun.budgetTruncated=true（不假 DONE）', async () => {
+  it.each(['enrichRun', 'enrichSignalsRun'] as const)(
+    '%s parks a pending legacy activity before provider routing or early success',
+    async (activityName) => {
+      const routeEnrichment = vi.fn(async () => []);
+      const routeSignalEnrichment = vi.fn(async () => []);
+      const withWorkspace = vi.fn(async (_workspaceId: string, callback: (tx: unknown) => Promise<unknown>) =>
+        callback({}),
+      );
+      const activities = createDiscoveryActivities({
+        prisma: { withWorkspace } as never,
+        providers: { routeEnrichment, routeSignalEnrichment } as never,
+        gateway: {} as never,
+        budgetStore: authorityBudgetStore(),
+      });
+
+      await expect(activities[activityName]({
+        workspaceId: DISCOVERY_BINDING.scopeKey,
+        runId: 'legacy-run',
+        icpId: 'icp-1',
+      } as never)).rejects.toMatchObject({
+        type: 'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        nonRetryable: true,
+      });
+      expect(withWorkspace).not.toHaveBeenCalled();
+      expect(routeEnrichment).not.toHaveBeenCalled();
+      expect(routeSignalEnrichment).not.toHaveBeenCalled();
+    },
+  );
+
+  it('富集源预算控制失败上抛，不降级为 PARTIAL', async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
     const acts = createDiscoveryActivities(deps);
-    const r = await acts.enrichRun(discoveryArgs('run-enrich-x', { icpId: 'icp-1' }));
-    expect(r.budgetTruncated).toBe(true);
+    await expect(acts.enrichRun(discoveryArgs('run-enrich-x', { icpId: 'icp-1' })))
+      .rejects.toBeInstanceOf(BudgetExceededError);
   });
 
   it('富集正常 → enrichRun.budgetTruncated=false', async () => {
@@ -402,11 +442,11 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
     expect(r.budgetTruncated).toBe(false);
   });
 
-  it('信号富集源打穿 run 预算并被 fail-safe 吞掉 → enrichSignalsRun.budgetTruncated=true（与 enrichRun 对称）', async () => {
+  it('信号富集预算控制失败上抛，不降级为 best-effort', async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
     const acts = createDiscoveryActivities(deps);
-    const r = await acts.enrichSignalsRun(discoveryArgs('run-signal-x', { icpId: 'icp-1' }));
-    expect(r.budgetTruncated).toBe(true);
+    await expect(acts.enrichSignalsRun(discoveryArgs('run-signal-x', { icpId: 'icp-1' })))
+      .rejects.toBeInstanceOf(BudgetExceededError);
   });
 
   it('authority workflow compatibility activity never closes a legacy run account', async () => {
@@ -421,14 +461,14 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
 
   it('propagates authority account open failures before provider execution', async () => {
     const close = vi.fn(async () => undefined);
-    const openAuthorized = vi.fn(async () => {
+    const attestAuthorized = vi.fn(async () => {
       throw new BudgetUnsettledOperationsError('run-unknown');
     });
     const adapter = vi.fn(async () => ({ records: [], costCents: 0 }));
     const deps = makeDeps([{ ...okAdapter('public-web', []), discoverCompanies: adapter }]);
     deps.budgetStore = {
       open: vi.fn(),
-      openAuthorized,
+      attestAuthorized,
       close,
       reserve: vi.fn(),
       settle: vi.fn(),
@@ -472,9 +512,11 @@ describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
         throw new Error('DISABLED 时绝不应查公司表');
       },
     };
-    const deps = { prisma, providers: {}, gateway: {} } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+    const deps = {
+      prisma, providers: {}, gateway: {}, budgetStore: authorityBudgetStore(),
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
     const acts = createDiscoveryActivities(deps);
-    const res = await acts.enqueuePatentLookupsForRun({ workspaceId: 'ws', runId: 'run', icpId: 'icp' });
+    const res = await acts.enqueuePatentLookupsForRun(discoveryArgs('run', { icpId: 'icp' }));
     expect(res).toEqual({ candidates: 0, enqueued: 0 });
   });
 
@@ -490,9 +532,11 @@ describe('enqueuePatentLookupsForRun · P1-1 kill-switch', () => {
       withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> => fn(tx),
       patentLookupRequest: { upsert: async ({ create }: { create: unknown }) => { upserts.push(create); return {}; } },
     };
-    const deps = { prisma, providers: {}, gateway: {} } as unknown as Parameters<typeof createDiscoveryActivities>[0];
+    const deps = {
+      prisma, providers: {}, gateway: {}, budgetStore: authorityBudgetStore(),
+    } as unknown as Parameters<typeof createDiscoveryActivities>[0];
     const acts = createDiscoveryActivities(deps);
-    const res = await acts.enqueuePatentLookupsForRun({ workspaceId: 'ws', runId: 'run', icpId: 'icp' });
+    const res = await acts.enqueuePatentLookupsForRun(discoveryArgs('run', { icpId: 'icp' }));
     expect(res).toEqual({ candidates: 1, enqueued: 1 });
     expect(upserts).toHaveLength(1);
   });

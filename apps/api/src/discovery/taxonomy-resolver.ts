@@ -11,6 +11,7 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 export type TaxonomyResolveOptions = {
@@ -161,7 +162,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`alias sediment failed: ${String(e).slice(0, 120)}`));
       return node;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -228,7 +229,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`cpv alias sediment failed: ${String(e).slice(0, 120)}`));
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -291,7 +292,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`naics alias sediment failed: ${String(e).slice(0, 120)}`));
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -358,7 +359,7 @@ export class TaxonomyResolver {
         .catch((e) => this.logger.warn(`fda alias sediment failed: ${String(e).slice(0, 120)}`));
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isBudgetControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -389,11 +390,10 @@ export class TaxonomyResolver {
       if (runId !== binding.accountKey) {
         throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
       }
-      await budgets.openAuthorized({
+      await budgets.attestAuthorized({
         authorityId: binding.authorityId,
         scopeKey: binding.scopeKey,
         accountKey: binding.accountKey,
-        replayScope: true,
       });
       return executeStructuredTaskWithRuntime<Output>(
         this.gateway,
@@ -448,11 +448,4 @@ function taxonomyReplay<Output>() {
       };
     },
   };
-}
-
-function isBudgetControlError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' &&
-    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
 }

@@ -175,6 +175,7 @@ export class CompanyService {
         data: {
           workspaceId: ctx.workspaceId,
           eventType: 'CompanyProfileCreated',
+          schemaVersion: 2,
           aggregateType: 'CompanyProfile',
           aggregateId: company.id,
           payload: {

@@ -44,6 +44,28 @@ describe('judgeFitCompany provider-independent result semantics', () => {
     ).rejects.toBeInstanceOf(BudgetOperationReplayError);
   });
 
+  it('recursively preserves an authority control wrapped by Temporal/runtime failures', async () => {
+    const failure = {
+      name: 'ActivityFailure',
+      message: 'Activity task failed',
+      cause: {
+        type: 'ApplicationFailure',
+        cause: { code: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' },
+      },
+    };
+    executeTask.mockRejectedValue(failure);
+
+    await expect(
+      judgeFitCompany(
+        {} as never,
+        '10000000-0000-4000-8000-000000000001',
+        { seller: 'Seller', seller_summary: null },
+        company,
+        { runId: 'run-1' },
+      ),
+    ).rejects.toBe(failure);
+  });
+
   it.each(['new-api', 'stub'])(
     'maps an already validated %s result through the same judgment path',
     async (provider) => {

@@ -28,7 +28,10 @@ import {
 import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { seedSanctions } from "../sanctions/sanctions-seed";
-import { parseExecutionBudgetBinding } from "../execution-budget/execution-budget-binding";
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from "../execution-budget/execution-budget-binding";
 import {
   INTEGRATION_EVENTS,
   INTERNAL_COMMANDS,
@@ -562,14 +565,19 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         website?: string;
         executionBudget?: unknown;
       };
-      const executionBudget = parseExecutionBudgetBinding(
-        payload.executionBudget,
-        {
+      let executionBudget: ExecutionBudgetBinding;
+      try {
+        if (ev.schemaVersion !== 2) throw new Error('legacy command version');
+        executionBudget = parseExecutionBudgetBinding(payload.executionBudget, {
           scopeKey: ev.workspaceId,
           purpose: "understanding.run",
           subjectType: "company",
-        },
-      );
+        });
+      } catch {
+        throw new NonRetryableOutboxCommandError(
+          'EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED',
+        );
+      }
       await this.startWorkflowIdempotent(
         UNDERSTANDING_WORKFLOW,
         {
@@ -580,6 +588,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               workspaceId: ev.workspaceId,
               companyId: ev.aggregateId,
               website: payload.website ?? "",
+              executionContractVersion: 2,
               executionBudget,
             },
           ],
@@ -593,14 +602,19 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         icpId?: string;
         executionBudget?: unknown;
       };
-      const executionBudget = parseExecutionBudgetBinding(
-        payload.executionBudget,
-        {
+      let executionBudget: ExecutionBudgetBinding;
+      try {
+        if (ev.schemaVersion !== 2) throw new Error('legacy command version');
+        executionBudget = parseExecutionBudgetBinding(payload.executionBudget, {
           scopeKey: ev.workspaceId,
           purpose: "discovery.run",
           subjectType: "discovery_run",
-        },
-      );
+        });
+      } catch {
+        throw new NonRetryableOutboxCommandError(
+          'EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED',
+        );
+      }
       await this.startWorkflowIdempotent(
         DISCOVERY_WORKFLOW,
         {
@@ -612,6 +626,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               runId: ev.aggregateId,
               planId: payload.planId ?? "",
               icpId: payload.icpId ?? "",
+              executionContractVersion: 2,
               executionBudget,
             },
           ],

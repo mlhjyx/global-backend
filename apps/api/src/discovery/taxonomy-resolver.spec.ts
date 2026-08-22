@@ -34,7 +34,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     };
     const budgetStore = {
       open: vi.fn(async () => undefined),
-      openAuthorized: vi.fn(async () => undefined),
+      attestAuthorized: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
     };
     const resolver = new TaxonomyResolver(
@@ -50,11 +50,10 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       executionBudget: binding,
     });
 
-    expect(budgetStore.openAuthorized).toHaveBeenCalledWith({
+    expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({
       authorityId: binding.authorityId,
       scopeKey: binding.scopeKey,
       accountKey: binding.accountKey,
-      replayScope: true,
     });
     expect(budgetStore.open).not.toHaveBeenCalled();
     expect(budgetStore.close).not.toHaveBeenCalled();

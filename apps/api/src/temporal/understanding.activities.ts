@@ -1,4 +1,4 @@
-import { Context } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
@@ -17,18 +17,27 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 export interface UnderstandingInput {
   workspaceId: string;
   companyId: string;
   website: string;
-  executionBudget: ExecutionBudgetBinding;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
 }
 
 interface UnderstandingAuthorityInput {
   workspaceId: string;
-  executionBudget: ExecutionBudgetBinding;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
 }
+
+type UnderstandingAuthorityEnvelope = Readonly<{
+  workspaceId?: string;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
+}>;
 
 interface ExtractedClaim {
   type: string;
@@ -75,13 +84,6 @@ function understandingReplay<Output>(schema: string) {
   };
 }
 
-function isBudgetControlFailure(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' &&
-    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
-}
-
 /**
  * Activities do the real (side-effectful) work — DB writes go through
  * withWorkspace so RLS confines them to the tenant. Crawling runs on Crawl4AI
@@ -102,20 +104,33 @@ export function createUnderstandingActivities(deps: {
     deps.budgetStore ??
     new UnavailableBudgetStore('understanding activities require an authoritative BudgetStore');
 
+  const requireAuthority = (args: UnderstandingAuthorityEnvelope): ExecutionBudgetBinding => {
+    let binding: ExecutionBudgetBinding;
+    try {
+      if (args.executionContractVersion !== 2 || !args.workspaceId) throw new Error('invalid version');
+      binding = parseExecutionBudgetBinding(args.executionBudget, {
+        scopeKey: args.workspaceId,
+        purpose: 'understanding.run',
+        subjectType: 'company',
+      });
+    } catch {
+      throw ApplicationFailure.nonRetryable(
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      );
+    }
+    return binding;
+  };
+
   const withRunBudget = async <T>(
     args: UnderstandingAuthorityInput,
     execute: (accountKey: string) => Promise<T>,
   ): Promise<T> => {
-    const binding = parseExecutionBudgetBinding(args.executionBudget, {
-      scopeKey: args.workspaceId,
-      purpose: 'understanding.run',
-      subjectType: 'company',
-    });
-    await budgets.openAuthorized({
+    const binding = requireAuthority(args);
+    await budgets.attestAuthorized({
       authorityId: binding.authorityId,
       scopeKey: binding.scopeKey,
       accountKey: binding.accountKey,
-      replayScope: true,
     });
     return execute(binding.accountKey);
   };
@@ -142,9 +157,11 @@ export function createUnderstandingActivities(deps: {
     async setStatus(args: {
       companyId: string;
       workspaceId: string;
-      executionBudget: ExecutionBudgetBinding;
+      executionContractVersion?: 2;
+      executionBudget?: ExecutionBudgetBinding;
       status: 'ENRICHING' | 'REVIEW' | 'ACTIVE';
     }): Promise<void> {
+      requireAuthority(args);
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.companyProfile.update({
           where: { id: args.companyId },
@@ -161,7 +178,8 @@ export function createUnderstandingActivities(deps: {
     },
 
     /** Deterministic: pick key subpages (products/about/certifications/cases/contact…). */
-    async selectSubpages(args: UnderstandingAuthorityInput & { markdown: string; website: string }): Promise<string[]> {
+    async selectSubpages(args: UnderstandingAuthorityEnvelope & { markdown: string; website: string }): Promise<string[]> {
+      requireAuthority(args);
       const links = extractSameSiteLinks(args.markdown, args.website);
       return selectKeySubpages(links, MAX_SUBPAGES);
     },
@@ -177,7 +195,7 @@ export function createUnderstandingActivities(deps: {
           if (s.status === 'fulfilled' && s.value.trim()) {
             pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
           } else if (s.status === 'rejected') {
-            if (isBudgetControlFailure(s.reason)) throw s.reason;
+            if (isExecutionControlError(s.reason)) throw s.reason;
             console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
           }
         });
@@ -246,7 +264,8 @@ export function createUnderstandingActivities(deps: {
 
     async extractOfferings(args: {
       workspaceId: string;
-      executionBudget: ExecutionBudgetBinding;
+      executionContractVersion?: 2;
+      executionBudget?: ExecutionBudgetBinding;
       text: string;
     }): Promise<{ offerings: ExtractedOffering[] }> {
       return withRunBudget(args, async (accountKey) => {
@@ -281,6 +300,7 @@ export function createUnderstandingActivities(deps: {
     async persistClaims(
       args: UnderstandingInput & { pages: { url: string; claims: ExtractedClaim[] }[] },
     ): Promise<{ claimCount: number }> {
+      requireAuthority(args);
       // 幂等（PRD 11.16）：at-least-once 的活动重试不得重复写入。
       // 每页的 source+claims 在同一事务里原子落库，ingestKey = runId+页URL；
       // 已存在则整页跳过。
@@ -376,6 +396,7 @@ export function createUnderstandingActivities(deps: {
     async persistOfferings(
       args: UnderstandingInput & { pages: { url: string; offerings: ExtractedOffering[] }[] },
     ): Promise<{ offeringCount: number }> {
+      requireAuthority(args);
       const merged = new Map<string, ExtractedOffering & { sourceUrl: string }>();
       for (const page of args.pages) {
         for (const o of page.offerings) {
@@ -422,6 +443,7 @@ export function createUnderstandingActivities(deps: {
     async persistPublicContacts(
       args: UnderstandingInput & { pages: CrawledPage[] },
     ): Promise<{ contactCount: number }> {
+      requireAuthority(args);
       const contacts = extractPublicContacts(args.pages);
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.companyProfile.update({

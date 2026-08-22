@@ -257,11 +257,10 @@ export class IntentProjectionService {
       if (opts.budgetKey !== binding.accountKey) {
         throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
       }
-      await budgets.openAuthorized({
+      await budgets.attestAuthorized({
         authorityId: binding.authorityId,
         scopeKey: binding.scopeKey,
         accountKey: binding.accountKey,
-        replayScope: true,
       });
       return this.discoverWatchPages(
         domain,
