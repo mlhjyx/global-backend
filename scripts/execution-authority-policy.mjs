@@ -565,6 +565,88 @@ async function scanDomainAckSource(repoRoot, issues) {
       issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_CONSUMER_CALL_MISSING", consumerPath, "actual product consumer must invoke receipt-aware ACK in its domain transaction"));
     }
   }
+  const smtpProviderPath = "apps/api/src/discovery/providers/email-verify.provider.ts";
+  const smtpProviderSource = existsSync(resolve(repoRoot, smtpProviderPath))
+    ? await readText(repoRoot, smtpProviderPath)
+    : "";
+  if (
+    !smtpProviderSource.includes(
+      "forwardDurableReceipt(ctx, SMTP_PROBE_TOOL, result.durableReceipt);",
+    ) ||
+    !smtpProviderSource.includes("DOMAIN_ACK_CONSUMER_BINDING_MISSING") ||
+    !smtpProviderSource.includes("ctx.onDurableReceipt(producerId, receipt)")
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_SMTP_RECEIPT_CALLBACK_MISSING",
+      smtpProviderPath,
+      "SMTP provider must forward the exact returned receipt and fail closed when no consumer callback exists",
+    ));
+  }
+  const contactProviderPath =
+    "apps/api/src/discovery/providers/decision-maker.provider.ts";
+  const contactProviderSource = existsSync(resolve(repoRoot, contactProviderPath))
+    ? await readText(repoRoot, contactProviderPath)
+    : "";
+  if (
+    !contactProviderSource.includes("return { ...ctx, taskContractId };") ||
+    !contactProviderSource.includes(
+      "{ ...ctx, durableResultSchema: 'contact-decision-makers/v1' }",
+    )
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_CONTACT_PROVIDER_CALLBACK_MISSING",
+      contactProviderPath,
+      "DecisionMaker Tool and Model calls must retain the receipt-aware execution context",
+    ));
+  }
+  const discoveryServicePath = "apps/api/src/discovery/discovery.service.ts";
+  const discoveryServiceSource = existsSync(resolve(repoRoot, discoveryServicePath))
+    ? await readText(repoRoot, discoveryServicePath)
+    : "";
+  if (
+    !discoveryServiceSource.includes("onDurableReceipt: captureContactReceipt,") ||
+    !discoveryServiceSource.includes("persistDiscoveredContacts(transaction") ||
+    !discoveryServiceSource.includes("'contact.find_decision_makers'") ||
+    !discoveryServiceSource.includes("'crawl4ai.fetch'")
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_CONTACT_RECEIPT_CALLBACK_MISSING",
+      discoveryServicePath,
+      "contact discovery must collect Tool and Model receipts at the actual adapter callback",
+    ));
+  }
+  if (
+    !discoveryServiceSource.includes(
+      "import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';",
+    ) ||
+    !discoveryServiceSource.includes("const persisted = await applyDomainAckConsumerTransactions({") ||
+    !discoveryServiceSource.includes("onDurableReceipt: captureSmtpReceipt,") ||
+    !discoveryServiceSource.includes("transaction.contactPoint.update({") ||
+    !discoveryServiceSource.includes("transaction.fieldEvidence.create({")
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_DISCOVERY_ACK_TRANSACTION_MISSING",
+      discoveryServicePath,
+      "SMTP and contact consumers must ACK and mutate on the same product transaction",
+    ));
+  }
+  const backlogPath = "apps/api/src/temporal/backlog.activities.ts";
+  const backlogSource = existsSync(resolve(repoRoot, backlogPath))
+    ? await readText(repoRoot, backlogPath)
+    : "";
+  if (
+    !backlogSource.includes("onDurableReceipt: captureContactReceipt,") ||
+    !backlogSource.includes("persistDiscoveredContacts(transaction") ||
+    !backlogSource.includes("applyDomainAckConsumerTransactions({") ||
+    !backlogSource.includes("onDurableReceipt: (producerId, receipt) =>") ||
+    !backlogSource.includes("persistGuessedEmail(transaction")
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_DISCOVERY_ACK_TRANSACTION_MISSING",
+      backlogPath,
+      "backlog contact and SMTP consumers must preserve callback and same-transaction ACK semantics",
+    ));
+  }
   if (
     !migrationSource.includes("SET search_path = pg_catalog, public") ||
     migrationSource.includes("session_user <> 'app_user'") ||
@@ -608,6 +690,20 @@ async function scanLedgerReceiptSource(repoRoot, issues) {
   if (/\bchargedMicrousd\b[\s\S]{0,400}\bcharged_cents\b/.test(source) ||
       /\bcostBasis\b[\s\S]{0,200}\bprovider_reported\b[\s\S]{0,200}\bcharged/.test(source)) {
     issues.push(issue("EXECUTION_AUTHORITY_LEDGER_RECEIPT_COST_INFERENCE", path, "BudgetStore receipt reconstruction must not infer cost basis or usage from cents"));
+  }
+  const callerFallbacks = [
+    /row\.result_schema_version\s*\?\?/,
+    /row\.result_schema\s*\?\?/,
+    /row\.result_digest\s*\?\?/,
+    /row\.result_json\s*\?\?/,
+    /row\.operation_id\s*\?\?/,
+  ];
+  if (callerFallbacks.some((pattern) => pattern.test(source))) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_LEDGER_RECEIPT_FALLBACK",
+      path,
+      "receipt reconstruction must require complete locked ledger fields and only compare caller projections",
+    ));
   }
   for (const token of ["CREATE FUNCTION reserve_tool_budget_with_receipt_v1", "CREATE FUNCTION settle_tool_budget_with_receipt_v1", "tool_budget_operation", "tool_budget_account", "FOR UPDATE"]) {
     if (!migrationSource.includes(token)) {

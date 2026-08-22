@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto';
 import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext,
   externalActionAuthorized,
 } from '../provider-contract';
-import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
+import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
 
 /**
  * ToolBroker 的最小面（供本 verifier 依赖 + 测试注入假实现）。SMTP 原始出网**只能**经此闸门：
@@ -14,6 +15,18 @@ import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools'
 export type EmailVerifyBroker = ExecutionBroker;
 
 const SMTP_PROBE_TOOL = 'smtp.rcpt_probe';
+
+function forwardDurableReceipt(
+  ctx: EmailVerifyContext | undefined,
+  producerId: typeof SMTP_PROBE_TOOL,
+  receipt: DurableExecutionReceipt | undefined,
+): void {
+  if (!receipt) return;
+  if (!ctx?.onDurableReceipt) {
+    throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+  }
+  ctx.onDurableReceipt(producerId, receipt);
+}
 
 /**
  * 自建邮箱验证（v3.0 P0，零付费，不接 ZeroBounce/NeverBounce）。
@@ -102,14 +115,13 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
       correlationId: `email-verify:${domain}`,
       authorizeExternalAction: ctx?.authorizeExternalAction,
     };
-    let probe: SmtpProbeOutput;
+    let result: ToolResult<SmtpProbeOutput>;
     try {
-      const res = await this.broker.invoke<SmtpProbeInput, SmtpProbeOutput>(
+      result = await this.broker.invoke<SmtpProbeInput, SmtpProbeOutput>(
         SMTP_PROBE_TOOL,
         { domain, mxHost: host, rcptTo: [email, `${randomLocal}@${domain}`] },
         toolCtx,
       );
-      probe = res.data;
     } catch (err) {
       if (
         err && typeof err === 'object' &&
@@ -125,6 +137,8 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
         costCents: 0,
       };
     }
+    forwardDurableReceipt(ctx, SMTP_PROBE_TOOL, result.durableReceipt);
+    const probe = result.data;
     // 工具内 SSRF 护栏拦截（MX 指向私网/内网）→ 未发生出网 → RISKY。
     if (probe.egressBlocked) {
       return {

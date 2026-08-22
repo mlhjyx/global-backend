@@ -43,6 +43,8 @@ export interface GuessContext {
   maxProbe?: number;
   /** 每个物理 SMTP 候选前的当前 suppression 授权；false 时终止本联系人后续探测。 */
   authorizeCandidate?: (email: string) => Promise<boolean>;
+  /** Carries every closed SMTP ledger receipt to the enclosing domain transaction. */
+  onDurableReceipt?: EmailVerifyContext['onDurableReceipt'];
 }
 
 export type GuessStatus =
@@ -152,6 +154,7 @@ export class EmailGuesser {
       kind: 'personal',
       lawfulBasis: recordedBasis,
       allowPersonalWithoutBasis: ctx.allowPersonalWithoutBasis,
+      onDurableReceipt: ctx.onDurableReceipt,
     };
 
     const maxProbe = ctx.maxProbe ?? 8;

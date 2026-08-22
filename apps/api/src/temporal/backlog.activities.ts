@@ -30,6 +30,8 @@ import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { backlogEligibleWhere, backlogEligibleOrderBy } from './backlog.eligibility';
 import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 /**
  * 存量对账活动（backlog reconciliation）——漏斗总闸的解锁器。
@@ -50,6 +52,23 @@ import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
 
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 与 discovery.activities 的 SIGNAL_TTL_MS 对齐（信号时变，7 天刷新）
 const PRODUCT_CANDIDATE_SCAN_BATCH = 50;
+const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
+  'crawl4ai.fetch',
+  'companies_house.search',
+  'inpi_rne.search',
+  'google_patents.search',
+  'contact.find_decision_makers',
+] as const);
+type ContactDiscoveryReceiptProducer =
+  (typeof CONTACT_DISCOVERY_RECEIPT_PRODUCERS)[number];
+
+function contactReceiptProducer(
+  producerId: string,
+): producerId is ContactDiscoveryReceiptProducer {
+  return CONTACT_DISCOVERY_RECEIPT_PRODUCERS.includes(
+    producerId as ContactDiscoveryReceiptProducer,
+  );
+}
 
 /**
  * Reads bounded evidence pages before a company can enter any backlog product
@@ -749,10 +768,27 @@ export function createBacklogActivities(deps: {
           const perAdapter: {
             key: string;
             contacts: ProviderContactRecord[];
+            durableReceipts: Array<{
+              producerId: ContactDiscoveryReceiptProducer;
+              receipt: DurableExecutionReceipt;
+            }>;
           }[] = [];
           for (const adapter of adapters) {
             try {
               if (!(await mayUseExternalProcessing(args.workspaceId, c.id))) break;
+              const durableReceipts: Array<{
+                producerId: ContactDiscoveryReceiptProducer;
+                receipt: DurableExecutionReceipt;
+              }> = [];
+              const captureContactReceipt = (
+                producerId: string,
+                receipt: DurableExecutionReceipt,
+              ): void => {
+                if (!contactReceiptProducer(producerId)) {
+                  throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+                }
+                durableReceipts.push({ producerId, receipt });
+              };
               const result = await adapter.discoverContacts(
                 {
                   name: c.name,
@@ -764,13 +800,15 @@ export function createBacklogActivities(deps: {
                   runId: budget.key,
                   correlationId: 'backlog-contacts',
                   authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+                  onDurableReceipt: captureContactReceipt,
                 },
                 sellerCtx,
               );
-              if (result.contacts.length)
+              if (result.contacts.length || durableReceipts.length)
                 perAdapter.push({
                   key: adapter.key,
                   contacts: result.contacts,
+                  durableReceipts,
                 });
             } catch (err) {
               if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
@@ -787,18 +825,32 @@ export function createBacklogActivities(deps: {
           if (!perAdapter.length) continue;
           // 同一 tx 内顺序 persist：同一人经 resolvePersonIdentity 跨 adapter 合并（email + officer_id 落同一条）。
           const created = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-            let n = 0;
-            for (const pa of perAdapter) {
-              const res = await persistDiscoveredContacts(tx, {
-                workspaceId: args.workspaceId,
-                company: { id: c.id, dedupeKey: c.dedupeKey },
-                adapterKey: pa.key,
-                contacts: pa.contacts,
-                suppressedEmails,
-              });
-              n += res.created;
-            }
-            return n;
+            const persisted = await applyDomainAckConsumerTransactions({
+              transaction: tx,
+              acknowledgements: perAdapter.flatMap((adapterResult) =>
+                adapterResult.durableReceipts.map(({ producerId, receipt }) => ({
+                  producerId,
+                  receipt,
+                  domainAckKey:
+                    `contact:${c.id}:${adapterResult.key}:${receipt.operationId}`,
+                  domainRevision: receipt.resultDigest,
+                }))),
+              apply: async (transaction) => {
+                let n = 0;
+                for (const pa of perAdapter) {
+                  const res = await persistDiscoveredContacts(transaction, {
+                    workspaceId: args.workspaceId,
+                    company: { id: c.id, dedupeKey: c.dedupeKey },
+                    adapterKey: pa.key,
+                    contacts: pa.contacts,
+                    suppressedEmails,
+                  });
+                  n += res.created;
+                }
+                return n;
+              },
+            });
+            return persisted ?? 0;
           });
           contactsCreated += created;
         }
@@ -955,7 +1007,11 @@ export function createBacklogActivities(deps: {
 
       // ── 事务外：逐公司逐缺邮箱决策人 SMTP 猜测（DAT-011 SUSPENDED 域跳过；单人失败 fail-safe）──
       const guesser = new EmailGuesser(verifier);
-      const results: { contactId: string; result: GuessResult }[] = [];
+      const results: {
+        contactId: string;
+        result: GuessResult;
+        durableReceipts: DurableExecutionReceipt[];
+      }[] = [];
       let attempted = 0;
       for (const gc of guessCompanies) {
         if (suspended.has(gc.domain.toLowerCase())) continue; // DAT-011：SUSPENDED 域连 MX/SMTP 都不探
@@ -965,6 +1021,7 @@ export function createBacklogActivities(deps: {
           attempted += 1;
           const budget = await openStageBudget('email-guess', args.workspaceId, args.budgetScopeId);
           try {
+            const durableReceipts: DurableExecutionReceipt[] = [];
             const result = await guesser.guess(
               {
                 fullName: t.fullName,
@@ -979,9 +1036,15 @@ export function createBacklogActivities(deps: {
                 suppressedEmails,
                 maxProbe: undefined,
                 authorizeCandidate: (email) => contactMayUseExternal(args.workspaceId, t.contactId, email),
+                onDurableReceipt: (producerId, receipt) => {
+                  if (producerId !== 'smtp.rcpt_probe') {
+                    throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+                  }
+                  durableReceipts.push(receipt);
+                },
               },
             );
-            results.push({ contactId: t.contactId, result });
+            results.push({ contactId: t.contactId, result, durableReceipts });
           } catch (err) {
             if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
             /* 单人猜测失败（SMTP 异常等）不影响其余 */
@@ -996,16 +1059,26 @@ export function createBacklogActivities(deps: {
       if (results.length) {
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           for (const r of results) {
-            const out = await persistGuessedEmail(tx, {
-              workspaceId: args.workspaceId,
-              contactId: r.contactId,
-              result: r.result,
-              suppressedEmails,
-              // 门实际采用（已 stamp）的依据优先；否则退回 config 的 interim 全局 LIA（问责留痕一致）。
-              lawfulBasis: r.result.lawfulBasis ?? lawfulBasis,
-              now,
+            const out = await applyDomainAckConsumerTransactions({
+              transaction: tx,
+              acknowledgements: r.durableReceipts.map((receipt) => ({
+                producerId: 'smtp.rcpt_probe',
+                receipt,
+                domainAckKey:
+                  `contact-guess:${r.contactId}:${receipt.operationId}`,
+                domainRevision: receipt.resultDigest,
+              })),
+              apply: (transaction) => persistGuessedEmail(transaction, {
+                workspaceId: args.workspaceId,
+                contactId: r.contactId,
+                result: r.result,
+                suppressedEmails,
+                // 门实际采用（已 stamp）的依据优先；否则退回 config 的 interim 全局 LIA（问责留痕一致）。
+                lawfulBasis: r.result.lawfulBasis ?? lawfulBasis,
+                now,
+              }),
             });
-            if (out.persisted) guessed += 1;
+            if (out?.persisted) guessed += 1;
           }
         });
       }

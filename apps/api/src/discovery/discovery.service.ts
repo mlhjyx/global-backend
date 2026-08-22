@@ -38,8 +38,19 @@ import {
   type VerifyContactPointHttpRequestBody,
 } from '../execution-budget/execution-budget-request-scope';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
+const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
+  'crawl4ai.fetch',
+  'companies_house.search',
+  'inpi_rne.search',
+  'google_patents.search',
+  'contact.find_decision_makers',
+] as const);
+type ContactDiscoveryReceiptProducer =
+  (typeof CONTACT_DISCOVERY_RECEIPT_PRODUCERS)[number];
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
 export const SUPPRESSION_DECISION_REASONS = [
   'USER_PREFERENCE_CHANGED',
@@ -56,6 +67,14 @@ export type SuppressionDecisionRequest = {
 };
 
 export type SuppressionPageRequest = { cursor?: string; limit?: number };
+
+function contactReceiptProducer(
+  producerId: string,
+): producerId is ContactDiscoveryReceiptProducer {
+  return CONTACT_DISCOVERY_RECEIPT_PRODUCERS.includes(
+    producerId as ContactDiscoveryReceiptProducer,
+  );
+}
 
 @Injectable()
 export class DiscoveryService {
@@ -269,6 +288,10 @@ export class DiscoveryService {
       key: string;
       contacts: ProviderContactRecord[];
       costCents: number;
+      durableReceipts: Array<{
+        producerId: ContactDiscoveryReceiptProducer;
+        receipt: DurableExecutionReceipt;
+      }>;
     }[] = [];
     const authorizeExternalAction = () =>
       this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
@@ -285,6 +308,19 @@ export class DiscoveryService {
         try {
           const authorized = await authorizeExternalAction();
           if (!authorized) break;
+          const durableReceipts: Array<{
+            producerId: ContactDiscoveryReceiptProducer;
+            receipt: DurableExecutionReceipt;
+          }> = [];
+          const captureContactReceipt = (
+            producerId: string,
+            receipt: DurableExecutionReceipt,
+          ): void => {
+            if (!contactReceiptProducer(producerId)) {
+              throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+            }
+            durableReceipts.push({ producerId, receipt });
+          };
           const result = await adapter.discoverContacts(
             {
               name: loaded.company.name,
@@ -296,12 +332,14 @@ export class DiscoveryService {
               runId: accountKey,
               correlationId: companyId,
               authorizeExternalAction,
+              onDurableReceipt: captureContactReceipt,
             },
           );
           perAdapter.push({
             key: adapter.key,
             contacts: result.contacts,
             costCents: result.costCents,
+            durableReceipts,
           });
         } catch (err) {
           if (isExecutionControlError(err)) throw err;
@@ -311,42 +349,64 @@ export class DiscoveryService {
     }
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
-      // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
-      let skippedSuppressed = 0;
-      let skippedInvalid = 0;
-      for (const pa of perAdapter) {
-        const res = await persistDiscoveredContacts(tx, {
-          workspaceId: ctx.workspaceId,
-          company: {
-            id: loaded.company.id,
-            dedupeKey: loaded.company.dedupeKey,
-          },
-          adapterKey: pa.key,
-          contacts: pa.contacts,
-          suppressedEmails: loaded.suppressedEmails,
-        });
-        skippedSuppressed += res.skippedSuppressed;
-        skippedInvalid += res.skippedInvalid;
-        if (pa.costCents > 0) {
-          await tx.usageLedger.create({
-            data: {
+      const persisted = await applyDomainAckConsumerTransactions({
+        transaction: tx,
+        acknowledgements: perAdapter.flatMap((adapterResult) =>
+          adapterResult.durableReceipts.map(({ producerId, receipt }) => ({
+            producerId,
+            receipt,
+            domainAckKey:
+              `contact:${loaded.company.id}:${adapterResult.key}:${receipt.operationId}`,
+            domainRevision: receipt.resultDigest,
+          }))),
+        apply: async (transaction) => {
+          // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
+          // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
+          let skippedSuppressed = 0;
+          let skippedInvalid = 0;
+          for (const pa of perAdapter) {
+            const res = await persistDiscoveredContacts(transaction, {
               workspaceId: ctx.workspaceId,
-              resourceType: 'provider_call',
-              quantity: pa.contacts.length,
-              costUsd: pa.costCents / 100,
-              refType: 'canonical_company',
-              refId: loaded.company.id,
-              meta: { provider: pa.key, op: 'contact_discovery' },
-            },
+              company: {
+                id: loaded.company.id,
+                dedupeKey: loaded.company.dedupeKey,
+              },
+              adapterKey: pa.key,
+              contacts: pa.contacts,
+              suppressedEmails: loaded.suppressedEmails,
+            });
+            skippedSuppressed += res.skippedSuppressed;
+            skippedInvalid += res.skippedInvalid;
+            if (pa.costCents > 0) {
+              await transaction.usageLedger.create({
+                data: {
+                  workspaceId: ctx.workspaceId,
+                  resourceType: 'provider_call',
+                  quantity: pa.contacts.length,
+                  costUsd: pa.costCents / 100,
+                  refType: 'canonical_company',
+                  refId: loaded.company.id,
+                  meta: { provider: pa.key, op: 'contact_discovery' },
+                },
+              });
+            }
+          }
+          const contacts = await transaction.canonicalContact.findMany({
+            where: { companyId: loaded.company.id },
+            include: { contactPoints: true },
           });
-        }
-      }
-      const contacts = await tx.canonicalContact.findMany({
-        where: { companyId: loaded.company.id },
-        include: { contactPoints: true },
+          return { contacts, skippedSuppressed, skippedInvalid };
+        },
       });
-      return { contacts, skippedSuppressed, skippedInvalid };
+      if (persisted) return persisted;
+      return {
+        contacts: await tx.canonicalContact.findMany({
+          where: { companyId: loaded.company.id },
+          include: { contactPoints: true },
+        }),
+        skippedSuppressed: 0,
+        skippedInvalid: 0,
+      };
     });
   }
 
@@ -448,6 +508,7 @@ export class DiscoveryService {
       contactId: string;
       fullName: string;
       result: GuessResult;
+      durableReceipts: DurableExecutionReceipt[];
     }[] = [];
     const accountKey = binding.accountKey;
     const budgets = this.budgets();
@@ -473,9 +534,11 @@ export class DiscoveryService {
               candidates: [],
               reason: 'suppression_action_gate',
             },
+            durableReceipts: [],
           });
           continue;
         }
+        const durableReceipts: DurableExecutionReceipt[] = [];
         const result = await guesser.guess(
           { fullName: c.fullName, domain, knownSamples },
           {
@@ -494,9 +557,20 @@ export class DiscoveryService {
                   email,
                 }),
               ),
+            onDurableReceipt: (producerId, receipt) => {
+              if (producerId !== 'smtp.rcpt_probe') {
+                throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+              }
+              durableReceipts.push(receipt);
+            },
           },
         );
-        results.push({ contactId: c.contactId, fullName: c.fullName, result });
+        results.push({
+          contactId: c.contactId,
+          fullName: c.fullName,
+          result,
+          durableReceipts,
+        });
         if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;
     }
 
@@ -518,17 +592,27 @@ export class DiscoveryService {
         }[],
       };
       for (const r of results) {
-        const out = await persistGuessedEmail(tx, {
-          workspaceId: ctx.workspaceId,
-          contactId: r.contactId,
-          result: r.result,
-          suppressedEmails: loaded.suppressedEmails,
-          // 用门**实际采用**的（已 stamp）依据，而非调用方原始入参——开关合成的 override 依据也在此，
-          // 否则 allowPersonalWithoutBasis 路径会 personal_data=true 却 lawful_basis=null（复审 HIGH）。
-          lawfulBasis: r.result.lawfulBasis ?? opts?.lawfulBasis,
-          now,
+        const out = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: r.durableReceipts.map((receipt) => ({
+            producerId: 'smtp.rcpt_probe',
+            receipt,
+            domainAckKey:
+              `contact-guess:${r.contactId}:${receipt.operationId}`,
+            domainRevision: receipt.resultDigest,
+          })),
+          apply: (transaction) => persistGuessedEmail(transaction, {
+            workspaceId: ctx.workspaceId,
+            contactId: r.contactId,
+            result: r.result,
+            suppressedEmails: loaded.suppressedEmails,
+            // 用门**实际采用**的（已 stamp）依据，而非调用方原始入参——开关合成的 override 依据也在此，
+            // 否则 allowPersonalWithoutBasis 路径会 personal_data=true 却 lawful_basis=null（复审 HIGH）。
+            lawfulBasis: r.result.lawfulBasis ?? opts?.lawfulBasis,
+            now,
+          }),
         });
-        if (out.persisted) {
+        if (out?.persisted) {
           summary.persisted += 1;
           if (out.status === 'VALID') summary.verified += 1;
           else summary.unverified += 1;
@@ -537,8 +621,8 @@ export class DiscoveryService {
         summary.perContact.push({
           fullName: r.fullName,
           status: r.result.status,
-          email: out.email ?? null,
-          pointStatus: out.status ?? null,
+          email: out?.email ?? null,
+          pointStatus: out?.status ?? null,
         });
       }
       return summary;
@@ -658,6 +742,16 @@ export class DiscoveryService {
     // 门拦截则合成 BLOCKED，**不路由/不触任何验证器**（即便 smtp_self 被 kill-switch 关掉也不绕过）。
     let verdict: EmailVerdict;
     let providerKey: string;
+    const smtpReceipts: DurableExecutionReceipt[] = [];
+    const captureSmtpReceipt = (
+      producerId: string,
+      receipt: DurableExecutionReceipt,
+    ): void => {
+      if (producerId !== 'smtp.rcpt_probe') {
+        throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+      }
+      smtpReceipts.push(receipt);
+    };
     const actionAuthorized = gate.allowed
       ? await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
           contactMayUseExternalProcessing(tx, {
@@ -701,6 +795,7 @@ export class DiscoveryService {
               email: loaded.pointValue,
             }),
           ),
+        onDurableReceipt: captureSmtpReceipt,
       };
       const accountKey = binding.accountKey;
       const budgets = this.budgets();
@@ -716,8 +811,17 @@ export class DiscoveryService {
 
     // 短事务②：审计留痕（裁决 + 合法性基础）+ 回写状态。返回 point + verification 元数据供前端判断。
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      await lockWorkspaceSuppressionPolicy(tx, ctx.workspaceId);
-      const currentPoint = await tx.contactPoint.findUnique({
+      const persisted = await applyDomainAckConsumerTransactions({
+        transaction: tx,
+        acknowledgements: smtpReceipts.map((receipt) => ({
+          producerId: 'smtp.rcpt_probe',
+          receipt,
+          domainAckKey: `contact-point:${pointId}:${receipt.operationId}`,
+          domainRevision: receipt.resultDigest,
+        })),
+        apply: async (transaction) => {
+      await lockWorkspaceSuppressionPolicy(transaction, ctx.workspaceId);
+      const currentPoint = await transaction.contactPoint.findUnique({
         where: { id: pointId },
         select: {
           value: true,
@@ -735,7 +839,7 @@ export class DiscoveryService {
           error: { code: 'NOT_FOUND', message: 'contact point not found' },
         });
       }
-      const currentSuppressions = await tx.suppressionRecord.findMany({
+      const currentSuppressions = await transaction.suppressionRecord.findMany({
         where: { type: { in: ['email', 'domain', 'company_name'] } },
         select: { type: true, value: true },
       });
@@ -744,7 +848,7 @@ export class DiscoveryService {
       const currentCompany = currentPoint.contact.company;
       const currentCompanySuppressed = companyMatchesSuppression(currentSuppressions, currentCompany);
       if (currentCompanySuppressed && currentCompany.status !== 'SUPPRESSED') {
-        await tx.canonicalCompany.update({
+        await transaction.canonicalCompany.update({
           where: { id: currentCompany.id },
           data: { status: 'SUPPRESSED', version: { increment: 1 } },
         });
@@ -772,7 +876,7 @@ export class DiscoveryService {
           }
         : verdict;
       const committedProviderKey = currentlySuppressed ? 'compliance_gate' : providerKey;
-      await tx.fieldEvidence.create({
+      await transaction.fieldEvidence.create({
         data: {
           workspaceId: ctx.workspaceId,
           entityType: 'contact',
@@ -790,7 +894,7 @@ export class DiscoveryService {
           allowedActions: allowedActionsFor(committedVerdict.status) as unknown as Prisma.InputJsonValue,
         },
       });
-      const updated = await tx.contactPoint.update({
+      const updated = await transaction.contactPoint.update({
         where: { id: pointId },
         data: { status: committedVerdict.status, verifiedAt: new Date() },
       });
@@ -802,6 +906,27 @@ export class DiscoveryService {
           kind: committedVerdict.kind ?? gateKind ?? loaded.kind ?? null,
           providerKey: committedProviderKey,
           lawfulBasis: committedVerdict.lawfulBasis ?? recordedBasis ?? null,
+        },
+      };
+        },
+      });
+      if (persisted) return persisted;
+      const replayedPoint = await tx.contactPoint.findUnique({
+        where: { id: pointId },
+      });
+      if (!replayedPoint) {
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'contact point not found' },
+        });
+      }
+      return {
+        ...replayedPoint,
+        verification: {
+          status: verdict.status,
+          detail: verdict.detail ?? null,
+          kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
+          providerKey,
+          lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
         },
       };
     });

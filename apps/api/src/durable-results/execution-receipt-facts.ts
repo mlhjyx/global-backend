@@ -153,12 +153,30 @@ export function modelExecutionReceiptFacts(input: {
 }): DurableExecutionReceiptFacts {
   const inputTokens = input.result.usage?.inputTokens;
   const outputTokens = input.result.usage?.outputTokens;
+  const providerCostUsd = input.result.usage?.costUsd;
   const callCount = input.result.callCount ?? 1;
-  if (
-    (inputTokens === undefined || Number.isSafeInteger(inputTokens) && inputTokens >= 0) &&
-    (outputTokens === undefined || Number.isSafeInteger(outputTokens) && outputTokens >= 0) &&
-    (inputTokens ?? 0) + (outputTokens ?? 0) > 0
-  ) {
+  const validInputTokens =
+    inputTokens === undefined || Number.isSafeInteger(inputTokens) && inputTokens >= 0;
+  const validOutputTokens =
+    outputTokens === undefined || Number.isSafeInteger(outputTokens) && outputTokens >= 0;
+  const tokenCountAvailable =
+    validInputTokens && validOutputTokens &&
+    (inputTokens ?? 0) + (outputTokens ?? 0) > 0;
+  const providerCostAvailable =
+    Number.isFinite(providerCostUsd) && (providerCostUsd as number) >= 0;
+  if (providerCostAvailable) {
+    return parseDurableExecutionReceiptFacts({
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount,
+        ...(inputTokens === undefined || !validInputTokens ? {} : { inputTokens }),
+        ...(outputTokens === undefined || !validOutputTokens ? {} : { outputTokens }),
+        chargedMicrousd: microusd(input.chargedMicrousd),
+        upperBoundMicrousd: microusd(input.reservedMicrousd),
+      },
+      costBasis: 'provider_reported',
+    }, input.resultSchema);
+  }
+  if (tokenCountAvailable) {
     return parseDurableExecutionReceiptFacts({
       usage: {
         currency: 'USD', unit: 'microusd', callCount,

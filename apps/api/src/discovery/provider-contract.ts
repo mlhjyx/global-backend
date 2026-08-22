@@ -206,6 +206,11 @@ export interface EmailVerifyContext {
   suppressed?: boolean;
   /** Rechecked before direct MX lookup and passed to ToolBroker for SMTP. */
   authorizeExternalAction?: () => Promise<boolean>;
+  /** Closed ledger receipt callback; a returned SMTP receipt must never be discarded. */
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 /** 邮箱验证（发送前实时验证，PRD 7.4.7）。 */
