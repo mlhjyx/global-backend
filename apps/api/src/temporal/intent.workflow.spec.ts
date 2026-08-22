@@ -6,8 +6,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
 
-import { acts, resetActivities } from './testing/temporal-workflow.mock';
+import { acts, resetActivities, setWorkflowInfo } from './testing/temporal-workflow.mock';
 import { intentSweepWorkflow } from './intent.workflow';
+import { PLATFORM_SCHEDULE_AUTHORITY_SCOPES } from './platform-schedule-authority';
+
+const scope = PLATFORM_SCHEDULE_AUTHORITY_SCOPES['intent-sweep'];
+const executionBudget = {
+  authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b', scopeKey: 'platform' as const,
+  accountKey: `platform:${scope.requestSha256}:workflow-run-1`, ...scope,
+  workflowRunId: 'workflow-run-1', admissionReplay: false,
+};
+const workflowInput = (limit?: number) => ({
+  executionContractVersion: 1 as const, executionScope: scope,
+  ...(limit === undefined ? {} : { limit }),
+});
 
 function watchResult(sourceId: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   return { sourceId, status: 'DONE', pagesFetched: 3, pagesMissed: 0, added: 1, changed: 2, intentEvents: 2, ...over };
@@ -20,13 +32,17 @@ function primeIntent(sourceIds: string[]): void {
   acts.projectIntentAllWorkspaces.mockResolvedValue({ workspaces: 2, companiesTouched: 5, eventsProjected: 9 });
 }
 
-beforeEach(() => resetActivities());
+beforeEach(() => {
+  resetActivities();
+  setWorkflowInfo({ runId: 'workflow-run-1' });
+  acts.admitPlatformSchedule.mockResolvedValue(executionBudget);
+});
 
 describe('intentSweepWorkflow', () => {
   it('happy：purge → 逐源 watch → project；swept + projected 正确', async () => {
     primeIntent(['s1', 's2']);
 
-    const out = await intentSweepWorkflow({});
+    const out = await intentSweepWorkflow(workflowInput());
 
     expect(acts.purgeStaleIntentEvents).toHaveBeenCalledTimes(1);
     expect(acts.watchSource).toHaveBeenCalledTimes(2);
@@ -43,7 +59,7 @@ describe('intentSweepWorkflow', () => {
       .mockRejectedValueOnce(new Error('watch boom'))
       .mockImplementationOnce(async ({ sourceId }: { sourceId: string }) => watchResult(sourceId));
 
-    const out = await intentSweepWorkflow({});
+    const out = await intentSweepWorkflow(workflowInput());
 
     expect(out.results[0]).toMatchObject({ sourceId: 's1', status: 'FAILED', intentEvents: 0 });
     expect(out.results[0].error).toContain('watch boom');
@@ -55,7 +71,7 @@ describe('intentSweepWorkflow', () => {
     primeIntent(['s1']);
     acts.purgeStaleIntentEvents.mockRejectedValue(new Error('purge boom'));
 
-    const out = await intentSweepWorkflow({});
+    const out = await intentSweepWorkflow(workflowInput());
 
     expect(acts.watchSource).toHaveBeenCalledTimes(1); // 保留期清理失败不阻断 sweep
     expect(out.swept).toBe(1);
@@ -65,7 +81,7 @@ describe('intentSweepWorkflow', () => {
     primeIntent(['s1']);
     acts.projectIntentAllWorkspaces.mockRejectedValue(new Error('project boom'));
 
-    const out = await intentSweepWorkflow({});
+    const out = await intentSweepWorkflow(workflowInput());
 
     expect(out.projected).toEqual({ workspaces: 0, companiesTouched: 0, eventsProjected: 0 });
     expect(out.results).toHaveLength(1);
@@ -73,9 +89,9 @@ describe('intentSweepWorkflow', () => {
 
   it('limit 透传（默认 50）', async () => {
     primeIntent([]);
-    await intentSweepWorkflow({ limit: 9 });
-    expect(acts.listDueWatches).toHaveBeenCalledWith({ limit: 9 });
-    await intentSweepWorkflow({});
-    expect(acts.listDueWatches).toHaveBeenLastCalledWith({ limit: 50 });
+    await intentSweepWorkflow(workflowInput(9));
+    expect(acts.listDueWatches).toHaveBeenCalledWith(expect.objectContaining({ limit: 9 }));
+    await intentSweepWorkflow(workflowInput());
+    expect(acts.listDueWatches).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50 }));
   });
 });
