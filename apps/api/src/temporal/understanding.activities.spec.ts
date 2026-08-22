@@ -9,13 +9,31 @@ import { createUnderstandingActivities } from './understanding.activities';
 
 function budgetStoreSpies() {
   const open = vi.fn(async () => undefined);
+  const openAuthorized = vi.fn(async () => ({
+    accountId: '40000000-0000-4000-8000-000000000004',
+    authorityId: '20000000-0000-4000-8000-000000000002',
+    authorizedCapMicrousd: 1_000_000n,
+    generation: 1,
+  }));
   const close = vi.fn(async () => undefined);
   return {
     open,
+    openAuthorized,
     close,
-    store: { open, close } as unknown as BudgetStore,
+    store: { open, openAuthorized, close } as unknown as BudgetStore,
   };
 }
+
+const UNDERSTANDING_BINDING = Object.freeze({
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  replay: false,
+  scopeKey: '10000000-0000-4000-8000-000000000001',
+  accountKey: `understanding.run:company:request:${'a'.repeat(64)}:${'a'.repeat(64)}`,
+  purpose: 'understanding.run' as const,
+  subjectType: 'company',
+  subjectId: `request:${'a'.repeat(64)}`,
+  requestSha256: 'a'.repeat(64),
+});
 
 /**
  * FIX C（Codex P1）：crawl4ai.fetch 的 allowedPurpose 追加 site_builder 后，**不带 purpose** 的调用者
@@ -73,6 +91,60 @@ describe('understanding.activities — unified runtime telemetry', () => {
 });
 
 describe('understanding.activities — durable workflow budget lifecycle', () => {
+  it('requires the relayed authority binding and never self-opens an environment cap account', async () => {
+    const budget = budgetStoreSpies();
+    const invoke = vi.fn(async () => ({ data: { text: 'Acme makes pumps.' }, costCents: 0 }));
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: {} as ModelGateway,
+      broker: { invoke } as unknown as ExecutionBroker,
+      budgetStore: budget.store,
+    });
+
+    await acts.crawlWebsite({
+      workspaceId: UNDERSTANDING_BINDING.scopeKey,
+      website: 'https://acme.example/',
+      executionBudget: UNDERSTANDING_BINDING,
+    });
+
+    expect(budget.openAuthorized).toHaveBeenCalledWith({
+      authorityId: UNDERSTANDING_BINDING.authorityId,
+      scopeKey: UNDERSTANDING_BINDING.scopeKey,
+      accountKey: UNDERSTANDING_BINDING.accountKey,
+      replayScope: true,
+    });
+    expect(budget.open).not.toHaveBeenCalled();
+    expect(budget.close).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith(
+      'crawl4ai.fetch',
+      expect.any(Object),
+      expect.objectContaining({
+        workspaceId: UNDERSTANDING_BINDING.scopeKey,
+        runId: UNDERSTANDING_BINDING.accountKey,
+      }),
+    );
+  });
+
+  it('fails missing authority closed before the broker wire', async () => {
+    const budget = budgetStoreSpies();
+    const invoke = vi.fn(async () => ({ data: { text: 'must not run' }, costCents: 0 }));
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: {} as ModelGateway,
+      broker: { invoke } as unknown as ExecutionBroker,
+      budgetStore: budget.store,
+    });
+
+    await expect(
+      acts.crawlWebsite({
+        workspaceId: UNDERSTANDING_BINDING.scopeKey,
+        website: 'https://acme.example/',
+      } as never),
+    ).rejects.toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+    expect(invoke).not.toHaveBeenCalled();
+    expect(budget.open).not.toHaveBeenCalled();
+  });
+
   it('opens every egress/model activity on the stable workflow account and passes the same key to execution context', async () => {
     const budget = budgetStoreSpies();
     const invoke = vi.fn(async () => ({ data: { text: 'Acme makes pumps.' }, costCents: 0 }));

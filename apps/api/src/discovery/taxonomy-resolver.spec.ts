@@ -4,6 +4,69 @@ import { BudgetOperationReplayError } from '../tools/budget-store';
 import { TaxonomyResolver } from './taxonomy-resolver';
 
 describe('TaxonomyResolver — durable model budget binding', () => {
+  it('uses the verified ICP authority binding for nested taxonomy model calls without a legacy account fallback', async () => {
+    const requestSha256 = 'a'.repeat(64);
+    const binding = {
+      authorityId: '20000000-0000-4000-8000-000000000002',
+      replay: false,
+      scopeKey: '10000000-0000-4000-8000-000000000001',
+      accountKey: `icp.query_plan:icp:30000000-0000-4000-8000-000000000003:${requestSha256}`,
+      purpose: 'icp.query_plan' as const,
+      subjectType: 'icp',
+      subjectId: '30000000-0000-4000-8000-000000000003',
+      requestSha256,
+    };
+    const generateStructured = vi.fn(async (_input, context) => ({
+      data: { code: 'industry-1' },
+      provider: 'gateway',
+      model: 'model',
+      context,
+    }));
+    const prisma = {
+      termAlias: { findUnique: vi.fn(async () => null), upsert: vi.fn(async () => ({})) },
+      canonicalTaxonomy: {
+        findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]),
+        findUnique: vi.fn(async () => ({
+          kind: 'industry', scheme: 'isic', code: 'industry-1', labelEn: 'Pumps', labels: {},
+          wikidataQid: null, osmTags: null, crosswalks: null,
+        })),
+      },
+    };
+    const budgetStore = {
+      open: vi.fn(async () => undefined),
+      openAuthorized: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+    };
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured } as never,
+      undefined,
+      budgetStore as never,
+    );
+
+    await resolver.resolve('industry', 'pumps', {
+      workspaceId: binding.scopeKey,
+      runId: binding.accountKey,
+      executionBudget: binding,
+    });
+
+    expect(budgetStore.openAuthorized).toHaveBeenCalledWith({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+      replayScope: true,
+    });
+    expect(budgetStore.open).not.toHaveBeenCalled();
+    expect(budgetStore.close).not.toHaveBeenCalled();
+    expect(generateStructured).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        workspaceId: binding.scopeKey,
+        runId: binding.accountKey,
+      }),
+    );
+  });
+
   it('opens before the model call, passes the same runId, and closes in finally', async () => {
     const order: string[] = [];
     const generateStructured = vi.fn(async (_input, context) => {

@@ -47,6 +47,17 @@ interface DeliveryRow {
 }
 
 const WS = "11111111-1111-1111-1111-111111111111";
+const REQUEST_SHA256 = "a".repeat(64);
+const EXECUTION_BUDGET = Object.freeze({
+  authorityId: "22222222-2222-4222-8222-222222222222",
+  replay: false,
+  scopeKey: WS,
+  accountKey: `understanding.run:company:request:${REQUEST_SHA256}:${REQUEST_SHA256}`,
+  purpose: "understanding.run",
+  subjectType: "company",
+  subjectId: `request:${REQUEST_SHA256}`,
+  requestSha256: REQUEST_SHA256,
+});
 
 function makeEvent(over: Partial<EvRow> = {}): EvRow {
   return {
@@ -409,6 +420,48 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     expect(ev.publishedAt).toBeInstanceOf(Date);
     // internal command 不进交付账本
     expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it("CompanyProfileCreated preserves the immutable authority binding in workflow args", async () => {
+    const ev = makeEvent({
+      eventType: "CompanyProfileCreated",
+      aggregateType: "Company",
+      aggregateId: "33333333-3333-4333-8333-333333333333",
+      payload: {
+        website: "https://acme.example/",
+        executionBudget: EXECUTION_BUDGET,
+      },
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            workspaceId: WS,
+            executionBudget: EXECUTION_BUDGET,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it.each([
+    ["CompanyProfileCreated", "Company", { website: "https://acme.example/" }],
+    ["DiscoveryRunRequested", "DiscoveryRun", { planId: "plan-1", icpId: "icp-1" }],
+  ])("%s fails closed instead of starting a workflow without authority", async (eventType, aggregateType, payload) => {
+    const ev = makeEvent({ eventType, aggregateType, payload });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).not.toHaveBeenCalled();
+    expect(ev.publishedAt).toBeNull();
   });
 
   it("internal command dispatch 失败 → 不标 published（下轮重试）", async () => {

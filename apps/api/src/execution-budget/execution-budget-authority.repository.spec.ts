@@ -174,6 +174,33 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(COMPACT_JWS);
   });
 
+  it('returns replay from the consumption transaction without opening or incrementing the account', async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [
+        { authority_id: AUTHORITY_ID, replay: true },
+      ]),
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+    } as unknown as PrismaService;
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(
+      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
+    ).resolves.toEqual({ authorityId: AUTHORITY_ID, replay: true });
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const query = tx.$queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    };
+    expect(query.strings?.join('')).toContain(
+      'consume_workspace_execution_authority',
+    );
+    expect(query.strings?.join('')).not.toContain(
+      'open_authorized_tool_budget_v1',
+    );
+  });
+
   it('rolls back a newly consumed authority when atomic account opening fails', async () => {
     const committed: string[] = [];
     const observedQueries: string[] = [];

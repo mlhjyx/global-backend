@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  guessEmailsExecutionBudgetRequestScope,
+  verifyContactPointExecutionBudgetRequestScope,
   workspaceExecutionBudgetRequestScope,
   type WorkspaceExecutionBudgetRequest,
 } from './execution-budget-request-scope';
@@ -158,5 +160,33 @@ describe('workspaceExecutionBudgetRequestScope', () => {
         body: { invalid: 1n } as never,
       }),
     ).toThrow('EXECUTION_BUDGET_REQUEST_INVALID');
+  });
+
+  it('hashes Guess Emails from the exact public HTTP DTO before lawful-basis reshaping', () => {
+    const scope = guessEmailsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
+      lawfulBasis: 'legitimate_interest',
+      lawfulBasisRef: 'LIA-42',
+      lawfulBasisNote: 'note',
+      allowPersonalWithoutBasis: true,
+      maxContacts: 5,
+      maxProbe: 3,
+    });
+
+    expect(scope.requestSha256).toBe(
+      '4aa3896784fc0f919c55eb5527452f2fa270e2b58c5a646ef86043dc08208952',
+    );
+  });
+
+  it('hashes Verify from the exact public HTTP DTO before lawful-basis reshaping', () => {
+    const scope = verifyContactPointExecutionBudgetRequestScope(POINT_ID, {
+      lawfulBasis: 'legitimate_interest',
+      lawfulBasisRef: 'LIA-42',
+      lawfulBasisNote: 'note',
+      allowPersonalWithoutBasis: true,
+    });
+
+    expect(scope.requestSha256).toBe(
+      'ff1319d2ec607743ccf3eb6cb9d251739bffed5a9ec5a1ba49cd5b1635c634ca',
+    );
   });
 });

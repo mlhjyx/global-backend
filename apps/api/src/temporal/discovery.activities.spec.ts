@@ -75,6 +75,16 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
 }
 
 const QUERY = { source_class: 'public_intelligence', filters: {}, keywords: [], priority: 1 };
+const DISCOVERY_BINDING = Object.freeze({
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  replay: false,
+  scopeKey: '10000000-0000-4000-8000-000000000001',
+  accountKey: `discovery.run:discovery_run:request:${'a'.repeat(64)}:${'a'.repeat(64)}`,
+  purpose: 'discovery.run' as const,
+  subjectType: 'discovery_run',
+  subjectId: `request:${'a'.repeat(64)}`,
+  requestSha256: 'a'.repeat(64),
+});
 
 // executeQuery/enrichRun 不 close run 预算账户（finalizeRun 才 close）→ 测试自行 force-close，清打标防单例泄漏。
 afterEach(() => {
@@ -120,6 +130,59 @@ function makeEnrichDeps(enrichers: unknown[]) {
 }
 
 describe('executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错', () => {
+  it('uses the relayed authority account and rejects missing binding before provider execution', async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const open = vi.fn(async () => undefined);
+    const openAuthorized = vi.fn(async () => ({
+      accountId: '40000000-0000-4000-8000-000000000004',
+      authorityId: DISCOVERY_BINDING.authorityId,
+      authorizedCapMicrousd: 1_000_000n,
+      generation: 1,
+    }));
+    const deps = makeDeps([
+      { ...okAdapter('wikidata', []), discoverCompanies },
+    ]);
+    deps.budgetStore = {
+      open,
+      openAuthorized,
+      status: vi.fn(async () => ({ remainingCents: 100, exhausted: false, open: true })),
+    } as never;
+    const acts = createDiscoveryActivities(deps);
+
+    await acts.executeQuery({
+      workspaceId: DISCOVERY_BINDING.scopeKey,
+      runId: 'run-row-id',
+      query: QUERY,
+      executionBudget: DISCOVERY_BINDING,
+    });
+
+    expect(openAuthorized).toHaveBeenCalledWith({
+      authorityId: DISCOVERY_BINDING.authorityId,
+      scopeKey: DISCOVERY_BINDING.scopeKey,
+      accountKey: DISCOVERY_BINDING.accountKey,
+      replayScope: true,
+    });
+    expect(open).not.toHaveBeenCalled();
+    expect(discoverCompanies).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        workspaceId: DISCOVERY_BINDING.scopeKey,
+        runId: DISCOVERY_BINDING.accountKey,
+      }),
+      expect.any(Object),
+    );
+
+    discoverCompanies.mockClear();
+    await expect(
+      acts.executeQuery({
+        workspaceId: DISCOVERY_BINDING.scopeKey,
+        runId: 'run-row-id',
+        query: QUERY,
+      } as never),
+    ).rejects.toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+    expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+
   it('产品路径在调用 provider 和持久化之前拒绝 synthetic sandbox adapter', async () => {
     const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
     const deps = makeDeps([
