@@ -403,6 +403,12 @@ const GOOGLE_PATENTS_RAW: RawToolResult = {
           }))
         : [],
     })),
+    costFacts: {
+      costBasis: 'estimated_upper_bound',
+      maximumBytesBilled: '214748364800',
+      observedBytesBilled: null,
+      maxRows: 50,
+    },
   },
   costCents: 0,
   degraded: true,
@@ -415,6 +421,7 @@ const GOOGLE_PATENTS_RESTORED: RawToolResult = {
       ...patent,
       ...(index === 0 ? { inventors: [] } : {}),
     })),
+    costFacts: GOOGLE_PATENTS_RAW.data.costFacts,
   },
 };
 
@@ -660,6 +667,11 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.patents[].applicants[].country.maxLength': 16,
     '$.data.patents[].inventors.maxItems': 25,
     '$.data.patents[].inventors[].name.maxLength': 500,
+    '$.data.costFacts.costBasis.maxLength': 32,
+    '$.data.costFacts.maximumBytesBilled.maxLength': 24,
+    '$.data.costFacts.observedBytesBilled.oneOf[0].maxLength': 24,
+    '$.data.costFacts.maxRows.minimum': 0,
+    '$.data.costFacts.maxRows.maximum': 50,
   },
   'tradefair-algolia/v1': {
     ...COMMON_RESULT_BOUNDS,

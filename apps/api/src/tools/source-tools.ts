@@ -768,9 +768,9 @@ export interface GooglePatentsInput {
 export interface GooglePatentsOutput {
   patents?: PatentRecord[];
   costFacts?: {
-    costBasis: "estimated_upper_bound";
+    costBasis: "estimated_upper_bound" | "provider_reported";
     maximumBytesBilled: string;
-    bytesBilled: string;
+    observedBytesBilled: string | null;
     maxRows: number;
   };
 }
@@ -827,7 +827,7 @@ export const googlePatentsSearchTool: Tool<
       costFacts: {
         costBasis: "estimated_upper_bound",
         maximumBytesBilled: bigqueryPatents.maximumBytesBilled(),
-        bytesBilled: bigqueryPatents.maximumBytesBilled(),
+        observedBytesBilled: null,
         maxRows: GOOGLE_PATENTS_MAX_ROWS,
       },
     },

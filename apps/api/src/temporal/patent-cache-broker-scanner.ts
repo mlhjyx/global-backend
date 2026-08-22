@@ -65,7 +65,7 @@ export function createPatentCacheBrokerScanner(input: {
         return { rows: [], bytesScanned: null, scanned: false };
       }
       const rows: RefreshInventorRow[] = [];
-      let bytesScanned = 0;
+      let bytesScanned: number | null = null;
       let scanned = false;
       for (const anchor of anchors) {
         const applicant = applicantFromAnchor(anchor);
@@ -86,17 +86,26 @@ export function createPatentCacheBrokerScanner(input: {
           },
           context,
         );
-        const bytesBilled = Number(result.data.costFacts?.bytesBilled);
+        const observedBytesBilled = result.data.costFacts?.observedBytesBilled;
         const maximumBytesBilled = Number(result.data.costFacts?.maximumBytesBilled);
         if (
-          !Number.isSafeInteger(bytesBilled) ||
-          bytesBilled < 0 ||
+          (observedBytesBilled !== null && typeof observedBytesBilled !== "string") ||
           !Number.isSafeInteger(maximumBytesBilled) ||
-          maximumBytesBilled < bytesBilled
+          maximumBytesBilled < 0
         ) {
           throw new Error("GOOGLE_PATENTS_COST_FACTS_UNAVAILABLE");
         }
-        bytesScanned += bytesBilled;
+        if (observedBytesBilled !== null) {
+          const observedBytes = Number(observedBytesBilled);
+          if (
+            !Number.isSafeInteger(observedBytes) ||
+            observedBytes < 0 ||
+            observedBytes > maximumBytesBilled
+          ) {
+            throw new Error("GOOGLE_PATENTS_COST_FACTS_UNAVAILABLE");
+          }
+          bytesScanned = (bytesScanned ?? 0) + observedBytes;
+        }
         scanned = true;
         rows.push(...rowsFromPatents(result.data.patents ?? []));
       }

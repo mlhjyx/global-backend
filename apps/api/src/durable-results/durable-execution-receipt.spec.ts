@@ -109,6 +109,7 @@ describe('DurableExecutionReceipt', () => {
     const parsed = parseDurableExecutionReceipt(
       receipt({
         resultSchema: 'google-patents-search/v1',
+        costBasis: 'provider_reported',
         usage: {
           currency: 'USD',
           unit: 'microusd',
@@ -117,7 +118,6 @@ describe('DurableExecutionReceipt', () => {
           bytesBilled: '1048576',
           maximumBytesBilled: '214748364800',
           chargedMicrousd: '0',
-          upperBoundMicrousd: '0',
         },
       }),
     );
@@ -256,6 +256,47 @@ describe('DurableExecutionReceipt', () => {
           unit: 'microusd',
           callCount: 1,
           chargedMicrousd: '0',
+        },
+      }),
+    ],
+    [
+      'estimated upper bound requires a wire call',
+      receipt({
+        costBasis: 'estimated_upper_bound',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 0,
+          chargedMicrousd: '0',
+          upperBoundMicrousd: '0',
+        },
+      }),
+    ],
+    [
+      'google patents receipts require maximumBytesBilled',
+      receipt({
+        resultSchema: 'google-patents-search/v1',
+        costBasis: 'estimated_upper_bound',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '0',
+          upperBoundMicrousd: '0',
+        },
+      }),
+    ],
+    [
+      'google patents provider-reported byte receipts require observed bytes',
+      receipt({
+        resultSchema: 'google-patents-search/v1',
+        costBasis: 'provider_reported',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '0',
+          maximumBytesBilled: '214748364800',
         },
       }),
     ],

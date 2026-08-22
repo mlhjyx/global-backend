@@ -244,7 +244,9 @@ export class ToolBroker implements ExecutionBroker {
           Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
         ) {
           const replay = tool.durableReplayResult?.(paidDecision.result as unknown as ToolResult<O>);
-          if (replay) return replay;
+          if (replay) {
+            return replay;
+          }
           throw new PaidOperationUnknownError(paidScope.operationKey, 'REPLAY_PAYLOAD_UNAVAILABLE');
         }
         throw new Error(
@@ -275,7 +277,11 @@ export class ToolBroker implements ExecutionBroker {
           } catch {
             throw new BudgetOperationReplayError(reservation.operationId);
           }
-          if (replay) return replay;
+          if (replay) {
+            return reservation.receipt
+              ? { ...replay, durableReceipt: reservation.receipt }
+              : replay;
+          }
           throw new BudgetOperationReplayError(reservation.operationId);
         }
       } catch (err) {

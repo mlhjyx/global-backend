@@ -206,6 +206,39 @@ const RULE_VALUE_SCHEMA: JsonSchema = {
 const factEntriesSchema = (keys: readonly string[], value: JsonSchema): JsonSchema => arraySchema(
   32, objectSchema({ key: stringSchema(120, { enum: [...keys] }), value }, ['key', 'value']),
 );
+const gatewaySettlementSchema: JsonSchema = {
+  oneOf: [
+    objectSchema({
+      status: stringSchema(16, { const: 'settled' }),
+      requestId: stringSchema(120),
+      resolverId: stringSchema(120),
+      alias: stringSchema(120),
+      protocol: stringSchema(40, {
+        enum: ['openai-chat-completions', 'openai-responses', 'anthropic-messages'],
+      }),
+      channelId: numberSchema(0, 1_000_000_000, true),
+      basis: stringSchema(40, { const: 'openox_catalog_token_pricing' }),
+      quota: numberSchema(0, 1_000_000_000, true),
+      costMicrousd: numberSchema(0, 1_000_000_000_000_000, true),
+      inputTokens: numberSchema(0, 1_000_000_000, true),
+      outputTokens: numberSchema(0, 1_000_000_000, true),
+    }, [
+      'status', 'requestId', 'resolverId', 'alias', 'protocol', 'channelId',
+      'basis', 'quota', 'costMicrousd', 'inputTokens', 'outputTokens',
+    ]),
+    objectSchema({
+      status: stringSchema(16, { const: 'unknown' }),
+      requestId: { oneOf: [stringSchema(120), { type: 'null' }] },
+      resolverId: stringSchema(120),
+      reason: stringSchema(40, {
+        enum: [
+          'request_id_missing', 'log_unavailable', 'log_ambiguous',
+          'log_invalid', 'model_mismatch', 'channel_mismatch',
+        ],
+      }),
+    }, ['status', 'requestId', 'resolverId', 'reason']),
+  ],
+};
 function modelResultSchema(data: JsonSchema): JsonSchema {
   return objectSchema({
     data,
@@ -219,7 +252,7 @@ function modelResultSchema(data: JsonSchema): JsonSchema {
       inputTokens: numberSchema(0, 1_000_000_000, true),
       outputTokens: numberSchema(0, 1_000_000_000, true),
       costUsd: numberSchema(0, 1_000_000_000),
-      gatewaySettlements: arraySchema(16, optionalObjectSchema({}, [])),
+      gatewaySettlements: arraySchema(16, gatewaySettlementSchema),
     }),
     callCount: numberSchema(0, 100, true),
   }, ['data', 'provider', 'model']);

@@ -203,13 +203,14 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         estimatedCents: 1,
         replay: true,
         replayProjection: projection,
+        receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
 
     await expect(
       broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
-    ).resolves.toEqual(projectedResult);
+    ).resolves.toEqual({ ...projectedResult, durableReceipt: DURABLE_RECEIPT });
     expect(execute).not.toHaveBeenCalled();
   });
 

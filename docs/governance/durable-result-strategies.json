@@ -411,22 +411,34 @@
     {
       "schema": "crawl4ai-fetch/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PERSONAL_DATA"
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["text/markdown"],
+      "maxBytes": 300000,
+      "ttlSeconds": 86400
     },
     {
       "schema": "crawl4ai-render/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PERSONAL_DATA"
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["text/html"],
+      "maxBytes": 3000000,
+      "ttlSeconds": 86400
     },
     {
       "schema": "http-get/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PERSONAL_DATA"
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["text/plain"],
+      "maxBytes": 3000000,
+      "ttlSeconds": 86400
     },
     {
       "schema": "sanctions-download/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PERSONAL_DATA"
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["application/xml", "text/xml"],
+      "maxBytes": 33554432,
+      "ttlSeconds": 86400
     }
   ],
   "managedExternalAdapters": [

@@ -53,6 +53,9 @@ const CH_OFFICER_KEYS = ['name', 'officerRole', 'resignedOn', 'officerId'] as co
 const INPI_COMPANY_KEYS = ['siren', 'name', 'etatAdministratif', 'dirigeants'] as const;
 const INPI_DIRIGEANT_KEYS = ['nom', 'prenoms', 'qualite'] as const;
 const PATENT_KEYS = ['publicationNumber', 'applicants', 'inventors'] as const;
+const PATENT_COST_FACT_KEYS = [
+  'costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows',
+] as const;
 const PATENT_APPLICANT_KEYS = ['name', 'country'] as const;
 const PATENT_INVENTOR_KEYS = ['name'] as const;
 const FAIR_EXHIBITOR_KEYS = [
@@ -762,6 +765,14 @@ const patentSchema = objectSchema({
   applicants: arraySchema(32, patentApplicantSchema),
   inventors: arraySchema(25, patentInventorSchema),
 }, ['publicationNumber', 'applicants', 'inventors']);
+const patentCostFactsSchema = objectSchema({
+  costBasis: stringSchema(32, {
+    enum: ['estimated_upper_bound', 'provider_reported'],
+  }),
+  maximumBytesBilled: stringSchema(24),
+  observedBytesBilled: { oneOf: [stringSchema(24), { type: 'null' }] },
+  maxRows: numberSchema(0, 50, true),
+}, ['costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows']);
 function projectPatentRecords(value: unknown): unknown[] {
   const groupSeen = new Map<string, Set<string>>();
   return mapArray(value, (item) => {
@@ -795,12 +806,30 @@ function projectPatentRecords(value: unknown): unknown[] {
     return { publicationNumber: field(patent, 'publicationNumber'), applicants, inventors };
   });
 }
-const patentsData = (value: unknown) => mapClosedRecord(value, ['patents'], [], {
+function projectPatentCostFacts(value: unknown): unknown {
+  const facts = mapClosedRecord(value, PATENT_COST_FACT_KEYS, [
+    'costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows',
+  ]);
+  if (
+    field(facts, 'costBasis') === 'estimated_upper_bound' &&
+    field(facts, 'observedBytesBilled') !== null
+  ) projectionInvalid();
+  if (
+    field(facts, 'costBasis') === 'provider_reported' &&
+    typeof field(facts, 'observedBytesBilled') !== 'string'
+  ) projectionInvalid();
+  return facts;
+}
+const patentsData = (value: unknown) => mapClosedRecord(value, ['patents', 'costFacts'], [], {
   patents: projectPatentRecords,
+  costFacts: projectPatentCostFacts,
 });
 const googlePatentsDefinition = definition(
   'google-patents-search/v1',
-  objectSchema({ patents: arraySchema(50, patentSchema) }, []),
+  objectSchema({
+    patents: arraySchema(50, patentSchema),
+    costFacts: patentCostFactsSchema,
+  }, []),
   patentsData,
 );
 

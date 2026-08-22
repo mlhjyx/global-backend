@@ -26,9 +26,13 @@ async function materializePolicyRepo(mutations = {}) {
     "docs/governance/durable-result-strategies.json",
     "apps/api/src/tools/builtin-tools.ts",
     "apps/api/src/tools/source-tools.ts",
+    "apps/api/src/tools/budget-store.ts",
     "apps/api/src/durable-results/durable-execution-receipt.ts",
     "apps/api/src/durable-results/domain-ack.ts",
     "apps/api/src/durable-results/artifact/artifact-materializer.registry.ts",
+    "apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.ts",
+    "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts",
+    "apps/api/src/durable-results/artifact/materializers/sanctions-download.materializer.ts",
     "apps/api/src/temporal/patents-cache.activities.ts",
     "apps/api/src/temporal/patent-cache-broker-scanner.ts",
     "apps/api/src/discovery/providers/bigquery-patents.provider.ts",
@@ -36,6 +40,7 @@ async function materializePolicyRepo(mutations = {}) {
     "apps/api/src/discovery/providers/directory.provider.ts",
     "apps/api/src/discovery/providers/decision-maker.provider.ts",
     "apps/api/src/icp/icp-budget-execution.ts",
+    "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql",
   ]);
   for (const [path] of EXPECTED_MODEL_TASKS) requiredFiles.add(path);
   for (const path of requiredFiles) {
@@ -90,6 +95,53 @@ test("scanner catches source-derived tool strategy omissions", async () => {
   });
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_TOOL_STRATEGY_SOURCE_MISMATCH"));
+});
+
+test("scanner catches declared tools that are no longer product-registered", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/tools/source-tools.ts": (source) =>
+      source.replace("  registry.register(googlePatentsSearchTool as Tool);\n", ""),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_TOOL_REGISTRATION_MISMATCH"));
+});
+
+test("scanner catches product model call-sites missing from the inventory", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/providers/public-web.provider.ts": (source) =>
+      `${source}
+async function unregisteredAuthorityModelCall(deps, ctx) {
+  return executeStructuredTaskWithRuntime(
+    deps.gateway,
+    { task: 'discovery.unregistered_model', prompt: 'offline scanner fixture' },
+    { ...ctx, durableResultSchema: 'taxonomy-code/v1' },
+  );
+}
+`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH"));
+});
+
+test("scanner catches artifact contract drift across materializer source and manifest", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts": (source) =>
+      source.replace("const MAX_HTTP_GET_ARTIFACT_BYTES = 3_000_000;", "const MAX_HTTP_GET_ARTIFACT_BYTES = 4_000_000;"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_ARTIFACT_CONTRACT_MISMATCH"));
+});
+
+test("scanner catches missing transaction-compatible Domain ACK and ledger receipt paths", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/durable-results/domain-ack.ts": (source) =>
+      source.replace("PostgresDomainAckRepository", "LegacyDomainAckRepository"),
+    "apps/api/src/tools/budget-store.ts": (source) =>
+      source.replace("reserve_tool_budget_with_receipt_v1", "reserve_tool_budget"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_REPOSITORY_MISSING"));
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_LEDGER_RECEIPT_SOURCE_MISSING"));
 });
 
 test("scanner catches new product direct BigQuery bypasses outside the original managed files", async () => {

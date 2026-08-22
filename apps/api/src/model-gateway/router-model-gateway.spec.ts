@@ -144,7 +144,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budgetStore = {
       reserve: vi.fn(async () => ({
         workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-        replay: true, replayProjection: projection,
+        replay: true, replayProjection: projection, receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
     const gateway = new RouterModelGateway(
@@ -165,7 +165,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
         },
       },
       { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
-    )).resolves.toEqual(restored);
+    )).resolves.toEqual({ ...restored, durableReceipt: DURABLE_RECEIPT });
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
 

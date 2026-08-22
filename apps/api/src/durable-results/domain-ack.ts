@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import {
   parseDurableExecutionReceipt,
   type DurableExecutionReceipt,
@@ -107,6 +108,7 @@ function freezeRecord(record: DomainAckRecord): DomainAckRecord {
 
 export class InMemoryDomainAckRepository implements DomainAckRepository {
   private readonly records = new Map<string, DomainAckRecord>();
+  private readonly pending = new Map<string, Promise<DomainAckRecord>>();
 
   async apply<T>(
     record: DomainAckRecord,
@@ -117,14 +119,75 @@ export class InMemoryDomainAckRepository implements DomainAckRepository {
       if (!sameAck(existing, record)) throw new DomainAckConflictError(record.operationId);
       return Object.freeze({ status: 'REPLAYED' as const, ack: existing, value: undefined });
     }
-    const value = await apply();
-    const stored = freezeRecord(record);
-    this.records.set(record.operationId, stored);
-    return Object.freeze({ status: 'APPLIED' as const, ack: stored, value });
+    const pending = this.pending.get(record.operationId);
+    if (pending) {
+      const stored = await pending;
+      if (!sameAck(stored, record)) throw new DomainAckConflictError(record.operationId);
+      return Object.freeze({ status: 'REPLAYED' as const, ack: stored, value: undefined });
+    }
+    let resolvePending!: (record: DomainAckRecord) => void;
+    let rejectPending!: (error: unknown) => void;
+    this.pending.set(record.operationId, new Promise<DomainAckRecord>((resolve, reject) => {
+      resolvePending = resolve;
+      rejectPending = reject;
+    }));
+    try {
+      const value = await apply();
+      const stored = freezeRecord(record);
+      this.records.set(record.operationId, stored);
+      resolvePending(stored);
+      return Object.freeze({ status: 'APPLIED' as const, ack: stored, value });
+    } catch (error) {
+      rejectPending(error);
+      throw error;
+    } finally {
+      this.pending.delete(record.operationId);
+    }
   }
 
   snapshot(): readonly DomainAckRecord[] {
     return Object.freeze([...this.records.values()].map((record) => freezeRecord(record)));
+  }
+}
+
+interface PostgresDomainAckRow {
+  status: 'APPLIED' | 'REPLAYED';
+  ack_json: unknown;
+}
+
+export interface DomainAckTransaction {
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T>;
+}
+
+function parseAckRow(rows: readonly PostgresDomainAckRow[], expected: DomainAckRecord): {
+  readonly status: 'APPLIED' | 'REPLAYED';
+  readonly ack: DomainAckRecord;
+} {
+  const row = rows[0];
+  if (!row || (row.status !== 'APPLIED' && row.status !== 'REPLAYED')) invalid();
+  const ack = freezeRecord(row.ack_json as DomainAckRecord);
+  if (!sameAck(ack, expected)) throw new DomainAckConflictError(expected.operationId);
+  return Object.freeze({ status: row.status, ack });
+}
+
+export class PostgresDomainAckRepository implements DomainAckRepository {
+  constructor(private readonly transaction: DomainAckTransaction) {}
+
+  async apply<T>(
+    record: DomainAckRecord,
+    apply: () => Promise<T>,
+  ): Promise<DomainAckApplyResult<T>> {
+    const locked = parseAckRow(
+      await this.transaction.$queryRaw<PostgresDomainAckRow[]>(
+        Prisma.sql`SELECT * FROM apply_execution_domain_ack_v1(${JSON.stringify(record)}::jsonb)`,
+      ),
+      record,
+    );
+    if (locked.status === 'REPLAYED') {
+      return Object.freeze({ status: 'REPLAYED' as const, ack: locked.ack, value: undefined });
+    }
+    const value = await apply();
+    return Object.freeze({ status: 'APPLIED' as const, ack: locked.ack, value });
   }
 }
 

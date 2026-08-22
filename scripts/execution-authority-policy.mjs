@@ -48,6 +48,12 @@ const REQUIRED_ARTIFACT_SCHEMAS = Object.freeze([
   "crawl4ai-render/v1",
 ]);
 
+const ARTIFACT_MATERIALIZER_FILES = Object.freeze([
+  "apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.ts",
+  "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts",
+  "apps/api/src/durable-results/artifact/materializers/sanctions-download.materializer.ts",
+]);
+
 const RECEIPT_FIELDS = Object.freeze([
   "operationId",
   "operationKey",
@@ -81,6 +87,147 @@ function hasNeedle(source, needle) {
 
 function sorted(values) {
   return [...values].sort();
+}
+
+function compactJson(value) {
+  return JSON.stringify(value);
+}
+
+function parseNumericLiteral(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replaceAll("_", "").trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function extractStringConstValues(source) {
+  const values = new Map();
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*["']([^"']+)["'](?:\s+as\s+const)?\s*;/g)) {
+    values.set(match[1], match[2]);
+  }
+  return values;
+}
+
+function extractNumberConstValues(source) {
+  const values = new Map();
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*([0-9_]+)\s*;/g)) {
+    const parsed = parseNumericLiteral(match[2]);
+    if (parsed !== null) values.set(match[1], parsed);
+  }
+  return values;
+}
+
+function resolveNumberToken(token, constants) {
+  const parsed = parseNumericLiteral(token);
+  if (parsed !== null) return parsed;
+  return constants.get(token.trim()) ?? null;
+}
+
+function resolveStringToken(token, constants) {
+  const trimmed = token.trim();
+  const literal = trimmed.match(/^["']([^"']+)["']$/);
+  if (literal) return literal[1];
+  return constants.get(trimmed) ?? null;
+}
+
+function extractArrayStrings(expression, constants) {
+  const array = expression.match(/\[([\s\S]*?)\]/);
+  if (!array) return null;
+  const values = [];
+  for (const raw of array[1].split(",")) {
+    const value = resolveStringToken(raw, constants);
+    if (!value) return null;
+    values.push(value);
+  }
+  return sorted(values);
+}
+
+function extractToolDeclarations(source) {
+  const declarations = new Map();
+  const factoryIds = new Map();
+  for (const match of source.matchAll(/\bfunction\s+(create[A-Za-z0-9_]+)\b[\s\S]*?return\s*{[\s\S]*?\bid:\s*"([a-z0-9_.]+)"/g)) {
+    factoryIds.set(match[1], match[2]);
+  }
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=\s*(create[A-Za-z0-9_]+)\(\)\s*;/g)) {
+    const id = factoryIds.get(match[2]);
+    if (id) declarations.set(match[1], id);
+  }
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Za-z0-9_]+)\b[\s\S]{0,800}?\bid:\s*"([a-z0-9_.]+)"/g)) {
+    declarations.set(match[1], match[2]);
+  }
+  for (const match of source.matchAll(/\bid:\s*"([a-z0-9_.]+)"/g)) {
+    const prefix = source.slice(Math.max(0, match.index - 2000), match.index);
+    const names = [...prefix.matchAll(/\b(?:export\s+)?const\s+([A-Za-z0-9_]+)\b/g)];
+    const last = names.at(-1);
+    if (last && !declarations.has(last[1])) declarations.set(last[1], match[1]);
+  }
+  return declarations;
+}
+
+function extractRegisteredToolIds(source, declarations) {
+  const ids = [];
+  for (const match of source.matchAll(/\bregistry\.register\(\s*([A-Za-z0-9_]+)\s+as\s+Tool\s*\)/g)) {
+    ids.push(declarations.get(match[1]) ?? `<unresolved:${match[1]}>`);
+  }
+  return sorted(ids);
+}
+
+function extractArtifactStrategyContracts(source) {
+  const numberConstants = extractNumberConstValues(source);
+  const stringConstants = extractStringConstValues(source);
+  const contracts = new Map();
+  for (const match of source.matchAll(/durableResultStrategy:\s*{([\s\S]*?)}\s*,/g)) {
+    const block = match[1];
+    if (!block.includes('kind: "artifact_reference"') && !block.includes("kind: 'artifact_reference'")) continue;
+    const schema = block.match(/\bschema:\s*["']([^"']+)["']/)?.[1] ?? null;
+    const maxBytesToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)/)?.[1] ?? null;
+    const mediaExpression = block.match(/\bmediaTypes:\s*(\[[\s\S]*?\])/)?.[1] ?? null;
+    const privacyClass = block.match(/\bprivacyClass:\s*["']([^"']+)["']/)?.[1] ?? null;
+    const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)/)?.[1] ?? null;
+    if (!schema || !maxBytesToken || !mediaExpression || !privacyClass || !ttlToken) continue;
+    const maxBytes = resolveNumberToken(maxBytesToken, numberConstants);
+    const mediaTypes = extractArrayStrings(mediaExpression, stringConstants);
+    const ttlSeconds = resolveNumberToken(ttlToken, numberConstants);
+    if (maxBytes === null || mediaTypes === null || ttlSeconds === null) continue;
+    contracts.set(schema, Object.freeze({ schema, maxBytes, mediaTypes, privacyClass, ttlSeconds }));
+  }
+  return contracts;
+}
+
+function extractMaterializerContracts(sources) {
+  const joined = sources.join("\n");
+  const numberConstants = extractNumberConstValues(joined);
+  const stringConstants = extractStringConstValues(joined);
+  const contracts = new Map();
+  for (const match of joined.matchAll(/Object\.freeze\(\s*{([\s\S]*?)}\s*\)/g)) {
+    const block = match[1];
+    const schema = block.match(/\bresultSchema:\s*["']([^"']+)["']/)?.[1] ?? null;
+    if (!schema || !REQUIRED_ARTIFACT_SCHEMAS.includes(schema)) continue;
+    const maxBytesToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)/)?.[1] ?? null;
+    const mediaExpression = block.match(/\bmediaTypes:\s*new Set\((\[[\s\S]*?\])\)/)?.[1] ?? null;
+    if (!maxBytesToken || !mediaExpression) continue;
+    const maxBytes = resolveNumberToken(maxBytesToken, numberConstants);
+    const mediaTypes = extractArrayStrings(mediaExpression, stringConstants);
+    if (maxBytes === null || mediaTypes === null) continue;
+    contracts.set(schema, Object.freeze({ schema, maxBytes, mediaTypes }));
+  }
+  return contracts;
+}
+
+function taskIdsFromModelSource(source) {
+  const tasks = [];
+  for (const match of source.matchAll(/\bexecuteStructuredTaskWithRuntime\b/g)) {
+    const before = source.slice(Math.max(0, match.index - 1800), match.index);
+    const after = source.slice(match.index, Math.min(source.length, match.index + 2200));
+    const schema = after.match(/\bdurableResultSchema:\s*["']([^"']+)["']/)?.[1] ?? null;
+    if (!schema) continue;
+    const literalTask = after.match(/\btask:\s*(?:contract\?\.id\s*\?\?\s*)?["']([^"']+)["']/)?.[1] ?? null;
+    const contractMatches = [...before.matchAll(/\bgetTask\(["']([^"']+)["']\)/g)];
+    const taskId = literalTask ?? contractMatches.at(-1)?.[1] ?? null;
+    if (taskId) tasks.push(Object.freeze({ taskId, schema }));
+  }
+  return tasks;
 }
 
 async function listFiles(root, relative = "") {
@@ -208,6 +355,9 @@ function validateManifestCoverage(manifest, issues) {
       if (entry?.privacyClass !== "PERSONAL_DATA") {
         issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_PRIVACY_MISMATCH", MANIFEST_PATH, `artifact schema must stay PERSONAL_DATA: ${entry?.schema ?? "<unknown>"}`));
       }
+      if (entry?.artifactIdRequired !== true || !Array.isArray(entry?.mediaTypes) || !Number.isSafeInteger(entry?.maxBytes) || !Number.isSafeInteger(entry?.ttlSeconds)) {
+        issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_DECLARATION_INCOMPLETE", MANIFEST_PATH, `artifact schema must declare artifactId, mediaTypes, maxBytes and ttlSeconds: ${entry?.schema ?? "<unknown>"}`));
+      }
     }
   }
 }
@@ -220,6 +370,10 @@ async function scanToolSource(repoRoot, issues) {
   const toolIds = sorted(extractToolIds(source));
   if (toolIds.join("\n") !== sorted(EXPECTED_TOOL_IDS).join("\n")) {
     issues.push(issue("EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH", "apps/api/src/tools", `source must register exactly ${EXPECTED_TOOL_IDS.length} tools`));
+  }
+  const registeredToolIds = extractRegisteredToolIds(source, extractToolDeclarations(source));
+  if (registeredToolIds.join("\n") !== sorted(EXPECTED_TOOL_IDS).join("\n")) {
+    issues.push(issue("EXECUTION_AUTHORITY_TOOL_REGISTRATION_MISMATCH", "apps/api/src/tools", `ToolRegistry registrations must exactly match ${EXPECTED_TOOL_IDS.length} product tools`));
   }
   for (const toolId of EXPECTED_TOOL_IDS) {
     if (!source.includes(`id: "${toolId}"`)) {
@@ -234,6 +388,21 @@ async function scanToolSource(repoRoot, issues) {
 }
 
 async function scanModelSource(repoRoot, issues) {
+  const modelFiles = (await listFiles(repoRoot, "apps/api/src"))
+    .filter((path) => path.endsWith(".ts") && !path.endsWith(".spec.ts"));
+  const discovered = [];
+  for (const path of modelFiles) {
+    const source = await readText(repoRoot, path);
+    for (const callsite of taskIdsFromModelSource(source)) {
+      discovered.push(Object.freeze({ path, ...callsite }));
+    }
+  }
+  const expectedTasks = sorted(EXPECTED_MODEL_TASKS.map(([, taskId, schema]) => `${taskId}\t${schema}`));
+  for (const entry of discovered) {
+    if (!expectedTasks.includes(`${entry.taskId}\t${entry.schema}`)) {
+      issues.push(issue("EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH", entry.path, `model call-site is missing from inventory: ${entry.taskId} -> ${entry.schema}`));
+    }
+  }
   for (const [path, taskId, schema] of EXPECTED_MODEL_TASKS) {
     const source = await readText(repoRoot, path);
     if (!source.includes(taskId)) {
@@ -282,6 +451,39 @@ async function scanDomainAckSource(repoRoot, issues) {
       issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_SERVICE_INCOMPLETE", path, `Domain ACK service missing ${token}`));
     }
   }
+  const migrationPath = "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql";
+  const migrationSource = existsSync(resolve(repoRoot, migrationPath))
+    ? await readText(repoRoot, migrationPath)
+    : "";
+  for (const token of ["PostgresDomainAckRepository", "DomainAckTransaction", "apply_execution_domain_ack_v1"]) {
+    if (!source.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_REPOSITORY_MISSING", path, `transaction-compatible Domain ACK repository missing ${token}`));
+    }
+  }
+  for (const token of ["CREATE TABLE", "\"execution_domain_ack\"", "CREATE FUNCTION apply_execution_domain_ack_v1", "FOR UPDATE", "operation_id"]) {
+    if (!migrationSource.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_REPOSITORY_MISSING", migrationPath, `Domain ACK migration missing ${token}`));
+    }
+  }
+}
+
+async function scanLedgerReceiptSource(repoRoot, issues) {
+  const path = "apps/api/src/tools/budget-store.ts";
+  const migrationPath = "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql";
+  const source = existsSync(resolve(repoRoot, path)) ? await readText(repoRoot, path) : "";
+  const migrationSource = existsSync(resolve(repoRoot, migrationPath))
+    ? await readText(repoRoot, migrationPath)
+    : "";
+  for (const token of ["durableReceiptFromLedgerRow", "parseDurableExecutionReceipt", "reserve_tool_budget_with_receipt_v1", "settle_tool_budget_with_receipt_v1"]) {
+    if (!source.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_LEDGER_RECEIPT_SOURCE_MISSING", path, `BudgetStore must reconstruct receipts from locked ledger rows: ${token}`));
+    }
+  }
+  for (const token of ["CREATE FUNCTION reserve_tool_budget_with_receipt_v1", "CREATE FUNCTION settle_tool_budget_with_receipt_v1", "tool_budget_operation", "tool_budget_account", "FOR UPDATE"]) {
+    if (!migrationSource.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_LEDGER_RECEIPT_SOURCE_MISSING", migrationPath, `ledger receipt migration wrapper missing ${token}`));
+    }
+  }
 }
 
 async function scanArtifactSource(repoRoot, issues) {
@@ -289,6 +491,54 @@ async function scanArtifactSource(repoRoot, issues) {
   for (const schema of REQUIRED_ARTIFACT_SCHEMAS) {
     if (!source.includes(`'${schema}'`) && !source.includes(`"${schema}"`)) {
       issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_MATERIALIZER_MISSING", "apps/api/src/durable-results/artifact/artifact-materializer.registry.ts", `missing artifact materializer schema ${schema}`));
+    }
+  }
+  const toolSource = [
+    await readText(repoRoot, "apps/api/src/tools/builtin-tools.ts"),
+    await readText(repoRoot, "apps/api/src/tools/source-tools.ts"),
+  ].join("\n");
+  const toolContracts = extractArtifactStrategyContracts(toolSource);
+  const materializerSources = [];
+  for (const path of ARTIFACT_MATERIALIZER_FILES) {
+    if (existsSync(resolve(repoRoot, path))) {
+      materializerSources.push(await readText(repoRoot, path));
+    }
+  }
+  const materializerContracts = extractMaterializerContracts([toolSource, ...materializerSources]);
+  const manifest = await readJson(repoRoot, MANIFEST_PATH);
+  const manifestContracts = new Map((manifest.artifactSchemas ?? []).map((entry) => [
+    entry.schema,
+    Object.freeze({
+      schema: entry.schema,
+      maxBytes: entry.maxBytes,
+      mediaTypes: sorted(entry.mediaTypes ?? []),
+      privacyClass: entry.privacyClass,
+      ttlSeconds: entry.ttlSeconds,
+    }),
+  ]));
+  for (const schema of REQUIRED_ARTIFACT_SCHEMAS) {
+    const tool = toolContracts.get(schema);
+    const materializer = materializerContracts.get(schema);
+    const manifestEntry = manifestContracts.get(schema);
+    if (!tool || !materializer || !manifestEntry) {
+      issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_CONTRACT_MISMATCH", "apps/api/src/durable-results/artifact", `artifact contract source incomplete for ${schema}`));
+      continue;
+    }
+    const materializerComparable = Object.freeze({
+      schema,
+      maxBytes: materializer.maxBytes,
+      mediaTypes: materializer.mediaTypes,
+    });
+    const toolMaterializerComparable = Object.freeze({
+      schema,
+      maxBytes: tool.maxBytes,
+      mediaTypes: tool.mediaTypes,
+    });
+    if (
+      compactJson(materializerComparable) !== compactJson(toolMaterializerComparable) ||
+      compactJson(tool) !== compactJson(manifestEntry)
+    ) {
+      issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_CONTRACT_MISMATCH", MANIFEST_PATH, `artifact contract must match Tool strategy and materializer source for ${schema}`));
     }
   }
 }
@@ -337,6 +587,7 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   await scanModelSource(repoRoot, issues);
   await scanReceiptSource(repoRoot, issues);
   await scanDomainAckSource(repoRoot, issues);
+  await scanLedgerReceiptSource(repoRoot, issues);
   await scanArtifactSource(repoRoot, issues);
   await scanExternalAdapterBypasses(repoRoot, issues);
   await scanGenericReplay(repoRoot, issues);

@@ -6,6 +6,7 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { PATENT_CACHE_BROKER_MAX_ANCHORS, createPatentsCacheActivities } from './patents-cache.activities';
 import { PLATFORM_SCHEDULE_AUTHORITY_SCOPES } from './platform-schedule-authority';
 import { googlePatentsSearchTool } from '../tools/source-tools';
+import { createPatentCacheBrokerScanner } from './patent-cache-broker-scanner';
 
 const scope = PLATFORM_SCHEDULE_AUTHORITY_SCOPES['patents-cache-refresh'];
 const binding = {
@@ -84,5 +85,113 @@ describe('patents cache schedule authority and ToolBroker route', () => {
     })).resolves.toMatchObject({ status: 'DISABLED' });
     expect(order[0]).toBe('attest');
     expect(broker.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not count a conservative maximumBytesBilled bound as observed bytesScanned', async () => {
+    const broker = {
+      checkSourcePolicy: vi.fn(),
+      invoke: vi.fn(async () => ({
+        data: {
+          patents: [],
+          costFacts: {
+            costBasis: 'estimated_upper_bound',
+            maximumBytesBilled: '214748364800',
+            observedBytesBilled: null,
+            maxRows: 50,
+          },
+        },
+        costCents: 0,
+      })),
+    } as unknown as ExecutionBroker;
+    const scanner = createPatentCacheBrokerScanner({
+      broker,
+      accountKey: 'platform:patents:test',
+    });
+
+    await expect(
+      scanner.searchInventorsForAnchorsWithStats(['%Acme%'], {
+        fromYear: 2020,
+        toYear: 2026,
+        maxRows: 50,
+      }),
+    ).resolves.toEqual({ rows: [], bytesScanned: null, scanned: true });
+  });
+
+  it('sums provider-reported observed bytes and skips empty anchors', async () => {
+    const broker = {
+      checkSourcePolicy: vi.fn(),
+      invoke: vi.fn(async () => ({
+        data: {
+          patents: [{
+            publicationNumber: 'US-1',
+            title: 'Pump',
+            publicationDate: '2026-01-01',
+            publicationDateIso: '2026-01-01',
+            applicants: [{ name: 'Acme', country: 'US' }],
+            inventors: [{ name: 'Ada' }],
+            abstract: 'A pump',
+          }],
+          costFacts: {
+            costBasis: 'provider_reported',
+            maximumBytesBilled: '100',
+            observedBytesBilled: '40',
+            maxRows: 50,
+          },
+        },
+        costCents: 0,
+      })),
+    } as unknown as ExecutionBroker;
+    const scanner = createPatentCacheBrokerScanner({
+      broker,
+      accountKey: 'platform:patents:test',
+    });
+
+    await expect(
+      scanner.searchInventorsForAnchorsWithStats(['%%', '%Acme%'], {
+        fromYear: 2020,
+        toYear: 2026,
+        maxRows: 99,
+      }),
+    ).resolves.toEqual({
+      rows: [{ assigneeName: 'Acme', assigneeCountry: 'US', inventorName: 'Ada' }],
+      bytesScanned: 40,
+      scanned: true,
+    });
+    expect(broker.invoke).toHaveBeenCalledTimes(1);
+    expect(broker.invoke).toHaveBeenCalledWith(
+      'google_patents.search',
+      expect.objectContaining({ applicant: 'Acme', maxRows: 25 }),
+      expect.objectContaining({ purpose: 'discovery' }),
+    );
+  });
+
+  it('fails closed when provider-reported bytes exceed the conservative maximum', async () => {
+    const broker = {
+      checkSourcePolicy: vi.fn(),
+      invoke: vi.fn(async () => ({
+        data: {
+          patents: [],
+          costFacts: {
+            costBasis: 'provider_reported',
+            maximumBytesBilled: '100',
+            observedBytesBilled: '101',
+            maxRows: 50,
+          },
+        },
+        costCents: 0,
+      })),
+    } as unknown as ExecutionBroker;
+    const scanner = createPatentCacheBrokerScanner({
+      broker,
+      accountKey: 'platform:patents:test',
+    });
+
+    await expect(
+      scanner.searchInventorsForAnchorsWithStats(['%Acme%'], {
+        fromYear: 2020,
+        toYear: 2026,
+        maxRows: 50,
+      }),
+    ).rejects.toThrow('GOOGLE_PATENTS_COST_FACTS_UNAVAILABLE');
   });
 });

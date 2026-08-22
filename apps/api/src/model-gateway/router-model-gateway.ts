@@ -381,10 +381,13 @@ export class RouterModelGateway extends ModelGateway {
           replay.schema === ctx.durableResultSchema
         ) {
           try {
-            return restoreModelResultFromReplay(
+            const restored = restoreModelResultFromReplay(
               ctx.durableResultSchema,
               replay,
             ) as ModelResult<T>;
+            return reservation.receipt
+              ? { ...restored, durableReceipt: reservation.receipt }
+              : restored;
           } catch {
             throw new BudgetOperationReplayError(operationKey);
           }

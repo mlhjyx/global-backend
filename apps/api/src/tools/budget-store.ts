@@ -30,7 +30,10 @@ import {
   type UnknownArtifactRow,
 } from './artifact-budget-expected-facts';
 import { assertMicrousd } from './microusd';
-import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import {
+  parseDurableExecutionReceipt,
+  type DurableExecutionReceipt,
+} from '../durable-results/durable-execution-receipt';
 const MAX_KEY_LENGTH = 200;
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
@@ -50,6 +53,7 @@ export interface BudgetReservation {
   estimatedCents: number;
   replay: boolean;
   replayProjection?: GenericOperationProjection;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetSettlement {
@@ -446,14 +450,31 @@ type ReserveRow = {
   remaining_cents: bigint;
   status?: string;
   result_json?: unknown;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  charged_cents?: bigint | null;
+  observed_cents?: bigint | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
 };
 
 type SettleRow = {
   charged_cents: bigint;
   observed_cents: bigint;
+  reserved_cents?: bigint;
   cap_variance: boolean;
   status: string;
   replay?: boolean;
+  operation_id?: string;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  result_json?: unknown;
 };
 
 type ResultUnknownRow = {
@@ -566,6 +587,81 @@ function toSafeNumber(name: string, value: bigint): number {
   const result = Number(value);
   if (!Number.isSafeInteger(result)) throw new RangeError(`${name} exceeds the JavaScript safe integer range`);
   return result;
+}
+
+function centsToMicrousd(value: bigint | number | undefined | null): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const cents = typeof value === 'bigint' ? value : BigInt(value);
+  return (cents * 10_000n).toString();
+}
+
+function projectionResultStrategy(
+  schemaVersion: string | null | undefined,
+): DurableExecutionReceipt['resultStrategy'] | null {
+  if (schemaVersion === 'generic-operation-projection/v1') return 'typed_projection';
+  if (schemaVersion === 'generic-operation-artifact-ref/v1') return 'artifact_reference';
+  return null;
+}
+
+function artifactIdFromResultJson(resultJson: unknown): string | null {
+  if (!resultJson || typeof resultJson !== 'object' || Array.isArray(resultJson)) return null;
+  const artifactId = (resultJson as Record<string, unknown>).artifactId;
+  return typeof artifactId === 'string' ? artifactId : null;
+}
+
+function durableReceiptFromLedgerRow(input: {
+  readonly scopeKey: string;
+  readonly operationId: string;
+  readonly operationKey?: string;
+  readonly accountId?: string;
+  readonly authorityId?: string | null;
+  readonly reservedCents?: bigint | null;
+  readonly chargedCents?: bigint | null;
+  readonly observedCents?: bigint | null;
+  readonly resultSchemaVersion?: string | null;
+  readonly resultSchema?: string | null;
+  readonly resultDigest?: string | null;
+  readonly resultJson?: unknown;
+}): DurableExecutionReceipt | undefined {
+  const resultStrategy = projectionResultStrategy(input.resultSchemaVersion);
+  if (
+    !input.accountId ||
+    !input.authorityId ||
+    !input.operationKey ||
+    !input.resultSchema ||
+    !input.resultDigest ||
+    !resultStrategy
+  ) {
+    return undefined;
+  }
+  const chargedMicrousd = centsToMicrousd(input.chargedCents);
+  const upperBoundMicrousd = centsToMicrousd(input.reservedCents);
+  const costBasis: DurableExecutionReceipt['costBasis'] =
+    chargedMicrousd !== undefined && BigInt(chargedMicrousd) > 0n
+      ? 'provider_reported'
+      : 'estimated_upper_bound';
+  return parseDurableExecutionReceipt({
+    schemaVersion: 'durable-execution-receipt/v1',
+    scopeKey: input.scopeKey,
+    authorityId: input.authorityId,
+    accountId: input.accountId,
+    operationId: input.operationId,
+    operationKey: input.operationKey,
+    resultStrategy,
+    resultSchema: input.resultSchema,
+    resultDigest: input.resultDigest,
+    artifactId: resultStrategy === 'artifact_reference'
+      ? artifactIdFromResultJson(input.resultJson)
+      : null,
+    usage: {
+      currency: 'USD',
+      unit: 'microusd',
+      callCount: 1,
+      ...(chargedMicrousd !== undefined ? { chargedMicrousd } : {}),
+      ...(upperBoundMicrousd !== undefined ? { upperBoundMicrousd } : {}),
+    },
+    costBasis,
+  });
 }
 
 function isBudgetAccountUnavailable(error: unknown): boolean {
@@ -755,7 +851,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       rows = await this.inScope(input.workspaceId, (tx) =>
         tx.$queryRaw<ReserveRow[]>(
-          Prisma.sql`SELECT * FROM reserve_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.operationKey}, ${BigInt(input.estimatedCents)})`,
+          Prisma.sql`SELECT * FROM reserve_tool_budget_with_receipt_v1(${input.workspaceId}, ${input.accountKey}, ${input.operationKey}, ${BigInt(input.estimatedCents)})`,
         ),
       );
     } catch (error) {
@@ -775,6 +871,20 @@ export class PostgresBudgetStore implements BudgetStore {
       row.kind === 'REPLAY' && row.result_json != null
         ? parseGenericOperationProjection(row.result_json)
         : undefined;
+    const receipt = row.kind === 'REPLAY' ? durableReceiptFromLedgerRow({
+      scopeKey: input.workspaceId,
+      operationId: row.operation_id,
+      operationKey: row.operation_key ?? input.operationKey,
+      accountId: row.account_id,
+      authorityId: row.authority_id,
+      reservedCents: row.reserved_cents,
+      chargedCents: row.charged_cents,
+      observedCents: row.observed_cents,
+      resultSchemaVersion: row.result_schema_version,
+      resultSchema: row.result_schema,
+      resultDigest: row.result_digest,
+      resultJson: row.result_json,
+    }) : undefined;
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
@@ -782,6 +892,7 @@ export class PostgresBudgetStore implements BudgetStore {
       estimatedCents: toSafeNumber('reservedCents', row.reserved_cents),
       replay: row.kind === 'REPLAY',
       ...(replayProjection ? { replayProjection } : {}),
+      ...(receipt ? { receipt } : {}),
     };
   }
 
@@ -798,7 +909,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       rows = await this.inScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget(
+          Prisma.sql`SELECT * FROM settle_tool_budget_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
             ${durable?.schema ?? null}, ${durable?.digest ?? null},
@@ -814,11 +925,26 @@ export class PostgresBudgetStore implements BudgetStore {
     }
     const row = rows[0];
     if (!row) throw new BudgetStoreUnavailableError('budget settle returned no result');
+    const receipt = durableReceiptFromLedgerRow({
+      scopeKey: reservation.workspaceId,
+      operationId: row.operation_id ?? reservation.operationId,
+      operationKey: row.operation_key,
+      accountId: row.account_id,
+      authorityId: row.authority_id,
+      reservedCents: row.reserved_cents ?? BigInt(reservation.estimatedCents),
+      chargedCents: row.charged_cents,
+      observedCents: row.observed_cents,
+      resultSchemaVersion: row.result_schema_version ?? durable?.schemaVersion,
+      resultSchema: row.result_schema ?? durable?.schema,
+      resultDigest: row.result_digest ?? durable?.digest,
+      resultJson: row.result_json ?? durable,
+    });
     return {
       chargedCents: toSafeNumber('chargedCents', row.charged_cents),
       observedCents: toSafeNumber('observedCents', row.observed_cents),
       capVariance: row.cap_variance,
       replay: row.replay ?? row.status !== 'SETTLED',
+      ...(receipt ? { receipt } : {}),
     };
   }
 

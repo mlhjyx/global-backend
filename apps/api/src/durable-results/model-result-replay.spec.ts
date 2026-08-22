@@ -28,6 +28,72 @@ describe('model result replay projection', () => {
     });
   });
 
+  it('projects and restores bounded gateway settlement observations byte-identically', () => {
+    const projected = projectModelResultForReplay('taxonomy-code/v1', {
+      data: { code: 'CPV-123' },
+      provider: 'provider-a',
+      model: 'model-a',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        gatewaySettlements: [
+          {
+            status: 'settled',
+            requestId: 'req_123',
+            resolverId: 'resolver-v1',
+            alias: 'site-builder-copywriter',
+            protocol: 'openai-chat-completions',
+            channelId: 7,
+            basis: 'openox_catalog_token_pricing',
+            quota: 1250,
+            costMicrousd: 2500,
+            inputTokens: 10,
+            outputTokens: 2,
+          },
+          {
+            status: 'unknown',
+            requestId: null,
+            resolverId: 'resolver-v1',
+            reason: 'log_unavailable',
+          },
+        ],
+      },
+      callCount: 2,
+    });
+
+    expect(restoreModelResultFromReplay('taxonomy-code/v1', projected)).toEqual({
+      data: { code: 'CPV-123' },
+      provider: 'provider-a',
+      model: 'model-a',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        gatewaySettlements: [
+          {
+            status: 'settled',
+            requestId: 'req_123',
+            resolverId: 'resolver-v1',
+            alias: 'site-builder-copywriter',
+            protocol: 'openai-chat-completions',
+            channelId: 7,
+            basis: 'openox_catalog_token_pricing',
+            quota: 1250,
+            costMicrousd: 2500,
+            inputTokens: 10,
+            outputTokens: 2,
+          },
+          {
+            status: 'unknown',
+            requestId: null,
+            resolverId: 'resolver-v1',
+            reason: 'log_unavailable',
+          },
+        ],
+      },
+      callCount: 2,
+    });
+  });
+
   it('rejects provider payloads that try to smuggle prompts or raw responses', () => {
     expect(() =>
       projectModelResultForReplay('taxonomy-code/v1', {

@@ -163,6 +163,105 @@ describe('PostgresBudgetStore', () => {
     },
   );
 
+  it('reconstructs a ledger-authored durable receipt from the locked settle row', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
+    });
+    const store = new PostgresBudgetStore(fakePrisma([[
+      {
+        charged_cents: 1n,
+        observed_cents: 1n,
+        reserved_cents: 3n,
+        cap_variance: false,
+        status: 'SETTLED',
+        replay: false,
+        account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        operation_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+        operation_key: 'workspace:model:taxonomy.normalize:request-1',
+        result_schema_version: projection.schemaVersion,
+        result_schema: projection.schema,
+        result_digest: projection.digest,
+        result_json: projection,
+      },
+    ]]));
+
+    await expect(store.settle({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      estimatedCents: 3,
+      replay: false,
+    }, 1, projection)).resolves.toMatchObject({
+      chargedCents: 1,
+      observedCents: 1,
+      receipt: {
+        scopeKey: TEST_WORKSPACE_ID,
+        authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        accountId: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+        operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+        operationKey: 'workspace:model:taxonomy.normalize:request-1',
+        resultStrategy: 'typed_projection',
+        resultSchema: 'taxonomy-code/v1',
+        resultDigest: projection.digest,
+        usage: {
+          callCount: 1,
+          chargedMicrousd: '10000',
+          upperBoundMicrousd: '30000',
+        },
+        costBasis: 'provider_reported',
+      },
+    });
+  });
+
+  it('reconstructs the same durable receipt for a replay reservation', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
+    });
+    const store = new PostgresBudgetStore(fakePrisma([[
+      {
+        kind: 'REPLAY',
+        operation_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+        operation_key: 'workspace:model:taxonomy.normalize:request-1',
+        reserved_cents: 3n,
+        remaining_cents: 7n,
+        charged_cents: 1n,
+        observed_cents: 1n,
+        status: 'SETTLED',
+        account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        result_schema_version: projection.schemaVersion,
+        result_schema: projection.schema,
+        result_digest: projection.digest,
+        result_json: projection,
+      },
+    ]]));
+
+    const reservation = await store.reserve({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationKey: 'workspace:model:taxonomy.normalize:request-1',
+      estimatedCents: 3,
+    });
+
+    expect(reservation).toMatchObject({
+      replay: true,
+      replayProjection: projection,
+      receipt: {
+        operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+        resultDigest: projection.digest,
+        usage: {
+          chargedMicrousd: '10000',
+          upperBoundMicrousd: '30000',
+        },
+      },
+    });
+  });
+
   it('keeps authority-bound accounts nonspendable on the additive API', async () => {
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({

@@ -297,6 +297,7 @@ function hasPositive(value: string | undefined): boolean {
 function validateUsageSemantics(
   usage: DurableExecutionUsageFacts,
   costBasis: DurableExecutionCostBasis,
+  resultSchema: string,
 ): void {
   const charged = decimalToBigInt(usage.chargedMicrousd);
   const upper = decimalToBigInt(usage.upperBoundMicrousd);
@@ -333,6 +334,13 @@ function validateUsageSemantics(
 
   if (costBasis === 'provider_reported') {
     if (charged === undefined || (usage.callCount ?? 0) < 1) invalid();
+    if (
+      resultSchema === 'google-patents-search/v1' &&
+      bytesProcessed === undefined &&
+      bytesBilled === undefined
+    ) {
+      invalid();
+    }
     return;
   }
 
@@ -350,6 +358,9 @@ function validateUsageSemantics(
 
   if (costBasis === 'estimated_upper_bound') {
     if (upper === undefined) invalid();
+    if ((usage.callCount ?? 0) < 1) invalid();
+    if (bytesProcessed !== undefined || bytesBilled !== undefined) invalid();
+    if (resultSchema === 'google-patents-search/v1' && maximumBytesBilled === undefined) invalid();
   }
 }
 
@@ -375,7 +386,8 @@ export function parseDurableExecutionReceipt(
   const parsedStrategy = resultStrategy as DurableExecutionResultStrategy;
   const parsedCostBasis = costBasis as DurableExecutionCostBasis;
   const usage = parseUsage(field(record, 'usage'));
-  validateUsageSemantics(usage, parsedCostBasis);
+  const parsedResultSchema = schema(field(record, 'resultSchema'));
+  validateUsageSemantics(usage, parsedCostBasis, parsedResultSchema);
   return Object.freeze({
     schemaVersion: 'durable-execution-receipt/v1',
     scopeKey: safeKey(field(record, 'scopeKey')),
@@ -384,7 +396,7 @@ export function parseDurableExecutionReceipt(
     operationId: uuid(field(record, 'operationId')),
     operationKey: safeKey(field(record, 'operationKey')),
     resultStrategy: parsedStrategy,
-    resultSchema: schema(field(record, 'resultSchema')),
+    resultSchema: parsedResultSchema,
     resultDigest: digest(field(record, 'resultDigest')),
     artifactId: artifactId === null ? null : safeKey(artifactId),
     usage,
