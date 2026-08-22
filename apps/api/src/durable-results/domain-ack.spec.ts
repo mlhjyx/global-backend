@@ -10,6 +10,8 @@ import {
 import {
   DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS,
   applyDomainAckConsumerTransaction,
+  applyDomainAckConsumerTransactions,
+  domainAggregateIdForReceipt,
   getDomainAckProductConsumerBinding,
 } from './domain-ack-consumer-bindings';
 
@@ -252,6 +254,86 @@ describe('DomainAckService', () => {
       },
     });
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives a stable UUID-shaped aggregate id from the receipt operation', () => {
+    const first = domainAggregateIdForReceipt(receipt(), 'taxonomy.normalize');
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(domainAggregateIdForReceipt(receipt(), 'taxonomy.normalize')).toBe(first);
+    expect(domainAggregateIdForReceipt(receipt(), 'icp.design')).not.toBe(first);
+  });
+
+  it('executes an unreceipted mutation directly on the supplied transaction and rejects a missing transaction', async () => {
+    const transaction = { $queryRaw: vi.fn() };
+    const apply = vi.fn(async (value) => value);
+    await expect(applyDomainAckConsumerTransaction({
+      transaction,
+      producerId: 'taxonomy.normalize',
+      domainAckKey: 'taxonomy:cpv:pump',
+      domainRevision: '1',
+      apply,
+    })).resolves.toEqual({ status: 'UNRECEIPTED', value: transaction });
+    expect(apply).toHaveBeenCalledWith(transaction);
+    await expect(applyDomainAckConsumerTransaction({
+      producerId: 'taxonomy.normalize',
+      domainAckKey: 'taxonomy:cpv:pump',
+      domainRevision: '1',
+      apply: async () => undefined,
+    })).rejects.toThrow('DOMAIN_ACK_TRANSACTION_REQUIRED');
+  });
+
+  it('applies plural receipts once, skips an all-replay mutation, and passes no-receipt batches through', async () => {
+    const mutation = vi.fn(async () => 'written');
+    const appliedTransaction = {
+      $queryRaw: vi.fn(async () => [{ status: 'APPLIED', ack_json: ackRecord() }]),
+    };
+    await expect(applyDomainAckConsumerTransactions({
+      transaction: appliedTransaction,
+      acknowledgements: [{
+        producerId: 'taxonomy.normalize',
+        receipt: receipt(),
+        domainAckKey: 'taxonomy:cpv:pump',
+        domainRevision: '0',
+      }],
+      apply: mutation,
+    })).resolves.toBe('written');
+    expect(mutation).toHaveBeenCalledWith(appliedTransaction);
+
+    mutation.mockClear();
+    const replayTransaction = {
+      $queryRaw: vi.fn(async () => [{ status: 'REPLAYED', ack_json: ackRecord() }]),
+    };
+    await expect(applyDomainAckConsumerTransactions({
+      transaction: replayTransaction,
+      acknowledgements: [{
+        producerId: 'taxonomy.normalize',
+        receipt: receipt(),
+        domainAckKey: 'taxonomy:cpv:pump',
+        domainRevision: '0',
+      }],
+      apply: mutation,
+    })).resolves.toBeUndefined();
+    expect(mutation).not.toHaveBeenCalled();
+
+    await expect(applyDomainAckConsumerTransactions({
+      transaction: replayTransaction,
+      acknowledgements: [],
+      apply: mutation,
+    })).resolves.toBe('written');
+    expect(mutation).toHaveBeenCalledWith(replayTransaction);
+  });
+
+  it('rejects an unknown producer before any transaction mutation', async () => {
+    const apply = vi.fn(async () => undefined);
+    await expect(applyDomainAckConsumerTransaction({
+      transaction: { $queryRaw: vi.fn() },
+      producerId: 'unknown.producer',
+      receipt: receipt(),
+      domainAckKey: 'aggregate',
+      domainRevision: '1',
+      apply,
+    })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it('ships a transaction-compatible Postgres ACK schema with row locks and uniqueness', async () => {

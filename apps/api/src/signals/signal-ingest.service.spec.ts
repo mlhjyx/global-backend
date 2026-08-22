@@ -5,6 +5,22 @@ import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ExecutionBroker, ToolContext } from '../tools/tool-contract';
 import { SignalIngestService } from './signal-ingest.service';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const SIGNAL_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'platform',
+  authorityId: '20000000-0000-4000-8000-000000000001',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'ted-search',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'ted-search/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10000' },
+  costBasis: 'estimated_upper_bound',
+});
 
 const NOW = Date.UTC(2026, 6, 11, 7, 0); // 2026-07-11T07:00Z → 6h 桶 06:00Z
 const WINDOW_MS = 6 * 3600_000;
@@ -137,6 +153,22 @@ function fakeBroker(handler?: (toolId: string) => unknown): ExecutionBroker & { 
 const tedParams = { cpvCodes: ['42122000'], buyerCountries: ['DEU'] };
 
 describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验收）', () => {
+  it('requires the exact platform transaction once a settled Tool receipt is present', async () => {
+    const prisma = fakePrisma();
+    const broker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: async () => ({
+        data: { notices: [TED_NOTICE] },
+        costCents: 0,
+        durableReceipt: SIGNAL_RECEIPT,
+      }),
+    } as unknown as ExecutionBroker;
+    const svc = new SignalIngestService({ prisma, broker });
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
+      .rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    expect(prisma.signals.size).toBe(0);
+  });
+
   it('同 provider+指纹+窗口第二次摄取 → 账本命中不出网（跨 workspace 只拉取一次的机制）', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();

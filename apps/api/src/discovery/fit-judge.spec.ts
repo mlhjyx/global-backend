@@ -11,6 +11,22 @@ import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
 } from '../durable-results/model-result-replay';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const FIT_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: '10000000-0000-4000-8000-000000000001',
+  authorityId: '20000000-0000-4000-8000-000000000001',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'fit',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'fit-judgment/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10000' },
+  costBasis: 'estimated_upper_bound',
+});
 
 const executeTask = vi.mocked(executeStructuredTaskWithRuntime);
 const company = {
@@ -94,6 +110,20 @@ describe('judgeFitCompany provider-independent result semantics', () => {
       });
     },
   );
+
+  it('propagates the durable receipt to the lead transaction consumer', async () => {
+    executeTask.mockResolvedValue({
+      provider: 'new-api', data: output, durableReceipt: FIT_RECEIPT,
+    } as never);
+    await expect(judgeFitCompany(
+      {} as never,
+      FIT_RECEIPT.scopeKey,
+      { seller: 'Seller', seller_summary: null },
+      company,
+    )).resolves.toMatchObject({
+      verdict: 'match', durableReceipt: FIT_RECEIPT,
+    });
+  });
 
   it('keeps the durable replay projector closed, bounded, and byte-identical for fractional cost facts', async () => {
     executeTask.mockImplementation(async (_gateway, _input, context) => {

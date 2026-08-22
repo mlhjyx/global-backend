@@ -26,6 +26,15 @@ const EXPECTED_FACTS = Object.freeze({
   sanitizedUrl: "https://example.com/final",
   blocked: null,
 }) satisfies ArtifactExpectedFacts;
+const RECEIPT_FACTS = Object.freeze({
+  usage: Object.freeze({
+    currency: "USD" as const,
+    unit: "microusd" as const,
+    callCount: 1,
+    upperBoundMicrousd: "170000",
+  }),
+  costBasis: "estimated_upper_bound" as const,
+});
 
 const manifest = Object.freeze({
   schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
@@ -223,6 +232,17 @@ describe("artifact expected-facts persistence", () => {
                 cap_variance: false,
                 status: "SETTLED",
                 replay: false,
+                reserved_cents: 17n,
+                operation_id: OPERATION_ID,
+                operation_key: "artifact-operation",
+                account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+                authority_id: AUTHORITY_ID,
+                result_schema_version: GENERIC_OPERATION_ARTIFACT_REFERENCE_SCHEMA,
+                result_schema: manifest.resultSchema,
+                result_digest: manifest.sha256,
+                result_json: reference,
+                receipt_usage: RECEIPT_FACTS.usage,
+                receipt_cost_basis: RECEIPT_FACTS.costBasis,
               },
             ];
           }),
@@ -242,18 +262,20 @@ describe("artifact expected-facts persistence", () => {
     await budgetStore.settleArtifactManifest(reservation, 13, {
       manifest,
       expectedFacts: EXPECTED_FACTS,
-    });
+    }, RECEIPT_FACTS);
 
     expect(queries[0]?.strings.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v3",
+      "settle_tool_budget_artifact_manifest_with_receipt_v1",
     );
-    expect(queries[0]?.values.slice(-6)).toEqual([
+    expect(queries[0]?.values.slice(-8)).toEqual([
       200,
       true,
       "https://example.com/final",
       null,
       null,
       null,
+      JSON.stringify(RECEIPT_FACTS.usage),
+      RECEIPT_FACTS.costBasis,
     ]);
     expect(queries[0]?.values[3]).toBe(JSON.stringify(manifest));
     expect(queries[0]?.values[3]).not.toContain("expectedFacts");

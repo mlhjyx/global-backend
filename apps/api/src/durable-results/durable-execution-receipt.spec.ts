@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseDurableExecutionReceipt,
+  parseDurableExecutionReceiptFacts,
   type DurableExecutionReceipt,
 } from './durable-execution-receipt';
 
@@ -38,6 +39,27 @@ function receipt(
 }
 
 describe('DurableExecutionReceipt', () => {
+  it('parses the standalone settlement facts surface with the same closed semantics', () => {
+    expect(parseDurableExecutionReceiptFacts({
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 1,
+        inputTokens: 1, chargedMicrousd: '1', upperBoundMicrousd: '2',
+      },
+      costBasis: 'token_pricing',
+    }, 'taxonomy-code/v1')).toEqual({
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 1,
+        inputTokens: 1, chargedMicrousd: '1', upperBoundMicrousd: '2',
+      },
+      costBasis: 'token_pricing',
+    });
+    expect(() => parseDurableExecutionReceiptFacts({
+      usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '1' },
+      costBasis: 'estimated_upper_bound',
+      body: 'forbidden',
+    }, 'taxonomy-code/v1')).toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
+  });
+
   it('parses a closed typed-projection receipt and freezes the result', () => {
     const parsed = parseDurableExecutionReceipt(receipt());
 

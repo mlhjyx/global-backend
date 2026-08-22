@@ -510,10 +510,14 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
+    const onDurableReceipt = vi.fn();
 
     await expect(
-      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+      broker.invoke(tool.id, {}, {
+        workspaceId: "w", runId: "run", onDurableReceipt,
+      }),
     ).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
+    expect(onDurableReceipt).toHaveBeenCalledWith(tool.id, DURABLE_RECEIPT);
   });
 
   it("retries an unknown success-settlement ACK with the identical tool projection and no second wire", async () => {

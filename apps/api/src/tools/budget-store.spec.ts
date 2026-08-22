@@ -269,6 +269,34 @@ describe('PostgresBudgetStore', () => {
     }, 2, projection)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
   });
 
+  it('rejects receipt facts without a durable projection and native projections without facts', async () => {
+    const store = new PostgresBudgetStore(fakePrisma([]));
+    const centsReservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      estimatedCents: 1,
+      replay: false,
+    };
+    await expect(store.settle(
+      centsReservation,
+      0,
+      undefined,
+      PROVIDER_REPORTED_FACTS,
+    )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+
+    const projection = projectGenericOperationResult({
+      kind: 'model', schema: 'taxonomy-code/v1', data: { code: 'CPV-123' },
+    });
+    await expect(store.settleMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      estimatedMicrousd: 10_000n,
+      replay: false,
+    }, 1n, projection)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
+  });
+
   it('reconstructs receipt usage and cost basis only from explicit locked ledger facts', async () => {
     const projection = projectGenericOperationResult({
       kind: 'model',

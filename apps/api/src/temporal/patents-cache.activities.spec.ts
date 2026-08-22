@@ -7,6 +7,25 @@ import { PATENT_CACHE_BROKER_MAX_ANCHORS, createPatentsCacheActivities } from '.
 import { PLATFORM_SCHEDULE_AUTHORITY_SCOPES } from './platform-schedule-authority';
 import { googlePatentsSearchTool } from '../tools/source-tools';
 import { createPatentCacheBrokerScanner } from './patent-cache-broker-scanner';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const PATENT_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'platform',
+  authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'patent-search',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'google-patents-search/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    maximumBytesBilled: '100', upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
+});
 
 const scope = PLATFORM_SCHEDULE_AUTHORITY_SCOPES['patents-cache-refresh'];
 const binding = {
@@ -85,6 +104,60 @@ describe('patents cache schedule authority and ToolBroker route', () => {
     })).resolves.toMatchObject({ status: 'DISABLED' });
     expect(order[0]).toBe('attest');
     expect(broker.invoke).not.toHaveBeenCalled();
+  });
+
+  it('collects the Patent receipt and requires the exact platform transaction before cache writes', async () => {
+    const priorKey = process.env.PII_ENCRYPTION_KEY;
+    process.env.PII_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+    try {
+      const ownerDb = {
+        patentInventorCache: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+        dataProvider: { findUnique: vi.fn(async () => ({ status: 'ENABLED' })) },
+        patentLookupRequest: {
+          findMany: vi.fn(async () => [{
+            id: 'request-1', assigneeNorm: 'acme', country: 'us',
+            anchor: '%Acme%', firstRequestedAt: new Date(),
+          }]),
+        },
+        sourcePolicy: { findUnique: vi.fn(async () => ({
+          reviewStatus: 'APPROVED', allowedPurpose: ['discovery'],
+        })) },
+        patentCacheRefreshAudit: {
+          create: vi.fn(async () => ({ id: 'audit-1' })),
+          update: vi.fn(async () => ({})),
+        },
+      } as unknown as PrismaClient;
+      const broker = {
+        invoke: vi.fn(async (_toolId, _toolInput, context) => {
+          context.onDurableReceipt?.('google_patents.search', PATENT_RECEIPT);
+          return {
+            data: {
+              patents: [],
+              costFacts: {
+                costBasis: 'estimated_upper_bound',
+                maximumBytesBilled: '100', observedBytesBilled: null, maxRows: 50,
+              },
+            },
+            costCents: 0,
+            durableReceipt: PATENT_RECEIPT,
+          };
+        }),
+      } as unknown as ExecutionBroker;
+      const activities = createPatentsCacheActivities({
+        ownerDb,
+        broker,
+        budgetStore: { attestAuthorized: vi.fn(async () => ({})) } as unknown as BudgetStore,
+        activityRunId: () => 'workflow-run-1',
+      });
+      await expect(activities.refreshPatentCacheActivity({
+        executionContractVersion: 1,
+        executionBudget: binding,
+        maxAnchors: 1,
+      })).rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    } finally {
+      if (priorKey === undefined) delete process.env.PII_ENCRYPTION_KEY;
+      else process.env.PII_ENCRYPTION_KEY = priorKey;
+    }
   });
 
   it('does not count a conservative maximumBytesBilled bound as observed bytesScanned', async () => {

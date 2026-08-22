@@ -5,6 +5,23 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import type { BudgetStore } from '../tools/budget-store';
 import { createUnderstandingActivities } from './understanding.activities';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { Context } from '@temporalio/activity';
+
+const MODEL_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: '10000000-0000-4000-8000-000000000001',
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'understanding-model',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'understanding-claims/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10000' },
+  costBasis: 'estimated_upper_bound',
+});
 
 function budgetStoreSpies() {
   const open = vi.fn(async () => undefined);
@@ -66,6 +83,23 @@ describe('understanding.activities — crawl4ai.fetch 显式声明 discovery/enr
 });
 
 describe('understanding.activities — unified runtime telemetry', () => {
+  it('propagates closed model receipts to the actual persistence activity payload', async () => {
+    const generateStructured = vi.fn(async (input: { task: string }) => ({
+      data: input.task.endsWith('extract_claims') ? { claims: [] } : { offerings: [] },
+      provider: 'gateway', model: 'model', durableReceipt: MODEL_RECEIPT,
+    }));
+    const budget = budgetStoreSpies();
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured } as unknown as ModelGateway,
+      budgetStore: budget.store,
+    });
+    await expect(acts.extractClaims({ ...AUTHORITY_ARGS, text: 'claims' }))
+      .resolves.toMatchObject({ claims: [], durableReceipt: MODEL_RECEIPT });
+    await expect(acts.extractOfferings({ ...AUTHORITY_ARGS, text: 'offerings' }))
+      .resolves.toMatchObject({ offerings: [], durableReceipt: MODEL_RECEIPT });
+  });
+
   it('propagates the worker telemetry lifecycle into structured model calls', async () => {
     const emit = vi.fn();
     const generateStructured = vi.fn(async () => ({
@@ -95,6 +129,61 @@ describe('understanding.activities — unified runtime telemetry', () => {
 });
 
 describe('understanding.activities — durable workflow budget lifecycle', () => {
+  it('runs claims and offerings domain writes through the same unreceipted transaction before Task 6', async () => {
+    const current = vi.spyOn(Context, 'current').mockReturnValue({
+      info: {
+        workflowExecution: { runId: 'workflow-run-1' },
+        activityId: 'activity-1',
+      },
+    } as never);
+    const claimCreate = vi.fn(async () => ({ id: 'claim-1' }));
+    const evidenceCreate = vi.fn(async () => ({}));
+    const offeringUpsert = vi.fn(async () => ({}));
+    const tx = {
+      claim: { findMany: vi.fn(async () => []), create: claimCreate },
+      knowledgeSource: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'source-1' })),
+      },
+      knowledgeConflict: { create: vi.fn(async () => ({})) },
+      outboxEvent: { create: vi.fn(async () => ({})) },
+      evidence: { create: evidenceCreate },
+      offering: { upsert: offeringUpsert },
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (value: typeof tx) => unknown) =>
+        callback(tx)),
+    } as unknown as PrismaService;
+    const acts = createUnderstandingActivities({
+      prisma,
+      gateway: {} as ModelGateway,
+      budgetStore: budgetStoreSpies().store,
+    });
+
+    await expect(acts.persistClaims({
+      ...AUTHORITY_ARGS,
+      companyId: 'company-1',
+      website: 'https://acme.example',
+      pages: [{
+        url: 'https://acme.example/about',
+        claims: [{ type: 'product', statement: 'Makes pumps', confidence: 0.9 }],
+      }],
+    })).resolves.toEqual({ claimCount: 1 });
+    await expect(acts.persistOfferings({
+      ...AUTHORITY_ARGS,
+      companyId: 'company-1',
+      website: 'https://acme.example',
+      pages: [{
+        url: 'https://acme.example/products',
+        offerings: [{ name: 'Pump', confidence: 0.8 }],
+      }],
+    })).resolves.toEqual({ offeringCount: 1 });
+    expect(claimCreate).toHaveBeenCalledOnce();
+    expect(evidenceCreate).toHaveBeenCalledOnce();
+    expect(offeringUpsert).toHaveBeenCalledOnce();
+    current.mockRestore();
+  });
+
   it('requires the relayed authority binding and never self-opens an environment cap account', async () => {
     const budget = budgetStoreSpies();
     const invoke = vi.fn(async () => ({ data: { text: 'Acme makes pumps.' }, costCents: 0 }));
