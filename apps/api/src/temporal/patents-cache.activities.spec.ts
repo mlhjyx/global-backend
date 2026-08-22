@@ -57,6 +57,8 @@ describe('patents cache schedule authority and ToolBroker route', () => {
     expect(scannerSource).not.toContain('bigqueryPatents');
     expect(scannerSource).toContain('google_patents.search');
     expect(scannerSource).toContain('input.broker.invoke');
+    expect(activitySource).toContain('readbackPatentRefresh');
+    expect(activitySource).not.toMatch(/return value \?\? \{/);
   });
 
   it('parks a pending pre-cutover activity before cache mutation or broker invocation', async () => {

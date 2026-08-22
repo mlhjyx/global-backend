@@ -25,4 +25,19 @@ describe('Crawl4aiPageFetcher — durable budget binding', () => {
       workspaceId: 'platform', runId: 'intent-watch:source-1', correlationId: 'intent-watch:source-1',
     })).rejects.toBe(replayError);
   });
+
+  it('does not downgrade a wrapped artifact/receipt control to an ordinary page miss', async () => {
+    const control = Object.assign(new Error('activity failed'), {
+      cause: { code: 'GENERIC_OPERATION_ARTIFACT_INVALID' },
+    });
+    const fetcher = new Crawl4aiPageFetcher({
+      invoke: vi.fn(async () => { throw control; }),
+    } as never);
+
+    await expect(fetcher.fetch('https://example.com/', {
+      workspaceId: 'platform',
+      runId: 'intent-watch:source-1',
+      correlationId: 'intent-watch:source-1',
+    })).rejects.toBe(control);
+  });
 });

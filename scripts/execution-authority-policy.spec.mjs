@@ -45,6 +45,16 @@ async function materializePolicyRepo(mutations = {}) {
     "apps/api/src/sanctions/sanctions-refresh.service.ts",
     "apps/api/src/signals/signal-ingest.service.ts",
     "apps/api/src/intent/intent-projection.service.ts",
+    "apps/api/src/intent/page-fetcher.ts",
+    "apps/api/src/intent/website-watch.service.ts",
+    "apps/api/src/acquisition/acquisition.service.ts",
+    "apps/api/src/acquisition/adapters/trade-fair.source.ts",
+    "apps/api/src/acquisition/adapters/mapyourshow.source.ts",
+    "apps/api/src/temporal/acquisition.activities.ts",
+    "apps/api/src/temporal/intent.activities.ts",
+    "apps/api/src/temporal/worker.ts",
+    "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts",
+    "apps/api/src/execution-budget/execution-control-error.ts",
     "apps/api/src/discovery/fit-judge.ts",
     "apps/api/src/discovery/taxonomy-resolver.ts",
     "apps/api/src/temporal/patent-cache-broker-scanner.ts",
@@ -304,6 +314,50 @@ test("scanner catches caller-derived receipt reconstruction fallbacks", async ()
   });
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_LEDGER_RECEIPT_FALLBACK"));
+});
+
+test("scanner exposes a closed one-to-one catalog for every discovered physical callsite", async () => {
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
+  assert.ok(result.callsiteCatalogCount > 0);
+  assert.equal(result.callsiteCatalogCount, result.discoveredPhysicalCallsiteCount);
+  assert.deepEqual(result.uncataloguedPhysicalCallsites, []);
+  assert.deepEqual(result.stalePhysicalCallsites, []);
+});
+
+test("scanner catches real consumer callback/transaction gaps while static producer IDs remain", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/temporal/acquisition.activities.ts": (source) =>
+      `${source.replace(
+        "onDurableReceipt: captureAcquisitionReceipt,",
+        "onDurableReceipt: () => undefined,",
+      )}\nconst retainedAcquisitionIds = ['tradefair.algolia', 'mapyourshow.fetch'];\n`,
+    "apps/api/src/temporal/understanding.activities.ts": (source) =>
+      `${source.replaceAll("crawlDurableReceipt", "discardedCrawlReceipt")}\nconst retainedCrawlId = 'crawl4ai.fetch';\n`,
+    "apps/api/src/temporal/discovery.activities.ts": (source) =>
+      `${source.replaceAll("captureEnrichmentReceipt", "discardEnrichmentReceipt")}\nconst retainedEnrichmentIds = ['gleif.fetch', 'wikidata.entity'];\n`,
+    "apps/api/src/intent/page-fetcher.ts": (source) =>
+      `${source.replace("forwardPageReceipt(context, result.durableReceipt);", "void result.durableReceipt;")}\nconst retainedRenderId = 'crawl4ai.render';\n`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_PHYSICAL_CALLSITE_CONSUMER_MISSING"));
+});
+
+test("scanner catches missing runtime schema binding, artifact ACK chain, and valid no-op ACK", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/durable-results/domain-ack-consumer-bindings.ts": (source) =>
+      source.replaceAll("resultSchema:", "discardedResultSchema:"),
+    "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts": (source) =>
+      source.replaceAll("durableReceipt", "discardedReceipt"),
+    "apps/api/src/discovery/taxonomy-resolver.ts": (source) =>
+      `${source.replaceAll("acknowledgeTaxonomyNoop", "discardTaxonomyNoop")}\nconst retainedNoopTask = 'taxonomy.normalize';\n`,
+    "apps/api/src/temporal/understanding.activities.ts": (source) =>
+      `${source.replaceAll("acknowledgeProfileNoop", "discardProfileNoop")}\nconst retainedProfileTask = 'company_understanding.extract_profile';\n`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  const resultCodes = codes(result);
+  assert.ok(resultCodes.includes("EXECUTION_AUTHORITY_RUNTIME_RECEIPT_BINDING_MISSING"));
+  assert.ok(resultCodes.includes("EXECUTION_AUTHORITY_ARTIFACT_ACK_CHAIN_MISSING"));
+  assert.ok(resultCodes.includes("EXECUTION_AUTHORITY_MODEL_NOOP_ACK_MISSING"));
 });
 
 test("scanner catches PUBLIC SECURITY DEFINER access and broad principal admission", async () => {

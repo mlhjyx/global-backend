@@ -274,6 +274,22 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
     })).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
   });
 
+  it('never downgrades a Temporal-wrapped Domain ACK or receipt control failure to RISKY', async () => {
+    const control = Object.assign(new Error('activity failed'), {
+      cause: Object.assign(new Error('consumer failed'), {
+        code: 'DOMAIN_ACK_RECEIPT_BINDING_MISMATCH',
+      }),
+    });
+    const broker = {
+      checkSourcePolicy: vi.fn(async () => ({ allowed: true })),
+      invoke: vi.fn(async () => { throw control; }),
+    } as unknown as EmailVerifyBroker;
+
+    await expect(new SelfHostedEmailVerifier(broker).verifyEmail('user@acme.de', {
+      workspaceId: 'w', runId: 'verify-run-1',
+    })).rejects.toBe(control);
+  });
+
   it('反枚举 provider(Gmail)：MX 后短路 RISKY，不 invoke 出网工具', async () => {
     mockedMx.mockResolvedValue([{ exchange: 'aspmx.l.google.com', priority: 10 }]);
     const { broker, invoke } = fakeBroker();

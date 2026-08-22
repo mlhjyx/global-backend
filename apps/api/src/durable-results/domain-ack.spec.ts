@@ -234,6 +234,8 @@ describe('DomainAckService', () => {
       consumer: 'EmailVerificationProvider',
       domainAggregateType: 'EmailVerification',
       identity: 'normalized-email-hash',
+      resultStrategy: 'typed_projection',
+      resultSchema: 'smtp-rcpt-probe/v1',
     });
 
     await expect(applyDomainAckConsumerTransaction({
@@ -254,6 +256,19 @@ describe('DomainAckService', () => {
       },
     });
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a receipt whose locked strategy/schema do not match the runtime consumer binding', async () => {
+    const apply = vi.fn(async () => undefined);
+    await expect(applyDomainAckConsumerTransaction({
+      service: new DomainAckService(new InMemoryDomainAckRepository()),
+      producerId: 'smtp.rcpt_probe',
+      receipt: receipt({ resultSchema: 'taxonomy-code/v1' }),
+      domainAckKey: 'smtp-probe-result',
+      domainRevision: '1',
+      apply,
+    })).rejects.toThrow('DOMAIN_ACK_RECEIPT_BINDING_MISMATCH');
+    expect(apply).not.toHaveBeenCalled();
   });
 
   it('derives a stable UUID-shaped aggregate id from the receipt operation', () => {
@@ -282,8 +297,9 @@ describe('DomainAckService', () => {
     })).rejects.toThrow('DOMAIN_ACK_TRANSACTION_REQUIRED');
   });
 
-  it('applies plural receipts once, skips an all-replay mutation, and passes no-receipt batches through', async () => {
+  it('returns exact per-item plural ACK states and authoritative all-replay readback', async () => {
     const mutation = vi.fn(async () => 'written');
+    const readback = vi.fn(async () => 'authoritative-readback');
     const appliedTransaction = {
       $queryRaw: vi.fn(async () => [{ status: 'APPLIED', ack_json: ackRecord() }]),
     };
@@ -296,8 +312,14 @@ describe('DomainAckService', () => {
         domainRevision: '0',
       }],
       apply: mutation,
-    })).resolves.toBe('written');
+      readback,
+    })).resolves.toMatchObject({
+      status: 'APPLIED',
+      acknowledgements: [{ producerId: 'taxonomy.normalize', status: 'APPLIED' }],
+      value: 'written',
+    });
     expect(mutation).toHaveBeenCalledWith(appliedTransaction);
+    expect(readback).not.toHaveBeenCalled();
 
     mutation.mockClear();
     const replayTransaction = {
@@ -312,15 +334,58 @@ describe('DomainAckService', () => {
         domainRevision: '0',
       }],
       apply: mutation,
-    })).resolves.toBeUndefined();
+      readback,
+    })).resolves.toMatchObject({
+      status: 'REPLAYED',
+      acknowledgements: [{ producerId: 'taxonomy.normalize', status: 'REPLAYED' }],
+      value: 'authoritative-readback',
+    });
     expect(mutation).not.toHaveBeenCalled();
+    expect(readback).toHaveBeenCalledWith(replayTransaction);
 
     await expect(applyDomainAckConsumerTransactions({
       transaction: replayTransaction,
       acknowledgements: [],
       apply: mutation,
-    })).resolves.toBe('written');
+      readback,
+    })).resolves.toMatchObject({ status: 'UNRECEIPTED', value: 'written' });
     expect(mutation).toHaveBeenCalledWith(replayTransaction);
+  });
+
+  it('rejects mixed receipted/unreceipted and mixed APPLIED/REPLAYED plural batches without a domain write', async () => {
+    const mutation = vi.fn(async () => 'must-not-write');
+    const readback = vi.fn(async () => 'must-not-read');
+    const transaction = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([{ status: 'APPLIED', ack_json: ackRecord() }])
+        .mockResolvedValueOnce([{ status: 'REPLAYED', ack_json: ackRecord() }]),
+    };
+    const acknowledgement = {
+      producerId: 'taxonomy.normalize',
+      receipt: receipt(),
+      domainAckKey: 'taxonomy:cpv:pump',
+      domainRevision: '0',
+    };
+
+    await expect(applyDomainAckConsumerTransactions({
+      transaction,
+      acknowledgements: [acknowledgement, {
+        ...acknowledgement,
+        receipt: undefined,
+      }],
+      apply: mutation,
+      readback,
+    })).rejects.toThrow('DOMAIN_ACK_MIXED_RECEIPT_BATCH');
+    expect(transaction.$queryRaw).not.toHaveBeenCalled();
+
+    await expect(applyDomainAckConsumerTransactions({
+      transaction,
+      acknowledgements: [acknowledgement, acknowledgement],
+      apply: mutation,
+      readback,
+    })).rejects.toThrow('DOMAIN_ACK_MIXED_REPLAY_STATE');
+    expect(mutation).not.toHaveBeenCalled();
+    expect(readback).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown producer before any transaction mutation', async () => {
@@ -367,7 +432,7 @@ describe('DomainAckService', () => {
     expect(migration).toContain('jsonb_typeof');
     expect(migration).toContain('DOMAIN_ACK_CONFLICT');
     expect(migration).toContain('p_reservation_microusd BIGINT');
-    expect(migration).not.toContain('operation."reserved_cents" * 10000');
+    expect(migration).toContain('operation."reserved_cents" * 10000');
     expect(migration).toContain('operation."reserved_microusd"');
     expect(migration).not.toContain("session_user <> 'app_user'");
     expect(migration).toContain('PERFORM assert_execution_budget_platform_writer_principal()');
@@ -386,6 +451,13 @@ describe('DomainAckService', () => {
     expect(migration).toContain('operation."result_schema_version"');
     expect(migration).toContain("operation.\"result_json\"->>'artifactId'");
     expect(migration).toContain('public.digest');
+    expect(migration).toContain('p_allow_store BOOLEAN');
+    expect(migration).toContain('IF NOT p_allow_store THEN');
+    expect(migration).toContain('NOT base.replay');
+    expect(migration).toContain('operation."amount_unit" = \'cent\'');
+    expect(migration).toContain('operation."charged_cents" * 10000');
+    expect(migration).toContain('operation."charged_microusd"');
+    expect(migration).toContain('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
   });
 
   it('passes the same database transaction object into the domain mutation callback', async () => {

@@ -256,6 +256,20 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     ).rejects.toBeInstanceOf(BudgetOperationReplayError);
   });
 
+  it('propagates a wrapped receipt/ACK control with zero signal or fake-success ledger writes', async () => {
+    const prisma = fakePrisma();
+    const control = Object.assign(new Error('activity failed'), {
+      cause: { code: 'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH' },
+    });
+    const broker = fakeBroker(() => control);
+    const svc = new SignalIngestService({ prisma, broker });
+
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
+      .rejects.toBe(control);
+    expect(prisma.signals.size).toBe(0);
+    expect(prisma.ledger.size).toBe(0);
+  });
+
   it('摄取幂等：同 externalId 复现 → 单行、observedAt 前移、status 绝不复活（EXPIRED 保持）', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();

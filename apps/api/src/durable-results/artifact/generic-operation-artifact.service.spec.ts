@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { BudgetReservation, BudgetStore } from '../../tools/budget-store';
+import type { DurableExecutionReceipt } from '../durable-execution-receipt';
 import {
   GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
   GenericOperationArtifactError,
@@ -85,6 +86,23 @@ const expectedFacts = Object.freeze({
   blocked: null,
 });
 const snapshot = Object.freeze({ manifest, expectedFacts });
+const ARTIFACT_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: WORKSPACE_ID,
+  authorityId: AUTHORITY_ID,
+  accountId: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+  operationId: OPERATION_ID,
+  operationKey: 'artifact-operation',
+  resultStrategy: 'artifact_reference',
+  resultSchema: 'http-get/v1',
+  resultDigest: SHA256,
+  artifactId: ARTIFACT_ID,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '170000',
+  },
+  costBasis: 'estimated_upper_bound',
+});
 
 async function* bytes(value = BODY): AsyncIterable<Uint8Array> {
   yield value;
@@ -109,6 +127,7 @@ function dependencies(overrides: {
   findExact?: GenericOperationArtifactRepository['findExact'];
   findByOperation?: GenericOperationArtifactRepository['findByOperation'];
   loadResultUnknownArtifact?: BudgetStore['loadResultUnknownArtifact'];
+  settleArtifactManifest?: BudgetStore['settleArtifactManifest'];
 } = {}) {
   const order: string[] = [];
   const store = {
@@ -149,15 +168,16 @@ function dependencies(overrides: {
       order.push('load-expected');
       return snapshot;
     })),
-    settleArtifactManifest: vi.fn(async () => {
+    settleArtifactManifest: vi.fn(overrides.settleArtifactManifest ?? (async () => {
       order.push('atomic-settle');
       return {
         chargedCents: reservation.estimatedCents,
         observedCents: 13,
         capVariance: false,
         replay: false,
+        receipt: ARTIFACT_RECEIPT,
       };
-    }),
+    })),
   } as unknown as BudgetStore;
   const logger = { warn: vi.fn() };
   const service = new GenericOperationArtifactService(
@@ -192,14 +212,17 @@ describe('GenericOperationArtifactService', () => {
     const deps = dependencies();
 
     await expect(deps.service.persist(persistInput())).resolves.toEqual({
-      schemaVersion: 'generic-operation-artifact-ref/v1',
-      artifactId: ARTIFACT_ID,
-      operationId: OPERATION_ID,
-      resultSchema: 'http-get/v1',
-      sha256: SHA256,
-      sizeBytes: String(BODY.byteLength),
-      mediaType: 'text/plain',
-      expiresAt: EXPIRES_AT,
+      reference: {
+        schemaVersion: 'generic-operation-artifact-ref/v1',
+        artifactId: ARTIFACT_ID,
+        operationId: OPERATION_ID,
+        resultSchema: 'http-get/v1',
+        sha256: SHA256,
+        sizeBytes: String(BODY.byteLength),
+        mediaType: 'text/plain',
+        expiresAt: EXPIRES_AT,
+      },
+      durableReceipt: ARTIFACT_RECEIPT,
     });
     expect(deps.order).toEqual([
       'stage',
@@ -271,20 +294,65 @@ describe('GenericOperationArtifactService', () => {
     expect(deps.store.promote).not.toHaveBeenCalled();
   });
 
-  it('rejects replay reservations before reading a producer or touching storage', async () => {
+  it('returns an exact settled artifact replay without reading the producer or touching storage', async () => {
     let producerReads = 0;
     const deps = dependencies();
+    const reference = {
+      schemaVersion: 'generic-operation-artifact-ref/v1' as const,
+      artifactId: ARTIFACT_ID,
+      operationId: OPERATION_ID,
+      resultSchema: 'http-get/v1',
+      sha256: SHA256,
+      sizeBytes: String(BODY.byteLength),
+      mediaType: 'text/plain',
+      expiresAt: EXPIRES_AT,
+    };
 
     await expect(deps.service.persist({
       ...persistInput(),
-      reservation: { ...reservation, replay: true },
+      reservation: {
+        ...reservation,
+        replay: true,
+        replayResult: {
+          resultStrategy: 'artifact_reference',
+          reference,
+        },
+        receipt: ARTIFACT_RECEIPT,
+      } as never,
       source: source(() => {
         producerReads += 1;
       }),
-    })).rejects.toMatchObject({
-      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    })).resolves.toEqual({
+      reference,
+      durableReceipt: ARTIFACT_RECEIPT,
     });
     expect(producerReads).toBe(0);
+    expect(deps.store.stage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an artifact replay whose reference and receipt artifact IDs drift', async () => {
+    const deps = dependencies();
+    await expect(deps.service.persist({
+      ...persistInput(),
+      reservation: {
+        ...reservation,
+        replay: true,
+        replayResult: {
+          resultStrategy: 'artifact_reference',
+          reference: {
+            schemaVersion: 'generic-operation-artifact-ref/v1',
+            artifactId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            operationId: OPERATION_ID,
+            resultSchema: 'http-get/v1',
+            sha256: SHA256,
+            sizeBytes: String(BODY.byteLength),
+            mediaType: 'text/plain',
+            expiresAt: EXPIRES_AT,
+          },
+        },
+        receipt: ARTIFACT_RECEIPT,
+      } as never,
+    })).rejects.toMatchObject({ code: 'GENERIC_OPERATION_ARTIFACT_INVALID' });
     expect(deps.store.stage).not.toHaveBeenCalled();
   });
 
@@ -343,7 +411,10 @@ describe('GenericOperationArtifactService', () => {
     await expect(deps.service.persist({
       ...persistInput(),
       reservation: platformReservation,
-    })).resolves.toMatchObject({ artifactId: ARTIFACT_ID });
+    })).resolves.toMatchObject({
+      reference: { artifactId: ARTIFACT_ID },
+      durableReceipt: ARTIFACT_RECEIPT,
+    });
     expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
       platformReservation,
       13,
@@ -362,6 +433,11 @@ describe('GenericOperationArtifactService', () => {
         },
         costBasis: 'estimated_upper_bound',
       },
+      {
+        producerId: 'http.get',
+        domainAckKey: ARTIFACT_ID,
+        domainRevision: SHA256,
+      },
     );
   });
 
@@ -373,9 +449,12 @@ describe('GenericOperationArtifactService', () => {
       authorityId: AUTHORITY_ID,
       actualCents: 13,
     })).resolves.toMatchObject({
-      artifactId: ARTIFACT_ID,
-      operationId: OPERATION_ID,
-      sha256: SHA256,
+      reference: {
+        artifactId: ARTIFACT_ID,
+        operationId: OPERATION_ID,
+        sha256: SHA256,
+      },
+      durableReceipt: ARTIFACT_RECEIPT,
     });
 
     expect(deps.store.stage).not.toHaveBeenCalled();
@@ -426,7 +505,10 @@ describe('GenericOperationArtifactService', () => {
 
     await expect(
       deps.service.recoverUnknown(hostileRecoveryInput),
-    ).resolves.toMatchObject({ sha256: SHA256 });
+    ).resolves.toMatchObject({
+      reference: { sha256: SHA256 },
+      durableReceipt: ARTIFACT_RECEIPT,
+    });
     expect(deps.store.inspect).toHaveBeenCalledWith(SHA256, undefined);
     expect(deps.store.inspect).not.toHaveBeenCalledWith('ff'.repeat(32), undefined);
   });
@@ -456,7 +538,8 @@ describe('GenericOperationArtifactService', () => {
     });
 
     await expect(deps.service.persist(persistInput())).resolves.toMatchObject({
-      artifactId: ARTIFACT_ID,
+      reference: { artifactId: ARTIFACT_ID },
+      durableReceipt: ARTIFACT_RECEIPT,
     });
     expect(deps.logger.warn).toHaveBeenCalledWith(
       ARTIFACT_STAGING_CLEANUP_FAILED,

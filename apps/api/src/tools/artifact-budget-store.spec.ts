@@ -90,6 +90,47 @@ function rawQueryMarkerError(
 }
 
 describe("PostgresBudgetStore artifact recovery", () => {
+  it("returns the closed artifact-reference replay union with the exact ledger receipt", async () => {
+    const store = new PostgresBudgetStore(fakePrisma([[
+      {
+        kind: "REPLAY",
+        operation_id: ARTIFACT_REFERENCE.operationId,
+        operation_key: "artifact-operation",
+        reserved_cents: 17n,
+        remaining_cents: 83n,
+        charged_cents: 17n,
+        observed_cents: 13n,
+        status: "SETTLED",
+        account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+        authority_id: ARTIFACT_MANIFEST.authorityId,
+        result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+        result_schema: ARTIFACT_REFERENCE.resultSchema,
+        result_digest: ARTIFACT_REFERENCE.sha256,
+        result_json: ARTIFACT_REFERENCE,
+        receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+        receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
+      },
+    ]]));
+
+    await expect(store.reserve({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: "artifact-account",
+      operationKey: "artifact-operation",
+      estimatedCents: 17,
+    })).resolves.toMatchObject({
+      replay: true,
+      replayResult: {
+        resultStrategy: "artifact_reference",
+        reference: ARTIFACT_REFERENCE,
+      },
+      receipt: {
+        resultStrategy: "artifact_reference",
+        artifactId: ARTIFACT_REFERENCE.artifactId,
+        resultDigest: ARTIFACT_REFERENCE.sha256,
+      },
+    });
+  });
+
   it("marks an executed artifact write RESULT_UNKNOWN without releasing its reservation", async () => {
     const queries: Array<{
       strings?: readonly string[];
