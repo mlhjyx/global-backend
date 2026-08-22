@@ -5,6 +5,7 @@ import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-
 import {
   BudgetAccountUnavailableError,
   BudgetExceededError,
+  BudgetMicrousdExceededError,
   BudgetUnsettledOperationsError,
   InMemoryBudgetStoreAdapter,
   PostgresBudgetStore,
@@ -87,6 +88,184 @@ function rawQueryMarkerError(marker: string): Prisma.PrismaClientKnownRequestErr
 }
 
 describe('PostgresBudgetStore', () => {
+  it.each([1n, 9_999n, 10_000n, 9_223_372_036_854_775_807n])(
+    'reserves exact additive microusd BIGINT boundary %s',
+    async (estimatedMicrousd) => {
+      const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
+      const prisma = {
+        withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+          $queryRaw: vi.fn(async (query) => {
+            queries.push(query);
+            return [{
+              kind: 'EXECUTE',
+              operation_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+              reserved_microusd: estimatedMicrousd,
+              remaining_microusd: 0n,
+              status: 'RESERVED',
+            }];
+          }),
+        } as never)),
+      } as unknown as PrismaService;
+      const store = new PostgresBudgetStore(prisma);
+
+      await expect(store.reserveMicrousd({
+        workspaceId: TEST_WORKSPACE_ID,
+        accountKey: 'legacy-unbound',
+        operationKey: `boundary:${estimatedMicrousd}`,
+        estimatedMicrousd,
+      })).resolves.toMatchObject({ estimatedMicrousd });
+      expect(queries[0]?.strings?.join('')).toContain(
+        'reserve_tool_budget_microusd_v1',
+      );
+      expect(queries[0]?.values).toContain(estimatedMicrousd);
+    },
+  );
+
+  it('rejects microusd overflow before persistence', async () => {
+    const prisma = fakePrisma([]);
+    const store = new PostgresBudgetStore(prisma);
+    await expect(store.reserveMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'legacy-unbound',
+      operationKey: 'overflow',
+      estimatedMicrousd: 9_223_372_036_854_775_808n,
+    })).rejects.toBeInstanceOf(RangeError);
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { observedMicrousd: 7_500n, chargedMicrousd: 7_500n, capVariance: false },
+    { observedMicrousd: 10_001n, chargedMicrousd: 10_000n, capVariance: true },
+  ])(
+    'settles exact additive provider cost $observedMicrousd',
+    async ({ observedMicrousd, chargedMicrousd, capVariance }) => {
+      const store = new PostgresBudgetStore(fakePrisma([[
+        {
+          charged_microusd: chargedMicrousd,
+          observed_microusd: observedMicrousd,
+          cap_variance: capVariance,
+          status: 'SETTLED',
+          replay: false,
+        },
+      ]]));
+      await expect(store.settleMicrousd({
+        workspaceId: TEST_WORKSPACE_ID,
+        accountKey: 'legacy-unbound',
+        operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+        estimatedMicrousd: 10_000n,
+        replay: false,
+      }, observedMicrousd)).resolves.toEqual({
+        chargedMicrousd,
+        observedMicrousd,
+        capVariance,
+        replay: false,
+      });
+    },
+  );
+
+  it('keeps authority-bound accounts nonspendable on the additive API', async () => {
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        $queryRaw: vi.fn(async () => {
+          throw rawQueryMarkerError(
+            'EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE',
+          );
+        }),
+      } as never)),
+    } as unknown as PrismaService;
+    const store = new PostgresBudgetStore(prisma);
+    await expect(store.reserveMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'authority-bound',
+      operationKey: 'blocked',
+      estimatedMicrousd: 1n,
+    })).rejects.toEqual(
+      new ExecutionBudgetGrantError(
+        'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      ),
+    );
+  });
+
+  it('reports exact microusd budget denial without number conversion', async () => {
+    const store = new PostgresBudgetStore(fakePrisma([[
+      {
+        kind: 'DENIED',
+        operation_id: null,
+        reserved_microusd: 0n,
+        remaining_microusd: 9_999n,
+      },
+    ]]));
+    await expect(store.reserveMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'legacy-unbound',
+      operationKey: 'denied',
+      estimatedMicrousd: 10_000n,
+    })).rejects.toEqual(
+      new BudgetMicrousdExceededError(
+        'legacy-unbound',
+        10_000n,
+        9_999n,
+      ),
+    );
+  });
+
+  it('releases, reads, and closes the additive microusd lifecycle', async () => {
+    const prisma = fakePrisma([
+      [{
+        charged_microusd: 0n,
+        observed_microusd: 0n,
+        cap_variance: false,
+        status: 'RELEASED',
+        replay: false,
+      }],
+      [{
+        remaining_microusd: 9_999n,
+        exhausted: false,
+        ref_count: 1,
+      }],
+      [{ close_tool_budget_microusd_v1: true }],
+    ]);
+    const store = new PostgresBudgetStore(prisma);
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'legacy-unbound',
+      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      estimatedMicrousd: 1n,
+      replay: false,
+    };
+    await expect(store.releaseMicrousd(reservation)).resolves.toEqual({
+      chargedMicrousd: 0n,
+      observedMicrousd: 0n,
+      capVariance: false,
+      replay: false,
+    });
+    await expect(store.statusMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: reservation.accountKey,
+    })).resolves.toEqual({
+      remainingMicrousd: 9_999n,
+      exhausted: false,
+      open: true,
+    });
+    await expect(store.closeMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: reservation.accountKey,
+      force: true,
+    })).resolves.toBeUndefined();
+  });
+
+  it('reports an absent additive microusd status as closed', async () => {
+    const store = new PostgresBudgetStore(fakePrisma([[]]));
+    await expect(store.statusMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'missing',
+    })).resolves.toEqual({
+      remainingMicrousd: 0n,
+      exhausted: false,
+      open: false,
+    });
+  });
+
   it('opens an authority-bound account without accepting or sending a caller amount', async () => {
     const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
     const prisma = {

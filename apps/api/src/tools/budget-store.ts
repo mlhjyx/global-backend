@@ -25,6 +25,7 @@ import {
   type GenericOperationArtifactSnapshot,
   type UnknownArtifactRow,
 } from './artifact-budget-expected-facts';
+import { assertMicrousd } from './microusd';
 const MAX_KEY_LENGTH = 200;
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
@@ -60,6 +61,36 @@ export interface BudgetResultUnknownTransition {
 
 export interface BudgetStatus {
   remainingCents: number;
+  exhausted: boolean;
+  open: boolean;
+}
+
+/** Additive Task 1 surface. No product caller uses this before Task 6. */
+export interface BudgetMicrousdReservationRequest {
+  workspaceId: string;
+  accountKey: string;
+  operationKey: string;
+  estimatedMicrousd: bigint;
+}
+
+export interface BudgetMicrousdReservation {
+  workspaceId: string;
+  accountKey: string;
+  operationId: string;
+  estimatedMicrousd: bigint;
+  replay: boolean;
+  replayProjection?: GenericOperationProjection;
+}
+
+export interface BudgetMicrousdSettlement {
+  chargedMicrousd: bigint;
+  observedMicrousd: bigint;
+  capVariance: boolean;
+  replay: boolean;
+}
+
+export interface BudgetMicrousdStatus {
+  remainingMicrousd: bigint;
   exhausted: boolean;
   open: boolean;
 }
@@ -109,6 +140,27 @@ export interface BudgetStore {
    * must retain operations and forbid a new generation while any are unresolved.
    */
   close(input: { workspaceId: string; accountKey: string; force?: boolean }): Promise<void>;
+  /** Additive native-unit API. Authority-bound accounts remain nonspendable until Task 6. */
+  reserveMicrousd(
+    input: BudgetMicrousdReservationRequest,
+  ): Promise<BudgetMicrousdReservation>;
+  settleMicrousd(
+    reservation: BudgetMicrousdReservation,
+    observedMicrousd: bigint,
+    projection?: GenericOperationProjection,
+  ): Promise<BudgetMicrousdSettlement>;
+  releaseMicrousd(
+    reservation: BudgetMicrousdReservation,
+  ): Promise<BudgetMicrousdSettlement>;
+  statusMicrousd(input: {
+    workspaceId: string;
+    accountKey: string;
+  }): Promise<BudgetMicrousdStatus>;
+  closeMicrousd(input: {
+    workspaceId: string;
+    accountKey: string;
+    force?: boolean;
+  }): Promise<void>;
 }
 
 export class BudgetStoreUnavailableError extends Error {
@@ -142,6 +194,21 @@ export class BudgetOperationReplayError extends Error {
   constructor(public readonly operationKey: string) {
     super(`budget operation already exists without a durable result: ${operationKey}`);
     this.name = 'BudgetOperationReplayError';
+  }
+}
+
+export class BudgetMicrousdExceededError extends Error {
+  readonly code = 'BUDGET_EXCEEDED';
+
+  constructor(
+    public readonly accountKey: string,
+    public readonly neededMicrousd: bigint,
+    public readonly remainingMicrousd: bigint,
+  ) {
+    super(
+      `budget exceeded for account ${accountKey}: need ${neededMicrousd} microusd, remaining ${remainingMicrousd} microusd`,
+    );
+    this.name = 'BudgetMicrousdExceededError';
   }
 }
 
@@ -189,6 +256,26 @@ export class UnavailableBudgetStore implements BudgetStore {
   }
 
   async close(): Promise<void> {
+    this.unavailable();
+  }
+
+  async reserveMicrousd(): Promise<BudgetMicrousdReservation> {
+    return this.unavailable();
+  }
+
+  async settleMicrousd(): Promise<BudgetMicrousdSettlement> {
+    return this.unavailable();
+  }
+
+  async releaseMicrousd(): Promise<BudgetMicrousdSettlement> {
+    return this.unavailable();
+  }
+
+  async statusMicrousd(): Promise<BudgetMicrousdStatus> {
+    return this.unavailable();
+  }
+
+  async closeMicrousd(): Promise<void> {
     this.unavailable();
   }
 }
@@ -257,7 +344,50 @@ export class InMemoryBudgetStoreAdapter implements BudgetStore {
   async close(input: { workspaceId: string; accountKey: string; force?: boolean }): Promise<void> {
     this.ledger.close(input.accountKey, { force: input.force });
   }
+
+  private microusdUnavailable(): never {
+    throw new BudgetStoreUnavailableError(
+      'deprecated cents-only test adapter has no native microusd ledger',
+    );
+  }
+
+  async reserveMicrousd(): Promise<BudgetMicrousdReservation> {
+    return this.microusdUnavailable();
+  }
+
+  async settleMicrousd(): Promise<BudgetMicrousdSettlement> {
+    return this.microusdUnavailable();
+  }
+
+  async releaseMicrousd(): Promise<BudgetMicrousdSettlement> {
+    return this.microusdUnavailable();
+  }
+
+  async statusMicrousd(): Promise<BudgetMicrousdStatus> {
+    return this.microusdUnavailable();
+  }
+
+  async closeMicrousd(): Promise<void> {
+    this.microusdUnavailable();
+  }
 }
+
+type MicrousdReserveRow = {
+  kind: 'EXECUTE' | 'REPLAY' | 'DENIED' | 'ACCOUNT_UNAVAILABLE';
+  operation_id: string | null;
+  reserved_microusd: bigint;
+  remaining_microusd: bigint;
+  status?: string;
+  result_json?: unknown;
+};
+
+type MicrousdSettleRow = {
+  charged_microusd: bigint;
+  observed_microusd: bigint;
+  cap_variance: boolean;
+  status: string;
+  replay?: boolean;
+};
 
 type ReserveRow = {
   kind: 'EXECUTE' | 'REPLAY' | 'DENIED' | 'ACCOUNT_UNAVAILABLE';
@@ -788,6 +918,190 @@ export class PostgresBudgetStore implements BudgetStore {
       await this.inScope(input.workspaceId, async (tx) => {
         await tx.$queryRaw(
           Prisma.sql`SELECT close_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.force ?? false})`,
+        );
+      });
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
+  }
+
+  async reserveMicrousd(
+    input: BudgetMicrousdReservationRequest,
+  ): Promise<BudgetMicrousdReservation> {
+    assertKey('accountKey', input.accountKey);
+    assertKey('operationKey', input.operationKey);
+    assertMicrousd('estimatedMicrousd', input.estimatedMicrousd);
+    let rows: MicrousdReserveRow[];
+    try {
+      rows = await this.inScope(input.workspaceId, (tx) =>
+        tx.$queryRaw<MicrousdReserveRow[]>(
+          Prisma.sql`SELECT * FROM reserve_tool_budget_microusd_v1(
+            ${input.workspaceId}, ${input.accountKey}, ${input.operationKey},
+            ${input.estimatedMicrousd}
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isBudgetAccountUnavailable(error)) {
+        throw new BudgetAccountUnavailableError(input.accountKey);
+      }
+      throw error;
+    }
+    const row = rows[0];
+    if (!row || row.kind === 'ACCOUNT_UNAVAILABLE') {
+      throw new BudgetAccountUnavailableError(input.accountKey);
+    }
+    if (row.kind === 'DENIED') {
+      throw new BudgetMicrousdExceededError(
+        input.accountKey,
+        input.estimatedMicrousd,
+        row.remaining_microusd,
+      );
+    }
+    if (!row.operation_id) {
+      throw new BudgetStoreUnavailableError(
+        'microusd budget reserve returned no operation id',
+      );
+    }
+    const replayProjection =
+      row.kind === 'REPLAY' && row.result_json != null
+        ? parseGenericOperationProjection(row.result_json)
+        : undefined;
+    return {
+      workspaceId: input.workspaceId,
+      accountKey: input.accountKey,
+      operationId: row.operation_id,
+      estimatedMicrousd: row.reserved_microusd,
+      replay: row.kind === 'REPLAY',
+      ...(replayProjection ? { replayProjection } : {}),
+    };
+  }
+
+  async settleMicrousd(
+    reservation: BudgetMicrousdReservation,
+    observedMicrousd: bigint,
+    projection?: GenericOperationProjection,
+  ): Promise<BudgetMicrousdSettlement> {
+    assertMicrousd('observedMicrousd', observedMicrousd);
+    const durable = projection
+      ? parseGenericOperationProjection(projection)
+      : null;
+    let rows: MicrousdSettleRow[];
+    try {
+      rows = await this.inScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<MicrousdSettleRow[]>(
+          Prisma.sql`SELECT * FROM settle_tool_budget_microusd_v1(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${observedMicrousd}, ${durable?.schemaVersion ?? null},
+            ${durable?.schema ?? null}, ${durable?.digest ?? null},
+            ${durable ? JSON.stringify(durable) : null}::jsonb
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
+    const row = rows[0];
+    if (!row) {
+      throw new BudgetStoreUnavailableError(
+        'microusd budget settle returned no result',
+      );
+    }
+    return {
+      chargedMicrousd: row.charged_microusd,
+      observedMicrousd: row.observed_microusd,
+      capVariance: row.cap_variance,
+      replay: row.replay ?? row.status !== 'SETTLED',
+    };
+  }
+
+  async releaseMicrousd(
+    reservation: BudgetMicrousdReservation,
+  ): Promise<BudgetMicrousdSettlement> {
+    let rows: MicrousdSettleRow[];
+    try {
+      rows = await this.inScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<MicrousdSettleRow[]>(
+          Prisma.sql`SELECT * FROM release_tool_budget_microusd_v1(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
+    const row = rows[0];
+    if (!row) {
+      throw new BudgetStoreUnavailableError(
+        'microusd budget release returned no result',
+      );
+    }
+    return {
+      chargedMicrousd: row.charged_microusd,
+      observedMicrousd: row.observed_microusd,
+      capVariance: row.cap_variance,
+      replay: row.replay ?? row.status !== 'RELEASED',
+    };
+  }
+
+  async statusMicrousd(input: {
+    workspaceId: string;
+    accountKey: string;
+  }): Promise<BudgetMicrousdStatus> {
+    assertKey('accountKey', input.accountKey);
+    let rows: Array<{
+      remaining_microusd: bigint;
+      exhausted: boolean;
+      ref_count: number;
+    }>;
+    try {
+      rows = await this.inScope(input.workspaceId, (tx) =>
+        tx.$queryRaw(
+          Prisma.sql`SELECT * FROM tool_budget_status_microusd_v1(
+            ${input.workspaceId}, ${input.accountKey}
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      throw error;
+    }
+    const row = rows[0];
+    return row
+      ? {
+          remainingMicrousd: row.remaining_microusd,
+          exhausted: row.exhausted,
+          open: row.ref_count > 0,
+        }
+      : { remainingMicrousd: 0n, exhausted: false, open: false };
+  }
+
+  async closeMicrousd(input: {
+    workspaceId: string;
+    accountKey: string;
+    force?: boolean;
+  }): Promise<void> {
+    assertKey('accountKey', input.accountKey);
+    try {
+      await this.inScope(input.workspaceId, async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT close_tool_budget_microusd_v1(
+            ${input.workspaceId}, ${input.accountKey}, ${input.force ?? false}
+          )`,
         );
       });
     } catch (error) {
