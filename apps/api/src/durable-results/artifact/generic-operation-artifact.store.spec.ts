@@ -1,11 +1,9 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
-  HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { contentAddressedObjectKey, stagingObjectKey } from './artifact-key';
 import {
@@ -15,213 +13,20 @@ import {
   type ArtifactS3Client,
   type StagedArtifact,
 } from './generic-operation-artifact.store';
-const ARTIFACT_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
-const BUCKET = 'generic-artifacts-test';
-const RESULT_SCHEMA = 'http-get/v1';
-interface MemoryObject {
-  readonly chunks: readonly Uint8Array[];
-  readonly contentType: string;
-  readonly metadata: Readonly<Record<string, string>>;
-}
-interface Failure extends Error {
-  readonly $metadata?: Readonly<{ httpStatusCode?: number }>;
-}
-function failure(
-  name: string,
-  message: string,
-  httpStatusCode?: number,
-): Failure {
-  return Object.assign(new Error(message), {
-    name,
-    ...(httpStatusCode === undefined
-      ? {}
-      : { $metadata: { httpStatusCode } }),
-  });
-}
-function bytes(...values: number[]): Uint8Array {
-  return Uint8Array.from(values);
-}
-function sha256(chunks: readonly Uint8Array[]): string {
-  const hash = createHash('sha256');
-  for (const chunk of chunks) hash.update(chunk);
-  return hash.digest('hex');
-}
-async function collect(body: unknown): Promise<readonly Uint8Array[]> {
-  if (
-    typeof body !== 'object' ||
-    body === null ||
-    !(Symbol.asyncIterator in body)
-  ) {
-    throw new Error('test transport requires an async iterable body');
-  }
-  const chunks: Uint8Array[] = [];
-  for await (const value of body as AsyncIterable<unknown>) {
-    if (!(value instanceof Uint8Array)) {
-      throw new Error('test transport received a non-byte chunk');
-    }
-    chunks.push(Uint8Array.from(value));
-  }
-  return chunks;
-}
-class MemoryS3Client implements ArtifactS3Client {
-  readonly objects = new Map<string, MemoryObject>();
-  readonly commands: object[] = [];
-  stagingPutFailure: Error | null = null;
-  stagingPutAckFailure = false;
-  stagingPutAckAbort: AbortController | null = null;
-  finalPutFailure: 'before_commit' | 'after_commit' | null = null;
-  finalReadbackChunks: readonly Uint8Array[] | null = null;
-  finalReadbackContentLength: number | null = null;
-  finalReadbackMetadata: Readonly<Record<string, string>> | null = null;
-  getFailure: Error | null = null;
-  headFailure: Error | null = null;
-  readinessFailure: Error | null = null;
-  async send(
-    command: object,
-    options?: Readonly<{ abortSignal?: AbortSignal }>,
-  ): Promise<unknown> {
-    this.commands.push(command);
-    if (command instanceof PutObjectCommand) {
-      const input = command.input;
-      if (input.Bucket !== BUCKET || typeof input.Key !== 'string') {
-        throw new Error('unexpected test bucket/key');
-      }
-      const isFinal = input.IfNoneMatch === '*';
-      if (!isFinal && this.stagingPutFailure) throw this.stagingPutFailure;
-      if (isFinal && this.objects.has(input.Key)) {
-        throw failure('PreconditionFailed', 'target exists', 412);
-      }
-      if (isFinal && this.finalPutFailure === 'before_commit') {
-        throw failure('TimeoutError', 'https://secret.invalid before ACK');
-      }
-      const chunks = await collect(input.Body);
-      this.objects.set(input.Key, {
-        chunks,
-        contentType: input.ContentType ?? '',
-        metadata: Object.freeze({ ...(input.Metadata ?? {}) }),
-      });
-      if (!isFinal && this.stagingPutAckFailure) {
-        this.stagingPutAckAbort?.abort();
-        throw failure('TimeoutError', 'https://secret.invalid staging ACK');
-      }
-      if (isFinal && this.finalPutFailure === 'after_commit') {
-        throw failure('TimeoutError', 'https://secret.invalid after ACK');
-      }
-      return {};
-    }
-    if (command instanceof HeadObjectCommand) {
-      if (this.headFailure) throw this.headFailure;
-      const key = command.input.Key;
-      const value = key === undefined ? undefined : this.objects.get(key);
-      if (!value) throw failure('NotFound', 'not found', 404);
-      return {
-        ContentLength: value.chunks.reduce(
-          (total, chunk) => total + chunk.byteLength,
-          0,
-        ),
-        ContentType: value.contentType,
-        Metadata: value.metadata,
-      };
-    }
-    if (command instanceof GetObjectCommand) {
-      if (options?.abortSignal?.aborted) {
-        throw failure('AbortError', 'aborted recovery signal');
-      }
-      if (this.getFailure) throw this.getFailure;
-      const key = command.input.Key;
-      const value = key === undefined ? undefined : this.objects.get(key);
-      if (!value) throw failure('NoSuchKey', 'not found', 404);
-      const isFinalKey = typeof key === 'string' && key.includes('/sha256/');
-      const chunks =
-        isFinalKey
-          ? (this.finalReadbackChunks ?? value.chunks)
-          : value.chunks;
-      return {
-        ContentLength:
-          (isFinalKey ? this.finalReadbackContentLength : null) ??
-          chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
-        ContentType: value.contentType,
-        Metadata:
-          (isFinalKey ? this.finalReadbackMetadata : null) ?? value.metadata,
-        Body: (async function* () {
-          for (const chunk of chunks) yield Uint8Array.from(chunk);
-        })(),
-      };
-    }
-    if (command instanceof DeleteObjectCommand) {
-      if (typeof command.input.Key === 'string') {
-        this.objects.delete(command.input.Key);
-      }
-      return {};
-    }
-    if (command instanceof HeadBucketCommand) {
-      if (this.readinessFailure) throw this.readinessFailure;
-      return {};
-    }
-    throw new Error(`unsupported test command: ${command.constructor.name}`);
-  }
-}
-function store(client = new MemoryS3Client()): {
-  readonly client: MemoryS3Client;
-  readonly store: S3GenericOperationArtifactStore;
-} {
-  return {
-    client,
-    store: new S3GenericOperationArtifactStore({ bucket: BUCKET, client }),
-  };
-}
-function source(
-  chunks: readonly Uint8Array[],
-  overrides: Readonly<{
-    body?: AsyncIterable<Uint8Array>;
-    mediaType?: string;
-    sourceDigest?: string;
-  }> = {},
-) {
-  return {
-    body:
-      overrides.body ??
-      (async function* () {
-        for (const chunk of chunks) yield chunk;
-      })(),
-    mediaType: overrides.mediaType ?? 'application/octet-stream',
-    ...(overrides.sourceDigest === undefined
-      ? {}
-      : { sourceDigest: overrides.sourceDigest }),
-  };
-}
-async function stage(
-  target: S3GenericOperationArtifactStore,
-  chunks: readonly Uint8Array[],
-  maxBytes: number,
-  signal?: AbortSignal,
-): Promise<StagedArtifact> {
-  return target.stage({
-    artifactId: ARTIFACT_ID,
-    source: source(chunks),
-    maxBytes,
-    resultSchema: RESULT_SCHEMA,
-    privacyClass: 'CONFIDENTIAL_TENANT',
-    signal,
-  });
-}
-function expectStorageCode(
-  promise: Promise<unknown>,
-  code:
-    | 'GENERIC_OPERATION_ARTIFACT_ABORTED'
-    | 'GENERIC_OPERATION_ARTIFACT_INVALID'
-    | 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN'
-    | 'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED'
-    | 'GENERIC_OPERATION_ARTIFACT_SOURCE_FAILED'
-    | 'GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN'
-    | 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
-): Promise<void> {
-  return expect(promise).rejects.toMatchObject({
-    name: 'ArtifactStorageError',
-    code,
-    message: code,
-  });
-}
+import {
+  ARTIFACT_ID,
+  BUCKET,
+  RESULT_SCHEMA,
+  MemoryS3Client,
+  bytes,
+  collect,
+  expectStorageCode,
+  sha256,
+  source,
+  stage,
+  store,
+} from './generic-operation-artifact.store.spec-helper';
+
 describe('S3GenericOperationArtifactStore stage', () => {
   it('streams and hashes a zero-byte source without rejecting an empty result', async () => {
     const { client, store: target } = store();
@@ -301,11 +106,10 @@ describe('S3GenericOperationArtifactStore stage', () => {
       resultSchema: RESULT_SCHEMA,
       privacyClass: 'PUBLIC_ORGANIZATION',
     });
-    await expectStorageCode(
-      result,
-      'GENERIC_OPERATION_ARTIFACT_SOURCE_FAILED',
+    await expectStorageCode(result, 'GENERIC_OPERATION_ARTIFACT_SOURCE_FAILED');
+    await expect(result).rejects.not.toThrow(
+      /secret|access-key|provider token/i,
     );
-    await expect(result).rejects.not.toThrow(/secret|access-key|provider token/i);
   });
 
   it('contains staging transport failures behind a fixed redacted code', async () => {
@@ -328,12 +132,13 @@ describe('S3GenericOperationArtifactStore stage', () => {
     client.stagingPutAckFailure = true;
     client.stagingPutAckAbort = abort;
     const { store: target } = store(client);
-    await expect(stage(target, [bytes(1), bytes(2, 3)], 3, abort.signal))
-      .resolves.toMatchObject({
-        stagingKey: stagingObjectKey(ARTIFACT_ID),
-        sizeBytes: '3',
-        sha256: sha256([bytes(1), bytes(2, 3)]),
-      });
+    await expect(
+      stage(target, [bytes(1), bytes(2, 3)], 3, abort.signal),
+    ).resolves.toMatchObject({
+      stagingKey: stagingObjectKey(ARTIFACT_ID),
+      sizeBytes: '3',
+      sha256: sha256([bytes(1), bytes(2, 3)]),
+    });
     expect(abort.signal.aborted).toBe(true);
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
@@ -445,9 +250,13 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const result = target.promote(mutable);
     Object.assign(mutable, {
       artifactId: '11111111-1111-4111-8111-111111111111',
-      stagingKey: '../attacker', sha256: 'ab'.repeat(32), sizeBytes: '999',
-      mediaType: 'text/plain', sourceDigest: 'cd'.repeat(32),
-      resultSchema: 'attacker/v1', privacyClass: 'PERSONAL_DATA',
+      stagingKey: '../attacker',
+      sha256: 'ab'.repeat(32),
+      sizeBytes: '999',
+      mediaType: 'text/plain',
+      sourceDigest: 'cd'.repeat(32),
+      resultSchema: 'attacker/v1',
+      privacyClass: 'PERSONAL_DATA',
     });
     const stored = await result;
     expect(stored).toEqual({
@@ -469,13 +278,18 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       .filter((command) => command instanceof GetObjectCommand)
       .map((command) => (command as GetObjectCommand).input.Key);
     expect(getKeys).toEqual([
-      staged.stagingKey, contentAddressedObjectKey(staged.sha256),
+      staged.stagingKey,
+      contentAddressedObjectKey(staged.sha256),
     ]);
     const finalPut = client.commands.find(
-      (command) => command instanceof PutObjectCommand && command.input.IfNoneMatch === '*',
+      (command) =>
+        command instanceof PutObjectCommand &&
+        command.input.IfNoneMatch === '*',
     ) as PutObjectCommand;
     expect(finalPut.input).toMatchObject({
-      Key: stored.objectKey, ContentLength: 3, ContentType: staged.mediaType,
+      Key: stored.objectKey,
+      ContentLength: 3,
+      ContentType: staged.mediaType,
     });
   });
 
@@ -491,12 +305,16 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const headKeys = client.commands
       .filter((command) => command instanceof HeadObjectCommand)
       .map((command) => (command as HeadObjectCommand).input.Key);
-    expect(headKeys).toEqual([contentAddressedObjectKey(staged.sha256)]);
+    expect(headKeys).toEqual([
+      contentAddressedObjectKey(staged.sha256),
+      contentAddressedObjectKey(staged.sha256),
+    ]);
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
       .map((command) => (command as GetObjectCommand).input.Key);
     expect(getKeys).toEqual([
-      staged.stagingKey, contentAddressedObjectKey(staged.sha256),
+      staged.stagingKey,
+      contentAddressedObjectKey(staged.sha256),
     ]);
   });
 
@@ -518,7 +336,8 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       const target = store(client).store;
       const staged = await stage(target, [bytes(1, 2)], 2);
       if (path === 'existing target') await target.promote(staged);
-      if (path === 'promote ACK recovery') client.finalPutFailure = 'after_commit';
+      if (path === 'promote ACK recovery')
+        client.finalPutFailure = 'after_commit';
       client.finalReadbackChunks = [bytes(1, 3)];
       await expectStorageCode(
         target.promote(staged),
@@ -527,18 +346,27 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     },
   );
 
-  it.each(['ContentLength', 'Metadata'])('rejects conflicting final GET %s', async (field) => {
-    const client = new MemoryS3Client();
-    const target = store(client).store;
-    const staged = await stage(target, [bytes(4, 5)], 2);
-    if (field === 'ContentLength') client.finalReadbackContentLength = 3;
-    else client.finalReadbackMetadata = {
-      sha256: staged.sha256, 'size-bytes': '2',
-      schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
-      'result-schema': staged.resultSchema, 'privacy-class': 'PERSONAL_DATA',
-    };
-    await expectStorageCode(target.promote(staged), 'GENERIC_OPERATION_ARTIFACT_INVALID');
-  });
+  it.each(['ContentLength', 'Metadata'])(
+    'rejects conflicting final GET %s',
+    async (field) => {
+      const client = new MemoryS3Client();
+      const target = store(client).store;
+      const staged = await stage(target, [bytes(4, 5)], 2);
+      if (field === 'ContentLength') client.finalReadbackContentLength = 3;
+      else
+        client.finalReadbackMetadata = {
+          sha256: staged.sha256,
+          'size-bytes': '2',
+          schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+          'result-schema': staged.resultSchema,
+          'privacy-class': 'PERSONAL_DATA',
+        };
+      await expectStorageCode(
+        target.promote(staged),
+        'GENERIC_OPERATION_ARTIFACT_INVALID',
+      );
+    },
+  );
 
   it('accepts an already-existing immutable target only when all metadata matches', async () => {
     const { client, store: target } = store();
@@ -547,6 +375,8 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     client.objects.set(key, {
       chunks: [bytes(9, 10)],
       contentType: staged.mediaType,
+      tagSet: [{ Key: 'artifact-privacy', Value: staged.privacyClass }],
+      serverSideEncryption: 'AES256',
       metadata: {
         sha256: staged.sha256,
         'size-bytes': staged.sizeBytes,
@@ -563,7 +393,68 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const getKeys = client.commands
       .filter((command) => command instanceof GetObjectCommand)
       .map((command) => (command as GetObjectCommand).input.Key);
-    expect(getKeys).toEqual([staged.stagingKey, key]);
+    expect(getKeys).toEqual([key]);
+  });
+
+  it.each([
+    ['missing privacy tag', []],
+    [
+      'conflicting privacy tag',
+      [{ Key: 'artifact-privacy', Value: 'PUBLIC_ORGANIZATION' }],
+    ],
+    [
+      'extra object tag',
+      [
+        { Key: 'artifact-privacy', Value: 'CONFIDENTIAL_TENANT' },
+        { Key: 'attacker', Value: 'retention-bypass' },
+      ],
+    ],
+  ])('rejects an immutable target with %s', async (_label, tagSet) => {
+    const { client, store: target } = store();
+    const staged = await stage(target, [bytes(31, 32)], 2);
+    const key = contentAddressedObjectKey(staged.sha256);
+    client.objects.set(key, {
+      chunks: [bytes(31, 32)],
+      contentType: staged.mediaType,
+      metadata: {
+        sha256: staged.sha256,
+        'size-bytes': staged.sizeBytes,
+        schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+        'result-schema': staged.resultSchema,
+        'privacy-class': staged.privacyClass,
+      },
+      tagSet,
+      serverSideEncryption: 'AES256',
+    });
+
+    await expectStorageCode(
+      target.promote(staged),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
+  });
+
+  it('rejects an immutable target without per-object AES256 encryption evidence', async () => {
+    const { client, store: target } = store();
+    const staged = await stage(target, [bytes(33, 34)], 2);
+    const key = contentAddressedObjectKey(staged.sha256);
+    client.objects.set(key, {
+      chunks: [bytes(33, 34)],
+      contentType: staged.mediaType,
+      metadata: {
+        sha256: staged.sha256,
+        'size-bytes': staged.sizeBytes,
+        schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+        'result-schema': staged.resultSchema,
+        'privacy-class': staged.privacyClass,
+      },
+      tagSet: [{ Key: 'artifact-privacy', Value: staged.privacyClass }],
+      serverSideEncryption: undefined,
+    });
+
+    await expectStorageCode(
+      target.promote(staged),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
   });
 
   it('rejects an existing target whose final GET bytes contradict matching metadata', async () => {
@@ -574,6 +465,8 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     client.objects.set(key, {
       chunks: [bytes(9, 11)],
       contentType: staged.mediaType,
+      tagSet: [{ Key: 'artifact-privacy', Value: staged.privacyClass }],
+      serverSideEncryption: 'AES256',
       metadata: {
         sha256: staged.sha256,
         'size-bytes': staged.sizeBytes,
@@ -601,7 +494,8 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const nonEnumerable = { ...staged };
     Object.defineProperty(nonEnumerable, 'mediaType', { enumerable: false });
     const cases = [
-      new Proxy(staged, {}), accessor,
+      new Proxy(staged, {}),
+      accessor,
       Object.assign(Object.create({}), staged),
       Object.assign(Object.create(null), staged),
       nonEnumerable,
@@ -631,6 +525,8 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       chunks:
         mutation.contentLength === 3 ? [bytes(11, 12, 13)] : [bytes(11, 12)],
       contentType: staged.mediaType,
+      tagSet: [{ Key: 'artifact-privacy', Value: staged.privacyClass }],
+      serverSideEncryption: 'AES256',
       metadata: {
         sha256: mutation.sha256 ?? staged.sha256,
         'size-bytes': staged.sizeBytes,
@@ -728,7 +624,9 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
     const abort = new AbortController();
     const abortingBody = await firstStore.read(digest, abort.signal);
     const abortingIterator = abortingBody[Symbol.asyncIterator]();
-    await expect(abortingIterator.next()).resolves.toMatchObject({ done: false });
+    await expect(abortingIterator.next()).resolves.toMatchObject({
+      done: false,
+    });
     abort.abort();
     await expectStorageCode(
       abortingIterator.next(),
@@ -767,10 +665,29 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       status: 'ready',
     });
     expect(
+      ready.client.commands.map((command) => command.constructor.name),
+    ).toEqual([
+      'GetBucketVersioningCommand',
+      'GetBucketEncryptionCommand',
+      'GetBucketLifecycleConfigurationCommand',
+      'PutObjectCommand',
+      'GetObjectCommand',
+      'DeleteObjectCommand',
+      'HeadObjectCommand',
+      'ListObjectVersionsCommand',
+    ]);
+    expect(
       ready.client.commands.some(
-        (command) => command instanceof HeadBucketCommand,
+        (command) =>
+          command.constructor.name.startsWith('Create') ||
+          command.constructor.name.startsWith('PutBucket'),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      [...ready.client.objects.keys()].some((key) =>
+        key.startsWith('generic-operation-results/v1/readiness/'),
+      ),
+    ).toBe(false);
 
     const unavailableClient = new MemoryS3Client();
     unavailableClient.readinessFailure = new Error(

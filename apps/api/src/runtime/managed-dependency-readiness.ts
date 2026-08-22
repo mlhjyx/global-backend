@@ -1,4 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { S3Client } from '@aws-sdk/client-s3';
 import Redis from 'ioredis';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
@@ -6,7 +7,10 @@ import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { RuntimeComponentStatus } from './runtime-readiness-registry';
 import { RuntimeReadinessContributorRegistry } from './runtime-readiness-registry';
-import { RuntimeReleaseIdentityService, type RuntimeReleaseIdentity } from './runtime-release-identity';
+import {
+  RuntimeReleaseIdentityService,
+  type RuntimeReleaseIdentity,
+} from './runtime-release-identity';
 import { validateRedisConnectionUrl } from '../tools/redis-rate-limit-store';
 import { probeJwksDocument } from '../auth/jwks-readiness';
 import { validateJwksTokenVerifierConfiguration } from '../auth/jwks-token-verifier';
@@ -20,6 +24,8 @@ import {
   validateExecutionBudgetGrantVerifierConfiguration,
   type ExecutionBudgetJwksFetch,
 } from '../execution-budget/execution-budget-grant.verifier';
+import { S3GenericOperationArtifactStore } from '../durable-results/artifact/generic-operation-artifact.store';
+import { checkMinioAllVersionLifecycle } from '../durable-results/artifact/generic-operation-artifact.minio-lifecycle';
 
 interface RedisProbeClient {
   readonly status: string;
@@ -29,9 +35,40 @@ interface RedisProbeClient {
 }
 
 type RedisProbeFactory = (url: string) => RedisProbeClient;
-type GatewayProbeFetch = (input: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'body'>>;
-type BrowserProbe = (executable: string, args: readonly string[]) => Promise<void>;
+type GatewayProbeFetch = (
+  input: string,
+  init: RequestInit,
+) => Promise<Pick<Response, 'ok' | 'body'>>;
+type BrowserProbe = (
+  executable: string,
+  args: readonly string[],
+) => Promise<void>;
 type ExecutableProbe = (executable: string) => Promise<boolean>;
+
+type GenericArtifactStorageConfig = Readonly<{
+  endpoint: string;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle: boolean;
+}>;
+
+interface GenericArtifactStorageProbe {
+  checkReadiness(): Promise<
+    | Readonly<{ status: 'ready' }>
+    | Readonly<{
+        status: 'not_ready';
+        code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE';
+      }>
+  >;
+  checkLifecycleExtension(): Promise<boolean>;
+  destroy(): void;
+}
+
+type GenericArtifactStorageProbeFactory = (
+  config: GenericArtifactStorageConfig,
+) => GenericArtifactStorageProbe;
 
 type PlatformAuthorityReadinessState =
   | 'active'
@@ -90,7 +127,10 @@ export async function checkImagePipelineIsolationReadiness(
     : { status: 'failed', code: 'IMAGE_PIPELINE_ISOLATION_UNAVAILABLE' };
 }
 
-async function defaultBrowserProbe(executable: string, args: readonly string[]): Promise<void> {
+async function defaultBrowserProbe(
+  executable: string,
+  args: readonly string[],
+): Promise<void> {
   await execFileAsync(executable, [...args], {
     timeout: 5_000,
     maxBuffer: 128 * 1024,
@@ -99,7 +139,113 @@ async function defaultBrowserProbe(executable: string, args: readonly string[]):
 }
 
 function loopback(hostname: string): boolean {
-  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]' || hostname === '::1';
+  return (
+    hostname === '127.0.0.1' ||
+    hostname === 'localhost' ||
+    hostname === '[::1]' ||
+    hostname === '::1'
+  );
+}
+
+function genericArtifactStorageConfig(
+  env: NodeJS.ProcessEnv,
+): GenericArtifactStorageConfig {
+  const endpointValue = env.GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT?.trim();
+  const bucket = env.GENERIC_OPERATION_ARTIFACT_S3_BUCKET?.trim();
+  const region = env.GENERIC_OPERATION_ARTIFACT_S3_REGION?.trim();
+  const accessKeyId = env.GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY?.trim();
+  const secretAccessKey = env.GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY?.trim();
+  const forcePathStyleValue =
+    env.GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE?.trim();
+  if (
+    !endpointValue ||
+    !bucket ||
+    !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket) ||
+    !region ||
+    region.length > 64 ||
+    !/^[a-z0-9][a-z0-9-]*$/.test(region) ||
+    !accessKeyId ||
+    accessKeyId.length > 128 ||
+    !secretAccessKey ||
+    secretAccessKey.length > 256 ||
+    (forcePathStyleValue !== 'true' && forcePathStyleValue !== 'false')
+  ) {
+    throw new Error('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
+  }
+  const endpoint = new URL(endpointValue);
+  if (
+    endpoint.username ||
+    endpoint.password ||
+    endpoint.search ||
+    endpoint.hash ||
+    (endpoint.protocol !== 'https:' &&
+      !(endpoint.protocol === 'http:' && loopback(endpoint.hostname)))
+  ) {
+    throw new Error('GENERIC_OPERATION_ARTIFACT_STORAGE_CONFIG_INVALID');
+  }
+  return Object.freeze({
+    endpoint: endpoint.href,
+    bucket,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    forcePathStyle: forcePathStyleValue === 'true',
+  });
+}
+
+function defaultGenericArtifactStorageProbe(
+  config: GenericArtifactStorageConfig,
+): GenericArtifactStorageProbe {
+  const client = new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    forcePathStyle: config.forcePathStyle,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    maxAttempts: 1,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    requestHandler: {
+      connectionTimeout: 1_500,
+      requestTimeout: 2_500,
+    },
+  });
+  const store = new S3GenericOperationArtifactStore({
+    bucket: config.bucket,
+    client,
+  });
+  return Object.freeze({
+    checkReadiness: () => store.checkReadiness(),
+    checkLifecycleExtension: () => checkMinioAllVersionLifecycle(config),
+    destroy: () => client.destroy(),
+  });
+}
+
+export async function checkGenericArtifactStorageReadiness(
+  env: NodeJS.ProcessEnv,
+  factory: GenericArtifactStorageProbeFactory = defaultGenericArtifactStorageProbe,
+): Promise<RuntimeComponentStatus> {
+  let probe: GenericArtifactStorageProbe | undefined;
+  try {
+    probe = factory(genericArtifactStorageConfig(env));
+    const result = await probe.checkReadiness();
+    const lifecycleExtensionReady =
+      result.status === 'ready' && (await probe.checkLifecycleExtension());
+    return lifecycleExtensionReady
+      ? { status: 'ok' }
+      : {
+          status: 'failed',
+          code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+        };
+  } catch {
+    return {
+      status: 'failed',
+      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+    };
+  } finally {
+    probe?.destroy();
+  }
 }
 
 function defaultRedisProbe(url: string): RedisProbeClient {
@@ -129,8 +275,11 @@ export async function checkRedisReadiness(
   let client: RedisProbeClient | undefined;
   try {
     client = factory(configured);
-    if (client.status === 'wait' || client.status === 'end') await client.connect();
-    return (await client.ping()) === 'PONG' ? { status: 'ok' } : { status: 'failed', code: 'REDIS_UNAVAILABLE' };
+    if (client.status === 'wait' || client.status === 'end')
+      await client.connect();
+    return (await client.ping()) === 'PONG'
+      ? { status: 'ok' }
+      : { status: 'failed', code: 'REDIS_UNAVAILABLE' };
   } catch {
     return { status: 'failed', code: 'REDIS_UNAVAILABLE' };
   } finally {
@@ -138,7 +287,9 @@ export async function checkRedisReadiness(
   }
 }
 
-export async function checkAuthJwksReadiness(env: NodeJS.ProcessEnv): Promise<RuntimeComponentStatus> {
+export async function checkAuthJwksReadiness(
+  env: NodeJS.ProcessEnv,
+): Promise<RuntimeComponentStatus> {
   try {
     const config = validateJwksTokenVerifierConfiguration(env);
     return (await probeJwksDocument(config.jwks.href))
@@ -174,7 +325,12 @@ function platformAuthorityCode(
 }
 
 export async function checkPlatformBudgetAuthorityReadiness(
-  repository: Pick<ExecutionBudgetAuthorityRepository, 'inspectPlatformAuthorityFreshness'> | undefined,
+  repository:
+    | Pick<
+        ExecutionBudgetAuthorityRepository,
+        'inspectPlatformAuthorityFreshness'
+      >
+    | undefined,
   now: Date = new Date(),
 ): Promise<RuntimeComponentStatus> {
   if (!repository) {
@@ -201,18 +357,26 @@ export async function checkPlatformBudgetAuthorityReadiness(
     if (rows.length !== EXECUTION_BUDGET_PLATFORM_PURPOSES.length) {
       throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
     }
-    const states = new Map<ExecutionBudgetPurpose, PlatformAuthorityReadinessState>();
+    const states = new Map<
+      ExecutionBudgetPurpose,
+      PlatformAuthorityReadinessState
+    >();
     for (const row of rows) {
       if (
         !EXECUTION_BUDGET_PLATFORM_PURPOSES.includes(
           row.purpose as (typeof EXECUTION_BUDGET_PLATFORM_PURPOSES)[number],
         ) ||
-        !PLATFORM_AUTHORITY_STATES.has(row.state as PlatformAuthorityReadinessState) ||
+        !PLATFORM_AUTHORITY_STATES.has(
+          row.state as PlatformAuthorityReadinessState,
+        ) ||
         states.has(row.purpose as ExecutionBudgetPurpose)
       ) {
         throw new Error('PLATFORM_AUTHORITY_READINESS_SHAPE_INVALID');
       }
-      states.set(row.purpose as ExecutionBudgetPurpose, row.state as PlatformAuthorityReadinessState);
+      states.set(
+        row.purpose as ExecutionBudgetPurpose,
+        row.state as PlatformAuthorityReadinessState,
+      );
     }
     for (const purpose of EXECUTION_BUDGET_PLATFORM_PURPOSES) {
       const state = states.get(purpose);
@@ -246,11 +410,15 @@ export async function checkModelGatewayReadiness(
       base.password ||
       base.search ||
       base.hash ||
-      (base.protocol !== 'https:' && !(base.protocol === 'http:' && loopback(base.hostname)))
+      (base.protocol !== 'https:' &&
+        !(base.protocol === 'http:' && loopback(base.hostname)))
     ) {
       return { status: 'failed', code: 'MODEL_GATEWAY_CONFIG_INVALID' };
     }
-    endpoint = new URL(`${base.pathname.replace(/\/$/, '')}/models`, base.origin);
+    endpoint = new URL(
+      `${base.pathname.replace(/\/$/, '')}/models`,
+      base.origin,
+    );
   } catch {
     return { status: 'failed', code: 'MODEL_GATEWAY_CONFIG_INVALID' };
   }
@@ -265,7 +433,9 @@ export async function checkModelGatewayReadiness(
       signal: controller.signal,
     });
     await response.body?.cancel().catch(() => undefined);
-    return response.ok ? { status: 'ok' } : { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
+    return response.ok
+      ? { status: 'ok' }
+      : { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
   } catch {
     return { status: 'failed', code: 'MODEL_GATEWAY_UNAVAILABLE' };
   } finally {
@@ -273,8 +443,13 @@ export async function checkModelGatewayReadiness(
   }
 }
 
-export function rendererRuntimeIdentity(identity: RuntimeReleaseIdentity): string {
-  if (!identity.attested || !/^sha256:[0-9a-f]{64}$/.test(identity.renderer_digest)) {
+export function rendererRuntimeIdentity(
+  identity: RuntimeReleaseIdentity,
+): string {
+  if (
+    !identity.attested ||
+    !/^sha256:[0-9a-f]{64}$/.test(identity.renderer_digest)
+  ) {
     throw new Error('RENDERER_IDENTITY_NOT_PROVEN');
   }
   return `site-renderer@${identity.renderer_digest}`;
@@ -297,7 +472,9 @@ export async function checkBrowserReadiness(
 }
 
 @Injectable()
-export class ManagedDependencyReadinessContributors implements OnModuleInit, OnModuleDestroy {
+export class ManagedDependencyReadinessContributors
+  implements OnModuleInit, OnModuleDestroy
+{
   private unregister: ReadonlyArray<() => void> = [];
 
   constructor(
@@ -308,10 +485,21 @@ export class ManagedDependencyReadinessContributors implements OnModuleInit, OnM
   onModuleInit(): void {
     this.unregister = Object.freeze([
       this.registry.register('redis', () => checkRedisReadiness(process.env)),
-      this.registry.register('auth_jwks', () => checkAuthJwksReadiness(process.env)),
-      this.registry.register('execution_budget_jwks', () => checkExecutionBudgetJwksReadiness(process.env)),
-      this.registry.register('model_gateway', () => checkModelGatewayReadiness(process.env)),
-      this.registry.register('browser', () => checkBrowserReadiness(process.env)),
+      this.registry.register('auth_jwks', () =>
+        checkAuthJwksReadiness(process.env),
+      ),
+      this.registry.register('execution_budget_jwks', () =>
+        checkExecutionBudgetJwksReadiness(process.env),
+      ),
+      this.registry.register('generic_artifact_storage', () =>
+        checkGenericArtifactStorageReadiness(process.env),
+      ),
+      this.registry.register('model_gateway', () =>
+        checkModelGatewayReadiness(process.env),
+      ),
+      this.registry.register('browser', () =>
+        checkBrowserReadiness(process.env),
+      ),
       this.registry.register('renderer', () => {
         try {
           rendererRuntimeIdentity(this.releaseIdentity.current());
@@ -333,7 +521,9 @@ export class ManagedDependencyReadinessContributors implements OnModuleInit, OnM
 }
 
 @Injectable()
-export class ExecutionBudgetAuthorityReadinessContributors implements OnModuleInit, OnModuleDestroy {
+export class ExecutionBudgetAuthorityReadinessContributors
+  implements OnModuleInit, OnModuleDestroy
+{
   private unregister?: () => void;
 
   constructor(

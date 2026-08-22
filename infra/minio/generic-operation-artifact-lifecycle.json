@@ -1,0 +1,63 @@
+{
+  "Rules": [
+    {
+      "Expiration": { "Days": 1, "ExpiredObjectAllVersions": true },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+      "ID": "generic-operation-artifact-staging-ttl",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "generic-operation-results/v1/staging/" }
+    },
+    {
+      "Expiration": { "Days": 30, "ExpiredObjectAllVersions": true },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+      "ID": "generic-operation-artifact-public-organization-ttl",
+      "Status": "Enabled",
+      "Filter": {
+        "Tag": {
+          "Key": "artifact-privacy",
+          "Value": "PUBLIC_ORGANIZATION"
+        }
+      }
+    },
+    {
+      "Expiration": { "Days": 7, "ExpiredObjectAllVersions": true },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 7 },
+      "ID": "generic-operation-artifact-confidential-tenant-ttl",
+      "Status": "Enabled",
+      "Filter": {
+        "Tag": {
+          "Key": "artifact-privacy",
+          "Value": "CONFIDENTIAL_TENANT"
+        }
+      }
+    },
+    {
+      "Expiration": { "Days": 1, "ExpiredObjectAllVersions": true },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+      "ID": "generic-operation-artifact-personal-data-ttl",
+      "Status": "Enabled",
+      "Filter": {
+        "Tag": { "Key": "artifact-privacy", "Value": "PERSONAL_DATA" }
+      }
+    },
+    {
+      "Expiration": { "ExpiredObjectDeleteMarker": true },
+      "ID": "generic-operation-artifact-staging-delete-markers",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "generic-operation-results/v1/staging/" }
+    },
+    {
+      "Expiration": { "ExpiredObjectDeleteMarker": true },
+      "ID": "generic-operation-artifact-final-delete-markers",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "generic-operation-results/v1/sha256/" }
+    },
+    {
+      "Expiration": { "ExpiredObjectDeleteMarker": true },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+      "ID": "generic-operation-artifact-readiness-cleanup",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "generic-operation-results/v1/readiness/" }
+    }
+  ]
+}

@@ -64,6 +64,7 @@ import {
 import { PostgresBudgetStore } from "../tools/budget-store";
 import {
   checkBrowserReadiness,
+  checkGenericArtifactStorageReadiness,
   checkImagePipelineIsolationReadiness,
   checkModelGatewayReadiness,
   checkRedisReadiness,
@@ -173,6 +174,10 @@ async function main(): Promise<void> {
     console.error(`[worker] not ready: ${code}; Temporal polling remains disabled`);
   await waitForWorkerDependencyAdmission({
     check: () => siteBuilderStorage.checkReadiness(),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkGenericArtifactStorageReadiness(process.env),
     onBlocked: dependencyBlocked,
   });
   await waitForWorkerDependencyAdmission({
@@ -448,6 +453,7 @@ async function main(): Promise<void> {
       }
       const checks = await Promise.all([
         siteBuilderStorage.checkReadiness(),
+        checkGenericArtifactStorageReadiness(process.env),
         checkRedisReadiness(process.env),
         checkModelGatewayReadiness(process.env),
         checkBrowserReadiness(process.env),

@@ -1,7 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
-  HeadBucketCommand,
+  GetObjectTaggingCommand,
   HeadObjectCommand,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
@@ -10,14 +10,24 @@ import { Readable } from 'node:stream';
 import { types as utilTypes } from 'node:util';
 import { contentAddressedObjectKey, stagingObjectKey } from './artifact-key';
 import {
+  checkGenericOperationArtifactStorageReadiness,
+  type ArtifactStorageReadiness,
+} from './generic-operation-artifact.readiness';
+import { uploadGenericOperationArtifactStaging } from './generic-operation-artifact.multipart-upload';
+import {
+  GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+  objectMetadata,
+  parseStoredArtifactContract,
+  sameArtifact,
+} from './generic-operation-artifact.object-contract';
+import {
   isCanonicalArtifactSha256,
   isCanonicalArtifactUuid,
   type ArtifactPrivacyClass,
   type ArtifactSource,
 } from './artifact.types';
 
-export const GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA =
-  'generic-operation-artifact-object/v1' as const;
+export { GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA };
 
 const RESULT_SCHEMA_PATTERN = /^[a-z0-9][a-z0-9._/-]*$/;
 const MEDIA_TYPE_PATTERN =
@@ -26,13 +36,6 @@ const PRIVACY_CLASSES = new Set<ArtifactPrivacyClass>([
   'PUBLIC_ORGANIZATION',
   'CONFIDENTIAL_TENANT',
   'PERSONAL_DATA',
-]);
-const OBJECT_METADATA_KEYS = new Set([
-  'privacy-class',
-  'result-schema',
-  'schema',
-  'sha256',
-  'size-bytes',
 ]);
 const STAGED_ARTIFACT_KEYS = [
   'artifactId',
@@ -100,20 +103,12 @@ export interface StoredArtifact {
   readonly privacyClass: ArtifactPrivacyClass;
 }
 
-export type ArtifactStorageReadiness =
-  | Readonly<{ status: 'ready' }>
-  | Readonly<{
-      status: 'not_ready';
-      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE';
-    }>;
+export type { ArtifactStorageReadiness };
 
 export interface GenericOperationArtifactStore {
   stage(input: StageArtifactInput): Promise<StagedArtifact>;
   promote(input: StagedArtifact): Promise<StoredArtifact>;
-  inspect(
-    sha256: string,
-    signal?: AbortSignal,
-  ): Promise<StoredArtifact | null>;
+  inspect(sha256: string, signal?: AbortSignal): Promise<StoredArtifact | null>;
   read(
     sha256: string,
     signal?: AbortSignal,
@@ -166,7 +161,9 @@ function assertMediaType(value: unknown): asserts value is string {
   }
 }
 
-function isAsyncByteIterable(value: unknown): value is AsyncIterable<Uint8Array> {
+function isAsyncByteIterable(
+  value: unknown,
+): value is AsyncIterable<Uint8Array> {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -301,77 +298,9 @@ function isNotFound(error: unknown): boolean {
 }
 
 function isPreconditionFailed(error: unknown): boolean {
-  return errorStatus(error) === 412 || errorName(error) === 'PreconditionFailed';
-}
-
-function asMetadata(value: unknown): Readonly<Record<string, string>> | null {
-  const record = asRecord(value);
-  if (!record || Object.keys(record).length !== OBJECT_METADATA_KEYS.size) {
-    return null;
-  }
-  for (const [key, item] of Object.entries(record)) {
-    if (!OBJECT_METADATA_KEYS.has(key) || typeof item !== 'string') return null;
-  }
-  return record as Readonly<Record<string, string>>;
-}
-
-function parseStoredArtifact(
-  sha256: string,
-  headOutput: unknown,
-): StoredArtifact {
-  const head = asRecord(headOutput);
-  const metadata = asMetadata(head?.Metadata);
-  const contentLength = head?.ContentLength;
-  const contentType = head?.ContentType;
-  if (
-    !head ||
-    !metadata ||
-    typeof contentLength !== 'number' ||
-    !Number.isSafeInteger(contentLength) ||
-    contentLength < 0 ||
-    metadata.schema !== GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA ||
-    metadata.sha256 !== sha256 ||
-    metadata['size-bytes'] !== String(contentLength)
-  ) {
-    throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
-  }
-  assertMediaType(contentType);
-  assertResultSchema(metadata['result-schema']);
-  assertPrivacyClass(metadata['privacy-class']);
-
-  return Object.freeze({
-    objectKey: contentAddressedObjectKey(sha256),
-    sha256,
-    sizeBytes: metadata['size-bytes'],
-    mediaType: contentType,
-    resultSchema: metadata['result-schema'],
-    privacyClass: metadata['privacy-class'],
-  });
-}
-
-function sameStoredArtifact(
-  stored: StoredArtifact,
-  staged: StagedArtifact,
-): boolean {
   return (
-    stored.sha256 === staged.sha256 &&
-    stored.sizeBytes === staged.sizeBytes &&
-    stored.mediaType === staged.mediaType &&
-    stored.resultSchema === staged.resultSchema &&
-    stored.privacyClass === staged.privacyClass
+    errorStatus(error) === 412 || errorName(error) === 'PreconditionFailed'
   );
-}
-
-function objectMetadata(
-  staged: StagedArtifact,
-): Readonly<Record<string, string>> {
-  return Object.freeze({
-    sha256: staged.sha256,
-    'size-bytes': staged.sizeBytes,
-    schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
-    'result-schema': staged.resultSchema,
-    'privacy-class': staged.privacyClass,
-  });
 }
 
 function commandOptions(
@@ -380,9 +309,15 @@ function commandOptions(
   return signal ? { abortSignal: signal } : undefined;
 }
 
-export class S3GenericOperationArtifactStore
-  implements GenericOperationArtifactStore
-{
+function readableBody(
+  body: Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+): Readable {
+  const stream = Readable.from(body);
+  stream.on('error', () => undefined);
+  return stream;
+}
+
+export class S3GenericOperationArtifactStore implements GenericOperationArtifactStore {
   private readonly bucket: string;
   private readonly client: ArtifactS3Client;
 
@@ -434,15 +369,16 @@ export class S3GenericOperationArtifactStore
       });
 
     try {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: stagingObjectKey(input.artifactId),
-          Body: Readable.from(boundedBody),
-          ContentType: input.source.mediaType,
-        }),
-        commandOptions(input.signal),
-      );
+      await uploadGenericOperationArtifactStaging({
+        bucket: this.bucket,
+        key: stagingObjectKey(input.artifactId),
+        body: boundedBody,
+        mediaType: input.source.mediaType,
+        client: this.client,
+        unavailable: () =>
+          storageError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE'),
+        signal: input.signal,
+      });
     } catch (error) {
       if (completed) {
         return this.recoverStaging(stagedArtifact());
@@ -461,6 +397,14 @@ export class S3GenericOperationArtifactStore
   async promote(input: StagedArtifact): Promise<StoredArtifact> {
     const staged = snapshotStagedArtifact(input);
     const objectKey = contentAddressedObjectKey(staged.sha256);
+    const existing = await this.inspect(staged.sha256);
+    if (existing) {
+      if (!sameArtifact(existing, staged)) {
+        throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+      }
+      await this.verifyFinalBody(staged);
+      return existing;
+    }
     let body: AsyncIterable<Uint8Array>;
     try {
       const result = asRecord(
@@ -489,10 +433,12 @@ export class S3GenericOperationArtifactStore
         new PutObjectCommand({
           Bucket: this.bucket,
           Key: objectKey,
-          Body: Readable.from(verifiedBody),
+          Body: readableBody(verifiedBody),
           ContentLength: Number(staged.sizeBytes),
           ContentType: staged.mediaType,
           Metadata: objectMetadata(staged),
+          Tagging: `artifact-privacy=${encodeURIComponent(staged.privacyClass)}`,
+          ServerSideEncryption: 'AES256',
           IfNoneMatch: '*',
         }),
       );
@@ -520,14 +466,22 @@ export class S3GenericOperationArtifactStore
     }
     assertNotAborted(signal);
     try {
-      const output = await this.client.send(
-        new HeadObjectCommand({
-          Bucket: this.bucket,
-          Key: contentAddressedObjectKey(sha256),
-        }),
-        commandOptions(signal),
-      );
-      return parseStoredArtifact(sha256, output);
+      const key = contentAddressedObjectKey(sha256);
+      const [output, tags] = await Promise.all([
+        this.client.send(
+          new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+          commandOptions(signal),
+        ),
+        this.client.send(
+          new GetObjectTaggingCommand({ Bucket: this.bucket, Key: key }),
+          commandOptions(signal),
+        ),
+      ]);
+      const stored = parseStoredArtifactContract(sha256, output, tags);
+      if (!stored) {
+        throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+      }
+      return stored;
     } catch (error) {
       if (error instanceof ArtifactStorageError) throw error;
       assertNotAborted(signal);
@@ -585,15 +539,10 @@ export class S3GenericOperationArtifactStore
   }
 
   async checkReadiness(): Promise<ArtifactStorageReadiness> {
-    try {
-      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
-      return Object.freeze({ status: 'ready' });
-    } catch {
-      return Object.freeze({
-        status: 'not_ready',
-        code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
-      });
-    }
+    return checkGenericOperationArtifactStorageReadiness(
+      this.bucket,
+      this.client,
+    );
   }
 
   private async recoverPromote(
@@ -602,7 +551,7 @@ export class S3GenericOperationArtifactStore
   ): Promise<StoredArtifact> {
     try {
       const stored = await this.inspect(input.sha256);
-      if (stored && sameStoredArtifact(stored, input)) {
+      if (stored && sameArtifact(stored, input)) {
         await this.verifyFinalBody(input);
         return stored;
       }
@@ -666,19 +615,24 @@ export class S3GenericOperationArtifactStore
   private async verifyFinalBody(staged: StagedArtifact): Promise<void> {
     let body: AsyncIterable<Uint8Array>;
     try {
-      const result = asRecord(
-        await this.client.send(
+      const key = contentAddressedObjectKey(staged.sha256);
+      const [rawResult, tags] = await Promise.all([
+        this.client.send(
           new GetObjectCommand({
             Bucket: this.bucket,
-            Key: contentAddressedObjectKey(staged.sha256),
+            Key: key,
           }),
         ),
-      );
-      if (!isAsyncByteIterable(result?.Body)) {
+        this.client.send(
+          new GetObjectTaggingCommand({ Bucket: this.bucket, Key: key }),
+        ),
+      ]);
+      const result = asRecord(rawResult);
+      const stored = parseStoredArtifactContract(staged.sha256, result, tags);
+      if (!stored || !sameArtifact(stored, staged)) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
       }
-      const stored = parseStoredArtifact(staged.sha256, result);
-      if (!sameStoredArtifact(stored, staged)) {
+      if (!isAsyncByteIterable(result?.Body)) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
       }
       body = result.Body;
@@ -715,9 +669,7 @@ export class S3GenericOperationArtifactStore
         }
         size += chunk.byteLength;
         if (!Number.isSafeInteger(size) || size > maxBytes) {
-          throw storageError(
-            'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED',
-          );
+          throw storageError('GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED');
         }
         hash.update(chunk);
         recordSize(size);

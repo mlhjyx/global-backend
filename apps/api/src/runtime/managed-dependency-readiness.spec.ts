@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   checkBrowserReadiness,
   checkExecutionBudgetJwksReadiness,
+  checkGenericArtifactStorageReadiness,
   checkImagePipelineIsolationReadiness,
   checkModelGatewayReadiness,
   checkPlatformBudgetAuthorityReadiness,
@@ -29,7 +30,8 @@ const identity = {
 const EXECUTION_BUDGET_ENV = {
   APP_ENVIRONMENT: 'test',
   NODE_ENV: 'test',
-  EXECUTION_BUDGET_GRANT_JWKS_URI: 'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
+  EXECUTION_BUDGET_GRANT_JWKS_URI:
+    'http://127.0.0.1:3100/.well-known/execution-budget-jwks.json',
   EXECUTION_BUDGET_GRANT_ISSUER: 'http://127.0.0.1:3100/',
   EXECUTION_BUDGET_GRANT_AUDIENCE: 'global-backend:execution-budget',
   EXECUTION_BUDGET_GRANT_ALGORITHMS: 'RS256,ES256,EdDSA',
@@ -46,11 +48,15 @@ const EXECUTION_ES256_PUBLIC_JWK = {
 };
 
 describe('managed dependency readiness', () => {
-  const platformAuthorityRows = (overrides: Readonly<Record<string, string>> = {}) =>
-    ['platform.acquisition', 'platform.intent_watch', 'platform.sanctions'].map((purpose) => ({
-      purpose,
-      state: overrides[purpose] ?? 'active',
-    }));
+  const platformAuthorityRows = (
+    overrides: Readonly<Record<string, string>> = {},
+  ) =>
+    ['platform.acquisition', 'platform.intent_watch', 'platform.sanctions'].map(
+      (purpose) => ({
+        purpose,
+        state: overrides[purpose] ?? 'active',
+      }),
+    );
 
   function platformSource(rows: readonly object[] | Error) {
     return {
@@ -62,7 +68,8 @@ describe('managed dependency readiness', () => {
   }
 
   it('rejects an unsafe execution-budget JWKS URL before network dispatch', async () => {
-    const unsafe = 'https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil';
+    const unsafe =
+      'https://user:must-never-leak@control-plane.example.test/jwks?redirect=evil';
     const fetcher = vi.fn();
 
     const result = await checkExecutionBudgetJwksReadiness(
@@ -97,7 +104,10 @@ describe('managed dependency readiness', () => {
         ),
     );
 
-    const result = await checkExecutionBudgetJwksReadiness(EXECUTION_BUDGET_ENV, fetcher);
+    const result = await checkExecutionBudgetJwksReadiness(
+      EXECUTION_BUDGET_ENV,
+      fetcher,
+    );
 
     expect(result).toEqual({ status: 'ok' });
     expect(fetcher).toHaveBeenCalledWith(
@@ -130,9 +140,14 @@ describe('managed dependency readiness', () => {
       },
     ],
   ])('rejects an execution-budget JWKS containing %s', async (_name, key) => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ keys: [key] }), { status: 200 }));
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ keys: [key] }), { status: 200 }),
+    );
 
-    await expect(checkExecutionBudgetJwksReadiness(EXECUTION_BUDGET_ENV, fetcher)).resolves.toEqual({
+    await expect(
+      checkExecutionBudgetJwksReadiness(EXECUTION_BUDGET_ENV, fetcher),
+    ).resolves.toEqual({
       status: 'failed',
       code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
     });
@@ -161,7 +176,9 @@ describe('managed dependency readiness', () => {
   });
 
   it('reports a missing deployment-owned platform writer without falling back to another principal', async () => {
-    await expect(checkPlatformBudgetAuthorityReadiness(undefined)).resolves.toEqual({
+    await expect(
+      checkPlatformBudgetAuthorityReadiness(undefined),
+    ).resolves.toEqual({
       status: 'failed',
       code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
     });
@@ -170,10 +187,17 @@ describe('managed dependency readiness', () => {
   it('proves all three fixed platform purposes from the bounded repository readback', async () => {
     const source = platformSource(platformAuthorityRows());
 
-    await expect(checkPlatformBudgetAuthorityReadiness(source, new Date('2026-08-21T00:00:00.000Z'))).resolves.toEqual({
+    await expect(
+      checkPlatformBudgetAuthorityReadiness(
+        source,
+        new Date('2026-08-21T00:00:00.000Z'),
+      ),
+    ).resolves.toEqual({
       status: 'ok',
     });
-    expect(source.inspectPlatformAuthorityFreshness).toHaveBeenCalledWith(new Date('2026-08-21T00:00:00.000Z'));
+    expect(source.inspectPlatformAuthorityFreshness).toHaveBeenCalledWith(
+      new Date('2026-08-21T00:00:00.000Z'),
+    );
   });
 
   it.each([
@@ -183,18 +207,26 @@ describe('managed dependency readiness', () => {
     ['exhausted', 'EXHAUSTED'],
     ['not_yet_valid', 'NOT_YET_VALID'],
     ['invalid', 'INVALID'],
-  ])('reports %s authority for the exact fixed platform purpose without row details', async (state, codeSuffix) => {
-    const source = platformSource(platformAuthorityRows({ 'platform.intent_watch': state }));
+  ])(
+    'reports %s authority for the exact fixed platform purpose without row details',
+    async (state, codeSuffix) => {
+      const source = platformSource(
+        platformAuthorityRows({ 'platform.intent_watch': state }),
+      );
 
-    const result = await checkPlatformBudgetAuthorityReadiness(source, new Date('2026-08-21T00:00:00.000Z'));
+      const result = await checkPlatformBudgetAuthorityReadiness(
+        source,
+        new Date('2026-08-21T00:00:00.000Z'),
+      );
 
-    expect(result).toEqual({
-      status: 'failed',
-      code: `PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_${codeSuffix}`,
-    });
-    expect(JSON.stringify(result)).not.toContain('schedule');
-    expect(JSON.stringify(result)).not.toContain('authority_id');
-  });
+      expect(result).toEqual({
+        status: 'failed',
+        code: `PLATFORM_BUDGET_AUTHORITY_PLATFORM_INTENT_WATCH_${codeSuffix}`,
+      });
+      expect(JSON.stringify(result)).not.toContain('schedule');
+      expect(JSON.stringify(result)).not.toContain('authority_id');
+    },
+  );
 
   it('bounds malformed rows and raw platform database errors to one stable code', async () => {
     for (const rows of [
@@ -220,9 +252,13 @@ describe('managed dependency readiness', () => {
         return unregister;
       }),
     };
-    const managed = new ManagedDependencyReadinessContributors(registry as never, { current: () => identity } as never);
+    const managed = new ManagedDependencyReadinessContributors(
+      registry as never,
+      { current: () => identity } as never,
+    );
     managed.onModuleInit();
     expect(contributors.has('execution_budget_jwks')).toBe(true);
+    expect(contributors.has('generic_artifact_storage')).toBe(true);
     expect(contributors.has('platform_budget_authority')).toBe(false);
     expect(unregister).not.toHaveBeenCalled();
     vi.stubEnv('TOOL_RATE_LIMIT_REDIS_URL', '');
@@ -266,8 +302,13 @@ describe('managed dependency readiness', () => {
       } as never,
     );
     platform.onModuleInit();
-    expect(platformRegistry.register).toHaveBeenCalledWith('platform_budget_authority', expect.any(Function));
-    await expect(contributors.get('platform_budget_authority')?.()).resolves.toEqual({
+    expect(platformRegistry.register).toHaveBeenCalledWith(
+      'platform_budget_authority',
+      expect.any(Function),
+    );
+    await expect(
+      contributors.get('platform_budget_authority')?.(),
+    ).resolves.toEqual({
       status: 'failed',
       code: 'PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE',
     });
@@ -275,12 +316,91 @@ describe('managed dependency readiness', () => {
     expect(platformUnregister).toHaveBeenCalledOnce();
   });
 
+  it('fails artifact storage readiness before constructing a client when deployment config is incomplete', async () => {
+    const factory = vi.fn();
+
+    await expect(
+      checkGenericArtifactStorageReadiness({}, factory),
+    ).resolves.toEqual({
+      status: 'failed',
+      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+    });
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('delegates artifact storage readiness to the production S3 store contract and destroys its client', async () => {
+    const checkReadiness = vi.fn(async () => ({ status: 'ready' as const }));
+    const checkLifecycleExtension = vi.fn(async () => true);
+    const destroy = vi.fn();
+    const factory = vi.fn(() => ({
+      checkReadiness,
+      checkLifecycleExtension,
+      destroy,
+    }));
+    const env = {
+      GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: 'http://127.0.0.1:19000',
+      GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'global-operation-artifacts',
+      GENERIC_OPERATION_ARTIFACT_S3_REGION: 'us-east-1',
+      GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-artifact',
+      GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'must-never-be-returned',
+      GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: 'true',
+    };
+
+    await expect(
+      checkGenericArtifactStorageReadiness(env, factory),
+    ).resolves.toEqual({
+      status: 'ok',
+    });
+    expect(factory).toHaveBeenCalledWith({
+      endpoint: 'http://127.0.0.1:19000/',
+      bucket: 'global-operation-artifacts',
+      region: 'us-east-1',
+      accessKeyId: 'runtime-artifact',
+      secretAccessKey: 'must-never-be-returned',
+      forcePathStyle: true,
+    });
+    expect(checkReadiness).toHaveBeenCalledOnce();
+    expect(checkLifecycleExtension).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it('fails artifact storage readiness when the MinIO all-version expiry extension drifts', async () => {
+    const factory = vi.fn(() => ({
+      checkReadiness: vi.fn(async () => ({ status: 'ready' as const })),
+      checkLifecycleExtension: vi.fn(async () => false),
+      destroy: vi.fn(),
+    }));
+
+    await expect(
+      checkGenericArtifactStorageReadiness(
+        {
+          GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: 'http://127.0.0.1:19000',
+          GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'global-operation-artifacts',
+          GENERIC_OPERATION_ARTIFACT_S3_REGION: 'us-east-1',
+          GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-artifact',
+          GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'must-never-be-returned',
+          GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: 'true',
+        },
+        factory,
+      ),
+    ).resolves.toEqual({
+      status: 'failed',
+      code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+    });
+  });
+
   it('holds Worker readiness when the Linux image decoder limiter is absent', async () => {
-    await expect(checkImagePipelineIsolationReadiness('linux', async () => false)).resolves.toEqual({
+    await expect(
+      checkImagePipelineIsolationReadiness('linux', async () => false),
+    ).resolves.toEqual({
       status: 'failed',
       code: 'IMAGE_PIPELINE_ISOLATION_UNAVAILABLE',
     });
-    await expect(checkImagePipelineIsolationReadiness('linux', async () => true)).resolves.toEqual({ status: 'ok' });
+    await expect(
+      checkImagePipelineIsolationReadiness('linux', async () => true),
+    ).resolves.toEqual({
+      status: 'ok',
+    });
   });
 
   it('requires an authoritative Redis PING and fails closed when config is missing', async () => {
@@ -311,23 +431,30 @@ describe('managed dependency readiness', () => {
     'rediss://cache.example.test:6380/0?family=4',
     'rediss://cache.example.test:6380/0#private-fragment',
     'rediss://cache.example.test:6380/not-a-db',
-  ])('rejects an unsafe Redis URL before constructing a client: %s', async (url) => {
-    const factory = vi.fn();
-    const result = await checkRedisReadiness({ REDIS_URL: url }, factory);
-    expect(result).toEqual({
-      status: 'failed',
-      code: 'REDIS_CONFIG_INVALID',
-    });
-    expect(factory).not.toHaveBeenCalled();
-    expect(JSON.stringify(result)).not.toContain(url);
-  });
+  ])(
+    'rejects an unsafe Redis URL before constructing a client: %s',
+    async (url) => {
+      const factory = vi.fn();
+      const result = await checkRedisReadiness({ REDIS_URL: url }, factory);
+      expect(result).toEqual({
+        status: 'failed',
+        code: 'REDIS_CONFIG_INVALID',
+      });
+      expect(factory).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toContain(url);
+    },
+  );
 
   it('allows credentials in a TLS URL but never returns them when the probe fails', async () => {
-    const configured = 'rediss://user:must-never-leak@cache.example.test:6380/0';
+    const configured =
+      'rediss://user:must-never-leak@cache.example.test:6380/0';
     const factory = vi.fn(() => {
       throw new Error(`failed ${configured}`);
     });
-    const result = await checkRedisReadiness({ REDIS_URL: configured }, factory);
+    const result = await checkRedisReadiness(
+      { REDIS_URL: configured },
+      factory,
+    );
     expect(result).toEqual({ status: 'failed', code: 'REDIS_UNAVAILABLE' });
     expect(factory).toHaveBeenCalledWith(configured);
     expect(JSON.stringify(result)).not.toContain('must-never-leak');
@@ -347,10 +474,13 @@ describe('managed dependency readiness', () => {
         fetcher as never,
       ),
     ).resolves.toEqual({ status: 'ok' });
-    expect(fetcher).toHaveBeenCalledWith('http://127.0.0.1:3001/v1/models', expect.objectContaining({ method: 'GET' }));
-    expect(JSON.stringify(await checkModelGatewayReadiness({}, fetcher as never))).not.toContain(
-      'must-not-be-returned',
+    expect(fetcher).toHaveBeenCalledWith(
+      'http://127.0.0.1:3001/v1/models',
+      expect.objectContaining({ method: 'GET' }),
     );
+    expect(
+      JSON.stringify(await checkModelGatewayReadiness({}, fetcher as never)),
+    ).not.toContain('must-not-be-returned');
   });
 
   it('never sends the gateway key to an unsafe probe origin', async () => {
@@ -377,7 +507,9 @@ describe('managed dependency readiness', () => {
   });
 
   it('derives the renderer identity from the attested renderer component digest', () => {
-    expect(rendererRuntimeIdentity(identity)).toBe(`site-renderer@${identity.renderer_digest}`);
+    expect(rendererRuntimeIdentity(identity)).toBe(
+      `site-renderer@${identity.renderer_digest}`,
+    );
     expect(() =>
       rendererRuntimeIdentity({
         attested: false,
@@ -401,7 +533,9 @@ describe('managed dependency readiness', () => {
       ]),
     );
     const unsafe = vi.fn();
-    await expect(checkBrowserReadiness({ CHROME_PATH: '/tmp/downloaded-chrome' }, unsafe)).resolves.toEqual({
+    await expect(
+      checkBrowserReadiness({ CHROME_PATH: '/tmp/downloaded-chrome' }, unsafe),
+    ).resolves.toEqual({
       status: 'failed',
       code: 'BROWSER_RUNTIME_CONFIG_INVALID',
     });

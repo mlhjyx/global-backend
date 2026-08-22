@@ -5,13 +5,16 @@ function dependencies(overrides: Record<string, unknown> = {}) {
   const transactionClient = {
     $executeRawUnsafe: vi.fn(async () => 0),
     $queryRawUnsafe: vi.fn(async (query: string) =>
-      query === 'SELECT 1' ? [{ ok: 1 }] : [{ migration_name: '20260816000000_runtime_process_lease' }],
+      query === 'SELECT 1'
+        ? [{ ok: 1 }]
+        : [{ migration_name: '20260816000000_runtime_process_lease' }],
     ),
   };
   return {
     prisma: {
-      $transaction: vi.fn(async (operation: (client: typeof transactionClient) => Promise<unknown>) =>
-        operation(transactionClient),
+      $transaction: vi.fn(
+        async (operation: (client: typeof transactionClient) => Promise<unknown>) =>
+          operation(transactionClient),
       ),
     },
     transactionClient,
@@ -51,10 +54,7 @@ describe('RuntimeReadinessService', () => {
     const rejectedRefresh = new Error('bounded background failure');
     const deps = dependencies({
       contributors: {
-        check: vi
-          .fn()
-          .mockRejectedValueOnce(rejectedRefresh)
-          .mockResolvedValue({ status: 'ok' }),
+        check: vi.fn().mockRejectedValueOnce(rejectedRefresh).mockResolvedValue({ status: 'ok' }),
       },
     });
     const service = new RuntimeReadinessService(
@@ -91,9 +91,7 @@ describe('RuntimeReadinessService', () => {
       service.onApplicationShutdown();
       const contributorCallsAtShutdown = deps.contributors.check.mock.calls.length;
       await vi.advanceTimersByTimeAsync(30_000);
-      expect(deps.contributors.check).toHaveBeenCalledTimes(
-        contributorCallsAtShutdown,
-      );
+      expect(deps.contributors.check).toHaveBeenCalledTimes(contributorCallsAtShutdown);
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       service.onApplicationShutdown();
@@ -131,7 +129,7 @@ describe('RuntimeReadinessService', () => {
     releaseProbe?.();
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
     expect(deps.prisma.$transaction).toHaveBeenCalledOnce();
-    expect(deps.contributors.check).toHaveBeenCalledTimes(10);
+    expect(deps.contributors.check).toHaveBeenCalledTimes(11);
   });
 
   it('starts fail-closed and publishes a dynamic worker failure into the mutation snapshot', async () => {
@@ -216,6 +214,7 @@ describe('RuntimeReadinessService', () => {
         api_runtime: { status: 'ok' },
         migration: { status: 'ok' },
         storage: { status: 'ok' },
+        generic_artifact_storage: { status: 'ok' },
         redis: { status: 'ok' },
         model_gateway: { status: 'ok' },
         renderer: { status: 'ok' },
@@ -225,6 +224,7 @@ describe('RuntimeReadinessService', () => {
       },
     });
     expect(deps.contributors.check).toHaveBeenCalledWith('storage');
+    expect(deps.contributors.check).toHaveBeenCalledWith('generic_artifact_storage');
     expect(deps.contributors.check).toHaveBeenCalledWith('api_runtime_lease');
     expect(deps.contributors.check).toHaveBeenCalledWith('redis');
     expect(deps.contributors.check).toHaveBeenCalledWith('model_gateway');
@@ -379,7 +379,9 @@ describe('RuntimeReadinessService', () => {
       maxWait: 1_000,
       timeout: 2_500,
     });
-    expect(deps.transactionClient.$executeRawUnsafe).toHaveBeenCalledWith('SET LOCAL statement_timeout = 2000');
+    expect(deps.transactionClient.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SET LOCAL statement_timeout = 2000',
+    );
     expect(deps.transactionClient.$queryRawUnsafe).toHaveBeenCalledWith('SELECT 1');
   });
 
@@ -483,6 +485,39 @@ describe('RuntimeReadinessService', () => {
         renderer: {
           status: 'not_proven',
           code: 'RENDERER_IDENTITY_NOT_PROVEN',
+        },
+      },
+    });
+  });
+
+  it('keeps the managed runtime not ready when generic artifact storage cannot pass its canary', async () => {
+    const deps = dependencies({
+      contributors: {
+        check: vi.fn(async (name: string) =>
+          name === 'generic_artifact_storage'
+            ? {
+                status: 'failed',
+                code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+              }
+            : { status: 'ok' },
+        ),
+      },
+    });
+    const service = new RuntimeReadinessService(
+      deps.prisma as never,
+      deps.temporal as never,
+      deps.admission as never,
+      deps.releaseIdentity as never,
+      deps.leases as never,
+      deps.contributors as never,
+    );
+
+    await expect(service.check()).resolves.toMatchObject({
+      status: 'not_ready',
+      components: {
+        generic_artifact_storage: {
+          status: 'failed',
+          code: 'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
         },
       },
     });

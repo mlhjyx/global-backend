@@ -26,20 +26,27 @@ describe("worker runtime admission wiring", () => {
   it("checks migration, storage, native isolation and mixed worker identities before polling", () => {
     const migration = source.indexOf("assertMigrationCompatible");
     const storage = source.indexOf("checkReadiness()");
+    const artifactStorage = source.indexOf(
+      "checkGenericArtifactStorageReadiness(process.env)",
+    );
     const browser = source.indexOf("checkBrowserReadiness");
     const imageIsolation = source.indexOf(
       "checkImagePipelineIsolationReadiness",
     );
     const queue = source.lastIndexOf("waitForWorkerQueueAdmission");
+    const create = source.indexOf("Worker.create");
     const poll = source.indexOf("worker.run()");
 
     expect(migration).toBeGreaterThan(-1);
     expect(storage).toBeGreaterThan(-1);
+    expect(artifactStorage).toBeGreaterThan(-1);
     expect(queue).toBeGreaterThan(-1);
     expect(browser).toBeGreaterThan(-1);
     expect(imageIsolation).toBeGreaterThan(-1);
     expect(migration).toBeLessThan(poll);
     expect(storage).toBeLessThan(poll);
+    expect(artifactStorage).toBeLessThan(poll);
+    expect(artifactStorage).toBeLessThan(create);
     expect(queue).toBeLessThan(poll);
     expect(browser).toBeLessThan(poll);
     expect(imageIsolation).toBeLessThan(poll);
@@ -119,6 +126,9 @@ describe("worker runtime admission wiring", () => {
     expect(recurring).toContain("prisma.reconnect()");
     expect(recurring).toContain(
       "assertMigrationCompatible(prisma, releaseIdentity)",
+    );
+    expect(recurring).toContain(
+      "checkGenericArtifactStorageReadiness(process.env)",
     );
   });
 });

@@ -32,6 +32,7 @@ export interface RuntimeReadinessReport {
     outbox_relay: ComponentStatus;
     api_runtime: ComponentStatus;
     storage: ComponentStatus;
+    generic_artifact_storage: ComponentStatus;
     redis: ComponentStatus;
     model_gateway: ComponentStatus;
     renderer: ComponentStatus;
@@ -72,6 +73,7 @@ function initialReadinessSnapshot(): RuntimeReadinessReport {
       outbox_relay: unavailableComponent(),
       api_runtime: unavailableComponent(),
       storage: unavailableComponent(),
+      generic_artifact_storage: unavailableComponent(),
       redis: unavailableComponent(),
       model_gateway: unavailableComponent(),
       renderer: unavailableComponent(),
@@ -194,6 +196,7 @@ export class RuntimeReadinessService
       outboxRelay,
       apiRuntime,
       storage,
+      genericArtifactStorage,
       redis,
       modelGateway,
       renderer,
@@ -211,6 +214,7 @@ export class RuntimeReadinessService
       this.checkLease(() => this.leases.inspectRole('OUTBOX_RELAY')),
       this.contributors.check('api_runtime_lease'),
       this.contributors.check('storage'),
+      this.contributors.check('generic_artifact_storage'),
       this.contributors.check('redis'),
       this.contributors.check('model_gateway'),
       this.contributors.check('renderer'),
@@ -230,6 +234,7 @@ export class RuntimeReadinessService
       outbox_relay: outboxRelay,
       api_runtime: apiRuntime,
       storage,
+      generic_artifact_storage: genericArtifactStorage,
       redis,
       model_gateway: modelGateway,
       renderer,
