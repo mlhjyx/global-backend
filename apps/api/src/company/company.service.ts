@@ -233,11 +233,13 @@ export class CompanyService {
   private outboxBinding(binding: ExecutionBudgetBinding) {
     return {
       authorityId: binding.authorityId,
+      replay: binding.replay,
       scopeKey: binding.scopeKey,
       accountKey: binding.accountKey,
       purpose: binding.purpose,
       subjectType: binding.subjectType,
       subjectId: binding.subjectId,
+      requestSha256: binding.requestSha256,
     };
   }
 

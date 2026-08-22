@@ -4,7 +4,6 @@ import type { ModelGateway } from '../model-gateway/model-gateway';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import type { BudgetStore } from '../tools/budget-store';
-import { runBudgetCents } from '../tools/budget';
 import { createUnderstandingActivities } from './understanding.activities';
 
 function budgetStoreSpies() {
@@ -34,6 +33,10 @@ const UNDERSTANDING_BINDING = Object.freeze({
   subjectId: `request:${'a'.repeat(64)}`,
   requestSha256: 'a'.repeat(64),
 });
+const AUTHORITY_ARGS = Object.freeze({
+  workspaceId: UNDERSTANDING_BINDING.scopeKey,
+  executionBudget: UNDERSTANDING_BINDING,
+});
 
 /**
  * FIX C（Codex P1）：crawl4ai.fetch 的 allowedPurpose 追加 site_builder 后，**不带 purpose** 的调用者
@@ -53,7 +56,7 @@ describe('understanding.activities — crawl4ai.fetch 显式声明 discovery/enr
       budgetStore: budget.store,
       activityRunId: () => 'understanding-run-1',
     });
-    await acts.crawlWebsite({ workspaceId: 'ws-1', website: 'https://acme.example/' });
+    await acts.crawlWebsite({ ...AUTHORITY_ARGS, website: 'https://acme.example/' });
     expect(invoke).toHaveBeenCalledTimes(1);
     const [toolId, , ctx] = invoke.mock.calls[0] as [string, unknown, { purpose?: string[] }];
     expect(toolId).toBe('crawl4ai.fetch');
@@ -79,11 +82,11 @@ describe('understanding.activities — unified runtime telemetry', () => {
       activityRunId: () => 'understanding-run-1',
     });
 
-    await acts.extractClaims({ workspaceId: 'ws-1', text: 'Acme makes pumps.' });
+    await acts.extractClaims({ ...AUTHORITY_ARGS, text: 'Acme makes pumps.' });
 
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 'company_understanding.extract_claims',
-      workspaceId: 'ws-1',
+      workspaceId: UNDERSTANDING_BINDING.scopeKey,
       reasoning: expect.any(String),
       fallbackIndex: 0,
     }));
@@ -172,28 +175,29 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       activityRunId: () => 'understanding-workflow-run',
     });
 
-    await acts.crawlWebsite({ workspaceId: 'ws-1', website: 'https://acme.example/' });
-    await acts.crawlPages({ workspaceId: 'ws-1', urls: ['https://acme.example/about'] });
-    await acts.extractClaims({ workspaceId: 'ws-1', text: 'claims' });
-    await acts.extractOfferings({ workspaceId: 'ws-1', text: 'offerings' });
+    await acts.crawlWebsite({ ...AUTHORITY_ARGS, website: 'https://acme.example/' });
+    await acts.crawlPages({ ...AUTHORITY_ARGS, urls: ['https://acme.example/about'] });
+    await acts.extractClaims({ ...AUTHORITY_ARGS, text: 'claims' });
+    await acts.extractOfferings({ ...AUTHORITY_ARGS, text: 'offerings' });
     await acts.extractAndPersistProfile({
-      workspaceId: 'ws-1',
+      ...AUTHORITY_ARGS,
       companyId: 'company-1',
       website: 'https://acme.example/',
       text: 'profile',
     });
 
-    const accountKey = 'understanding:understanding-workflow-run';
-    expect(budget.open).toHaveBeenCalledTimes(5);
-    for (const [input] of budget.open.mock.calls) {
+    const accountKey = UNDERSTANDING_BINDING.accountKey;
+    expect(budget.openAuthorized).toHaveBeenCalledTimes(5);
+    for (const [input] of budget.openAuthorized.mock.calls) {
       expect(input).toEqual({
-        workspaceId: 'ws-1',
+        authorityId: UNDERSTANDING_BINDING.authorityId,
+        scopeKey: UNDERSTANDING_BINDING.scopeKey,
         accountKey,
-        capCents: runBudgetCents(),
         replayScope: true,
       });
     }
-    expect(budget.close).toHaveBeenCalledTimes(5);
+    expect(budget.open).not.toHaveBeenCalled();
+    expect(budget.close).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledTimes(2);
     for (const call of invoke.mock.calls) {
       expect(call[2]).toEqual(expect.objectContaining({ runId: accountKey }));
@@ -218,11 +222,11 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       activityRunId: () => 'understanding-workflow-run',
     });
 
-    await expect(acts.extractClaims({ workspaceId: 'ws-1', text: 'claims' }))
+    await expect(acts.extractClaims({ ...AUTHORITY_ARGS, text: 'claims' }))
       .rejects.toThrow();
   });
 
-  it('closes the workflow budget account when egress fails', async () => {
+  it('preserves the authority account holder when egress fails', async () => {
     const budget = budgetStoreSpies();
     const acts = createUnderstandingActivities({
       prisma: {} as PrismaService,
@@ -233,12 +237,9 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     });
 
     await expect(
-      acts.crawlWebsite({ workspaceId: 'ws-1', website: 'https://acme.example/' }),
+      acts.crawlWebsite({ ...AUTHORITY_ARGS, website: 'https://acme.example/' }),
     ).rejects.toThrow('wire failed');
-    expect(budget.close).toHaveBeenCalledWith({
-      workspaceId: 'ws-1',
-      accountKey: 'understanding:understanding-workflow-run',
-    });
+    expect(budget.close).not.toHaveBeenCalled();
   });
 
   it('does not downgrade a subpage durable replay failure into a successful partial page list', async () => {
@@ -254,7 +255,7 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       activityRunId: () => 'understanding-workflow-run',
     });
 
-    await expect(acts.crawlPages({ workspaceId: 'ws-1', urls: ['https://acme.example/about'] }))
+    await expect(acts.crawlPages({ ...AUTHORITY_ARGS, urls: ['https://acme.example/about'] }))
       .rejects.toBe(replayError);
   });
 });

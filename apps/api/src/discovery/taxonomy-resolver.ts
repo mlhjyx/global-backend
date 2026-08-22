@@ -7,9 +7,18 @@ import type { RuntimeTelemetry } from '../model-runtime/types';
 import { createHash } from 'node:crypto';
 import { BudgetExceededError, runBudgetCents } from '../tools/budget';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
-export type TaxonomyResolveOptions = { allowLlm?: boolean; workspaceId?: string; runId?: string };
+export type TaxonomyResolveOptions = {
+  allowLlm?: boolean;
+  workspaceId?: string;
+  runId?: string;
+  executionBudget?: ExecutionBudgetBinding;
+};
 
 /** 官方码制对照（§8.2 暴露给 resolveIcpToCpv 等冷路径；schemaless JSON，键按 kind 选用）。 */
 export interface TaxonomyCrosswalks {
@@ -140,6 +149,7 @@ export class TaxonomyResolver {
         },
         opts.workspaceId,
         opts.runId,
+        opts.executionBudget,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -203,6 +213,7 @@ export class TaxonomyResolver {
         },
         opts.workspaceId,
         opts.runId,
+        opts.executionBudget,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -269,6 +280,7 @@ export class TaxonomyResolver {
         },
         opts.workspaceId,
         opts.runId,
+        opts.executionBudget,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -335,6 +347,7 @@ export class TaxonomyResolver {
         },
         opts.workspaceId,
         opts.runId,
+        opts.executionBudget,
       );
       const code = result.data?.code;
       if (!code) return null;
@@ -366,9 +379,34 @@ export class TaxonomyResolver {
     input: Parameters<ModelGateway['generateStructured']>[0],
     workspaceId: string,
     runId?: string,
+    executionBudget?: ExecutionBudgetBinding,
   ) {
-    const accountKey = runId ?? `taxonomy:${createHash('sha256').update(`${input.task}:${input.prompt}`).digest('hex').slice(0, 32)}`;
     const budgets = this.budgetStore ?? new UnavailableBudgetStore('TaxonomyResolver requires an authoritative BudgetStore');
+    if (executionBudget) {
+      const binding = parseExecutionBudgetBinding(executionBudget, {
+        scopeKey: workspaceId,
+      });
+      if (runId !== binding.accountKey) {
+        throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
+      }
+      await budgets.openAuthorized({
+        authorityId: binding.authorityId,
+        scopeKey: binding.scopeKey,
+        accountKey: binding.accountKey,
+        replayScope: true,
+      });
+      return executeStructuredTaskWithRuntime<Output>(
+        this.gateway,
+        input,
+        {
+          workspaceId: binding.scopeKey,
+          runId: binding.accountKey,
+          genericReplay: taxonomyReplay<Output>(),
+        },
+        { telemetry: this.runtimeTelemetry },
+      );
+    }
+    const accountKey = runId ?? `taxonomy:${createHash('sha256').update(`${input.task}:${input.prompt}`).digest('hex').slice(0, 32)}`;
     await budgets.open({ workspaceId, accountKey, capCents: runBudgetCents(), replayScope: true });
     try {
       return await executeStructuredTaskWithRuntime<Output>(
@@ -377,28 +415,7 @@ export class TaxonomyResolver {
         {
           workspaceId,
           runId: accountKey,
-          genericReplay: {
-            schema: 'taxonomy-result/v1',
-            project: (result) => ({
-              json: JSON.stringify(result.data),
-              provider: result.provider,
-              model: result.model,
-            }),
-            restore: (value) => {
-              if (!value || typeof value !== 'object' || Array.isArray(value)) {
-                throw new Error('TAXONOMY_REPLAY_INVALID');
-              }
-              const record = value as Record<string, unknown>;
-              if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
-                throw new Error('TAXONOMY_REPLAY_INVALID');
-              }
-              return {
-                data: JSON.parse(record.json) as Output,
-                provider: record.provider,
-                model: record.model,
-              };
-            },
-          },
+          genericReplay: taxonomyReplay<Output>(),
         },
         { telemetry: this.runtimeTelemetry },
       );
@@ -408,7 +425,34 @@ export class TaxonomyResolver {
   }
 }
 
+function taxonomyReplay<Output>() {
+  return {
+    schema: 'taxonomy-result/v1',
+    project: (result: { data: unknown; provider: string; model: string }) => ({
+      json: JSON.stringify(result.data),
+      provider: result.provider,
+      model: result.model,
+    }),
+    restore: (value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('TAXONOMY_REPLAY_INVALID');
+      }
+      const record = value as Record<string, unknown>;
+      if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
+        throw new Error('TAXONOMY_REPLAY_INVALID');
+      }
+      return {
+        data: JSON.parse(record.json) as Output,
+        provider: record.provider,
+        model: record.model,
+      };
+    },
+  };
+}
+
 function isBudgetControlError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' &&
+    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
 }

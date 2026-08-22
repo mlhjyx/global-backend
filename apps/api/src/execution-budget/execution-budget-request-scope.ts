@@ -36,6 +36,22 @@ export type WorkspaceExecutionBudgetRequest =
       body?: unknown;
     }>;
 
+export interface GuessEmailsHttpRequestBody {
+  readonly lawfulBasis?: string;
+  readonly lawfulBasisRef?: string;
+  readonly lawfulBasisNote?: string;
+  readonly allowPersonalWithoutBasis?: boolean;
+  readonly maxContacts?: number;
+  readonly maxProbe?: number;
+}
+
+export interface VerifyContactPointHttpRequestBody {
+  readonly lawfulBasis?: string;
+  readonly lawfulBasisRef?: string;
+  readonly lawfulBasisNote?: string;
+  readonly allowPersonalWithoutBasis?: boolean;
+}
+
 function invalidRequest(): never {
   throw new Error('EXECUTION_BUDGET_REQUEST_INVALID');
 }
@@ -142,4 +158,44 @@ export function workspaceExecutionBudgetRequestScope(
         requestSha256,
       });
   }
+}
+
+/** Canonical public DTO boundary used by both the HTTP adapter and grant issuer. */
+export function guessEmailsExecutionBudgetRequestScope(
+  companyId: string,
+  body?: GuessEmailsHttpRequestBody,
+): Readonly<WorkspaceExecutionBudgetScope> {
+  return workspaceExecutionBudgetRequestScope({
+    operation: 'POST /canonical-companies/:id/guess-emails',
+    companyId,
+    body: body
+      ? {
+          lawfulBasis: body.lawfulBasis,
+          lawfulBasisRef: body.lawfulBasisRef,
+          lawfulBasisNote: body.lawfulBasisNote,
+          allowPersonalWithoutBasis: body.allowPersonalWithoutBasis,
+          maxContacts: body.maxContacts,
+          maxProbe: body.maxProbe,
+        }
+      : undefined,
+  });
+}
+
+/** Canonical public DTO boundary used by both the HTTP adapter and grant issuer. */
+export function verifyContactPointExecutionBudgetRequestScope(
+  pointId: string,
+  body?: VerifyContactPointHttpRequestBody,
+): Readonly<WorkspaceExecutionBudgetScope> {
+  return workspaceExecutionBudgetRequestScope({
+    operation: 'POST /contact-points/:pointId/verify',
+    pointId,
+    body: body
+      ? {
+          lawfulBasis: body.lawfulBasis,
+          lawfulBasisRef: body.lawfulBasisRef,
+          lawfulBasisNote: body.lawfulBasisNote,
+          allowPersonalWithoutBasis: body.allowPersonalWithoutBasis,
+        }
+      : undefined,
+  });
 }

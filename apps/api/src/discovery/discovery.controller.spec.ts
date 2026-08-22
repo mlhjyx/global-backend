@@ -33,11 +33,14 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
         maxProbe: 3,
       },
       undefined,
-      expect.objectContaining({
-        purpose: 'discovery.run',
-        subjectType: 'company',
-        subjectId: 'company-1',
-      }),
+      {
+        lawfulBasis: 'legitimate_interest',
+        lawfulBasisRef: 'LIA-42',
+        lawfulBasisNote: 'note',
+        allowPersonalWithoutBasis: true,
+        maxContacts: 5,
+        maxProbe: 3,
+      },
     );
   });
 
@@ -55,9 +58,7 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
         maxProbe: undefined,
       },
       undefined,
-      expect.objectContaining({
-        requestSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-      }),
+      undefined,
     );
   });
 
@@ -80,11 +81,12 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
         allowPersonalWithoutBasis: true,
       },
       undefined,
-      expect.objectContaining({
-        purpose: 'contact.verify',
-        subjectType: 'contact_point',
-        subjectId: 'point-1',
-      }),
+      {
+        lawfulBasis: 'legitimate_interest',
+        lawfulBasisRef: 'LIA-42',
+        lawfulBasisNote: 'note',
+        allowPersonalWithoutBasis: true,
+      },
     );
   });
 });

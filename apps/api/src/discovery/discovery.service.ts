@@ -19,7 +19,6 @@ import {
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
-import { runBudgetCents } from '../tools/budget';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   assertProductDiscoveryProvenance,
@@ -31,7 +30,13 @@ import {
   assertFreshExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
-import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import {
+  guessEmailsExecutionBudgetRequestScope,
+  verifyContactPointExecutionBudgetRequestScope,
+  workspaceExecutionBudgetRequestScope,
+  type GuessEmailsHttpRequestBody,
+  type VerifyContactPointHttpRequestBody,
+} from '../execution-budget/execution-budget-request-scope';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -269,9 +274,13 @@ export class DiscoveryService {
       );
     const accountKey = binding.accountKey;
     const budgets = this.budgets();
-    await budgets.open({ workspaceId: ctx.workspaceId, accountKey, capCents: runBudgetCents() });
-    try {
-      for (const adapter of loaded.adapters) {
+    await budgets.openAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey,
+      replayScope: true,
+    });
+    for (const adapter of loaded.adapters) {
         try {
           const authorized = await authorizeExternalAction();
           if (!authorized) break;
@@ -282,7 +291,7 @@ export class DiscoveryService {
               country: loaded.company.country ?? undefined,
             },
             {
-              workspaceId: ctx.workspaceId,
+              workspaceId: binding.scopeKey,
               runId: accountKey,
               correlationId: companyId,
               authorizeExternalAction,
@@ -294,12 +303,10 @@ export class DiscoveryService {
             costCents: result.costCents,
           });
         } catch (err) {
+          if (isExecutionControlError(err)) throw err;
           console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
         }
-        if ((await budgets.status({ workspaceId: ctx.workspaceId, accountKey })).exhausted) break;
-      }
-    } finally {
-      await budgets.close({ workspaceId: ctx.workspaceId, accountKey });
+        if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;
     }
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -360,15 +367,15 @@ export class DiscoveryService {
       maxProbe?: number;
     },
     compactJws?: string,
+    publicRequestBody?: GuessEmailsHttpRequestBody,
   ) {
     const binding = await this.authority.consumeWorkspaceGrant({
       compactJws,
       identity: ctx,
-      scope: workspaceExecutionBudgetRequestScope({
-        operation: 'POST /canonical-companies/:id/guess-emails',
+      scope: guessEmailsExecutionBudgetRequestScope(
         companyId,
-        body: this.optionalRequestBody(opts),
-      }),
+        publicRequestBody,
+      ),
     });
     assertFreshExecutionBudgetBinding(binding);
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -443,12 +450,16 @@ export class DiscoveryService {
     }[] = [];
     const accountKey = binding.accountKey;
     const budgets = this.budgets();
-    await budgets.open({ workspaceId: ctx.workspaceId, accountKey, capCents: runBudgetCents() });
-    try {
-      for (const c of targets) {
+    await budgets.openAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey,
+      replayScope: true,
+    });
+    for (const c of targets) {
         const authorized = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
           contactMayUseExternalProcessing(tx, {
-            workspaceId: ctx.workspaceId,
+            workspaceId: binding.scopeKey,
             contactId: c.contactId,
           }),
         );
@@ -486,10 +497,7 @@ export class DiscoveryService {
           },
         );
         results.push({ contactId: c.contactId, fullName: c.fullName, result });
-        if ((await budgets.status({ workspaceId: ctx.workspaceId, accountKey })).exhausted) break;
-      }
-    } finally {
-      await budgets.close({ workspaceId: ctx.workspaceId, accountKey });
+        if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;
     }
 
     // 短事务②：落库
@@ -550,15 +558,15 @@ export class DiscoveryService {
     pointId: string,
     opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean },
     compactJws?: string,
+    publicRequestBody?: VerifyContactPointHttpRequestBody,
   ) {
     const binding = await this.authority.consumeWorkspaceGrant({
       compactJws,
       identity: ctx,
-      scope: workspaceExecutionBudgetRequestScope({
-        operation: 'POST /contact-points/:pointId/verify',
+      scope: verifyContactPointExecutionBudgetRequestScope(
         pointId,
-        body: this.optionalRequestBody(opts),
-      }),
+        publicRequestBody,
+      ),
     });
     assertFreshExecutionBudgetBinding(binding);
     // 短事务①：载入 point + 分级 + 禁联命中 + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经
@@ -696,18 +704,14 @@ export class DiscoveryService {
       };
       const accountKey = binding.accountKey;
       const budgets = this.budgets();
-      await budgets.open({
-        workspaceId: ctx.workspaceId,
+      await budgets.openAuthorized({
+        authorityId: binding.authorityId,
+        scopeKey: binding.scopeKey,
         accountKey,
-        capCents: runBudgetCents(),
         replayScope: true,
       });
-      try {
-        verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
-        providerKey = loaded.adapter.key;
-      } finally {
-        await budgets.close({ workspaceId: ctx.workspaceId, accountKey });
-      }
+      verdict = await loaded.adapter.verifyEmail(loaded.pointValue, verifyCtx);
+      providerKey = loaded.adapter.key;
     }
     assertProductDiscoveryProvenance({ providerKey });
 
@@ -804,24 +808,16 @@ export class DiscoveryService {
     });
   }
 
-  private optionalRequestBody(value: unknown): unknown {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return undefined;
-    }
-    const entries = Object.entries(value as Record<string, unknown>).filter(
-      ([, item]) => item !== undefined,
-    );
-    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-  }
-
   private outboxBinding(binding: ExecutionBudgetBinding) {
     return {
       authorityId: binding.authorityId,
+      replay: binding.replay,
       scopeKey: binding.scopeKey,
       accountKey: binding.accountKey,
       purpose: binding.purpose,
       subjectType: binding.subjectType,
       subjectId: binding.subjectId,
+      requestSha256: binding.requestSha256,
     };
   }
 
@@ -1061,6 +1057,15 @@ export class DiscoveryService {
   listProviders(ctx: RequestContext) {
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) => tx.dataProvider.findMany({ orderBy: { key: 'asc' } }));
   }
+}
+
+function isExecutionControlError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    typeof code === 'string' &&
+    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'))
+  );
 }
 
 function assertSameSuppressionCommand(

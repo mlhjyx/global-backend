@@ -187,7 +187,9 @@ describe('ExecutionBudgetAuthorityRepository', () => {
 
     await expect(
       repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
-    ).resolves.toEqual({ authorityId: AUTHORITY_ID, replay: true });
+    ).rejects.toEqual(
+      new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED'),
+    );
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     const query = tx.$queryRaw.mock.calls[0]?.[0] as {

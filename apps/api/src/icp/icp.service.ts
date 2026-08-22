@@ -22,6 +22,7 @@ import { executeIcpBudgetedTask } from './icp-budget-execution';
 import {
   assertFreshExecutionBudgetBinding,
   ExecutionBudgetAuthorityService,
+  type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 
@@ -43,6 +44,13 @@ interface IcpModelOutput {
     weight?: number;
     rationale?: string;
   }[];
+}
+
+function isExecutionControlError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' &&
+    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
 }
 
 interface QueryPlanModelOutput {
@@ -493,9 +501,9 @@ export class IcpService {
 
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    let queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries']);
+    let queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries'], binding);
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
-    queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries);
+    queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries, binding);
 
     return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.discoveryQueryPlan.create({
@@ -519,6 +527,7 @@ export class IcpService {
     workspaceId: string,
     icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
     planned: QueryPlanModelOutput['queries'],
+    binding: ExecutionBudgetBinding,
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
     // §8.7 稳健：从 company_attributes + planner 各查询双路采集行业词（拆逗号），防单字段缺失/合并串漏掉 TED 注入。
@@ -529,10 +538,15 @@ export class IcpService {
       const cpv = await resolveIcpToCpv(
         taxonomy,
         { industryTerms, product: attrs.product ? String(attrs.product) : undefined, targetCountries },
-        { workspaceId },
+        {
+          workspaceId: binding.scopeKey,
+          runId: binding.accountKey,
+          executionBudget: binding,
+        },
       );
       return buildTedQuery(cpv, planned) as QueryPlanModelOutput['queries'];
     } catch (e) {
+      if (isExecutionControlError(e)) throw e;
        
       console.warn(`[icp] icp→cpv resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;
@@ -548,6 +562,7 @@ export class IcpService {
     workspaceId: string,
     icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
     planned: QueryPlanModelOutput['queries'],
+    binding: ExecutionBudgetBinding,
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
     const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
@@ -561,10 +576,15 @@ export class IcpService {
           tradeSide: attrs.trade_side ? String(attrs.trade_side) : undefined,
           targetCountries: splitTerms(icp.targetMarkets), // openFDA 仅美国市场门（非美国目标 → 不注入）
         },
-        { workspaceId },
+        {
+          workspaceId: binding.scopeKey,
+          runId: binding.accountKey,
+          executionBudget: binding,
+        },
       );
       return buildFdaQuery(fda, planned) as QueryPlanModelOutput['queries'];
     } catch (e) {
+      if (isExecutionControlError(e)) throw e;
        
       console.warn(`[icp] icp→fda resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;

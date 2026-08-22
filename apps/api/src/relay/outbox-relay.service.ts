@@ -28,6 +28,7 @@ import {
 import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { seedSanctions } from "../sanctions/sanctions-seed";
+import { parseExecutionBudgetBinding } from "../execution-budget/execution-budget-binding";
 import {
   INTEGRATION_EVENTS,
   INTERNAL_COMMANDS,
@@ -557,7 +558,18 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     payload: unknown;
   }): Promise<void> {
     if (ev.eventType === "CompanyProfileCreated") {
-      const payload = (ev.payload ?? {}) as { website?: string };
+      const payload = (ev.payload ?? {}) as {
+        website?: string;
+        executionBudget?: unknown;
+      };
+      const executionBudget = parseExecutionBudgetBinding(
+        payload.executionBudget,
+        {
+          scopeKey: ev.workspaceId,
+          purpose: "understanding.run",
+          subjectType: "company",
+        },
+      );
       await this.startWorkflowIdempotent(
         UNDERSTANDING_WORKFLOW,
         {
@@ -568,6 +580,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               workspaceId: ev.workspaceId,
               companyId: ev.aggregateId,
               website: payload.website ?? "",
+              executionBudget,
             },
           ],
         },
@@ -575,7 +588,19 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (ev.eventType === "DiscoveryRunRequested") {
-      const payload = (ev.payload ?? {}) as { planId?: string; icpId?: string };
+      const payload = (ev.payload ?? {}) as {
+        planId?: string;
+        icpId?: string;
+        executionBudget?: unknown;
+      };
+      const executionBudget = parseExecutionBudgetBinding(
+        payload.executionBudget,
+        {
+          scopeKey: ev.workspaceId,
+          purpose: "discovery.run",
+          subjectType: "discovery_run",
+        },
+      );
       await this.startWorkflowIdempotent(
         DISCOVERY_WORKFLOW,
         {
@@ -587,6 +612,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               runId: ev.aggregateId,
               planId: payload.planId ?? "",
               icpId: payload.icpId ?? "",
+              executionBudget,
             },
           ],
         },

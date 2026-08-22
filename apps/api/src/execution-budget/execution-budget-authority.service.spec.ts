@@ -153,6 +153,7 @@ describe('ExecutionBudgetAuthorityService', () => {
         purpose: 'icp.design',
         subjectType: 'company',
         subjectId: COMPANY_ID,
+        requestSha256: REQUEST_SHA256,
       });
       expect(Object.isFrozen(binding)).toBe(true);
       expect(consumeWorkspaceAndOpen).toHaveBeenCalledWith(

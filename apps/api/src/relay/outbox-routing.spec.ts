@@ -58,6 +58,12 @@ const EXECUTION_BUDGET = Object.freeze({
   subjectId: `request:${REQUEST_SHA256}`,
   requestSha256: REQUEST_SHA256,
 });
+const DISCOVERY_EXECUTION_BUDGET = Object.freeze({
+  ...EXECUTION_BUDGET,
+  accountKey: `discovery.run:discovery_run:request:${REQUEST_SHA256}:${REQUEST_SHA256}`,
+  purpose: "discovery.run",
+  subjectType: "discovery_run",
+});
 
 function makeEvent(over: Partial<EvRow> = {}): EvRow {
   return {
@@ -350,6 +356,16 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
         aggregateType,
         aggregateId: `agg-${eventType}`,
         publishedAt: null,
+        payload:
+          eventType === "CompanyProfileCreated"
+            ? { website: "https://acme.example/", executionBudget: EXECUTION_BUDGET }
+            : eventType === "DiscoveryRunRequested"
+              ? {
+                  planId: "plan-1",
+                  icpId: "icp-1",
+                  executionBudget: DISCOVERY_EXECUTION_BUDGET,
+                }
+              : {},
       });
       const err = new Error("already started");
       err.name = "WorkflowExecutionAlreadyStartedError";

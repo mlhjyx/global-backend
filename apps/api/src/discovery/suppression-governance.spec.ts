@@ -15,11 +15,13 @@ const VERIFY_ACCOUNT_KEY = `contact.verify:contact_point:88888888-8888-4888-8888
 const authority = {
   consumeWorkspaceGrant: vi.fn(async () => ({
     authorityId: '44444444-4444-4444-8444-444444444444',
+    replay: false,
     scopeKey: WORKSPACE_ID,
     accountKey: VERIFY_ACCOUNT_KEY,
     purpose: 'contact.verify',
     subjectType: 'contact_point',
     subjectId: '88888888-8888-4888-8888-888888888888',
+    requestSha256: 'a'.repeat(64),
   })),
 };
 
@@ -541,6 +543,7 @@ describe('Suppression governance', () => {
     };
     const budgetStore = {
       open: vi.fn(async () => undefined),
+      openAuthorized: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
     };
     const service = new DiscoveryService(
@@ -553,17 +556,15 @@ describe('Suppression governance', () => {
     const result = await service.verifyContactPoint(CTX, point.id);
 
     expect(verifyEmail).toHaveBeenCalledTimes(1);
-    expect(budgetStore.open).toHaveBeenCalledWith({
-      workspaceId: WORKSPACE_ID,
+    expect(budgetStore.openAuthorized).toHaveBeenCalledWith({
+      authorityId: '44444444-4444-4444-8444-444444444444',
+      scopeKey: WORKSPACE_ID,
       accountKey: VERIFY_ACCOUNT_KEY,
-      capCents: expect.any(Number),
       replayScope: true,
     });
     expect(verifyEmail.mock.calls[0]?.[1]).toMatchObject({ runId: VERIFY_ACCOUNT_KEY });
-    expect(budgetStore.close).toHaveBeenCalledWith({
-      workspaceId: WORKSPACE_ID,
-      accountKey: VERIFY_ACCOUNT_KEY,
-    });
+    expect(budgetStore.open).not.toHaveBeenCalled();
+    expect(budgetStore.close).not.toHaveBeenCalled();
     expect(result).toMatchObject({ status: 'BLOCKED' });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'BLOCKED' }) }));
   });

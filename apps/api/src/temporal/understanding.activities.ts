@@ -9,17 +9,25 @@ import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import type { ModelResult } from '../model-gateway/types';
-import { runBudgetCents } from '../tools/budget';
 import {
-  BudgetStoreUnavailableError,
   type BudgetStore,
   UnavailableBudgetStore,
 } from '../tools/budget-store';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
 
 export interface UnderstandingInput {
   workspaceId: string;
   companyId: string;
   website: string;
+  executionBudget: ExecutionBudgetBinding;
+}
+
+interface UnderstandingAuthorityInput {
+  workspaceId: string;
+  executionBudget: ExecutionBudgetBinding;
 }
 
 interface ExtractedClaim {
@@ -68,8 +76,10 @@ function understandingReplay<Output>(schema: string) {
 }
 
 function isBudgetControlFailure(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' &&
+    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
 }
 
 /**
@@ -92,35 +102,22 @@ export function createUnderstandingActivities(deps: {
     deps.budgetStore ??
     new UnavailableBudgetStore('understanding activities require an authoritative BudgetStore');
 
-  const workflowAccountKey = (): string => {
-    let workflowRunId: string | undefined;
-    try {
-      workflowRunId = deps.activityRunId?.() ?? Context.current().info.workflowExecution?.runId;
-    } catch {
-      workflowRunId = undefined;
-    }
-    if (!workflowRunId) {
-      throw new BudgetStoreUnavailableError('understanding activity requires a Temporal workflow run id');
-    }
-    return `understanding:${workflowRunId}`;
-  };
-
   const withRunBudget = async <T>(
-    workspaceId: string,
+    args: UnderstandingAuthorityInput,
     execute: (accountKey: string) => Promise<T>,
   ): Promise<T> => {
-    const accountKey = workflowAccountKey();
-    await budgets.open({
-      workspaceId,
-      accountKey,
-      capCents: runBudgetCents(),
+    const binding = parseExecutionBudgetBinding(args.executionBudget, {
+      scopeKey: args.workspaceId,
+      purpose: 'understanding.run',
+      subjectType: 'company',
+    });
+    await budgets.openAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
       replayScope: true,
     });
-    try {
-      return await execute(accountKey);
-    } finally {
-      await budgets.close({ workspaceId, accountKey });
-    }
+    return execute(binding.accountKey);
   };
 
   const crawlViaBroker = async (workspaceId: string, url: string, accountKey: string): Promise<string> => {
@@ -145,6 +142,7 @@ export function createUnderstandingActivities(deps: {
     async setStatus(args: {
       companyId: string;
       workspaceId: string;
+      executionBudget: ExecutionBudgetBinding;
       status: 'ENRICHING' | 'REVIEW' | 'ACTIVE';
     }): Promise<void> {
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -155,22 +153,22 @@ export function createUnderstandingActivities(deps: {
       );
     },
 
-    async crawlWebsite(args: { workspaceId: string; website: string }): Promise<CrawledPage> {
-      return withRunBudget(args.workspaceId, async (accountKey) => {
+    async crawlWebsite(args: UnderstandingAuthorityInput & { website: string }): Promise<CrawledPage> {
+      return withRunBudget(args, async (accountKey) => {
         const text = await crawlViaBroker(args.workspaceId, args.website, accountKey);
         return { url: args.website, text: text.slice(0, MAX_PAGE_CHARS) };
       });
     },
 
     /** Deterministic: pick key subpages (products/about/certifications/cases/contact…). */
-    async selectSubpages(args: { markdown: string; website: string }): Promise<string[]> {
+    async selectSubpages(args: UnderstandingAuthorityInput & { markdown: string; website: string }): Promise<string[]> {
       const links = extractSameSiteLinks(args.markdown, args.website);
       return selectKeySubpages(links, MAX_SUBPAGES);
     },
 
     /** Crawl subpages, tolerating individual failures — a broken page must not kill the run. */
-    async crawlPages(args: { workspaceId: string; urls: string[] }): Promise<{ pages: CrawledPage[] }> {
-      return withRunBudget(args.workspaceId, async (accountKey) => {
+    async crawlPages(args: UnderstandingAuthorityInput & { urls: string[] }): Promise<{ pages: CrawledPage[] }> {
+      return withRunBudget(args, async (accountKey) => {
         const settled = await Promise.allSettled(
           args.urls.map((u) => crawlViaBroker(args.workspaceId, u, accountKey)),
         );
@@ -187,8 +185,8 @@ export function createUnderstandingActivities(deps: {
       });
     },
 
-    async extractClaims(args: { workspaceId: string; text: string }): Promise<{ claims: ExtractedClaim[] }> {
-      return withRunBudget(args.workspaceId, async (accountKey) => {
+    async extractClaims(args: UnderstandingAuthorityInput & { text: string }): Promise<{ claims: ExtractedClaim[] }> {
+      return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_claims');
         const result = await executeStructuredTaskWithRuntime(
           deps.gateway,
@@ -214,7 +212,7 @@ export function createUnderstandingActivities(deps: {
 
     /** 画像回填（KNW-002/5.2.3）：行业 + 简介，只在首页文本上跑一次。 */
     async extractAndPersistProfile(args: UnderstandingInput & { text: string }): Promise<void> {
-      return withRunBudget(args.workspaceId, async (accountKey) => {
+      return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_profile');
         const result = await executeStructuredTaskWithRuntime(
           deps.gateway,
@@ -248,9 +246,10 @@ export function createUnderstandingActivities(deps: {
 
     async extractOfferings(args: {
       workspaceId: string;
+      executionBudget: ExecutionBudgetBinding;
       text: string;
     }): Promise<{ offerings: ExtractedOffering[] }> {
-      return withRunBudget(args.workspaceId, async (accountKey) => {
+      return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_offerings');
         const result = await executeStructuredTaskWithRuntime(
           deps.gateway,

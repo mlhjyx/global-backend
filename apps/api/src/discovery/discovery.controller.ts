@@ -386,6 +386,7 @@ export class DiscoveryController {
             allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
           },
           compactJws,
+          dto,
         ),
       ),
     );
@@ -432,6 +433,7 @@ export class DiscoveryController {
             maxProbe: dto?.maxProbe,
           },
           compactJws,
+          dto,
         ),
       ),
     );

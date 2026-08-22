@@ -1,5 +1,9 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { UnderstandingActivities } from './understanding.activities';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
 
 // Crawling can be slow (headless browser per page) — generous timeout, few retries.
 const crawlActs = proxyActivities<UnderstandingActivities>({
@@ -23,6 +27,7 @@ export interface UnderstandingWorkflowInput {
   workspaceId: string;
   companyId: string;
   website: string;
+  executionBudget: ExecutionBudgetBinding;
 }
 
 /**
@@ -36,11 +41,16 @@ export interface UnderstandingWorkflowInput {
  */
 export async function understandingWorkflow(input: UnderstandingWorkflowInput): Promise<void> {
   const { workspaceId, companyId, website } = input;
-  await dbActs.setStatus({ companyId, workspaceId, status: 'ENRICHING' });
+  const executionBudget = parseExecutionBudgetBinding(input.executionBudget, {
+    scopeKey: workspaceId,
+    purpose: 'understanding.run',
+    subjectType: 'company',
+  });
+  await dbActs.setStatus({ companyId, workspaceId, executionBudget, status: 'ENRICHING' });
 
-  const home = await crawlActs.crawlWebsite({ workspaceId, website });
-  const subUrls = await dbActs.selectSubpages({ markdown: home.text, website });
-  const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, urls: subUrls });
+  const home = await crawlActs.crawlWebsite({ workspaceId, website, executionBudget });
+  const subUrls = await dbActs.selectSubpages({ workspaceId, executionBudget, markdown: home.text, website });
+  const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, executionBudget, urls: subUrls });
   const pages = [home, ...subPages];
 
   // Per-page extraction so every Evidence row points at the page it came from.
@@ -49,22 +59,22 @@ export async function understandingWorkflow(input: UnderstandingWorkflowInput): 
     Promise.all(
       pages.map(async (p) => ({
         url: p.url,
-        claims: (await modelActs.extractClaims({ workspaceId, text: p.text })).claims,
+        claims: (await modelActs.extractClaims({ workspaceId, executionBudget, text: p.text })).claims,
       })),
     ),
     Promise.all(
       pages.map(async (p) => ({
         url: p.url,
-        offerings: (await modelActs.extractOfferings({ workspaceId, text: p.text })).offerings,
+        offerings: (await modelActs.extractOfferings({ workspaceId, executionBudget, text: p.text })).offerings,
       })),
     ),
   ]);
 
-  await dbActs.persistClaims({ workspaceId, companyId, website, pages: claimPages });
-  await dbActs.persistOfferings({ workspaceId, companyId, website, pages: offeringPages });
-  await dbActs.persistPublicContacts({ workspaceId, companyId, website, pages });
-  await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, text: home.text });
+  await dbActs.persistClaims({ workspaceId, companyId, website, executionBudget, pages: claimPages });
+  await dbActs.persistOfferings({ workspaceId, companyId, website, executionBudget, pages: offeringPages });
+  await dbActs.persistPublicContacts({ workspaceId, companyId, website, executionBudget, pages });
+  await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, executionBudget, text: home.text });
 
   // 5.2.7：理解完成 ≠ 可用。落 REVIEW，等待人工审批（Claim 审批达阈值或显式 confirm）→ ACTIVE。
-  await dbActs.setStatus({ companyId, workspaceId, status: 'REVIEW' });
+  await dbActs.setStatus({ companyId, workspaceId, executionBudget, status: 'REVIEW' });
 }

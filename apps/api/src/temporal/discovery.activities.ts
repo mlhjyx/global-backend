@@ -14,7 +14,7 @@ import {
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
-import { BudgetExceededError, runBudgetCents } from '../tools/budget';
+import { BudgetExceededError } from '../tools/budget';
 import {
   BudgetOperationReplayError,
   type BudgetStore,
@@ -27,13 +27,23 @@ import {
 } from '../discovery/company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
   runId: string;
   planId: string;
   icpId: string;
+  executionBudget: ExecutionBudgetBinding;
 }
+
+type DiscoveryActivityInput = Readonly<{
+  workspaceId: string;
+  executionBudget: ExecutionBudgetBinding;
+}>;
 
 export interface PlanQuery {
   source_class: string;
@@ -66,9 +76,22 @@ export function createDiscoveryActivities(deps: {
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
-  // 每个活动入口幂等开持久账户；跨 worker/重试共用同一数据库真值。
-  const ensureRunBudget = (workspaceId: string, runId: string): Promise<void> =>
-    budgets.open({ workspaceId, accountKey: runId, capCents: runBudgetCents(), replayScope: true });
+  const ensureRunBudget = async (
+    args: DiscoveryActivityInput,
+  ): Promise<ExecutionBudgetBinding> => {
+    const binding = parseExecutionBudgetBinding(args.executionBudget, {
+      scopeKey: args.workspaceId,
+      purpose: 'discovery.run',
+      subjectType: 'discovery_run',
+    });
+    await budgets.openAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+      replayScope: true,
+    });
+    return binding;
+  };
   const authorizeCompanyExternalAction =
     (workspaceId: string, companyId: string): (() => Promise<boolean>) =>
     () =>
@@ -81,11 +104,15 @@ export function createDiscoveryActivities(deps: {
      * reservation and refuses the next open while any operation is unresolved,
      * so a worker crash can never turn an unknown physical call into a retry.
      */
-    async resetRunBudget(args: { workspaceId: string; runId: string }): Promise<void> {
-      await budgets.close({ workspaceId: args.workspaceId, accountKey: args.runId, force: true });
+    async resetRunBudget(args: DiscoveryActivityInput & { runId: string }): Promise<void> {
+      parseExecutionBudgetBinding(args.executionBudget, {
+        scopeKey: args.workspaceId,
+        purpose: 'discovery.run',
+        subjectType: 'discovery_run',
+      });
     },
 
-    async loadPlanQueries(args: { workspaceId: string; planId: string }): Promise<{ queries: PlanQuery[] }> {
+    async loadPlanQueries(args: DiscoveryActivityInput & { planId: string }): Promise<{ queries: PlanQuery[] }> {
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: args.planId },
         });
@@ -105,13 +132,13 @@ export function createDiscoveryActivities(deps: {
      * raw 原样落地（幂等 by externalId）。
      * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
      */
-    async executeQuery(args: { workspaceId: string; runId: string; query: PlanQuery }): Promise<{
+    async executeQuery(args: DiscoveryActivityInput & { runId: string; query: PlanQuery }): Promise<{
       rawCount: number;
       costCents: number;
       provider: string | null;
       budgetTruncated: boolean;
     }> {
-      await ensureRunBudget(args.workspaceId, args.runId);
+      const binding = await ensureRunBudget(args);
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -123,7 +150,8 @@ export function createDiscoveryActivities(deps: {
         const countryTerms = [enriched.country, enriched.region].flat().filter(Boolean).map(String);
         const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
           workspaceId: args.workspaceId,
-          runId: args.runId,
+          runId: binding.accountKey,
+          executionBudget: binding,
         });
         if (inds.length) {
           enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
@@ -133,7 +161,8 @@ export function createDiscoveryActivities(deps: {
         for (const ct of countryTerms) {
           const c = await deps.taxonomy.resolve('country', ct, {
             workspaceId: args.workspaceId,
-            runId: args.runId,
+            runId: binding.accountKey,
+            executionBudget: binding,
           });
           if (c?.wikidataQid) {
             enriched._countryQid = c.wikidataQid;
@@ -176,15 +205,15 @@ export function createDiscoveryActivities(deps: {
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
       const ctx: ExecutionContext = {
         workspaceId: args.workspaceId,
-        runId: args.runId,
-        correlationId: args.runId,
+        runId: binding.accountKey,
+        correlationId: binding.accountKey,
       };
       const blockedDomains = suspended.map((s) => s.domain);
       const settled = await Promise.allSettled(
         adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
       );
       for (const result of settled) {
-        if (result.status === 'rejected' && result.reason instanceof BudgetOperationReplayError) {
+        if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           throw result.reason;
         }
         if (result.status !== 'fulfilled') continue;
@@ -200,7 +229,7 @@ export function createDiscoveryActivities(deps: {
       // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
       // 改由 BudgetLedger 唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
       // wasExhausted=true → 显性上报截断，让 workflow 判 PARTIAL 而非假 DONE（各源 fail-safe 拿到的部分记录仍落库）。
-      const budgetTruncated = (await budgets.status({ workspaceId: args.workspaceId, accountKey: args.runId })).exhausted;
+      const budgetTruncated = (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted;
 
       // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
       // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务
@@ -269,7 +298,7 @@ export function createDiscoveryActivities(deps: {
      * 归一 + 身份解析（PRD 8.8）+ 字段级 Evidence（8.10）+ Suppression 标记。
      * 幂等：canonical 按 dedupeKey upsert；identity_link 按 (canonical,raw) 去重。
      */
-    async canonicalizeRun(args: {
+    async canonicalizeRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
     }): Promise<{ companies: number; suppressed: number }> {
@@ -403,12 +432,12 @@ export function createDiscoveryActivities(deps: {
      * 判定即 CandidateAssessment：发现候选就建 Lead 行（status=DISCOVERED、无 scores），评分阶段再填 scores。
      * fit 挂 Lead 而非 canonical —— 同 workspace 多 ICP 各自独立判，互不覆盖。网络调用在事务外，落库在事务内。
      */
-    async qualifyFitForRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{
+    async qualifyFitForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       judged: number;
       verdicts: Record<string, number>;
       skippedForBudget: number;
     }> {
-      await ensureRunBudget(args.workspaceId, args.runId); // fit 判定（LLM）消耗计入本 run 预算
+      const binding = await ensureRunBudget(args); // fit 判定（LLM）消耗计入同一 authority 账户
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
@@ -471,7 +500,7 @@ export function createDiscoveryActivities(deps: {
         try {
           const authorizeExternalAction = authorizeCompanyExternalAction(args.workspaceId, c.id);
           judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
-            runId: args.runId,
+            runId: binding.accountKey,
             runtimeTelemetry: deps.runtimeTelemetry,
             authorizeExternalAction,
           });
@@ -504,7 +533,7 @@ export function createDiscoveryActivities(deps: {
      * 幂等：按 enricher key 命名空间存 attributes，已有该源命名空间则跳过（重跑不重复写证据）。
      * 网络调用在事务外，每家命中后单独落库（attributes 命名空间合并 + 逐字段 field_evidence）。
      */
-    async enrichRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{
+    async enrichRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;
       matched: number;
       provider: string | null;
@@ -554,15 +583,15 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
-      await ensureRunBudget(args.workspaceId, args.runId);
+      const binding = await ensureRunBudget(args);
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
       for (const c of companies.slice(0, ENRICH_LIMIT)) {
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
-          runId: args.runId,
-          correlationId: args.runId,
+          runId: binding.accountKey,
+          correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
         };
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
@@ -588,7 +617,7 @@ export function createDiscoveryActivities(deps: {
             );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch (error) {
-            if (error instanceof BudgetOperationReplayError) throw error;
+            if (isExecutionControlError(error)) throw error;
             // 单富集源失败不影响其余
           }
         }
@@ -612,7 +641,7 @@ export function createDiscoveryActivities(deps: {
         enriched,
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
-        budgetTruncated: (await budgets.status({ workspaceId: args.workspaceId, accountKey: args.runId })).exhausted,
+        budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
       };
     },
 
@@ -623,7 +652,7 @@ export function createDiscoveryActivities(deps: {
      *  - TTL 刷新：命名空间 `_ts` 在 SIGNAL_TTL_MS 内则跳过（信号时变，不能像 GLEIF 静态事实那样一次写死）。
      *  - 每家 heartbeat + 上限 SIGNAL_ENRICH_LIMIT，防长活动被判卡死。
      */
-    async enrichSignalsRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{
+    async enrichSignalsRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;
       matched: number;
       provider: string | null;
@@ -683,7 +712,7 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
-      await ensureRunBudget(args.workspaceId, args.runId);
+      const binding = await ensureRunBudget(args);
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
@@ -691,8 +720,8 @@ export function createDiscoveryActivities(deps: {
       for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
-          runId: args.runId,
-          correlationId: args.runId,
+          runId: binding.accountKey,
+          correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
         };
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
@@ -720,7 +749,7 @@ export function createDiscoveryActivities(deps: {
             );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch (error) {
-            if (error instanceof BudgetOperationReplayError) throw error;
+            if (isExecutionControlError(error)) throw error;
             /* 单信号源失败不影响其余 */
           }
         }
@@ -742,7 +771,7 @@ export function createDiscoveryActivities(deps: {
         enriched,
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
-        budgetTruncated: (await budgets.status({ workspaceId: args.workspaceId, accountKey: args.runId })).exhausted,
+        budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
       };
     },
 
@@ -752,11 +781,12 @@ export function createDiscoveryActivities(deps: {
      * 交给独立 intentSweep 持续盯产品/招聘/供应商招募/新闻页变更 → intent 事件 → 投影进 attributes.intent.*。
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
      */
-    async registerWatchesForRun(args: {
+    async registerWatchesForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       icpId: string;
     }): Promise<{ candidates: number; registered: number }> {
+      const binding = await ensureRunBudget(args);
       const intentSvc = new IntentProjectionService({
         prisma: deps.prisma,
         broker: deps.broker,
@@ -798,13 +828,13 @@ export function createDiscoveryActivities(deps: {
             continue;
           await intentSvc.registerWatch(args.workspaceId, c.id, {
             authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
-            budgetKey: args.runId,
-            budgetWorkspaceId: args.workspaceId,
-            budgetCapCents: runBudgetCents(),
+            budgetKey: binding.accountKey,
+            budgetWorkspaceId: binding.scopeKey,
+            executionBudget: binding,
           });
           registered += 1;
         } catch (error) {
-          if (error instanceof BudgetOperationReplayError) throw error;
+          if (isExecutionControlError(error)) throw error;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
@@ -819,7 +849,7 @@ export function createDiscoveryActivities(deps: {
      * enqueue = 廉价 upsert（非慢活动/无 BQ 出网），故上限比 web_watch 宽；capped 记 log（不静默截断）。
      * 冷启动时序（首次 contact discovery 早于首刷）由 Step 10 灰度启用的**手跑刷新预热**兜（见设计文档）。
      */
-    async enqueuePatentLookupsForRun(args: {
+    async enqueuePatentLookupsForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       icpId: string;
@@ -876,7 +906,7 @@ export function createDiscoveryActivities(deps: {
       return { candidates: companies.length, enqueued };
     },
 
-    async finalizeRun(args: {
+    async finalizeRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       planId: string;
@@ -929,11 +959,16 @@ export function createDiscoveryActivities(deps: {
           });
         }
       });
-      // Force only clears activity holder references. Any RESERVED operation is
-      // retained by PostgreSQL and blocks a later generation from opening.
-      await budgets.close({ workspaceId: args.workspaceId, accountKey: args.runId, force: true });
     },
   };
 }
 
 export type DiscoveryActivities = ReturnType<typeof createDiscoveryActivities>;
+
+function isExecutionControlError(error: unknown): boolean {
+  if (error instanceof BudgetOperationReplayError) return true;
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' &&
+    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
+}

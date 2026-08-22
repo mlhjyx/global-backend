@@ -1,6 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
+import { parseExecutionBudgetBinding } from '../execution-budget/execution-budget-binding';
 
 const acts = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '2 minutes',
@@ -22,18 +23,19 @@ const signalActs = proxyActivities<DiscoveryActivities>({
  */
 export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void> {
   const { workspaceId, runId, planId } = input;
+  const executionBudget = parseExecutionBudgetBinding(input.executionBudget, {
+    scopeKey: workspaceId,
+    purpose: 'discovery.run',
+    subjectType: 'discovery_run',
+  });
   const perSource: Record<string, { rawCount: number; provider: string | null; error?: string }> = {};
   let failures = 0;
   let discoveryBudgetTruncated = false;
 
-  // Compatibility close: drops stale holders, never reservations. If a prior
-  // physical call is unresolved, the first paid activity fails closed on open.
-  await acts.resetRunBudget({ workspaceId, runId });
-
-  const { queries } = await acts.loadPlanQueries({ workspaceId, planId });
+  const { queries } = await acts.loadPlanQueries({ workspaceId, planId, executionBudget });
   for (const query of queries) {
     try {
-      const r = await acts.executeQuery({ workspaceId, runId, query });
+      const r = await acts.executeQuery({ workspaceId, runId, query, executionBudget });
       perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
       // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
       if (r.budgetTruncated) discoveryBudgetTruncated = true;
@@ -43,13 +45,13 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     }
   }
 
-  const { companies, suppressed } = await acts.canonicalizeRun({ workspaceId, runId });
+  const { companies, suppressed } = await acts.canonicalizeRun({ workspaceId, runId, executionBudget });
 
   // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
-  const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId });
+  const fit = await acts.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId, executionBudget });
 
   // 富集（Waterfall 富化段）：只给过了本 run ICP fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
-  const enrich = await acts.enrichRun({ workspaceId, runId, icpId: input.icpId });
+  const enrich = await acts.enrichRun({ workspaceId, runId, icpId: input.icpId, executionBudget });
 
   // 信号富集（数字足迹 + 结构化收割）：慢且时变，走独立长活动 + heartbeat；失败不拖垮整个 run
   let signals: { matched: number; enriched: number; provider: string | null; budgetTruncated?: boolean } = {
@@ -58,7 +60,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     provider: null,
   };
   try {
-    signals = await signalActs.enrichSignalsRun({ workspaceId, runId, icpId: input.icpId });
+    signals = await signalActs.enrichSignalsRun({ workspaceId, runId, icpId: input.icpId, executionBudget });
   } catch {
     /* 信号富集是尽力而为的富化，失败不影响 run 状态 */
   }
@@ -67,7 +69,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // best-effort（每家一次 sitemap 探测，慢）→ 长活动；失败不影响 run 状态。
   let watches: { candidates: number; registered: number } = { candidates: 0, registered: 0 };
   try {
-    watches = await signalActs.registerWatchesForRun({ workspaceId, runId, icpId: input.icpId });
+    watches = await signalActs.registerWatchesForRun({ workspaceId, runId, icpId: input.icpId, executionBudget });
   } catch {
     /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
   }
@@ -76,7 +78,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // cheap upsert（非慢活动）→ 走常规 2 分钟活动；best-effort，失败不影响 run 状态。
   let patentEnqueue: { candidates: number; enqueued: number } = { candidates: 0, enqueued: 0 };
   try {
-    patentEnqueue = await acts.enqueuePatentLookupsForRun({ workspaceId, runId, icpId: input.icpId });
+    patentEnqueue = await acts.enqueuePatentLookupsForRun({ workspaceId, runId, icpId: input.icpId, executionBudget });
   } catch {
     /* 专利预热是尽力而为的收口，失败不影响 run 状态 */
   }
@@ -114,5 +116,6 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       queries: queries.length,
       failures,
     },
+    executionBudget,
   });
 }

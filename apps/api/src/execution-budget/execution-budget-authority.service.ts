@@ -8,6 +8,8 @@ import {
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
 import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
+import type { ExecutionBudgetBinding } from './execution-budget-binding';
+export type { ExecutionBudgetBinding } from './execution-budget-binding';
 
 const MAX_ACCOUNT_KEY_LENGTH = 200;
 
@@ -22,16 +24,6 @@ export interface WorkspaceExecutionBudgetGrantInput {
   readonly compactJws?: string;
   readonly identity: Readonly<Pick<RequestContext, 'workspaceId'>>;
   readonly scope: Readonly<WorkspaceExecutionBudgetScope>;
-}
-
-export interface ExecutionBudgetBinding {
-  readonly authorityId: string;
-  readonly replay: boolean;
-  readonly scopeKey: string;
-  readonly accountKey: string;
-  readonly purpose: ExecutionBudgetPurpose;
-  readonly subjectType: string;
-  readonly subjectId: string;
 }
 
 function invalid(): ExecutionBudgetGrantError {
@@ -68,7 +60,7 @@ function exactVerifiedAuthority(
 
 function workspaceBindingIdentity(
   authority: VerifiedExecutionBudgetAuthority,
-): Readonly<{ accountKey: string; scopeKey: string }> {
+): Readonly<{ accountKey: string; scopeKey: string; requestSha256: string }> {
   if (
     authority.authorityKind !== 'WORKSPACE_GRANT' ||
     authority.workspaceId === null ||
@@ -91,7 +83,11 @@ function workspaceBindingIdentity(
   ) {
     throw invalid();
   }
-  return Object.freeze({ accountKey, scopeKey: authority.workspaceId });
+  return Object.freeze({
+    accountKey,
+    scopeKey: authority.workspaceId,
+    requestSha256: authority.requestSha256,
+  });
 }
 
 function executionBudgetBinding(
@@ -99,7 +95,8 @@ function executionBudgetBinding(
   authorityId: string,
   replay: boolean,
 ): ExecutionBudgetBinding {
-  const { accountKey, scopeKey } = workspaceBindingIdentity(authority);
+  const { accountKey, scopeKey, requestSha256 } =
+    workspaceBindingIdentity(authority);
   return Object.freeze({
     authorityId,
     replay,
@@ -108,6 +105,7 @@ function executionBudgetBinding(
     purpose: authority.purpose,
     subjectType: authority.subjectType,
     subjectId: authority.subjectId,
+    requestSha256,
   });
 }
 

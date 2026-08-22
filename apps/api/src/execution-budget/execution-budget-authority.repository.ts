@@ -409,6 +409,11 @@ export class ExecutionBudgetAuthorityRepository {
       const consumption = parseAuthorityRow(
         await consumeWorkspaceWithTransaction(tx, authority),
       );
+      if (consumption.replay) {
+        throw new ExecutionBudgetGrantError(
+          'EXECUTION_BUDGET_GRANT_REUSED',
+        );
+      }
       const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
         Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
           ${authority.workspaceId}, ${consumption.authorityId}::uuid,

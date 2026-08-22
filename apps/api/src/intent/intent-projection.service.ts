@@ -7,6 +7,10 @@ import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { BudgetExceededError, runBudgetCents } from '../tools/budget';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
 import { PageKind, classifyPageKind } from './page-signals';
 import { WEB_WATCH_KEY } from './website-watch.service';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
@@ -57,6 +61,7 @@ export class IntentProjectionService {
       budgetKey?: string;
       budgetWorkspaceId?: string;
       budgetCapCents?: number;
+      executionBudget?: ExecutionBudgetBinding;
     },
   ): Promise<RegisterWatchResult> {
     const { prisma } = this.deps;
@@ -235,6 +240,7 @@ export class IntentProjectionService {
       budgetKey?: string;
       budgetWorkspaceId?: string;
       budgetCapCents?: number;
+      executionBudget?: ExecutionBudgetBinding;
     },
   ): Promise<{ url: string; kind: PageKind }[]> {
     if (!this.deps.broker) return discoverWatchPages(domain);
@@ -242,6 +248,28 @@ export class IntentProjectionService {
     const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
     const budgets = this.deps.budgetStore
       ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
+    if (opts.executionBudget) {
+      const binding = parseExecutionBudgetBinding(opts.executionBudget, {
+        scopeKey: budgetWorkspaceId,
+        purpose: 'discovery.run',
+        subjectType: 'discovery_run',
+      });
+      if (opts.budgetKey !== binding.accountKey) {
+        throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
+      }
+      await budgets.openAuthorized({
+        authorityId: binding.authorityId,
+        scopeKey: binding.scopeKey,
+        accountKey: binding.accountKey,
+        replayScope: true,
+      });
+      return this.discoverWatchPages(
+        domain,
+        binding.scopeKey,
+        binding.accountKey,
+        opts.authorizeExternalAction,
+      );
+    }
     await budgets.open({
       workspaceId: budgetWorkspaceId,
       accountKey: opts.budgetKey,
@@ -249,21 +277,35 @@ export class IntentProjectionService {
       replayScope: true,
     });
     try {
-      let budgetError: unknown;
-      const pages = await discoverWatchPages(
+      return await this.discoverWatchPages(
         domain,
-        this.sitemapHttpGet(
-          budgetWorkspaceId,
-          opts.budgetKey,
-          opts.authorizeExternalAction,
-          (error) => { budgetError = error; },
-        ),
+        budgetWorkspaceId,
+        opts.budgetKey,
+        opts.authorizeExternalAction,
       );
-      if (budgetError) throw budgetError;
-      return pages;
     } finally {
       await budgets.close({ workspaceId: budgetWorkspaceId, accountKey: opts.budgetKey });
     }
+  }
+
+  private async discoverWatchPages(
+    domain: string,
+    workspaceId: string,
+    budgetKey: string,
+    authorizeExternalAction?: () => Promise<boolean>,
+  ): Promise<{ url: string; kind: PageKind }[]> {
+    let budgetError: unknown;
+    const pages = await discoverWatchPages(
+      domain,
+      this.sitemapHttpGet(
+        workspaceId,
+        budgetKey,
+        authorizeExternalAction,
+        (error) => { budgetError = error; },
+      ),
+    );
+    if (budgetError) throw budgetError;
+    return pages;
   }
 
   private sitemapHttpGet(

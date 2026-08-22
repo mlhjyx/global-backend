@@ -79,6 +79,7 @@ describe('workspace authority transaction and replay semantics', () => {
       purpose: 'discovery.run' as const,
       subjectType: 'discovery_run',
       subjectId: `request:${'c'.repeat(64)}`,
+      requestSha256: 'c'.repeat(64),
     };
     const authority = {
       verifyWorkspaceGrant: vi.fn(async () => {
@@ -120,11 +121,13 @@ describe('workspace authority transaction and replay semantics', () => {
         payload: expect.objectContaining({
           executionBudget: {
             authorityId: binding.authorityId,
+            replay: binding.replay,
             scopeKey: binding.scopeKey,
             accountKey: binding.accountKey,
             purpose: binding.purpose,
             subjectType: binding.subjectType,
             subjectId: binding.subjectId,
+            requestSha256: binding.requestSha256,
           },
         }),
       }),

@@ -1,4 +1,4 @@
-import { CanonicalNode, TaxonomyKind } from './taxonomy-resolver';
+import { CanonicalNode, TaxonomyKind, type TaxonomyResolveOptions } from './taxonomy-resolver';
 
 /**
  * TED 覆盖的买方国别（EU-27 + EEA(ISL/LIE/NOR) + CHE + GBR），ISO-3。
@@ -11,9 +11,9 @@ export const TED_COVERAGE: ReadonlySet<string> = new Set([
 
 /** resolveIcpToCpv 依赖的最小 taxonomy 面（结构化 —— 真 TaxonomyResolver 天然满足，便于单测替身）。 */
 export interface CpvTaxonomyPort {
-  resolveMany(kind: TaxonomyKind, terms: string[], opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<CanonicalNode[]>;
-  resolve(kind: TaxonomyKind, term: string, opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<CanonicalNode | null>;
-  resolveCpvForProduct(product: string, subtreePrefixes: string[], opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<string | null>;
+  resolveMany(kind: TaxonomyKind, terms: string[], opts?: TaxonomyResolveOptions): Promise<CanonicalNode[]>;
+  resolve(kind: TaxonomyKind, term: string, opts?: TaxonomyResolveOptions): Promise<CanonicalNode | null>;
+  resolveCpvForProduct(product: string, subtreePrefixes: string[], opts?: TaxonomyResolveOptions): Promise<string | null>;
 }
 
 export interface IcpToCpvInput {
@@ -37,7 +37,7 @@ export interface IcpToCpvResult {
 export async function resolveIcpToCpv(
   taxonomy: CpvTaxonomyPort,
   input: IcpToCpvInput,
-  opts?: { allowLlm?: boolean; workspaceId?: string },
+  opts?: TaxonomyResolveOptions,
 ): Promise<IcpToCpvResult> {
   const warnings: string[] = [];
 

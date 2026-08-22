@@ -29,10 +29,20 @@ import { InMemoryBudgetStoreAdapter } from '../tools/budget-store';
 
 const judgeFitMock = vi.mocked(judgeFitCompany);
 
-const WS = 'ws-1';
+const WS = '10000000-0000-4000-8000-000000000001';
 const ICP_A = 'icp-a';
 const ICP_B = 'icp-b';
 const RUN = 'run-1';
+const RUN_BINDING = Object.freeze({
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  replay: false,
+  scopeKey: WS,
+  accountKey: `discovery.run:discovery_run:request:${'a'.repeat(64)}:${'a'.repeat(64)}`,
+  purpose: 'discovery.run' as const,
+  subjectType: 'discovery_run',
+  subjectId: `request:${'a'.repeat(64)}`,
+  requestSha256: 'a'.repeat(64),
+});
 
 const judgment = (verdict: FitJudgment['verdict']): FitJudgment => ({
   verdict,
@@ -216,7 +226,31 @@ const leadFor = (store: Store, icpId: string) =>
 
 beforeEach(() => judgeFitMock.mockReset());
 
-const testBudgetStore = () => new InMemoryBudgetStoreAdapter(new BudgetLedger());
+const testBudgetStore = () => {
+  const store = new InMemoryBudgetStoreAdapter(new BudgetLedger());
+  store.openAuthorized = vi.fn(async (input) => {
+    await store.open({
+      workspaceId: input.scopeKey,
+      accountKey: input.accountKey,
+      capCents: 100,
+      replayScope: true,
+    });
+    return {
+      accountId: '30000000-0000-4000-8000-000000000003',
+      authorityId: input.authorityId,
+      authorizedCapMicrousd: 1_000_000n,
+      generation: 1,
+    };
+  });
+  return store;
+};
+
+const runArgs = (icpId: string) => ({
+  workspaceId: WS,
+  runId: RUN,
+  icpId,
+  executionBudget: RUN_BINDING,
+});
 
 describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 ICP 互不覆盖', () => {
   it('同一公司：ICP-A 判 match、ICP-B 判 mismatch → 两条独立 Lead，各自 fitVerdict 不被对方覆盖', async () => {
@@ -226,7 +260,7 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
 
     // ICP-A：match
     judgeFitMock.mockResolvedValue(judgment('match'));
-    const rA = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
+    const rA = await acts.qualifyFitForRun(runArgs(ICP_A));
     expect(rA.judged).toBe(1);
     expect(store.leads).toHaveLength(1); // ← 旧实现此处 = 0（写的是 canonical，不建 Lead）→ FAIL
     expect(leadFor(store, ICP_A)?.fitVerdict).toBe('match');
@@ -234,7 +268,7 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
 
     // ICP-B：mismatch —— 关键：ICP-A 已判 match 的公司在 ICP-B 仍会被判（修「后判 ICP 判不了」）
     judgeFitMock.mockResolvedValue(judgment('mismatch'));
-    const rB = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_B });
+    const rB = await acts.qualifyFitForRun(runArgs(ICP_B));
     expect(rB.judged).toBe(1);
     expect(store.leads).toHaveLength(2);
     expect(leadFor(store, ICP_A)?.fitVerdict).toBe('match'); // ← 未被 ICP-B 覆盖（旧实现会被覆盖成 mismatch）
@@ -249,8 +283,8 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any, budgetStore: testBudgetStore() });
     judgeFitMock.mockResolvedValue(judgment('match'));
-    await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
-    const second = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
+    await acts.qualifyFitForRun(runArgs(ICP_A));
+    const second = await acts.qualifyFitForRun(runArgs(ICP_A));
     expect(second.judged).toBe(0); // 已判 → 不再判
     expect(store.leads).toHaveLength(1);
     expect(judgeFitMock).toHaveBeenCalledTimes(1);
