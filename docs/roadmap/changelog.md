@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-22 · 通用操作 Artifact 耐久重放 Task 8 记录（pre-cutover / no runtime claim）
+
+- 新增 [通用操作 Artifact 耐久重放实现记录](../implementation-records/generic-operation-artifact-replay.md)，固定 Task 1–7 在 `codex/production-parity` 的 `a06eb7f4f29d8b9dd0ed47f52a1d86d60a13379b` 审查基线：closed small reference、digest-derived immutable key、七个 additive artifact migrations、expected facts、`RESULT_UNKNOWN` recovery、bounded materializers，以及 deployment-owned MinIO lifecycle/IAM/readiness contract。
+- 本次聚焦 artifact/ToolBroker suite 为 232 passed / 6 skipped（artifact statements 86.95%、branches 82.89%），schema validate、API build、governance（118/118）和 docs verifier 通过；ContractGraph clean scan/status 绑定 `a06eb7f4…`（10,407 nodes / 23,838 edges），但仅为 static impact，未评估 RuntimeEvidence。
+- full API suite 启动后确认 4 个已知 ToolRegistry fixture baseline failures（`public-web-wire-suppression` 1，`paid-execution-gates` 3），故不能称 full suite green。当前未配置 disposable PostgreSQL/MinIO；为不写入其他 worktree 保留的 `global-postgres`/`global-minio`，real RLS 和 six-scenario MinIO contract 结果均为 `RESULT_UNKNOWN`，不伪造 PASS。
+- 仍是 additive/pre-cutover：没有 Domain ACK/cutover、Authority admission/Control Plane transport、retained migration、OCI/deployment/readback、production RuntimeEvidence、Release Bundle、merge 或用户可用性声明。Copy receipt 保持 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`，不 rebaseline 或授权 dispatch。
+
 ## 2026-08-21 · Execution Budget Authority additive foundation
 
 - Tasks 1–7 在 `c96b5d4f04ca8d93ad23b4b7b690e88bd2449f42` 后完成共享 Authority claim/JWKS verifier、Workspace Grant 同事务 consume+authorized-open、Platform signed command/schema/ingestion、FORCE RLS authority/revocation/account binding，以及独立 capability health snapshots；实现收口于 `bea4d7392344cd44cbfbc5379a7d620f418122fc`。现有产品 caller、API/Worker admission 与 legacy cap path 未切换，probe 只观察、不 admission。
