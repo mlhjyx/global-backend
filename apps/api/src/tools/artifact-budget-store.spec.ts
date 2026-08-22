@@ -315,6 +315,54 @@ describe("PostgresBudgetStore artifact recovery", () => {
     ]);
   });
 
+  it("rejects artifact receipts when the locked row omits or drifts from the submitted manifest reference", async () => {
+    const common = {
+      charged_cents: 17n,
+      observed_cents: 13n,
+      cap_variance: false,
+      status: "SETTLED",
+      replay: false,
+      reserved_cents: 17n,
+      operation_id: ARTIFACT_REFERENCE.operationId,
+      operation_key: "artifact-operation",
+      account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+      authority_id: ARTIFACT_MANIFEST.authorityId,
+      receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+      receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
+    };
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: "artifact-account",
+      operationId: ARTIFACT_REFERENCE.operationId,
+      estimatedCents: 17,
+      replay: false,
+    };
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      common,
+    ]])).settleArtifactManifest(
+      reservation,
+      13,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+    )).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      {
+        ...common,
+        result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+        result_schema: ARTIFACT_REFERENCE.resultSchema,
+        result_digest: "cd".padEnd(64, "0"),
+        result_json: ARTIFACT_REFERENCE,
+      },
+    ]])).settleArtifactManifest(
+      reservation,
+      13,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+    )).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+  });
+
   it("rejects an open or caller-extended artifact reference before persistence", async () => {
     const prisma = fakePrisma([]);
     const store = new PostgresBudgetStore(prisma);

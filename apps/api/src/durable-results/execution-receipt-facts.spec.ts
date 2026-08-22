@@ -108,7 +108,24 @@ describe('execution receipt fact producers', () => {
     })).toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
   });
 
-  it('uses explicit Model tokens when present and a declared upper bound when absent', () => {
+  it('keeps Model charged amount and provenance on the same provider/token/fallback branch', () => {
+    expect(modelExecutionReceiptFacts({
+      taskId: 'taxonomy.normalize',
+      resultSchema: 'taxonomy-code/v1',
+      result: modelResult({
+        usage: { inputTokens: 7, outputTokens: 3, costUsd: 0.0125 },
+        callCount: 1,
+      }),
+      reservedMicrousd: 40_000n,
+      chargedMicrousd: 12_500n,
+    })).toEqual({
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 1,
+        inputTokens: 7, outputTokens: 3,
+        chargedMicrousd: '12500', upperBoundMicrousd: '40000',
+      },
+      costBasis: 'provider_reported',
+    });
     expect(modelExecutionReceiptFacts({
       taskId: 'taxonomy.normalize',
       resultSchema: 'taxonomy-code/v1',

@@ -13,8 +13,26 @@ import {
   EmailVerifyBroker,
 } from './email-verify.provider';
 import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
+import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
 
 const mockedMx = resolveMx as unknown as ReturnType<typeof vi.fn>;
+const DURABLE_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: '11111111-1111-4111-8111-111111111111',
+  authorityId: '22222222-2222-4222-8222-222222222222',
+  accountId: '33333333-3333-4333-8333-333333333333',
+  operationId: '44444444-4444-4444-8444-444444444444',
+  operationKey: 'smtp-probe:run-1',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'smtp-rcpt-probe/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '0',
+  },
+  costBasis: 'estimated_upper_bound',
+});
 
 describe('自建邮箱验证 · 纯逻辑（诚实上限）', () => {
   it('provider 分级：Gmail/M365/Proofpoint/Mimecast = 反枚举', () => {
@@ -101,7 +119,7 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
   const okProbe: SmtpProbeOutput = { reachable: true, mailFromCode: 250, codes: [250, 550],
   }; // 真实 250 / 随机 550=非 catch-all
 
-  function fakeBroker(opts: { suspend?: string[]; denyPurpose?: string[]; probe?: SmtpProbeOutput; throwName?: string; throwCode?: string; policyThrows?: boolean;
+  function fakeBroker(opts: { suspend?: string[]; denyPurpose?: string[]; probe?: SmtpProbeOutput; durableReceipt?: DurableExecutionReceipt; throwName?: string; throwCode?: string; policyThrows?: boolean;
     } = {},
   ) {
     const invoke = vi.fn(async () => {
@@ -111,7 +129,11 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
         if (opts.throwCode) (e as Error & { code: string }).code = opts.throwCode;
         throw e;
       }
-      return { data: opts.probe ?? okProbe, costCents: 0 };
+      return {
+        data: opts.probe ?? okProbe,
+        costCents: 0,
+        ...(opts.durableReceipt ? { durableReceipt: opts.durableReceipt } : {}),
+      };
     });
     const checkSourcePolicy = vi.fn(async (_toolId: string, d: string) => {
       if (opts.policyThrows) throw new Error('db blip');
@@ -158,6 +180,26 @@ describe('自建邮箱验证 · ToolBroker 闸门 + source_policy', () => {
     expect((input as { rcptTo: string[] }).rcptTo).toHaveLength(2); // 真实 + 随机(catch-all 探测)
     expect(ctx).toMatchObject({ workspaceId: 'w' });
     expect(r.status).toBe('VALID'); // 可达+MAIL FROM过+250+catch-all 证伪
+  });
+
+  it('forwards the exact smtp.rcpt_probe receipt to the service callback before returning a verdict', async () => {
+    const { broker } = fakeBroker({ durableReceipt: DURABLE_RECEIPT });
+    const onDurableReceipt = vi.fn();
+
+    await expect(new SelfHostedEmailVerifier(broker).verifyEmail('user@acme.de', {
+      workspaceId: 'w',
+      onDurableReceipt,
+    })).resolves.toMatchObject({ status: 'VALID' });
+
+    expect(onDurableReceipt).toHaveBeenCalledWith('smtp.rcpt_probe', DURABLE_RECEIPT);
+  });
+
+  it('fails closed instead of discarding a returned SMTP receipt when no consumer callback exists', async () => {
+    const { broker } = fakeBroker({ durableReceipt: DURABLE_RECEIPT });
+
+    await expect(new SelfHostedEmailVerifier(broker).verifyEmail('user@acme.de', {
+      workspaceId: 'w',
+    })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   });
 
   it('uses a stable catch-all address for the same durable run identity', async () => {

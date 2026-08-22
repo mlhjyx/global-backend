@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EmailGuesser } from './email-guesser';
 import { generateEmailCandidates } from './email-permutation';
-import { EmailVerdict, EmailVerificationAdapter } from './provider-contract';
+import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext } from './provider-contract';
 
 /** 假 SMTP 验证器：按地址查表返回 verdict，记录被探测顺序。 */
 function fakeVerifier(responder: (email: string) => EmailVerdict) {
@@ -21,6 +21,22 @@ const LIA = { basis: 'legitimate_interest' as const, ref: 'LIA-1' };
 const CTX = { lawfulBasis: LIA, nowIso: '2026-07-10T00:00:00.000Z' };
 
 describe('EmailGuesser · 命中路径', () => {
+  it('threads the durable SMTP receipt callback through every verifier invocation', async () => {
+    const onDurableReceipt = vi.fn();
+    const verifyEmail = vi.fn(async (_email: string, verifyCtx?: EmailVerifyContext) => {
+      expect(verifyCtx?.onDurableReceipt).toBe(onDurableReceipt);
+      return { status: 'VALID' as const, detail: 'smtp_accepted:250', costCents: 0 };
+    });
+    const adapter: EmailVerificationAdapter = { key: 'fake', verifyEmail };
+
+    await new EmailGuesser(adapter).guess(
+      { fullName: 'Hans Herold', domain: 'acme.de' },
+      { ...CTX, onDurableReceipt },
+    );
+
+    expect(verifyEmail).toHaveBeenCalledOnce();
+  });
+
   it('某候选 VALID → verified，命中即停', async () => {
     const { adapter, calls } = fakeVerifier((e) => (e === 'hans.herold@acme.de' ? { status: 'VALID', detail: 'smtp_accepted:250', costCents: 0 } : REJECT));
     const r = await new EmailGuesser(adapter).guess({ fullName: 'Hans Herold', domain: 'acme.de' }, CTX);

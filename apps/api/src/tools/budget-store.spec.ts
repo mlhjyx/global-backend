@@ -269,6 +269,59 @@ describe('PostgresBudgetStore', () => {
     }, 2, projection)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
   });
 
+  it('rejects cents receipt reconstruction when the locked row omits or drifts from caller projection facts', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
+    });
+    const common = {
+      charged_cents: 1n,
+      observed_cents: 1n,
+      reserved_cents: 3n,
+      cap_variance: false,
+      status: 'SETTLED',
+      replay: false,
+      account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+      authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      operation_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      operation_key: 'workspace:model:taxonomy.normalize:request-1',
+      receipt_usage: PROVIDER_REPORTED_FACTS.usage,
+      receipt_cost_basis: PROVIDER_REPORTED_FACTS.costBasis,
+    };
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: common.operation_id,
+      estimatedCents: 3,
+      replay: false,
+    };
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      common,
+    ]])).settle(
+      reservation,
+      1,
+      projection,
+      PROVIDER_REPORTED_FACTS,
+    )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      {
+        ...common,
+        result_schema_version: projection.schemaVersion,
+        result_schema: projection.schema,
+        result_digest: 'b'.repeat(64),
+        result_json: projection,
+      },
+    ]])).settle(
+      reservation,
+      1,
+      projection,
+      PROVIDER_REPORTED_FACTS,
+    )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+  });
+
   it('rejects receipt facts without a durable projection and native projections without facts', async () => {
     const store = new PostgresBudgetStore(fakePrisma([]));
     const centsReservation = {
@@ -447,6 +500,71 @@ describe('PostgresBudgetStore', () => {
     );
     expect(queries[0]?.values).toContain(JSON.stringify(facts.usage));
     expect(queries[0]?.values).toContain(facts.costBasis);
+  });
+
+  it('rejects microusd receipt reconstruction unless the complete locked row byte-matches the submitted projection', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
+    });
+    const facts = {
+      usage: {
+        currency: 'USD' as const,
+        unit: 'microusd' as const,
+        callCount: 1,
+        inputTokens: 7,
+        outputTokens: 3,
+        chargedMicrousd: '777',
+        upperBoundMicrousd: '10000',
+      },
+      costBasis: 'token_pricing' as const,
+    };
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      estimatedMicrousd: 10_000n,
+      replay: false,
+    };
+    const common = {
+      charged_microusd: 777n,
+      observed_microusd: 777n,
+      reserved_microusd: 10_000n,
+      cap_variance: false,
+      status: 'SETTLED',
+      replay: false,
+      account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+      authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      operation_id: reservation.operationId,
+      operation_key: 'workspace:model:taxonomy.normalize:request-1',
+      receipt_usage: facts.usage,
+      receipt_cost_basis: facts.costBasis,
+    };
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      common,
+    ]])).settleMicrousd(
+      reservation,
+      777n,
+      projection,
+      facts,
+    )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      {
+        ...common,
+        result_schema_version: projection.schemaVersion,
+        result_schema: 'fit-judgment/v1',
+        result_digest: projection.digest,
+        result_json: projection,
+      },
+    ]])).settleMicrousd(
+      reservation,
+      777n,
+      projection,
+      facts,
+    )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
   });
 
   it('reconstructs the same durable receipt for a replay reservation', async () => {

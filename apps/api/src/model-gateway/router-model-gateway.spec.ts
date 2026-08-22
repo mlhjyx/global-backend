@@ -214,6 +214,66 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     );
   });
 
+  it('uses provider-reported costUsd for both the charged amount and receipt basis even when tokens exist', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-123' },
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 7, outputTokens: 3, costUsd: 0.0125 },
+      callCount: 1,
+    });
+    const settle = vi.fn(async () => ({
+      chargedCents: 2,
+      observedCents: 2,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    );
+
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      2,
+      expect.objectContaining({ schema: 'taxonomy-code/v1' }),
+      {
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          inputTokens: 7,
+          outputTokens: 3,
+          chargedMicrousd: '12500',
+          upperBoundMicrousd: '400000',
+        },
+        costBasis: 'provider_reported',
+      },
+    );
+  });
+
   it('replays a registered typed model projection without a second provider wire', async () => {
     const provider = fakeProvider(async () => { throw new Error('must not execute'); });
     const restored = { data: { code: 'cached' }, provider: 'fake', model: 'm' };
@@ -299,6 +359,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       data: { code: 'ok' },
       provider: 'fake',
       model: 'm',
+      usage: { inputTokens: 5, outputTokens: 2, costUsd: 0.0125 },
     });
     const settle = vi.fn()
       .mockRejectedValueOnce(new Error('settlement ACK unavailable'))
@@ -333,6 +394,10 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
     expect(settle.mock.calls[0]?.[2]).toMatchObject({
       kind: 'model', schema: 'taxonomy-code/v1',
+    });
+    expect(settle.mock.calls[0]?.[3]).toMatchObject({
+      usage: { chargedMicrousd: '12500' },
+      costBasis: 'provider_reported',
     });
   });
 

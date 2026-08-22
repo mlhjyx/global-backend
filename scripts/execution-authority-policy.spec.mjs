@@ -242,6 +242,70 @@ test("scanner catches missing executable consumer imports and transaction calls"
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_CONSUMER_CALL_MISSING"));
 });
 
+test("scanner catches removed SMTP receipt callback propagation while the producer ID remains", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/providers/email-verify.provider.ts": (source) =>
+      `${source.replace(
+        "forwardDurableReceipt(ctx, SMTP_PROBE_TOOL, result.durableReceipt);",
+        "void result.durableReceipt; // smtp.rcpt_probe remains statically named",
+      )}\nconst retainedSmtpProducerId = 'smtp.rcpt_probe';\n`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_SMTP_RECEIPT_CALLBACK_MISSING"));
+});
+
+test("scanner catches removed contact receipt callback while static Tool and Model IDs remain", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/discovery.service.ts": (source) =>
+      `${source.replace(
+        "onDurableReceipt: captureContactReceipt,",
+        "onDurableReceipt: () => undefined,",
+      )}\nconst retainedContactProducerIds = ['crawl4ai.fetch', 'contact.find_decision_makers'];\n`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_CONTACT_RECEIPT_CALLBACK_MISSING"));
+});
+
+test("scanner catches DecisionMaker Tool/Model context propagation removal while task IDs remain", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/providers/decision-maker.provider.ts": (source) =>
+      source
+        .replace(
+          "return { ...ctx, taskContractId };",
+          "return { workspaceId: ctx.workspaceId, taskContractId };",
+        )
+        .replace(
+          "{ ...ctx, durableResultSchema: 'contact-decision-makers/v1' }",
+          "{ workspaceId: ctx.workspaceId, durableResultSchema: 'contact-decision-makers/v1' }",
+        ),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_CONTACT_PROVIDER_CALLBACK_MISSING"));
+});
+
+test("scanner catches removed SMTP/contact ACK import and call despite static producer IDs", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/discovery.service.ts": (source) =>
+      `${source.replaceAll(
+        "applyDomainAckConsumerTransactions",
+        "staticDomainAckCatalogLookup",
+      )}\nconst retainedReceiptProducerIds = ['smtp.rcpt_probe', 'contact.find_decision_makers'];\n`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DISCOVERY_ACK_TRANSACTION_MISSING"));
+});
+
+test("scanner catches caller-derived receipt reconstruction fallbacks", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/tools/budget-store.ts": (source) => source.replace(
+      "resultSchema: row.result_schema,",
+      "resultSchema: row.result_schema ?? durable?.schema,",
+    ),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_LEDGER_RECEIPT_FALLBACK"));
+});
+
 test("scanner catches PUBLIC SECURITY DEFINER access and broad principal admission", async () => {
   const tempRoot = await materializePolicyRepo({
     "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql": (source) =>
