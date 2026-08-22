@@ -24,10 +24,15 @@ const CTX = Object.freeze({
 
 function rejectingHarness(code: ExecutionBudgetGrantError['code']) {
   const withWorkspace = vi.fn();
-  const consumeWorkspaceGrant = vi
-    .fn()
-    .mockRejectedValue(new ExecutionBudgetGrantError(code));
-  const authority = { consumeWorkspaceGrant } as unknown as ExecutionBudgetAuthorityService;
+  const failure = new ExecutionBudgetGrantError(code);
+  const consumeWorkspaceGrant = vi.fn().mockRejectedValue(failure);
+  const verifyWorkspaceGrant = vi.fn().mockRejectedValue(failure);
+  const consumeVerifiedWorkspaceGrantInTransaction = vi.fn();
+  const authority = {
+    consumeWorkspaceGrant,
+    verifyWorkspaceGrant,
+    consumeVerifiedWorkspaceGrantInTransaction,
+  } as unknown as ExecutionBudgetAuthorityService;
   const prisma = { withWorkspace } as never;
   const providers = {
     routeContactDiscovery: vi.fn(),
@@ -43,11 +48,12 @@ function rejectingHarness(code: ExecutionBudgetGrantError['code']) {
     authority,
     budget,
     consumeWorkspaceGrant,
+    verifyWorkspaceGrant,
     providers,
     withWorkspace,
     company: new CompanyService(prisma, authority),
-    icp: new IcpService(prisma, {} as never, {} as never, budget as never, authority),
-    discovery: new DiscoveryService(prisma, providers as never, budget as never, authority),
+    icp: new IcpService(prisma, {} as never, {} as never, authority, budget as never),
+    discovery: new DiscoveryService(prisma, providers as never, authority, budget as never),
   };
 }
 
@@ -79,12 +85,40 @@ describe('workspace HTTP authority cutover', () => {
       await expect(call()).rejects.toMatchObject({ code });
     }
 
-    expect(harness.consumeWorkspaceGrant).toHaveBeenCalledTimes(calls.length);
+    expect(harness.consumeWorkspaceGrant).toHaveBeenCalledTimes(5);
+    expect(harness.verifyWorkspaceGrant).toHaveBeenCalledTimes(2);
     expect(harness.withWorkspace).not.toHaveBeenCalled();
     expect(harness.providers.routeContactDiscovery).not.toHaveBeenCalled();
     expect(harness.providers.routeEmailVerification).not.toHaveBeenCalled();
     expect(harness.budget.open).not.toHaveBeenCalled();
     expect(harness.budget.openAuthorized).not.toHaveBeenCalled();
+  });
+
+  it('rejects an exact consumed-token replay before discovery DB/provider work', async () => {
+    const withWorkspace = vi.fn();
+    const providers = { routeContactDiscovery: vi.fn() };
+    const authority = {
+      consumeWorkspaceGrant: vi.fn(async () => ({
+        authorityId: '88888888-8888-4888-8888-888888888888',
+        replay: true,
+        scopeKey: WORKSPACE_ID,
+        accountKey: `discovery.run:company:${COMPANY_ID}:${'a'.repeat(64)}`,
+        purpose: 'discovery.run',
+        subjectType: 'company',
+        subjectId: COMPANY_ID,
+      })),
+    };
+    const service = new DiscoveryService(
+      { withWorkspace } as never,
+      providers as never,
+      authority as never,
+    );
+
+    await expect(
+      service.discoverContacts(CTX, COMPANY_ID, 'consumed-grant'),
+    ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_REUSED' });
+    expect(withWorkspace).not.toHaveBeenCalled();
+    expect(providers.routeContactDiscovery).not.toHaveBeenCalled();
   });
 
   it.each([

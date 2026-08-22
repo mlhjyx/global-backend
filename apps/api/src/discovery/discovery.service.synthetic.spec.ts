@@ -2,13 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { DiscoveryService } from './discovery.service';
 
 const ctx = { workspaceId: 'ws-1', userId: 'user-1', roles: [] } as never;
+const authority = {
+  consumeWorkspaceGrant: vi.fn(async () => ({
+    authorityId: '20000000-0000-4000-8000-000000000002',
+    scopeKey: 'ws-1',
+    accountKey: 'discovery.run:company:company-synthetic:request',
+    purpose: 'discovery.run',
+    subjectType: 'company',
+    subjectId: 'company-synthetic',
+  })),
+};
 
 function serviceWithTx(tx: unknown, providers: unknown = {}): DiscoveryService {
   const prisma = {
     withWorkspace: async <T>(_workspaceId: string, callback: (client: unknown) => Promise<T>): Promise<T> =>
       callback(tx),
   };
-  return new DiscoveryService(prisma as never, providers as never);
+  return new DiscoveryService(prisma as never, providers as never, authority as never);
 }
 
 describe('DiscoveryService synthetic provenance read quarantine', () => {

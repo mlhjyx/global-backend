@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { RequestContext } from '../auth/request-context';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 import {
@@ -25,6 +26,7 @@ export interface WorkspaceExecutionBudgetGrantInput {
 
 export interface ExecutionBudgetBinding {
   readonly authorityId: string;
+  readonly replay: boolean;
   readonly scopeKey: string;
   readonly accountKey: string;
   readonly purpose: ExecutionBudgetPurpose;
@@ -92,6 +94,23 @@ function workspaceBindingIdentity(
   return Object.freeze({ accountKey, scopeKey: authority.workspaceId });
 }
 
+function executionBudgetBinding(
+  authority: VerifiedExecutionBudgetAuthority,
+  authorityId: string,
+  replay: boolean,
+): ExecutionBudgetBinding {
+  const { accountKey, scopeKey } = workspaceBindingIdentity(authority);
+  return Object.freeze({
+    authorityId,
+    replay,
+    scopeKey,
+    accountKey,
+    purpose: authority.purpose,
+    subjectType: authority.subjectType,
+    subjectId: authority.subjectId,
+  });
+}
+
 @Injectable()
 export class ExecutionBudgetAuthorityService {
   constructor(
@@ -120,18 +139,38 @@ export class ExecutionBudgetAuthorityService {
     const authority = exactVerifiedAuthority(
       await this.verifyWorkspaceGrant(input),
     );
-    const { accountKey, scopeKey } = workspaceBindingIdentity(authority);
+    const { accountKey } = workspaceBindingIdentity(authority);
     const consumed = await this.repository.consumeWorkspaceAndOpen(
       authority,
       accountKey,
     );
-    return Object.freeze({
-      authorityId: consumed.authorityId,
-      scopeKey,
-      accountKey,
-      purpose: authority.purpose,
-      subjectType: authority.subjectType,
-      subjectId: authority.subjectId,
-    });
+    return executionBudgetBinding(
+      authority,
+      consumed.authorityId,
+      consumed.replay,
+    );
+  }
+
+  async consumeVerifiedWorkspaceGrantInTransaction(
+    authority: VerifiedExecutionBudgetAuthority,
+    transaction: Prisma.TransactionClient,
+  ): Promise<ExecutionBudgetBinding> {
+    const exact = exactVerifiedAuthority(authority);
+    const { accountKey } = workspaceBindingIdentity(exact);
+    const consumed =
+      await this.repository.consumeWorkspaceAndOpenInTransaction(
+        transaction,
+        exact,
+        accountKey,
+      );
+    return executionBudgetBinding(exact, consumed.authorityId, consumed.replay);
+  }
+}
+
+export function assertFreshExecutionBudgetBinding(
+  binding: ExecutionBudgetBinding,
+): void {
+  if (binding.replay) {
+    throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED');
   }
 }

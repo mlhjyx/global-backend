@@ -11,6 +11,17 @@ const CTX: RequestContext = {
   userId: 'pilot-compliance-operator',
   roles: ['pilot_compliance'],
 };
+const VERIFY_ACCOUNT_KEY = `contact.verify:contact_point:88888888-8888-4888-8888-888888888888:${'a'.repeat(64)}`;
+const authority = {
+  consumeWorkspaceGrant: vi.fn(async () => ({
+    authorityId: '44444444-4444-4444-8444-444444444444',
+    scopeKey: WORKSPACE_ID,
+    accountKey: VERIFY_ACCOUNT_KEY,
+    purpose: 'contact.verify',
+    subjectType: 'contact_point',
+    subjectId: '88888888-8888-4888-8888-888888888888',
+  })),
+};
 
 type SuppressionRow = {
   id: string;
@@ -468,7 +479,11 @@ describe('Suppression governance', () => {
     const prisma = {
       withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
     };
-    const service = new DiscoveryService(prisma as never, { routeEmailVerification } as never);
+    const service = new DiscoveryService(
+      prisma as never,
+      { routeEmailVerification } as never,
+      authority as never,
+    );
 
     const result = await service.verifyContactPoint(CTX, point.id);
 
@@ -528,21 +543,26 @@ describe('Suppression governance', () => {
       open: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
     };
-    const service = new DiscoveryService(prisma as never, { routeEmailVerification } as never, budgetStore as never);
+    const service = new DiscoveryService(
+      prisma as never,
+      { routeEmailVerification } as never,
+      authority as never,
+      budgetStore as never,
+    );
 
     const result = await service.verifyContactPoint(CTX, point.id);
 
     expect(verifyEmail).toHaveBeenCalledTimes(1);
     expect(budgetStore.open).toHaveBeenCalledWith({
       workspaceId: WORKSPACE_ID,
-      accountKey: `verify-contact-point:${point.id}`,
+      accountKey: VERIFY_ACCOUNT_KEY,
       capCents: expect.any(Number),
       replayScope: true,
     });
-    expect(verifyEmail.mock.calls[0]?.[1]).toMatchObject({ runId: `verify-contact-point:${point.id}` });
+    expect(verifyEmail.mock.calls[0]?.[1]).toMatchObject({ runId: VERIFY_ACCOUNT_KEY });
     expect(budgetStore.close).toHaveBeenCalledWith({
       workspaceId: WORKSPACE_ID,
-      accountKey: `verify-contact-point:${point.id}`,
+      accountKey: VERIFY_ACCOUNT_KEY,
     });
     expect(result).toMatchObject({ status: 'BLOCKED' });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'BLOCKED' }) }));

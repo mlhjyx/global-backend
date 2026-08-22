@@ -2,22 +2,22 @@ import type { ModelResult } from '../model-gateway/types';
 import type { AiContext } from '../model-gateway/types';
 import { runBudgetCents } from '../tools/budget';
 import type { BudgetStore } from '../tools/budget-store';
+import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-authority.service';
 
 export async function executeIcpBudgetedTask<Output>(input: {
   budgetStore: BudgetStore;
-  workspaceId: string;
-  accountKey: string;
+  binding: ExecutionBudgetBinding;
   execute: (context: Pick<AiContext, 'runId' | 'genericReplay'>) => Promise<ModelResult<Output>>;
 }): Promise<ModelResult<Output>> {
   await input.budgetStore.open({
-    workspaceId: input.workspaceId,
-    accountKey: input.accountKey,
+    workspaceId: input.binding.scopeKey,
+    accountKey: input.binding.accountKey,
     capCents: runBudgetCents(),
     replayScope: true,
   });
   try {
     return await input.execute({
-      runId: input.accountKey,
+      runId: input.binding.accountKey,
       genericReplay: {
         schema: 'icp-product-result/v1',
         project: (result) => ({
@@ -42,6 +42,9 @@ export async function executeIcpBudgetedTask<Output>(input: {
       },
     });
   } finally {
-    await input.budgetStore.close({ workspaceId: input.workspaceId, accountKey: input.accountKey });
+    await input.budgetStore.close({
+      workspaceId: input.binding.scopeKey,
+      accountKey: input.binding.accountKey,
+    });
   }
 }

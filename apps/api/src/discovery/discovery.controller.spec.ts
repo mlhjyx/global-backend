@@ -28,7 +28,7 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
       allowPersonalWithoutBasis: true,
       maxContacts: 5,
       maxProbe: 3,
-    });
+    }, undefined);
   });
 
   it('无 body → lawfulBasis undefined（无基础即门 blocked，诚实不探）；其余透传 undefined', async () => {
@@ -40,6 +40,6 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
       allowPersonalWithoutBasis: undefined,
       maxContacts: undefined,
       maxProbe: undefined,
-    });
+    }, undefined);
   });
 });

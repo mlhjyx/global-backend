@@ -21,6 +21,11 @@ import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-env
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { CompanyDto, OfferingDto } from './dto/company.dto';
+import {
+  ApiExecutionBudgetGrant,
+  asExecutionBudgetHttpBoundary,
+  ExecutionBudgetGrant,
+} from '../execution-budget/execution-budget-grant.decorator';
 
 @ApiTags('Companies')
 @ApiBearerAuth()
@@ -39,13 +44,22 @@ export class CompanyController {
   })
   // name 必须与 @Headers('idempotency-key') 推断名精确一致（含大小写）才会合并成单个 required:false 参数
   @ApiHeader({ name: 'idempotency-key', required: false, description: '幂等键（客户端生成，如 uuid）' })
+  @ApiExecutionBudgetGrant()
   @ApiEnvelope(CompanyDto, { status: 202 })
   async create(
     @Ctx() ctx: RequestContext,
     @Body() dto: CreateCompanyDto,
     @Headers('idempotency-key') idempotencyKey?: string,
+    @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<CompanyDto>> {
-    const { company } = await this.companies.create(ctx, dto, idempotencyKey?.trim() || undefined);
+    const { company } = await asExecutionBudgetHttpBoundary(() =>
+      this.companies.create(
+        ctx,
+        dto,
+        idempotencyKey?.trim() || undefined,
+        compactJws,
+      ),
+    );
     return envelope(CompanyDto.from(company));
   }
 

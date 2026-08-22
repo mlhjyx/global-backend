@@ -32,6 +32,11 @@ import {
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { LawfulBasisKind } from './provider-contract';
 import { SUPPRESSION_TYPES } from './suppression-value';
+import {
+  ApiExecutionBudgetGrant,
+  asExecutionBudgetHttpBoundary,
+  ExecutionBudgetGrant,
+} from '../execution-budget/execution-budget-grant.decorator';
 
 // eslint-disable-next-line no-control-regex -- boundary contract intentionally rejects ASCII control characters.
 const NO_CONTROL_CHARS = new RegExp('^[^\\u0000-\\u001f\\u007f]*$', 'u');
@@ -237,6 +242,7 @@ export class DiscoveryController {
   @HttpCode(202)
   @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）',
   })
+  @ApiExecutionBudgetGrant()
   @ApiEnvelope(
     {
       type: 'object',
@@ -248,8 +254,14 @@ export class DiscoveryController {
     },
     { status: 202 },
   )
-  async execute(@Ctx() ctx: RequestContext, @Param('planId', ParseUUIDPipe) planId: string) {
-    const run = await this.discovery.executePlan(ctx, planId);
+  async execute(
+    @Ctx() ctx: RequestContext,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ) {
+    const run = await asExecutionBudgetHttpBoundary(() =>
+      this.discovery.executePlan(ctx, planId, compactJws),
+    );
     return envelope({ runId: run.id, status: run.status });
   }
 
@@ -318,13 +330,22 @@ export class DiscoveryController {
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）',
   })
+  @ApiExecutionBudgetGrant()
   @ApiEnvelope(
     { type: 'object', additionalProperties: true, description: '联系人发现结果（新建联系人/联系点计数）',
     },
     { status: 201 },
   )
-  async discoverContacts(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string) {
-    return envelope(await this.discovery.discoverContacts(ctx, id));
+  async discoverContacts(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ) {
+    return envelope(
+      await asExecutionBudgetHttpBoundary(() =>
+        this.discovery.discoverContacts(ctx, id, compactJws),
+      ),
+    );
   }
 
   @Post('contact-points/:pointId/verify')
@@ -338,6 +359,7 @@ export class DiscoveryController {
     description:
       '合规门：职能邮箱默认自动验证；人名邮箱（个人数据）需 lawfulBasis 或 allowPersonalWithoutBasis，否则 BLOCKED（不探测）。',
   })
+  @ApiExecutionBudgetGrant()
   // body 可选：职能邮箱无需合规上下文即可 body-less 调用；仅人名邮箱要 lawfulBasis。
   @ApiBody({ type: VerifyContactPointDto, required: false })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: '验证结果（status + 探测细节留痕）',
@@ -346,15 +368,26 @@ export class DiscoveryController {
     @Ctx() ctx: RequestContext,
     @Param('pointId', ParseUUIDPipe) pointId: string,
     @Body() dto?: VerifyContactPointDto,
+    @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
-      await this.discovery.verifyContactPoint(ctx, pointId, {
-        lawfulBasis: dto?.lawfulBasis
-          ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote,
-            }
-          : undefined,
-        allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
-      }),
+      await asExecutionBudgetHttpBoundary(() =>
+        this.discovery.verifyContactPoint(
+          ctx,
+          pointId,
+          {
+            lawfulBasis: dto?.lawfulBasis
+              ? {
+                  basis: dto.lawfulBasis,
+                  ref: dto.lawfulBasisRef,
+                  note: dto.lawfulBasisNote,
+                }
+              : undefined,
+            allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
+          },
+          compactJws,
+        ),
+      ),
     );
   }
 
@@ -370,21 +403,37 @@ export class DiscoveryController {
       '合规门：猜出的都是人名邮箱（个人数据），需 lawfulBasis 或 allowPersonalWithoutBasis，否则一律 blocked（零探测）。' +
       'RISKY 未证实猜测落库但 allowedActions 不含 outreach（不可群发）；suppression 命中不落。',
   })
+  @ApiExecutionBudgetGrant()
   // body 可选：无 body 则全 blocked（无 lawfulBasis），诚实不探。
   @ApiBody({ type: GuessEmailsDto, required: false })
   @ApiEnvelope({ type: 'object', additionalProperties: true, description: '邮箱猜测结果（补全计数 + 逐决策人状态/落库态）',
   })
-  async guessEmails(@Ctx() ctx: RequestContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto?: GuessEmailsDto) {
+  async guessEmails(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto?: GuessEmailsDto,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ) {
     return envelope(
-      await this.discovery.guessEmailsForCompany(ctx, id, {
-        lawfulBasis: dto?.lawfulBasis
-          ? { basis: dto.lawfulBasis, ref: dto.lawfulBasisRef, note: dto.lawfulBasisNote,
-            }
-          : undefined,
-        allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
-        maxContacts: dto?.maxContacts,
-        maxProbe: dto?.maxProbe,
-      }),
+      await asExecutionBudgetHttpBoundary(() =>
+        this.discovery.guessEmailsForCompany(
+          ctx,
+          id,
+          {
+            lawfulBasis: dto?.lawfulBasis
+              ? {
+                  basis: dto.lawfulBasis,
+                  ref: dto.lawfulBasisRef,
+                  note: dto.lawfulBasisNote,
+                }
+              : undefined,
+            allowPersonalWithoutBasis: dto?.allowPersonalWithoutBasis,
+            maxContacts: dto?.maxContacts,
+            maxProbe: dto?.maxProbe,
+          },
+          compactJws,
+        ),
+      ),
     );
   }
 

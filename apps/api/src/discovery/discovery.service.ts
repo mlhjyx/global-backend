@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
@@ -25,6 +26,12 @@ import {
   isSyntheticDiscoveryProvenance,
 } from './evidence-license';
 import { collectProductReadPage } from './product-read-pagination';
+import {
+  ExecutionBudgetAuthorityService,
+  assertFreshExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-authority.service';
+import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
@@ -49,6 +56,7 @@ export class DiscoveryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly providers: DiscoveryProviderRegistry,
+    private readonly authority: ExecutionBudgetAuthorityService,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
   ) {}
 
@@ -57,8 +65,22 @@ export class DiscoveryService {
   }
 
   /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
-  async executePlan(ctx: RequestContext, planId: string) {
+  async executePlan(ctx: RequestContext, planId: string, compactJws?: string) {
+    const verified = await this.authority.verifyWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /query-plans/:planId/execute',
+        planId,
+      }),
+    });
+    const runId = randomUUID();
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
+        verified,
+        tx,
+      );
+      assertFreshExecutionBudgetBinding(binding);
       const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: planId },
       });
       if (!plan) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'query plan not found' },
@@ -70,7 +92,7 @@ export class DiscoveryService {
         });
       }
       const run = await tx.discoveryRun.create({
-        data: { workspaceId: ctx.workspaceId, planId, icpId: plan.icpId },
+        data: { id: runId, workspaceId: ctx.workspaceId, planId, icpId: plan.icpId },
       });
       await tx.outboxEvent.create({
         data: {
@@ -78,7 +100,11 @@ export class DiscoveryService {
           eventType: 'DiscoveryRunRequested',
           aggregateType: 'DiscoveryRun',
           aggregateId: run.id,
-          payload: { planId, icpId: plan.icpId },
+          payload: {
+            planId,
+            icpId: plan.icpId,
+            executionBudget: this.outboxBinding(binding),
+          },
         },
       });
       return run;
@@ -165,7 +191,20 @@ export class DiscoveryService {
    * 短事务①载入 → **事务外**网络发现（decision_maker 抓多页 + LLM，可达数分钟，绝不持 DB 事务跨这段）
    * → 短事务②持久化（与 verifyContactPoint 同一纪律）。
    */
-  async discoverContacts(ctx: RequestContext, companyId: string) {
+  async discoverContacts(
+    ctx: RequestContext,
+    companyId: string,
+    compactJws?: string,
+  ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /canonical-companies/:id/discover-contacts',
+        companyId,
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.canonicalCompany.findUnique({
         where: { id: companyId },
@@ -228,7 +267,7 @@ export class DiscoveryService {
       this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
         companyMayUseExternalProcessing(tx, ctx.workspaceId, companyId),
       );
-    const accountKey = `contact-discovery:${companyId}`;
+    const accountKey = binding.accountKey;
     const budgets = this.budgets();
     await budgets.open({ workspaceId: ctx.workspaceId, accountKey, capCents: runBudgetCents() });
     try {
@@ -320,7 +359,18 @@ export class DiscoveryService {
       maxContacts?: number;
       maxProbe?: number;
     },
+    compactJws?: string,
   ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /canonical-companies/:id/guess-emails',
+        companyId,
+        body: this.optionalRequestBody(opts),
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.canonicalCompany.findUnique({
         where: { id: companyId },
@@ -391,7 +441,7 @@ export class DiscoveryService {
       fullName: string;
       result: GuessResult;
     }[] = [];
-    const accountKey = `email-guess:${companyId}`;
+    const accountKey = binding.accountKey;
     const budgets = this.budgets();
     await budgets.open({ workspaceId: ctx.workspaceId, accountKey, capCents: runBudgetCents() });
     try {
@@ -499,7 +549,18 @@ export class DiscoveryService {
     ctx: RequestContext,
     pointId: string,
     opts?: { lawfulBasis?: LawfulBasis; allowPersonalWithoutBasis?: boolean },
+    compactJws?: string,
   ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /contact-points/:pointId/verify',
+        pointId,
+        body: this.optionalRequestBody(opts),
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     // 短事务①：载入 point + 分级 + 禁联命中 + 选定验证器。**不**在事务内做网络验证——邮箱验证可能经
     // ToolBroker 走 SMTP 出网（含限流等待 + 最长 8s 探测），持 DB 连接跨这段会拖垮连接池/触发事务超时。
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -619,7 +680,7 @@ export class DiscoveryService {
       assertProductDiscoveryProvenance({ providerKey: loaded.adapter.key });
       const verifyCtx: EmailVerifyContext = {
         workspaceId: ctx.workspaceId,
-        runId: `verify-contact-point:${pointId}`,
+        runId: binding.accountKey,
         kind: loaded.kind,
         lawfulBasis: recordedBasis,
         allowPersonalWithoutBasis: opts?.allowPersonalWithoutBasis,
@@ -633,7 +694,7 @@ export class DiscoveryService {
             }),
           ),
       };
-      const accountKey = `verify-contact-point:${pointId}`;
+      const accountKey = binding.accountKey;
       const budgets = this.budgets();
       await budgets.open({
         workspaceId: ctx.workspaceId,
@@ -741,6 +802,27 @@ export class DiscoveryService {
         },
       };
     });
+  }
+
+  private optionalRequestBody(value: unknown): unknown {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    const entries = Object.entries(value as Record<string, unknown>).filter(
+      ([, item]) => item !== undefined,
+    );
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+  }
+
+  private outboxBinding(binding: ExecutionBudgetBinding) {
+    return {
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+      purpose: binding.purpose,
+      subjectType: binding.subjectType,
+      subjectId: binding.subjectId,
+    };
   }
 
   // ── Suppression 治理 ──────────────────────────────────────────────────────

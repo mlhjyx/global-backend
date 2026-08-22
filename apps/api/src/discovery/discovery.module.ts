@@ -7,8 +7,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
 import { PostgresBudgetStore, TOOL_BUDGET_STORE, type BudgetStore } from '../tools/budget-store';
+import { ExecutionBudgetModule } from '../execution-budget/execution-budget.module';
 
 @Module({
+  imports: [ExecutionBudgetModule],
   controllers: [DiscoveryController],
   providers: [
     {

@@ -7,7 +7,6 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { RequestContext } from '../auth/request-context';
@@ -20,6 +19,11 @@ import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-ta
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
 import { executeIcpBudgetedTask } from './icp-budget-execution';
+import {
+  assertFreshExecutionBudgetBinding,
+  ExecutionBudgetAuthorityService,
+} from '../execution-budget/execution-budget-authority.service';
+import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 
 interface IcpModelOutput {
   name: string;
@@ -63,11 +67,25 @@ export class IcpService {
     private readonly prisma: PrismaService,
     private readonly gateway: ModelGateway,
     private readonly runtimeTelemetry: LangfuseRuntimeTelemetryService,
+    private readonly authority: ExecutionBudgetAuthorityService,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
   ) {}
 
   /** AI-design an ICP from the seller company's APPROVED claims (PRD 5.4 / 7.5). */
-  async generateFromCompany(ctx: RequestContext, companyId: string) {
+  async generateFromCompany(
+    ctx: RequestContext,
+    companyId: string,
+    compactJws?: string,
+  ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /companies/:companyId/icps',
+        companyId,
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     const { company, claims, offerings } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
       if (!company) {
@@ -97,8 +115,7 @@ export class IcpService {
 
     const result = await executeIcpBudgetedTask<IcpModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP generation requires an authoritative BudgetStore'),
-      workspaceId: ctx.workspaceId,
-      accountKey: `icp:design:${companyId}:${createHash('sha256').update(prompt).digest('hex').slice(0, 24)}`,
+      binding,
       execute: (budgetContext) => executeStructuredTaskWithRuntime<IcpModelOutput>(
         this.gateway,
         {
@@ -422,7 +439,20 @@ export class IcpService {
   // ── 查询计划（LED-005）────────────────────────────────────────────────────
 
   /** AI translates an ACTIVE ICP into an ordered multi-source query plan (Discover input). */
-  async generateQueryPlan(ctx: RequestContext, icpId: string) {
+  async generateQueryPlan(
+    ctx: RequestContext,
+    icpId: string,
+    compactJws?: string,
+  ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /icps/:icpId/query-plans',
+        icpId,
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     const icp = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
     );
@@ -445,8 +475,7 @@ export class IcpService {
     const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`;
     const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
-      workspaceId: ctx.workspaceId,
-      accountKey: `icp:query-plan:${icpId}:${createHash('sha256').update(queryPlanPrompt).digest('hex').slice(0, 24)}`,
+      binding,
       execute: (budgetContext) => executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
         this.gateway,
         {

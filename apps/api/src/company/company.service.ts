@@ -1,15 +1,77 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { assertPublicHttpUrl } from '../adapters/url-guard';
+import {
+  ExecutionBudgetAuthorityService,
+  assertFreshExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-authority.service';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
+import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 
 type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
 
+type StoredCompanyReplay = Readonly<{
+  schemaVersion: 'company-authority-replay/v1';
+  requestSha256: string;
+  authorityTokenSha256: string;
+  company: CompanyRow & { createdAt: string; updatedAt: string };
+}>;
+
+function restoreCompany(value: unknown): CompanyRow | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const candidate =
+    record.schemaVersion === 'company-authority-replay/v1'
+      ? record.company
+      : record;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return null;
+  }
+  const stored = candidate as CompanyRow & {
+    createdAt: string | Date;
+    updatedAt: string | Date;
+  };
+  if (typeof stored.id !== 'string') return null;
+  return {
+    ...stored,
+    createdAt: new Date(stored.createdAt),
+    updatedAt: new Date(stored.updatedAt),
+  } as CompanyRow;
+}
+
+function storedReplay(value: unknown): StoredCompanyReplay | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== 'company-authority-replay/v1' ||
+    typeof record.requestSha256 !== 'string' ||
+    typeof record.authorityTokenSha256 !== 'string'
+  ) {
+    return null;
+  }
+  return value as StoredCompanyReplay;
+}
+
+function idempotencyConflict(): ConflictException {
+  return new ConflictException({
+    error: {
+      code: 'IDEMPOTENCY_CONFLICT',
+      message: 'idempotency key is already bound to another request',
+    },
+  });
+}
+
 @Injectable()
 export class CompanyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authority: ExecutionBudgetAuthorityService,
+  ) {}
 
   /**
    * Create a DRAFT profile and append the event that will drive understanding.
@@ -20,8 +82,54 @@ export class CompanyService {
     ctx: RequestContext,
     dto: CreateCompanyDto,
     idempotencyKey?: string,
+    compactJws?: string,
   ): Promise<{ company: CompanyRow; replayed: boolean }> {
+    const scope = workspaceExecutionBudgetRequestScope({
+      operation: 'POST /companies',
+      body: {
+        website: dto.website,
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+      },
+    });
+    let verified;
+    try {
+      verified = await this.authority.verifyWorkspaceGrant({
+        compactJws,
+        identity: ctx,
+        scope,
+      });
+    } catch (error) {
+      if (
+        error instanceof ExecutionBudgetGrantError &&
+        error.code === 'EXECUTION_BUDGET_GRANT_EXPIRED' &&
+        idempotencyKey &&
+        typeof compactJws === 'string'
+      ) {
+        const prior = await this.readPrior(ctx, idempotencyKey);
+        const stored = storedReplay(prior?.response);
+        const tokenSha256 = createHash('sha256')
+          .update(compactJws)
+          .digest('hex');
+        const company = restoreCompany(prior?.response);
+        if (
+          prior?.requestHash === scope.requestSha256 &&
+          stored?.requestSha256 === scope.requestSha256 &&
+          stored.authorityTokenSha256 === tokenSha256 &&
+          company
+        ) {
+          return { company, replayed: true };
+        }
+      }
+      throw error;
+    }
+
+    if (idempotencyKey) {
+      const prior = await this.readPrior(ctx, idempotencyKey);
+      if (prior) return this.replay(prior, scope.requestSha256);
+    }
+
     await assertPublicHttpUrl(dto.website);
+    const companyId = randomUUID();
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       if (idempotencyKey) {
@@ -35,11 +143,7 @@ export class CompanyService {
           },
         });
         if (prior) {
-          const stored = prior.response as unknown as CompanyRow & { createdAt: string; updatedAt: string };
-          return {
-            company: { ...stored, createdAt: new Date(stored.createdAt), updatedAt: new Date(stored.updatedAt) },
-            replayed: true,
-          };
+          return this.replay(prior, scope.requestSha256);
         }
       }
 
@@ -50,8 +154,15 @@ export class CompanyService {
         create: { id: ctx.workspaceId },
       });
 
+      const binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
+        verified,
+        tx,
+      );
+      assertFreshExecutionBudgetBinding(binding);
+
       const company = await tx.companyProfile.create({
         data: {
+          id: companyId,
           workspaceId: ctx.workspaceId,
           name: dto.name ?? new URL(dto.website).hostname,
           website: dto.website,
@@ -66,7 +177,10 @@ export class CompanyService {
           eventType: 'CompanyProfileCreated',
           aggregateType: 'CompanyProfile',
           aggregateId: company.id,
-          payload: { website: dto.website },
+          payload: {
+            website: dto.website,
+            executionBudget: this.outboxBinding(binding),
+          },
         },
       });
 
@@ -76,13 +190,55 @@ export class CompanyService {
             workspaceId: ctx.workspaceId,
             endpoint: 'POST /companies',
             key: idempotencyKey,
-            response: company as unknown as Prisma.InputJsonValue,
+            requestHash: scope.requestSha256,
+            response: {
+              schemaVersion: 'company-authority-replay/v1',
+              requestSha256: scope.requestSha256,
+              authorityTokenSha256: verified.tokenSha256,
+              company,
+            } as unknown as Prisma.InputJsonValue,
           },
         });
       }
 
       return { company, replayed: false };
     });
+  }
+
+  private readPrior(ctx: RequestContext, idempotencyKey: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.idempotencyKey.findUnique({
+        where: {
+          workspaceId_endpoint_key: {
+            workspaceId: ctx.workspaceId,
+            endpoint: 'POST /companies',
+            key: idempotencyKey,
+          },
+        },
+      }),
+    );
+  }
+
+  private replay(
+    prior: { response: Prisma.JsonValue; requestHash: string | null },
+    requestSha256: string,
+  ): { company: CompanyRow; replayed: true } {
+    const company = restoreCompany(prior.response);
+    if (prior.requestHash !== requestSha256 || !company) {
+      throw idempotencyConflict();
+    }
+    return { company, replayed: true };
+  }
+
+  private outboxBinding(binding: ExecutionBudgetBinding) {
+    return {
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+      purpose: binding.purpose,
+      subjectType: binding.subjectType,
+      subjectId: binding.subjectId,
+    };
   }
 
   async list(ctx: RequestContext, limit: number, cursor?: string) {

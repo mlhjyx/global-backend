@@ -382,19 +382,40 @@ export class ExecutionBudgetAuthorityRepository {
 
       return await this.prisma.withWorkspace(
         authority.workspaceId,
-        async (tx) => {
-          const consumption = parseAuthorityRow(
-            await consumeWorkspaceWithTransaction(tx, authority),
-          );
-          const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
-            Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
-            ${authority.workspaceId}, ${consumption.authorityId}::uuid,
-            ${accountKey}, ${true}
-          )`,
-          );
-          return parseAuthorizedOpenRow(opened, consumption);
-        },
+        (tx) =>
+          this.consumeWorkspaceAndOpenInTransaction(
+            tx,
+            authority,
+            accountKey,
+          ),
       );
+    } catch (error) {
+      throw mapExecutionBudgetPersistenceError(error);
+    }
+  }
+
+  /**
+   * Joins an existing workspace transaction so authority consumption/account
+   * identity and the endpoint's first durable business facts commit together.
+   */
+  async consumeWorkspaceAndOpenInTransaction(
+    tx: Prisma.TransactionClient,
+    authority: VerifiedExecutionBudgetAuthority,
+    accountKey: string,
+  ): Promise<ExecutionBudgetWorkspaceAccountPersistenceResult> {
+    try {
+      assertWorkspaceAuthority(authority);
+      assertBoundedText(accountKey, 200, 'EXECUTION_BUDGET_GRANT_INVALID');
+      const consumption = parseAuthorityRow(
+        await consumeWorkspaceWithTransaction(tx, authority),
+      );
+      const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
+        Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
+          ${authority.workspaceId}, ${consumption.authorityId}::uuid,
+          ${accountKey}, ${true}
+        )`,
+      );
+      return parseAuthorizedOpenRow(opened, consumption);
     } catch (error) {
       throw mapExecutionBudgetPersistenceError(error);
     }

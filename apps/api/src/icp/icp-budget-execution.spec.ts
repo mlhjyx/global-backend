@@ -19,8 +19,15 @@ describe('ICP product model budget execution', () => {
 
     await expect(executeIcpBudgetedTask({
       budgetStore: budgetStore as never,
-      workspaceId: '10000000-0000-4000-8000-000000000001',
-      accountKey: 'icp:design:request-digest',
+      binding: {
+        authorityId: '20000000-0000-4000-8000-000000000002',
+        replay: false,
+        scopeKey: '10000000-0000-4000-8000-000000000001',
+        accountKey: 'icp:design:request-digest',
+        purpose: 'icp.design',
+        subjectType: 'company',
+        subjectId: '30000000-0000-4000-8000-000000000003',
+      },
       execute,
     })).resolves.toMatchObject({ data: { name: 'ICP', weight: 0.75 } });
     expect(budgetStore.open).toHaveBeenCalledWith(expect.objectContaining({

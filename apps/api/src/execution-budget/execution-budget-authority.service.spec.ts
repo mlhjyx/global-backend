@@ -147,6 +147,7 @@ describe('ExecutionBudgetAuthorityService', () => {
 
       expect(binding).toEqual({
         authorityId: AUTHORITY_ID,
+        replay,
         scopeKey: WORKSPACE_ID,
         accountKey: ACCOUNT_KEY,
         purpose: 'icp.design',
@@ -179,6 +180,15 @@ describe('ExecutionBudgetAuthorityService', () => {
     ).not.toContain(COMPACT_JWS);
     expect(authority).not.toHaveProperty('compactJws');
     expect(authority).toMatchObject({ tokenSha256: TOKEN_SHA256 });
+  });
+
+  it('preserves repository replay in the immutable binding for endpoint admission', async () => {
+    const { service } = serviceHarness({ replay: true });
+
+    await expect(service.consumeWorkspaceGrant(input())).resolves.toMatchObject({
+      authorityId: AUTHORITY_ID,
+      replay: true,
+    });
   });
 
   it('does not echo a raw JWS when atomic persistence rejects', async () => {
