@@ -87,6 +87,14 @@ export interface PatentSearchOptions {
   maxRows?: number;
 }
 
+export interface PatentSearchWithCostFactsResult {
+  readonly patents: PatentRecord[];
+  readonly queried: boolean;
+  readonly maximumBytesBilled: string;
+  readonly observedBytesBilled: string | null;
+  readonly maxRows: number;
+}
+
 /**
  * 归一 assignee 前缀锚（SQL 宽预筛；provider 再做精确对齐 ≥0.9，故此处偏「宽」不「准」）。
  * 取最长的 ≥3 字母/数字 token（去法人后缀/虚词）；无合格 token → null（不查，返空）。
@@ -259,6 +267,11 @@ export class BigQueryPatentsClient {
     return this.maxBytes();
   }
 
+  canSearchPatentsByAssignee(assignee: string): boolean {
+    const name = assignee?.trim();
+    return Boolean(name && assigneeLikeAnchor(name) && this.getClient());
+  }
+
   /**
    * 按 assignee（公司名）查近 [fromYear, toYear] 专利 → {@link PatentRecord}[]。
    * 无锚/无 creds → 返空（天然 no-op）。查询错误/超额向上抛，由 provider 的 try/catch fail-safe 兜（不在此吞）。
@@ -266,24 +279,72 @@ export class BigQueryPatentsClient {
   async searchPatentsByAssignee(assignee: string, opts: PatentSearchOptions,
     beforeRequest?: () => Promise<void>,
   ): Promise<PatentRecord[]> {
+    return (await this.searchPatentsByAssigneeWithCostFacts(
+      assignee,
+      opts,
+      beforeRequest,
+    )).patents;
+  }
+
+  async searchPatentsByAssigneeWithCostFacts(
+    assignee: string,
+    opts: PatentSearchOptions,
+    beforeRequest?: () => Promise<void>,
+  ): Promise<PatentSearchWithCostFactsResult> {
+    const maximumBytesBilled = this.maxBytes();
+    const maxRows = clampMaxRows(opts.maxRows);
     const name = assignee?.trim();
-    if (!name) return [];
+    if (!name) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    }
     const anchor = assigneeLikeAnchor(name);
-    if (!anchor) return [];
+    if (!anchor) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    }
     const client = this.getClient();
-    if (!client) return []; // 无 creds → 天然 no-op（同 EPO 无 key）
+    if (!client) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    } // 无 creds → 天然 no-op（同 EPO 无 key）
     await beforeRequest?.();
-    const [rows] = await client.query({
-      query: buildQuery(clampMaxRows(opts.maxRows)),
+    const queryOpts = {
+      query: buildQuery(maxRows),
       params: {
         fromDate: yearToStart(opts.fromYear),
         toDate: yearToEnd(opts.toYear),
         assigneeLike: anchor,
       },
       types: { fromDate: 'INT64', toDate: 'INT64', assigneeLike: 'STRING' },
-      maximumBytesBilled: this.maxBytes(),
-    });
-    return (rows ?? []).map(normalizeRow);
+      maximumBytesBilled,
+    };
+    if (client.createQueryJob) {
+      const [job] = await client.createQueryJob(queryOpts);
+      const [rows] = await job.getQueryResults();
+      let meta = job.metadata;
+      if (job.getMetadata) {
+        try {
+          const [refreshed] = await job.getMetadata();
+          meta = refreshed;
+        } catch {
+          /* Missing final metadata keeps observedBytesBilled=null. */
+        }
+      }
+      const observed = bytesFromMeta(meta);
+      return {
+        patents: (rows ?? []).map(normalizeRow),
+        queried: true,
+        maximumBytesBilled,
+        observedBytesBilled: observed === null ? null : String(observed),
+        maxRows,
+      };
+    }
+    const [rows] = await client.query(queryOpts);
+    return {
+      patents: (rows ?? []).map(normalizeRow),
+      queried: true,
+      maximumBytesBilled,
+      observedBytesBilled: null,
+      maxRows,
+    };
   }
 
   /**

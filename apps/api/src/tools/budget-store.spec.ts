@@ -186,6 +186,14 @@ describe('PostgresBudgetStore', () => {
         result_schema: projection.schema,
         result_digest: projection.digest,
         result_json: projection,
+        receipt_usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '10000',
+          upperBoundMicrousd: '30000',
+        },
+        receipt_cost_basis: 'provider_reported',
       },
     ]]));
 
@@ -277,6 +285,8 @@ describe('PostgresBudgetStore', () => {
           currency: 'USD',
           unit: 'microusd',
           callCount: 1,
+          inputTokens: 7,
+          outputTokens: 3,
           chargedMicrousd: '777',
           upperBoundMicrousd: '90000',
         },
@@ -341,6 +351,14 @@ describe('PostgresBudgetStore', () => {
         result_schema: projection.schema,
         result_digest: projection.digest,
         result_json: projection,
+        receipt_usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '10000',
+          upperBoundMicrousd: '30000',
+        },
+        receipt_cost_basis: 'provider_reported',
       },
     ]]));
 

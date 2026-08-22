@@ -11,6 +11,7 @@ export interface DomainAckInput {
   readonly consumer: string;
   readonly domainAggregateType: string;
   readonly domainAckKey: string;
+  readonly domainRevision?: string;
 }
 
 export interface DomainAckRecord {
@@ -24,6 +25,7 @@ export interface DomainAckRecord {
   readonly consumer: string;
   readonly domainAggregateType: string;
   readonly domainAckKey: string;
+  readonly domainRevision: string;
   readonly resultStrategy: DurableExecutionReceipt['resultStrategy'];
   readonly resultSchema: string;
   readonly resultDigest: string;
@@ -38,10 +40,10 @@ export interface DomainAckApplyResult<T> {
   readonly value?: T;
 }
 
-export interface DomainAckRepository {
+export interface DomainAckRepository<TTransaction = unknown> {
   apply<T>(
     record: DomainAckRecord,
-    apply: () => Promise<T>,
+    apply: (transaction: TTransaction) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>>;
 }
 
@@ -61,11 +63,11 @@ function invalid(): never {
   throw new Error('DOMAIN_ACK_INVALID');
 }
 
-function safeText(value: string): string {
+function safeText(value: string, options: { readonly rejectPayloadHints?: boolean } = {}): string {
   if (
     typeof value !== 'string' ||
     !SAFE_TEXT.test(value) ||
-    PII_LIKE.test(value) ||
+    (options.rejectPayloadHints === true && PII_LIKE.test(value)) ||
     value !== value.normalize('NFC')
   ) {
     invalid();
@@ -90,6 +92,7 @@ function ackId(input: {
   readonly consumer: string;
   readonly domainAggregateType: string;
   readonly domainAckKey: string;
+  readonly domainRevision: string;
   readonly resultDigest: string;
 }): string {
   return createHash('sha256').update(canonical(input)).digest('hex');
@@ -106,20 +109,31 @@ function freezeRecord(record: DomainAckRecord): DomainAckRecord {
   });
 }
 
-export class InMemoryDomainAckRepository implements DomainAckRepository {
+export class InMemoryDomainAckRepository implements DomainAckRepository<undefined> {
   private readonly records = new Map<string, DomainAckRecord>();
   private readonly pending = new Map<string, Promise<DomainAckRecord>>();
 
+  private key(record: DomainAckRecord): string {
+    return [
+      record.operationId,
+      record.consumer,
+      record.domainAggregateType,
+      record.domainAckKey,
+      record.domainRevision,
+    ].join('\0');
+  }
+
   async apply<T>(
     record: DomainAckRecord,
-    apply: () => Promise<T>,
+    apply: (transaction: undefined) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>> {
-    const existing = this.records.get(record.operationId);
+    const key = this.key(record);
+    const existing = this.records.get(key);
     if (existing) {
       if (!sameAck(existing, record)) throw new DomainAckConflictError(record.operationId);
       return Object.freeze({ status: 'REPLAYED' as const, ack: existing, value: undefined });
     }
-    const pending = this.pending.get(record.operationId);
+    const pending = this.pending.get(key);
     if (pending) {
       const stored = await pending;
       if (!sameAck(stored, record)) throw new DomainAckConflictError(record.operationId);
@@ -127,21 +141,21 @@ export class InMemoryDomainAckRepository implements DomainAckRepository {
     }
     let resolvePending!: (record: DomainAckRecord) => void;
     let rejectPending!: (error: unknown) => void;
-    this.pending.set(record.operationId, new Promise<DomainAckRecord>((resolve, reject) => {
+    this.pending.set(key, new Promise<DomainAckRecord>((resolve, reject) => {
       resolvePending = resolve;
       rejectPending = reject;
     }));
     try {
-      const value = await apply();
+      const value = await apply(undefined);
       const stored = freezeRecord(record);
-      this.records.set(record.operationId, stored);
+      this.records.set(key, stored);
       resolvePending(stored);
       return Object.freeze({ status: 'APPLIED' as const, ack: stored, value });
     } catch (error) {
       rejectPending(error);
       throw error;
     } finally {
-      this.pending.delete(record.operationId);
+      this.pending.delete(key);
     }
   }
 
@@ -170,12 +184,12 @@ function parseAckRow(rows: readonly PostgresDomainAckRow[], expected: DomainAckR
   return Object.freeze({ status: row.status, ack });
 }
 
-export class PostgresDomainAckRepository implements DomainAckRepository {
+export class PostgresDomainAckRepository implements DomainAckRepository<DomainAckTransaction> {
   constructor(private readonly transaction: DomainAckTransaction) {}
 
   async apply<T>(
     record: DomainAckRecord,
-    apply: () => Promise<T>,
+    apply: (transaction: DomainAckTransaction) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>> {
     const locked = parseAckRow(
       await this.transaction.$queryRaw<PostgresDomainAckRow[]>(
@@ -186,22 +200,23 @@ export class PostgresDomainAckRepository implements DomainAckRepository {
     if (locked.status === 'REPLAYED') {
       return Object.freeze({ status: 'REPLAYED' as const, ack: locked.ack, value: undefined });
     }
-    const value = await apply();
+    const value = await apply(this.transaction);
     return Object.freeze({ status: 'APPLIED' as const, ack: locked.ack, value });
   }
 }
 
-export class DomainAckService {
-  constructor(private readonly repository: DomainAckRepository) {}
+export class DomainAckService<TTransaction = unknown> {
+  constructor(private readonly repository: DomainAckRepository<TTransaction>) {}
 
   async applyWithAck<T>(
     input: DomainAckInput,
-    apply: () => Promise<T>,
+    apply: (transaction: TTransaction) => Promise<T>,
   ): Promise<DomainAckApplyResult<T>> {
     const receipt = parseDurableExecutionReceipt(input.receipt);
     const consumer = safeText(input.consumer);
     const domainAggregateType = safeText(input.domainAggregateType);
-    const domainAckKey = safeText(input.domainAckKey);
+    const domainAckKey = safeText(input.domainAckKey, { rejectPayloadHints: true });
+    const domainRevision = safeText(input.domainRevision ?? '0');
     const record = freezeRecord({
       schemaVersion: 'domain-ack/v1',
       ackId: ackId({
@@ -209,6 +224,7 @@ export class DomainAckService {
         consumer,
         domainAggregateType,
         domainAckKey,
+        domainRevision,
         resultDigest: receipt.resultDigest,
       }),
       operationId: receipt.operationId,
@@ -219,6 +235,7 @@ export class DomainAckService {
       consumer,
       domainAggregateType,
       domainAckKey,
+      domainRevision,
       resultStrategy: receipt.resultStrategy,
       resultSchema: receipt.resultSchema,
       resultDigest: receipt.resultDigest,

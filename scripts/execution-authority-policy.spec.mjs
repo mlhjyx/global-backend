@@ -30,6 +30,7 @@ async function materializePolicyRepo(mutations = {}) {
     "apps/api/src/tools/budget-store.ts",
     "apps/api/src/durable-results/durable-execution-receipt.ts",
     "apps/api/src/durable-results/domain-ack.ts",
+    "apps/api/src/durable-results/domain-ack-consumer-bindings.ts",
     "apps/api/src/durable-results/artifact/artifact-materializer.registry.ts",
     "apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.ts",
     "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts",

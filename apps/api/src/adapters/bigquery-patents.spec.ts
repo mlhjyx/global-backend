@@ -162,6 +162,49 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
     await client.searchPatentsByAssignee('Siemens', { fromYear: 2021, toYear: 2026, maxRows: 99999 });
     expect(seen?.query).toContain('LIMIT 50'); // manifest/tool durable cap
   });
+
+  it('searchPatentsByAssigneeWithCostFacts records provider-observed bytes only from completed job metadata', async () => {
+    const client = new BigQueryPatentsClient({
+      maxGb: 50,
+      makeClient: () => fakeJobClient([{
+        publication_number: 'US-789-A1',
+        applicants: [{ name: 'Siemens AG', country: 'DE' }],
+        inventors: [{ name: 'Hans Müller', country: 'DE' }],
+      }], '123456'),
+    });
+
+    await expect(client.searchPatentsByAssigneeWithCostFacts(
+      'Siemens AG',
+      { fromYear: 2021, toYear: 2026, maxRows: 5 },
+    )).resolves.toEqual({
+      patents: [{
+        publicationNumber: 'US-789-A1',
+        applicants: [{ name: 'Siemens AG', country: 'de' }],
+        inventors: [{ name: 'Hans Müller' }],
+      }],
+      queried: true,
+      maximumBytesBilled: String(50 * GB),
+      observedBytesBilled: '123456',
+      maxRows: 5,
+    });
+  });
+
+  it('searchPatentsByAssigneeWithCostFacts returns explicit no-query facts without creating a client', async () => {
+    const makeClient = vi.fn();
+    const client = new BigQueryPatentsClient({ maxGb: 50, makeClient });
+
+    await expect(client.searchPatentsByAssigneeWithCostFacts(
+      'The Co',
+      { fromYear: 2021, toYear: 2026 },
+    )).resolves.toEqual({
+      patents: [],
+      queried: false,
+      maximumBytesBilled: String(50 * GB),
+      observedBytesBilled: null,
+      maxRows: 0,
+    });
+    expect(makeClient).not.toHaveBeenCalled();
+  });
 });
 
 describe('BigQueryPatents · maximumBytesBilled 成本护栏（env/默认路径）', () => {

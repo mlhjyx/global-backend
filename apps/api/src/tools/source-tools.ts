@@ -766,9 +766,9 @@ export interface GooglePatentsInput {
   maxRows?: number;
 }
 export interface GooglePatentsOutput {
-  patents?: PatentRecord[];
-  costFacts?: {
-    costBasis: "estimated_upper_bound" | "provider_reported";
+  patents: PatentRecord[];
+  costFacts: {
+    costBasis: "not_incurred" | "estimated_upper_bound" | "provider_reported";
     maximumBytesBilled: string;
     observedBytesBilled: string | null;
     maxRows: number;
@@ -813,26 +813,39 @@ export const googlePatentsSearchTool: Tool<
     healthy: true,
     detail: "google-patents-bigquery",
   }),
-  execute: async (input, ctx) => ({
-    data: {
-      patents: await bigqueryPatents.searchPatentsByAssignee(
-        input.applicant,
-        {
-          fromYear: input.fromYear,
-          toYear: input.toYear,
-          maxRows: Math.min(input.maxRows ?? GOOGLE_PATENTS_MAX_ROWS, GOOGLE_PATENTS_MAX_ROWS),
-        },
-        beforeExternalRequest(ctx),
-      ),
-      costFacts: {
-        costBasis: "estimated_upper_bound",
-        maximumBytesBilled: bigqueryPatents.maximumBytesBilled(),
-        observedBytesBilled: null,
-        maxRows: GOOGLE_PATENTS_MAX_ROWS,
+  execute: async (input, ctx) => {
+    const result = await bigqueryPatents.searchPatentsByAssigneeWithCostFacts(
+      input.applicant,
+      {
+        fromYear: input.fromYear,
+        toYear: input.toYear,
+        maxRows: Math.min(input.maxRows ?? GOOGLE_PATENTS_MAX_ROWS, GOOGLE_PATENTS_MAX_ROWS),
       },
-    },
-    costCents: 0,
-  }),
+      beforeExternalRequest(ctx),
+    );
+    const costFacts = result.queried
+      ? {
+          costBasis: result.observedBytesBilled === null
+            ? "estimated_upper_bound" as const
+            : "provider_reported" as const,
+          maximumBytesBilled: result.maximumBytesBilled,
+          observedBytesBilled: result.observedBytesBilled,
+          maxRows: result.maxRows,
+        }
+      : {
+          costBasis: "not_incurred" as const,
+          maximumBytesBilled: "0",
+          observedBytesBilled: null,
+          maxRows: 0,
+        };
+    return {
+      data: {
+        patents: result.patents,
+        costFacts,
+      },
+      costCents: 0,
+    };
+  },
 };
 
 export interface TradeFairAlgoliaInput {

@@ -7,6 +7,11 @@ import {
   InMemoryDomainAckRepository,
   PostgresDomainAckRepository,
 } from './domain-ack';
+import {
+  DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS,
+  applyDomainAckConsumerTransaction,
+  getDomainAckProductConsumerBinding,
+} from './domain-ack-consumer-bindings';
 
 const UUID_A = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
 const UUID_B = '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0';
@@ -50,13 +55,14 @@ function canonical(value: unknown): string {
   )).join(',')}}`;
 }
 
-function ackRecord(domainAckKey = 'taxonomy:cpv:pump') {
+function ackRecord(domainAckKey = 'taxonomy:cpv:pump', domainRevision = '0') {
   const durableReceipt = receipt();
   const ackInput = {
     operationId: durableReceipt.operationId,
     consumer: 'TaxonomyResolver',
     domainAggregateType: 'TermAlias',
     domainAckKey,
+    domainRevision,
     resultDigest: durableReceipt.resultDigest,
   };
   return {
@@ -70,6 +76,7 @@ function ackRecord(domainAckKey = 'taxonomy:cpv:pump') {
     consumer: ackInput.consumer,
     domainAggregateType: ackInput.domainAggregateType,
     domainAckKey,
+    domainRevision,
     resultStrategy: durableReceipt.resultStrategy,
     resultSchema: durableReceipt.resultSchema,
     resultDigest: durableReceipt.resultDigest,
@@ -202,6 +209,39 @@ describe('DomainAckService', () => {
     expect(repository.snapshot()).toEqual([]);
   });
 
+  it('keeps product consumer bindings additive and allows non-PII consumer names like EmailVerificationProvider', async () => {
+    const repository = new InMemoryDomainAckRepository();
+    const service = new DomainAckService(repository);
+    const apply = vi.fn(async () => ({ status: 'verified' }));
+
+    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(28);
+    expect(getDomainAckProductConsumerBinding('smtp.rcpt_probe')).toEqual({
+      producerId: 'smtp.rcpt_probe',
+      consumer: 'EmailVerificationProvider',
+      domainAggregateType: 'EmailVerification',
+      identity: 'normalized-email-hash',
+    });
+
+    await expect(applyDomainAckConsumerTransaction({
+      service,
+      producerId: 'smtp.rcpt_probe',
+      receipt: receipt(),
+      domainAckKey: 'smtp-rcpt:sha256:abc123',
+      domainRevision: '1',
+      apply,
+    })).resolves.toMatchObject({
+      status: 'APPLIED',
+      value: { status: 'verified' },
+      ack: {
+        consumer: 'EmailVerificationProvider',
+        domainAggregateType: 'EmailVerification',
+        domainAckKey: 'smtp-rcpt:sha256:abc123',
+        domainRevision: '1',
+      },
+    });
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
   it('ships a transaction-compatible Postgres ACK schema with row locks and uniqueness', async () => {
     const migration = await readFile(
       new URL(
@@ -230,6 +270,9 @@ describe('DomainAckService', () => {
     expect(migration).toContain('apply_execution_domain_ack_v1');
     expect(migration).toContain('jsonb_typeof');
     expect(migration).toContain('DOMAIN_ACK_CONFLICT');
+    expect(migration).toContain('p_reserved_microusd BIGINT');
+    expect(migration).toContain('operation."reserved_cents" * 10000');
+    expect(migration).toContain('operation."reserved_microusd"');
   });
 
   it('passes the same database transaction object into the domain mutation callback', async () => {

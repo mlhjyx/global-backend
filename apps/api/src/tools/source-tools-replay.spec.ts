@@ -1,8 +1,55 @@
-import { describe, expect, it } from 'vitest';
-import { openFdaSearchTool, samgovSearchTool, tedSearchTool } from './source-tools';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  googlePatentsSearchTool,
+  openFdaSearchTool,
+  samgovSearchTool,
+  tedSearchTool,
+} from './source-tools';
 import { projectGenericOperationResult } from './generic-operation-projection';
 
 describe('governed source Tool durable replay', () => {
+  const savedEnv = {
+    sa: process.env.GOOGLE_PATENTS_SA_JSON,
+    adc: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    project: process.env.GOOGLE_PATENTS_PROJECT,
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (savedEnv.sa === undefined) delete process.env.GOOGLE_PATENTS_SA_JSON;
+    else process.env.GOOGLE_PATENTS_SA_JSON = savedEnv.sa;
+    if (savedEnv.adc === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = savedEnv.adc;
+    if (savedEnv.project === undefined) delete process.env.GOOGLE_PATENTS_PROJECT;
+    else process.env.GOOGLE_PATENTS_PROJECT = savedEnv.project;
+  });
+
+  it('returns explicit not_incurred Patent cost facts for no-query/no-creds paths', async () => {
+    delete process.env.GOOGLE_PATENTS_SA_JSON;
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    delete process.env.GOOGLE_PATENTS_PROJECT;
+    const beforeRequest = vi.fn(async () => undefined);
+
+    await expect(googlePatentsSearchTool.execute({
+      applicant: 'The Co',
+      fromYear: 2021,
+      toYear: 2026,
+    }, { workspaceId: 'workspace-1', authorizeExternalAction: beforeRequest } as never))
+      .resolves.toEqual({
+        data: {
+          patents: [],
+          costFacts: {
+            costBasis: 'not_incurred',
+            maximumBytesBilled: '0',
+            observedBytesBilled: null,
+            maxRows: 0,
+          },
+        },
+        costCents: 0,
+      });
+    expect(beforeRequest).not.toHaveBeenCalled();
+  });
+
   it('projects only bounded TED green organization facts', () => {
     const replay = tedSearchTool.durableReplayResult?.({
       data: {

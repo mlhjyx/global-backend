@@ -1434,6 +1434,12 @@ describe('closed catalog Tool result projections', () => {
             inventors: Array.from({ length: 30 }, (_, index) => inventor(`US Inventor ${index}`)),
           },
         ],
+        costFacts: {
+          costBasis: 'estimated_upper_bound',
+          maximumBytesBilled: '214748364800',
+          observedBytesBilled: null,
+          maxRows: 50,
+        },
       },
       costCents: 0,
     };

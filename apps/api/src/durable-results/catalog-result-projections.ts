@@ -767,7 +767,7 @@ const patentSchema = objectSchema({
 }, ['publicationNumber', 'applicants', 'inventors']);
 const patentCostFactsSchema = objectSchema({
   costBasis: stringSchema(32, {
-    enum: ['estimated_upper_bound', 'provider_reported'],
+    enum: ['not_incurred', 'estimated_upper_bound', 'provider_reported'],
   }),
   maximumBytesBilled: stringSchema(24),
   observedBytesBilled: { oneOf: [stringSchema(24), { type: 'null' }] },
@@ -810,6 +810,18 @@ function projectPatentCostFacts(value: unknown): unknown {
   const facts = mapClosedRecord(value, PATENT_COST_FACT_KEYS, [
     'costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows',
   ]);
+  const maximum = BigInt(String(field(facts, 'maximumBytesBilled')));
+  const observed = field(facts, 'observedBytesBilled') === null
+    ? null
+    : BigInt(String(field(facts, 'observedBytesBilled')));
+  if (maximum < 0n || observed !== null && (observed < 0n || observed > maximum)) {
+    projectionInvalid();
+  }
+  if (
+    field(facts, 'costBasis') === 'not_incurred' &&
+    (maximum !== 0n || field(facts, 'observedBytesBilled') !== null ||
+      field(facts, 'maxRows') !== 0)
+  ) projectionInvalid();
   if (
     field(facts, 'costBasis') === 'estimated_upper_bound' &&
     field(facts, 'observedBytesBilled') !== null
@@ -820,7 +832,7 @@ function projectPatentCostFacts(value: unknown): unknown {
   ) projectionInvalid();
   return facts;
 }
-const patentsData = (value: unknown) => mapClosedRecord(value, ['patents', 'costFacts'], [], {
+const patentsData = (value: unknown) => mapClosedRecord(value, ['patents', 'costFacts'], ['patents', 'costFacts'], {
   patents: projectPatentRecords,
   costFacts: projectPatentCostFacts,
 });
@@ -829,7 +841,7 @@ const googlePatentsDefinition = definition(
   objectSchema({
     patents: arraySchema(50, patentSchema),
     costFacts: patentCostFactsSchema,
-  }, []),
+  }, ['patents', 'costFacts']),
   patentsData,
 );
 

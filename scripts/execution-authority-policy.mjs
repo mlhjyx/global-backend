@@ -220,8 +220,10 @@ function taskIdsFromModelSource(source) {
   for (const match of source.matchAll(/\bexecuteStructuredTaskWithRuntime\b/g)) {
     const before = source.slice(Math.max(0, match.index - 1800), match.index);
     const after = source.slice(match.index, Math.min(source.length, match.index + 2200));
-    const schema = after.match(/\bdurableResultSchema:\s*["']([^"']+)["']/)?.[1] ?? null;
-    if (!schema) continue;
+    const schema =
+      after.match(/\bdurableResultSchema:\s*["']([^"']+)["']/)?.[1] ??
+      before.match(/\bdurableResultSchema:\s*["']([^"']+)["']/)?.[1] ??
+      null;
     const literalTask = after.match(/\btask:\s*(?:contract\?\.id\s*\?\?\s*)?["']([^"']+)["']/)?.[1] ?? null;
     const contractMatches = [...before.matchAll(/\bgetTask\(["']([^"']+)["']\)/g)];
     const taskId = literalTask ?? contractMatches.at(-1)?.[1] ?? null;
@@ -395,6 +397,9 @@ async function scanModelSource(repoRoot, issues) {
     const source = await readText(repoRoot, path);
     for (const callsite of taskIdsFromModelSource(source)) {
       discovered.push(Object.freeze({ path, ...callsite }));
+      if (!callsite.schema) {
+        issues.push(issue("EXECUTION_AUTHORITY_MODEL_SCHEMA_BINDING_MISSING", path, `model call-site omits durableResultSchema: ${callsite.taskId}`));
+      }
     }
   }
   const expectedTasks = sorted(EXPECTED_MODEL_TASKS.map(([, taskId, schema]) => `${taskId}\t${schema}`));
@@ -446,9 +451,24 @@ async function scanDomainAckSource(repoRoot, issues) {
     return;
   }
   const source = await readText(repoRoot, path);
-  for (const token of ["DomainAckService", "InMemoryDomainAckRepository", "applyWithAck", "DOMAIN_ACK_CONFLICT", "parseDurableExecutionReceipt"]) {
+  for (const token of ["DomainAckService", "InMemoryDomainAckRepository", "applyWithAck", "DOMAIN_ACK_CONFLICT", "parseDurableExecutionReceipt", "domainRevision"]) {
     if (!source.includes(token)) {
       issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_SERVICE_INCOMPLETE", path, `Domain ACK service missing ${token}`));
+    }
+  }
+  const bindingPath = "apps/api/src/durable-results/domain-ack-consumer-bindings.ts";
+  const bindingSource = existsSync(resolve(repoRoot, bindingPath))
+    ? await readText(repoRoot, bindingPath)
+    : "";
+  if (!bindingSource.includes("DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS") ||
+      !bindingSource.includes("applyDomainAckConsumerTransaction") ||
+      !bindingSource.includes("domainRevision")) {
+    issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_CONSUMER_BINDING_MISSING", bindingPath, "product consumer-compatible Domain ACK binding surface is required"));
+  }
+  const manifest = await readJson(repoRoot, MANIFEST_PATH);
+  for (const entry of [...(manifest.tools ?? []), ...(manifest.modelTasks ?? [])]) {
+    if (entry?.domainAck?.consumer && !bindingSource.includes(entry.domainAck.consumer)) {
+      issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_CONSUMER_BINDING_MISSING", bindingPath, `missing consumer binding ${entry.domainAck.consumer}`));
     }
   }
   const migrationPath = "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql";
@@ -465,6 +485,28 @@ async function scanDomainAckSource(repoRoot, issues) {
       issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_REPOSITORY_MISSING", migrationPath, `Domain ACK migration missing ${token}`));
     }
   }
+  const requiredSqlTokens = [
+    "\"domain_revision\"",
+    "UNIQUE (\"operation_id\", \"consumer\", \"domain_aggregate_type\", \"domain_ack_key\", \"domain_revision\")",
+    "REFERENCES \"tool_budget_operation\"",
+    "REFERENCES \"tool_budget_account\"",
+    "REFERENCES \"execution_budget_authority\"",
+    "\"status\" = 'SETTLED'",
+    "ENABLE ROW LEVEL SECURITY",
+    "FORCE ROW LEVEL SECURITY",
+    "REVOKE ALL ON TABLE \"execution_domain_ack\" FROM PUBLIC",
+    "SECURITY DEFINER",
+    "SET search_path = public, pg_temp",
+    "pg_advisory_xact_lock",
+    "jsonb_object_keys",
+    "DOMAIN_ACK_LEDGER_MISMATCH",
+    "receipt_usage",
+    "receipt_cost_basis",
+  ];
+  if (requiredSqlTokens.some((token) => !migrationSource.includes(token)) ||
+      migrationSource.includes("UNIQUE (\"operation_id\")")) {
+    issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_SQL_TRUST_INCOMPLETE", migrationPath, "Domain ACK SQL must bind SETTLED ledger tuple, RLS, closed JSON and composite ACK identity"));
+  }
 }
 
 async function scanLedgerReceiptSource(repoRoot, issues) {
@@ -474,14 +516,23 @@ async function scanLedgerReceiptSource(repoRoot, issues) {
   const migrationSource = existsSync(resolve(repoRoot, migrationPath))
     ? await readText(repoRoot, migrationPath)
     : "";
-  for (const token of ["durableReceiptFromLedgerRow", "parseDurableExecutionReceipt", "reserve_tool_budget_with_receipt_v1", "settle_tool_budget_with_receipt_v1"]) {
+  for (const token of ["durableReceiptFromLedgerRow", "parseDurableExecutionReceipt", "reserve_tool_budget_with_receipt_v1", "settle_tool_budget_with_receipt_v1", "receipt_usage", "receipt_cost_basis"]) {
     if (!source.includes(token)) {
       issues.push(issue("EXECUTION_AUTHORITY_LEDGER_RECEIPT_SOURCE_MISSING", path, `BudgetStore must reconstruct receipts from locked ledger rows: ${token}`));
     }
   }
+  if (/\bchargedMicrousd\b[\s\S]{0,400}\bcharged_cents\b/.test(source) ||
+      /\bcostBasis\b[\s\S]{0,200}\bprovider_reported\b[\s\S]{0,200}\bcharged/.test(source)) {
+    issues.push(issue("EXECUTION_AUTHORITY_LEDGER_RECEIPT_COST_INFERENCE", path, "BudgetStore receipt reconstruction must not infer cost basis or usage from cents"));
+  }
   for (const token of ["CREATE FUNCTION reserve_tool_budget_with_receipt_v1", "CREATE FUNCTION settle_tool_budget_with_receipt_v1", "tool_budget_operation", "tool_budget_account", "FOR UPDATE"]) {
     if (!migrationSource.includes(token)) {
       issues.push(issue("EXECUTION_AUTHORITY_LEDGER_RECEIPT_SOURCE_MISSING", migrationPath, `ledger receipt migration wrapper missing ${token}`));
+    }
+  }
+  for (const token of ["CREATE FUNCTION reserve_tool_budget_microusd_with_receipt_v1", "CREATE FUNCTION settle_tool_budget_microusd_with_receipt_v1"]) {
+    if (!migrationSource.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_MICROUSD_RECEIPT_WRAPPER_MISSING", migrationPath, `microusd receipt wrapper missing ${token}`));
     }
   }
 }
@@ -556,6 +607,42 @@ async function scanExternalAdapterBypasses(repoRoot, issues) {
   }
 }
 
+async function scanDirectModelGatewayBypasses(repoRoot, issues) {
+  const sourceFiles = (await listFiles(repoRoot, "apps/api/src"))
+    .filter((path) => path.endsWith(".ts") && !path.endsWith(".spec.ts"));
+  for (const path of sourceFiles) {
+    if (path.startsWith("apps/api/src/model-runtime/")) continue;
+    if (path.startsWith("apps/api/src/model-gateway/")) continue;
+    if (path === "apps/api/src/site-builder/site-builder-model-settlement.ts") continue;
+    const source = await readText(repoRoot, path);
+      if (
+        /\b[a-zA-Z0-9_$]+\.(generateText|generateStructured|reviewVision)\s*\(/.test(source) ||
+        /\bgateway\.embed\s*\(/.test(source) ||
+        /\bmodelGateway\.embed\s*\(/.test(source)
+      ) {
+      issues.push(issue("EXECUTION_AUTHORITY_DIRECT_MODEL_GATEWAY_CALL", path, "product ModelGateway calls must go through registered model runtime strategy/receipt paths"));
+    }
+  }
+}
+
+async function scanToolBrokerTypedProjection(repoRoot, issues) {
+  const path = "apps/api/src/tools/tool-broker.ts";
+  const source = existsSync(resolve(repoRoot, path)) ? await readText(repoRoot, path) : "";
+  const requiredTokens = [
+    "TypedProjectionRegistry",
+    "registerCatalogResultProjections",
+    "registerSourceResultProjections",
+    "tool.durableResultStrategy.schema",
+    "this.projectionRegistry.project",
+    "this.projectionRegistry.restore",
+  ];
+  if (requiredTokens.some((token) => !source.includes(token)) ||
+      source.includes("schema: 'tool-result/v1'") ||
+      source.includes('schema: "tool-result/v1"')) {
+    issues.push(issue("EXECUTION_AUTHORITY_TOOLBROKER_TYPED_PROJECTION_MISSING", path, "ToolBroker must settle/replay through each Tool registered durable strategy schema"));
+  }
+}
+
 async function scanGenericReplay(repoRoot, issues) {
   const sourceFiles = (await listFiles(repoRoot, "apps/api/src"))
     .filter((path) => path.endsWith(".ts") && !path.endsWith(".spec.ts"));
@@ -590,6 +677,8 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   await scanLedgerReceiptSource(repoRoot, issues);
   await scanArtifactSource(repoRoot, issues);
   await scanExternalAdapterBypasses(repoRoot, issues);
+  await scanDirectModelGatewayBypasses(repoRoot, issues);
+  await scanToolBrokerTypedProjection(repoRoot, issues);
   await scanGenericReplay(repoRoot, issues);
 
   return Object.freeze({

@@ -458,6 +458,8 @@ type ReserveRow = {
   result_schema_version?: string | null;
   result_schema?: string | null;
   result_digest?: string | null;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type SettleRow = {
@@ -475,6 +477,8 @@ type SettleRow = {
   result_schema?: string | null;
   result_digest?: string | null;
   result_json?: unknown;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type ResultUnknownRow = {
@@ -589,12 +593,6 @@ function toSafeNumber(name: string, value: bigint): number {
   return result;
 }
 
-function centsToMicrousd(value: bigint | number | undefined | null): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  const cents = typeof value === 'bigint' ? value : BigInt(value);
-  return (cents * 10_000n).toString();
-}
-
 function projectionResultStrategy(
   schemaVersion: string | null | undefined,
 ): DurableExecutionReceipt['resultStrategy'] | null {
@@ -615,13 +613,12 @@ function durableReceiptFromLedgerRow(input: {
   readonly operationKey?: string;
   readonly accountId?: string;
   readonly authorityId?: string | null;
-  readonly reservedCents?: bigint | null;
-  readonly chargedCents?: bigint | null;
-  readonly observedCents?: bigint | null;
   readonly resultSchemaVersion?: string | null;
   readonly resultSchema?: string | null;
   readonly resultDigest?: string | null;
   readonly resultJson?: unknown;
+  readonly receiptUsage?: unknown;
+  readonly receiptCostBasis?: string | null;
 }): DurableExecutionReceipt | undefined {
   const resultStrategy = projectionResultStrategy(input.resultSchemaVersion);
   if (
@@ -630,16 +627,12 @@ function durableReceiptFromLedgerRow(input: {
     !input.operationKey ||
     !input.resultSchema ||
     !input.resultDigest ||
-    !resultStrategy
+    !resultStrategy ||
+    !input.receiptUsage ||
+    !input.receiptCostBasis
   ) {
     return undefined;
   }
-  const chargedMicrousd = centsToMicrousd(input.chargedCents);
-  const upperBoundMicrousd = centsToMicrousd(input.reservedCents);
-  const costBasis: DurableExecutionReceipt['costBasis'] =
-    chargedMicrousd !== undefined && BigInt(chargedMicrousd) > 0n
-      ? 'provider_reported'
-      : 'estimated_upper_bound';
   return parseDurableExecutionReceipt({
     schemaVersion: 'durable-execution-receipt/v1',
     scopeKey: input.scopeKey,
@@ -653,14 +646,8 @@ function durableReceiptFromLedgerRow(input: {
     artifactId: resultStrategy === 'artifact_reference'
       ? artifactIdFromResultJson(input.resultJson)
       : null,
-    usage: {
-      currency: 'USD',
-      unit: 'microusd',
-      callCount: 1,
-      ...(chargedMicrousd !== undefined ? { chargedMicrousd } : {}),
-      ...(upperBoundMicrousd !== undefined ? { upperBoundMicrousd } : {}),
-    },
-    costBasis,
+    usage: input.receiptUsage,
+    costBasis: input.receiptCostBasis,
   });
 }
 
@@ -877,13 +864,12 @@ export class PostgresBudgetStore implements BudgetStore {
       operationKey: row.operation_key ?? input.operationKey,
       accountId: row.account_id,
       authorityId: row.authority_id,
-      reservedCents: row.reserved_cents,
-      chargedCents: row.charged_cents,
-      observedCents: row.observed_cents,
       resultSchemaVersion: row.result_schema_version,
       resultSchema: row.result_schema,
       resultDigest: row.result_digest,
       resultJson: row.result_json,
+      receiptUsage: row.receipt_usage,
+      receiptCostBasis: row.receipt_cost_basis,
     }) : undefined;
     return {
       workspaceId: input.workspaceId,
@@ -931,13 +917,12 @@ export class PostgresBudgetStore implements BudgetStore {
       operationKey: row.operation_key,
       accountId: row.account_id,
       authorityId: row.authority_id,
-      reservedCents: row.reserved_cents ?? BigInt(reservation.estimatedCents),
-      chargedCents: row.charged_cents,
-      observedCents: row.observed_cents,
       resultSchemaVersion: row.result_schema_version ?? durable?.schemaVersion,
       resultSchema: row.result_schema ?? durable?.schema,
       resultDigest: row.result_digest ?? durable?.digest,
       resultJson: row.result_json ?? durable,
+      receiptUsage: row.receipt_usage,
+      receiptCostBasis: row.receipt_cost_basis,
     });
     return {
       chargedCents: toSafeNumber('chargedCents', row.charged_cents),

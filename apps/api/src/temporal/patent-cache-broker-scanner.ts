@@ -86,14 +86,27 @@ export function createPatentCacheBrokerScanner(input: {
           },
           context,
         );
-        const observedBytesBilled = result.data.costFacts?.observedBytesBilled;
-        const maximumBytesBilled = Number(result.data.costFacts?.maximumBytesBilled);
+        const costFacts = result.data.costFacts;
+        const observedBytesBilled = costFacts.observedBytesBilled;
+        const maximumBytesBilled = Number(costFacts.maximumBytesBilled);
         if (
+          !["not_incurred", "estimated_upper_bound", "provider_reported"].includes(costFacts.costBasis) ||
           (observedBytesBilled !== null && typeof observedBytesBilled !== "string") ||
           !Number.isSafeInteger(maximumBytesBilled) ||
           maximumBytesBilled < 0
         ) {
           throw new Error("GOOGLE_PATENTS_COST_FACTS_UNAVAILABLE");
+        }
+        if (costFacts.costBasis === "not_incurred") {
+          if (
+            maximumBytesBilled !== 0 ||
+            observedBytesBilled !== null ||
+            costFacts.maxRows !== 0 ||
+            (result.data.patents ?? []).length > 0
+          ) {
+            throw new Error("GOOGLE_PATENTS_COST_FACTS_UNAVAILABLE");
+          }
+          continue;
         }
         if (observedBytesBilled !== null) {
           const observedBytes = Number(observedBytesBilled);
