@@ -57,15 +57,18 @@ describe('BigQueryPatents · assigneeLikeAnchor（SQL 宽预筛锚）', () => {
 describe('BigQueryPatents · normalizeRow（🔴 数据最小化）', () => {
   it('inventor 只留 name（丢 country_code）；applicant 留 alpha-2 国别', () => {
     const rec = normalizeRow({
+      publication_number: 'US-123-A1',
       applicants: [{ name: 'SIEMENS AG', country: 'DE' }],
       inventors: [{ name: 'SCHMIDT, JOHANN', country: 'DE' }], // country 应被丢弃
     });
+    expect(rec.publicationNumber).toBe('US-123-A1');
     expect(rec.applicants).toEqual([{ name: 'SIEMENS AG', country: 'de' }]);
     expect(rec.inventors).toEqual([{ name: 'SCHMIDT, JOHANN' }]); // 🔴 无 country
     expect((rec.inventors[0] as Record<string, unknown>).country).toBeUndefined();
   });
   it('非 alpha-2 国别 → undefined；空名过滤', () => {
     const rec = normalizeRow({
+      publication_number: 'US-456-A1',
       applicants: [
         { name: 'Foo', country: 'Germany' }, // 非 alpha-2 → undefined
         { name: '', country: 'US' }, // 空名 → 过滤
@@ -76,10 +79,13 @@ describe('BigQueryPatents · normalizeRow（🔴 数据最小化）', () => {
     expect(rec.inventors).toEqual([{ name: 'Jane Doe' }]);
   });
   it('缺字段/非数组 → 空数组（防御式）', () => {
-    expect(normalizeRow({})).toEqual({ applicants: [], inventors: [] });
+    expect(() => normalizeRow({ applicants: [], inventors: [] })).toThrow(
+      'GOOGLE_PATENTS_PUBLICATION_NUMBER_REQUIRED',
+    );
   });
   it('applicant 数超过 Tool output contract 时 fail closed，而不是盲截断改变 sole-applicant 语义', () => {
     expect(() => normalizeRow({
+      publication_number: 'US-999-A1',
       applicants: Array.from({ length: MAX_APPLICANTS_PER_PATENT + 1 }, (_, index) => ({
         name: `Applicant ${index}`, country: 'DE',
       })),
@@ -97,14 +103,22 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
       maxGb: 50,
       makeClient: () =>
         fakeClient(
-          [{ applicants: [{ name: 'Siemens AG', country: 'DE' }], inventors: [{ name: 'Hans Müller', country: 'DE' }] }],
+          [{
+            publication_number: 'US-789-A1',
+            applicants: [{ name: 'Siemens AG', country: 'DE' }],
+            inventors: [{ name: 'Hans Müller', country: 'DE' }],
+          }],
           (opts) => (seen = opts),
         ),
     });
     const out = await client.searchPatentsByAssignee('Siemens AG', { fromYear: 2021, toYear: 2026 });
     // 结果归一（inventor 丢 country）
     expect(out).toEqual([
-      { applicants: [{ name: 'Siemens AG', country: 'de' }], inventors: [{ name: 'Hans Müller' }] },
+      {
+        publicationNumber: 'US-789-A1',
+        applicants: [{ name: 'Siemens AG', country: 'de' }],
+        inventors: [{ name: 'Hans Müller' }],
+      },
     ]);
     // 查询参数：日期 INT64 YYYYMMDD + 锚 + 成本硬顶
     expect(seen?.params).toMatchObject({ fromDate: 20210101, toDate: 20261231, assigneeLike: '%SIEMENS%' });
@@ -146,7 +160,7 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
     let seen: Parameters<BigQueryLike['query']>[0] | undefined;
     const client = new BigQueryPatentsClient({ makeClient: () => fakeClient([], (opts) => (seen = opts)) });
     await client.searchPatentsByAssignee('Siemens', { fromYear: 2021, toYear: 2026, maxRows: 99999 });
-    expect(seen?.query).toContain('LIMIT 2000'); // clamp 到 MAX_ROWS_CEIL
+    expect(seen?.query).toContain('LIMIT 50'); // manifest/tool durable cap
   });
 });
 

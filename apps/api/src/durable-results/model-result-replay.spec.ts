@@ -7,7 +7,10 @@ describe('model result replay projection', () => {
       data: { code: 'CPV-123' },
       provider: 'provider-a',
       model: 'model-a',
+      reportedModel: 'upstream-model-a',
+      modelResolutionSource: 'upstream_response',
       usage: { inputTokens: 10, outputTokens: 2 },
+      callCount: 1,
     });
 
     expect(projected.kind).toBe('model');
@@ -18,6 +21,10 @@ describe('model result replay projection', () => {
       data: { code: 'CPV-123' },
       provider: 'provider-a',
       model: 'model-a',
+      reportedModel: 'upstream-model-a',
+      modelResolutionSource: 'upstream_response',
+      usage: { inputTokens: 10, outputTokens: 2 },
+      callCount: 1,
     });
   });
 
@@ -48,6 +55,27 @@ describe('model result replay projection', () => {
 
     expect(() =>
       restoreModelResultFromReplay('fit-judgment/v1', projected),
+    ).toThrow('MODEL_RESULT_REPLAY_INVALID');
+  });
+
+  it('rejects malformed replay envelopes without returning a partial model result', () => {
+    const projected = projectModelResultForReplay('taxonomy-code/v1', {
+      data: { code: 'CPV-123' },
+      provider: 'provider-a',
+      model: 'model-a',
+    });
+
+    expect(() =>
+      restoreModelResultFromReplay('taxonomy-code/v1', {
+        ...projected,
+        data: { output: projected.data },
+      }),
+    ).toThrow('MODEL_RESULT_REPLAY_INVALID');
+    expect(() =>
+      restoreModelResultFromReplay('taxonomy-code/v1', {
+        ...projected,
+        digest: 'b'.repeat(64),
+      }),
     ).toThrow('MODEL_RESULT_REPLAY_INVALID');
   });
 });

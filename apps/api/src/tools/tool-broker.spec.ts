@@ -7,6 +7,28 @@ import { BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
 import { projectGenericOperationResult } from "./generic-operation-projection";
 import { RateLimitStoreUnavailableError } from "./redis-rate-limit-store";
 import { Tool } from "./tool-contract";
+import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
+
+const DURABLE_RECEIPT: DurableExecutionReceipt = {
+  schemaVersion: "durable-execution-receipt/v1",
+  scopeKey: "w",
+  authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+  accountId: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+  operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
+  operationKey: "run:tool:t.project",
+  resultStrategy: "typed_projection",
+  resultSchema: "searxng-search/v1",
+  resultDigest: "a".repeat(64),
+  artifactId: null,
+  usage: {
+    currency: "USD",
+    unit: "microusd",
+    callCount: 1,
+    chargedMicrousd: "0",
+    upperBoundMicrousd: "0",
+  },
+  costBasis: "estimated_upper_bound",
+};
 
 function fakeTool(
   id: string,
@@ -225,6 +247,32 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         }),
       }),
     );
+  });
+
+  it("returns the ledger-authored receipt from a durable tool settlement", async () => {
+    const tool = fakeTool("t.receipted", 1);
+    tool.durableReplayResult = (result) => result;
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: false,
+      })),
+      settle: vi.fn(async () => ({
+        chargedCents: 1,
+        observedCents: 1,
+        capVariance: false,
+        replay: false,
+        receipt: DURABLE_RECEIPT,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
   });
 
   it("retries an unknown success-settlement ACK with the identical tool projection and no second wire", async () => {

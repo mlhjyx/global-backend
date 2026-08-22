@@ -435,16 +435,20 @@ export class ToolBroker implements ExecutionBroker {
           throw new BudgetOperationReplayError(reservation.operationId);
         }
         const settlement = [reservation, result.costCents, projection] as const;
+        let settled;
         try {
-          await this.budget.settle(...settlement);
+          settled = await this.budget.settle(...settlement);
         } catch {
           try {
             // A lost ACK after commit is safe to retry only with byte-identical
             // cost and projection. PostgreSQL rejects any settlement drift.
-            await this.budget.settle(...settlement);
+            settled = await this.budget.settle(...settlement);
           } catch {
             throw new BudgetOperationReplayError(reservation.operationId);
           }
+        }
+        if (settled?.receipt) {
+          result = { ...result, durableReceipt: settled.receipt };
         }
       }
       this.trace(

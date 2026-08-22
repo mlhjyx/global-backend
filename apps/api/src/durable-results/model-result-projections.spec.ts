@@ -58,7 +58,7 @@ function rawResult(data: JsonRecord): RawModelResult {
 }
 
 function restoredResult(data: JsonRecord): RawModelResult {
-  return { data, provider: PROVIDER, model: MODEL };
+  return { data, provider: PROVIDER, model: MODEL, ...KNOWN_MODEL_METADATA };
 }
 
 function cloneRaw(raw: RawModelResult): RawModelResult & JsonRecord {
@@ -532,7 +532,7 @@ describe('non-Site-Builder model result projection registry', () => {
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);
       for (const name of names) {
         expect(name).toMatch(/^[a-z][A-Za-z0-9]*$/);
-        expect(name).not.toMatch(/prompt|reasoning|raw|response|body|pageBody|credential|token|secret|cookie/i);
+        expect(name).not.toMatch(/prompt|reasoning|raw|response|body|pageBody|credential|compactToken|authToken|secret|cookie/i);
       }
     }
   });
@@ -548,7 +548,8 @@ describe('non-Site-Builder model result projection registry', () => {
     expect(Buffer.byteLength(JSON.stringify(envelope), 'utf8')).toBeLessThanOrEqual(120 * 1024);
     expect(registry.restore(envelope)).toEqual(fixture.restored);
     expect(JSON.stringify(envelope.data)).not.toContain('rawPage');
-    expect(JSON.stringify(envelope.data)).not.toContain('inputTokens');
+    expect(JSON.stringify(envelope.data)).toContain('inputTokens');
+    expect(JSON.stringify(envelope.data)).not.toContain('prompt');
   });
 
   it.each(REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES)('$taskId rejects each over-bound, open, forbidden, or non-canonical mutation', (fixture) => {

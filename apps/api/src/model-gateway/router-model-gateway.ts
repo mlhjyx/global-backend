@@ -14,7 +14,6 @@ import {
   UnavailableBudgetStore,
   type BudgetStore,
 } from '../tools/budget-store';
-import { projectGenericOperationResult } from '../tools/generic-operation-projection';
 import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
@@ -390,31 +389,6 @@ export class RouterModelGateway extends ModelGateway {
             throw new BudgetOperationReplayError(operationKey);
           }
         }
-        if (
-          replay &&
-          replay.kind === 'model' &&
-          !ctx.durableResultSchema &&
-          ctx.genericReplay &&
-          replay.schema === ctx.genericReplay.schema &&
-          replay.data &&
-          typeof replay.data === 'object' &&
-          !Array.isArray(replay.data)
-        ) {
-          try {
-            const stored = replay.data as Record<string, unknown>;
-            const restored = ctx.genericReplay.restore(stored.result);
-            const verified = projectGenericOperationResult({
-              kind: 'model',
-              schema: ctx.genericReplay.schema,
-              data: { result: ctx.genericReplay.project(restored) },
-            });
-            if (verified.digest === replay.digest) {
-              return restored as ModelResult<T>;
-            }
-          } catch {
-            throw new BudgetOperationReplayError(operationKey);
-          }
-        }
         throw new BudgetOperationReplayError(operationKey);
       }
     } catch (err) {
@@ -485,12 +459,6 @@ export class RouterModelGateway extends ModelGateway {
             ctx.durableResultSchema,
             result as ModelResult<unknown>,
           )
-        : ctx.genericReplay
-        ? projectGenericOperationResult({
-            kind: 'model',
-            schema: ctx.genericReplay.schema,
-            data: { result: ctx.genericReplay.project(result as ModelResult<unknown>) },
-          })
         : undefined;
     } catch {
       // A valid provider output exists, but it cannot be represented by the
@@ -503,13 +471,17 @@ export class RouterModelGateway extends ModelGateway {
       ? Math.ceil(costUsd * 100)
       : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1));
     const settlement = [reservation, observedCents, projection] as const;
+    let settled;
     try {
-      await this.budgetStore.settle(...settlement);
+      settled = await this.budgetStore.settle(...settlement);
     } catch {
       // The first failure may be an ACK loss after commit. Repeating the exact
       // same operation/cost/projection is safe; PostgreSQL rejects any drift.
-      await this.budgetStore.settle(...settlement);
+      settled = await this.budgetStore.settle(...settlement);
     }
+    const returnedResult = settled?.receipt
+      ? { ...result, durableReceipt: settled.receipt }
+      : result;
     this.trace?.record({
       workspaceId: ctx.workspaceId,
       task: input.task,
@@ -524,7 +496,7 @@ export class RouterModelGateway extends ModelGateway {
       correlationId: ctx.correlationId,
       modelPolicy: ctx.modelPolicy,
     });
-    return result;
+    return returnedResult;
   }
 
   private async runPersistent<T>(

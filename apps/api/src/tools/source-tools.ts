@@ -57,7 +57,11 @@ import {
   searchCompaniesWithDirigeants,
   FrCompanyHit,
 } from "../adapters/inpi-rne";
-import { bigqueryPatents, PatentRecord } from "../adapters/bigquery-patents";
+import {
+  GOOGLE_PATENTS_MAX_ROWS,
+  bigqueryPatents,
+  PatentRecord,
+} from "../adapters/bigquery-patents";
 import {
   fetchSourcesSought,
   SamSourcesSought,
@@ -763,6 +767,12 @@ export interface GooglePatentsInput {
 }
 export interface GooglePatentsOutput {
   patents?: PatentRecord[];
+  costFacts?: {
+    costBasis: "estimated_upper_bound";
+    maximumBytesBilled: string;
+    bytesBilled: string;
+    maxRows: number;
+  };
 }
 
 /**
@@ -810,10 +820,16 @@ export const googlePatentsSearchTool: Tool<
         {
           fromYear: input.fromYear,
           toYear: input.toYear,
-          maxRows: input.maxRows,
+          maxRows: Math.min(input.maxRows ?? GOOGLE_PATENTS_MAX_ROWS, GOOGLE_PATENTS_MAX_ROWS),
         },
         beforeExternalRequest(ctx),
       ),
+      costFacts: {
+        costBasis: "estimated_upper_bound",
+        maximumBytesBilled: bigqueryPatents.maximumBytesBilled(),
+        bytesBilled: bigqueryPatents.maximumBytesBilled(),
+        maxRows: GOOGLE_PATENTS_MAX_ROWS,
+      },
     },
     costCents: 0,
   }),

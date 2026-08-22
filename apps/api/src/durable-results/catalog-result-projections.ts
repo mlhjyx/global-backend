@@ -52,7 +52,7 @@ const CH_COMPANY_KEYS = ['companyNumber', 'title', 'companyStatus'] as const;
 const CH_OFFICER_KEYS = ['name', 'officerRole', 'resignedOn', 'officerId'] as const;
 const INPI_COMPANY_KEYS = ['siren', 'name', 'etatAdministratif', 'dirigeants'] as const;
 const INPI_DIRIGEANT_KEYS = ['nom', 'prenoms', 'qualite'] as const;
-const PATENT_KEYS = ['applicants', 'inventors'] as const;
+const PATENT_KEYS = ['publicationNumber', 'applicants', 'inventors'] as const;
 const PATENT_APPLICANT_KEYS = ['name', 'country'] as const;
 const PATENT_INVENTOR_KEYS = ['name'] as const;
 const FAIR_EXHIBITOR_KEYS = [
@@ -758,23 +758,28 @@ const patentApplicantSchema = objectSchema({
 }, ['name']);
 const patentInventorSchema = objectSchema({ name: stringSchema(500) }, ['name']);
 const patentSchema = objectSchema({
+  publicationNumber: stringSchema(120),
   applicants: arraySchema(32, patentApplicantSchema),
   inventors: arraySchema(25, patentInventorSchema),
-}, ['applicants', 'inventors']);
+}, ['publicationNumber', 'applicants', 'inventors']);
 function projectPatentRecords(value: unknown): unknown[] {
   const groupSeen = new Map<string, Set<string>>();
   return mapArray(value, (item) => {
-    const patent = ownDataRecord(item, PATENT_KEYS, ['applicants', 'inventors']);
+    const patent = ownDataRecord(item, PATENT_KEYS, ['publicationNumber', 'applicants', 'inventors']);
     const applicants = mapArray(field(patent, 'applicants'), (entry) => (
       mapClosedRecord(entry, PATENT_APPLICANT_KEYS, ['name'])
     )) as UnknownRecord[];
     const inputInventors = mapArray(field(patent, 'inventors'), (entry) => (
       mapClosedRecord(entry, PATENT_INVENTOR_KEYS, ['name'])
     )) as UnknownRecord[];
-    if (applicants.length !== 1) return { applicants, inventors: [] };
+    if (applicants.length !== 1) return {
+      publicationNumber: field(patent, 'publicationNumber'), applicants, inventors: [],
+    };
     const sole = applicants[0];
     const applicantKey = normForMatch(String(field(sole, 'name') ?? ''));
-    if (!applicantKey) return { applicants, inventors: [] };
+    if (!applicantKey) return {
+      publicationNumber: field(patent, 'publicationNumber'), applicants, inventors: [],
+    };
     const country = typeof field(sole, 'country') === 'string'
       ? String(field(sole, 'country')).toLowerCase() : '';
     const groupKey = `${applicantKey}\0${country}`;
@@ -787,7 +792,7 @@ function projectPatentRecords(value: unknown): unknown[] {
       seen.add(nameKey);
       inventors.push(inventor);
     }
-    return { applicants, inventors };
+    return { publicationNumber: field(patent, 'publicationNumber'), applicants, inventors };
   });
 }
 const patentsData = (value: unknown) => mapClosedRecord(value, ['patents'], [], {
@@ -795,7 +800,7 @@ const patentsData = (value: unknown) => mapClosedRecord(value, ['patents'], [], 
 });
 const googlePatentsDefinition = definition(
   'google-patents-search/v1',
-  objectSchema({ patents: arraySchema(2000, patentSchema) }, []),
+  objectSchema({ patents: arraySchema(50, patentSchema) }, []),
   patentsData,
 );
 

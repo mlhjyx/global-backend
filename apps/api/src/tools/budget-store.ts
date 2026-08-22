@@ -30,6 +30,7 @@ import {
   type UnknownArtifactRow,
 } from './artifact-budget-expected-facts';
 import { assertMicrousd } from './microusd';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 const MAX_KEY_LENGTH = 200;
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
@@ -56,6 +57,7 @@ export interface BudgetSettlement {
   observedCents: number;
   capVariance: boolean;
   replay: boolean;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetResultUnknownTransition {

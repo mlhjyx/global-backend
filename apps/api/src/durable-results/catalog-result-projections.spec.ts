@@ -389,7 +389,8 @@ const INPI_RAW: RawToolResult = {
 
 const GOOGLE_PATENTS_RAW: RawToolResult = {
   data: {
-    patents: Array.from({ length: 2000 }, (_, index) => ({
+    patents: Array.from({ length: 50 }, (_, index) => ({
+      publicationNumber: `US-${String(index).padStart(4, '0')}-A1`,
       applicants: index === 0
         ? Array.from({ length: 32 }, (_, itemIndex) => ({
             name: itemIndex === 0 ? 'a'.repeat(500) : `Applicant ${itemIndex}`,
@@ -652,7 +653,8 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
   },
   'google-patents-search/v1': {
     ...COMMON_RESULT_BOUNDS,
-    '$.data.patents.maxItems': 2000,
+    '$.data.patents.maxItems': 50,
+    '$.data.patents[].publicationNumber.maxLength': 120,
     '$.data.patents[].applicants.maxItems': 32,
     '$.data.patents[].applicants[].name.maxLength': 500,
     '$.data.patents[].applicants[].country.maxLength': 16,
@@ -958,6 +960,25 @@ describe('closed catalog Tool result projections', () => {
       email: 'person@example.test', phone: '+1 555 0100', contactName: 'Named person',
     });
     expect(() => registry.project('mapyourshow-fetch/v1', map)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
+  it('requires Google Patents publicationNumber identity and caps durable rows at 50', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const missingIdentity = cloneRaw(GOOGLE_PATENTS_RAW);
+    delete ((missingIdentity.data.patents as JsonRecord[])[0]).publicationNumber;
+    expect(() => registry.project('google-patents-search/v1', missingIdentity)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const tooMany = cloneRaw(GOOGLE_PATENTS_RAW);
+    (tooMany.data.patents as JsonRecord[]).push({
+      publicationNumber: 'US-0051-A1',
+      applicants: [],
+      inventors: [],
+    });
+    expect(() => registry.project('google-patents-search/v1', tooMany)).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
   });
@@ -1333,10 +1354,12 @@ describe('closed catalog Tool result projections', () => {
       data: {
         patents: [
           {
+            publicationNumber: 'US-HOME-1',
             applicants: [{ name: 'Siemens AG', country: 'de' }],
             inventors: Array.from({ length: 15 }, (_, index) => inventor(`Home Inventor ${index}`)),
           },
           {
+            publicationNumber: 'US-HOME-2',
             applicants: [{ name: 'Siemens Aktiengesellschaft', country: 'de' }],
             inventors: [
               inventor('Home Inventor 0'),
@@ -1344,6 +1367,7 @@ describe('closed catalog Tool result projections', () => {
             ],
           },
           {
+            publicationNumber: 'US-COAUTHOR',
             applicants: [
               { name: 'Siemens AG', country: 'de' },
               { name: 'Bosch GmbH', country: 'de' },
@@ -1351,6 +1375,7 @@ describe('closed catalog Tool result projections', () => {
             inventors: [inventor('Coauthor Must Not Survive')],
           },
           {
+            publicationNumber: 'US-FOREIGN',
             applicants: [{ name: 'Siemens Inc', country: 'us' }],
             inventors: Array.from({ length: 30 }, (_, index) => inventor(`US Inventor ${index}`)),
           },

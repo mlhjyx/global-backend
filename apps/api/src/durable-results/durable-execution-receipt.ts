@@ -286,6 +286,73 @@ function parseUsage(value: unknown): DurableExecutionUsageFacts {
   return Object.freeze(usage);
 }
 
+function decimalToBigInt(value: string | undefined): bigint | undefined {
+  return value === undefined ? undefined : BigInt(value);
+}
+
+function hasPositive(value: string | undefined): boolean {
+  return (decimalToBigInt(value) ?? 0n) > 0n;
+}
+
+function validateUsageSemantics(
+  usage: DurableExecutionUsageFacts,
+  costBasis: DurableExecutionCostBasis,
+): void {
+  const charged = decimalToBigInt(usage.chargedMicrousd);
+  const upper = decimalToBigInt(usage.upperBoundMicrousd);
+  if (charged !== undefined && upper !== undefined && charged > upper) invalid();
+
+  const maximumBytesBilled = decimalToBigInt(usage.maximumBytesBilled);
+  const bytesProcessed = decimalToBigInt(usage.bytesProcessed);
+  const bytesBilled = decimalToBigInt(usage.bytesBilled);
+  if (
+    bytesProcessed !== undefined ||
+    bytesBilled !== undefined ||
+    maximumBytesBilled !== undefined
+  ) {
+    if (maximumBytesBilled === undefined) invalid();
+    if (bytesProcessed !== undefined && bytesProcessed > maximumBytesBilled) invalid();
+    if (bytesBilled !== undefined && bytesBilled > maximumBytesBilled) invalid();
+  }
+
+  if (costBasis === 'not_incurred') {
+    if (
+      (usage.callCount ?? 0) !== 0 ||
+      (usage.inputTokens ?? 0) !== 0 ||
+      (usage.outputTokens ?? 0) !== 0 ||
+      bytesProcessed !== undefined ||
+      bytesBilled !== undefined ||
+      maximumBytesBilled !== undefined ||
+      hasPositive(usage.chargedMicrousd) ||
+      hasPositive(usage.upperBoundMicrousd)
+    ) {
+      invalid();
+    }
+    return;
+  }
+
+  if (costBasis === 'provider_reported') {
+    if (charged === undefined || (usage.callCount ?? 0) < 1) invalid();
+    return;
+  }
+
+  if (costBasis === 'token_pricing') {
+    if (
+      (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) < 1 ||
+      charged === undefined ||
+      upper === undefined ||
+      (usage.callCount ?? 0) < 1
+    ) {
+      invalid();
+    }
+    return;
+  }
+
+  if (costBasis === 'estimated_upper_bound') {
+    if (upper === undefined) invalid();
+  }
+}
+
 export function parseDurableExecutionReceipt(
   value: unknown,
 ): DurableExecutionReceipt {
@@ -307,6 +374,8 @@ export function parseDurableExecutionReceipt(
   if (typeof costBasis !== 'string' || !COST_BASIS.has(costBasis)) invalid();
   const parsedStrategy = resultStrategy as DurableExecutionResultStrategy;
   const parsedCostBasis = costBasis as DurableExecutionCostBasis;
+  const usage = parseUsage(field(record, 'usage'));
+  validateUsageSemantics(usage, parsedCostBasis);
   return Object.freeze({
     schemaVersion: 'durable-execution-receipt/v1',
     scopeKey: safeKey(field(record, 'scopeKey')),
@@ -318,7 +387,7 @@ export function parseDurableExecutionReceipt(
     resultSchema: schema(field(record, 'resultSchema')),
     resultDigest: digest(field(record, 'resultDigest')),
     artifactId: artifactId === null ? null : safeKey(artifactId),
-    usage: parseUsage(field(record, 'usage')),
+    usage,
     costBasis: parsedCostBasis,
   } satisfies DurableExecutionReceipt);
 }

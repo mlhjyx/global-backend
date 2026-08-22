@@ -150,6 +150,9 @@ export function buildSyntheticRecords(rows: CacheInventorRow[]): PatentRecord[] 
     const applicantName = [...g.rawNames].sort()[0];
     if (!applicantName) continue;
     records.push({
+      publicationNumber: `cache:${Buffer.from(`${applicantName}:${g.country || 'unknown'}`)
+        .toString('base64url')
+        .slice(0, 100)}`,
       applicants: [{ name: applicantName, country: g.country || undefined }],
       inventors: g.inventors.map((name) => ({ name })),
     });

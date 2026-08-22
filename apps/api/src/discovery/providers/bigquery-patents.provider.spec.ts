@@ -31,6 +31,7 @@ function fakeBroker(opts: { patents?: () => PatentRecord[]; throwErr?: boolean }
 
 const appl = (name: string, country?: string): PatentApplicant => ({ name, country });
 const patent = (applicants: PatentApplicant[], inventors: string[]): PatentRecord => ({
+  publicationNumber: `US-${applicants.map((entry) => entry.name).join('-').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 80) || 'UNKNOWN'}-A1`,
   applicants,
   inventors: inventors.map((name) => ({ name })),
 });

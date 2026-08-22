@@ -95,13 +95,32 @@ function readModelResult(
   raw: unknown,
   allowedDataKeys: readonly string[],
   requiredDataKeys: readonly string[],
-): { readonly data: UnknownRecord; readonly provider: unknown; readonly model: unknown } {
+): UnknownRecord & {
+  readonly data: UnknownRecord;
+  readonly provider: unknown;
+  readonly model: unknown;
+} {
   const result = ownDataRecord(raw, MODEL_RESULT_KEYS, ['data', 'provider', 'model']);
   return {
     data: ownDataRecord(field(result, 'data'), allowedDataKeys, requiredDataKeys),
     provider: field(result, 'provider'),
     model: field(result, 'model'),
+    ...(hasField(result, 'reportedModel') ? { reportedModel: field(result, 'reportedModel') } : {}),
+    ...(hasField(result, 'modelResolutionSource')
+      ? { modelResolutionSource: field(result, 'modelResolutionSource') }
+      : {}),
+    ...(hasField(result, 'usage') ? { usage: readModelUsage(field(result, 'usage')) } : {}),
+    ...(hasField(result, 'callCount') ? { callCount: field(result, 'callCount') } : {}),
   };
+}
+
+function readModelUsage(value: unknown): UnknownRecord {
+  return ownDataRecord(value, [
+    'inputTokens',
+    'outputTokens',
+    'costUsd',
+    'gatewaySettlements',
+  ], []);
 }
 function projectStringArray(value: unknown): unknown[] {
   return denseArray(value).map((entry) => entry);
@@ -192,13 +211,57 @@ function modelResultSchema(data: JsonSchema): JsonSchema {
     data,
     provider: stringSchema(120),
     model: stringSchema(120),
+    reportedModel: stringSchema(120),
+    modelResolutionSource: stringSchema(40, {
+      enum: ['upstream_response', 'requested_fallback'],
+    }),
+    usage: optionalObjectSchema({
+      inputTokens: numberSchema(0, 1_000_000_000, true),
+      outputTokens: numberSchema(0, 1_000_000_000, true),
+      costUsd: numberSchema(0, 1_000_000_000),
+      gatewaySettlements: arraySchema(16, optionalObjectSchema({}, [])),
+    }),
+    callCount: numberSchema(0, 100, true),
   }, ['data', 'provider', 'model']);
 }
 function restoreModelResult(
-  projected: { readonly provider: string; readonly model: string },
+  projected: UnknownRecord & { readonly provider: string; readonly model: string },
   data: unknown,
 ): ModelResult<unknown> {
-  return { data, provider: projected.provider, model: projected.model };
+  return {
+    data,
+    provider: projected.provider,
+    model: projected.model,
+    ...(hasField(projected, 'reportedModel')
+      ? { reportedModel: projected.reportedModel as string }
+      : {}),
+    ...(hasField(projected, 'modelResolutionSource')
+      ? { modelResolutionSource: projected.modelResolutionSource as ModelResult<unknown>['modelResolutionSource'] }
+      : {}),
+    ...(hasField(projected, 'usage')
+      ? { usage: projected.usage as ModelResult<unknown>['usage'] }
+      : {}),
+    ...(hasField(projected, 'callCount')
+      ? { callCount: projected.callCount as number }
+      : {}),
+  };
+}
+
+function projectModelResultEnvelope(
+  result: UnknownRecord & { readonly provider: unknown; readonly model: unknown },
+  data: unknown,
+): UnknownRecord {
+  return {
+    data,
+    provider: result.provider,
+    model: result.model,
+    ...(hasField(result, 'reportedModel') ? { reportedModel: result.reportedModel } : {}),
+    ...(hasField(result, 'modelResolutionSource')
+      ? { modelResolutionSource: result.modelResolutionSource }
+      : {}),
+    ...(hasField(result, 'usage') ? { usage: result.usage } : {}),
+    ...(hasField(result, 'callCount') ? { callCount: result.callCount } : {}),
+  };
 }
 const claimsDefinition: TypedProjectionDefinition<unknown, unknown> = {
   schema: 'understanding-claims/v1',
@@ -212,8 +275,7 @@ const claimsDefinition: TypedProjectionDefinition<unknown, unknown> = {
   }, ['claims'])),
   project(raw) {
     const result = readModelResult(raw, ['claims'], ['claims']);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         claims: denseArray(field(result.data, 'claims')).map((claim) => {
           const source = ownDataRecord(
             claim, ['type', 'statement', 'evidence', 'confidence'],
@@ -226,10 +288,7 @@ const claimsDefinition: TypedProjectionDefinition<unknown, unknown> = {
             confidence: field(source, 'confidence'),
           };
         }),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -253,11 +312,10 @@ const profileDefinition: TypedProjectionDefinition<unknown, unknown> = {
   }, ['industry', 'summary'])),
   project(raw) {
     const result = readModelResult(raw, ['industry', 'summary'], ['industry', 'summary']);
-    return {
-      data: { industry: field(result.data, 'industry'), summary: field(result.data, 'summary') },
-      provider: result.provider,
-      model: result.model,
-    };
+    return projectModelResultEnvelope(result, {
+      industry: field(result.data, 'industry'),
+      summary: field(result.data, 'summary'),
+    });
   },
   restore(projected) {
     const result = projected as {
@@ -283,8 +341,7 @@ const offeringsDefinition: TypedProjectionDefinition<unknown, unknown> = {
   }, ['offerings'])),
   project(raw) {
     const result = readModelResult(raw, ['offerings'], ['offerings']);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         offerings: denseArray(field(result.data, 'offerings')).map((offering) => {
           const source = ownDataRecord(
             offering, ['name', 'description', 'attributes', 'evidence', 'confidence'],
@@ -300,10 +357,7 @@ const offeringsDefinition: TypedProjectionDefinition<unknown, unknown> = {
             confidence: field(source, 'confidence'),
           };
         }),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -364,8 +418,7 @@ const icpDesignDefinition: TypedProjectionDefinition<unknown, unknown> = {
       'qualification_rules',
     ];
     const result = readModelResult(raw, dataKeys, dataKeys);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         name: field(result.data, 'name'),
         companyAttributeEntries: projectFactEntries(
           field(result.data, 'company_attributes'), ICP_ATTRIBUTE_KEYS,
@@ -409,10 +462,7 @@ const icpDesignDefinition: TypedProjectionDefinition<unknown, unknown> = {
             ...(hasField(source, 'rationale') ? { rationale: field(source, 'rationale') } : {}),
           };
         }),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -475,8 +525,7 @@ const queryPlanDefinition: TypedProjectionDefinition<unknown, unknown> = {
     const result = readModelResult(raw, ['queries', 'estimated_volume'], [
       'queries', 'estimated_volume',
     ]);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         queries: denseArray(field(result.data, 'queries')).map((query) => {
           const source = ownDataRecord(
             query, ['source_class', 'filters', 'keywords', 'rationale', 'priority'],
@@ -491,10 +540,7 @@ const queryPlanDefinition: TypedProjectionDefinition<unknown, unknown> = {
           };
         }),
         estimatedVolume: field(result.data, 'estimated_volume'),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -520,11 +566,7 @@ const taxonomyDefinition: TypedProjectionDefinition<unknown, unknown> = {
   }, ['code'])),
   project(raw) {
     const result = readModelResult(raw, ['code'], ['code']);
-    return {
-      data: { code: field(result.data, 'code') },
-      provider: result.provider,
-      model: result.model,
-    };
+    return projectModelResultEnvelope(result, { code: field(result.data, 'code') });
   },
   restore(projected) {
     const result = projected as {
@@ -549,18 +591,14 @@ const fitDefinition: TypedProjectionDefinition<unknown, unknown> = {
       'business_model_gate', 'reasons',
     ];
     const result = readModelResult(raw, dataKeys, dataKeys);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         verdict: field(result.data, 'verdict'),
         materialGate: field(result.data, 'material_gate'),
         roleGate: field(result.data, 'role_gate'),
         processGate: field(result.data, 'process_gate'),
         businessModelGate: field(result.data, 'business_model_gate'),
         reasons: projectStringArray(field(result.data, 'reasons')),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -596,8 +634,7 @@ const companyDefinition: TypedProjectionDefinition<unknown, unknown> = {
       'products', 'keywords', 'evidence', 'confidence',
     ];
     const result = readModelResult(raw, rawKeys, ['is_company_site']);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         isCompanySite: field(result.data, 'is_company_site'),
         ...(hasField(result.data, 'name') ? { name: field(result.data, 'name') } : {}),
         ...(hasField(result.data, 'country') ? { country: field(result.data, 'country') } : {}),
@@ -615,10 +652,7 @@ const companyDefinition: TypedProjectionDefinition<unknown, unknown> = {
         ...(hasField(result.data, 'confidence')
           ? { confidence: field(result.data, 'confidence') }
           : {}),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -663,8 +697,7 @@ const listDefinition: TypedProjectionDefinition<unknown, unknown> = {
       raw, ['is_directory', 'list_kind', 'companies', 'has_next_page'],
       ['is_directory', 'companies'],
     );
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         isDirectory: field(result.data, 'is_directory'),
         ...(hasField(result.data, 'list_kind') ? { listKind: field(result.data, 'list_kind') } : {}),
         companies: denseArray(field(result.data, 'companies')).map((company) => {
@@ -681,10 +714,7 @@ const listDefinition: TypedProjectionDefinition<unknown, unknown> = {
         ...(hasField(result.data, 'has_next_page')
           ? { hasNextPage: field(result.data, 'has_next_page') }
           : {}),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {
@@ -723,8 +753,7 @@ const peopleDefinition: TypedProjectionDefinition<unknown, unknown> = {
   }, ['people'])),
   project(raw) {
     const result = readModelResult(raw, ['people'], ['people']);
-    return {
-      data: {
+    return projectModelResultEnvelope(result, {
         people: denseArray(field(result.data, 'people')).map((person) => {
           const source = ownDataRecord(
             person,
@@ -748,10 +777,7 @@ const peopleDefinition: TypedProjectionDefinition<unknown, unknown> = {
             ...(hasField(source, 'evidence') ? { evidence: field(source, 'evidence') } : {}),
           };
         }),
-      },
-      provider: result.provider,
-      model: result.model,
-    };
+      });
   },
   restore(projected) {
     const result = projected as {

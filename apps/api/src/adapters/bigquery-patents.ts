@@ -26,8 +26,9 @@ export const GOOGLE_PATENTS_ATTRIBUTION =
 // publications 表无 assignee 分区/聚簇 → 每查按列全表扫描（只 SELECT 2 列压字节）。maximumBytesBilled 硬顶护额度。
 const DEFAULT_MAX_GB = 200;
 const BYTES_PER_GB = 1024 ** 3;
-const MAX_ROWS_DEFAULT = 500;
-const MAX_ROWS_CEIL = 2000;
+export const GOOGLE_PATENTS_MAX_ROWS = 50;
+const MAX_ROWS_DEFAULT = GOOGLE_PATENTS_MAX_ROWS;
+const MAX_ROWS_CEIL = GOOGLE_PATENTS_MAX_ROWS;
 
 /**
  * 🔴 每 (assigneeNorm, assigneeCountry) **缓存**发明人上限（Codex PR #93 P2-6，数据最小化）——
@@ -72,6 +73,8 @@ export interface PatentInventor {
   name: string;
 }
 export interface PatentRecord {
+  /** Stable public patent row identity for durable replay/domain ACK. */
+  publicationNumber: string;
   /** ≤ MAX_APPLICANTS_PER_PATENT; normalizeRow rejects larger rows fail-closed. */
   applicants: PatentApplicant[];
   inventors: PatentInventor[];
@@ -113,6 +116,7 @@ function clampMaxRows(n?: number): number {
 function buildQuery(maxRows: number): string {
   return `
     SELECT
+      publication_number AS publication_number,
       ARRAY(
         SELECT AS STRUCT a.name AS name, a.country_code AS country
         FROM UNNEST(assignee_harmonized) a
@@ -251,6 +255,10 @@ export class BigQueryPatentsClient {
     return String(Math.floor(maxGb * BYTES_PER_GB));
   }
 
+  maximumBytesBilled(): string {
+    return this.maxBytes();
+  }
+
   /**
    * 按 assignee（公司名）查近 [fromYear, toYear] 专利 → {@link PatentRecord}[]。
    * 无锚/无 creds → 返空（天然 no-op）。查询错误/超额向上抛，由 provider 的 try/catch fail-safe 兜（不在此吞）。
@@ -341,6 +349,14 @@ function normCountry(v: unknown): string | undefined {
 
 /** BigQuery 行 → PatentRecord（🔴 inventor **只留 name**，丢 country_code 等 = 数据最小化）。 */
 export function normalizeRow(row: Record<string, unknown>): PatentRecord {
+  const publicationNumber = String(row.publication_number ?? row.publicationNumber ?? '').trim();
+  if (
+    !publicationNumber ||
+    publicationNumber.length > 120 ||
+    !/^[A-Za-z0-9:._/-]+$/u.test(publicationNumber)
+  ) {
+    throw new Error('GOOGLE_PATENTS_PUBLICATION_NUMBER_REQUIRED');
+  }
   const rawApplicants = Array.isArray(row.applicants)
     ? row.applicants as Array<Record<string, unknown>>
     : [];
@@ -358,7 +374,7 @@ export function normalizeRow(row: Record<string, unknown>): PatentRecord {
         .map((i) => ({ name: String(i?.name ?? '').trim() })) // 🔴 只 name
         .filter((i) => i.name)
     : [];
-  return { applicants, inventors };
+  return { publicationNumber, applicants, inventors };
 }
 
 /** 生产单例（env 驱动）。 */

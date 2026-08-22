@@ -38,7 +38,7 @@
         "consumer": "CompanyRegistryDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identity": "company-registry-number",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -51,7 +51,7 @@
         "consumer": "WebCrawlKnowledgeSource",
         "domainAggregateType": "KnowledgeSource",
         "identity": "source-url-and-content-hash",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -64,7 +64,7 @@
         "consumer": "RenderedPageCapture",
         "domainAggregateType": "KnowledgeSource",
         "identity": "source-url-and-render-hash",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -77,7 +77,7 @@
         "consumer": "LegalEntityEnrichment",
         "domainAggregateType": "CanonicalCompany",
         "identity": "lei",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -93,14 +93,14 @@
       },
       "costConstraints": {
         "maximumBytesBilled": "214748364800",
-        "costBasis": "provider_reported-or-estimated_upper_bound",
+        "costBasis": "estimated_upper_bound",
         "noRealBigQueryInTests": true
       },
       "domainAck": {
         "consumer": "PatentCacheBrokerScanner",
         "domainAggregateType": "PatentEvidence",
-        "identity": "publication-number",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "identity": "publicationNumber",
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -113,7 +113,7 @@
         "consumer": "GenericHttpArtifactConsumer",
         "domainAggregateType": "ExternalArtifact",
         "identity": "url-and-content-hash",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -126,7 +126,7 @@
         "consumer": "CompanyRegistryDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identity": "siren-or-siret",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -139,7 +139,7 @@
         "consumer": "TradeFairDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identity": "show-exhibitor-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -152,7 +152,7 @@
         "consumer": "OpenFdaDiscoveryProvider",
         "domainAggregateType": "ProductRegistrationEvidence",
         "identity": "registration-or-k-number",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -165,7 +165,7 @@
         "consumer": "GeoDiscoveryProvider",
         "domainAggregateType": "LocationEvidence",
         "identity": "osm-element-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -178,7 +178,7 @@
         "consumer": "SamGovDiscoveryProvider",
         "domainAggregateType": "FederalContractEvidence",
         "identity": "uei-or-award-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -191,7 +191,7 @@
         "consumer": "SanctionsScreeningCache",
         "domainAggregateType": "SanctionsDataset",
         "identity": "dataset-source-and-published-date",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -204,7 +204,7 @@
         "consumer": "SearchDiscoveryProvider",
         "domainAggregateType": "SearchResultEvidence",
         "identity": "result-url-and-query-digest",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -217,7 +217,7 @@
         "consumer": "EmailVerificationProvider",
         "domainAggregateType": "EmailVerification",
         "identity": "normalized-email-hash",
-        "mode": "DECLARED_PRE_CUTOVER",
+        "mode": "ADDITIVE_ACK_REPOSITORY",
         "personalDataDsrCompatible": true
       }
     },
@@ -231,7 +231,7 @@
         "consumer": "TedTenderDiscoveryProvider",
         "domainAggregateType": "TenderEvidence",
         "identity": "ted-notice-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -244,7 +244,7 @@
         "consumer": "TradeFairDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identity": "event-exhibitor-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -257,7 +257,7 @@
         "consumer": "WikidataEntityResolver",
         "domainAggregateType": "CanonicalCompany",
         "identity": "wikidata-qid",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -270,7 +270,7 @@
         "consumer": "WikidataTaxonomyResolver",
         "domainAggregateType": "TaxonomyEvidence",
         "identity": "query-digest-and-qid",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     }
   ],
@@ -285,7 +285,7 @@
         "consumer": "UnderstandingActivities.extractClaims",
         "domainAggregateType": "Claim",
         "identity": "claim-type-and-statement-digest",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -298,7 +298,7 @@
         "consumer": "UnderstandingActivities.extractOfferings",
         "domainAggregateType": "Offering",
         "identity": "company-and-offering-name",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -311,7 +311,7 @@
         "consumer": "UnderstandingActivities.extractAndPersistProfile",
         "domainAggregateType": "CompanyProfile",
         "identity": "company-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -324,7 +324,7 @@
         "consumer": "DecisionMakerProvider.extract",
         "domainAggregateType": "Contact",
         "identity": "source-page-and-person-name",
-        "mode": "DECLARED_PRE_CUTOVER",
+        "mode": "ADDITIVE_ACK_REPOSITORY",
         "personalDataDsrCompatible": true
       }
     },
@@ -338,7 +338,7 @@
         "consumer": "PublicWebDiscoveryProvider.mineDomain",
         "domainAggregateType": "CanonicalCompany",
         "identity": "domain",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -351,7 +351,7 @@
         "consumer": "DirectoryDiscoveryProvider.extractList",
         "domainAggregateType": "CanonicalCompany",
         "identity": "directory-source-and-company-name",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -364,7 +364,7 @@
         "consumer": "FitJudge.upsertLeadFit",
         "domainAggregateType": "Lead",
         "identity": "workspace-icp-company",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -377,7 +377,7 @@
         "consumer": "IcpService.generateQueryPlan",
         "domainAggregateType": "DiscoveryQueryPlan",
         "identity": "icp-id",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -390,7 +390,7 @@
         "consumer": "IcpService.generateFromCompany",
         "domainAggregateType": "IcpDefinition",
         "identity": "company-id-and-icp-version",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     },
     {
@@ -403,7 +403,7 @@
         "consumer": "TaxonomyResolver",
         "domainAggregateType": "TermAlias",
         "identity": "taxonomy-kind-and-normalized-term",
-        "mode": "DECLARED_PRE_CUTOVER"
+        "mode": "ADDITIVE_ACK_REPOSITORY"
       }
     }
   ],
@@ -411,22 +411,22 @@
     {
       "schema": "crawl4ai-fetch/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PUBLIC_ORGANIZATION"
+      "privacyClass": "PERSONAL_DATA"
     },
     {
       "schema": "crawl4ai-render/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PUBLIC_ORGANIZATION"
+      "privacyClass": "PERSONAL_DATA"
     },
     {
       "schema": "http-get/v1",
       "artifactIdRequired": true,
-      "privacyClass": "CONFIDENTIAL_TENANT"
+      "privacyClass": "PERSONAL_DATA"
     },
     {
       "schema": "sanctions-download/v1",
       "artifactIdRequired": true,
-      "privacyClass": "PUBLIC_ORGANIZATION"
+      "privacyClass": "PERSONAL_DATA"
     }
   ],
   "managedExternalAdapters": [

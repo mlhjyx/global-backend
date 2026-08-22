@@ -28,6 +28,7 @@ import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'public_web/v1';
 
@@ -127,6 +128,7 @@ export class PublicWebDiscoveryProvider
       const batch = domains.slice(i, i + CRAWL_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map((d) => this.mineDomain(d, query, ctx)));
       for (const s of settled) {
+        if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
         if (s.status === 'fulfilled' && s.value) records.push(s.value);
       }
     }
@@ -170,6 +172,7 @@ export class PublicWebDiscoveryProvider
       );
       text = crawled.data.text.slice(0, 30_000);
     } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       this.log(`skip ${domain}: crawl failed (${String(err).slice(0, 80)})`);
       return null; // 站点不可达/闸门拒绝 → 放弃该候选
     }

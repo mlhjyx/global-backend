@@ -95,7 +95,7 @@ describe('judgeFitCompany provider-independent result semantics', () => {
     },
   );
 
-  it('keeps the durable replay projector closed, bounded, and independent from fractional cost facts', async () => {
+  it('keeps the durable replay projector closed, bounded, and byte-identical for fractional cost facts', async () => {
     executeTask.mockImplementation(async (_gateway, _input, context) => {
       expect(context.durableResultSchema).toBe('fit-judgment/v1');
       const projected = projectModelResultForReplay('fit-judgment/v1', {
@@ -108,12 +108,19 @@ describe('judgeFitCompany provider-independent result semantics', () => {
         provider: 'new-api',
         model: 'qualified-model',
       });
-      expect(projectModelResultForReplay('fit-judgment/v1', {
+      const projectedWithCost = projectModelResultForReplay('fit-judgment/v1', {
         data: output,
         provider: 'new-api',
         model: 'qualified-model',
         usage: { inputTokens: 11, outputTokens: 7, costUsd: 0.0017 },
-      }).digest).toBe(projected.digest);
+      });
+      expect(projectedWithCost.digest).not.toBe(projected.digest);
+      expect(restoreModelResultFromReplay('fit-judgment/v1', projectedWithCost)).toEqual({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+        usage: { inputTokens: 11, outputTokens: 7, costUsd: 0.0017 },
+      });
       expect(() =>
         restoreModelResultFromReplay('taxonomy-code/v1', projected),
       ).toThrow('MODEL_RESULT_REPLAY_INVALID');

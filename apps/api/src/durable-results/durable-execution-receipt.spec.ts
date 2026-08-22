@@ -135,4 +135,133 @@ describe('DurableExecutionReceipt', () => {
       ),
     ).toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
   });
+
+  it.each([
+    [
+      'not_incurred',
+      receipt({
+        costBasis: 'not_incurred',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 0,
+          chargedMicrousd: '0',
+          upperBoundMicrousd: '0',
+        },
+      }),
+    ],
+    [
+      'provider_reported',
+      receipt({
+        costBasis: 'provider_reported',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '42',
+        },
+      }),
+    ],
+    [
+      'token_pricing',
+      receipt({
+        costBasis: 'token_pricing',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          inputTokens: 10,
+          outputTokens: 4,
+          chargedMicrousd: '14',
+          upperBoundMicrousd: '20',
+        },
+      }),
+    ],
+  ])('accepts internally consistent %s cost facts', (_name, candidate) => {
+    expect(parseDurableExecutionReceipt(candidate).costBasis).toBe(candidate.costBasis);
+  });
+
+  it.each([
+    [
+      'not_incurred cannot claim a wire call or charge',
+      receipt({
+        costBasis: 'not_incurred',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '1',
+          upperBoundMicrousd: '1',
+        },
+      }),
+    ],
+    [
+      'charged microusd cannot exceed the upper bound',
+      receipt({
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '101',
+          upperBoundMicrousd: '100',
+        },
+      }),
+    ],
+    [
+      'bytes billed cannot exceed maximumBytesBilled',
+      receipt({
+        resultSchema: 'google-patents-search/v1',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          bytesProcessed: '214748364801',
+          bytesBilled: '214748364801',
+          maximumBytesBilled: '214748364800',
+          chargedMicrousd: '0',
+          upperBoundMicrousd: '0',
+        },
+      }),
+    ],
+    [
+      'token pricing requires token facts',
+      receipt({
+        costBasis: 'token_pricing',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '10',
+          upperBoundMicrousd: '10',
+        },
+      }),
+    ],
+    [
+      'provider reported cost requires a charged amount',
+      receipt({
+        costBasis: 'provider_reported',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+        },
+      }),
+    ],
+    [
+      'estimated upper bound requires an upper bound amount',
+      receipt({
+        costBasis: 'estimated_upper_bound',
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          chargedMicrousd: '0',
+        },
+      }),
+    ],
+  ])('rejects contradictory usage/cost facts: %s', (_name, candidate) => {
+    expect(() => parseDurableExecutionReceipt(candidate)).toThrow(
+      'DURABLE_EXECUTION_RECEIPT_INVALID',
+    );
+  });
 });

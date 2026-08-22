@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,6 +83,22 @@ function sorted(values) {
   return [...values].sort();
 }
 
+async function listFiles(root, relative = "") {
+  const dir = resolve(root, relative);
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const child = relative ? `${relative}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === "dist") continue;
+      files.push(...await listFiles(root, child));
+    } else if (entry.isFile()) {
+      files.push(child);
+    }
+  }
+  return files;
+}
+
 function validateClosedTopLevelObject(value, path, allowedKeys, issues) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     issues.push(issue("EXECUTION_AUTHORITY_MANIFEST_INVALID", path, "manifest must be a JSON object"));
@@ -148,6 +164,20 @@ function validateManifestCoverage(manifest, issues) {
       if (!entry.operationIdentity || !entry.receipt || !entry.domainAck) {
         issues.push(issue("EXECUTION_AUTHORITY_TOOL_ACK_PATH_MISSING", MANIFEST_PATH, `tool lacks operation identity/receipt/domainAck path: ${entry.id ?? "<unknown>"}`));
       }
+      if (entry.domainAck?.mode !== "ADDITIVE_ACK_REPOSITORY") {
+        issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_MODE_INVALID", MANIFEST_PATH, `tool must bind additive ACK repository path: ${entry.id ?? "<unknown>"}`));
+      }
+      if (entry.id === "google_patents.search") {
+        if (entry.resultConstraints?.maxRows !== 50 || entry.domainAck?.identity !== "publicationNumber") {
+          issues.push(issue("EXECUTION_AUTHORITY_PATENT_RESULT_CONTRACT_INVALID", MANIFEST_PATH, "google_patents.search must cap durable rows at 50 and ACK publicationNumber"));
+        }
+        if (
+          entry.costConstraints?.maximumBytesBilled !== "214748364800" ||
+          entry.costConstraints?.costBasis !== "estimated_upper_bound"
+        ) {
+          issues.push(issue("EXECUTION_AUTHORITY_PATENT_COST_CONTRACT_INVALID", MANIFEST_PATH, "google_patents.search must declare bounded estimated upper-bound BigQuery cost facts"));
+        }
+      }
     }
   }
   if (Array.isArray(manifest.modelTasks)) {
@@ -164,12 +194,20 @@ function validateManifestCoverage(manifest, issues) {
       if (!entry.operationIdentity || !entry.receipt || !entry.domainAck) {
         issues.push(issue("EXECUTION_AUTHORITY_MODEL_ACK_PATH_MISSING", MANIFEST_PATH, `model task lacks operation identity/receipt/domainAck path: ${entry.taskId ?? "<unknown>"}`));
       }
+      if (entry.domainAck?.mode !== "ADDITIVE_ACK_REPOSITORY") {
+        issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_MODE_INVALID", MANIFEST_PATH, `model task must bind additive ACK repository path: ${entry.taskId ?? "<unknown>"}`));
+      }
     }
   }
   if (Array.isArray(manifest.artifactSchemas)) {
     const schemas = sorted(manifest.artifactSchemas.map((entry) => entry?.schema).filter(Boolean));
     if (schemas.join("\n") !== sorted(REQUIRED_ARTIFACT_SCHEMAS).join("\n")) {
       issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_SCHEMA_MISMATCH", MANIFEST_PATH, "artifact schema inventory must match materializer registry"));
+    }
+    for (const entry of manifest.artifactSchemas) {
+      if (entry?.privacyClass !== "PERSONAL_DATA") {
+        issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_PRIVACY_MISMATCH", MANIFEST_PATH, `artifact schema must stay PERSONAL_DATA: ${entry?.schema ?? "<unknown>"}`));
+      }
     }
   }
 }
@@ -187,6 +225,11 @@ async function scanToolSource(repoRoot, issues) {
     if (!source.includes(`id: "${toolId}"`)) {
       issues.push(issue("EXECUTION_AUTHORITY_TOOL_MISSING", "apps/api/src/tools", `missing tool ${toolId}`));
     }
+    const idIndex = source.indexOf(`id: "${toolId}"`);
+    const toolBlock = idIndex >= 0 ? source.slice(idIndex, idIndex + 2500) : "";
+    if (!toolBlock.includes("durableResultStrategy")) {
+      issues.push(issue("EXECUTION_AUTHORITY_TOOL_STRATEGY_SOURCE_MISMATCH", "apps/api/src/tools", `${toolId} must declare durableResultStrategy next to its Tool contract`));
+    }
   }
 }
 
@@ -199,18 +242,6 @@ async function scanModelSource(repoRoot, issues) {
     }
     if (!source.includes(`durableResultSchema: '${schema}'`) && !source.includes(`durableResultSchema: "${schema}"`)) {
       issues.push(issue("EXECUTION_AUTHORITY_MODEL_SCHEMA_BINDING_MISSING", path, `${taskId} must bind durableResultSchema ${schema}`));
-    }
-  }
-  const legacyFiles = [
-    "apps/api/src/icp/icp-budget-execution.ts",
-    "apps/api/src/discovery/taxonomy-resolver.ts",
-    "apps/api/src/discovery/fit-judge.ts",
-    "apps/api/src/temporal/understanding.activities.ts",
-  ];
-  for (const path of legacyFiles) {
-    const source = await readText(repoRoot, path);
-    if (source.includes("genericReplay")) {
-      issues.push(issue("EXECUTION_AUTHORITY_MODEL_CALLBACK_REPLAY_REMAINS", path, "product model paths must use registered durableResultSchema rather than ad hoc replay callbacks"));
     }
   }
 }
@@ -232,6 +263,25 @@ async function scanReceiptSource(repoRoot, issues) {
       issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_PAYLOAD_GUARD_INCOMPLETE", path, `receipt parser must explicitly guard ${forbidden}`));
     }
   }
+  for (const token of ["charged > upper", "bytesBilled", "maximumBytesBilled", "not_incurred", "token_pricing"]) {
+    if (!source.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_SEMANTICS_INCOMPLETE", path, `receipt parser must enforce cost semantic token ${token}`));
+    }
+  }
+}
+
+async function scanDomainAckSource(repoRoot, issues) {
+  const path = "apps/api/src/durable-results/domain-ack.ts";
+  if (!existsSync(resolve(repoRoot, path))) {
+    issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_SERVICE_MISSING", path, "additive Domain ACK service/repository is required"));
+    return;
+  }
+  const source = await readText(repoRoot, path);
+  for (const token of ["DomainAckService", "InMemoryDomainAckRepository", "applyWithAck", "DOMAIN_ACK_CONFLICT", "parseDurableExecutionReceipt"]) {
+    if (!source.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_SERVICE_INCOMPLETE", path, `Domain ACK service missing ${token}`));
+    }
+  }
 }
 
 async function scanArtifactSource(repoRoot, issues) {
@@ -244,15 +294,25 @@ async function scanArtifactSource(repoRoot, issues) {
 }
 
 async function scanExternalAdapterBypasses(repoRoot, issues) {
-  const managedPaths = [
-    "apps/api/src/temporal/patents-cache.activities.ts",
-    "apps/api/src/temporal/patent-cache-broker-scanner.ts",
-    "apps/api/src/discovery/providers/bigquery-patents.provider.ts",
-  ];
-  for (const path of managedPaths) {
+  const sourceFiles = (await listFiles(repoRoot, "apps/api/src"))
+    .filter((path) => path.endsWith(".ts") && !path.endsWith(".spec.ts"));
+  for (const path of sourceFiles) {
+    if (path === "apps/api/src/adapters/bigquery-patents.ts") continue;
+    if (path === "apps/api/src/tools/source-tools.ts") continue;
     const source = await readText(repoRoot, path);
-    if (path !== "apps/api/src/temporal/patent-cache-broker-scanner.ts" && /bigqueryPatents\.(search|refresh|scan|searchPatentsByAssignee)/.test(source)) {
+    if (/@google-cloud\/bigquery|new BigQuery|bigqueryPatents\.(search|refresh|scan|searchPatentsByAssignee)/.test(source)) {
       issues.push(issue("EXECUTION_AUTHORITY_DIRECT_BIGQUERY_BYPASS", path, "managed product path must invoke google_patents.search through ToolBroker"));
+    }
+  }
+}
+
+async function scanGenericReplay(repoRoot, issues) {
+  const sourceFiles = (await listFiles(repoRoot, "apps/api/src"))
+    .filter((path) => path.endsWith(".ts") && !path.endsWith(".spec.ts"));
+  for (const path of sourceFiles) {
+    const source = await readText(repoRoot, path);
+    if (source.includes("genericReplay")) {
+      issues.push(issue("EXECUTION_AUTHORITY_GENERIC_REPLAY_UNCLASSIFIED", path, "genericReplay is not allowed on product source paths"));
     }
   }
 }
@@ -276,8 +336,10 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   await scanToolSource(repoRoot, issues);
   await scanModelSource(repoRoot, issues);
   await scanReceiptSource(repoRoot, issues);
+  await scanDomainAckSource(repoRoot, issues);
   await scanArtifactSource(repoRoot, issues);
   await scanExternalAdapterBypasses(repoRoot, issues);
+  await scanGenericReplay(repoRoot, issues);
 
   return Object.freeze({
     ok: issues.length === 0,

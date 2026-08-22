@@ -5,6 +5,7 @@
  */
 
 import type { DurableResultStrategy } from "../durable-results/durable-result-strategy";
+import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import type { PaidCostContext } from "../site-builder/site-build-cost-ledger";
 
 export type ToolCategory =
@@ -146,6 +147,8 @@ export interface ToolResult<T = unknown> {
     parserVersion: string;
   };
   degraded?: boolean; // 走了 fallback / 降级
+  /** Ledger-authored durable receipt returned by authoritative settlement, when available. */
+  durableReceipt?: DurableExecutionReceipt;
 }
 
 /** source_policy 闸门的拒绝原因（checkSourcePolicy 与 invoke 共用词表）。 */

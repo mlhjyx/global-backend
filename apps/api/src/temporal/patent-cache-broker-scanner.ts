@@ -65,6 +65,8 @@ export function createPatentCacheBrokerScanner(input: {
         return { rows: [], bytesScanned: null, scanned: false };
       }
       const rows: RefreshInventorRow[] = [];
+      let bytesScanned = 0;
+      let scanned = false;
       for (const anchor of anchors) {
         const applicant = applicantFromAnchor(anchor);
         if (!applicant) continue;
@@ -84,9 +86,21 @@ export function createPatentCacheBrokerScanner(input: {
           },
           context,
         );
+        const bytesBilled = Number(result.data.costFacts?.bytesBilled);
+        const maximumBytesBilled = Number(result.data.costFacts?.maximumBytesBilled);
+        if (
+          !Number.isSafeInteger(bytesBilled) ||
+          bytesBilled < 0 ||
+          !Number.isSafeInteger(maximumBytesBilled) ||
+          maximumBytesBilled < bytesBilled
+        ) {
+          throw new Error("GOOGLE_PATENTS_COST_FACTS_UNAVAILABLE");
+        }
+        bytesScanned += bytesBilled;
+        scanned = true;
         rows.push(...rowsFromPatents(result.data.patents ?? []));
       }
-      return { rows, bytesScanned: null, scanned: true };
+      return { rows, bytesScanned, scanned };
     },
   };
 }
