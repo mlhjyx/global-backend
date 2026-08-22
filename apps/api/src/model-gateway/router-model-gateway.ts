@@ -16,6 +16,10 @@ import {
 } from '../tools/budget-store';
 import { projectGenericOperationResult } from '../tools/generic-operation-projection';
 import {
+  projectModelResultForReplay,
+  restoreModelResultFromReplay,
+} from '../durable-results/model-result-replay';
+import {
   ExternalActionDeniedError,
   ProviderIdentityError,
   ProviderOutputError,
@@ -374,6 +378,22 @@ export class RouterModelGateway extends ModelGateway {
         if (
           replay &&
           replay.kind === 'model' &&
+          ctx.durableResultSchema &&
+          replay.schema === ctx.durableResultSchema
+        ) {
+          try {
+            return restoreModelResultFromReplay(
+              ctx.durableResultSchema,
+              replay,
+            ) as ModelResult<T>;
+          } catch {
+            throw new BudgetOperationReplayError(operationKey);
+          }
+        }
+        if (
+          replay &&
+          replay.kind === 'model' &&
+          !ctx.durableResultSchema &&
           ctx.genericReplay &&
           replay.schema === ctx.genericReplay.schema &&
           replay.data &&
@@ -460,7 +480,12 @@ export class RouterModelGateway extends ModelGateway {
 
     let projection;
     try {
-      projection = ctx.genericReplay
+      projection = ctx.durableResultSchema
+        ? projectModelResultForReplay(
+            ctx.durableResultSchema,
+            result as ModelResult<unknown>,
+          )
+        : ctx.genericReplay
         ? projectGenericOperationResult({
             kind: 'model',
             schema: ctx.genericReplay.schema,

@@ -62,6 +62,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       expect.objectContaining({
         workspaceId: binding.scopeKey,
         runId: binding.accountKey,
+        durableResultSchema: 'taxonomy-code/v1',
       }),
     );
   });
@@ -73,7 +74,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       expect(context).toMatchObject({
         workspaceId: 'workspace-1',
         runId: 'discovery:run-1',
-        genericReplay: expect.objectContaining({ schema: 'taxonomy-result/v1' }),
+        durableResultSchema: 'taxonomy-code/v1',
       });
       return { data: { code: 'industry-1' }, provider: 'gateway', model: 'model', usage: { inputTokens: 1, outputTokens: 1 } };
     });
@@ -133,7 +134,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     const generateStructured = vi.fn(async (input, context) => {
       expect(input.task).toBe('taxonomy.normalize');
       expect(input.model).toBe('deepseek-v4-flash');
-      expect(context.genericReplay).toEqual(expect.objectContaining({ schema: 'taxonomy-result/v1' }));
+      expect(context.durableResultSchema).toBe('taxonomy-code/v1');
       const code = ((input.schema as {
         properties: { code: { enum: (string | null)[] } };
       }).properties.code.enum[0]);

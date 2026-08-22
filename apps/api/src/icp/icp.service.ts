@@ -124,6 +124,7 @@ export class IcpService {
     const result = await executeIcpBudgetedTask<IcpModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP generation requires an authoritative BudgetStore'),
       binding,
+      durableResultSchema: 'icp-design/v1',
       execute: (budgetContext) => executeStructuredTaskWithRuntime<IcpModelOutput>(
         this.gateway,
         {
@@ -484,6 +485,7 @@ export class IcpService {
     const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,
+      durableResultSchema: 'icp-query-plan/v1',
       execute: (budgetContext) => executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
         this.gateway,
         {

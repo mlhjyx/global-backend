@@ -401,7 +401,7 @@ export class TaxonomyResolver {
         {
           workspaceId: binding.scopeKey,
           runId: binding.accountKey,
-          genericReplay: taxonomyReplay<Output>(),
+          durableResultSchema: 'taxonomy-code/v1',
         },
         { telemetry: this.runtimeTelemetry },
       );
@@ -415,7 +415,7 @@ export class TaxonomyResolver {
         {
           workspaceId,
           runId: accountKey,
-          genericReplay: taxonomyReplay<Output>(),
+          durableResultSchema: 'taxonomy-code/v1',
         },
         { telemetry: this.runtimeTelemetry },
       );
@@ -423,29 +423,4 @@ export class TaxonomyResolver {
       await budgets.close({ workspaceId, accountKey });
     }
   }
-}
-
-function taxonomyReplay<Output>() {
-  return {
-    schema: 'taxonomy-result/v1',
-    project: (result: { data: unknown; provider: string; model: string }) => ({
-      json: JSON.stringify(result.data),
-      provider: result.provider,
-      model: result.model,
-    }),
-    restore: (value: unknown) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new Error('TAXONOMY_REPLAY_INVALID');
-      }
-      const record = value as Record<string, unknown>;
-      if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
-        throw new Error('TAXONOMY_REPLAY_INVALID');
-      }
-      return {
-        data: JSON.parse(record.json) as Output,
-        provider: record.provider,
-        model: record.model,
-      };
-    },
-  };
 }

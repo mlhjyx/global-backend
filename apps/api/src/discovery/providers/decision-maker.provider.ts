@@ -256,7 +256,7 @@ export class DecisionMakerProvider {
           schema: contract?.outputSchema ?? { required: ['people'] },
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { ...ctx },
+        { ...ctx, durableResultSchema: 'contact-decision-makers/v1' },
         { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data?.people ?? [];

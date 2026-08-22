@@ -209,7 +209,7 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     for (const call of generateStructured.mock.calls) {
       expect(call[1]).toEqual(expect.objectContaining({
         runId: accountKey,
-        genericReplay: expect.objectContaining({ schema: expect.stringMatching(/^understanding-/) }),
+        durableResultSchema: expect.stringMatching(/^understanding-/),
       }));
     }
   });

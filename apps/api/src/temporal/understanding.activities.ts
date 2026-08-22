@@ -8,7 +8,6 @@ import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links'
 import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
-import type { ModelResult } from '../model-gateway/types';
 import {
   type BudgetStore,
   UnavailableBudgetStore,
@@ -62,27 +61,6 @@ export interface CrawledPage {
 /** Keep Temporal payloads bounded — a page beyond this adds noise, not facts. */
 const MAX_PAGE_CHARS = 40_000;
 const MAX_SUBPAGES = 6;
-
-function understandingReplay<Output>(schema: string) {
-  return {
-    schema,
-    project: (result: ModelResult<unknown>) => ({
-      json: JSON.stringify(result.data),
-      provider: result.provider,
-      model: result.model,
-    }),
-    restore: (value: unknown): ModelResult<Output> => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new Error('UNDERSTANDING_REPLAY_INVALID');
-      }
-      const record = value as Record<string, unknown>;
-      if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
-        throw new Error('UNDERSTANDING_REPLAY_INVALID');
-      }
-      return { data: JSON.parse(record.json) as Output, provider: record.provider, model: record.model };
-    },
-  };
-}
 
 /**
  * Activities do the real (side-effectful) work — DB writes go through
@@ -218,7 +196,7 @@ export function createUnderstandingActivities(deps: {
           {
             workspaceId: args.workspaceId,
             runId: accountKey,
-            genericReplay: understandingReplay<{ claims: ExtractedClaim[] }>('understanding-claims/v1'),
+            durableResultSchema: 'understanding-claims/v1',
           },
           { telemetry: deps.runtimeTelemetry },
         );
@@ -244,7 +222,7 @@ export function createUnderstandingActivities(deps: {
           {
             workspaceId: args.workspaceId,
             runId: accountKey,
-            genericReplay: understandingReplay<{ industry?: string; summary?: string }>('understanding-profile/v1'),
+            durableResultSchema: 'understanding-profile/v1',
           },
           { telemetry: deps.runtimeTelemetry },
         );
@@ -282,7 +260,7 @@ export function createUnderstandingActivities(deps: {
           {
             workspaceId: args.workspaceId,
             runId: accountKey,
-            genericReplay: understandingReplay<{ offerings: ExtractedOffering[] }>('understanding-offerings/v1'),
+            durableResultSchema: 'understanding-offerings/v1',
           },
           { telemetry: deps.runtimeTelemetry },
         );

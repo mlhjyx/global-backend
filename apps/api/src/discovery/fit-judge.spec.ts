@@ -7,6 +7,10 @@ vi.mock('../model-runtime/structured-task-runtime-bridge', () => ({
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { judgeFitCompany } from './fit-judge';
 import { BudgetOperationReplayError } from '../tools/budget-store';
+import {
+  projectModelResultForReplay,
+  restoreModelResultFromReplay,
+} from '../durable-results/model-result-replay';
 
 const executeTask = vi.mocked(executeStructuredTaskWithRuntime);
 const company = {
@@ -93,46 +97,26 @@ describe('judgeFitCompany provider-independent result semantics', () => {
 
   it('keeps the durable replay projector closed, bounded, and independent from fractional cost facts', async () => {
     executeTask.mockImplementation(async (_gateway, _input, context) => {
-      const replay = context.genericReplay!;
-      expect(replay.project({
-        data: output,
-        provider: 'new-api',
-        model: 'qualified-model',
-      })).toEqual({
+      expect(context.durableResultSchema).toBe('fit-judgment/v1');
+      const projected = projectModelResultForReplay('fit-judgment/v1', {
         data: output,
         provider: 'new-api',
         model: 'qualified-model',
       });
-      expect(replay.project({
+      expect(restoreModelResultFromReplay('fit-judgment/v1', projected)).toEqual({
+        data: output,
+        provider: 'new-api',
+        model: 'qualified-model',
+      });
+      expect(projectModelResultForReplay('fit-judgment/v1', {
         data: output,
         provider: 'new-api',
         model: 'qualified-model',
         usage: { inputTokens: 11, outputTokens: 7, costUsd: 0.0017 },
-      })).toEqual({
-        data: output,
-        provider: 'new-api',
-        model: 'qualified-model',
-      });
-      expect(() => replay.restore(null)).toThrow('FIT_JUDGMENT_REPLAY_INVALID');
-      expect(replay.restore({
-        data: output,
-        provider: 'new-api',
-        model: 'qualified-model',
-      })).toEqual({
-        data: output,
-        provider: 'new-api',
-        model: 'qualified-model',
-      });
-      expect(replay.restore({
-        data: output,
-        provider: 'new-api',
-        model: 'qualified-model',
-        usage: { inputTokens: 11, outputTokens: 7, costUsd: 0.0017 },
-      })).toEqual({
-        data: output,
-        provider: 'new-api',
-        model: 'qualified-model',
-      });
+      }).digest).toBe(projected.digest);
+      expect(() =>
+        restoreModelResultFromReplay('taxonomy-code/v1', projected),
+      ).toThrow('MODEL_RESULT_REPLAY_INVALID');
       return { provider: 'new-api', data: output } as never;
     });
 

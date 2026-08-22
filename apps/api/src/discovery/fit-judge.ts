@@ -139,25 +139,7 @@ export async function judgeFitCompany(
         workspaceId,
         runId: opts?.runId,
         authorizeExternalAction: opts?.authorizeExternalAction,
-        genericReplay: {
-          schema: 'fit-judgment/v1',
-          project: (result) => ({
-            data: result.data,
-            provider: result.provider,
-            model: result.model,
-          }),
-          restore: (projection) => {
-            if (!projection || typeof projection !== 'object' || Array.isArray(projection)) {
-              throw new Error('FIT_JUDGMENT_REPLAY_INVALID');
-            }
-            const restored = projection as Record<string, unknown>;
-            return {
-              data: restored.data,
-              provider: String(restored.provider ?? ''),
-              model: String(restored.model ?? ''),
-            };
-          },
-        },
+        durableResultSchema: 'fit-judgment/v1',
       },
       { telemetry: opts?.runtimeTelemetry },
     );

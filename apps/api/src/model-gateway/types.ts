@@ -1,4 +1,5 @@
 import type { ModelExecutionTrace } from '@global/contracts';
+import type { TypedProjectionSchema } from '../durable-results/durable-result-strategy';
 import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
 import type { GatewaySettlementObservation } from './paid-model-settlement';
 
@@ -19,7 +20,13 @@ export interface AiContext {
   modelPolicy?: ModelExecutionTrace;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: PaidCostContext;
-  /** Explicit bounded projection/parser for non-Site-Builder durable replay. */
+  /**
+   * Registered typed durable-result schema for product model replay.
+   * Legacy genericReplay remains a cutover compatibility seam for non-product
+   * callers until their strategies are registered.
+   */
+  durableResultSchema?: TypedProjectionSchema;
+  /** Explicit bounded projection/parser for remaining non-product durable replay. */
   genericReplay?: {
     schema: string;
     project: (result: ModelResult<unknown>) => unknown;
