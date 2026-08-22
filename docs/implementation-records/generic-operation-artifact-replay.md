@@ -26,6 +26,8 @@
 | branch | `codex/production-parity` |
 | Task 8 开始时 HEAD | `a06eb7f4f29d8b9dd0ed47f52a1d86d60a13379b` |
 | HEAD subject | `feat(runtime): validate operation artifact storage` |
+| Task 8 verification refresh HEAD | `9aab31ff0239165ef373ed9eb17adf6c0e630b5e` |
+| refresh HEAD subject | `test(tools): declare durable strategies in legacy fixtures` |
 | 状态 | clean；本记录写入前 ContractGraph scan 的 evidence 亦为 `dirty=false` |
 | ContractGraph source hash | `6e7f67e1043e8f55d1b4ff0e70330732c0126bd0b40afcad7d1227bfc6f93144` |
 
@@ -103,7 +105,7 @@ GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET=operation-artifacts-t7-<8 lowercase hex>
 
 runtime policy 只读 bucket configuration、限制 ListBucketVersions 到 readiness prefix、读取 staging/readiness/final objects、写 staging/readiness/final（final/readiness 要求 `artifact-privacy` tag）、仅删除 staging/readiness、并可 abort multipart；personal reader 仅可读取 tag 为 `PERSONAL_DATA` 的 final objects。它不是 root、不能管理 lifecycle 或 bucket。readiness 使用 reserved prefix 做 bounded **write/read/delete** canary，缺 bucket、lifecycle/versioning/encryption/IAM/object contract 任一不匹配均 not-ready，Worker 必须不 polling。
 
-`generic-operation-artifact.minio.spec.ts` 的 six 个物理-store scenarios 覆盖：两 client 的 maximum-object immutability/reuse、corrupt staging/final metadata drift、lifecycle/versioning/encryption readback、PERSONAL_DATA read-role deny、readiness canary 不创建 missing bucket，以及 MinIO all-version-expiry extension drift fail closed；其中 fresh child process 重新 materialize 证明 restart/worker boundary。**本次 Task 8 未执行这些 six 个 scenarios，结果为 `RESULT_UNKNOWN`，不是 PASS/production evidence。** 这是为了不写入由其他 worktree 管理的 retained `global-minio`；也没有 image pull、provider call 或 retained topology mutation。
+`generic-operation-artifact.minio.spec.ts` 的 six 个物理-store scenarios 覆盖：两 client 的 maximum-object immutability/reuse、corrupt staging/final metadata drift、lifecycle/versioning/encryption readback、PERSONAL_DATA read-role deny、readiness canary 不创建 missing bucket，以及 MinIO all-version-expiry extension drift fail closed；其中 fresh child process 重新 materialize 证明 restart/worker boundary。**截至 refresh HEAD `9aab31ff…`，当前 worktree 仍没有 fresh disposable MinIO receipt，故这 six 个 scenarios 的结果仍为 `RESULT_UNKNOWN`，不是 PASS/production evidence。** 这是为了不写入由其他 worktree 管理的 retained `global-minio`；也没有 image pull、provider call 或 retained topology mutation。
 
 ## 5. 本次 Task 8 验证记录
 
@@ -112,7 +114,7 @@ runtime policy 只读 bucket configuration、限制 ListBucketVersions 到 readi
 | artifact + ToolBroker 聚焦 Vitest coverage | PASS：16 files，15 passed / 1 skipped；238 tests，232 passed / 6 skipped；artifact directory statements **86.95%**、branches **82.89%**、functions 92.48%、lines 89.98% | 本地确定性 unit/contract；6 个 skipped 是未启用的 disposable MinIO spec，不能替代 real store |
 | `prisma validate` | PASS（以本地 development URL 仅供 schema env 解析） | schema-only；没有连接/迁移 retained DB 的结论 |
 | `pnpm --filter @global/api build` | PASS | 本地 build，不是 OCI image/readback |
-| full API test | HOLD：启动后明确出现 **4 个已知 ToolRegistry fixture baseline failures**：`public-web-wire-suppression.spec.ts` 1 个；`paid-execution-gates.spec.ts` 3 个（durable reserve legacy-cents label、cached ToolResult、success-settlement ACK loss） | 不能声称 full suite green；这些 failures 不在本 Task 8 修复范围，需 fixture owner 在独立 task 处理 |
+| full API test | PASS：**349 files、5,375 tests、10 skipped、exit 0** | refresh HEAD `9aab31ff…` 令 legacy ToolRegistry fixtures 显式声明与当前 ToolRegistry 合同一致的 `durableResultStrategy`；此前 `public-web-wire-suppression` 的 1 个和 `paid-execution-gates` 的 3 个 fixture mismatch 已消除。此为本地完整 API deterministic suite，不是 MinIO、OCI、部署或 RuntimeEvidence |
 | `pnpm governance:verify` | PASS：118/118 | 本地 governance/contract verification，不是 hosted CI/review/merge |
 | `pnpm docs:verify` | PASS | 文档结构/链接合同；不证明 runtime/deploy/release |
 | `git diff --check`（写本记录前） | PASS | 文本 whitespace 检查 |

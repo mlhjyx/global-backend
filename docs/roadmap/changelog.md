@@ -5,7 +5,8 @@
 
 - 新增 [通用操作 Artifact 耐久重放实现记录](../implementation-records/generic-operation-artifact-replay.md)，固定 Task 1–7 在 `codex/production-parity` 的 `a06eb7f4f29d8b9dd0ed47f52a1d86d60a13379b` 审查基线：closed small reference、digest-derived immutable key、七个 additive artifact migrations、expected facts、`RESULT_UNKNOWN` recovery、bounded materializers，以及 deployment-owned MinIO lifecycle/IAM/readiness contract。
 - 本次聚焦 artifact/ToolBroker suite 为 232 passed / 6 skipped（artifact statements 86.95%、branches 82.89%），schema validate、API build、governance（118/118）和 docs verifier 通过；ContractGraph clean scan/status 绑定 `a06eb7f4…`（10,407 nodes / 23,838 edges），但仅为 static impact，未评估 RuntimeEvidence。
-- full API suite 启动后确认 4 个已知 ToolRegistry fixture baseline failures（`public-web-wire-suppression` 1，`paid-execution-gates` 3），故不能称 full suite green。当前未配置 disposable PostgreSQL/MinIO；为不写入其他 worktree 保留的 `global-postgres`/`global-minio`，real RLS 和 six-scenario MinIO contract 结果均为 `RESULT_UNKNOWN`，不伪造 PASS。
+- 在 `9aab31ff0239165ef373ed9eb17adf6c0e630b5e`，legacy ToolRegistry fixtures 已显式声明匹配当前合同的 `durableResultStrategy`，先前 `public-web-wire-suppression` 1 个与 `paid-execution-gates` 3 个 fixture mismatch 因而关闭。完整 API suite 现为 **349 files / 5,375 tests / 10 skipped / exit 0**；这只是本地 deterministic suite，不推导 MinIO、OCI、部署或 RuntimeEvidence。
+- 当前 worktree 没有 fresh disposable PostgreSQL/MinIO receipt；为不写入其他 worktree 保留的 `global-postgres`/`global-minio`，real RLS 和 Task 7 six-scenario MinIO contract 继续为 `RESULT_UNKNOWN`，不伪造 PASS。
 - 仍是 additive/pre-cutover：没有 Domain ACK/cutover、Authority admission/Control Plane transport、retained migration、OCI/deployment/readback、production RuntimeEvidence、Release Bundle、merge 或用户可用性声明。Copy receipt 保持 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`，不 rebaseline 或授权 dispatch。
 
 ## 2026-08-21 · Execution Budget Authority additive foundation
