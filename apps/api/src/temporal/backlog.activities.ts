@@ -811,7 +811,12 @@ export function createBacklogActivities(deps: {
                   durableReceipts,
                 });
             } catch (err) {
-              if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
+              if (
+                err instanceof BudgetOperationReplayError ||
+                err instanceof BudgetExceededError ||
+                err instanceof Error &&
+                  err.message === 'DOMAIN_ACK_CONSUMER_BINDING_MISSING'
+              ) throw err;
               // 单 adapter fail-safe：不阻断其余源
             }
           }
@@ -1046,7 +1051,12 @@ export function createBacklogActivities(deps: {
             );
             results.push({ contactId: t.contactId, result, durableReceipts });
           } catch (err) {
-            if (err instanceof BudgetOperationReplayError || err instanceof BudgetExceededError) throw err;
+            if (
+              err instanceof BudgetOperationReplayError ||
+              err instanceof BudgetExceededError ||
+              err instanceof Error &&
+                err.message === 'DOMAIN_ACK_CONSUMER_BINDING_MISSING'
+            ) throw err;
             /* 单人猜测失败（SMTP 异常等）不影响其余 */
           } finally {
             await budget.close();

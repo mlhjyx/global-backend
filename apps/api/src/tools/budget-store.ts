@@ -1123,7 +1123,7 @@ export class PostgresBudgetStore implements BudgetStore {
           receiptUsage: row.receipt_usage,
           receiptCostBasis: row.receipt_cost_basis,
           expectedProjection: durable,
-          ...(explicitFacts ? { expectedFacts: explicitFacts } : {}),
+          expectedFacts: explicitFacts!,
         })
       : undefined;
     return {
@@ -1562,7 +1562,7 @@ export class PostgresBudgetStore implements BudgetStore {
           receiptUsage: row.receipt_usage,
           receiptCostBasis: row.receipt_cost_basis,
           expectedProjection: durable,
-          ...(explicitFacts ? { expectedFacts: explicitFacts } : {}),
+          expectedFacts: explicitFacts!,
         })
       : undefined;
     return {

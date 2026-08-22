@@ -322,6 +322,67 @@ describe('PostgresBudgetStore', () => {
     )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
   });
 
+  it('fails closed for locked projection JSON, receipt metadata, fact, and parser drift', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { codes: ['CPV-123'] }, provider: 'new-api', model: 'gpt' } },
+    });
+    const differentProjection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { codes: ['CPV-999'] }, provider: 'new-api', model: 'gpt' } },
+    });
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      estimatedCents: 3,
+      replay: false,
+    };
+    const common = {
+      charged_cents: 1n,
+      observed_cents: 1n,
+      reserved_cents: 3n,
+      cap_variance: false,
+      status: 'SETTLED',
+      replay: false,
+      account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+      authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      operation_id: reservation.operationId,
+      operation_key: 'workspace:model:taxonomy.normalize:request-1',
+      result_schema_version: projection.schemaVersion,
+      result_schema: projection.schema,
+      result_digest: projection.digest,
+      result_json: projection,
+      receipt_usage: PROVIDER_REPORTED_FACTS.usage,
+      receipt_cost_basis: PROVIDER_REPORTED_FACTS.costBasis,
+    };
+    const settle = (row: Record<string, unknown>) => new PostgresBudgetStore(
+      fakePrisma([[row]]),
+    ).settle(reservation, 1, projection, PROVIDER_REPORTED_FACTS);
+
+    await expect(settle({
+      ...common,
+      result_json: differentProjection,
+    })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+    await expect(settle({
+      ...common,
+      account_id: undefined,
+    })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+    await expect(settle({
+      ...common,
+      receipt_usage: {
+        ...PROVIDER_REPORTED_FACTS.usage,
+        chargedMicrousd: '9999',
+      },
+    })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+    await expect(settle({
+      ...common,
+      result_json: { malformed: true },
+    })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+  });
+
   it('rejects receipt facts without a durable projection and native projections without facts', async () => {
     const store = new PostgresBudgetStore(fakePrisma([]));
     const centsReservation = {
@@ -619,6 +680,58 @@ describe('PostgresBudgetStore', () => {
         },
       },
     });
+  });
+
+  it('rejects cents and microusd replay rows whose locked operation key drifts from the reservation', async () => {
+    const projection = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'taxonomy-code/v1',
+      data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
+    });
+    const common = {
+      kind: 'REPLAY' as const,
+      operation_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+      operation_key: 'different-operation-key',
+      status: 'SETTLED',
+      account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+      authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      result_schema_version: projection.schemaVersion,
+      result_schema: projection.schema,
+      result_digest: projection.digest,
+      result_json: projection,
+      receipt_usage: PROVIDER_REPORTED_FACTS.usage,
+      receipt_cost_basis: PROVIDER_REPORTED_FACTS.costBasis,
+    };
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      {
+        ...common,
+        reserved_cents: 3n,
+        remaining_cents: 7n,
+        charged_cents: 1n,
+        observed_cents: 1n,
+      },
+    ]])).reserve({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationKey: 'expected-operation-key',
+      estimatedCents: 3,
+    })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      {
+        ...common,
+        reserved_microusd: 30_000n,
+        remaining_microusd: 70_000n,
+        charged_microusd: 10_000n,
+        observed_microusd: 10_000n,
+      },
+    ]])).reserveMicrousd({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: 'run-1',
+      operationKey: 'expected-operation-key',
+      estimatedMicrousd: 30_000n,
+    })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
   });
 
   it('keeps authority-bound accounts nonspendable on the additive API', async () => {

@@ -342,7 +342,11 @@ export class DiscoveryService {
             durableReceipts,
           });
         } catch (err) {
-          if (isExecutionControlError(err)) throw err;
+          if (
+            isExecutionControlError(err) ||
+            err instanceof Error &&
+              err.message === 'DOMAIN_ACK_CONSUMER_BINDING_MISSING'
+          ) throw err;
           console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
         }
         if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;

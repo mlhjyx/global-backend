@@ -5,11 +5,15 @@ import type { EmailVerifyContext, ExecutionContext } from './provider-contract';
 
 const mocks = vi.hoisted(() => ({
   persistDiscoveredContacts: vi.fn(),
+  persistGuessedEmail: vi.fn(),
   applyDomainAckConsumerTransactions: vi.fn(),
 }));
 
 vi.mock('./contact-persist', () => ({
   persistDiscoveredContacts: mocks.persistDiscoveredContacts,
+}));
+vi.mock('./email-guess-persist', () => ({
+  persistGuessedEmail: mocks.persistGuessedEmail,
 }));
 vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
   applyDomainAckConsumerTransactions: mocks.applyDomainAckConsumerTransactions,
@@ -99,6 +103,12 @@ describe('actual discovery receipt consumers', () => {
       skippedSuppressed: 0,
       skippedInvalid: 0,
     });
+    mocks.persistGuessedEmail.mockReset();
+    mocks.persistGuessedEmail.mockResolvedValue({
+      persisted: true,
+      email: 'hans.herold@acme.example',
+      status: 'VALID',
+    });
     mocks.applyDomainAckConsumerTransactions.mockReset();
     mocks.applyDomainAckConsumerTransactions.mockImplementation(async (input: {
       transaction: unknown;
@@ -133,7 +143,7 @@ describe('actual discovery receipt consumers', () => {
             personalData: true,
             sourcePage: 'https://acme.example/impressum',
           }],
-          costCents: 0,
+          costCents: 2,
         };
       }),
     };
@@ -146,6 +156,7 @@ describe('actual discovery receipt consumers', () => {
       canonicalContact: {
         findMany: vi.fn(async () => []),
       },
+      usageLedger: { create: vi.fn(async () => ({})) },
       fieldEvidence: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
@@ -176,6 +187,28 @@ describe('actual discovery receipt consumers', () => {
     expect(mocks.persistDiscoveredContacts).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({ adapterKey: 'decision_maker' }),
+    );
+    expect(tx.usageLedger.create).toHaveBeenCalledOnce();
+
+    mocks.applyDomainAckConsumerTransactions.mockImplementationOnce(
+      async () => undefined,
+    );
+    await expect(service.discoverContacts(CTX, COMPANY_ID)).resolves.toEqual({
+      contacts: [],
+      skippedSuppressed: 0,
+      skippedInvalid: 0,
+    });
+    expect(mocks.persistDiscoveredContacts).toHaveBeenCalledOnce();
+
+    adapter.discoverContacts.mockImplementationOnce(async (
+      _company: unknown,
+      executionContext: ExecutionContext,
+    ) => {
+      executionContext.onDurableReceipt?.('unexpected.tool', TOOL_RECEIPT);
+      return { contacts: [], costCents: 0 };
+    });
+    await expect(service.discoverContacts(CTX, COMPANY_ID)).rejects.toThrow(
+      'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
     );
   });
 
@@ -266,5 +299,104 @@ describe('actual discovery receipt consumers', () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'VALID' }),
     }));
+
+    mocks.applyDomainAckConsumerTransactions.mockImplementationOnce(
+      async () => undefined,
+    );
+    await expect(service.verifyContactPoint(CTX, POINT_ID)).resolves.toMatchObject({
+      verification: { status: 'VALID' },
+    });
+    expect(update).toHaveBeenCalledOnce();
+
+    verifyEmail.mockImplementationOnce(async (
+      _email: string,
+      verifyContext?: EmailVerifyContext,
+    ) => {
+      verifyContext?.onDurableReceipt?.('unexpected.tool', SMTP_RECEIPT);
+      return { status: 'VALID' as const, costCents: 0 };
+    });
+    await expect(service.verifyContactPoint(CTX, POINT_ID)).rejects.toThrow(
+      'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+    );
+  });
+
+  it('carries every guessed-email SMTP receipt into the exact guessed ContactPoint transaction', async () => {
+    const company = {
+      id: COMPANY_ID,
+      name: 'Acme GmbH',
+      domain: 'acme.example',
+      status: 'ENRICHED',
+      dedupeKey: 'd:acme.example',
+      attributes: {},
+    };
+    const contact = {
+      id: CONTACT_ID,
+      contactId: CONTACT_ID,
+      companyId: COMPANY_ID,
+      fullName: 'Hans Herold',
+      title: 'Managing Director',
+      contactPoints: [],
+      company,
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => company),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      canonicalContact: {
+        findMany: vi.fn(async () => [contact]),
+        findUnique: vi.fn(async () => contact),
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (
+        _workspaceId: string,
+        callback: (transaction: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    };
+    const verifyEmail = vi.fn(async (
+      _email: string,
+      verifyContext?: EmailVerifyContext,
+    ) => {
+      verifyContext?.onDurableReceipt?.('smtp.rcpt_probe', SMTP_RECEIPT);
+      return {
+        status: 'VALID' as const,
+        detail: 'smtp_accepted:250',
+        costCents: 0,
+      };
+    });
+    const service = new DiscoveryService(
+      prisma as never,
+      {
+        routeEmailVerification: vi.fn(async () => [{
+          key: 'smtp_self',
+          verifyEmail,
+        }]),
+      } as never,
+      authority('email-guess-account') as never,
+      budgetStore() as never,
+    );
+
+    await expect(service.guessEmailsForCompany(CTX, COMPANY_ID, {
+      lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-test' },
+      maxContacts: 1,
+      maxProbe: 1,
+    })).resolves.toMatchObject({ persisted: 1, verified: 1 });
+
+    const acknowledgement = mocks.applyDomainAckConsumerTransactions.mock.calls
+      .find((call) => call[0]?.acknowledgements?.[0]?.producerId === 'smtp.rcpt_probe')?.[0];
+    expect(acknowledgement).toMatchObject({
+      transaction: tx,
+      acknowledgements: [{
+        producerId: 'smtp.rcpt_probe',
+        receipt: SMTP_RECEIPT,
+      }],
+    });
+    expect(mocks.persistGuessedEmail).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ contactId: CONTACT_ID }),
+    );
   });
 });
