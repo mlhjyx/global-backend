@@ -33,6 +33,8 @@ import { assertMicrousd } from './microusd';
 import {
   parseDurableExecutionReceipt,
   type DurableExecutionReceipt,
+  parseDurableExecutionReceiptFacts,
+  type DurableExecutionReceiptFacts,
 } from '../durable-results/durable-execution-receipt';
 const MAX_KEY_LENGTH = 200;
 
@@ -90,6 +92,7 @@ export interface BudgetMicrousdReservation {
   estimatedMicrousd: bigint;
   replay: boolean;
   replayProjection?: GenericOperationProjection;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetMicrousdSettlement {
@@ -97,6 +100,7 @@ export interface BudgetMicrousdSettlement {
   observedMicrousd: bigint;
   capVariance: boolean;
   replay: boolean;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetMicrousdStatus {
@@ -150,6 +154,7 @@ export interface BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement>;
   /** Physical execution started, but the result/object acknowledgement is unknown. */
   markResultUnknown(
@@ -166,6 +171,7 @@ export interface BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
+    receiptFacts: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -182,6 +188,7 @@ export interface BudgetStore {
     reservation: BudgetMicrousdReservation,
     observedMicrousd: bigint,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetMicrousdSettlement>;
   releaseMicrousd(
     reservation: BudgetMicrousdReservation,
@@ -433,6 +440,16 @@ type MicrousdReserveRow = {
   remaining_microusd: bigint;
   status?: string;
   result_json?: unknown;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  charged_microusd?: bigint | null;
+  observed_microusd?: bigint | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type MicrousdSettleRow = {
@@ -441,6 +458,17 @@ type MicrousdSettleRow = {
   cap_variance: boolean;
   status: string;
   replay?: boolean;
+  reserved_microusd?: bigint;
+  operation_id?: string;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  result_json?: unknown;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type ReserveRow = {
@@ -649,6 +677,27 @@ function durableReceiptFromLedgerRow(input: {
     usage: input.receiptUsage,
     costBasis: input.receiptCostBasis,
   });
+}
+
+function receiptFactsForSettlement(
+  projection: GenericOperationProjection | null,
+  receiptFacts: DurableExecutionReceiptFacts | undefined,
+): DurableExecutionReceiptFacts | null {
+  if (!projection) {
+    if (receiptFacts) throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    return null;
+  }
+  if (!receiptFacts) {
+    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
+  }
+  return parseDurableExecutionReceiptFacts(receiptFacts, projection.schema);
+}
+
+function requiredReceipt(
+  receipt: DurableExecutionReceipt | undefined,
+): DurableExecutionReceipt {
+  if (!receipt) throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
+  return receipt;
 }
 
 function isBudgetAccountUnavailable(error: unknown): boolean {
@@ -871,6 +920,7 @@ export class PostgresBudgetStore implements BudgetStore {
       receiptUsage: row.receipt_usage,
       receiptCostBasis: row.receipt_cost_basis,
     }) : undefined;
+    if (replayProjection) requiredReceipt(receipt);
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
@@ -886,11 +936,13 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
     const durable = projection
       ? parseGenericOperationProjection(projection)
       : null;
+    const explicitFacts = receiptFactsForSettlement(durable, receiptFacts);
     let rows: SettleRow[];
     try {
       rows = await this.inScope(reservation.workspaceId, (tx) =>
@@ -899,7 +951,9 @@ export class PostgresBudgetStore implements BudgetStore {
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
             ${durable?.schema ?? null}, ${durable?.digest ?? null},
-            ${durable ? JSON.stringify(durable) : null}::jsonb
+            ${durable ? JSON.stringify(durable) : null}::jsonb,
+            ${explicitFacts ? JSON.stringify(explicitFacts.usage) : null}::jsonb,
+            ${explicitFacts?.costBasis ?? null}
           )`,
         ),
       );
@@ -924,6 +978,7 @@ export class PostgresBudgetStore implements BudgetStore {
       receiptUsage: row.receipt_usage,
       receiptCostBasis: row.receipt_cost_basis,
     });
+    if (durable) requiredReceipt(receipt);
     return {
       chargedCents: toSafeNumber('chargedCents', row.charged_cents),
       observedCents: toSafeNumber('observedCents', row.observed_cents),
@@ -1065,21 +1120,28 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
+    receiptFacts: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
     const { snapshot: durable, columns: facts } =
       parseBoundArtifactBudgetSnapshot(snapshot, reservation);
     const manifest = durable.manifest;
+    const explicitFacts = parseDurableExecutionReceiptFacts(
+      receiptFacts,
+      manifest.resultSchema,
+    );
     let rows: SettleRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v3(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${JSON.stringify(manifest)}::jsonb,
             ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
-            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked}
+            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
+            ${JSON.stringify(explicitFacts.usage)}::jsonb,
+            ${explicitFacts.costBasis}
           )`,
         ),
       );
@@ -1113,11 +1175,28 @@ export class PostgresBudgetStore implements BudgetStore {
         'budget artifact settlement returned no result',
       );
     }
+    const receipt = requiredReceipt(durableReceiptFromLedgerRow({
+      scopeKey: reservation.workspaceId,
+      operationId: row.operation_id ?? reservation.operationId,
+      operationKey: row.operation_key,
+      accountId: row.account_id,
+      authorityId: row.authority_id,
+      resultSchemaVersion: row.result_schema_version ?? 'generic-operation-artifact-ref/v1',
+      resultSchema: row.result_schema ?? manifest.resultSchema,
+      resultDigest: row.result_digest ?? manifest.sha256,
+      resultJson: row.result_json ?? {
+        schemaVersion: 'generic-operation-artifact-ref/v1',
+        artifactId: manifest.artifactId,
+      },
+      receiptUsage: row.receipt_usage,
+      receiptCostBasis: row.receipt_cost_basis,
+    }));
     return {
       chargedCents: toSafeNumber('chargedCents', row.charged_cents),
       observedCents: toSafeNumber('observedCents', row.observed_cents),
       capVariance: row.cap_variance,
       replay: row.replay ?? false,
+      receipt,
     };
   }
 
@@ -1208,7 +1287,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       rows = await this.inScope(input.workspaceId, (tx) =>
         tx.$queryRaw<MicrousdReserveRow[]>(
-          Prisma.sql`SELECT * FROM reserve_tool_budget_microusd_v1(
+          Prisma.sql`SELECT * FROM reserve_tool_budget_microusd_with_receipt_v1(
             ${input.workspaceId}, ${input.accountKey}, ${input.operationKey},
             ${input.estimatedMicrousd}
           )`,
@@ -1243,6 +1322,20 @@ export class PostgresBudgetStore implements BudgetStore {
       row.kind === 'REPLAY' && row.result_json != null
         ? parseGenericOperationProjection(row.result_json)
         : undefined;
+    const receipt = row.kind === 'REPLAY' ? durableReceiptFromLedgerRow({
+      scopeKey: input.workspaceId,
+      operationId: row.operation_id,
+      operationKey: row.operation_key ?? input.operationKey,
+      accountId: row.account_id,
+      authorityId: row.authority_id,
+      resultSchemaVersion: row.result_schema_version,
+      resultSchema: row.result_schema,
+      resultDigest: row.result_digest,
+      resultJson: row.result_json,
+      receiptUsage: row.receipt_usage,
+      receiptCostBasis: row.receipt_cost_basis,
+    }) : undefined;
+    if (replayProjection) requiredReceipt(receipt);
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
@@ -1250,6 +1343,7 @@ export class PostgresBudgetStore implements BudgetStore {
       estimatedMicrousd: row.reserved_microusd,
       replay: row.kind === 'REPLAY',
       ...(replayProjection ? { replayProjection } : {}),
+      ...(receipt ? { receipt } : {}),
     };
   }
 
@@ -1257,20 +1351,24 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetMicrousdReservation,
     observedMicrousd: bigint,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetMicrousdSettlement> {
     assertMicrousd('observedMicrousd', observedMicrousd);
     const durable = projection
       ? parseGenericOperationProjection(projection)
       : null;
+    const explicitFacts = receiptFactsForSettlement(durable, receiptFacts);
     let rows: MicrousdSettleRow[];
     try {
       rows = await this.inScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<MicrousdSettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_microusd_v1(
+          Prisma.sql`SELECT * FROM settle_tool_budget_microusd_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${durable?.schemaVersion ?? null},
             ${durable?.schema ?? null}, ${durable?.digest ?? null},
-            ${durable ? JSON.stringify(durable) : null}::jsonb
+            ${durable ? JSON.stringify(durable) : null}::jsonb,
+            ${explicitFacts ? JSON.stringify(explicitFacts.usage) : null}::jsonb,
+            ${explicitFacts?.costBasis ?? null}
           )`,
         ),
       );
@@ -1286,11 +1384,26 @@ export class PostgresBudgetStore implements BudgetStore {
         'microusd budget settle returned no result',
       );
     }
+    const receipt = durableReceiptFromLedgerRow({
+      scopeKey: reservation.workspaceId,
+      operationId: row.operation_id ?? reservation.operationId,
+      operationKey: row.operation_key,
+      accountId: row.account_id,
+      authorityId: row.authority_id,
+      resultSchemaVersion: row.result_schema_version ?? durable?.schemaVersion,
+      resultSchema: row.result_schema ?? durable?.schema,
+      resultDigest: row.result_digest ?? durable?.digest,
+      resultJson: row.result_json ?? durable,
+      receiptUsage: row.receipt_usage,
+      receiptCostBasis: row.receipt_cost_basis,
+    });
+    if (durable) requiredReceipt(receipt);
     return {
       chargedMicrousd: row.charged_microusd,
       observedMicrousd: row.observed_microusd,
       capVariance: row.cap_variance,
       replay: row.replay ?? row.status !== 'SETTLED',
+      ...(receipt ? { receipt } : {}),
     };
   }
 

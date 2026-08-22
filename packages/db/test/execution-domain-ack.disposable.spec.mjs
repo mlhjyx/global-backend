@@ -74,7 +74,9 @@ function asApp(sql, workspace = WORKSPACE_A) {
   return `
     SET SESSION AUTHORIZATION app_user;
     BEGIN;
-    SELECT set_config('app.current_workspace_id', '${workspace}', true);
+    DO $workspace$ BEGIN
+      PERFORM set_config('app.current_workspace_id', '${workspace}', true);
+    END $workspace$;
     ${sql}
     COMMIT;
   `;

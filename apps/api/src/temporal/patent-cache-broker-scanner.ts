@@ -7,6 +7,7 @@ import type {
 import type { PatentRefreshScanner } from "../adapters/patent-inventor-cache";
 import { PLATFORM_WORKSPACE } from "../discovery/provider-contract";
 import type { ExecutionBroker, ToolContext } from "../tools/tool-contract";
+import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import type {
   GooglePatentsInput,
   GooglePatentsOutput,
@@ -49,12 +50,17 @@ function rowsFromPatents(
 export function createPatentCacheBrokerScanner(input: {
   readonly broker: ExecutionBroker;
   readonly accountKey: string;
+  readonly onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }): PatentRefreshScanner {
   const context: ToolContext = Object.freeze({
     workspaceId: PLATFORM_WORKSPACE,
     runId: input.accountKey,
     correlationId: input.accountKey,
     purpose: "discovery",
+    onDurableReceipt: input.onDurableReceipt,
   });
   return {
     async searchInventorsForAnchorsWithStats(

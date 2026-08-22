@@ -264,25 +264,27 @@ describe('DomainAckService', () => {
     );
 
     expect(migration).toContain('CREATE TABLE "execution_domain_ack"');
-    expect(migration).toContain('"domain_revision" VARCHAR(200) NOT NULL');
+    expect(migration).toContain('"domain_revision" CHAR(64) NOT NULL');
     expect(migration).not.toContain('UNIQUE ("operation_id")');
-    expect(migration).toContain('UNIQUE ("operation_id", "consumer", "domain_aggregate_type", "domain_ack_key", "domain_revision")');
-    expect(migration).toContain('UNIQUE ("ack_id")');
+    expect(migration).toMatch(
+      /UNIQUE \([\s\S]*?"operation_id", "consumer", "domain_aggregate_type",[\s\S]*?"domain_ack_key", "domain_revision"[\s\S]*?\)/,
+    );
     expect(migration).toContain('REFERENCES "tool_budget_operation"');
     expect(migration).toContain('REFERENCES "tool_budget_account"');
-    expect(migration).toContain('"status" = \'SETTLED\'');
+    expect(migration).toContain('operation."status" IS DISTINCT FROM \'SETTLED\'');
     expect(migration).toContain('ENABLE ROW LEVEL SECURITY');
     expect(migration).toContain('FORCE ROW LEVEL SECURITY');
     expect(migration).toContain('REVOKE ALL ON TABLE "execution_domain_ack" FROM PUBLIC');
     expect(migration).toContain('SECURITY DEFINER');
     expect(migration).toContain('SET search_path = pg_catalog, public');
     expect(migration).toContain('pg_advisory_xact_lock');
-    expect(migration).toContain('jsonb_object_keys');
+    expect(migration).toContain('"ack_json" ?& ARRAY[');
+    expect(migration).toContain('"ack_json" - ARRAY[');
     expect(migration).toContain('FOR UPDATE');
     expect(migration).toContain('apply_execution_domain_ack_v1');
     expect(migration).toContain('jsonb_typeof');
     expect(migration).toContain('DOMAIN_ACK_CONFLICT');
-    expect(migration).toContain('p_reserved_microusd BIGINT');
+    expect(migration).toContain('p_reservation_microusd BIGINT');
     expect(migration).not.toContain('operation."reserved_cents" * 10000');
     expect(migration).toContain('operation."reserved_microusd"');
     expect(migration).not.toContain("session_user <> 'app_user'");
@@ -294,10 +296,7 @@ describe('DomainAckService', () => {
       /REVOKE ALL ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?FROM PUBLIC/,
     );
     expect(migration).toMatch(
-      /GRANT EXECUTE ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?TO app_user/,
-    );
-    expect(migration).toMatch(
-      /GRANT EXECUTE ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?TO execution_budget_platform_writer/,
+      /GRANT EXECUTE ON FUNCTION[\s\S]*?apply_execution_domain_ack_v1\([\s\S]*?TO app_user, execution_budget_platform_writer/,
     );
     expect(migration).not.toContain("p_ack->>'resultStrategy'");
     expect(migration).not.toContain("p_ack->>'artifactId'");
@@ -407,31 +406,40 @@ describe('DomainAckService', () => {
   });
 
   it('wires actual product consumers to the receipt-aware helper inside their domain transaction', async () => {
-    const paths = [
-      '../icp/icp.service.ts',
-      '../temporal/understanding.activities.ts',
-      '../temporal/discovery.activities.ts',
-      '../temporal/patents-cache.activities.ts',
-      '../sanctions/sanctions-refresh.service.ts',
-      '../signals/signal-ingest.service.ts',
-      '../intent/intent-projection.service.ts',
-    ];
-    const sources = await Promise.all(paths.map((path) => readFile(
+    const consumers = [
+      ['../icp/icp.service.ts', ['icp.design', 'discovery.query_plan']],
+      ['../discovery/taxonomy-resolver.ts', ['taxonomy.normalize']],
+      ['../discovery/fit-judge.ts', ['discovery.qualify_fit']],
+      ['../temporal/understanding.activities.ts', [
+        'company_understanding.extract_claims',
+        'company_understanding.extract_profile',
+        'company_understanding.extract_offerings',
+      ]],
+      ['../temporal/discovery.activities.ts', [
+        'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render',
+        'gleif.fetch', 'http.get', 'inpi_rne.search', 'mapyourshow.fetch',
+        'openfda.search', 'osm.overpass', 'searxng.search', 'smtp.rcpt_probe',
+        'tradefair.algolia', 'wikidata.entity', 'wikidata.sparql',
+        'discovery.extract_company', 'discovery.extract_list',
+        'contact.find_decision_makers',
+      ]],
+      ['../temporal/patents-cache.activities.ts', ['google_patents.search']],
+      ['../sanctions/sanctions-refresh.service.ts', ['sanctions.download']],
+      ['../signals/signal-ingest.service.ts', ['ted.search', 'openfda.search', 'samgov.search']],
+      ['../intent/intent-projection.service.ts', ['http.get']],
+    ] as const;
+    const sources = await Promise.all(consumers.map(([path]) => readFile(
       new URL(path, import.meta.url),
       'utf8',
     )));
 
     for (const [index, source] of sources.entries()) {
-      expect(source, paths[index]).toContain('applyDomainAckConsumerTransaction');
-      expect(source, paths[index]).toContain('durableReceipt');
+      const [path, producerIds] = consumers[index]!;
+      expect(source, path).toContain('applyDomainAckConsumerTransaction');
+      expect(source, path).toContain('durableReceipt');
+      for (const producerId of producerIds) {
+        expect(source, `${path}:${producerId}`).toContain(producerId);
+      }
     }
-    expect(sources[0]).toContain("producerId: 'icp.design'");
-    expect(sources[0]).toContain("producerId: 'discovery.query_plan'");
-    expect(sources[1]).toContain("producerId: 'company_understanding.extract_profile'");
-    expect(sources[2]).toContain("producerId: 'discovery.qualify_fit'");
-    expect(sources[3]).toContain("producerId: 'google_patents.search'");
-    expect(sources[4]).toContain("producerId: 'sanctions.download'");
-    expect(sources[5]).toContain("producerId: 'ted.search'");
-    expect(sources[6]).toContain("producerId: 'http.get'");
   });
 });

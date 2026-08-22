@@ -38,6 +38,11 @@ export interface DurableExecutionReceipt {
   readonly costBasis: DurableExecutionCostBasis;
 }
 
+export interface DurableExecutionReceiptFacts {
+  readonly usage: DurableExecutionUsageFacts;
+  readonly costBasis: DurableExecutionCostBasis;
+}
+
 const RECEIPT_KEYS = Object.freeze([
   'schemaVersion',
   'scopeKey',
@@ -65,6 +70,8 @@ const USAGE_KEYS = Object.freeze([
   'chargedMicrousd',
   'upperBoundMicrousd',
 ] as const);
+
+const RECEIPT_FACT_KEYS = Object.freeze(['usage', 'costBasis'] as const);
 
 const COST_BASIS: ReadonlySet<string> = new Set([
   'provider_reported',
@@ -402,4 +409,17 @@ export function parseDurableExecutionReceipt(
     usage,
     costBasis: parsedCostBasis,
   } satisfies DurableExecutionReceipt);
+}
+
+export function parseDurableExecutionReceiptFacts(
+  value: unknown,
+  resultSchema: string,
+): DurableExecutionReceiptFacts {
+  const record = ownDataRecord(value, RECEIPT_FACT_KEYS);
+  const costBasis = field(record, 'costBasis');
+  if (typeof costBasis !== 'string' || !COST_BASIS.has(costBasis)) invalid();
+  const parsedCostBasis = costBasis as DurableExecutionCostBasis;
+  const usage = parseUsage(field(record, 'usage'));
+  validateUsageSemantics(usage, parsedCostBasis, schema(resultSchema));
+  return Object.freeze({ usage, costBasis: parsedCostBasis });
 }

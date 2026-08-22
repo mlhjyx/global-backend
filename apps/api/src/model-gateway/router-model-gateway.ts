@@ -34,6 +34,7 @@ import {
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
 import type { SiteBuildCostReconciliationCatalog } from '../site-builder/site-build-cost-reconciliation-resolver';
+import { modelExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -385,9 +386,13 @@ export class RouterModelGateway extends ModelGateway {
               ctx.durableResultSchema,
               replay,
             ) as ModelResult<T>;
-            return reservation.receipt
+            const returned = reservation.receipt
               ? { ...restored, durableReceipt: reservation.receipt }
               : restored;
+            if (returned.durableReceipt) {
+              ctx.onDurableReceipt?.(input.task, returned.durableReceipt);
+            }
+            return returned;
           } catch {
             throw new BudgetOperationReplayError(operationKey);
           }
@@ -473,7 +478,16 @@ export class RouterModelGateway extends ModelGateway {
     const observedCents = costUsd != null
       ? Math.ceil(costUsd * 100)
       : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1));
-    const settlement = [reservation, observedCents, projection] as const;
+    const receiptFacts = projection && ctx.durableResultSchema
+      ? modelExecutionReceiptFacts({
+          taskId: input.task,
+          resultSchema: ctx.durableResultSchema,
+          result: result as ModelResult<unknown>,
+          reservedMicrousd: BigInt(reservation.estimatedCents) * 10_000n,
+          chargedMicrousd: BigInt(observedCents) * 10_000n,
+        })
+      : undefined;
+    const settlement = [reservation, observedCents, projection, receiptFacts] as const;
     let settled;
     try {
       settled = await this.budgetStore.settle(...settlement);
@@ -499,6 +513,9 @@ export class RouterModelGateway extends ModelGateway {
       correlationId: ctx.correlationId,
       modelPolicy: ctx.modelPolicy,
     });
+    if (returnedResult.durableReceipt) {
+      ctx.onDurableReceipt?.(input.task, returnedResult.durableReceipt);
+    }
     return returnedResult;
   }
 

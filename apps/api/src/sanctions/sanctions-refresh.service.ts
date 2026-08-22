@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import countries from 'world-countries';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
@@ -8,6 +8,7 @@ import { parseOfacXml, type ParsedSanctionsEntity, type ParsedSanctionsList } fr
 import { parseEuFsf } from '../adapters/eu-fsf-xml';
 import type { SanctionsDownloadInput, SanctionsDownloadOutput } from '../tools/source-tools';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 
 /**
  * 制裁名单刷新服务（Temporal 每日 Schedule 活动 + verify 脚本用）。owner 连接写平台表（绕 RLS）。
@@ -141,6 +142,7 @@ export interface SanctionsRefreshSummary {
 
 export interface SanctionsRefreshDeps {
   ownerDb: PrismaClient; // owner 连接（绕 RLS，写平台表）
+  platformWriter?: PrismaClient;
   broker: ExecutionBroker;
 }
 
@@ -212,43 +214,7 @@ export class SanctionsRefreshService {
     const diff = diffSanctionsEntities(existing, desired);
 
     const now = new Date();
-    for (const chunk of chunks(diff.toCreate, CHUNK)) {
-      await this.deps.ownerDb.sanctionsEntity.createMany({
-        data: chunk.map((d) => ({ sourceId, ...toRow(d) })),
-        skipDuplicates: true,
-      });
-    }
-    for (const d of diff.toUpdate) {
-      await this.deps.ownerDb.sanctionsEntity.update({
-        where: { sourceId_externalId: { sourceId, externalId: d.externalId } },
-        data: { ...toRow(d), lastSeenAt: now, withdrawnAt: null },
-      });
-    }
-    // H1：未变实体仅廉价批量更 listVersion + lastSeenAt（不逐行 UPDATE，防发版全表逐行改）。
-    for (const chunk of chunks(diff.unchangedExternalIds, CHUNK)) {
-      await this.deps.ownerDb.sanctionsEntity.updateMany({
-        where: { sourceId, externalId: { in: chunk } },
-        data: { listVersion, lastSeenAt: now },
-      });
-    }
-    for (const chunk of chunks(diff.toWithdrawExternalIds, CHUNK)) {
-      await this.deps.ownerDb.sanctionsEntity.updateMany({
-        where: { sourceId, externalId: { in: chunk } },
-        data: { withdrawnAt: now },
-      });
-    }
-
-    await this.deps.ownerDb.sanctionsSource.update({
-      where: { id: sourceId },
-      data: {
-        publishDate: parsed.publishDate ? new Date(`${parsed.publishDate}T00:00:00.000Z`) : undefined,
-        recordCount: parsed.entities.length,
-        lastRefreshedAt: now,
-        lastFetchStatus: 'DONE',
-      },
-    });
-
-    return {
+    const summary: SanctionsRefreshSummary = {
       sourceKey: src.key,
       status: 'DONE',
       total: parsed.entities.length,
@@ -258,6 +224,62 @@ export class SanctionsRefreshService {
       withdrawn: diff.toWithdrawExternalIds.length,
       publishDate: parsed.publishDate,
     };
+    const persist = async (
+      database: Pick<Prisma.TransactionClient, 'sanctionsEntity' | 'sanctionsSource'>,
+    ): Promise<SanctionsRefreshSummary> => {
+    for (const chunk of chunks(diff.toCreate, CHUNK)) {
+      await database.sanctionsEntity.createMany({
+        data: chunk.map((d) => ({ sourceId, ...toRow(d) })),
+        skipDuplicates: true,
+      });
+    }
+    for (const d of diff.toUpdate) {
+      await database.sanctionsEntity.update({
+        where: { sourceId_externalId: { sourceId, externalId: d.externalId } },
+        data: { ...toRow(d), lastSeenAt: now, withdrawnAt: null },
+      });
+    }
+    // H1：未变实体仅廉价批量更 listVersion + lastSeenAt（不逐行 UPDATE，防发版全表逐行改）。
+    for (const chunk of chunks(diff.unchangedExternalIds, CHUNK)) {
+      await database.sanctionsEntity.updateMany({
+        where: { sourceId, externalId: { in: chunk } },
+        data: { listVersion, lastSeenAt: now },
+      });
+    }
+    for (const chunk of chunks(diff.toWithdrawExternalIds, CHUNK)) {
+      await database.sanctionsEntity.updateMany({
+        where: { sourceId, externalId: { in: chunk } },
+        data: { withdrawnAt: now },
+      });
+    }
+
+    await database.sanctionsSource.update({
+      where: { id: sourceId },
+      data: {
+        publishDate: parsed.publishDate ? new Date(`${parsed.publishDate}T00:00:00.000Z`) : undefined,
+        recordCount: parsed.entities.length,
+        lastRefreshedAt: now,
+        lastFetchStatus: 'DONE',
+      },
+    });
+
+    return summary;
+    };
+    if (!res.durableReceipt) return persist(this.deps.ownerDb);
+    if (!this.deps.platformWriter) {
+      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter.$transaction(async (tx) => {
+      const applied = await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'sanctions.download',
+        receipt: res.durableReceipt,
+        domainAckKey: sourceId,
+        domainRevision: res.durableReceipt!.resultDigest,
+        apply: persist,
+      });
+      return applied.value ?? summary;
+    });
   }
 }
 

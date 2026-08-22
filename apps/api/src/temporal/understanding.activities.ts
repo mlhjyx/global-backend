@@ -17,6 +17,11 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  applyDomainAckConsumerTransaction,
+  applyDomainAckConsumerTransactions,
+} from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -181,7 +186,10 @@ export function createUnderstandingActivities(deps: {
       });
     },
 
-    async extractClaims(args: UnderstandingAuthorityInput & { text: string }): Promise<{ claims: ExtractedClaim[] }> {
+    async extractClaims(args: UnderstandingAuthorityInput & { text: string }): Promise<{
+      claims: ExtractedClaim[];
+      durableReceipt?: DurableExecutionReceipt;
+    }> {
       return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_claims');
         const result = await executeStructuredTaskWithRuntime(
@@ -202,7 +210,10 @@ export function createUnderstandingActivities(deps: {
         );
         const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
         if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_CLAIMS_INVALID');
-        return { claims: fromModel };
+        return {
+          claims: fromModel,
+          ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
+        };
       });
     },
 
@@ -228,15 +239,22 @@ export function createUnderstandingActivities(deps: {
         );
         const out = result.data as { industry?: string; summary?: string };
         if (!out?.industry && !out?.summary) return; // stub/空输出不回填
-        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          tx.companyProfile.update({
+        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          await applyDomainAckConsumerTransaction({
+            transaction: tx,
+            producerId: 'company_understanding.extract_profile',
+            receipt: result.durableReceipt,
+            domainAckKey: args.companyId,
+            domainRevision: result.durableReceipt?.resultDigest ?? '1',
+            apply: (transaction) => transaction.companyProfile.update({
             where: { id: args.companyId },
             data: {
               ...(out.industry ? { industry: out.industry } : {}),
               ...(out.summary ? { summary: out.summary } : {}),
             },
           }),
-        );
+          });
+        });
       });
     },
 
@@ -245,7 +263,10 @@ export function createUnderstandingActivities(deps: {
       executionContractVersion?: 2;
       executionBudget?: ExecutionBudgetBinding;
       text: string;
-    }): Promise<{ offerings: ExtractedOffering[] }> {
+    }): Promise<{
+      offerings: ExtractedOffering[];
+      durableReceipt?: DurableExecutionReceipt;
+    }> {
       return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_offerings');
         const result = await executeStructuredTaskWithRuntime(
@@ -266,7 +287,10 @@ export function createUnderstandingActivities(deps: {
         );
         const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
         if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_OFFERINGS_INVALID');
-        return { offerings: fromModel };
+        return {
+          offerings: fromModel,
+          ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
+        };
       });
     },
 
@@ -276,7 +300,11 @@ export function createUnderstandingActivities(deps: {
      * duplicates collapse into one claim with evidence from each page.
      */
     async persistClaims(
-      args: UnderstandingInput & { pages: { url: string; claims: ExtractedClaim[] }[] },
+      args: UnderstandingInput & { pages: {
+        url: string;
+        claims: ExtractedClaim[];
+        durableReceipt?: DurableExecutionReceipt;
+      }[] },
     ): Promise<{ claimCount: number }> {
       requireAuthority(args);
       // 幂等（PRD 11.16）：at-least-once 的活动重试不得重复写入。
@@ -285,8 +313,17 @@ export function createUnderstandingActivities(deps: {
       const runId = Context.current().info.workflowExecution?.runId ?? Context.current().info.activityId;
       let claimCount = 0;
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: args.pages.map((page) => ({
+            producerId: 'company_understanding.extract_claims',
+            receipt: page.durableReceipt,
+            domainAckKey: `${args.companyId}:${page.url}`,
+            domainRevision: page.durableReceipt?.resultDigest ?? runId,
+          })),
+          apply: async (transaction) => {
         // KNW-004 冲突检测的对照集：本公司既有（其他来源/往次运行）的有效 Claim
-        const priorClaims = await tx.claim.findMany({
+        const priorClaims = await transaction.claim.findMany({
           where: { companyId: args.companyId, status: { in: ['APPROVED', 'NEEDS_REVIEW'] } },
           select: { id: true, type: true, statement: true },
         });
@@ -295,12 +332,12 @@ export function createUnderstandingActivities(deps: {
         for (const page of args.pages) {
           if (!page.claims.length) continue;
           const ingestKey = `${runId}:${page.url}`;
-          const existing = await tx.knowledgeSource.findFirst({
+          const existing = await transaction.knowledgeSource.findFirst({
             where: { companyId: args.companyId, ingestKey },
             select: { id: true },
           });
           if (existing) continue; // 本次运行已写过该页
-          const source = await tx.knowledgeSource.create({
+          const source = await transaction.knowledgeSource.create({
             data: {
               workspaceId: args.workspaceId,
               companyId: args.companyId,
@@ -314,7 +351,7 @@ export function createUnderstandingActivities(deps: {
             const key = c.statement.toLowerCase().replace(/\s+/g, ' ').trim();
             let claimId = byStatement.get(key);
             if (!claimId) {
-              const claim = await tx.claim.create({
+              const claim = await transaction.claim.create({
                 data: {
                   workspaceId: args.workspaceId,
                   companyId: args.companyId,
@@ -334,7 +371,7 @@ export function createUnderstandingActivities(deps: {
               );
               if (rival && conflictBudget > 0) {
                 conflictBudget -= 1;
-                await tx.knowledgeConflict.create({
+                await transaction.knowledgeConflict.create({
                   data: {
                     workspaceId: args.workspaceId,
                     companyId: args.companyId,
@@ -343,7 +380,7 @@ export function createUnderstandingActivities(deps: {
                     claimType: c.type,
                   },
                 });
-                await tx.outboxEvent.create({
+                await transaction.outboxEvent.create({
                   data: {
                     workspaceId: args.workspaceId,
                     eventType: 'KnowledgeConflictDetected',
@@ -354,7 +391,7 @@ export function createUnderstandingActivities(deps: {
                 });
               }
             }
-            await tx.evidence.create({
+            await transaction.evidence.create({
               data: {
                 workspaceId: args.workspaceId,
                 claimId,
@@ -366,13 +403,19 @@ export function createUnderstandingActivities(deps: {
             });
           }
         }
+          },
+        });
       });
       return { claimCount };
     },
 
     /** Merge per-page offerings by name and upsert (idempotent on re-runs). */
     async persistOfferings(
-      args: UnderstandingInput & { pages: { url: string; offerings: ExtractedOffering[] }[] },
+      args: UnderstandingInput & { pages: {
+        url: string;
+        offerings: ExtractedOffering[];
+        durableReceipt?: DurableExecutionReceipt;
+      }[] },
     ): Promise<{ offeringCount: number }> {
       requireAuthority(args);
       const merged = new Map<string, ExtractedOffering & { sourceUrl: string }>();
@@ -387,8 +430,17 @@ export function createUnderstandingActivities(deps: {
         }
       }
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        for (const o of merged.values()) {
-          await tx.offering.upsert({
+        await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: args.pages.map((page) => ({
+            producerId: 'company_understanding.extract_offerings',
+            receipt: page.durableReceipt,
+            domainAckKey: `${args.companyId}:${page.url}`,
+            domainRevision: page.durableReceipt?.resultDigest ?? '1',
+          })),
+          apply: async (transaction) => {
+          for (const o of merged.values()) {
+          await transaction.offering.upsert({
             where: { companyId_name: { companyId: args.companyId, name: o.name } },
             update: {
               description: o.description ?? null,
@@ -409,6 +461,8 @@ export function createUnderstandingActivities(deps: {
             },
           });
         }
+          },
+        });
       });
       return { offeringCount: merged.size };
     },

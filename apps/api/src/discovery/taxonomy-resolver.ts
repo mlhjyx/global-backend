@@ -12,6 +12,8 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 export type TaxonomyResolveOptions = {
@@ -157,9 +159,13 @@ export class TaxonomyResolver {
       const node = await this.node(kind, code); // 校验 code 真实存在
       if (!node) return null;
       // 沉淀：下次该词确定性命中
-      await this.prisma.termAlias
-        .upsert({ where: { kind_term: { kind, term: norm(term) } }, update: { code, source: 'llm' }, create: { kind, term: norm(term), code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`alias sediment failed: ${String(e).slice(0, 120)}`));
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        kind,
+        norm(term),
+        code,
+      );
       return node;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -220,13 +226,13 @@ export class TaxonomyResolver {
       if (!code) return null;
       const node = await this.node('cpv', code); // 校验 code 真实存在
       if (!node) return null;
-      await this.prisma.termAlias
-        .upsert({
-          where: { kind_term: { kind: 'cpv', term } },
-          update: { code, source: 'llm' },
-          create: { kind: 'cpv', term, code, source: 'llm' },
-        })
-        .catch((e) => this.logger.warn(`cpv alias sediment failed: ${String(e).slice(0, 120)}`));
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        'cpv',
+        term,
+        code,
+      );
       return code;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -287,9 +293,13 @@ export class TaxonomyResolver {
       if (!code) return null;
       const node = await this.node('naics', code); // 校验 code 真实存在
       if (!node) return null;
-      await this.prisma.termAlias
-        .upsert({ where: { kind_term: { kind: 'naics', term } }, update: { code, source: 'llm' }, create: { kind: 'naics', term, code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`naics alias sediment failed: ${String(e).slice(0, 120)}`));
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        'naics',
+        term,
+        code,
+      );
       return code;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -354,9 +364,13 @@ export class TaxonomyResolver {
       if (!code) return null;
       const node = await this.node('fda_product_code', code); // 校验 code 真实存在
       if (!node) return null;
-      await this.prisma.termAlias
-        .upsert({ where: { kind_term: { kind: 'fda_product_code', term } }, update: { code, source: 'llm' }, create: { kind: 'fda_product_code', term, code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`fda alias sediment failed: ${String(e).slice(0, 120)}`));
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        'fda_product_code',
+        term,
+        code,
+      );
       return code;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -422,5 +436,28 @@ export class TaxonomyResolver {
     } finally {
       await budgets.close({ workspaceId, accountKey });
     }
+  }
+
+  private async persistTermAlias(
+    workspaceId: string,
+    durableReceipt: DurableExecutionReceipt | undefined,
+    kind: string,
+    term: string,
+    code: string,
+  ): Promise<void> {
+    await this.prisma.withWorkspace(workspaceId, async (tx) => {
+      await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'taxonomy.normalize',
+        receipt: durableReceipt,
+        domainAckKey: `${kind}:${term}`,
+        domainRevision: code,
+        apply: (transaction) => transaction.termAlias.upsert({
+          where: { kind_term: { kind, term } },
+          update: { code, source: 'llm' },
+          create: { kind, term, code, source: 'llm' },
+        }),
+      });
+    });
   }
 }

@@ -7,6 +7,10 @@ import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
 import { createPatentCacheBrokerScanner } from './patent-cache-broker-scanner';
 import { PATENTS_CACHE_REFRESH_SCHEDULE_ID } from './understanding.constants';
+import {
+  applyDomainAckConsumerTransactions,
+} from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
 
@@ -24,6 +28,7 @@ function boundedMaxAnchors(value: number | undefined): number {
  */
 export function createPatentsCacheActivities(deps: {
   ownerDb: PrismaClient;
+  platformWriter?: PrismaClient;
   broker: ExecutionBroker;
   budgetStore?: BudgetStore;
   activityRunId?: () => string | undefined;
@@ -34,9 +39,46 @@ export function createPatentsCacheActivities(deps: {
       const binding = await attestPlatformScheduleActivity({
         args: input, budgetStore: budgets, scheduleId: PATENTS_CACHE_REFRESH_SCHEDULE_ID, activityRunId: deps.activityRunId,
       });
+      const durableReceipts: DurableExecutionReceipt[] = [];
       return refreshPatentCache({
         db: deps.ownerDb as unknown as PatentRefreshDb, // 全 delegate ⊇ PatentRefreshDb 子集
-        bq: createPatentCacheBrokerScanner({ broker: deps.broker, accountKey: binding.accountKey }),
+        bq: createPatentCacheBrokerScanner({
+          broker: deps.broker,
+          accountKey: binding.accountKey,
+          onDurableReceipt: (producerId, durableReceipt) => {
+            if (producerId !== 'google_patents.search') {
+              throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+            }
+            durableReceipts.push(durableReceipt);
+          },
+        }),
+        applyScanWithAck: async (scan, persist) => {
+          if (!durableReceipts.length) return persist(deps.ownerDb as unknown as PatentRefreshDb);
+          if (!deps.platformWriter) {
+            throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+          }
+          return deps.platformWriter.$transaction(async (tx) => {
+            const value = await applyDomainAckConsumerTransactions({
+              transaction: tx,
+              acknowledgements: durableReceipts.map((durableReceipt) => ({
+                producerId: 'google_patents.search',
+                receipt: durableReceipt,
+                domainAckKey: `${binding.accountKey}:${durableReceipt.operationId}`,
+                domainRevision: durableReceipt.resultDigest,
+              })),
+              apply: (transaction) => persist(transaction as unknown as PatentRefreshDb),
+            });
+            return value ?? {
+              status: 'OK',
+              anchorCount: 0,
+              rowCount: scan.rows.length,
+              bytesScanned: scan.bytesScanned,
+              purged: 0,
+              cached: 0,
+              empty: 0,
+            };
+          });
+        },
         maxAnchors: boundedMaxAnchors(input.maxAnchors),
         log: (msg) => console.warn(`[patents-cache-refresh] ${msg}`),
       });

@@ -25,6 +25,10 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import {
+  applyDomainAckConsumerTransaction,
+  domainAggregateIdForReceipt,
+} from '../durable-results/domain-ack-consumer-bindings';
 
 interface IcpModelOutput {
   name: string;
@@ -140,9 +144,20 @@ export class IcpService {
     });
     const out = result.data;
 
+    const icpId = result.durableReceipt
+      ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
+      : undefined;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const icp = await tx.icpDefinition.create({
+      const applied = await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'icp.design',
+        receipt: result.durableReceipt,
+        domainAckKey: icpId ?? companyId,
+        domainRevision: result.durableReceipt?.resultDigest ?? '1',
+        apply: async (transaction) => {
+      const icp = await transaction.icpDefinition.create({
         data: {
+          ...(icpId ? { id: icpId } : {}),
           workspaceId: ctx.workspaceId,
           companyId,
           name: out.name ?? '未命名 ICP',
@@ -156,7 +171,7 @@ export class IcpService {
         },
       });
       for (const p of out.personas ?? []) {
-        await tx.persona.create({
+        await transaction.persona.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
@@ -167,7 +182,7 @@ export class IcpService {
         });
       }
       for (const r of out.buying_committee ?? []) {
-        await tx.buyingCommitteeRole.create({
+        await transaction.buyingCommitteeRole.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
@@ -181,7 +196,7 @@ export class IcpService {
       for (const r of out.qualification_rules ?? []) {
         const kind = String(r.kind).toUpperCase();
         if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) continue; // 丢弃不合法提议
-        await tx.qualificationRule.create({
+        await transaction.qualificationRule.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
@@ -194,7 +209,10 @@ export class IcpService {
           },
         });
       }
-      return this.full(tx, icp.id);
+      return this.full(transaction, icp.id);
+        },
+      });
+      return applied.value ?? this.full(tx, icpId!);
     });
   }
 
@@ -507,9 +525,19 @@ export class IcpService {
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
     queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries, binding);
 
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.discoveryQueryPlan.create({
+    const queryPlanId = result.durableReceipt
+      ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')
+      : undefined;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const applied = await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'discovery.query_plan',
+        receipt: result.durableReceipt,
+        domainAckKey: queryPlanId ?? icpId,
+        domainRevision: result.durableReceipt?.resultDigest ?? '1',
+        apply: (transaction) => transaction.discoveryQueryPlan.create({
         data: {
+          ...(queryPlanId ? { id: queryPlanId } : {}),
           workspaceId: ctx.workspaceId,
           icpId,
           status: 'DRAFT', // 人工确认（→READY）后才可被 Discover 执行
@@ -517,7 +545,12 @@ export class IcpService {
           estimatedVolume: Number.isFinite(out.estimated_volume) ? Math.round(out.estimated_volume) : null,
         },
       }),
-    );
+      });
+      if (applied.value) return applied.value;
+      return tx.discoveryQueryPlan.findUniqueOrThrow({
+        where: { id: queryPlanId! },
+      });
+    });
   }
 
   /**

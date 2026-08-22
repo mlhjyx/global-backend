@@ -126,7 +126,7 @@ describe('PostgresBudgetStore', () => {
         estimatedMicrousd,
       })).resolves.toMatchObject({ estimatedMicrousd });
       expect(queries[0]?.strings?.join('')).toContain(
-        'reserve_tool_budget_microusd_v1',
+        'reserve_tool_budget_microusd_with_receipt_v1',
       );
       expect(queries[0]?.values).toContain(estimatedMicrousd);
     },
@@ -417,7 +417,7 @@ describe('PostgresBudgetStore', () => {
     expect(queries[0]?.strings?.join('')).toContain(
       'settle_tool_budget_microusd_with_receipt_v1',
     );
-    expect(queries[0]?.values).toContainEqual(facts.usage);
+    expect(queries[0]?.values).toContain(JSON.stringify(facts.usage));
     expect(queries[0]?.values).toContain(facts.costBasis);
   });
 
@@ -1238,6 +1238,17 @@ describe('PostgresBudgetStore', () => {
           remaining_cents: 10n,
           status: 'RESERVED',
           result_json: projection,
+          operation_key: 'op',
+          account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+          authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+          result_schema_version: projection.schemaVersion,
+          result_schema: projection.schema,
+          result_digest: projection.digest,
+          receipt_usage: {
+            currency: 'USD', unit: 'microusd', callCount: 1,
+            upperBoundMicrousd: '50000',
+          },
+          receipt_cost_basis: 'estimated_upper_bound',
         },
       ]]),
     );
@@ -1258,7 +1269,26 @@ describe('PostgresBudgetStore', () => {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
         $queryRaw: vi.fn(async (query: { values?: unknown[] }) => {
           queries.push(query);
-          return [{ charged_cents: 1n, observed_cents: 1n, cap_variance: false, status: 'SETTLED', replay: false }];
+          return [{
+            charged_cents: 1n,
+            observed_cents: 1n,
+            cap_variance: false,
+            status: 'SETTLED',
+            replay: false,
+            operation_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+            operation_key: 'op',
+            account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+            authority_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+            result_schema_version: 'generic-operation-projection/v1',
+            result_schema: 'fit-judgment/v1',
+            result_digest: projection.digest,
+            result_json: projection,
+            receipt_usage: {
+              currency: 'USD', unit: 'microusd', callCount: 1,
+              upperBoundMicrousd: '10000',
+            },
+            receipt_cost_basis: 'estimated_upper_bound',
+          }];
         }),
       } as never)),
     } as unknown as PrismaService;
@@ -1270,7 +1300,13 @@ describe('PostgresBudgetStore', () => {
     await store.settle({
       workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run',
       operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b', estimatedCents: 1, replay: false,
-    }, 1, projection);
+    }, 1, projection, {
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 1,
+        upperBoundMicrousd: '10000',
+      },
+      costBasis: 'estimated_upper_bound',
+    });
 
     expect(queries[0]?.values).toEqual(expect.arrayContaining([
       projection.schemaVersion, projection.schema, projection.digest,

@@ -283,6 +283,13 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       expect.objectContaining({ operationId: 'op' }),
       5,
       expect.objectContaining({ kind: 'model', schema: 'taxonomy-code/v1' }),
+      {
+        usage: {
+          currency: 'USD', unit: 'microusd', callCount: 1,
+          upperBoundMicrousd: '200000',
+        },
+        costBasis: 'estimated_upper_bound',
+      },
     );
   });
 

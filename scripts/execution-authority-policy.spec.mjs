@@ -31,6 +31,7 @@ async function materializePolicyRepo(mutations = {}) {
     "apps/api/src/durable-results/durable-execution-receipt.ts",
     "apps/api/src/durable-results/domain-ack.ts",
     "apps/api/src/durable-results/domain-ack-consumer-bindings.ts",
+    "apps/api/src/durable-results/execution-receipt-facts.ts",
     "apps/api/src/durable-results/artifact/artifact-materializer.registry.ts",
     "apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.ts",
     "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts",
@@ -44,6 +45,8 @@ async function materializePolicyRepo(mutations = {}) {
     "apps/api/src/sanctions/sanctions-refresh.service.ts",
     "apps/api/src/signals/signal-ingest.service.ts",
     "apps/api/src/intent/intent-projection.service.ts",
+    "apps/api/src/discovery/fit-judge.ts",
+    "apps/api/src/discovery/taxonomy-resolver.ts",
     "apps/api/src/temporal/patent-cache-broker-scanner.ts",
     "apps/api/src/discovery/providers/bigquery-patents.provider.ts",
     "apps/api/src/discovery/providers/public-web.provider.ts",
@@ -188,8 +191,11 @@ test("scanner catches SQL ACK trust and receipt-ready microusd wrapper regressio
   const tempRoot = await materializePolicyRepo({
     "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql": (source) =>
       source
-        .replace("FORCE ROW LEVEL SECURITY", "NO FORCE ROW LEVEL SECURITY")
-        .replace("\"status\" = 'SETTLED'", "\"status\" <> 'SETTLED'")
+        .replace("FORCE ROW LEVEL SECURITY", "ROW LEVEL SECURITY NOT_FORCED")
+        .replace(
+          "operation.\"status\" IS DISTINCT FROM 'SETTLED'",
+          "operation.\"status\" IS NOT DISTINCT FROM 'SETTLED'",
+        )
         .replace("reserve_tool_budget_microusd_with_receipt_v1", "reserve_tool_budget_microusd_v1"),
   });
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
@@ -241,8 +247,8 @@ test("scanner catches PUBLIC SECURITY DEFINER access and broad principal admissi
     "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql": (source) =>
       source
         .replace(
-          "REVOKE ALL ON FUNCTION\n  apply_execution_domain_ack_v1",
-          "REVOKE ALL ON FUNCTION\n  missing_apply_execution_domain_ack_v1",
+          "FROM PUBLIC, app_user, execution_budget_platform_writer;",
+          "FROM app_user, execution_budget_platform_writer;",
         )
         .replace(
           "ELSIF session_user IS DISTINCT FROM 'app_user'",
@@ -270,7 +276,7 @@ test("scanner catches per-path receipt fact and old microusd wrapper regressions
   const tempRoot = await materializePolicyRepo({
     "docs/governance/durable-result-strategies.json": (source) => {
       const manifest = JSON.parse(source);
-      delete manifest.tools[0].receiptFacts;
+      manifest.receiptFactPaths.tools.shift();
       return `${JSON.stringify(manifest, null, 2)}\n`;
     },
     "apps/api/src/tools/budget-store.ts": (source) => source
@@ -285,11 +291,10 @@ test("scanner catches per-path receipt fact and old microusd wrapper regressions
 test("scanner catches optional-hook typed projection and missing materializer tests", async () => {
   const tempRoot = await materializePolicyRepo({
     "apps/api/src/tools/tool-broker.ts": (source) => source.replace(
-      "this.projectionRegistry.project(\n          tool.durableResultStrategy.schema,\n          result,",
-      "this.projectionRegistry.project(\n          tool.durableResultStrategy.schema,\n          tool.durableReplayResult?.(result),",
+      "tool.durableResultStrategy.kind === 'typed_projection'\n            ? result",
+      "tool.durableResultStrategy.kind === 'typed_projection'\n            ? tool.durableReplayResult?.(result)",
     ),
-    "apps/api/src/durable-results/artifact/materializers/http-get.materializer.spec.ts": (source) =>
-      source.replaceAll("http-get/v1", "missing-http-get/v1"),
+    "apps/api/src/durable-results/artifact/materializers/http-get.materializer.spec.ts": () => "",
   });
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_TOOLBROKER_TYPED_PROJECTION_MISSING"));

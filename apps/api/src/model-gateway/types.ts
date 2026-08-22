@@ -23,6 +23,11 @@ export interface AiContext {
   paidCost?: PaidCostContext;
   /** Registered typed durable-result schema for model replay. */
   durableResultSchema?: TypedProjectionSchema;
+  /** Collects only the closed ledger receipt for the actual domain transaction. */
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 export interface ModelUsage {

@@ -32,6 +32,8 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -61,6 +63,13 @@ const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 const WATCH_REGISTER_LIMIT = 12; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
+const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
+  'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
+  'http.get', 'inpi_rne.search', 'mapyourshow.fetch', 'openfda.search',
+  'osm.overpass', 'searxng.search', 'smtp.rcpt_probe', 'tradefair.algolia',
+  'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
+  'discovery.extract_list', 'contact.find_decision_makers',
+]);
 
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
@@ -217,7 +226,22 @@ export function createDiscoveryActivities(deps: {
       };
       const blockedDomains = suspended.map((s) => s.domain);
       const settled = await Promise.allSettled(
-        adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
+        adapters.map(async (a) => {
+          const durableReceipts: Array<{
+            producerId: string;
+            receipt: DurableExecutionReceipt;
+          }> = [];
+          const r = await a.discoverCompanies(q, {
+            ...ctx,
+            onDurableReceipt: (producerId, receipt) => {
+              if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
+                throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+              }
+              durableReceipts.push({ producerId, receipt });
+            },
+          }, { blockedDomains });
+          return { key: a.key, r, durableReceipts };
+        }),
       );
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
@@ -242,6 +266,17 @@ export function createDiscoveryActivities(deps: {
       // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务
       // （Postgres 里 catch 单条 P2002 会毒化整个事务）。批内先按 externalId 去重。
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const persisted = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: settled.flatMap((item) => item.status === 'fulfilled'
+            ? item.value.durableReceipts.map(({ producerId, receipt }) => ({
+                producerId,
+                receipt,
+                domainAckKey: `${args.runId}:${item.value.key}:${receipt.operationId}`,
+                domainRevision: receipt.resultDigest,
+              }))
+            : []),
+          apply: async (transaction) => {
         let rawCount = 0;
         let totalCost = 0;
         const providersHit: string[] = [];
@@ -271,7 +306,7 @@ export function createDiscoveryActivities(deps: {
               costCents: 0,
             }));
           if (rows.length) {
-            const created = await tx.rawSourceRecord.createMany({
+            const created = await transaction.rawSourceRecord.createMany({
               data: rows,
               skipDuplicates: true,
             });
@@ -280,7 +315,7 @@ export function createDiscoveryActivities(deps: {
           totalCost += r.costCents;
         }
         if (totalCost > 0) {
-          await tx.usageLedger.create({
+          await transaction.usageLedger.create({
             data: {
               workspaceId: args.workspaceId,
               resourceType: 'provider_call',
@@ -296,6 +331,14 @@ export function createDiscoveryActivities(deps: {
           rawCount,
           costCents: totalCost,
           provider: providersHit.join('+') || null,
+          budgetTruncated,
+        };
+          },
+        });
+        return persisted ?? {
+          rawCount: 0,
+          costCents: 0,
+          provider: null,
           budgetTruncated,
         };
       });

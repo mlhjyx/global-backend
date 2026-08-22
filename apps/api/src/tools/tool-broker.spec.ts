@@ -258,6 +258,13 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         schema: "test-tool/v1",
         data: { data: { ok: true }, costCents: 1 },
       }),
+      {
+        usage: {
+          currency: "USD", unit: "microusd", callCount: 1,
+          upperBoundMicrousd: "10000",
+        },
+        costBasis: "estimated_upper_bound",
+      },
     );
   });
 

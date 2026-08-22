@@ -98,6 +98,18 @@ function ackId(input: {
   return createHash('sha256').update(canonical(input)).digest('hex');
 }
 
+function opaqueDomainIdentity(value: string): string {
+  return createHash('sha256').update(value.normalize('NFC')).digest('hex');
+}
+
+function opaqueDomainIdentitySource(value: string): string {
+  if (
+    typeof value !== 'string' || value.length < 1 || value.length > 500 ||
+    value.includes('\0') || value !== value.normalize('NFC') || PII_LIKE.test(value)
+  ) invalid();
+  return value;
+}
+
 function sameAck(left: DomainAckRecord, right: DomainAckRecord): boolean {
   return canonical(left) === canonical(right);
 }
@@ -193,7 +205,11 @@ export class PostgresDomainAckRepository implements DomainAckRepository<DomainAc
   ): Promise<DomainAckApplyResult<T>> {
     const locked = parseAckRow(
       await this.transaction.$queryRaw<PostgresDomainAckRow[]>(
-        Prisma.sql`SELECT * FROM apply_execution_domain_ack_v1(${JSON.stringify(record)}::jsonb)`,
+        Prisma.sql`SELECT * FROM apply_execution_domain_ack_v1(
+          ${record.scopeKey}, ${record.operationId}::uuid, ${record.consumer},
+          ${record.domainAggregateType}, ${record.domainAckKey},
+          ${record.domainRevision}
+        )`,
       ),
       record,
     );
@@ -215,8 +231,12 @@ export class DomainAckService<TTransaction = unknown> {
     const receipt = parseDurableExecutionReceipt(input.receipt);
     const consumer = safeText(input.consumer);
     const domainAggregateType = safeText(input.domainAggregateType);
-    const domainAckKey = safeText(input.domainAckKey, { rejectPayloadHints: true });
-    const domainRevision = safeText(input.domainRevision ?? '0');
+    const domainAckKey = opaqueDomainIdentity(
+      opaqueDomainIdentitySource(input.domainAckKey),
+    );
+    const domainRevision = opaqueDomainIdentity(
+      opaqueDomainIdentitySource(input.domainRevision ?? '0'),
+    );
     const record = freezeRecord({
       schemaVersion: 'domain-ack/v1',
       ackId: ackId({

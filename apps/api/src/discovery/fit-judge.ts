@@ -6,6 +6,8 @@ import { BudgetOperationReplayError } from '../tools/budget-store';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -40,6 +42,7 @@ export interface FitJudgment {
     business_model: string;
     reasons: string[];
   };
+  durableReceipt?: DurableExecutionReceipt;
 }
 
 interface FitOutput {
@@ -67,7 +70,13 @@ export async function upsertLeadFit(
   canonicalCompanyId: string,
   judgment: FitJudgment,
 ): Promise<void> {
-  await tx.lead.upsert({
+  await applyDomainAckConsumerTransaction({
+    transaction: tx,
+    producerId: 'discovery.qualify_fit',
+    receipt: judgment.durableReceipt,
+    domainAckKey: `${workspaceId}:${icpId}:${canonicalCompanyId}`,
+    domainRevision: judgment.durableReceipt?.resultDigest ?? judgment.verdict,
+    apply: (transaction) => transaction.lead.upsert({
     where: { workspaceId_icpId_canonicalCompanyId: { workspaceId, icpId, canonicalCompanyId,
       },
     },
@@ -84,6 +93,7 @@ export async function upsertLeadFit(
       fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
       queue: judgment.verdict === 'mismatch' ? 'rejected' : 'needs_review',
     },
+  }),
   });
 }
 
@@ -119,6 +129,7 @@ export async function judgeFitCompany(
   const contract = getTask('discovery.qualify_fit')!;
   const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
   let out: FitOutput;
+  let durableReceipt: DurableExecutionReceipt | undefined;
   try {
     const result = await executeStructuredTaskWithRuntime<FitOutput>(
       gateway,
@@ -144,6 +155,7 @@ export async function judgeFitCompany(
       { telemetry: opts?.runtimeTelemetry },
     );
     out = result.data;
+    durableReceipt = result.durableReceipt;
   } catch (err) {
     // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
     // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
@@ -166,5 +178,6 @@ export async function judgeFitCompany(
       business_model: out.business_model_gate,
       reasons: out.reasons,
     },
+    ...(durableReceipt ? { durableReceipt } : {}),
   };
 }

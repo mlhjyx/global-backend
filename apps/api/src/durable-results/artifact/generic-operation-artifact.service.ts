@@ -5,6 +5,7 @@ import type {
   BudgetReservation,
   BudgetStore,
 } from '../../tools/budget-store';
+import { artifactExecutionReceiptFacts } from '../execution-receipt-facts';
 import { contentAddressedObjectKey } from './artifact-key';
 import {
   parseArtifactExpectedFactsForResultSchema,
@@ -386,6 +387,10 @@ export class GenericOperationArtifactService {
       input.reservation,
       input.actualCents,
       snapshot,
+      artifactExecutionReceiptFacts({
+        resultSchema: manifest.resultSchema,
+        reservedMicrousd: BigInt(input.reservation.estimatedCents) * 10_000n,
+      }),
     );
     await this.cleanup(staged.artifactId);
     return reference;
@@ -416,6 +421,10 @@ export class GenericOperationArtifactService {
       input.reservation,
       input.actualCents,
       snapshot,
+      artifactExecutionReceiptFacts({
+        resultSchema: expected.resultSchema,
+        reservedMicrousd: BigInt(input.reservation.estimatedCents) * 10_000n,
+      }),
     );
     await this.cleanup(expected.artifactId);
     return reference;

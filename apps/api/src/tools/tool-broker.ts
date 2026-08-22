@@ -20,6 +20,7 @@ import {
 import { TypedProjectionRegistry } from '../durable-results/typed-projection.registry';
 import { registerCatalogResultProjections } from '../durable-results/catalog-result-projections';
 import { registerSourceResultProjections } from '../durable-results/source-result-projections';
+import { toolExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   legacyToolCostMeasurement,
@@ -284,9 +285,13 @@ export class ToolBroker implements ExecutionBroker {
             throw new BudgetOperationReplayError(reservation.operationId);
           }
           if (replay) {
-            return reservation.receipt
+            const returned = reservation.receipt
               ? { ...replay, durableReceipt: reservation.receipt }
               : replay;
+            if (returned.durableReceipt) {
+              ctx.onDurableReceipt?.(tool.id, returned.durableReceipt);
+            }
+            return returned;
           }
           throw new BudgetOperationReplayError(reservation.operationId);
         }
@@ -424,8 +429,13 @@ export class ToolBroker implements ExecutionBroker {
       } else if (reservation) {
         let projection: GenericOperationProjection | undefined;
         try {
-          const durableReplay = tool.durableReplayResult?.(result) ?? null;
-          if (tool.durableReplayResult && !durableReplay) {
+          const durableReplay = tool.durableResultStrategy.kind === 'typed_projection'
+            ? result
+            : tool.durableReplayResult?.(result) ?? null;
+          if (
+            tool.durableResultStrategy.kind !== 'typed_projection' &&
+            tool.durableReplayResult && !durableReplay
+          ) {
             throw new Error('approved durable replay hook returned no result');
           }
           projection = durableReplay
@@ -438,7 +448,23 @@ export class ToolBroker implements ExecutionBroker {
           // result or allow a second physical request.
           throw new BudgetOperationReplayError(reservation.operationId);
         }
-        const settlement = [reservation, result.costCents, projection] as const;
+        const receiptFacts = projection
+          ? toolExecutionReceiptFacts({
+              toolId: tool.id,
+              resultSchema: tool.durableResultStrategy.kind === 'no_physical_call'
+                ? projection.schema
+                : tool.durableResultStrategy.schema,
+              result: result as ToolResult<unknown>,
+              reservedMicrousd: BigInt(reservation.estimatedCents) * 10_000n,
+              chargedMicrousd: BigInt(result.costCents) * 10_000n,
+            })
+          : undefined;
+        const settlement = [
+          reservation,
+          result.costCents,
+          projection,
+          receiptFacts,
+        ] as const;
         let settled;
         try {
           settled = await this.budget.settle(...settlement);
@@ -465,6 +491,9 @@ export class ToolBroker implements ExecutionBroker {
         tool.idempotencyKey(input),
         result.degraded,
       );
+      if (result.durableReceipt) {
+        ctx.onDurableReceipt?.(tool.id, result.durableReceipt);
+      }
       return result;
     } finally {
       await release?.();
@@ -484,11 +513,12 @@ export class ToolBroker implements ExecutionBroker {
       typeof projection.data !== 'object' ||
       Array.isArray(projection.data)
     ) return null;
-    if (!tool.durableReplayResult) return null;
     const restored = tool.durableResultStrategy.kind === 'typed_projection'
       ? this.projectionRegistry.restore(projection.data)
       : projection.data;
-    const replay = tool.durableReplayResult(restored as ToolResult<O>);
+    const replay = tool.durableResultStrategy.kind === 'typed_projection'
+      ? restored as ToolResult<O>
+      : tool.durableReplayResult?.(restored as ToolResult<O>) ?? null;
     if (!replay) return null;
     const verified = this.projectToolDurableResult(tool, replay);
     return verified.digest === projection.digest ? replay : null;
@@ -496,7 +526,7 @@ export class ToolBroker implements ExecutionBroker {
 
   private projectToolDurableResult<I, O>(
     tool: Tool<I, O>,
-    replay: ToolResult<O>,
+    result: ToolResult<O>,
   ): GenericOperationProjection {
     if (tool.durableResultStrategy.kind === 'typed_projection') {
       return projectGenericOperationResult({
@@ -504,7 +534,7 @@ export class ToolBroker implements ExecutionBroker {
         schema: tool.durableResultStrategy.schema,
         data: JSON.parse(JSON.stringify(this.projectionRegistry.project(
           tool.durableResultStrategy.schema,
-          replay,
+          result,
         ))),
       });
     }
@@ -514,7 +544,7 @@ export class ToolBroker implements ExecutionBroker {
     return projectGenericOperationResult({
       kind: 'tool',
       schema: tool.durableResultStrategy.schema,
-      data: replay,
+      data: result,
     });
   }
 

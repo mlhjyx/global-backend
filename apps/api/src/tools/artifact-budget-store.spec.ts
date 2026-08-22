@@ -46,6 +46,15 @@ const ARTIFACT_SNAPSHOT = Object.freeze({
   manifest: ARTIFACT_MANIFEST,
   expectedFacts: EXPECTED_FACTS,
 });
+const ARTIFACT_RECEIPT_FACTS = Object.freeze({
+  usage: Object.freeze({
+    currency: "USD" as const,
+    unit: "microusd" as const,
+    callCount: 1,
+    upperBoundMicrousd: "170000",
+  }),
+  costBasis: "estimated_upper_bound" as const,
+});
 
 function unknownRow(manifest = ARTIFACT_MANIFEST) {
   return {
@@ -244,6 +253,17 @@ describe("PostgresBudgetStore artifact recovery", () => {
                 cap_variance: false,
                 status: "SETTLED",
                 replay: false,
+                reserved_cents: 17n,
+                operation_id: ARTIFACT_REFERENCE.operationId,
+                operation_key: "artifact-operation",
+                account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+                authority_id: ARTIFACT_MANIFEST.authorityId,
+                result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+                result_schema: ARTIFACT_REFERENCE.resultSchema,
+                result_digest: ARTIFACT_REFERENCE.sha256,
+                result_json: ARTIFACT_REFERENCE,
+                receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+                receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
               },
             ];
           }),
@@ -263,15 +283,21 @@ describe("PostgresBudgetStore artifact recovery", () => {
         },
         13,
         ARTIFACT_SNAPSHOT,
+        ARTIFACT_RECEIPT_FACTS,
       ),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       chargedCents: 17,
       observedCents: 13,
       capVariance: false,
       replay: false,
+      receipt: {
+        resultStrategy: "artifact_reference",
+        resultSchema: "http-get/v1",
+        artifactId: ARTIFACT_REFERENCE.artifactId,
+      },
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v3",
+      "settle_tool_budget_artifact_manifest_with_receipt_v1",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
@@ -284,6 +310,8 @@ describe("PostgresBudgetStore artifact recovery", () => {
       null,
       null,
       null,
+      JSON.stringify(ARTIFACT_RECEIPT_FACTS.usage),
+      ARTIFACT_RECEIPT_FACTS.costBasis,
     ]);
   });
 
@@ -308,6 +336,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
           } as unknown as GenericOperationArtifactManifest,
           expectedFacts: EXPECTED_FACTS,
         },
+        ARTIFACT_RECEIPT_FACTS,
       ),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
@@ -340,7 +369,9 @@ describe("PostgresBudgetStore artifact recovery", () => {
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
     await expect(
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
+      store.settleArtifactManifest(
+        reservation, 13, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
+      ),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
@@ -375,7 +406,9 @@ describe("PostgresBudgetStore artifact recovery", () => {
 
     const results = await Promise.allSettled([
       store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
+      store.settleArtifactManifest(
+        reservation, 13, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
+      ),
       store.loadResultUnknownArtifact(
         reservation,
         ARTIFACT_MANIFEST.authorityId,

@@ -5,6 +5,7 @@
  */
 
 import type { CompanyIdentifier } from './identity';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export type SourceClass =
   | 'trade_data'
@@ -40,6 +41,10 @@ export interface ExecutionContext {
    * and platform discovery behavior; callers must never synthesize `true`.
    */
   authorizeExternalAction?: () => Promise<boolean>;
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 /** Fail-closed helper for direct DNS/robots boundaries that are not Tool calls. */

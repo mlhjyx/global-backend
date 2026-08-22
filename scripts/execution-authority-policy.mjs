@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const DEFAULT_REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const MANIFEST_PATH = "docs/governance/durable-result-strategies.json";
+const RECEIPT_FACT_SOURCE_PATH = "apps/api/src/durable-results/execution-receipt-facts.ts";
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
   "searxng.search",
@@ -266,6 +267,7 @@ function validateManifestShape(manifest, issues) {
     "schemaVersion",
     "cutoverFence",
     "receipt",
+    "receiptFactPaths",
     "tools",
     "modelTasks",
     "artifactSchemas",
@@ -294,6 +296,11 @@ function validateManifestShape(manifest, issues) {
     if (!Array.isArray(manifest[key])) {
       issues.push(issue("EXECUTION_AUTHORITY_MANIFEST_INVALID", MANIFEST_PATH, `${key} must be an array`));
     }
+  }
+  if (!manifest.receiptFactPaths || typeof manifest.receiptFactPaths !== "object" ||
+      !Array.isArray(manifest.receiptFactPaths.tools) ||
+      !Array.isArray(manifest.receiptFactPaths.modelTasks)) {
+    issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", MANIFEST_PATH, "explicit receipt facts are required for every Tool and Model path"));
   }
 }
 
@@ -359,6 +366,25 @@ function validateManifestCoverage(manifest, issues) {
       }
       if (entry?.artifactIdRequired !== true || !Array.isArray(entry?.mediaTypes) || !Number.isSafeInteger(entry?.maxBytes) || !Number.isSafeInteger(entry?.ttlSeconds)) {
         issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_DECLARATION_INCOMPLETE", MANIFEST_PATH, `artifact schema must declare artifactId, mediaTypes, maxBytes and ttlSeconds: ${entry?.schema ?? "<unknown>"}`));
+      }
+    }
+  }
+  if (manifest.receiptFactPaths && typeof manifest.receiptFactPaths === "object") {
+    const toolFacts = sorted((manifest.receiptFactPaths.tools ?? []).map((entry) => entry?.id).filter(Boolean));
+    const modelFacts = sorted((manifest.receiptFactPaths.modelTasks ?? []).map((entry) => entry?.taskId).filter(Boolean));
+    if (toolFacts.join("\n") !== sorted(EXPECTED_TOOL_IDS).join("\n") ||
+        modelFacts.join("\n") !== sorted(EXPECTED_MODEL_TASKS.map(([, taskId]) => taskId)).join("\n")) {
+      issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", MANIFEST_PATH, "receipt fact paths must exactly cover 18 Tools and 10 Model tasks"));
+    }
+    for (const entry of manifest.receiptFactPaths.tools ?? []) {
+      const expected = entry?.id === "google_patents.search" ? "patent_cost_facts" : "declared_upper_bound";
+      if (entry?.source !== expected) {
+        issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", MANIFEST_PATH, `invalid Tool receipt fact source: ${entry?.id ?? "<unknown>"}`));
+      }
+    }
+    for (const entry of manifest.receiptFactPaths.modelTasks ?? []) {
+      if (entry?.source !== "model_usage_or_declared_upper_bound") {
+        issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", MANIFEST_PATH, `invalid Model receipt fact source: ${entry?.taskId ?? "<unknown>"}`));
       }
     }
   }
@@ -487,18 +513,18 @@ async function scanDomainAckSource(repoRoot, issues) {
   }
   const requiredSqlTokens = [
     "\"domain_revision\"",
-    "UNIQUE (\"operation_id\", \"consumer\", \"domain_aggregate_type\", \"domain_ack_key\", \"domain_revision\")",
+    "\"domain_ack_key\", \"domain_revision\"",
     "REFERENCES \"tool_budget_operation\"",
     "REFERENCES \"tool_budget_account\"",
     "REFERENCES \"execution_budget_authority\"",
-    "\"status\" = 'SETTLED'",
+    "operation.\"status\" IS DISTINCT FROM 'SETTLED'",
     "ENABLE ROW LEVEL SECURITY",
     "FORCE ROW LEVEL SECURITY",
-    "REVOKE ALL ON TABLE \"execution_domain_ack\" FROM PUBLIC",
+    "REVOKE ALL ON TABLE \"execution_domain_ack\"",
     "SECURITY DEFINER",
-    "SET search_path = public, pg_temp",
+    "SET search_path = pg_catalog, public",
     "pg_advisory_xact_lock",
-    "jsonb_object_keys",
+    "\"ack_json\" ?& ARRAY[",
     "DOMAIN_ACK_LEDGER_MISMATCH",
     "receipt_usage",
     "receipt_cost_basis",
@@ -506,6 +532,64 @@ async function scanDomainAckSource(repoRoot, issues) {
   if (requiredSqlTokens.some((token) => !migrationSource.includes(token)) ||
       migrationSource.includes("UNIQUE (\"operation_id\")")) {
     issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_SQL_TRUST_INCOMPLETE", migrationPath, "Domain ACK SQL must bind SETTLED ledger tuple, RLS, closed JSON and composite ACK identity"));
+  }
+  const consumerPaths = Object.freeze([
+    ["apps/api/src/icp/icp.service.ts", ["icp.design", "discovery.query_plan"]],
+    ["apps/api/src/discovery/taxonomy-resolver.ts", ["taxonomy.normalize"]],
+    ["apps/api/src/discovery/fit-judge.ts", ["discovery.qualify_fit"]],
+    ["apps/api/src/temporal/understanding.activities.ts", [
+      "company_understanding.extract_claims",
+      "company_understanding.extract_profile",
+      "company_understanding.extract_offerings",
+    ]],
+    ["apps/api/src/temporal/discovery.activities.ts", [
+      "companies_house.search", "crawl4ai.fetch", "crawl4ai.render",
+      "gleif.fetch", "http.get", "inpi_rne.search", "mapyourshow.fetch",
+      "openfda.search", "osm.overpass", "searxng.search",
+      "smtp.rcpt_probe", "tradefair.algolia", "wikidata.entity",
+      "wikidata.sparql", "discovery.extract_company",
+      "discovery.extract_list", "contact.find_decision_makers",
+    ]],
+    ["apps/api/src/temporal/patents-cache.activities.ts", ["google_patents.search"]],
+    ["apps/api/src/sanctions/sanctions-refresh.service.ts", ["sanctions.download"]],
+    ["apps/api/src/signals/signal-ingest.service.ts", ["ted.search", "openfda.search", "samgov.search"]],
+    ["apps/api/src/intent/intent-projection.service.ts", ["http.get"]],
+  ]);
+  for (const [consumerPath, producerIds] of consumerPaths) {
+    const consumerSource = existsSync(resolve(repoRoot, consumerPath))
+      ? await readText(repoRoot, consumerPath)
+      : "";
+    if (!consumerSource.includes("applyDomainAckConsumerTransaction") ||
+        !consumerSource.includes("durableReceipt") ||
+        producerIds.some((producerId) => !consumerSource.includes(producerId))) {
+      issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_CONSUMER_CALL_MISSING", consumerPath, "actual product consumer must invoke receipt-aware ACK in its domain transaction"));
+    }
+  }
+  if (
+    !migrationSource.includes("SET search_path = pg_catalog, public") ||
+    migrationSource.includes("session_user <> 'app_user'") ||
+    !migrationSource.includes("PERFORM assert_execution_budget_platform_writer_principal()")
+  ) {
+    issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_PRINCIPAL_INVALID", migrationPath, "ACK functions must use exact app/platform principal admission"));
+  }
+  const aclTokens = [
+    "REVOKE ALL ON FUNCTION",
+    "apply_execution_domain_ack_v1(TEXT, UUID, TEXT, TEXT, TEXT, TEXT)",
+    "FROM PUBLIC, app_user, execution_budget_platform_writer",
+    "TO app_user, execution_budget_platform_writer",
+  ];
+  if (aclTokens.some((token) => !migrationSource.includes(token))) {
+    issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_FUNCTION_ACL_INVALID", migrationPath, "every new function must revoke PUBLIC and grant exact principals only"));
+  }
+  if (
+    migrationSource.includes("p_ack->>'resultStrategy'") ||
+    migrationSource.includes("p_ack->>'artifactId'") ||
+    migrationSource.includes("p_ack->>'ackId'") ||
+    !migrationSource.includes('operation."result_schema_version"') ||
+    !migrationSource.includes('operation."result_json"->>\'artifactId\'') ||
+    !migrationSource.includes("public.digest")
+  ) {
+    issues.push(issue("EXECUTION_AUTHORITY_DOMAIN_ACK_DERIVATION_INVALID", migrationPath, "strategy, artifact and ACK identity must be derived from locked ledger facts"));
   }
 }
 
@@ -535,6 +619,34 @@ async function scanLedgerReceiptSource(repoRoot, issues) {
       issues.push(issue("EXECUTION_AUTHORITY_MICROUSD_RECEIPT_WRAPPER_MISSING", migrationPath, `microusd receipt wrapper missing ${token}`));
     }
   }
+  for (const token of [
+    "reserve_tool_budget_microusd_with_receipt_v1",
+    "settle_tool_budget_microusd_with_receipt_v1",
+    "parseDurableExecutionReceiptFacts",
+    "DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED",
+  ]) {
+    if (!source.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_MICROUSD_RECEIPT_WRAPPER_MISSING", path, `BudgetStore receipt path missing ${token}`));
+    }
+  }
+  const factSource = existsSync(resolve(repoRoot, RECEIPT_FACT_SOURCE_PATH))
+    ? await readText(repoRoot, RECEIPT_FACT_SOURCE_PATH)
+    : "";
+  for (const toolId of EXPECTED_TOOL_IDS) {
+    if (!factSource.includes(`'${toolId}'`) && !factSource.includes(`"${toolId}"`)) {
+      issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", RECEIPT_FACT_SOURCE_PATH, `missing Tool receipt fact path ${toolId}`));
+    }
+  }
+  for (const [, taskId] of EXPECTED_MODEL_TASKS) {
+    if (!factSource.includes(`'${taskId}'`) && !factSource.includes(`"${taskId}"`)) {
+      issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", RECEIPT_FACT_SOURCE_PATH, `missing Model receipt fact path ${taskId}`));
+    }
+  }
+  for (const token of ["toolExecutionReceiptFacts", "modelExecutionReceiptFacts", "patentCostFacts", "not_incurred", "provider_reported", "estimated_upper_bound", "token_pricing"]) {
+    if (!factSource.includes(token)) {
+      issues.push(issue("EXECUTION_AUTHORITY_RECEIPT_FACTS_MISSING", RECEIPT_FACT_SOURCE_PATH, `receipt fact producer missing ${token}`));
+    }
+  }
 }
 
 async function scanArtifactSource(repoRoot, issues) {
@@ -542,6 +654,21 @@ async function scanArtifactSource(repoRoot, issues) {
   for (const schema of REQUIRED_ARTIFACT_SCHEMAS) {
     if (!source.includes(`'${schema}'`) && !source.includes(`"${schema}"`)) {
       issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_MATERIALIZER_MISSING", "apps/api/src/durable-results/artifact/artifact-materializer.registry.ts", `missing artifact materializer schema ${schema}`));
+    }
+  }
+  const materializerTestContracts = Object.freeze([
+    ["apps/api/src/durable-results/artifact/materializers/crawl4ai.materializer.spec.ts", ["crawl4ai-fetch/v1", "crawl4ai-render/v1"]],
+    ["apps/api/src/durable-results/artifact/materializers/http-get.materializer.spec.ts", ["http-get/v1"]],
+    ["apps/api/src/durable-results/artifact/materializers/sanctions-download.materializer.spec.ts", ["sanctions-download/v1"]],
+  ]);
+  for (const [testPath, schemas] of materializerTestContracts) {
+    const testSource = existsSync(resolve(repoRoot, testPath))
+      ? await readText(repoRoot, testPath)
+      : "";
+    for (const schema of schemas) {
+      if (!testSource.includes(schema)) {
+        issues.push(issue("EXECUTION_AUTHORITY_ARTIFACT_MATERIALIZER_TEST_MISSING", testPath, `missing materializer test for ${schema}`));
+      }
     }
   }
   const toolSource = [
@@ -637,6 +764,8 @@ async function scanToolBrokerTypedProjection(repoRoot, issues) {
     "this.projectionRegistry.restore",
   ];
   if (requiredTokens.some((token) => !source.includes(token)) ||
+      !/tool\.durableResultStrategy\.kind === 'typed_projection'[\s\S]{0,120}\? result/.test(source) ||
+      !/this\.projectionRegistry\.project\([\s\S]{0,120}tool\.durableResultStrategy\.schema,[\s\S]{0,80}result/.test(source) ||
       source.includes("schema: 'tool-result/v1'") ||
       source.includes('schema: "tool-result/v1"')) {
     issues.push(issue("EXECUTION_AUTHORITY_TOOLBROKER_TYPED_PROJECTION_MISSING", path, "ToolBroker must settle/replay through each Tool registered durable strategy schema"));

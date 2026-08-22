@@ -355,6 +355,13 @@ describe('GenericOperationArtifactService', () => {
         }),
         expectedFacts,
       }),
+      {
+        usage: {
+          currency: 'USD', unit: 'microusd', callCount: 1,
+          upperBoundMicrousd: '170000',
+        },
+        costBasis: 'estimated_upper_bound',
+      },
     );
   });
 

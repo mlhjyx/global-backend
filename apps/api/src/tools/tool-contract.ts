@@ -86,6 +86,11 @@ export interface ToolContext {
   sourcePolicySnapshot?: Record<string, unknown>;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: Omit<PaidCostContext, "siteId">;
+  /** Collects only a closed ledger receipt after settlement; never receives result data. */
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 export class ExternalToolActionDeniedError extends Error {

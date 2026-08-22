@@ -27,6 +27,40 @@
       "personalData"
     ]
   },
+  "receiptFactPaths": {
+    "tools": [
+      { "id": "searxng.search", "source": "declared_upper_bound" },
+      { "id": "crawl4ai.fetch", "source": "declared_upper_bound" },
+      { "id": "wikidata.sparql", "source": "declared_upper_bound" },
+      { "id": "osm.overpass", "source": "declared_upper_bound" },
+      { "id": "smtp.rcpt_probe", "source": "declared_upper_bound" },
+      { "id": "crawl4ai.render", "source": "declared_upper_bound" },
+      { "id": "http.get", "source": "declared_upper_bound" },
+      { "id": "wikidata.entity", "source": "declared_upper_bound" },
+      { "id": "gleif.fetch", "source": "declared_upper_bound" },
+      { "id": "ted.search", "source": "declared_upper_bound" },
+      { "id": "openfda.search", "source": "declared_upper_bound" },
+      { "id": "companies_house.search", "source": "declared_upper_bound" },
+      { "id": "inpi_rne.search", "source": "declared_upper_bound" },
+      { "id": "google_patents.search", "source": "patent_cost_facts" },
+      { "id": "tradefair.algolia", "source": "declared_upper_bound" },
+      { "id": "mapyourshow.fetch", "source": "declared_upper_bound" },
+      { "id": "samgov.search", "source": "declared_upper_bound" },
+      { "id": "sanctions.download", "source": "declared_upper_bound" }
+    ],
+    "modelTasks": [
+      { "taskId": "company_understanding.extract_claims", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "company_understanding.extract_profile", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "company_understanding.extract_offerings", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "icp.design", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "discovery.query_plan", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "taxonomy.normalize", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "discovery.qualify_fit", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "discovery.extract_company", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "discovery.extract_list", "source": "model_usage_or_declared_upper_bound" },
+      { "taskId": "contact.find_decision_makers", "source": "model_usage_or_declared_upper_bound" }
+    ]
+  },
   "tools": [
     {
       "id": "companies_house.search",

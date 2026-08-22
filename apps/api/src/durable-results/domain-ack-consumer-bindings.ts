@@ -1,5 +1,10 @@
 import type { DurableExecutionReceipt } from './durable-execution-receipt';
-import type { DomainAckApplyResult, DomainAckService } from './domain-ack';
+import {
+  DomainAckService,
+  PostgresDomainAckRepository,
+  type DomainAckApplyResult,
+  type DomainAckTransaction,
+} from './domain-ack';
 
 export interface DomainAckProductConsumerBinding {
   readonly producerId: string;
@@ -49,16 +54,53 @@ export function getDomainAckProductConsumerBinding(
   return binding;
 }
 
-export async function applyDomainAckConsumerTransaction<TTransaction, TValue>(input: {
-  readonly service: DomainAckService<TTransaction>;
+export function domainAggregateIdForReceipt(
+  receipt: DurableExecutionReceipt,
+  producerId: string,
+): string {
+  const bytes = createHash('sha256')
+    .update(`${producerId}\0${receipt.operationId}`)
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export type DomainAckConsumerApplyResult<TValue> =
+  | DomainAckApplyResult<TValue>
+  | Readonly<{ status: 'UNRECEIPTED'; value: TValue }>;
+
+export async function applyDomainAckConsumerTransaction<
+  TTransaction,
+  TValue,
+>(input: {
+  readonly service?: DomainAckService<TTransaction>;
+  readonly transaction?: TTransaction;
   readonly producerId: string;
-  readonly receipt: DurableExecutionReceipt;
+  readonly receipt?: DurableExecutionReceipt;
   readonly domainAckKey: string;
   readonly domainRevision: string;
   readonly apply: (transaction: TTransaction) => Promise<TValue>;
-}): Promise<DomainAckApplyResult<TValue>> {
+}): Promise<DomainAckConsumerApplyResult<TValue>> {
   const binding = getDomainAckProductConsumerBinding(input.producerId);
-  return input.service.applyWithAck({
+  if (!input.receipt) {
+    if (!input.transaction) throw new Error('DOMAIN_ACK_TRANSACTION_REQUIRED');
+    return Object.freeze({
+      status: 'UNRECEIPTED' as const,
+      value: await input.apply(input.transaction),
+    });
+  }
+  const service = input.service ?? (input.transaction
+    ? new DomainAckService(
+        new PostgresDomainAckRepository(
+          input.transaction as unknown as DomainAckTransaction,
+        ),
+      ) as unknown as DomainAckService<TTransaction>
+    : undefined);
+  if (!service) throw new Error('DOMAIN_ACK_TRANSACTION_REQUIRED');
+  return service.applyWithAck({
     receipt: input.receipt,
     consumer: binding.consumer,
     domainAggregateType: binding.domainAggregateType,
@@ -66,3 +108,36 @@ export async function applyDomainAckConsumerTransaction<TTransaction, TValue>(in
     domainRevision: input.domainRevision,
   }, input.apply);
 }
+
+export async function applyDomainAckConsumerTransactions<
+  TTransaction extends DomainAckTransaction,
+  TValue,
+>(input: {
+  readonly transaction: TTransaction;
+  readonly acknowledgements: readonly Readonly<{
+    producerId: string;
+    receipt?: DurableExecutionReceipt;
+    domainAckKey: string;
+    domainRevision: string;
+  }>[];
+  readonly apply: (transaction: TTransaction) => Promise<TValue>;
+}): Promise<TValue | undefined> {
+  const receipted = input.acknowledgements.filter(
+    (item): item is typeof item & { receipt: DurableExecutionReceipt } =>
+      item.receipt !== undefined,
+  );
+  if (!receipted.length) return input.apply(input.transaction);
+  let hasNewAck = false;
+  for (const acknowledgement of receipted) {
+    await applyDomainAckConsumerTransaction({
+      transaction: input.transaction,
+      ...acknowledgement,
+      apply: async () => {
+        hasNewAck = true;
+        return undefined;
+      },
+    });
+  }
+  return hasNewAck ? input.apply(input.transaction) : undefined;
+}
+import { createHash } from 'node:crypto';

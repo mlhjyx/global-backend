@@ -261,6 +261,10 @@ export interface PatentRefreshDeps {
   ttlDays?: number;
   maxAnchors?: number;
   log?: (msg: string) => void;
+  applyScanWithAck?: (
+    scan: RefreshScanResult,
+    persist: (transaction: PatentRefreshDb) => Promise<PatentRefreshSummary>,
+  ) => Promise<PatentRefreshSummary>;
 }
 
 export type PatentRefreshStatus =
@@ -415,6 +419,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   // 🔴 P2-7（复审 HIGH 收口）：整个写阶段（盲键 crypto + 墓碑 findMany + upsert）**全包 try/catch** → 任一步抛错
   //   标 audit FAILED、graceful 返回（不逃逸令 audit 卡 RUNNING + Temporal 重试整活动重扫 BQ 烧配额）。scan 成功后
   //   BQ 配额已花，下游任何 DB/crypto 抖动（含 rolling deploy 墓碑表未及应用）绝不触发白白重扫。
+  const persistScan = async (db: PatentRefreshDb): Promise<PatentRefreshSummary> => {
   const resultKeys = new Set<string>();
   let rowCount = 0;
   try {
@@ -490,6 +495,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
       });
     }
   } catch (err) {
+    if (deps.applyScanWithAck) throw err;
     await db.patentCacheRefreshAudit.update({
       where: { id: audit.id },
       data: { finishedAt: new Date(), rowCount, status: 'FAILED', detail: `persist failed: ${String(err).slice(0, 260)}` },
@@ -523,4 +529,8 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   });
 
   return { status: 'OK', anchorCount: anchors.length, rowCount, bytesScanned: scan.bytesScanned, purged, cached, empty };
+  };
+  return deps.applyScanWithAck
+    ? deps.applyScanWithAck(scan, persistScan)
+    : persistScan(db);
 }
