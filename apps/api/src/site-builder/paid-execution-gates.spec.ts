@@ -1191,6 +1191,14 @@ function paidTool(execute: () => Promise<unknown>): Tool {
     },
     capabilities: { produces: ['domain'], accepts: ['domain'] },
     idempotencyKey: () => 'crawl-key',
+    durableResultStrategy: {
+      kind: 'artifact_reference',
+      schema: 'crawl4ai-fetch/v1',
+      maxBytes: 1_000,
+      mediaTypes: ['text/markdown'],
+      privacyClass: 'PERSONAL_DATA',
+      ttlSeconds: 86_400,
+    },
     durableReplayResult: (result: ToolResult<{ text: string }>) => ({
       ...result,
       data: { text: '[scrubbed-replay]' },

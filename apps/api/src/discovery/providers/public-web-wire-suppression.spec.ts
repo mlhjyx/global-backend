@@ -39,6 +39,14 @@ describe('PublicWebDiscoveryProvider — per-wire suppression propagation', () =
       },
       capabilities: { produces: ['contact'], accepts: ['domain'] },
       idempotencyKey: ({ url }: { url: string }) => url,
+      durableResultStrategy: {
+        kind: 'artifact_reference',
+        schema: 'crawl4ai-fetch/v1',
+        maxBytes: 1_000,
+        mediaTypes: ['text/markdown'],
+        privacyClass: 'PERSONAL_DATA',
+        ttlSeconds: 86_400,
+      },
       healthCheck: async () => ({ healthy: true }),
       execute,
     } as Tool;
