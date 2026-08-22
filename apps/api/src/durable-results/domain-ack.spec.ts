@@ -140,19 +140,50 @@ describe('DomainAckService', () => {
     expect(apply).toHaveBeenCalledTimes(1);
   });
 
-  it('throws a stable conflict when the same receipt is acked against a different domain key', async () => {
+  it('allows the same settled operation to ACK distinct domain aggregate revisions independently', async () => {
+    const service = new DomainAckService(new InMemoryDomainAckRepository());
+    const apply = vi.fn(async (value: string) => ({ code: value }));
+    const base = {
+      receipt: receipt(),
+      consumer: 'TaxonomyResolver',
+      domainAggregateType: 'TermAlias',
+      domainAckKey: 'taxonomy:cpv:pump',
+    } as const;
+
+    await expect(
+      service.applyWithAck({ ...base, domainRevision: '1' } as never, () => apply('CPV-123')),
+    ).resolves.toMatchObject({
+      status: 'APPLIED',
+      ack: { domainAckKey: 'taxonomy:cpv:pump', domainRevision: '1' },
+    });
+    await expect(
+      service.applyWithAck({ ...base, domainRevision: '2' } as never, () => apply('CPV-456')),
+    ).resolves.toMatchObject({
+      status: 'APPLIED',
+      value: { code: 'CPV-456' },
+      ack: { domainAckKey: 'taxonomy:cpv:pump', domainRevision: '2' },
+    });
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws a stable conflict when the same aggregate revision is acked with a different receipt digest', async () => {
     const service = new DomainAckService(new InMemoryDomainAckRepository());
     const apply = vi.fn(async () => undefined);
     const base = {
       receipt: receipt(),
       consumer: 'TaxonomyResolver',
       domainAggregateType: 'TermAlias',
+      domainRevision: '1',
     } as const;
 
-    await service.applyWithAck({ ...base, domainAckKey: 'taxonomy:cpv:pump' }, apply);
+    await service.applyWithAck({ ...base, domainAckKey: 'taxonomy:cpv:pump' } as never, apply);
 
     await expect(
-      service.applyWithAck({ ...base, domainAckKey: 'taxonomy:cpv:valve' }, apply),
+      service.applyWithAck({
+        ...base,
+        receipt: receipt({ resultDigest: 'b'.repeat(64) }),
+        domainAckKey: 'taxonomy:cpv:pump',
+      } as never, apply),
     ).rejects.toMatchObject({ code: 'DOMAIN_ACK_CONFLICT' });
     expect(apply).toHaveBeenCalledTimes(1);
   });
@@ -181,12 +212,49 @@ describe('DomainAckService', () => {
     );
 
     expect(migration).toContain('CREATE TABLE "execution_domain_ack"');
-    expect(migration).toContain('UNIQUE ("operation_id")');
+    expect(migration).toContain('"domain_revision" VARCHAR(200) NOT NULL');
+    expect(migration).not.toContain('UNIQUE ("operation_id")');
+    expect(migration).toContain('UNIQUE ("operation_id", "consumer", "domain_aggregate_type", "domain_ack_key", "domain_revision")');
     expect(migration).toContain('UNIQUE ("ack_id")');
+    expect(migration).toContain('REFERENCES "tool_budget_operation"');
+    expect(migration).toContain('REFERENCES "tool_budget_account"');
+    expect(migration).toContain('"status" = \'SETTLED\'');
+    expect(migration).toContain('ENABLE ROW LEVEL SECURITY');
+    expect(migration).toContain('FORCE ROW LEVEL SECURITY');
+    expect(migration).toContain('REVOKE ALL ON TABLE "execution_domain_ack" FROM PUBLIC');
+    expect(migration).toContain('SECURITY DEFINER');
+    expect(migration).toContain('SET search_path = public, pg_temp');
+    expect(migration).toContain('pg_advisory_xact_lock');
+    expect(migration).toContain('jsonb_object_keys');
     expect(migration).toContain('FOR UPDATE');
     expect(migration).toContain('apply_execution_domain_ack_v1');
     expect(migration).toContain('jsonb_typeof');
     expect(migration).toContain('DOMAIN_ACK_CONFLICT');
+  });
+
+  it('passes the same database transaction object into the domain mutation callback', async () => {
+    const transaction = {
+      $queryRaw: vi.fn(async () => [{
+        status: 'APPLIED',
+        ack_json: ackRecord(),
+      }]),
+    };
+    const service = new DomainAckService(new PostgresDomainAckRepository(transaction));
+    const apply = vi.fn(async (tx) => {
+      expect(tx).toBe(transaction);
+      return { code: 'CPV-123' };
+    });
+
+    await expect(service.applyWithAck({
+      receipt: receipt(),
+      consumer: 'TaxonomyResolver',
+      domainAggregateType: 'TermAlias',
+      domainAckKey: 'taxonomy:cpv:pump',
+    }, apply)).resolves.toMatchObject({
+      status: 'APPLIED',
+      value: { code: 'CPV-123' },
+    });
+    expect(apply).toHaveBeenCalledTimes(1);
   });
 
   it('returns APPLIED from the transaction repository only after the domain callback succeeds', async () => {

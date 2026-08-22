@@ -117,6 +117,36 @@ describe('patents cache schedule authority and ToolBroker route', () => {
     ).resolves.toEqual({ rows: [], bytesScanned: null, scanned: true });
   });
 
+  it('treats explicit not_incurred Patent facts as not scanned and not empty-cache evidence', async () => {
+    const broker = {
+      checkSourcePolicy: vi.fn(),
+      invoke: vi.fn(async () => ({
+        data: {
+          patents: [],
+          costFacts: {
+            costBasis: 'not_incurred',
+            maximumBytesBilled: '0',
+            observedBytesBilled: null,
+            maxRows: 0,
+          },
+        },
+        costCents: 0,
+      })),
+    } as unknown as ExecutionBroker;
+    const scanner = createPatentCacheBrokerScanner({
+      broker,
+      accountKey: 'platform:patents:test',
+    });
+
+    await expect(
+      scanner.searchInventorsForAnchorsWithStats(['%Acme%'], {
+        fromYear: 2020,
+        toYear: 2026,
+        maxRows: 50,
+      }),
+    ).resolves.toEqual({ rows: [], bytesScanned: null, scanned: false });
+  });
+
   it('sums provider-reported observed bytes and skips empty anchors', async () => {
     const broker = {
       checkSourcePolicy: vi.fn(),

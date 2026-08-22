@@ -26,6 +26,7 @@ async function materializePolicyRepo(mutations = {}) {
     "docs/governance/durable-result-strategies.json",
     "apps/api/src/tools/builtin-tools.ts",
     "apps/api/src/tools/source-tools.ts",
+    "apps/api/src/tools/tool-broker.ts",
     "apps/api/src/tools/budget-store.ts",
     "apps/api/src/durable-results/durable-execution-receipt.ts",
     "apps/api/src/durable-results/domain-ack.ts",
@@ -123,6 +124,36 @@ async function unregisteredAuthorityModelCall(deps, ctx) {
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH"));
 });
 
+test("scanner catches product model call-sites that omit durableResultSchema", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/providers/public-web.provider.ts": (source) =>
+      `${source}
+async function unreceiptedAuthorityModelCall(deps, ctx) {
+  return executeStructuredTaskWithRuntime(
+    deps.gateway,
+    { task: 'discovery.extract_company', prompt: 'offline scanner fixture' },
+    { ...ctx },
+  );
+}
+`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_MODEL_SCHEMA_BINDING_MISSING"));
+});
+
+test("scanner catches direct product ModelGateway calls outside the approved runtime bridge", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/discovery/providers/public-web.provider.ts": (source) =>
+      `${source}
+async function directGatewayBypass(gateway, input, ctx) {
+  return gateway.generateStructured(input, ctx);
+}
+`,
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DIRECT_MODEL_GATEWAY_CALL"));
+});
+
 test("scanner catches artifact contract drift across materializer source and manifest", async () => {
   const tempRoot = await materializePolicyRepo({
     "apps/api/src/durable-results/artifact/materializers/http-get.materializer.ts": (source) =>
@@ -142,6 +173,28 @@ test("scanner catches missing transaction-compatible Domain ACK and ledger recei
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_REPOSITORY_MISSING"));
   assert.ok(codes(result).includes("EXECUTION_AUTHORITY_LEDGER_RECEIPT_SOURCE_MISSING"));
+});
+
+test("scanner catches SQL ACK trust and receipt-ready microusd wrapper regressions", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql": (source) =>
+      source
+        .replace("FORCE ROW LEVEL SECURITY", "NO FORCE ROW LEVEL SECURITY")
+        .replace("\"status\" = 'SETTLED'", "\"status\" <> 'SETTLED'")
+        .replace("reserve_tool_budget_microusd_with_receipt_v1", "reserve_tool_budget_microusd_v1"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_DOMAIN_ACK_SQL_TRUST_INCOMPLETE"));
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_MICROUSD_RECEIPT_WRAPPER_MISSING"));
+});
+
+test("scanner catches ToolBroker generic tool-result/v1 settlement compatibility regressions", async () => {
+  const tempRoot = await materializePolicyRepo({
+    "apps/api/src/tools/tool-broker.ts": (source) =>
+      source.replace("schema: tool.durableResultStrategy.schema", "schema: 'tool-result/v1'"),
+  });
+  const result = await verifyExecutionAuthorityPolicy({ repoRoot: tempRoot });
+  assert.ok(codes(result).includes("EXECUTION_AUTHORITY_TOOLBROKER_TYPED_PROJECTION_MISSING"));
 });
 
 test("scanner catches new product direct BigQuery bypasses outside the original managed files", async () => {

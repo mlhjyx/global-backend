@@ -250,6 +250,81 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     );
   });
 
+  it("settles typed Tool output with the registered durable result schema instead of tool-result/v1", async () => {
+    const tool = fakeTool("searxng.search", 1, async () => ({
+      results: [{ url: "https://example.com/result", title: "Example" }],
+    }));
+    tool.durableResultStrategy = { kind: "typed_projection", schema: "searxng-search/v1" };
+    tool.durableReplayResult = (result) => result;
+    const settle = vi.fn(async () => ({
+      chargedCents: 1,
+      observedCents: 1,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: "op" }),
+      1,
+      expect.objectContaining({
+        kind: "tool",
+        schema: "searxng-search/v1",
+        data: {
+          data: { results: [{ url: "https://example.com/result", title: "Example" }] },
+          costCents: 1,
+        },
+      }),
+    );
+  });
+
+  it("replays typed Tool projections through the Tool strategy without a generic envelope", async () => {
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool("searxng.search", 1, execute);
+    tool.durableResultStrategy = { kind: "typed_projection", schema: "searxng-search/v1" };
+    tool.durableReplayResult = (result) => result;
+    const projectedResult = {
+      data: { results: [{ url: "https://example.com/result", title: "Cached" }] },
+      costCents: 1,
+    };
+    const projection = projectGenericOperationResult({
+      kind: "tool",
+      schema: "searxng-search/v1",
+      data: projectedResult,
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: true,
+        replayProjection: projection,
+        receipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).resolves.toEqual({
+      ...projectedResult,
+      durableReceipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("returns the ledger-authored receipt from a durable tool settlement", async () => {
     const tool = fakeTool("t.receipted", 1);
     tool.durableReplayResult = (result) => result;

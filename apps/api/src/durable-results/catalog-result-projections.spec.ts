@@ -995,6 +995,48 @@ describe('closed catalog Tool result projections', () => {
     );
   });
 
+  it('requires canonical Google Patents cost facts and rejects invented observed bytes', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const missingFacts = cloneRaw(GOOGLE_PATENTS_RAW);
+    delete (missingFacts.data as JsonRecord).costFacts;
+    expect(() => registry.project('google-patents-search/v1', missingFacts)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const notIncurred = cloneRaw(GOOGLE_PATENTS_RAW);
+    notIncurred.data.costFacts = {
+      costBasis: 'not_incurred',
+      maximumBytesBilled: '0',
+      observedBytesBilled: null,
+      maxRows: 0,
+    };
+    expect(registry.project('google-patents-search/v1', notIncurred).data).toMatchObject({
+      data: { costFacts: notIncurred.data.costFacts },
+    });
+
+    const inventedObserved = cloneRaw(GOOGLE_PATENTS_RAW);
+    inventedObserved.data.costFacts = {
+      costBasis: 'estimated_upper_bound',
+      maximumBytesBilled: '100',
+      observedBytesBilled: '100',
+      maxRows: 50,
+    };
+    expect(() => registry.project('google-patents-search/v1', inventedObserved)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const exceedsMaximum = cloneRaw(GOOGLE_PATENTS_RAW);
+    exceedsMaximum.data.costFacts = {
+      costBasis: 'provider_reported',
+      maximumBytesBilled: '100',
+      observedBytesBilled: '101',
+      maxRows: 50,
+    };
+    expect(() => registry.project('google-patents-search/v1', exceedsMaximum)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
   it('retains only the exact fixed OSM classification pair allowlist', () => {
     const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
     const envelope = registry.project('osm-overpass/v1', OSM_RAW);
