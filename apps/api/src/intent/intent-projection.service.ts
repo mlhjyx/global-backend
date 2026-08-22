@@ -5,7 +5,7 @@ import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-h
 import { isTerminalExternalActionPolicyDenied } from '../tools/tool-contract';
 import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { BudgetExceededError, runBudgetCents } from '../tools/budget';
+import { runBudgetCents } from '../tools/budget';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   parseExecutionBudgetBinding,
@@ -20,6 +20,7 @@ import {
 } from '../discovery/evidence-license';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
@@ -154,7 +155,7 @@ export class IntentProjectionService {
       throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }
     return this.deps.platformWriter.$transaction(async (tx) => {
-      const value = await applyDomainAckConsumerTransactions({
+      const result = await applyDomainAckConsumerTransactions({
         transaction: tx,
         acknowledgements: durableReceipts.map((durableReceipt) => ({
           producerId: 'http.get',
@@ -163,18 +164,20 @@ export class IntentProjectionService {
           domainRevision: durableReceipt.resultDigest,
         })),
         apply: persist,
+        readback: async (transaction) => {
+          const existing = await transaction.monitoredSource.findUniqueOrThrow({
+            where: { sourceKey },
+            select: { id: true, config: true },
+          });
+          return {
+            sourceId: existing.id,
+            sourceKey,
+            created: false,
+            pages: mergePages(existing.config, pages).length,
+          };
+        },
       });
-      if (value) return value;
-      const existing = await tx.monitoredSource.findUniqueOrThrow({
-        where: { sourceKey },
-        select: { id: true, config: true },
-      });
-      return {
-        sourceId: existing.id,
-        sourceKey,
-        created: false,
-        pages: mergePages(existing.config, pages).length,
-      };
+      return result.value;
     });
   }
 
@@ -374,7 +377,7 @@ export class IntentProjectionService {
         if (result.durableReceipt) durableReceipts.push(result.durableReceipt);
         return result.data;
       } catch (error) {
-        if (error instanceof BudgetExceededError || isBudgetControlError(error)) onBudgetError?.(error);
+        if (isExecutionControlError(error)) onBudgetError?.(error);
         throw error;
       }
     };
@@ -504,7 +507,7 @@ export async function discoverWatchPages(
   try {
     urls = await fetchSitemapUrls(domain, httpGet);
   } catch (error) {
-    if (isTerminalExternalActionPolicyDenied(error) || error instanceof BudgetExceededError || isBudgetControlError(error)) {
+    if (isTerminalExternalActionPolicyDenied(error) || isExecutionControlError(error)) {
       throw error;
     }
     urls = [];
@@ -524,10 +527,6 @@ export async function discoverWatchPages(
   return pages.filter((p) => (seen.has(p.url) ? false : (seen.add(p.url), true))).slice(0, 8);
 }
 
-function isBudgetControlError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
-}
 
 function companyOf(config: unknown): { name: string; domain?: string } | undefined {
   const c = (config ?? {}) as Record<string, unknown>;

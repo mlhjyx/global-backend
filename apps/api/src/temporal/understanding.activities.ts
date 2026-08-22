@@ -61,6 +61,7 @@ interface ExtractedOffering {
 export interface CrawledPage {
   url: string;
   text: string;
+  durableReceipt?: DurableExecutionReceipt;
 }
 
 /** Keep Temporal payloads bounded — a page beyond this adds noise, not facts. */
@@ -118,7 +119,11 @@ export function createUnderstandingActivities(deps: {
     return execute(binding.accountKey);
   };
 
-  const crawlViaBroker = async (workspaceId: string, url: string, accountKey: string): Promise<string> => {
+  const crawlViaBroker = async (
+    workspaceId: string,
+    url: string,
+    accountKey: string,
+  ): Promise<{ text: string; durableReceipt?: DurableExecutionReceipt }> => {
     if (!deps.broker) throw new Error('understanding: broker unavailable (fail-closed, no raw egress)');
     const r = await deps.broker.invoke<{ url: string }, CrawlResult>(
       'crawl4ai.fetch',
@@ -133,7 +138,27 @@ export function createUnderstandingActivities(deps: {
         runId: accountKey,
       },
     );
-    return r.data.text;
+    return {
+      text: r.data.text,
+      ...(r.durableReceipt ? { durableReceipt: r.durableReceipt } : {}),
+    };
+  };
+
+  const acknowledgeProfileNoop = async (
+    workspaceId: string,
+    companyId: string,
+    durableReceipt: DurableExecutionReceipt | undefined,
+  ): Promise<void> => {
+    await deps.prisma.withWorkspace(workspaceId, async (transaction) => {
+      await applyDomainAckConsumerTransaction({
+        transaction,
+        producerId: 'company_understanding.extract_profile',
+        receipt: durableReceipt,
+        domainAckKey: companyId,
+        domainRevision: durableReceipt?.resultDigest ?? 'noop',
+        apply: async () => undefined,
+      });
+    });
   };
 
   return {
@@ -155,8 +180,14 @@ export function createUnderstandingActivities(deps: {
 
     async crawlWebsite(args: UnderstandingAuthorityInput & { website: string }): Promise<CrawledPage> {
       return withRunBudget(args, async (accountKey) => {
-        const text = await crawlViaBroker(args.workspaceId, args.website, accountKey);
-        return { url: args.website, text: text.slice(0, MAX_PAGE_CHARS) };
+        const crawled = await crawlViaBroker(args.workspaceId, args.website, accountKey);
+        return {
+          url: args.website,
+          text: crawled.text.slice(0, MAX_PAGE_CHARS),
+          ...(crawled.durableReceipt
+            ? { durableReceipt: crawled.durableReceipt }
+            : {}),
+        };
       });
     },
 
@@ -175,8 +206,14 @@ export function createUnderstandingActivities(deps: {
         );
         const pages: CrawledPage[] = [];
         settled.forEach((s, i) => {
-          if (s.status === 'fulfilled' && s.value.trim()) {
-            pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
+          if (s.status === 'fulfilled' && s.value.text.trim()) {
+            pages.push({
+              url: args.urls[i],
+              text: s.value.text.slice(0, MAX_PAGE_CHARS),
+              ...(s.value.durableReceipt
+                ? { durableReceipt: s.value.durableReceipt }
+                : {}),
+            });
           } else if (s.status === 'rejected') {
             if (isExecutionControlError(s.reason)) throw s.reason;
             console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
@@ -238,7 +275,14 @@ export function createUnderstandingActivities(deps: {
           { telemetry: deps.runtimeTelemetry },
         );
         const out = result.data as { industry?: string; summary?: string };
-        if (!out?.industry && !out?.summary) return; // stub/空输出不回填
+        if (!out?.industry && !out?.summary) {
+          await acknowledgeProfileNoop(
+            args.workspaceId,
+            args.companyId,
+            result.durableReceipt,
+          );
+          return;
+        }
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           await applyDomainAckConsumerTransaction({
             transaction: tx,
@@ -304,6 +348,7 @@ export function createUnderstandingActivities(deps: {
         url: string;
         claims: ExtractedClaim[];
         durableReceipt?: DurableExecutionReceipt;
+        crawlDurableReceipt?: DurableExecutionReceipt;
       }[] },
     ): Promise<{ claimCount: number }> {
       requireAuthority(args);
@@ -311,17 +356,25 @@ export function createUnderstandingActivities(deps: {
       // 每页的 source+claims 在同一事务里原子落库，ingestKey = runId+页URL；
       // 已存在则整页跳过。
       const runId = Context.current().info.workflowExecution?.runId ?? Context.current().info.activityId;
-      let claimCount = 0;
-      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        await applyDomainAckConsumerTransactions({
+      const claimCount = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await applyDomainAckConsumerTransactions({
           transaction: tx,
-          acknowledgements: args.pages.map((page) => ({
-            producerId: 'company_understanding.extract_claims',
-            receipt: page.durableReceipt,
-            domainAckKey: `${args.companyId}:${page.url}`,
-            domainRevision: page.durableReceipt?.resultDigest ?? runId,
-          })),
+          acknowledgements: args.pages.flatMap((page) => [
+            ...(page.durableReceipt ? [{
+              producerId: 'company_understanding.extract_claims',
+              receipt: page.durableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:claims`,
+              domainRevision: page.durableReceipt.resultDigest,
+            }] : []),
+            ...(page.crawlDurableReceipt ? [{
+              producerId: 'crawl4ai.fetch',
+              receipt: page.crawlDurableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:crawl`,
+              domainRevision: page.crawlDurableReceipt.resultDigest,
+            }] : []),
+          ]),
           apply: async (transaction) => {
+        let appliedClaimCount = 0;
         // KNW-004 冲突检测的对照集：本公司既有（其他来源/往次运行）的有效 Claim
         const priorClaims = await transaction.claim.findMany({
           where: { companyId: args.companyId, status: { in: ['APPROVED', 'NEEDS_REVIEW'] } },
@@ -364,7 +417,7 @@ export function createUnderstandingActivities(deps: {
               });
               claimId = claim.id;
               byStatement.set(key, claimId);
-              claimCount += 1;
+              appliedClaimCount += 1;
               // KNW-004：与既有同类型 Claim 高度相似但不相同 → 冲突，供人工裁决，绝不静默覆盖
               const rival = priorClaims.find(
                 (p) => p.type === c.type && p.statement !== c.statement && jaccard(p.statement, c.statement) >= 0.55,
@@ -403,8 +456,13 @@ export function createUnderstandingActivities(deps: {
             });
           }
         }
+        return appliedClaimCount;
           },
+          readback: (transaction) => transaction.claim.count({
+            where: { companyId: args.companyId },
+          }),
         });
+        return result.value;
       });
       return { claimCount };
     },
@@ -415,6 +473,7 @@ export function createUnderstandingActivities(deps: {
         url: string;
         offerings: ExtractedOffering[];
         durableReceipt?: DurableExecutionReceipt;
+        crawlDurableReceipt?: DurableExecutionReceipt;
       }[] },
     ): Promise<{ offeringCount: number }> {
       requireAuthority(args);
@@ -429,15 +488,23 @@ export function createUnderstandingActivities(deps: {
           }
         }
       }
-      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        await applyDomainAckConsumerTransactions({
+      const offeringCount = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await applyDomainAckConsumerTransactions({
           transaction: tx,
-          acknowledgements: args.pages.map((page) => ({
-            producerId: 'company_understanding.extract_offerings',
-            receipt: page.durableReceipt,
-            domainAckKey: `${args.companyId}:${page.url}`,
-            domainRevision: page.durableReceipt?.resultDigest ?? '1',
-          })),
+          acknowledgements: args.pages.flatMap((page) => [
+            ...(page.durableReceipt ? [{
+              producerId: 'company_understanding.extract_offerings',
+              receipt: page.durableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:offerings`,
+              domainRevision: page.durableReceipt.resultDigest,
+            }] : []),
+            ...(page.crawlDurableReceipt ? [{
+              producerId: 'crawl4ai.fetch',
+              receipt: page.crawlDurableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:crawl`,
+              domainRevision: page.crawlDurableReceipt.resultDigest,
+            }] : []),
+          ]),
           apply: async (transaction) => {
           for (const o of merged.values()) {
           await transaction.offering.upsert({
@@ -461,10 +528,15 @@ export function createUnderstandingActivities(deps: {
             },
           });
         }
+          return merged.size;
           },
+          readback: (transaction) => transaction.offering.count({
+            where: { companyId: args.companyId },
+          }),
         });
+        return result.value;
       });
-      return { offeringCount: merged.size };
+      return { offeringCount };
     },
 
     /**
@@ -477,13 +549,36 @@ export function createUnderstandingActivities(deps: {
     ): Promise<{ contactCount: number }> {
       requireAuthority(args);
       const contacts = extractPublicContacts(args.pages);
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.companyProfile.update({
-          where: { id: args.companyId },
-          data: { publicContacts: contacts as never },
-        }),
-      );
-      return { contactCount: contacts.length };
+      const contactCount = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: args.pages.flatMap((page) =>
+            page.durableReceipt ? [{
+              producerId: 'crawl4ai.fetch',
+              receipt: page.durableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:public-contacts`,
+              domainRevision: page.durableReceipt.resultDigest,
+            }] : []),
+          apply: async (transaction) => {
+            await transaction.companyProfile.update({
+              where: { id: args.companyId },
+              data: { publicContacts: contacts as never },
+            });
+            return contacts.length;
+          },
+          readback: async (transaction) => {
+            const profile = await transaction.companyProfile.findUniqueOrThrow({
+              where: { id: args.companyId },
+              select: { publicContacts: true },
+            });
+            return Array.isArray(profile.publicContacts)
+              ? profile.publicContacts.length
+              : 0;
+          },
+        });
+        return result.value;
+      });
+      return { contactCount };
     },
   };
 }

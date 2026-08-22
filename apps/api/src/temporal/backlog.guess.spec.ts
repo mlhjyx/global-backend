@@ -9,7 +9,15 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
 const ackMock = vi.hoisted(() => vi.fn(async (input: {
   transaction: unknown;
   apply: (transaction: unknown) => Promise<unknown>;
-}) => input.apply(input.transaction)));
+  acknowledgements: Array<{ producerId: string }>;
+}) => ({
+  status: 'APPLIED',
+  acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+    producerId,
+    status: 'APPLIED',
+  })),
+  value: await input.apply(input.transaction),
+})));
 
 vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
   applyDomainAckConsumerTransactions: ackMock,

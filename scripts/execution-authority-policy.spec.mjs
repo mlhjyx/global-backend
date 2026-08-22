@@ -24,6 +24,7 @@ async function materializePolicyRepo(mutations = {}) {
   const tempRoot = await mkdtemp(join(tmpdir(), "execution-authority-policy-"));
   const requiredFiles = new Set([
     "docs/governance/durable-result-strategies.json",
+    "docs/governance/execution-authority-callsites.json",
     "apps/api/src/tools/builtin-tools.ts",
     "apps/api/src/tools/source-tools.ts",
     "apps/api/src/tools/tool-broker.ts",

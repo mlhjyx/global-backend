@@ -38,6 +38,8 @@ import {
   parseDurableExecutionReceiptFacts,
   type DurableExecutionReceiptFacts,
 } from '../durable-results/durable-execution-receipt';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 const MAX_KEY_LENGTH = 200;
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
@@ -50,13 +52,23 @@ export interface BudgetReservationRequest {
   estimatedCents: number;
 }
 
+export type BudgetReplayResult =
+  | Readonly<{
+      resultStrategy: 'typed_projection';
+      projection: GenericOperationProjection;
+    }>
+  | Readonly<{
+      resultStrategy: 'artifact_reference';
+      reference: GenericOperationArtifactReference;
+    }>;
+
 export interface BudgetReservation {
   workspaceId: string;
   accountKey: string;
   operationId: string;
   estimatedCents: number;
   replay: boolean;
-  replayProjection?: GenericOperationProjection;
+  replayResult?: BudgetReplayResult;
   receipt?: DurableExecutionReceipt;
 }
 
@@ -66,6 +78,13 @@ export interface BudgetSettlement {
   capVariance: boolean;
   replay: boolean;
   receipt?: DurableExecutionReceipt;
+  domainAckStatus?: 'APPLIED' | 'REPLAYED';
+}
+
+export interface BudgetDomainAckRequest {
+  readonly producerId: string;
+  readonly domainAckKey: string;
+  readonly domainRevision: string;
 }
 
 export interface BudgetResultUnknownTransition {
@@ -93,7 +112,7 @@ export interface BudgetMicrousdReservation {
   operationId: string;
   estimatedMicrousd: bigint;
   replay: boolean;
-  replayProjection?: GenericOperationProjection;
+  replayResult?: BudgetReplayResult;
   receipt?: DurableExecutionReceipt;
 }
 
@@ -174,6 +193,7 @@ export interface BudgetStore {
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
     receiptFacts: DurableExecutionReceiptFacts,
+    domainAck: BudgetDomainAckRequest,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -775,7 +795,7 @@ function requireLedgerArtifactReceipt(input: {
   readonly receiptUsage?: unknown;
   readonly receiptCostBasis?: string | null;
   readonly expectedReference: GenericOperationArtifactReference;
-  readonly expectedFacts: DurableExecutionReceiptFacts;
+  readonly expectedFacts?: DurableExecutionReceiptFacts;
 }): DurableExecutionReceipt {
   try {
     if (
@@ -806,8 +826,9 @@ function requireLedgerArtifactReceipt(input: {
     });
     if (
       !receipt ||
-      canonicalJson(receipt.usage) !== canonicalJson(input.expectedFacts.usage) ||
-      receipt.costBasis !== input.expectedFacts.costBasis
+      input.expectedFacts &&
+        (canonicalJson(receipt.usage) !== canonicalJson(input.expectedFacts.usage) ||
+          receipt.costBasis !== input.expectedFacts.costBasis)
     ) {
       return ledgerReceiptMismatch();
     }
@@ -821,6 +842,26 @@ function requireLedgerArtifactReceipt(input: {
     }
     return ledgerReceiptMismatch();
   }
+}
+
+function replayResultFromLedgerRow(row: {
+  readonly result_schema_version?: string | null;
+  readonly result_json?: unknown;
+}): BudgetReplayResult | undefined {
+  if (row.result_json == null) return undefined;
+  if (row.result_schema_version === 'generic-operation-projection/v1') {
+    return Object.freeze({
+      resultStrategy: 'typed_projection' as const,
+      projection: parseGenericOperationProjection(row.result_json),
+    });
+  }
+  if (row.result_schema_version === 'generic-operation-artifact-ref/v1') {
+    return Object.freeze({
+      resultStrategy: 'artifact_reference' as const,
+      reference: parseArtifactReference(row.result_json),
+    });
+  }
+  return ledgerReceiptMismatch();
 }
 
 function receiptFactsForSettlement(
@@ -1040,11 +1081,10 @@ export class PostgresBudgetStore implements BudgetStore {
       throw new BudgetExceededError(input.accountKey, input.estimatedCents, toSafeNumber('remainingCents', row.remaining_cents));
     }
     if (!row.operation_id) throw new BudgetStoreUnavailableError('budget reserve returned no operation id');
-    const replayProjection =
-      row.kind === 'REPLAY' && row.result_json != null
-        ? parseGenericOperationProjection(row.result_json)
-        : undefined;
-    const receipt = replayProjection
+    const replayResult = row.kind === 'REPLAY'
+      ? replayResultFromLedgerRow(row)
+      : undefined;
+    const receipt = replayResult?.resultStrategy === 'typed_projection'
       ? requireLedgerProjectionReceipt({
           scopeKey: input.workspaceId,
           expectedOperationId: row.operation_id,
@@ -1058,9 +1098,25 @@ export class PostgresBudgetStore implements BudgetStore {
           resultJson: row.result_json,
           receiptUsage: row.receipt_usage,
           receiptCostBasis: row.receipt_cost_basis,
-          expectedProjection: replayProjection,
+          expectedProjection: replayResult.projection,
         })
-      : undefined;
+      : replayResult?.resultStrategy === 'artifact_reference'
+        ? requireLedgerArtifactReceipt({
+            scopeKey: input.workspaceId,
+            expectedOperationId: row.operation_id,
+            operationId: row.operation_id,
+            operationKey: row.operation_key,
+            accountId: row.account_id,
+            authorityId: row.authority_id,
+            resultSchemaVersion: row.result_schema_version,
+            resultSchema: row.result_schema,
+            resultDigest: row.result_digest,
+            resultJson: row.result_json,
+            receiptUsage: row.receipt_usage,
+            receiptCostBasis: row.receipt_cost_basis,
+            expectedReference: replayResult.reference,
+          })
+        : undefined;
     if (receipt && receipt.operationKey !== input.operationKey) {
       ledgerReceiptMismatch();
     }
@@ -1070,7 +1126,7 @@ export class PostgresBudgetStore implements BudgetStore {
       operationId: row.operation_id,
       estimatedCents: toSafeNumber('reservedCents', row.reserved_cents),
       replay: row.kind === 'REPLAY',
-      ...(replayProjection ? { replayProjection } : {}),
+      ...(replayResult ? { replayResult } : {}),
       ...(receipt ? { receipt } : {}),
     };
   }
@@ -1268,6 +1324,7 @@ export class PostgresBudgetStore implements BudgetStore {
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
     receiptFacts: DurableExecutionReceiptFacts,
+    domainAck: BudgetDomainAckRequest,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
     const { snapshot: durable, columns: facts } =
@@ -1277,10 +1334,9 @@ export class PostgresBudgetStore implements BudgetStore {
       receiptFacts,
       manifest.resultSchema,
     );
-    let rows: SettleRow[];
     try {
-      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
-        tx.$queryRaw<SettleRow[]>(
+      return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
+        const rows = await tx.$queryRaw<SettleRow[]>(
           Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${JSON.stringify(manifest)}::jsonb,
@@ -1290,9 +1346,68 @@ export class PostgresBudgetStore implements BudgetStore {
             ${JSON.stringify(explicitFacts.usage)}::jsonb,
             ${explicitFacts.costBasis}
           )`,
-        ),
-      );
+        );
+        const row = rows[0];
+        if (
+          rows.length !== 1 ||
+          !row ||
+          row.status !== 'SETTLED' ||
+          typeof row.charged_cents !== 'bigint' ||
+          typeof row.observed_cents !== 'bigint' ||
+          typeof row.cap_variance !== 'boolean'
+        ) {
+          throw new BudgetStoreUnavailableError(
+            'budget artifact settlement returned no result',
+          );
+        }
+        const expectedReference = Object.freeze({
+          schemaVersion: 'generic-operation-artifact-ref/v1' as const,
+          artifactId: manifest.artifactId,
+          operationId: manifest.operationId,
+          resultSchema: manifest.resultSchema,
+          sha256: manifest.sha256,
+          sizeBytes: manifest.sizeBytes,
+          mediaType: manifest.mediaType,
+          expiresAt: manifest.expiresAt,
+        });
+        const receipt = requireLedgerArtifactReceipt({
+          scopeKey: reservation.workspaceId,
+          expectedOperationId: reservation.operationId,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedReference,
+          expectedFacts: explicitFacts,
+        });
+        const acknowledgement = await applyDomainAckConsumerTransaction({
+          transaction: tx,
+          producerId: domainAck.producerId,
+          receipt,
+          domainAckKey: domainAck.domainAckKey,
+          domainRevision: domainAck.domainRevision,
+          apply: async () => undefined,
+        });
+        if (acknowledgement.status === 'UNRECEIPTED') {
+          throw new Error('DOMAIN_ACK_RECEIPT_REQUIRED');
+        }
+        return {
+          chargedCents: toSafeNumber('chargedCents', row.charged_cents),
+          observedCents: toSafeNumber('observedCents', row.observed_cents),
+          capVariance: row.cap_variance,
+          replay: row.replay ?? false,
+          receipt,
+          domainAckStatus: acknowledgement.status,
+        };
+      });
     } catch (error) {
+      if (isExecutionControlError(error)) throw error;
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
       }
@@ -1309,52 +1424,6 @@ export class PostgresBudgetStore implements BudgetStore {
         'budget artifact settlement unavailable',
       );
     }
-    const row = rows[0];
-    if (
-      rows.length !== 1 ||
-      !row ||
-      row.status !== 'SETTLED' ||
-      typeof row.charged_cents !== 'bigint' ||
-      typeof row.observed_cents !== 'bigint' ||
-      typeof row.cap_variance !== 'boolean'
-    ) {
-      throw new BudgetStoreUnavailableError(
-        'budget artifact settlement returned no result',
-      );
-    }
-    const expectedReference = Object.freeze({
-      schemaVersion: 'generic-operation-artifact-ref/v1' as const,
-      artifactId: manifest.artifactId,
-      operationId: manifest.operationId,
-      resultSchema: manifest.resultSchema,
-      sha256: manifest.sha256,
-      sizeBytes: manifest.sizeBytes,
-      mediaType: manifest.mediaType,
-      expiresAt: manifest.expiresAt,
-    });
-    const receipt = requireLedgerArtifactReceipt({
-      scopeKey: reservation.workspaceId,
-      expectedOperationId: reservation.operationId,
-      operationId: row.operation_id,
-      operationKey: row.operation_key,
-      accountId: row.account_id,
-      authorityId: row.authority_id,
-      resultSchemaVersion: row.result_schema_version,
-      resultSchema: row.result_schema,
-      resultDigest: row.result_digest,
-      resultJson: row.result_json,
-      receiptUsage: row.receipt_usage,
-      receiptCostBasis: row.receipt_cost_basis,
-      expectedReference,
-      expectedFacts: explicitFacts,
-    });
-    return {
-      chargedCents: toSafeNumber('chargedCents', row.charged_cents),
-      observedCents: toSafeNumber('observedCents', row.observed_cents),
-      capVariance: row.cap_variance,
-      replay: row.replay ?? false,
-      receipt,
-    };
   }
 
   async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
@@ -1475,11 +1544,10 @@ export class PostgresBudgetStore implements BudgetStore {
         'microusd budget reserve returned no operation id',
       );
     }
-    const replayProjection =
-      row.kind === 'REPLAY' && row.result_json != null
-        ? parseGenericOperationProjection(row.result_json)
-        : undefined;
-    const receipt = replayProjection
+    const replayResult = row.kind === 'REPLAY'
+      ? replayResultFromLedgerRow(row)
+      : undefined;
+    const receipt = replayResult?.resultStrategy === 'typed_projection'
       ? requireLedgerProjectionReceipt({
           scopeKey: input.workspaceId,
           expectedOperationId: row.operation_id,
@@ -1493,9 +1561,25 @@ export class PostgresBudgetStore implements BudgetStore {
           resultJson: row.result_json,
           receiptUsage: row.receipt_usage,
           receiptCostBasis: row.receipt_cost_basis,
-          expectedProjection: replayProjection,
+          expectedProjection: replayResult.projection,
         })
-      : undefined;
+      : replayResult?.resultStrategy === 'artifact_reference'
+        ? requireLedgerArtifactReceipt({
+            scopeKey: input.workspaceId,
+            expectedOperationId: row.operation_id,
+            operationId: row.operation_id,
+            operationKey: row.operation_key,
+            accountId: row.account_id,
+            authorityId: row.authority_id,
+            resultSchemaVersion: row.result_schema_version,
+            resultSchema: row.result_schema,
+            resultDigest: row.result_digest,
+            resultJson: row.result_json,
+            receiptUsage: row.receipt_usage,
+            receiptCostBasis: row.receipt_cost_basis,
+            expectedReference: replayResult.reference,
+          })
+        : undefined;
     if (receipt && receipt.operationKey !== input.operationKey) {
       ledgerReceiptMismatch();
     }
@@ -1505,7 +1589,7 @@ export class PostgresBudgetStore implements BudgetStore {
       operationId: row.operation_id,
       estimatedMicrousd: row.reserved_microusd,
       replay: row.kind === 'REPLAY',
-      ...(replayProjection ? { replayProjection } : {}),
+      ...(replayResult ? { replayResult } : {}),
       ...(receipt ? { receipt } : {}),
     };
   }

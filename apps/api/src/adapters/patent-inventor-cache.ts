@@ -240,7 +240,7 @@ export async function enqueuePatentLookup(
 export type PatentRefreshDb = {
   patentLookupRequest: Pick<PrismaClient['patentLookupRequest'], 'findMany' | 'update'>;
   patentInventorCache: Pick<PrismaClient['patentInventorCache'], 'upsert' | 'deleteMany'>;
-  patentCacheRefreshAudit: Pick<PrismaClient['patentCacheRefreshAudit'], 'create' | 'update'>;
+  patentCacheRefreshAudit: Pick<PrismaClient['patentCacheRefreshAudit'], 'create' | 'update' | 'findFirst'>;
   sourcePolicy: Pick<PrismaClient['sourcePolicy'], 'findUnique'>;
   /** 🔴 kill-switch（P1-1）：`google_patents` 非 ENABLED → 不扫 BQ、不物化 PII。 */
   dataProvider: Pick<PrismaClient['dataProvider'], 'findUnique'>;
@@ -264,6 +264,13 @@ export interface PatentRefreshDeps {
   applyScanWithAck?: (
     scan: RefreshScanResult,
     persist: (transaction: PatentRefreshDb) => Promise<PatentRefreshSummary>,
+    context: Readonly<{
+      auditId: string;
+      readback: (
+        transaction: PatentRefreshDb,
+        operationIds: readonly string[],
+      ) => Promise<PatentRefreshSummary>;
+    }>,
   ) => Promise<PatentRefreshSummary>;
 }
 
@@ -530,7 +537,49 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
 
   return { status: 'OK', anchorCount: anchors.length, rowCount, bytesScanned: scan.bytesScanned, purged, cached, empty };
   };
+  const readback = async (
+    database: PatentRefreshDb,
+    operationIds: readonly string[],
+  ): Promise<PatentRefreshSummary> => {
+    const row = await database.patentCacheRefreshAudit.findFirst({
+      where: {
+        status: 'OK',
+        executionOperationIds: { equals: [...operationIds] },
+      },
+      orderBy: { finishedAt: 'desc' },
+      select: {
+        status: true,
+        anchorCount: true,
+        rowCount: true,
+        bytesScanned: true,
+        purged: true,
+        cached: true,
+        empty: true,
+      },
+    } as never);
+    if (
+      !row || row.status !== 'OK' ||
+      !Number.isSafeInteger(row.anchorCount) ||
+      !Number.isSafeInteger(row.rowCount) ||
+      !Number.isSafeInteger(row.purged) ||
+      !Number.isSafeInteger(row.cached) ||
+      !Number.isSafeInteger(row.empty)
+    ) {
+      throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    }
+    return {
+      status: 'OK',
+      anchorCount: row.anchorCount,
+      rowCount: row.rowCount,
+      bytesScanned: row.bytesScanned === null
+        ? null
+        : Number(row.bytesScanned),
+      purged: row.purged as number,
+      cached: row.cached as number,
+      empty: row.empty as number,
+    };
+  };
   return deps.applyScanWithAck
-    ? deps.applyScanWithAck(scan, persistScan)
+    ? deps.applyScanWithAck(scan, persistScan, { auditId: audit.id, readback })
     : persistScan(db);
 }

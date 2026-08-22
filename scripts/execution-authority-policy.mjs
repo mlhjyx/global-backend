@@ -7,6 +7,7 @@ const SCRIPT_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const DEFAULT_REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const MANIFEST_PATH = "docs/governance/durable-result-strategies.json";
 const RECEIPT_FACT_SOURCE_PATH = "apps/api/src/durable-results/execution-receipt-facts.ts";
+const CALLSITE_CATALOG_PATH = "docs/governance/execution-authority-callsites.json";
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
   "searxng.search",
@@ -879,6 +880,170 @@ async function scanGenericReplay(repoRoot, issues) {
   }
 }
 
+async function discoverPhysicalCallsites(repoRoot) {
+  const sourceFiles = (await listFiles(repoRoot, "apps/api/src"))
+    .filter((path) => path.endsWith(".ts") && !path.endsWith(".spec.ts"));
+  const callsites = [];
+  for (const path of sourceFiles) {
+    const source = await readText(repoRoot, path);
+    const toolCounts = new Map();
+    for (const match of source.matchAll(/\.invoke(?:<[\s\S]*?>)?\s*\(\s*["']([a-z0-9_.]+)["']/g)) {
+      const producerId = match[1];
+      if (!EXPECTED_TOOL_IDS.includes(producerId)) continue;
+      const ordinal = (toolCounts.get(producerId) ?? 0) + 1;
+      toolCounts.set(producerId, ordinal);
+      callsites.push(`${path}#${producerId}#${ordinal}`);
+    }
+    const modelCounts = new Map();
+    for (const callsite of taskIdsFromModelSource(source)) {
+      const ordinal = (modelCounts.get(callsite.taskId) ?? 0) + 1;
+      modelCounts.set(callsite.taskId, ordinal);
+      callsites.push(`${path}#${callsite.taskId}#${ordinal}`);
+    }
+  }
+  for (const [path, taskId] of EXPECTED_MODEL_TASKS) {
+    const key = `${path}#${taskId}#1`;
+    if (!callsites.includes(key)) {
+      const source = await readText(repoRoot, path);
+      if (
+        source.includes("executeStructuredTaskWithRuntime") &&
+        source.includes(`'${taskId}'`)
+      ) {
+        callsites.push(key);
+      }
+    }
+  }
+  for (const entry of [
+    ["crawl4ai.fetch", "crawl4ai-fetch/v1"],
+    ["crawl4ai.render", "crawl4ai-render/v1"],
+    ["http.get", "http-get/v1"],
+    ["sanctions.download", "sanctions-download/v1"],
+  ]) {
+    callsites.push(`artifact#${entry[0]}#1`);
+  }
+  return sorted(callsites);
+}
+
+async function scanPhysicalCallsites(repoRoot, manifest, issues) {
+  let catalog = null;
+  try {
+    catalog = await readJson(repoRoot, CALLSITE_CATALOG_PATH);
+  } catch {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_PHYSICAL_CALLSITE_CATALOG_MISSING",
+      CALLSITE_CATALOG_PATH,
+      "closed physical callsite catalog is required",
+    ));
+    return {
+      catalogCount: 0,
+      discoveredCount: 0,
+      uncatalogued: [],
+      stale: [],
+    };
+  }
+  const entries = Array.isArray(catalog?.callsites) ? catalog.callsites : [];
+  const discovered = await discoverPhysicalCallsites(repoRoot);
+  const catalogKeys = sorted(entries.map((entry) => entry?.key).filter(Boolean));
+  const uncatalogued = discovered.filter((key) => !catalogKeys.includes(key));
+  const stale = catalogKeys.filter((key) => !discovered.includes(key));
+  if (
+    catalog?.schemaVersion !== "execution-authority-callsites/v1" ||
+    new Set(catalogKeys).size !== catalogKeys.length ||
+    uncatalogued.length > 0 || stale.length > 0
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_PHYSICAL_CALLSITE_CATALOG_MISMATCH",
+      CALLSITE_CATALOG_PATH,
+      `catalog/discovery mismatch: uncatalogued=${uncatalogued.length} stale=${stale.length}`,
+    ));
+  }
+  const declarationByProducer = new Map([
+    ...(manifest?.tools ?? []).map((entry) => [entry.id, entry]),
+    ...(manifest?.modelTasks ?? []).map((entry) => [entry.taskId, entry]),
+  ]);
+  for (const entry of entries) {
+    const declaration = declarationByProducer.get(entry?.producerId);
+    if (
+      !entry || typeof entry !== "object" ||
+      !["tool", "model", "artifact"].includes(entry.kind) ||
+      !["ACK_REQUIRED", "TASK6_CUTOVER_FENCE"].includes(entry.receiptMode) ||
+      !declaration ||
+      entry.resultStrategy !== declaration.resultStrategy ||
+      entry.resultSchema !== declaration.resultSchema ||
+      !Array.isArray(entry.consumerChecks) || entry.consumerChecks.length < 1
+    ) {
+      issues.push(issue(
+        "EXECUTION_AUTHORITY_PHYSICAL_CALLSITE_BINDING_INVALID",
+        CALLSITE_CATALOG_PATH,
+        `invalid callsite binding: ${entry?.key ?? "<unknown>"}`,
+      ));
+      continue;
+    }
+    for (const check of entry.consumerChecks) {
+      const consumerSource = existsSync(resolve(repoRoot, check.path))
+        ? await readText(repoRoot, check.path)
+        : "";
+      if (!check.anchor || !consumerSource.includes(check.anchor)) {
+        issues.push(issue(
+          "EXECUTION_AUTHORITY_PHYSICAL_CALLSITE_CONSUMER_MISSING",
+          check.path,
+          `callsite ${entry.key} lacks consumer anchor ${check.anchor ?? "<missing>"}`,
+        ));
+      }
+    }
+  }
+  const bindingPath = "apps/api/src/durable-results/domain-ack-consumer-bindings.ts";
+  const bindingSource = await readText(repoRoot, bindingPath);
+  for (const declaration of declarationByProducer.values()) {
+    const producerIndex = bindingSource.indexOf(`producerId: '${declaration.id ?? declaration.taskId}'`);
+    const block = producerIndex < 0
+      ? ""
+      : bindingSource.slice(producerIndex, producerIndex + 700);
+    if (
+      !block.includes(`resultStrategy: '${declaration.resultStrategy}'`) ||
+      !block.includes(`resultSchema: '${declaration.resultSchema}'`)
+    ) {
+      issues.push(issue(
+        "EXECUTION_AUTHORITY_RUNTIME_RECEIPT_BINDING_MISSING",
+        bindingPath,
+        `runtime binding missing strategy/schema for ${declaration.id ?? declaration.taskId}`,
+      ));
+    }
+  }
+  const artifactServicePath = "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts";
+  const artifactService = await readText(repoRoot, artifactServicePath);
+  if (
+    !artifactService.includes("replayResult") ||
+    !artifactService.includes("durableReceipt") ||
+    !artifactService.includes("domainAckKey") ||
+    !artifactService.includes("settleArtifactManifest")
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_ARTIFACT_ACK_CHAIN_MISSING",
+      artifactServicePath,
+      "artifact persist/recovery/replay must preserve reference, receipt and ACK binding",
+    ));
+  }
+  const taxonomySource = await readText(repoRoot, "apps/api/src/discovery/taxonomy-resolver.ts");
+  const understandingSource = await readText(repoRoot, "apps/api/src/temporal/understanding.activities.ts");
+  if (
+    !taxonomySource.includes("acknowledgeTaxonomyNoop") ||
+    !understandingSource.includes("acknowledgeProfileNoop")
+  ) {
+    issues.push(issue(
+      "EXECUTION_AUTHORITY_MODEL_NOOP_ACK_MISSING",
+      "apps/api/src",
+      "valid Model no-op results must still consume their durable receipt",
+    ));
+  }
+  return {
+    catalogCount: catalogKeys.length,
+    discoveredCount: discovered.length,
+    uncatalogued,
+    stale,
+  };
+}
+
 export async function verifyExecutionAuthorityPolicy(options = {}) {
   const repoRoot = resolve(options.repoRoot ?? DEFAULT_REPO_ROOT);
   const issues = [];
@@ -905,10 +1070,15 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   await scanDirectModelGatewayBypasses(repoRoot, issues);
   await scanToolBrokerTypedProjection(repoRoot, issues);
   await scanGenericReplay(repoRoot, issues);
+  const callsites = await scanPhysicalCallsites(repoRoot, manifest, issues);
 
   return Object.freeze({
     ok: issues.length === 0,
     issues: Object.freeze(issues),
+    callsiteCatalogCount: callsites.catalogCount,
+    discoveredPhysicalCallsiteCount: callsites.discoveredCount,
+    uncataloguedPhysicalCallsites: Object.freeze(callsites.uncatalogued),
+    stalePhysicalCallsites: Object.freeze(callsites.stale),
   });
 }
 

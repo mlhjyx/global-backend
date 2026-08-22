@@ -14,6 +14,15 @@ import {
   type GenericOperationArtifactReference,
 } from "./artifact.types";
 
+const acknowledgementMock = vi.hoisted(() => vi.fn(async (input: {
+  transaction: unknown;
+  apply: (transaction: unknown) => Promise<unknown>;
+}) => ({ status: "APPLIED", value: await input.apply(input.transaction) })));
+
+vi.mock("../domain-ack-consumer-bindings", () => ({
+  applyDomainAckConsumerTransaction: acknowledgementMock,
+}));
+
 const WORKSPACE_ID = "e03abddd-1307-47cb-a731-7e7a786615a0";
 const AUTHORITY_ID = "42c863b9-7c7e-4d28-8678-60ef9a20219b";
 const OPERATION_ID = "8cf66f2a-1780-453e-8d7d-f70e36cb22a6";
@@ -262,7 +271,11 @@ describe("artifact expected-facts persistence", () => {
     await budgetStore.settleArtifactManifest(reservation, 13, {
       manifest,
       expectedFacts: EXPECTED_FACTS,
-    }, RECEIPT_FACTS);
+    }, RECEIPT_FACTS, {
+      producerId: "http.get",
+      domainAckKey: "artifact:test",
+      domainRevision: manifest.sha256,
+    });
 
     expect(queries[0]?.strings.join("")).toContain(
       "settle_tool_budget_artifact_manifest_with_receipt_v1",

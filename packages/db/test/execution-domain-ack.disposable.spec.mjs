@@ -10,13 +10,21 @@ const AUTHORITY_A = '20000000-0000-4000-8000-000000000001';
 const AUTHORITY_PLATFORM = '20000000-0000-4000-8000-000000000002';
 const ACCOUNT_A = '30000000-0000-4000-8000-000000000001';
 const ACCOUNT_PLATFORM = '30000000-0000-4000-8000-000000000002';
+const ACCOUNT_MICRO = '30000000-0000-4000-8000-000000000003';
+const ACCOUNT_CENTS = '30000000-0000-4000-8000-000000000004';
 const OP_APPLY = '40000000-0000-4000-8000-000000000001';
 const OP_ROLLBACK = '40000000-0000-4000-8000-000000000002';
 const OP_CONCURRENT = '40000000-0000-4000-8000-000000000003';
 const OP_UNSETTLED = '40000000-0000-4000-8000-000000000004';
 const OP_ARTIFACT = '40000000-0000-4000-8000-000000000005';
 const OP_PLATFORM = '40000000-0000-4000-8000-000000000006';
+const OP_CENTS_MISSING = '40000000-0000-4000-8000-000000000007';
+const OP_MICRO = '40000000-0000-4000-8000-000000000008';
+const OP_MICRO_MISSING = '40000000-0000-4000-8000-000000000009';
+const OP_ARTIFACT_MISSING = '40000000-0000-4000-8000-00000000000a';
+const OP_CENTS_REPLAY = '40000000-0000-4000-8000-00000000000b';
 const ARTIFACT_ID = '50000000-0000-4000-8000-000000000001';
+const ARTIFACT_MISSING_ID = '50000000-0000-4000-8000-000000000002';
 const DOMAIN_KEY = 'a'.repeat(64);
 const DOMAIN_REVISION = 'b'.repeat(64);
 const PLATFORM_LOGIN = 'task4_platform_writer';
@@ -140,7 +148,11 @@ const SEED_SQL = `
     ('${ACCOUNT_A}'::uuid,'${WORKSPACE_A}','task4-account',1,0,0,0,false,1,
       '${AUTHORITY_A}'::uuid,100000,0,0),
     ('${ACCOUNT_PLATFORM}'::uuid,'platform','task4-platform-account',1,0,0,0,false,1,
-      '${AUTHORITY_PLATFORM}'::uuid,100000,0,0);
+      '${AUTHORITY_PLATFORM}'::uuid,100000,0,0),
+    ('${ACCOUNT_MICRO}'::uuid,'${WORKSPACE_A}','task4-micro-account',1,10,0,0,false,1,
+      NULL,NULL,0,0),
+    ('${ACCOUNT_CENTS}'::uuid,'${WORKSPACE_A}','task4-cents-account',1,10,0,0,false,1,
+      NULL,NULL,0,0);
 
   DO $seed$
   DECLARE
@@ -205,7 +217,86 @@ const SEED_SQL = `
         'expiresAt','2026-08-24T00:00:00.000Z'
       ),'SETTLED',clock_timestamp(),'cent',artifact_usage,'estimated_upper_bound'
     );
-  END
+
+    INSERT INTO tool_budget_operation(
+      id,scope_key,account_id,generation,operation_key,reserved_cents,
+      observed_cents,charged_cents,result_schema_version,result_schema,
+      result_digest,result_json,status,settled_at,amount_unit,
+      receipt_usage,receipt_cost_basis
+    ) VALUES (
+      '${OP_CENTS_REPLAY}'::uuid,'${WORKSPACE_A}','${ACCOUNT_CENTS}'::uuid,1,
+      'cents-replay',2,1,1,'generic-operation-projection/v1',
+      'taxonomy-code/v1',projection_digest,projection,'SETTLED',
+      clock_timestamp(),'cent',typed_usage,'token_pricing'
+    ), (
+      '${OP_CENTS_MISSING}'::uuid,'${WORKSPACE_A}','${ACCOUNT_CENTS}'::uuid,1,
+      'cents-missing',2,1,1,'generic-operation-projection/v1',
+      'taxonomy-code/v1',projection_digest,projection,'SETTLED',
+      clock_timestamp(),'cent',NULL,NULL
+    );
+
+    INSERT INTO tool_budget_operation(
+      id,scope_key,account_id,generation,operation_key,reserved_cents,
+      reserved_microusd,observed_microusd,charged_microusd,
+      result_schema_version,result_schema,result_digest,result_json,status,
+      settled_at,amount_unit,receipt_usage,receipt_cost_basis
+    ) VALUES
+      ('${OP_MICRO}'::uuid,'${WORKSPACE_A}','${ACCOUNT_MICRO}'::uuid,1,'micro',0,
+       20000,10000,10000,'generic-operation-projection/v1','taxonomy-code/v1',
+       projection_digest,projection,'SETTLED',clock_timestamp(),'microusd',
+       typed_usage,'token_pricing'),
+      ('${OP_MICRO_MISSING}'::uuid,'${WORKSPACE_A}','${ACCOUNT_MICRO}'::uuid,1,
+       'micro-missing',0,20000,10000,10000,
+       'generic-operation-projection/v1','taxonomy-code/v1',projection_digest,
+       projection,'SETTLED',clock_timestamp(),'microusd',NULL,NULL);
+
+    INSERT INTO tool_budget_operation(
+      id,scope_key,account_id,generation,operation_key,reserved_cents,
+      observed_cents,charged_cents,result_schema_version,result_schema,
+      result_digest,result_json,status,settled_at,amount_unit,
+      receipt_usage,receipt_cost_basis
+    ) VALUES (
+      '${OP_ARTIFACT_MISSING}'::uuid,'${WORKSPACE_A}','${ACCOUNT_A}'::uuid,1,
+      'artifact-missing',2,1,1,'generic-operation-artifact-ref/v1',
+      'http-get/v1',repeat('d',64),jsonb_build_object(
+        'schemaVersion','generic-operation-artifact-ref/v1',
+        'artifactId','${ARTIFACT_MISSING_ID}',
+        'operationId','${OP_ARTIFACT_MISSING}','resultSchema','http-get/v1',
+        'sha256',repeat('d',64),'sizeBytes','123','mediaType','text/plain',
+        'expiresAt','2026-08-24T00:00:00.000Z'
+      ),'SETTLED',clock_timestamp(),'cent',NULL,NULL
+    );
+
+    INSERT INTO generic_operation_artifact_object(
+      sha256,object_key,size_bytes,media_type,privacy_class,created_at
+    ) VALUES
+      (repeat('c',64),
+       'generic-operation-results/v1/sha256/' || repeat('c',2) || '/' || repeat('c',64),
+       123,'text/plain','PUBLIC_ORGANIZATION','2026-08-23T00:00:00Z'),
+      (repeat('d',64),
+       'generic-operation-results/v1/sha256/' || repeat('d',2) || '/' || repeat('d',64),
+       123,'text/plain','PUBLIC_ORGANIZATION','2026-08-23T00:00:00Z');
+
+    INSERT INTO generic_operation_artifact(
+      id,scope_key,workspace_id,authority_id,operation_id,result_schema,
+      object_key,sha256,size_bytes,media_type,privacy_class,source_digest,
+      created_at,expires_at,expected_http_status,expected_http_ok,
+      expected_sanitized_url,expected_content_hash,expected_blocked_code,
+      expected_robots_blocked
+    ) VALUES
+      ('${ARTIFACT_ID}'::uuid,'${WORKSPACE_A}','${WORKSPACE_A}'::uuid,
+       '${AUTHORITY_A}'::uuid,'${OP_ARTIFACT}'::uuid,'http-get/v1',
+       'generic-operation-results/v1/sha256/' || repeat('c',2) || '/' || repeat('c',64),
+       repeat('c',64),123,'text/plain','PUBLIC_ORGANIZATION',NULL,
+       '2026-08-23T00:00:00Z','2026-08-24T00:00:00Z',200,true,
+       'https://example.test/artifact',NULL,NULL,NULL),
+      ('${ARTIFACT_MISSING_ID}'::uuid,'${WORKSPACE_A}','${WORKSPACE_A}'::uuid,
+       '${AUTHORITY_A}'::uuid,'${OP_ARTIFACT_MISSING}'::uuid,'http-get/v1',
+       'generic-operation-results/v1/sha256/' || repeat('d',2) || '/' || repeat('d',64),
+       repeat('d',64),123,'text/plain','PUBLIC_ORGANIZATION',NULL,
+       '2026-08-23T00:00:00Z','2026-08-24T00:00:00Z',200,true,
+       'https://example.test/artifact',NULL,NULL,NULL);
+  END;
   $seed$;
 
   CREATE TABLE task4_domain_mutation(
@@ -298,6 +389,103 @@ describe('Task 4 disposable PostgreSQL Domain ACK trust path', () => {
     assert.equal(secondAggregate.status, 'APPLIED');
     assert.equal(secondRevision.status, 'APPLIED');
     assert.notEqual(secondAggregate.ack.ackId, secondRevision.ack.ackId);
+  });
+
+  it('keeps cents and microusd replay receipt facts read-only, exact, and ledger-bound', () => {
+    const usage = `'{
+      "currency":"USD","unit":"microusd","callCount":1,
+      "inputTokens":7,"outputTokens":3,
+      "chargedMicrousd":"10000","upperBoundMicrousd":"20000"
+    }'::jsonb`;
+    const centsReplay = (operationId) => asApp(`
+      SELECT replay::text FROM settle_tool_budget_with_receipt_v1(
+        '${WORKSPACE_A}','${operationId}'::uuid,1,
+        'generic-operation-projection/v1','taxonomy-code/v1',
+        (SELECT result_digest FROM tool_budget_operation
+          WHERE scope_key='${WORKSPACE_A}' AND id='${operationId}'::uuid),
+        (SELECT result_json FROM tool_budget_operation
+          WHERE scope_key='${WORKSPACE_A}' AND id='${operationId}'::uuid),
+        ${usage},'token_pricing'
+      );
+    `);
+    const microReplay = (operationId) => asApp(`
+      SELECT replay::text FROM settle_tool_budget_microusd_with_receipt_v1(
+        '${WORKSPACE_A}','${operationId}'::uuid,10000,
+        'generic-operation-projection/v1','taxonomy-code/v1',
+        (SELECT result_digest FROM tool_budget_operation
+          WHERE scope_key='${WORKSPACE_A}' AND id='${operationId}'::uuid),
+        (SELECT result_json FROM tool_budget_operation
+          WHERE scope_key='${WORKSPACE_A}' AND id='${operationId}'::uuid),
+        ${usage},'token_pricing'
+      );
+    `);
+
+    assert.equal(psql(centsReplay(OP_CENTS_REPLAY)), 'true');
+    assert.equal(psql(microReplay(OP_MICRO)), 'true');
+    psql(centsReplay(OP_CENTS_MISSING), {
+      rejects: /DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED/,
+    });
+    psql(microReplay(OP_MICRO_MISSING), {
+      rejects: /DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED/,
+    });
+    assert.equal(psql(`
+      SELECT count(*) FROM tool_budget_operation
+      WHERE id IN ('${OP_CENTS_MISSING}'::uuid,'${OP_MICRO_MISSING}'::uuid)
+        AND receipt_usage IS NULL AND receipt_cost_basis IS NULL;
+    `), '2');
+
+    const driftUsage = usage.replace(
+      '\"upperBoundMicrousd\":\"20000\"',
+      '\"upperBoundMicrousd\":\"30000\"',
+    );
+    psql(asApp(`
+      SELECT replay FROM settle_tool_budget_with_receipt_v1(
+        '${WORKSPACE_A}','${OP_CENTS_REPLAY}'::uuid,1,
+        'generic-operation-projection/v1','taxonomy-code/v1',
+        (SELECT result_digest FROM tool_budget_operation
+          WHERE scope_key='${WORKSPACE_A}' AND id='${OP_CENTS_REPLAY}'::uuid),
+        (SELECT result_json FROM tool_budget_operation
+          WHERE scope_key='${WORKSPACE_A}' AND id='${OP_CENTS_REPLAY}'::uuid),
+        ${driftUsage},'token_pricing'
+      );
+    `), { rejects: /DURABLE_EXECUTION_RECEIPT_FACTS_CONFLICT/ });
+    assert.equal(psql(`
+      SELECT receipt_usage->>'upperBoundMicrousd'
+      FROM tool_budget_operation WHERE id='${OP_CENTS_REPLAY}'::uuid;
+    `), '20000');
+  });
+
+  it('keeps artifact replay facts read-only and refuses missing-fact backfill', () => {
+    const artifactReplay = (operationId, artifactId, digest) => asApp(`
+      SELECT replay::text FROM settle_tool_budget_artifact_manifest_with_receipt_v1(
+        '${WORKSPACE_A}','${operationId}'::uuid,1,
+        jsonb_build_object(
+          'schemaVersion','generic-operation-artifact/v1',
+          'artifactId','${artifactId}','scopeKind','workspace',
+          'workspaceId','${WORKSPACE_A}','authorityId','${AUTHORITY_A}',
+          'operationId','${operationId}','resultSchema','http-get/v1',
+          'objectKey','generic-operation-results/v1/sha256/' || left('${digest}',2) || '/' || '${digest}',
+          'sha256','${digest}','sizeBytes','123','mediaType','text/plain',
+          'privacyClass','PUBLIC_ORGANIZATION','sourceDigest',NULL,
+          'createdAt','2026-08-23T00:00:00.000Z',
+          'expiresAt','2026-08-24T00:00:00.000Z'
+        ),200::smallint,true,'https://example.test/artifact',
+        NULL::text,NULL::text,NULL::boolean,
+        '{"currency":"USD","unit":"microusd","callCount":1,"upperBoundMicrousd":"20000"}'::jsonb,
+        'estimated_upper_bound'
+      );
+    `);
+
+    assert.equal(psql(artifactReplay(OP_ARTIFACT, ARTIFACT_ID, 'c'.repeat(64))), 'true');
+    psql(artifactReplay(
+      OP_ARTIFACT_MISSING,
+      ARTIFACT_MISSING_ID,
+      'd'.repeat(64),
+    ), { rejects: /DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED/ });
+    assert.equal(psql(`
+      SELECT (receipt_usage IS NULL AND receipt_cost_basis IS NULL)::text
+      FROM tool_budget_operation WHERE id='${OP_ARTIFACT_MISSING}'::uuid;
+    `), 'true');
   });
 
   it('rolls back ACK and domain mutation together when the transaction aborts', () => {

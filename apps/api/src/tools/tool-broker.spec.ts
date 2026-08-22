@@ -217,7 +217,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
         receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
@@ -360,7 +360,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       operationId: "op",
       estimatedCents: 1,
       replay: true,
-      replayProjection: projection,
+      replayResult: { resultStrategy: 'typed_projection', projection },
       receipt: {
         ...DURABLE_RECEIPT,
         resultSchema: "searxng-search/v1",
@@ -476,7 +476,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
         receipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
       })),
     } as unknown as BudgetStore;
@@ -597,7 +597,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
@@ -625,7 +625,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });

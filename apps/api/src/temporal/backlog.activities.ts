@@ -16,7 +16,7 @@ import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-j
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { persistDiscoveredContacts } from '../discovery/contact-persist';
 import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
-import { persistGuessedEmail } from '../discovery/email-guess-persist';
+import { persistGuessedEmail, readbackGuessedEmail } from '../discovery/email-guess-persist';
 import { buildGuessTargets } from '../discovery/email-guess-targets';
 import { LAWFUL_BASIS_KINDS } from '../discovery/compliance/email-verification-gate';
 import { KnownEmailSample } from '../discovery/email-format-learning';
@@ -191,6 +191,7 @@ export function createBacklogActivities(deps: {
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('backlog activities require an authoritative BudgetStore');
@@ -198,6 +199,7 @@ export function createBacklogActivities(deps: {
     prisma: deps.prisma,
     broker: deps.broker,
     budgetStore: budgets,
+    platformWriter: deps.platformWriter,
   });
 
   /**
@@ -854,8 +856,11 @@ export function createBacklogActivities(deps: {
                 }
                 return n;
               },
+              readback: (transaction) => transaction.canonicalContact.count({
+                where: { companyId: c.id },
+              }),
             });
-            return persisted ?? 0;
+            return persisted.value;
           });
           contactsCreated += created;
         }
@@ -1087,8 +1092,12 @@ export function createBacklogActivities(deps: {
                 lawfulBasis: r.result.lawfulBasis ?? lawfulBasis,
                 now,
               }),
+              readback: (transaction) => readbackGuessedEmail(transaction, {
+                contactId: r.contactId,
+                result: r.result,
+              }),
             });
-            if (out?.persisted) guessed += 1;
+            if (out.value.persisted) guessed += 1;
           }
         });
       }

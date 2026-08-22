@@ -9,6 +9,7 @@ import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 const DUE_LIMIT = 50;
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000; // web_watch intent 事件保留 90 天（可 arg 覆盖）
@@ -27,6 +28,7 @@ export function createIntentActivities(deps: {
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker; // 收口②：registerWatch 的 sitemap 发现经 http.get 工具（无 broker → fail-closed 不出网）
   budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('intent activities require an authoritative BudgetStore');
@@ -59,13 +61,29 @@ export function createIntentActivities(deps: {
     /** 对一个 web_watch 源跑一次页面监控（抓每页→抽信号→diff→写 intent 事件）。幂等 by (source,url)。 */
     async watchSource(args: { sourceId: string } & PlatformScheduleAuthorityActivityInput): Promise<WatchResult> {
       const binding = await attest(args);
+      const durableReceipts: Array<{
+        producerId: string;
+        receipt: DurableExecutionReceipt;
+      }> = [];
+      const capturePageReceipt = (
+        producerId: string,
+        receipt: DurableExecutionReceipt,
+      ): void => {
+        if (producerId !== 'crawl4ai.render') {
+          throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+        }
+        durableReceipts.push({ producerId, receipt });
+      };
       const watchSvc = new WebsiteWatchService({
         prisma: deps.prisma,
         fetcher: { fetch: (url) => deps.fetcher.fetch(url, {
           workspaceId: PLATFORM_WORKSPACE,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
+          onDurableReceipt: capturePageReceipt,
         }) },
+        platformWriter: deps.platformWriter,
+        durableReceipts,
       });
       return watchSvc.watch(args.sourceId);
     },

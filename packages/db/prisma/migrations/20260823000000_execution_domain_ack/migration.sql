@@ -13,6 +13,37 @@ ALTER TABLE "tool_budget_operation"
   ADD COLUMN "receipt_usage" JSONB,
   ADD COLUMN "receipt_cost_basis" VARCHAR(40);
 
+ALTER TABLE "patent_cache_refresh_audit"
+  ADD COLUMN "execution_operation_ids" JSONB,
+  ADD COLUMN "purged" INTEGER,
+  ADD COLUMN "cached" INTEGER,
+  ADD COLUMN "empty" INTEGER,
+  ADD CONSTRAINT "patent_cache_refresh_execution_result_check" CHECK (
+    (
+      "execution_operation_ids" IS NULL
+      AND "purged" IS NULL AND "cached" IS NULL AND "empty" IS NULL
+    ) OR (
+      jsonb_typeof("execution_operation_ids") = 'array'
+      AND jsonb_array_length("execution_operation_ids") BETWEEN 1 AND 25
+      AND "purged" >= 0 AND "cached" >= 0 AND "empty" >= 0
+    )
+  );
+
+ALTER TABLE "source_fetch"
+  ADD COLUMN "execution_operation_ids" JSONB,
+  ADD COLUMN "execution_result" JSONB,
+  ADD CONSTRAINT "source_fetch_execution_result_check" CHECK (
+    (
+      "execution_operation_ids" IS NULL
+      AND "execution_result" IS NULL
+    ) OR (
+      jsonb_typeof("execution_operation_ids") = 'array'
+      AND jsonb_array_length("execution_operation_ids") BETWEEN 1 AND 50
+      AND jsonb_typeof("execution_result") = 'object'
+      AND pg_column_size("execution_result") <= 4096
+    )
+  );
+
 CREATE FUNCTION execution_receipt_facts_valid_v1(
   p_result_schema TEXT,
   p_usage JSONB,
@@ -305,7 +336,8 @@ CREATE FUNCTION execution_receipt_store_facts_v1(
   p_scope_key TEXT,
   p_operation_id UUID,
   p_receipt_usage JSONB,
-  p_receipt_cost_basis TEXT
+  p_receipt_cost_basis TEXT,
+  p_allow_store BOOLEAN
 )
 RETURNS VOID
 LANGUAGE plpgsql
@@ -314,12 +346,21 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   operation "tool_budget_operation"%ROWTYPE;
+  ledger_reserved NUMERIC;
+  ledger_observed NUMERIC;
+  ledger_charged NUMERIC;
+  submitted_reserved NUMERIC;
+  submitted_charged NUMERIC;
 BEGIN
   SELECT target.* INTO operation
   FROM "tool_budget_operation" target
   WHERE target."scope_key" = p_scope_key
     AND target."id" = p_operation_id
   FOR UPDATE;
+  IF p_receipt_usage IS NULL OR p_receipt_cost_basis IS NULL THEN
+    RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED'
+      USING ERRCODE = 'P0001';
+  END IF;
   IF operation."id" IS NULL
     OR operation."status" IS DISTINCT FROM 'SETTLED'
     OR operation."result_schema" IS NULL
@@ -328,6 +369,50 @@ BEGIN
     )
   THEN
     RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF operation."amount_unit" = 'cent' THEN
+    ledger_reserved := operation."reserved_cents" * 10000;
+    ledger_observed := operation."observed_cents" * 10000;
+    ledger_charged := operation."charged_cents" * 10000;
+  ELSIF operation."amount_unit" = 'microusd' THEN
+    ledger_reserved := operation."reserved_microusd";
+    ledger_observed := operation."observed_microusd";
+    ledger_charged := operation."charged_microusd";
+  ELSE
+    RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_INVALID'
+      USING ERRCODE = 'P0001';
+  END IF;
+  submitted_reserved := CASE
+    WHEN p_receipt_usage ? 'upperBoundMicrousd'
+      THEN (p_receipt_usage->>'upperBoundMicrousd')::NUMERIC
+    ELSE NULL
+  END;
+  submitted_charged := CASE
+    WHEN p_receipt_usage ? 'chargedMicrousd'
+      THEN (p_receipt_usage->>'chargedMicrousd')::NUMERIC
+    ELSE NULL
+  END;
+  IF p_receipt_cost_basis = 'not_incurred' THEN
+    IF COALESCE(ledger_observed, 0) <> 0
+      OR COALESCE(ledger_charged, 0) <> 0
+      OR submitted_reserved IS DISTINCT FROM ledger_reserved
+      OR COALESCE(submitted_charged, 0) <> 0
+    THEN
+      RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_CONFLICT'
+        USING ERRCODE = 'P0001';
+    END IF;
+  ELSIF submitted_reserved IS DISTINCT FROM ledger_reserved
+    OR (
+      p_receipt_cost_basis IN ('provider_reported', 'token_pricing')
+      AND submitted_charged IS DISTINCT FROM ledger_charged
+    )
+    OR (
+      submitted_charged IS NOT NULL
+      AND submitted_charged IS DISTINCT FROM ledger_charged
+    )
+  THEN
+    RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_CONFLICT'
       USING ERRCODE = 'P0001';
   END IF;
   IF operation."receipt_usage" IS NOT NULL
@@ -340,6 +425,10 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
     RETURN;
+  END IF;
+  IF NOT p_allow_store THEN
+    RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED'
+      USING ERRCODE = 'P0001';
   END IF;
   UPDATE "tool_budget_operation" target
   SET "receipt_usage" = p_receipt_usage,
@@ -547,11 +636,11 @@ BEGIN
   FOR UPDATE;
   RETURN QUERY SELECT base.kind, base.operation_id, base.reserved_cents,
     base.remaining_cents, base.status, base.result_json,
-    operation."operation_key", account."id", account."authority_id",
+    operation."operation_key"::TEXT, account."id", account."authority_id",
     operation."charged_cents", operation."observed_cents",
-    operation."result_schema_version", operation."result_schema",
-    operation."result_digest", operation."receipt_usage",
-    operation."receipt_cost_basis";
+    operation."result_schema_version"::TEXT, operation."result_schema"::TEXT,
+    operation."result_digest"::TEXT, operation."receipt_usage",
+    operation."receipt_cost_basis"::TEXT;
 END
 $$;
 
@@ -583,7 +672,8 @@ BEGIN
   );
   IF p_result_json IS NOT NULL THEN
     PERFORM execution_receipt_store_facts_v1(
-      p_scope_key, p_operation_id, p_receipt_usage, p_receipt_cost_basis
+      p_scope_key, p_operation_id, p_receipt_usage, p_receipt_cost_basis,
+      NOT base.replay
     );
   ELSIF p_receipt_usage IS NOT NULL OR p_receipt_cost_basis IS NOT NULL THEN
     RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_INVALID'
@@ -597,11 +687,11 @@ BEGIN
   FOR UPDATE;
   RETURN QUERY SELECT base.charged_cents, base.observed_cents,
     base.cap_variance, base.status, base.replay, operation."reserved_cents",
-    operation."id", operation."operation_key", account."id",
-    account."authority_id", operation."result_schema_version",
-    operation."result_schema", operation."result_digest",
+    operation."id", operation."operation_key"::TEXT, account."id",
+    account."authority_id", operation."result_schema_version"::TEXT,
+    operation."result_schema"::TEXT, operation."result_digest"::TEXT,
     operation."result_json", operation."receipt_usage",
-    operation."receipt_cost_basis";
+    operation."receipt_cost_basis"::TEXT;
 END
 $$;
 
@@ -646,11 +736,11 @@ BEGIN
   FOR UPDATE;
   RETURN QUERY SELECT base.kind, base.operation_id,
     base.reserved_microusd, base.remaining_microusd, base.status,
-    base.result_json, operation."operation_key", account."id",
+    base.result_json, operation."operation_key"::TEXT, account."id",
     account."authority_id", operation."charged_microusd",
-    operation."observed_microusd", operation."result_schema_version",
-    operation."result_schema", operation."result_digest",
-    operation."receipt_usage", operation."receipt_cost_basis";
+    operation."observed_microusd", operation."result_schema_version"::TEXT,
+    operation."result_schema"::TEXT, operation."result_digest"::TEXT,
+    operation."receipt_usage", operation."receipt_cost_basis"::TEXT;
 END
 $$;
 
@@ -683,7 +773,8 @@ BEGIN
   );
   IF p_result_json IS NOT NULL THEN
     PERFORM execution_receipt_store_facts_v1(
-      p_scope_key, p_operation_id, p_receipt_usage, p_receipt_cost_basis
+      p_scope_key, p_operation_id, p_receipt_usage, p_receipt_cost_basis,
+      NOT base.replay
     );
   ELSIF p_receipt_usage IS NOT NULL OR p_receipt_cost_basis IS NOT NULL THEN
     RAISE EXCEPTION 'DURABLE_EXECUTION_RECEIPT_FACTS_INVALID'
@@ -698,10 +789,10 @@ BEGIN
   RETURN QUERY SELECT base.charged_microusd, base.observed_microusd,
     base.cap_variance, base.status, base.replay,
     operation."reserved_microusd", operation."id",
-    operation."operation_key", account."id", account."authority_id",
-    operation."result_schema_version", operation."result_schema",
-    operation."result_digest", operation."result_json",
-    operation."receipt_usage", operation."receipt_cost_basis";
+    operation."operation_key"::TEXT, account."id", account."authority_id",
+    operation."result_schema_version"::TEXT, operation."result_schema"::TEXT,
+    operation."result_digest"::TEXT, operation."result_json",
+    operation."receipt_usage", operation."receipt_cost_basis"::TEXT;
 END
 $$;
 
@@ -737,7 +828,8 @@ BEGIN
     p_expected_robots_blocked
   );
   PERFORM execution_receipt_store_facts_v1(
-    p_scope_key, p_operation_id, p_receipt_usage, p_receipt_cost_basis
+    p_scope_key, p_operation_id, p_receipt_usage, p_receipt_cost_basis,
+    NOT base.replay
   );
   SELECT target.* INTO operation FROM "tool_budget_operation" target
   WHERE target."scope_key" = p_scope_key AND target."id" = p_operation_id
@@ -747,18 +839,18 @@ BEGIN
   FOR UPDATE;
   RETURN QUERY SELECT base.charged_cents, base.observed_cents,
     base.cap_variance, base.status, base.replay, operation."reserved_cents",
-    operation."id", operation."operation_key", account."id",
-    account."authority_id", operation."result_schema_version",
-    operation."result_schema", operation."result_digest",
+    operation."id", operation."operation_key"::TEXT, account."id",
+    account."authority_id", operation."result_schema_version"::TEXT,
+    operation."result_schema"::TEXT, operation."result_digest"::TEXT,
     operation."result_json", operation."receipt_usage",
-    operation."receipt_cost_basis";
+    operation."receipt_cost_basis"::TEXT;
 END
 $$;
 
 REVOKE ALL ON FUNCTION
   execution_receipt_facts_valid_v1(TEXT, JSONB, TEXT),
   assert_execution_domain_ack_scope_v1(TEXT),
-  execution_receipt_store_facts_v1(TEXT, UUID, JSONB, TEXT),
+  execution_receipt_store_facts_v1(TEXT, UUID, JSONB, TEXT, BOOLEAN),
   apply_execution_domain_ack_v1(TEXT, UUID, TEXT, TEXT, TEXT, TEXT),
   reserve_tool_budget_with_receipt_v1(TEXT, TEXT, TEXT, BIGINT),
   settle_tool_budget_with_receipt_v1(

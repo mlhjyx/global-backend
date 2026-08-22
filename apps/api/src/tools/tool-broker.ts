@@ -279,7 +279,9 @@ export class ToolBroker implements ExecutionBroker {
           try {
             replay = this.replayGenericToolProjection(
               tool,
-              reservation.replayProjection,
+              reservation.replayResult?.resultStrategy === 'typed_projection'
+                ? reservation.replayResult.projection
+                : undefined,
             );
           } catch {
             throw new BudgetOperationReplayError(reservation.operationId);

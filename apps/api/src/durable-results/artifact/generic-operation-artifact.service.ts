@@ -35,6 +35,14 @@ import {
   type GenericOperationArtifactManifest,
   type GenericOperationArtifactReference,
 } from './artifact.types';
+import {
+  artifactProducerIdForResultSchema,
+  type ArtifactResultSchema,
+} from './artifact-materializer.registry';
+import {
+  parseDurableExecutionReceipt,
+  type DurableExecutionReceipt,
+} from '../durable-execution-receipt';
 
 export const ARTIFACT_STAGING_CLEANUP_FAILED =
   'GENERIC_OPERATION_ARTIFACT_STAGING_CLEANUP_FAILED' as const;
@@ -106,6 +114,11 @@ export interface VerifiedGenericOperationArtifact {
   readonly manifest: GenericOperationArtifactManifest;
   readonly expectedFacts: ArtifactExpectedFacts | undefined;
   readonly body: AsyncIterable<Uint8Array>;
+}
+
+export interface GenericOperationArtifactReceiptResult {
+  readonly reference: GenericOperationArtifactReference;
+  readonly durableReceipt: DurableExecutionReceipt;
 }
 
 function invalid(): never {
@@ -182,6 +195,51 @@ function referenceFromManifest(
     mediaType: manifest.mediaType,
     expiresAt: manifest.expiresAt,
   });
+}
+
+function receiptResult(
+  reservation: BudgetReservation,
+  authorityId: string,
+  referenceValue: GenericOperationArtifactReference,
+  receiptValue: DurableExecutionReceipt | undefined,
+): GenericOperationArtifactReceiptResult {
+  const reference = parseArtifactReference(referenceValue);
+  const receipt = receiptValue
+    ? parseDurableExecutionReceipt(receiptValue)
+    : undefined;
+  if (
+    !receipt ||
+    receipt.scopeKey !== reservation.workspaceId ||
+    receipt.authorityId !== authorityId ||
+    receipt.operationId !== reservation.operationId ||
+    receipt.resultStrategy !== 'artifact_reference' ||
+    receipt.resultSchema !== reference.resultSchema ||
+    receipt.resultDigest !== reference.sha256 ||
+    receipt.artifactId !== reference.artifactId ||
+    reference.operationId !== reservation.operationId
+  ) {
+    return invalid();
+  }
+  return Object.freeze({ reference, durableReceipt: receipt });
+}
+
+function replayArtifactResult(
+  input: PersistGenericOperationArtifactInput,
+): GenericOperationArtifactReceiptResult | null {
+  if (!input.reservation.replay) return null;
+  const replay = input.reservation.replayResult;
+  if (
+    replay?.resultStrategy !== 'artifact_reference' ||
+    replay.reference.resultSchema !== input.resultSchema
+  ) {
+    return invalid();
+  }
+  return receiptResult(
+    input.reservation,
+    input.authorityId,
+    replay.reference,
+    input.reservation.receipt,
+  );
 }
 
 function snapshotExpectedManifest(
@@ -309,7 +367,9 @@ export class GenericOperationArtifactService {
 
   async persist(
     input: PersistGenericOperationArtifactInput,
-  ): Promise<GenericOperationArtifactReference> {
+  ): Promise<GenericOperationArtifactReceiptResult> {
+    const replay = replayArtifactResult(input);
+    if (replay) return replay;
     assertReservationBinding(input.reservation, input.authorityId);
     const expectedFacts = parseArtifactExpectedFactsForResultSchema(
       input.resultSchema,
@@ -383,7 +443,7 @@ export class GenericOperationArtifactService {
     await this.drainVerifiedBody(promoted, input.signal);
 
     const reference = referenceFromManifest(manifest);
-    await this.budgetStore.settleArtifactManifest(
+    const settlement = await this.budgetStore.settleArtifactManifest(
       input.reservation,
       input.actualCents,
       snapshot,
@@ -391,14 +451,26 @@ export class GenericOperationArtifactService {
         resultSchema: manifest.resultSchema,
         reservedMicrousd: BigInt(input.reservation.estimatedCents) * 10_000n,
       }),
+      {
+        producerId: artifactProducerIdForResultSchema(
+          manifest.resultSchema as ArtifactResultSchema,
+        ),
+        domainAckKey: manifest.artifactId,
+        domainRevision: manifest.sha256,
+      },
     );
     await this.cleanup(staged.artifactId);
-    return reference;
+    return receiptResult(
+      input.reservation,
+      input.authorityId,
+      reference,
+      settlement.receipt,
+    );
   }
 
   async recoverUnknown(
     input: RecoverUnknownGenericOperationArtifactInput,
-  ): Promise<GenericOperationArtifactReference> {
+  ): Promise<GenericOperationArtifactReceiptResult> {
     assertReservationBinding(input.reservation, input.authorityId, true);
     const loaded = await this.budgetStore.loadResultUnknownArtifact(
       input.reservation,
@@ -417,7 +489,7 @@ export class GenericOperationArtifactService {
     await this.drainVerifiedBody(expected, input.signal);
 
     const reference = referenceFromManifest(expected);
-    await this.budgetStore.settleArtifactManifest(
+    const settlement = await this.budgetStore.settleArtifactManifest(
       input.reservation,
       input.actualCents,
       snapshot,
@@ -425,9 +497,21 @@ export class GenericOperationArtifactService {
         resultSchema: expected.resultSchema,
         reservedMicrousd: BigInt(input.reservation.estimatedCents) * 10_000n,
       }),
+      {
+        producerId: artifactProducerIdForResultSchema(
+          expected.resultSchema as ArtifactResultSchema,
+        ),
+        domainAckKey: expected.artifactId,
+        domainRevision: expected.sha256,
+      },
     );
     await this.cleanup(expected.artifactId);
-    return reference;
+    return receiptResult(
+      input.reservation,
+      input.authorityId,
+      reference,
+      settlement.receipt,
+    );
   }
 
   async readVerified(

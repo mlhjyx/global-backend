@@ -1,4 +1,5 @@
 import { PrismaService } from '../prisma/prisma.service';
+import type { PrismaClient } from '@prisma/client';
 import { SourceAdapterRegistry } from '../acquisition/source-adapter';
 import { AcquisitionService, AcquireResult } from '../acquisition/acquisition.service';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
@@ -6,6 +7,7 @@ import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
 import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
 import { ACQ_SWEEP_SCHEDULE_ID } from './understanding.constants';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 const DUE_LIMIT = 50;
 
@@ -17,9 +19,14 @@ export function createAcquisitionActivities(deps: {
   prisma: PrismaService;
   registry: SourceAdapterRegistry;
   budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
 }) {
-  const svc = new AcquisitionService({ prisma: deps.prisma, registry: deps.registry });
+  const svc = new AcquisitionService({
+    prisma: deps.prisma,
+    registry: deps.registry,
+    platformWriter: deps.platformWriter,
+  });
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('acquisition activities require an authoritative BudgetStore');
   const attest = (args: PlatformScheduleAuthorityActivityInput) =>
     attestPlatformScheduleActivity({
@@ -55,9 +62,28 @@ export function createAcquisitionActivities(deps: {
     /** 对一个源跑一次 acquire（抓取→清洗→落库→增量）。幂等 by externalId，可安全重试。 */
     async acquireSource(args: { sourceId: string; limit?: number } & PlatformScheduleAuthorityActivityInput): Promise<AcquireResult> {
       const binding = await attest(args);
+      const durableReceipts: Array<{
+        producerId: string;
+        receipt: DurableExecutionReceipt;
+      }> = [];
+      const captureAcquisitionReceipt = (
+        producerId: string,
+        receipt: DurableExecutionReceipt,
+      ): void => {
+        if (producerId !== 'tradefair.algolia' && producerId !== 'mapyourshow.fetch') {
+          throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+        }
+        durableReceipts.push({ producerId, receipt });
+      };
       return svc.acquire(args.sourceId, {
         ...(args.limit ? { limit: args.limit } : {}),
-        context: { workspaceId: PLATFORM_WORKSPACE, runId: binding.accountKey, correlationId: binding.accountKey },
+        context: {
+          workspaceId: PLATFORM_WORKSPACE,
+          runId: binding.accountKey,
+          correlationId: binding.accountKey,
+          onDurableReceipt: captureAcquisitionReceipt,
+        },
+        durableReceipts,
       });
     },
   };

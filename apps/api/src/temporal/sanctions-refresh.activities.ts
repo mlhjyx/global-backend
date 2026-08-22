@@ -19,9 +19,14 @@ export function createSanctionsRefreshActivities(deps: {
   broker: ExecutionBroker;
   sanctionsScreening?: SanctionsScreeningService;
   budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
 }) {
-  const service = new SanctionsRefreshService({ ownerDb: deps.ownerDb, broker: deps.broker });
+  const service = new SanctionsRefreshService({
+    ownerDb: deps.ownerDb,
+    broker: deps.broker,
+    platformWriter: deps.platformWriter,
+  });
   const budgets =
     deps.budgetStore ??
     new UnavailableBudgetStore('sanctions refresh activities require an authoritative BudgetStore');

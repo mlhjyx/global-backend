@@ -168,14 +168,17 @@ function dependencies(overrides: {
       order.push('load-expected');
       return snapshot;
     })),
-    settleArtifactManifest: vi.fn(overrides.settleArtifactManifest ?? (async () => {
+    settleArtifactManifest: vi.fn(overrides.settleArtifactManifest ?? (async (settlementReservation) => {
       order.push('atomic-settle');
       return {
         chargedCents: reservation.estimatedCents,
         observedCents: 13,
         capVariance: false,
         replay: false,
-        receipt: ARTIFACT_RECEIPT,
+        receipt: {
+          ...ARTIFACT_RECEIPT,
+          scopeKey: settlementReservation.workspaceId,
+        },
       };
     })),
   } as unknown as BudgetStore;
@@ -413,7 +416,7 @@ describe('GenericOperationArtifactService', () => {
       reservation: platformReservation,
     })).resolves.toMatchObject({
       reference: { artifactId: ARTIFACT_ID },
-      durableReceipt: ARTIFACT_RECEIPT,
+      durableReceipt: { ...ARTIFACT_RECEIPT, scopeKey: 'platform' },
     });
     expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
       platformReservation,

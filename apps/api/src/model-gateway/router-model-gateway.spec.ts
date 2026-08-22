@@ -266,7 +266,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
           callCount: 1,
           inputTokens: 7,
           outputTokens: 3,
-          chargedMicrousd: '12500',
+          chargedMicrousd: '20000',
           upperBoundMicrousd: '400000',
         },
         costBasis: 'provider_reported',
@@ -281,7 +281,9 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budgetStore = {
       reserve: vi.fn(async () => ({
         workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-        replay: true, replayProjection: projection, receipt: DURABLE_RECEIPT,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
+        receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
     const gateway = new RouterModelGateway(
@@ -396,7 +398,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       kind: 'model', schema: 'taxonomy-code/v1',
     });
     expect(settle.mock.calls[0]?.[3]).toMatchObject({
-      usage: { chargedMicrousd: '12500' },
+      usage: { chargedMicrousd: '20000' },
       costBasis: 'provider_reported',
     });
   });
@@ -410,7 +412,8 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budgetStore = {
       reserve: vi.fn(async () => ({
         workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-        replay: true, replayProjection: projection,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const gateway = new RouterModelGateway(
@@ -440,7 +443,8 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budgetStore = {
       reserve: vi.fn(async () => ({
         workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-        replay: true, replayProjection: projection,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const gateway = new RouterModelGateway(

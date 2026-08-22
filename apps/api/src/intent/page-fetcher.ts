@@ -2,7 +2,8 @@ import { isAllowedByRobots } from '../adapters/robots';
 import type { CrawlHtmlResult } from '../adapters/web-crawler';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { ToolContext } from '../tools/tool-contract';
-import { BudgetExceededError } from '../tools/budget';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 /**
  * 抓一个被监控页面的渲染后 HTML（robots 合规门 + Crawl4AI）。
@@ -24,6 +25,17 @@ export interface PageFetcher {
 
 const MIN_HTML = 200; // 过短 = 抓空/被拦，视为 miss（不据此判页面消失）
 
+function forwardPageReceipt(
+  context: ToolContext | undefined,
+  receipt: DurableExecutionReceipt | undefined,
+): void {
+  if (!receipt) return;
+  if (!context?.onDurableReceipt) {
+    throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+  }
+  context.onDurableReceipt('crawl4ai.render', receipt);
+}
+
 export class Crawl4aiPageFetcher implements PageFetcher {
   private warnedNoBroker = false;
 
@@ -44,24 +56,21 @@ export class Crawl4aiPageFetcher implements PageFetcher {
     if (!context?.runId) throw new Error('web_watch: durable budget context unavailable (fail-closed)');
     let page: (CrawlHtmlResult & { robotsBlocked?: boolean }) | null;
     try {
-      page = (
+      const { onDurableReceipt: _consumer, ...brokerContext } = context;
+      const result =
         await this.broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
           'crawl4ai.render',
           { url },
-          context,
-        )
-      ).data;
+          brokerContext,
+        );
+      forwardPageReceipt(context, result.durableReceipt);
+      page = result.data;
     } catch (error) {
-      if (error instanceof BudgetExceededError || isBudgetControlError(error)) throw error;
+      if (isExecutionControlError(error)) throw error;
       page = null;
     }
     if (!page || page.robotsBlocked) return null; // 工具内 robots 权威判定 → 走原 robots 禁抓路径
     if (!page.html || page.html.length < MIN_HTML) return null;
     return { url, html: page.html };
   }
-}
-
-function isBudgetControlError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
 }

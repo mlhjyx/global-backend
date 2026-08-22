@@ -390,7 +390,9 @@ export class RouterModelGateway extends ModelGateway {
         estimatedCents: reserveCents,
       });
       if (reservation.replay) {
-        const replay = reservation.replayProjection;
+        const replay = reservation.replayResult?.resultStrategy === 'typed_projection'
+          ? reservation.replayResult.projection
+          : undefined;
         if (
           replay &&
           replay.kind === 'model' &&
@@ -498,11 +500,9 @@ export class RouterModelGateway extends ModelGateway {
     const observedCents = reportedMicrousd !== null
       ? centsCeilFromMicrousd(reportedMicrousd)
       : (tokenPricedCents ?? baseCents * (result.callCount ?? 1));
-    const chargedMicrousd = reportedMicrousd !== null
-      ? (reportedMicrousd > reservedMicrousd
-          ? reservedMicrousd
-          : reportedMicrousd)
-      : centsToMicrousd(Math.min(observedCents, reservation.estimatedCents));
+    const chargedMicrousd = centsToMicrousd(
+      Math.min(observedCents, reservation.estimatedCents),
+    );
     const receiptFacts = projection && ctx.durableResultSchema
       ? modelExecutionReceiptFacts({
           taskId: input.task,

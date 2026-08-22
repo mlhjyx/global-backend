@@ -9,6 +9,22 @@ import { googlePatentsSearchTool } from '../tools/source-tools';
 import { createPatentCacheBrokerScanner } from './patent-cache-broker-scanner';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
+const patentAckMock = vi.hoisted(() => vi.fn(async (input: {
+  transaction: unknown;
+  acknowledgements: Array<{ producerId: string }>;
+  apply: (transaction: unknown) => Promise<unknown>;
+}) => ({
+  status: 'APPLIED',
+  acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+    producerId, status: 'APPLIED',
+  })),
+  value: await input.apply(input.transaction),
+})));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransactions: patentAckMock,
+}));
+
 const PATENT_RECEIPT: DurableExecutionReceipt = Object.freeze({
   schemaVersion: 'durable-execution-receipt/v1',
   scopeKey: 'platform',
@@ -161,6 +177,109 @@ describe('patents cache schedule authority and ToolBroker route', () => {
       else process.env.PII_ENCRYPTION_KEY = priorKey;
     }
   });
+
+  it.each(['APPLIED', 'REPLAYED', 'REPLAYED_NULL'] as const)(
+    '%s Patent receipt returns exact persisted/readback summary on one platform transaction',
+    async (ackStatus) => {
+      const priorKey = process.env.PII_ENCRYPTION_KEY;
+      process.env.PII_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+      try {
+        const authoritativeRow = {
+          status: 'OK' as const, anchorCount: 1, rowCount: 0,
+          bytesScanned: ackStatus === 'REPLAYED' ? 40n : null,
+          purged: 0, cached: 0, empty: 1,
+        };
+        const expected = {
+          ...authoritativeRow,
+          bytesScanned: ackStatus === 'REPLAYED' ? 40 : null,
+        };
+        const auditUpdate = vi.fn(async () => ({}));
+        const ownerDb = {
+          patentInventorCache: {
+            deleteMany: vi.fn(async () => ({ count: 0 })),
+            upsert: vi.fn(),
+          },
+          patentInventorTombstone: { findMany: vi.fn(async () => []) },
+          dataProvider: { findUnique: vi.fn(async () => ({ status: 'ENABLED' })) },
+          patentLookupRequest: {
+            findMany: vi.fn(async () => [{
+              id: 'request-1', assigneeNorm: 'acme', country: 'us',
+              anchor: '%Acme%', firstRequestedAt: new Date(),
+            }]),
+            update: vi.fn(async () => ({})),
+          },
+          sourcePolicy: { findUnique: vi.fn(async () => ({
+            reviewStatus: 'APPROVED', allowedPurpose: ['discovery'],
+          })) },
+          patentCacheRefreshAudit: {
+            create: vi.fn(async () => ({ id: 'audit-1' })),
+            update: auditUpdate,
+            findFirst: vi.fn(async () => authoritativeRow),
+          },
+        };
+        const broker = {
+          invoke: vi.fn(async (_toolId, _toolInput, context) => {
+            context.onDurableReceipt?.('google_patents.search', PATENT_RECEIPT);
+            return {
+              data: {
+                patents: [],
+                costFacts: {
+                  costBasis: 'estimated_upper_bound',
+                  maximumBytesBilled: '100', observedBytesBilled: null, maxRows: 50,
+                },
+              },
+              costCents: 0,
+              durableReceipt: PATENT_RECEIPT,
+            };
+          }),
+        } as unknown as ExecutionBroker;
+        if (ackStatus !== 'APPLIED') {
+          patentAckMock.mockImplementationOnce(async (input: {
+            transaction: unknown;
+            acknowledgements: Array<{ producerId: string }>;
+            readback: (transaction: unknown) => Promise<unknown>;
+          }) => ({
+            status: 'REPLAYED',
+            acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+              producerId, status: 'REPLAYED',
+            })),
+            value: await input.readback(input.transaction),
+          }));
+        }
+        const activities = createPatentsCacheActivities({
+          ownerDb: ownerDb as unknown as PrismaClient,
+          platformWriter: {
+            $transaction: vi.fn(async (callback: (transaction: typeof ownerDb) => Promise<unknown>) =>
+              callback(ownerDb)),
+          } as unknown as PrismaClient,
+          broker,
+          budgetStore: { attestAuthorized: vi.fn(async () => ({})) } as unknown as BudgetStore,
+          activityRunId: () => 'workflow-run-1',
+        });
+
+        await expect(activities.refreshPatentCacheActivity({
+          executionContractVersion: 1,
+          executionBudget: binding,
+          maxAnchors: 1,
+        })).resolves.toEqual(expected);
+        expect(patentAckMock).toHaveBeenCalledWith(expect.objectContaining({
+          acknowledgements: [expect.objectContaining({
+            producerId: 'google_patents.search', receipt: PATENT_RECEIPT,
+          })],
+        }));
+        expect(auditUpdate).toHaveBeenCalledWith(expect.objectContaining({
+          data: expect.objectContaining({
+            ...(ackStatus === 'APPLIED'
+              ? { executionOperationIds: [PATENT_RECEIPT.operationId] }
+              : { status: 'REPLAYED' }),
+          }),
+        }));
+      } finally {
+        if (priorKey === undefined) delete process.env.PII_ENCRYPTION_KEY;
+        else process.env.PII_ENCRYPTION_KEY = priorKey;
+      }
+    },
+  );
 
   it('does not count a conservative maximumBytesBilled bound as observed bytesScanned', async () => {
     const broker = {

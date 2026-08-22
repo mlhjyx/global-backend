@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { refreshPatentCache, type PatentRefreshDb, type PatentRefreshSummary } from '../adapters/patent-inventor-cache';
 import type { BudgetStore } from '../tools/budget-store';
 import { UnavailableBudgetStore } from '../tools/budget-store';
@@ -13,6 +13,38 @@ import {
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
+
+async function readbackPatentRefresh(
+  transaction: PatentRefreshDb,
+  context: Readonly<{
+    auditId: string;
+    readback: (
+      transaction: PatentRefreshDb,
+      operationIds: readonly string[],
+    ) => Promise<PatentRefreshSummary>;
+  }>,
+  receipts: readonly DurableExecutionReceipt[],
+): Promise<PatentRefreshSummary> {
+  const operationIds = receipts.map((receipt) => receipt.operationId);
+  const summary = await context.readback(transaction, operationIds);
+  await transaction.patentCacheRefreshAudit.update({
+    where: { id: context.auditId },
+    data: {
+      finishedAt: new Date(),
+      status: 'REPLAYED',
+      anchorCount: summary.anchorCount,
+      rowCount: summary.rowCount,
+      bytesScanned: summary.bytesScanned === null
+        ? null
+        : BigInt(Math.round(summary.bytesScanned)),
+      purged: summary.purged,
+      cached: summary.cached,
+      empty: summary.empty,
+      detail: 'authoritative replay readback',
+    },
+  } as never);
+  return summary;
+}
 
 function boundedMaxAnchors(value: number | undefined): number {
   return Number.isSafeInteger(value) && value !== undefined && value > 0
@@ -52,13 +84,13 @@ export function createPatentsCacheActivities(deps: {
             durableReceipts.push(durableReceipt);
           },
         }),
-        applyScanWithAck: async (scan, persist) => {
+        applyScanWithAck: async (_scan, persist, context) => {
           if (!durableReceipts.length) return persist(deps.ownerDb as unknown as PatentRefreshDb);
           if (!deps.platformWriter) {
             throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
           }
           return deps.platformWriter.$transaction(async (tx) => {
-            const value = await applyDomainAckConsumerTransactions({
+            const result = await applyDomainAckConsumerTransactions({
               transaction: tx,
               acknowledgements: durableReceipts.map((durableReceipt) => ({
                 producerId: 'google_patents.search',
@@ -66,17 +98,29 @@ export function createPatentsCacheActivities(deps: {
                 domainAckKey: `${binding.accountKey}:${durableReceipt.operationId}`,
                 domainRevision: durableReceipt.resultDigest,
               })),
-              apply: (transaction) => persist(transaction as unknown as PatentRefreshDb),
+              apply: async (transaction) => {
+                const database = transaction as unknown as PatentRefreshDb;
+                const summary = await persist(database);
+                await database.patentCacheRefreshAudit.update({
+                  where: { id: context.auditId },
+                  data: {
+                    executionOperationIds: durableReceipts.map(
+                      (receipt) => receipt.operationId,
+                    ) as unknown as Prisma.InputJsonValue,
+                    purged: summary.purged,
+                    cached: summary.cached,
+                    empty: summary.empty,
+                  },
+                } as never);
+                return summary;
+              },
+              readback: (transaction) => readbackPatentRefresh(
+                transaction as unknown as PatentRefreshDb,
+                context,
+                durableReceipts,
+              ),
             });
-            return value ?? {
-              status: 'OK',
-              anchorCount: 0,
-              rowCount: scan.rows.length,
-              bytesScanned: scan.bytesScanned,
-              purged: 0,
-              cached: 0,
-              empty: 0,
-            };
+            return result.value;
           });
         },
         maxAnchors: boundedMaxAnchors(input.maxAnchors),

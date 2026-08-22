@@ -670,7 +670,7 @@ describe('PostgresBudgetStore', () => {
 
     expect(reservation).toMatchObject({
       replay: true,
-      replayProjection: projection,
+      replayResult: { resultStrategy: 'typed_projection', projection },
       receipt: {
         operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
         resultDigest: projection.digest,
@@ -1513,7 +1513,10 @@ describe('PostgresBudgetStore', () => {
     );
     await expect(
       store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedCents: 5 }),
-    ).resolves.toMatchObject({ replay: true, replayProjection: projection });
+    ).resolves.toMatchObject({
+      replay: true,
+      replayResult: { resultStrategy: 'typed_projection', projection },
+    });
     await expect(
       store.open({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: '', capCents: 1 }),
     ).rejects.toBeInstanceOf(TypeError);

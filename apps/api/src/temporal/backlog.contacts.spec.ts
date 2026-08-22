@@ -5,7 +5,15 @@ const receiptMocks = vi.hoisted(() => ({
   applyDomainAckConsumerTransactions: vi.fn(async (input: {
     transaction: unknown;
     apply: (transaction: unknown) => Promise<unknown>;
-  }) => input.apply(input.transaction)),
+    acknowledgements: Array<{ producerId: string }>;
+  }) => ({
+    status: 'APPLIED',
+    acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+      producerId,
+      status: 'APPLIED',
+    })),
+    value: await input.apply(input.transaction),
+  })),
   persistDiscoveredContacts: vi.fn(async () => ({
     created: 1,
     merged: 0,

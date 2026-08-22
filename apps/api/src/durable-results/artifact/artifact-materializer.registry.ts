@@ -23,6 +23,19 @@ export const REQUIRED_ARTIFACT_RESULT_SCHEMAS = Object.freeze([
 export type ArtifactResultSchema =
   (typeof REQUIRED_ARTIFACT_RESULT_SCHEMAS)[number];
 
+export const ARTIFACT_RESULT_PRODUCERS = Object.freeze({
+  'crawl4ai-fetch/v1': 'crawl4ai.fetch',
+  'crawl4ai-render/v1': 'crawl4ai.render',
+  'http-get/v1': 'http.get',
+  'sanctions-download/v1': 'sanctions.download',
+} as const satisfies Record<ArtifactResultSchema, string>);
+
+export function artifactProducerIdForResultSchema(
+  resultSchema: ArtifactResultSchema,
+): string {
+  return ARTIFACT_RESULT_PRODUCERS[resultSchema];
+}
+
 const REQUIRED_SCHEMA_SET = new Set<string>(REQUIRED_ARTIFACT_RESULT_SCHEMAS);
 const MATERIALIZER_KEYS = new Set(['resultSchema', 'materialize']);
 const MAX_STREAM_CHUNKS = 65_536;

@@ -235,13 +235,15 @@ describe('DomainAckService', () => {
       domainAggregateType: 'EmailVerification',
       identity: 'normalized-email-hash',
       resultStrategy: 'typed_projection',
-      resultSchema: 'smtp-rcpt-probe/v1',
+      resultSchema: 'smtp-probe-verdict/v1',
     });
 
     await expect(applyDomainAckConsumerTransaction({
       service,
       producerId: 'smtp.rcpt_probe',
-      receipt: receipt(),
+      receipt: receipt({
+        resultSchema: 'smtp-probe-verdict/v1',
+      }),
       domainAckKey: 'smtp-rcpt:sha256:abc123',
       domainRevision: '1',
       apply,

@@ -6,7 +6,7 @@ import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
 import { EmailGuesser, GuessResult } from './email-guesser';
-import { persistGuessedEmail } from './email-guess-persist';
+import { persistGuessedEmail, readbackGuessedEmail } from './email-guess-persist';
 import { buildGuessTargets } from './email-guess-targets';
 import { EmailVerdict, EmailVerifyContext, LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { cleanEmail } from '../acquisition/clean';
@@ -401,16 +401,16 @@ export class DiscoveryService {
           });
           return { contacts, skippedSuppressed, skippedInvalid };
         },
-      });
-      if (persisted) return persisted;
-      return {
-        contacts: await tx.canonicalContact.findMany({
-          where: { companyId: loaded.company.id },
-          include: { contactPoints: true },
+        readback: async (transaction) => ({
+          contacts: await transaction.canonicalContact.findMany({
+            where: { companyId: loaded.company.id },
+            include: { contactPoints: true },
+          }),
+          skippedSuppressed: 0,
+          skippedInvalid: 0,
         }),
-        skippedSuppressed: 0,
-        skippedInvalid: 0,
-      };
+      });
+      return persisted.value;
     });
   }
 
@@ -615,18 +615,22 @@ export class DiscoveryService {
             lawfulBasis: r.result.lawfulBasis ?? opts?.lawfulBasis,
             now,
           }),
+          readback: (transaction) => readbackGuessedEmail(transaction, {
+            contactId: r.contactId,
+            result: r.result,
+          }),
         });
-        if (out?.persisted) {
+        if (out.value.persisted) {
           summary.persisted += 1;
-          if (out.status === 'VALID') summary.verified += 1;
+          if (out.value.status === 'VALID') summary.verified += 1;
           else summary.unverified += 1;
         }
         if (r.result.status === 'blocked') summary.blocked += 1;
         summary.perContact.push({
           fullName: r.fullName,
           status: r.result.status,
-          email: out?.email ?? null,
-          pointStatus: out?.status ?? null,
+          email: out.value.email ?? null,
+          pointStatus: out.value.status ?? null,
         });
       }
       return summary;
@@ -913,26 +917,28 @@ export class DiscoveryService {
         },
       };
         },
-      });
-      if (persisted) return persisted;
-      const replayedPoint = await tx.contactPoint.findUnique({
-        where: { id: pointId },
-      });
-      if (!replayedPoint) {
-        throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'contact point not found' },
-        });
-      }
-      return {
-        ...replayedPoint,
-        verification: {
-          status: verdict.status,
-          detail: verdict.detail ?? null,
-          kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
-          providerKey,
-          lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
+        readback: async (transaction) => {
+          const replayedPoint = await transaction.contactPoint.findUnique({
+            where: { id: pointId },
+          });
+          if (!replayedPoint) {
+            throw new NotFoundException({
+              error: { code: 'NOT_FOUND', message: 'contact point not found' },
+            });
+          }
+          return {
+            ...replayedPoint,
+            verification: {
+              status: verdict.status,
+              detail: verdict.detail ?? null,
+              kind: verdict.kind ?? gateKind ?? loaded.kind ?? null,
+              providerKey,
+              lawfulBasis: verdict.lawfulBasis ?? recordedBasis ?? null,
+            },
+          };
         },
-      };
+      });
+      return persisted.value;
     });
   }
 

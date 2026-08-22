@@ -113,7 +113,15 @@ describe('actual discovery receipt consumers', () => {
     mocks.applyDomainAckConsumerTransactions.mockImplementation(async (input: {
       transaction: unknown;
       apply: (transaction: unknown) => Promise<unknown>;
-    }) => input.apply(input.transaction));
+      acknowledgements: Array<{ producerId: string }>;
+    }) => ({
+      status: 'APPLIED',
+      acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+        producerId,
+        status: 'APPLIED',
+      })),
+      value: await input.apply(input.transaction),
+    }));
   });
 
   it('captures contact Tool and Model receipts and ACKs the exact contact persistence transaction', async () => {
@@ -191,7 +199,18 @@ describe('actual discovery receipt consumers', () => {
     expect(tx.usageLedger.create).toHaveBeenCalledOnce();
 
     mocks.applyDomainAckConsumerTransactions.mockImplementationOnce(
-      async () => undefined,
+      async (input: {
+        transaction: unknown;
+        readback: (transaction: unknown) => Promise<unknown>;
+        acknowledgements: Array<{ producerId: string }>;
+      }) => ({
+        status: 'REPLAYED',
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: 'REPLAYED',
+        })),
+        value: await input.readback(input.transaction),
+      }),
     );
     await expect(service.discoverContacts(CTX, COMPANY_ID)).resolves.toEqual({
       contacts: [],
@@ -301,7 +320,18 @@ describe('actual discovery receipt consumers', () => {
     }));
 
     mocks.applyDomainAckConsumerTransactions.mockImplementationOnce(
-      async () => undefined,
+      async (input: {
+        transaction: unknown;
+        readback: (transaction: unknown) => Promise<unknown>;
+        acknowledgements: Array<{ producerId: string }>;
+      }) => ({
+        status: 'REPLAYED',
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: 'REPLAYED',
+        })),
+        value: await input.readback(input.transaction),
+      }),
     );
     await expect(service.verifyContactPoint(CTX, POINT_ID)).resolves.toMatchObject({
       verification: { status: 'VALID' },

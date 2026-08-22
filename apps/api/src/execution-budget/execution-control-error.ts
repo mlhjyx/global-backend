@@ -12,6 +12,13 @@ function controlToken(value: unknown): boolean {
     token.includes('BUDGETSTORE') ||
     token.includes('BUDGETEXCEEDED') ||
     token.includes('PAIDOPERATIONUNKNOWN') ||
+    token.includes('DOMAIN_ACK_') ||
+    token.includes('DOMAINACK') ||
+    token.includes('DURABLE_EXECUTION_RECEIPT_') ||
+    token.includes('DURABLEEXECUTIONRECEIPT') ||
+    token.includes('GENERIC_OPERATION_ARTIFACT_') ||
+    token.includes('GENERICOPERATIONARTIFACT') ||
+    token.includes('ARTIFACTSTORAGEERROR') ||
     token.includes('DURABLE_REPLAY_') ||
     token.includes('_REPLAY_')
   );

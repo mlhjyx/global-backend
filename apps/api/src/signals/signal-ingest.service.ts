@@ -1,8 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
-import { BudgetExceededError } from '../tools/budget';
-import { BudgetOperationReplayError } from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { OpenFdaSearchInput, OpenFdaSearchOutput, SamSearchInput, SamSearchOutput, TedSearchInput, TedSearchOutput } from '../tools/source-tools';
 import type { Fda510kClearance } from '../adapters/openfda-api';
@@ -19,6 +17,7 @@ import {
 import { MapOutcome, mapFdaClearance, mapSamSourcesSought, mapTedNotice } from './signal-mappers';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 /**
  * 平台层信号摄取（收口⑤ ingest-once）：外部源 → source_signal 一等事实，**拉取一次服务所有租户**。
@@ -218,14 +217,25 @@ export class SignalIngestService {
         observedAt: new Date(nowMs),
       });
     } catch (err) {
-      if (err instanceof BudgetExceededError || err instanceof BudgetOperationReplayError) throw err;
+      if (isExecutionControlError(err)) throw err;
       const msg = String(err).slice(0, 300);
       await this.writeLedgerError(spec, fingerprint, windowKey, msg);
       console.warn(`[signal-ingest] fetch failed provider=${spec.provider}: ${msg.slice(0, 150)}`);
       return { ...base, error: msg.slice(0, 150) };
     }
 
-    let persisted: { upserted: number; skipped: Record<string, number> };
+    let persisted: {
+      upserted: number;
+      skipped: Record<string, number>;
+      recordsFetched: number;
+    };
+    const skippedFromOutcomes = (): Record<string, number> => {
+      const skipped: Record<string, number> = {};
+      for (const outcome of fetched.outcomes) {
+        if (!outcome.row) skipped[outcome.skip] = (skipped[outcome.skip] ?? 0) + 1;
+      }
+      return skipped;
+    };
     if (fetched.durableReceipt) {
       if (!this.deps.platformWriter) {
         throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
@@ -237,18 +247,57 @@ export class SignalIngestService {
           receipt: fetched.durableReceipt,
           domainAckKey: `${spec.provider}:${fingerprint}:${windowKey}`,
           domainRevision: fetched.durableReceipt!.resultDigest,
-          apply: (transaction) => this.persistSignals(fetched.outcomes, transaction),
+          apply: async (transaction) => {
+            const result = await this.persistSignals(fetched.outcomes, transaction);
+            await this.writeLedger(spec, fingerprint, windowKey, {
+              recordsFetched: fetched.records,
+              signalsUpserted: result.upserted,
+              status: 'OK',
+              error: null,
+            }, transaction);
+            return { ...result, recordsFetched: fetched.records };
+          },
         });
-        return applied.value ?? { upserted: 0, skipped: {} };
+        if (applied.value) return applied.value;
+        const ledger = await tx.signalIngest.findUnique({
+          where: {
+            providerKey_queryFingerprint_windowKey: {
+              providerKey: spec.provider,
+              queryFingerprint: fingerprint,
+              windowKey,
+            },
+          },
+          select: {
+            recordsFetched: true,
+            signalsUpserted: true,
+            status: true,
+          },
+        });
+        if (!ledger || ledger.status !== 'OK') {
+          throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+        }
+        return {
+          upserted: ledger.signalsUpserted,
+          recordsFetched: ledger.recordsFetched,
+          skipped: skippedFromOutcomes(),
+        };
       });
     } else {
-      persisted = await this.persistSignals(fetched.outcomes, this.deps.prisma);
+      const result = await this.persistSignals(fetched.outcomes, this.deps.prisma);
+      await this.writeLedger(spec, fingerprint, windowKey, {
+        recordsFetched: fetched.records,
+        signalsUpserted: result.upserted,
+        status: 'OK', error: null,
+      });
+      persisted = { ...result, recordsFetched: fetched.records };
     }
     const { upserted, skipped } = persisted;
-    await this.writeLedger(spec, fingerprint, windowKey, {
-      recordsFetched: fetched.records, signalsUpserted: upserted, status: 'OK', error: null,
-    });
-    return { ...base, recordsFetched: fetched.records, signalsUpserted: upserted, skipped };
+    return {
+      ...base,
+      recordsFetched: persisted.recordsFetched,
+      signalsUpserted: upserted,
+      skipped,
+    };
   }
 
   private async persistSignals(
@@ -298,8 +347,9 @@ export class SignalIngestService {
     fingerprint: string,
     windowKey: string,
     patch: { recordsFetched: number; signalsUpserted: number; status: 'OK' | 'ERROR'; error: string | null },
+    database: Pick<Prisma.TransactionClient, 'signalIngest'> = this.deps.prisma,
   ): Promise<void> {
-    await this.deps.prisma.signalIngest.upsert({
+    await database.signalIngest.upsert({
       where: { providerKey_queryFingerprint_windowKey: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey } },
       create: {
         providerKey: spec.provider,

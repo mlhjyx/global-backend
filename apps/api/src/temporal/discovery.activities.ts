@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
@@ -85,6 +85,7 @@ export function createDiscoveryActivities(deps: {
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
@@ -334,13 +335,25 @@ export function createDiscoveryActivities(deps: {
           budgetTruncated,
         };
           },
+          readback: async (transaction) => {
+            const fulfilled = settled.filter((item) => item.status === 'fulfilled');
+            return {
+              rawCount: await transaction.rawSourceRecord.count({
+                where: { runId: args.runId, sourceClass: q.sourceClass },
+              }),
+              costCents: fulfilled.reduce(
+                (sum, item) => sum + item.value.r.costCents,
+                0,
+              ),
+              provider: fulfilled
+                .filter((item) => item.value.r.records.length > 0)
+                .map((item) => item.value.key)
+                .join('+') || null,
+              budgetTruncated,
+            };
+          },
         });
-        return persisted ?? {
-          rawCount: 0,
-          costCents: 0,
-          provider: null,
-          budgetTruncated,
-        };
+        return persisted.value;
       });
     },
 
@@ -639,11 +652,22 @@ export function createDiscoveryActivities(deps: {
       let enriched = 0;
       let matched = 0;
       for (const c of companies.slice(0, ENRICH_LIMIT)) {
+        const durableReceipts: Array<{
+          producerId: string;
+          receipt: DurableExecutionReceipt;
+        }> = [];
+        const captureEnrichmentReceipt = (
+          producerId: string,
+          receipt: DurableExecutionReceipt,
+        ): void => {
+          durableReceipts.push({ producerId, receipt });
+        };
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          onDurableReceipt: captureEnrichmentReceipt,
         };
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         // 所有 enricher 互补并跑；已有该源命名空间的跳过（幂等）
@@ -673,15 +697,35 @@ export function createDiscoveryActivities(deps: {
           }
         }
         enriched += 1;
-        if (!hits.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          commitCompanyEnrichmentResults(tx, {
-            workspaceId: args.workspaceId,
-            companyId: c.id,
-            hits,
-            status: 'ENRICHED',
-          }),
-        );
+        if (!hits.length && !durableReceipts.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const result = await applyDomainAckConsumerTransactions({
+            transaction: tx,
+            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+              producerId,
+              receipt,
+              domainAckKey: `${c.id}:${receipt.operationId}:enrichment`,
+              domainRevision: receipt.resultDigest,
+            })),
+            apply: (transaction) => hits.length
+              ? commitCompanyEnrichmentResults(transaction, {
+                  workspaceId: args.workspaceId,
+                  companyId: c.id,
+                  hits,
+                  status: 'ENRICHED',
+                })
+              : Promise.resolve(false),
+            readback: async (transaction) => {
+              const current = await transaction.canonicalCompany.findUnique({
+                where: { id: c.id },
+                select: { attributes: true },
+              });
+              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+              return hits.some((hit) => Object.hasOwn(attributes, hit.key));
+            },
+          });
+          return result.value;
+        });
         if (!committed) continue;
         matched += 1;
         hits.forEach((h) => providersHit.add(h.key));
@@ -769,11 +813,22 @@ export function createDiscoveryActivities(deps: {
       let matched = 0;
       const nowMs = Date.now();
       for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
+        const durableReceipts: Array<{
+          producerId: string;
+          receipt: DurableExecutionReceipt;
+        }> = [];
+        const captureEnrichmentReceipt = (
+          producerId: string,
+          receipt: DurableExecutionReceipt,
+        ): void => {
+          durableReceipts.push({ producerId, receipt });
+        };
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          onDurableReceipt: captureEnrichmentReceipt,
         };
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
 
@@ -805,15 +860,35 @@ export function createDiscoveryActivities(deps: {
           }
         }
         enriched += 1;
-        if (!hits.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          commitCompanyEnrichmentResults(tx, {
-            workspaceId: args.workspaceId,
-            companyId: c.id,
-            hits,
-            signalTimestamp: new Date(nowMs),
-          }),
-        );
+        if (!hits.length && !durableReceipts.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const result = await applyDomainAckConsumerTransactions({
+            transaction: tx,
+            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+              producerId,
+              receipt,
+              domainAckKey: `${c.id}:${receipt.operationId}:signal-enrichment`,
+              domainRevision: receipt.resultDigest,
+            })),
+            apply: (transaction) => hits.length
+              ? commitCompanyEnrichmentResults(transaction, {
+                  workspaceId: args.workspaceId,
+                  companyId: c.id,
+                  hits,
+                  signalTimestamp: new Date(nowMs),
+                })
+              : Promise.resolve(false),
+            readback: async (transaction) => {
+              const current = await transaction.canonicalCompany.findUnique({
+                where: { id: c.id },
+                select: { attributes: true },
+              });
+              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+              return hits.some((hit) => Object.hasOwn(attributes, hit.key));
+            },
+          });
+          return result.value;
+        });
         if (!committed) continue;
         matched += 1;
         hits.forEach((h) => providersHit.add(h.key));
@@ -842,6 +917,7 @@ export function createDiscoveryActivities(deps: {
         prisma: deps.prisma,
         broker: deps.broker,
         budgetStore: budgets,
+        platformWriter: deps.platformWriter,
       });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (

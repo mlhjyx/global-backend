@@ -6,6 +6,7 @@ import { EmailVerdict, EmailVerificationAdapter, EmailVerifyContext,
 import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import type { SmtpProbeInput, SmtpProbeOutput } from '../../tools/builtin-tools';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 /**
  * ToolBroker 的最小面（供本 verifier 依赖 + 测试注入假实现）。SMTP 原始出网**只能**经此闸门：
@@ -123,11 +124,7 @@ export class SelfHostedEmailVerifier implements EmailVerificationAdapter {
         toolCtx,
       );
     } catch (err) {
-      if (
-        err && typeof err === 'object' &&
-        typeof (err as { code?: unknown }).code === 'string' &&
-        (err as { code: string }).code.startsWith('BUDGET_')
-      ) throw err;
+      if (isExecutionControlError(err)) throw err;
       // Broker 拒绝：SUSPENDED/用途门（竞态）= source_policy_denied；其余（预算/限流兜底）= probe_failed。
       // 任何情况都**不**回落到原始出网。
       const denied = (err as { name?: string })?.name === 'ToolPolicyDenied';

@@ -155,9 +155,19 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, kind, norm(term),
+        );
+        return null;
+      }
       const node = await this.node(kind, code); // 校验 code 真实存在
-      if (!node) return null;
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, kind, norm(term),
+        );
+        return null;
+      }
       // 沉淀：下次该词确定性命中
       await this.persistTermAlias(
         opts.workspaceId,
@@ -223,9 +233,19 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'cpv', term,
+        );
+        return null;
+      }
       const node = await this.node('cpv', code); // 校验 code 真实存在
-      if (!node) return null;
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'cpv', term,
+        );
+        return null;
+      }
       await this.persistTermAlias(
         opts.workspaceId,
         result.durableReceipt,
@@ -290,9 +310,19 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'naics', term,
+        );
+        return null;
+      }
       const node = await this.node('naics', code); // 校验 code 真实存在
-      if (!node) return null;
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'naics', term,
+        );
+        return null;
+      }
       await this.persistTermAlias(
         opts.workspaceId,
         result.durableReceipt,
@@ -361,9 +391,21 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt,
+          'fda_product_code', term,
+        );
+        return null;
+      }
       const node = await this.node('fda_product_code', code); // 校验 code 真实存在
-      if (!node) return null;
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt,
+          'fda_product_code', term,
+        );
+        return null;
+      }
       await this.persistTermAlias(
         opts.workspaceId,
         result.durableReceipt,
@@ -457,6 +499,24 @@ export class TaxonomyResolver {
           update: { code, source: 'llm' },
           create: { kind, term, code, source: 'llm' },
         }),
+      });
+    });
+  }
+
+  private async acknowledgeTaxonomyNoop(
+    workspaceId: string,
+    durableReceipt: DurableExecutionReceipt | undefined,
+    kind: string,
+    term: string,
+  ): Promise<void> {
+    await this.prisma.withWorkspace(workspaceId, async (transaction) => {
+      await applyDomainAckConsumerTransaction({
+        transaction,
+        producerId: 'taxonomy.normalize',
+        receipt: durableReceipt,
+        domainAckKey: `${kind}:${term}`,
+        domainRevision: durableReceipt?.resultDigest ?? 'noop',
+        apply: async () => undefined,
       });
     });
   }
