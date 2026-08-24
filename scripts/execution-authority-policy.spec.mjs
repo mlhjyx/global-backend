@@ -6,7 +6,9 @@ import test from 'node:test';
 import {
   EXPECTED_MODEL_TASKS,
   EXPECTED_MODEL_GATEWAY_BOUNDARIES,
+  EXPECTED_NON_TOOL_INVOKE_BOUNDARIES,
   EXPECTED_PROTECTED_WIRING_PATHS,
+  EXPECTED_TOOL_CALLSITES,
   EXPECTED_TOOL_IDS,
   inspectExecutionAuthoritySource,
   verifyExecutionAuthorityPolicy,
@@ -28,6 +30,10 @@ test('inventory is locked to 18 Tools and 10 product Model tasks', () => {
     'apps/api/src/model-gateway/router-model-gateway.ts',
     'apps/api/src/tools/tool-broker.factory.ts',
     'apps/api/src/tools/tool-broker.ts',
+  ]);
+  assert.equal(EXPECTED_TOOL_CALLSITES.length, 36);
+  assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
+    'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
   ]);
 });
 
@@ -57,6 +63,14 @@ test('AST inspection sees aliased gateway calls, Tool calls and BigQuery aliases
   `);
   assert.deepEqual(execution.modelMethods, ['generateStructured']);
   assert.deepEqual(execution.toolIds, ['google_patents.search']);
+  assert.deepEqual(execution.dynamicInvokeReceivers, []);
+  const resolvedConstant = inspectExecutionAuthoritySource('synthetic.ts', `
+    const TOOL = 'smtp.rcpt_probe';
+    await broker.invoke(TOOL, input, context);
+    await anotherBroker.invoke(toolId, input, context);
+  `);
+  assert.deepEqual(resolvedConstant.toolIds, ['smtp.rcpt_probe']);
+  assert.deepEqual(resolvedConstant.dynamicInvokeReceivers, ['anotherBroker']);
   const bigQuery = inspectExecutionAuthoritySource('synthetic.ts', `
     import { bigqueryPatents as patents } from "../adapters/bigquery-patents";
     await patents.searchPatentsByAssignee('Acme', options);
@@ -70,7 +84,7 @@ test('pure contracts are complete while physical Router/ToolBroker wiring remain
   assert.equal(result.toolCount, 18);
   assert.equal(result.modelTaskCount, 10);
   assert.equal(result.physicalExecutionWiring, 'NOT_WIRED');
-  assert.equal(result.physicalToolCallsiteCount, 35);
+  assert.equal(result.physicalToolCallsiteCount, 36);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });
 

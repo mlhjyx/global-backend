@@ -48,6 +48,49 @@ export const EXPECTED_PROTECTED_WIRING_PATHS = Object.freeze([
   'apps/api/src/tools/tool-broker.ts',
 ]);
 
+export const EXPECTED_TOOL_CALLSITES = Object.freeze([
+  'apps/api/src/acquisition/adapters/mapyourshow.source.ts#mapyourshow.fetch#1',
+  'apps/api/src/acquisition/adapters/trade-fair.source.ts#tradefair.algolia#1',
+  'apps/api/src/discovery/providers/bigquery-patents.provider.ts#google_patents.search#1',
+  'apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#1',
+  'apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#2',
+  'apps/api/src/discovery/providers/decision-maker.provider.ts#crawl4ai.fetch#1',
+  'apps/api/src/discovery/providers/decision-maker.provider.ts#crawl4ai.fetch#2',
+  'apps/api/src/discovery/providers/digital-footprint.provider.ts#crawl4ai.render#1',
+  'apps/api/src/discovery/providers/directory.provider.ts#crawl4ai.fetch#1',
+  'apps/api/src/discovery/providers/directory.provider.ts#searxng.search#1',
+  'apps/api/src/discovery/providers/email-verify.provider.ts#smtp.rcpt_probe#1',
+  'apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#1',
+  'apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#2',
+  'apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1',
+  'apps/api/src/discovery/providers/openfda.provider.ts#openfda.search#1',
+  'apps/api/src/discovery/providers/osm.provider.ts#osm.overpass#1',
+  'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.fetch#1',
+  'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.fetch#2',
+  'apps/api/src/discovery/providers/public-web.provider.ts#searxng.search#1',
+  'apps/api/src/discovery/providers/structured-harvest.provider.ts#crawl4ai.render#1',
+  'apps/api/src/discovery/providers/structured-harvest.provider.ts#http.get#1',
+  'apps/api/src/discovery/providers/ted.provider.ts#ted.search#1',
+  'apps/api/src/discovery/providers/trade-fair.provider.ts#tradefair.algolia#1',
+  'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#1',
+  'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#2',
+  'apps/api/src/discovery/providers/wikidata.provider.ts#wikidata.sparql#1',
+  'apps/api/src/intent/intent-projection.service.ts#http.get#1',
+  'apps/api/src/intent/page-fetcher.ts#crawl4ai.render#1',
+  'apps/api/src/sanctions/sanctions-refresh.service.ts#sanctions.download#1',
+  'apps/api/src/signals/signal-ingest.service.ts#openfda.search#1',
+  'apps/api/src/signals/signal-ingest.service.ts#samgov.search#1',
+  'apps/api/src/signals/signal-ingest.service.ts#ted.search#1',
+  'apps/api/src/site-builder/agents/brand-research.ts#crawl4ai.fetch#1',
+  'apps/api/src/site-builder/agents/brand-research.ts#searxng.search#1',
+  'apps/api/src/temporal/patent-cache-broker-scanner.ts#google_patents.search#1',
+  'apps/api/src/temporal/understanding.activities.ts#crawl4ai.fetch#1',
+]);
+
+export const EXPECTED_NON_TOOL_INVOKE_BOUNDARIES = Object.freeze([
+  'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
+]);
+
 const RECEIPT_FIELDS = Object.freeze([
   'schemaVersion', 'scopeKey', 'authorityId', 'accountId', 'operationId',
   'operationKey', 'resultStrategy', 'resultSchema', 'resultDigest',
@@ -92,9 +135,19 @@ function analyzeTypeScript(path, source) {
   );
   const modelCalls = [];
   const toolCalls = [];
+  const dynamicInvokes = [];
   const bigQueryValueImports = new Set();
+  const stringConstantsByLocalName = new Map();
   let importsGoogleBigQuery = false;
   let constructsBigQuery = false;
+  function collectConstants(node) {
+    if (
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+      node.initializer && ts.isStringLiteralLike(node.initializer)
+    ) stringConstantsByLocalName.set(node.name.text, node.initializer.text);
+    ts.forEachChild(node, collectConstants);
+  }
+  collectConstants(sourceFile);
   function visit(node) {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const moduleName = node.moduleSpecifier.text;
@@ -128,9 +181,13 @@ function analyzeTypeScript(path, source) {
       ) modelCalls.push(Object.freeze({ method, position: node.getStart(sourceFile) }));
       if (method === 'invoke') {
         const first = node.arguments[0];
-        if (first && ts.isStringLiteralLike(first)) {
-          toolCalls.push(Object.freeze({ toolId: first.text, position: node.getStart(sourceFile) }));
-        }
+        const toolId = first && ts.isStringLiteralLike(first)
+          ? first.text
+          : first && ts.isIdentifier(first)
+            ? stringConstantsByLocalName.get(first.text)
+            : undefined;
+        if (toolId !== undefined) toolCalls.push(Object.freeze({ toolId, position: node.getStart(sourceFile) }));
+        else dynamicInvokes.push(Object.freeze({ receiver, position: node.getStart(sourceFile) }));
       }
       if (bigQueryValueImports.has(receiver)) constructsBigQuery = true;
     }
@@ -140,6 +197,7 @@ function analyzeTypeScript(path, source) {
   return Object.freeze({
     modelCalls: Object.freeze(modelCalls),
     toolCalls: Object.freeze(toolCalls),
+    dynamicInvokes: Object.freeze(dynamicInvokes),
     importsGoogleBigQuery,
     constructsBigQuery,
   });
@@ -150,6 +208,7 @@ export function inspectExecutionAuthoritySource(path, source) {
   return Object.freeze({
     modelMethods: Object.freeze(analysis.modelCalls.map((entry) => entry.method)),
     toolIds: Object.freeze(analysis.toolCalls.map((entry) => entry.toolId)),
+    dynamicInvokeReceivers: Object.freeze(analysis.dynamicInvokes.map((entry) => entry.receiver)),
     importsGoogleBigQuery: analysis.importsGoogleBigQuery,
     constructsBigQuery: analysis.constructsBigQuery,
   });
@@ -515,6 +574,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   }
   const modelBoundaryCalls = [];
   const toolPhysicalCalls = [];
+  const nonToolInvokeBoundaries = [];
   const allProductSources = (await listFiles(repoRoot, 'apps/api/src'))
     .filter((path) => path.endsWith('.ts') && !path.endsWith('.spec.ts'))
     .filter((path) => !path.startsWith('apps/api/src/model-gateway/'));
@@ -536,6 +596,32 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
       if (!EXPECTED_TOOL_IDS.includes(call.toolId)) {
         issues.push(issue('EXECUTION_AUTHORITY_UNREGISTERED_TOOL_CALL', path, `uncatalogued ToolBroker call ${call.toolId}`, call.toolId));
       }
+    }
+    const dynamicOrdinals = new Map();
+    for (const call of analysis.dynamicInvokes) {
+      const ordinal = (dynamicOrdinals.get(call.receiver) ?? 0) + 1;
+      dynamicOrdinals.set(call.receiver, ordinal);
+      nonToolInvokeBoundaries.push(`${path}#${call.receiver}#${ordinal}`);
+    }
+  }
+  if (!sameSet(toolPhysicalCalls, EXPECTED_TOOL_CALLSITES)) {
+    const expected = new Set(EXPECTED_TOOL_CALLSITES);
+    const actual = new Set(toolPhysicalCalls);
+    for (const key of sorted(actual).filter((entry) => !expected.has(entry))) {
+      issues.push(issue('EXECUTION_AUTHORITY_TOOL_CALLSITE_UNCATALOGUED', key.split('#')[0], `uncatalogued Tool physical callsite ${key}`, key.split('#')[1]));
+    }
+    for (const key of EXPECTED_TOOL_CALLSITES.filter((entry) => !actual.has(entry))) {
+      issues.push(issue('EXECUTION_AUTHORITY_TOOL_CALLSITE_MISSING', key.split('#')[0], `missing Tool physical callsite ${key}`, key.split('#')[1]));
+    }
+  }
+  if (!sameSet(nonToolInvokeBoundaries, EXPECTED_NON_TOOL_INVOKE_BOUNDARIES)) {
+    const expected = new Set(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES);
+    const actual = new Set(nonToolInvokeBoundaries);
+    for (const key of sorted(actual).filter((entry) => !expected.has(entry))) {
+      issues.push(issue('EXECUTION_AUTHORITY_DYNAMIC_INVOKE_UNCLASSIFIED', key.split('#')[0], `dynamic invoke is not an approved non-Tool boundary ${key}`));
+    }
+    for (const key of EXPECTED_NON_TOOL_INVOKE_BOUNDARIES.filter((entry) => !actual.has(entry))) {
+      issues.push(issue('EXECUTION_AUTHORITY_NON_TOOL_BOUNDARY_MISSING', key.split('#')[0], `missing approved non-Tool invoke boundary ${key}`));
     }
   }
   if (!sameSet(modelBoundaryCalls, EXPECTED_MODEL_GATEWAY_BOUNDARIES)) {
@@ -606,6 +692,8 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   return Object.freeze({
     modelGatewayBoundaryCount: modelBoundaryCalls.length,
     physicalToolCallsiteCount: toolPhysicalCalls.length,
+    modelGatewayBoundaries: Object.freeze(sorted(modelBoundaryCalls)),
+    physicalToolCallsites: Object.freeze(sorted(toolPhysicalCalls)),
   });
 }
 
@@ -640,13 +728,15 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
       physicalExecutionWiring: 'UNKNOWN',
       physicalToolCallsiteCount: 0,
       modelGatewayBoundaryCount: 0,
+      physicalToolCallsites: Object.freeze([]),
+      modelGatewayBoundaries: Object.freeze([]),
     });
   }
   try {
     if (manifest === undefined) manifest = await readJson(repoRoot, manifestPath);
   } catch (error) {
     issues.push(issue('EXECUTION_AUTHORITY_MANIFEST_INVALID', manifestPath, error instanceof Error ? error.message : String(error)));
-    return Object.freeze({ ok: false, issues: Object.freeze(issues), toolCount: 0, modelTaskCount: 0, physicalExecutionWiring: 'UNKNOWN', physicalToolCallsiteCount: 0, modelGatewayBoundaryCount: 0 });
+    return Object.freeze({ ok: false, issues: Object.freeze(issues), toolCount: 0, modelTaskCount: 0, physicalExecutionWiring: 'UNKNOWN', physicalToolCallsiteCount: 0, modelGatewayBoundaryCount: 0, physicalToolCallsites: Object.freeze([]), modelGatewayBoundaries: Object.freeze([]) });
   }
   validateTopLevel(manifest, manifestPath, issues);
   validateReceipt(manifest, manifestPath, issues);
@@ -664,6 +754,8 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
     physicalExecutionWiring: manifest.physicalExecutionWiring?.status ?? 'UNKNOWN',
     physicalToolCallsiteCount: callsites.physicalToolCallsiteCount,
     modelGatewayBoundaryCount: callsites.modelGatewayBoundaryCount,
+    physicalToolCallsites: callsites.physicalToolCallsites,
+    modelGatewayBoundaries: callsites.modelGatewayBoundaries,
   });
 }
 
