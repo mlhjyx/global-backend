@@ -7,6 +7,30 @@ import { BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
 import { projectGenericOperationResult } from "./generic-operation-projection";
 import { RateLimitStoreUnavailableError } from "./redis-rate-limit-store";
 import { Tool } from "./tool-contract";
+import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
+import { TypedProjectionRegistry } from "../durable-results/typed-projection.registry";
+import { registerCatalogResultProjections } from "../durable-results/catalog-result-projections";
+
+const DURABLE_RECEIPT: DurableExecutionReceipt = {
+  schemaVersion: "durable-execution-receipt/v1",
+  scopeKey: "w",
+  authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+  accountId: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+  operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
+  operationKey: "run:tool:t.project",
+  resultStrategy: "typed_projection",
+  resultSchema: "searxng-search/v1",
+  resultDigest: "a".repeat(64),
+  artifactId: null,
+  usage: {
+    currency: "USD",
+    unit: "microusd",
+    callCount: 1,
+    chargedMicrousd: "0",
+    upperBoundMicrousd: "0",
+  },
+  costBasis: "estimated_upper_bound",
+};
 
 function fakeTool(
   id: string,
@@ -55,6 +79,24 @@ function makeBroker(
       ...extra,
     }),
   };
+}
+
+function durableArtifactTool(
+  id: string,
+  costCents = 1,
+  exec?: () => Promise<unknown>,
+): Tool {
+  const tool = fakeTool(id, costCents, exec);
+  tool.durableResultStrategy = {
+    kind: "artifact_reference",
+    schema: "test-tool/v1",
+    maxBytes: 4096,
+    mediaTypes: ["application/json"],
+    privacyClass: "PERSONAL_DATA",
+    ttlSeconds: 60,
+  };
+  tool.durableReplayResult = (result) => result;
+  return tool;
 }
 
 describe("ToolBroker — allowedTools 白名单（无超级 Agent 的代码强制）", () => {
@@ -161,17 +203,12 @@ describe("ToolBroker — per-wire external-action authorization", () => {
 describe("ToolBroker — 预算 reserve-then-settle", () => {
   it("replays an approved durable projection without executing the physical tool again", async () => {
     const execute = vi.fn(async () => ({ mustNotRun: true }));
-    const tool = fakeTool("t.replay", 1, execute);
-    tool.durableReplayResult = (result) => result;
+    const tool = durableArtifactTool("t.replay", 1, execute);
     const projectedResult = { data: { value: "cached" }, costCents: 1 };
     const projection = projectGenericOperationResult({
       kind: "tool",
-      schema: "tool-result/v1",
-      data: {
-        toolId: tool.id,
-        toolVersion: tool.version,
-        result: projectedResult,
-      },
+      schema: "test-tool/v1",
+      data: projectedResult,
     });
     const budgetStore = {
       reserve: vi.fn(async () => ({
@@ -180,19 +217,62 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
+        receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
 
     await expect(
       broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
-    ).resolves.toEqual(projectedResult);
+    ).resolves.toEqual({ ...projectedResult, durableReceipt: DURABLE_RECEIPT });
     expect(execute).not.toHaveBeenCalled();
   });
 
   it("atomically settles the scrubbed tool projection with the observed cost", async () => {
-    const tool = fakeTool("t.project", 1);
+    const tool = durableArtifactTool("t.project", 1);
+    const settle = vi.fn(async () => ({
+      chargedCents: 1,
+      observedCents: 1,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: "op" }),
+      1,
+      expect.objectContaining({
+        kind: "tool",
+        schema: "test-tool/v1",
+        data: { data: { ok: true }, costCents: 1 },
+      }),
+      {
+        usage: {
+          currency: "USD", unit: "microusd", callCount: 1,
+          upperBoundMicrousd: "10000",
+        },
+        costBasis: "estimated_upper_bound",
+      },
+    );
+  });
+
+  it("settles typed Tool output with the registered durable result schema instead of tool-result/v1", async () => {
+    const tool = fakeTool("searxng.search", 1, async () => ({
+      results: [{ url: "https://example.com/result", title: "Example" }],
+    }));
+    tool.durableResultStrategy = { kind: "typed_projection", schema: "searxng-search/v1" };
     tool.durableReplayResult = (result) => result;
     const settle = vi.fn(async () => ({
       chargedCents: 1,
@@ -218,19 +298,231 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       1,
       expect.objectContaining({
         kind: "tool",
-        schema: "tool-result/v1",
+        schema: "searxng-search/v1",
         data: expect.objectContaining({
-          toolId: tool.id,
-          toolVersion: tool.version,
+          schema: "searxng-search/v1",
+          data: {
+            data: { results: [{ url: "https://example.com/result", title: "Example" }] },
+            costCents: 1,
+          },
         }),
       }),
+      {
+        usage: {
+          currency: "USD",
+          unit: "microusd",
+          callCount: 1,
+          upperBoundMicrousd: "10000",
+        },
+        costBasis: "estimated_upper_bound",
+      },
     );
+  });
+
+  it("projects and replays every typed Tool directly from its central schema without a replay hook", async () => {
+    const execute = vi.fn(async () => ({
+      results: [{ url: "https://example.com/result", title: "Example" }],
+    }));
+    const tool = fakeTool("searxng.search", 1, execute);
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "searxng-search/v1",
+    };
+    delete tool.durableReplayResult;
+    const settle = vi.fn(async () => ({
+      chargedCents: 1,
+      observedCents: 1,
+      capVariance: false,
+      replay: false,
+    }));
+    const reserve = vi.fn()
+      .mockResolvedValueOnce({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: false,
+      });
+    const budgetStore = { reserve, settle } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    const live = await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    const projection = settle.mock.calls[0]?.[2];
+    expect(projection).toMatchObject({
+      kind: "tool",
+      schema: "searxng-search/v1",
+      data: expect.objectContaining({ schema: "searxng-search/v1" }),
+    });
+
+    reserve.mockResolvedValueOnce({
+      workspaceId: "w",
+      accountKey: "run",
+      operationId: "op",
+      estimatedCents: 1,
+      replay: true,
+      replayResult: { resultStrategy: 'typed_projection', projection },
+      receipt: {
+        ...DURABLE_RECEIPT,
+        resultSchema: "searxng-search/v1",
+        resultDigest: projection!.digest,
+      },
+    });
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).resolves.toEqual({
+      ...live,
+      durableReceipt: {
+        ...DURABLE_RECEIPT,
+        resultSchema: "searxng-search/v1",
+        resultDigest: projection!.digest,
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects the exact Google Patents result and canonical cost facts without a replay hook", async () => {
+    const tool = fakeTool("google_patents.search", 2, async () => ({
+      patents: [{
+        publicationNumber: "US-123-A1",
+        applicants: [{ name: "Example GmbH", country: "DE" }],
+        inventors: [{ name: "Ada Example" }],
+      }],
+      costFacts: {
+        costBasis: "provider_reported",
+        maximumBytesBilled: "214748364800",
+        observedBytesBilled: "4096",
+        maxRows: 50,
+      },
+    }));
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "google-patents-search/v1",
+    };
+    delete tool.durableReplayResult;
+    const settle = vi.fn(async () => ({
+      chargedCents: 2,
+      observedCents: 2,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 2,
+        replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" });
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: "op" }),
+      2,
+      expect.objectContaining({
+        kind: "tool",
+        schema: "google-patents-search/v1",
+        data: expect.objectContaining({
+          data: expect.objectContaining({
+            data: expect.objectContaining({
+              patents: [expect.objectContaining({ publicationNumber: "US-123-A1" })],
+              costFacts: {
+                costBasis: "provider_reported",
+                maximumBytesBilled: "214748364800",
+                observedBytesBilled: "4096",
+                maxRows: 50,
+              },
+            }),
+          }),
+        }),
+      }),
+      {
+        usage: {
+          currency: "USD",
+          unit: "microusd",
+          callCount: 1,
+          bytesBilled: "4096",
+          maximumBytesBilled: "214748364800",
+          chargedMicrousd: "20000",
+          upperBoundMicrousd: "20000",
+        },
+        costBasis: "provider_reported",
+      },
+    );
+  });
+
+  it("replays typed Tool projections through the Tool strategy without a generic envelope", async () => {
+    const execute = vi.fn(async () => ({ mustNotRun: true }));
+    const tool = fakeTool("searxng.search", 1, execute);
+    tool.durableResultStrategy = { kind: "typed_projection", schema: "searxng-search/v1" };
+    tool.durableReplayResult = (result) => result;
+    const projectedResult = {
+      data: { results: [{ url: "https://example.com/result", title: "Cached" }] },
+      costCents: 1,
+    };
+    const typedProjection = registerCatalogResultProjections(new TypedProjectionRegistry())
+      .project("searxng-search/v1", projectedResult);
+    const projection = projectGenericOperationResult({
+      kind: "tool",
+      schema: "searxng-search/v1",
+      data: JSON.parse(JSON.stringify(typedProjection)),
+    });
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
+        receipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).resolves.toEqual({
+      ...projectedResult,
+      durableReceipt: { ...DURABLE_RECEIPT, resultSchema: "searxng-search/v1", resultDigest: projection.digest },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("returns the ledger-authored receipt from a durable tool settlement", async () => {
+    const tool = durableArtifactTool("t.receipted", 1);
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedCents: 1,
+        replay: false,
+      })),
+      settle: vi.fn(async () => ({
+        chargedCents: 1,
+        observedCents: 1,
+        capVariance: false,
+        replay: false,
+        receipt: DURABLE_RECEIPT,
+      })),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+    const onDurableReceipt = vi.fn();
+
+    await expect(
+      broker.invoke(tool.id, {}, {
+        workspaceId: "w", runId: "run", onDurableReceipt,
+      }),
+    ).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
+    expect(onDurableReceipt).toHaveBeenCalledWith(tool.id, DURABLE_RECEIPT);
   });
 
   it("retries an unknown success-settlement ACK with the identical tool projection and no second wire", async () => {
     const execute = vi.fn(async () => ({ value: "live" }));
-    const tool = fakeTool("t.settlement-ack", 1, execute);
-    tool.durableReplayResult = (result) => result;
+    const tool = durableArtifactTool("t.settlement-ack", 1, execute);
     const settle = vi
       .fn()
       .mockRejectedValueOnce(new Error("settlement ACK unavailable"))
@@ -260,7 +552,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
     expect(settle.mock.calls[0]?.[2]).toMatchObject({
       kind: "tool",
-      schema: "tool-result/v1",
+      schema: "test-tool/v1",
     });
   });
 
@@ -292,16 +584,11 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
 
   it("rejects a projection bound to another tool without executing either wire", async () => {
     const execute = vi.fn(async () => ({ mustNotRun: true }));
-    const tool = fakeTool("t.bound", 1, execute);
-    tool.durableReplayResult = (result) => result;
+    const tool = durableArtifactTool("t.bound", 1, execute);
     const projection = projectGenericOperationResult({
       kind: "tool",
-      schema: "tool-result/v1",
-      data: {
-        toolId: "t.other",
-        toolVersion: tool.version,
-        result: { data: {}, costCents: 1 },
-      },
+      schema: "other-tool/v1",
+      data: { data: {}, costCents: 1 },
     });
     const budgetStore = {
       reserve: vi.fn(async () => ({
@@ -310,7 +597,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });
@@ -322,18 +609,14 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
 
   it("converts a throwing durable replay hook into the stable no-second-wire error", async () => {
     const execute = vi.fn(async () => ({ mustNotRun: true }));
-    const tool = fakeTool("t.throwing-replay", 1, execute);
+    const tool = durableArtifactTool("t.throwing-replay", 1, execute);
     tool.durableReplayResult = () => {
       throw new Error("old replay shape");
     };
     const projection = projectGenericOperationResult({
       kind: "tool",
-      schema: "tool-result/v1",
-      data: {
-        toolId: tool.id,
-        toolVersion: tool.version,
-        result: { data: { value: "cached" }, costCents: 1 },
-      },
+      schema: "test-tool/v1",
+      data: { data: { value: "cached" }, costCents: 1 },
     });
     const budgetStore = {
       reserve: vi.fn(async () => ({
@@ -342,7 +625,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
         operationId: "op",
         estimatedCents: 1,
         replay: true,
-        replayProjection: projection,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const { broker } = makeBroker(tool, { budgetStore });

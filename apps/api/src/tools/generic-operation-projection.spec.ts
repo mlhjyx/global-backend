@@ -20,6 +20,19 @@ describe('generic durable operation projection', () => {
     expect(parseGenericOperationProjection(projected)).toEqual(projected);
   });
 
+  it('preserves finite fractional cost facts without changing replay bytes', () => {
+    const projected = projectGenericOperationResult({
+      kind: 'model',
+      schema: 'fit-judgment/v1',
+      data: { usage: { costUsd: 0.0017, inputTokens: 11, outputTokens: 7 } },
+    });
+
+    expect(parseGenericOperationProjection(projected)).toEqual(projected);
+    expect(projected.data).toEqual({
+      usage: { costUsd: 0.0017, inputTokens: 11, outputTokens: 7 },
+    });
+  });
+
   it.each(['prompt', 'authorization', 'token', 'headers', 'rawResponse'])(
     'rejects sensitive key %s at any nesting depth',
     (key) => {

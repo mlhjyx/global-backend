@@ -14,9 +14,8 @@ describe('ICP product model budget execution', () => {
     const execute = vi.fn(async (context) => {
       order.push('model');
       expect(context.runId).toBe(accountKey);
+      expect(context.durableResultSchema).toBe('icp-design/v1');
       const result = { data: { name: 'ICP', weight: 0.75 }, provider: 'gateway', model: 'qualified' };
-      const projected = context.genericReplay.project(result);
-      expect(context.genericReplay.restore(projected)).toEqual(result);
       return result;
     });
 
@@ -32,6 +31,7 @@ describe('ICP product model budget execution', () => {
         subjectId: '30000000-0000-4000-8000-000000000003',
         requestSha256,
       },
+      durableResultSchema: 'icp-design/v1',
       execute,
     })).resolves.toMatchObject({ data: { name: 'ICP', weight: 0.75 } });
     expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({

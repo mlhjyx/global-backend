@@ -1,13 +1,19 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MISS_THRESHOLD, computeNextFetchAt } from '../acquisition/monitored-source.lifecycle';
 import { PageFetcher } from './page-fetcher';
 import { BudgetExceededError } from '../tools/budget';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageKind, PageSignals } from './page-signals';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 const PARSER_VERSION = 'web-watch/v1';
 const WEB_WATCH_KEY = 'web_watch';
+type WebsiteWatchWriteDb = Pick<
+  PrismaClient,
+  'sourceEntity' | 'sourceEntityChange' | 'sourceFetch' | 'monitoredSource'
+>;
 
 /** monitored_source.config 的 web_watch 形态。 */
 export interface WebWatchConfig {
@@ -26,6 +32,30 @@ export interface WatchResult {
   reason?: string;
 }
 
+function parseWatchResult(value: unknown): WatchResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+  }
+  const row = value as Record<string, unknown>;
+  if (
+    typeof row.sourceId !== 'string' || row.status !== 'DONE' ||
+    !['pagesFetched', 'pagesMissed', 'added', 'changed', 'intentEvents'].every(
+      (key) => Number.isSafeInteger(row[key]) && (row[key] as number) >= 0,
+    )
+  ) {
+    throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+  }
+  return Object.freeze({
+    sourceId: row.sourceId,
+    status: 'DONE' as const,
+    pagesFetched: row.pagesFetched as number,
+    pagesMissed: row.pagesMissed as number,
+    added: row.added as number,
+    changed: row.changed as number,
+    intentEvents: row.intentEvents as number,
+  });
+}
+
 /**
  * 网站变更 = intent 引擎（v3.0 P0 #4）。**复用** acquisition 的「内容哈希增量 diff + source_entity_change」
  * 机制，但锚点从「公司记录」换成「目标公司的一个意图承载页」：对一个 web_watch monitored_source 的每个页，
@@ -42,7 +72,15 @@ export interface WatchResult {
  *   通用 listDueSources 已排除 providerKey='web_watch'，本引擎走独立 intentSweep + 独立 Schedule。
  */
 export class WebsiteWatchService {
-  constructor(private readonly deps: { prisma: PrismaService; fetcher: PageFetcher }) {}
+  constructor(private readonly deps: {
+    prisma: PrismaService;
+    fetcher: PageFetcher;
+    platformWriter?: PrismaClient;
+    durableReceipts?: Array<{
+      producerId: string;
+      receipt: DurableExecutionReceipt;
+    }>;
+  }) {}
 
   async watch(sourceId: string): Promise<WatchResult> {
     const { prisma, fetcher } = this.deps;
@@ -78,6 +116,7 @@ export class WebsiteWatchService {
     const existingByUrl = new Map(existing.map((e) => [e.externalId, e]));
     const now = new Date();
     const changes: Prisma.SourceEntityChangeCreateManyInput[] = [];
+    const mutations: Array<(database: WebsiteWatchWriteDb) => Promise<void>> = [];
 
     let pagesFetched = 0, pagesMissed = 0, added = 0, changed = 0;
     const seen = new Set<string>();
@@ -104,10 +143,14 @@ export class WebsiteWatchService {
         if (prev && !prev.withdrawnAt) {
           const miss = prev.missCount + 1;
           if (miss >= MISS_THRESHOLD) {
-            await prisma.sourceEntity.update({ where: { id: prev.id }, data: { withdrawnAt: now, missCount: MISS_THRESHOLD } });
+            mutations.push(async (database) => {
+              await database.sourceEntity.update({ where: { id: prev.id }, data: { withdrawnAt: now, missCount: MISS_THRESHOLD } });
+            });
             changes.push({ sourceId, fetchId: fetchRow.id, externalId: url, changeType: 'REMOVED', detail: { page_kind: kind } as Prisma.InputJsonValue });
           } else {
-            await prisma.sourceEntity.update({ where: { id: prev.id }, data: { missCount: miss } });
+            mutations.push(async (database) => {
+              await database.sourceEntity.update({ where: { id: prev.id }, data: { missCount: miss } });
+            });
           }
         }
         continue;
@@ -120,12 +163,12 @@ export class WebsiteWatchService {
 
       if (!prev) {
         // 首见页 = 基线快照（不发 intent 事件，避免初次监控刷屏；当前态存 cleaned 供 projection 读）
-        await prisma.sourceEntity.create({
-          data: {
+        mutations.push(async (database) => {
+          await database.sourceEntity.create({ data: {
             sourceId, externalId: url, entityKind: 'web_page',
             name: companyName, domain: companyDomain ?? null, country: source.region ?? null,
             cleaned, contentHash: hash, firstSeenAt: now, lastSeenAt: now,
-          },
+          } });
         });
         added += 1;
         changes.push({ sourceId, fetchId: fetchRow.id, externalId: url, changeType: 'ADDED', detail: { page_kind: kind, baseline: signalSummary(signals) } as Prisma.InputJsonValue });
@@ -133,7 +176,9 @@ export class WebsiteWatchService {
       }
 
       if (!prev.withdrawnAt && prev.contentHash === hash) {
-        await prisma.sourceEntity.update({ where: { id: prev.id }, data: { lastSeenAt: now, missCount: 0 } });
+        mutations.push(async (database) => {
+          await database.sourceEntity.update({ where: { id: prev.id }, data: { lastSeenAt: now, missCount: 0 } });
+        });
         continue;
       }
 
@@ -151,31 +196,90 @@ export class WebsiteWatchService {
         }
         changed += 1;
       }
-      await prisma.sourceEntity.update({
-        where: { id: prev.id },
-        data: { cleaned, contentHash: hash, name: companyName, domain: companyDomain ?? prev.domain, lastSeenAt: now, withdrawnAt: null, missCount: 0 },
+      mutations.push(async (database) => {
+        await database.sourceEntity.update({
+          where: { id: prev.id },
+          data: { cleaned, contentHash: hash, name: companyName, domain: companyDomain ?? prev.domain, lastSeenAt: now, withdrawnAt: null, missCount: 0 },
+        });
       });
     }
 
     // 从 config 移除的旧页（不再监控）→ 标退出（不发 REMOVED intent，纯清理）
     for (const e of existing) {
       if (seen.has(e.externalId) || e.withdrawnAt) continue;
-      await prisma.sourceEntity.update({ where: { id: e.id }, data: { withdrawnAt: now } });
+      mutations.push(async (database) => {
+        await database.sourceEntity.update({ where: { id: e.id }, data: { withdrawnAt: now } });
+      });
     }
 
     const intentEvents = changes.filter((c) => c.changeType !== 'ADDED' && c.changeType !== 'REMOVED').length;
-    if (changes.length) await prisma.sourceEntityChange.createMany({ data: changes });
-
-    await prisma.sourceFetch.update({
-      where: { id: fetchRow.id },
-      data: { status: 'DONE', total: pagesFetched, added, updated: changed, finishedAt: now },
+    const watchResult: WatchResult = {
+      sourceId, status: 'DONE', pagesFetched, pagesMissed,
+      added, changed, intentEvents,
+    };
+    const durableReceipts = this.deps.durableReceipts ?? [];
+    const persist = async (database: WebsiteWatchWriteDb): Promise<WatchResult> => {
+      for (const mutation of mutations) await mutation(database);
+      if (changes.length) await database.sourceEntityChange.createMany({ data: changes });
+      await database.sourceFetch.update({
+        where: { id: fetchRow.id },
+        data: {
+          status: 'DONE', total: pagesFetched, added, updated: changed,
+          finishedAt: now,
+          ...(durableReceipts.length ? {
+            executionOperationIds: durableReceipts.map(
+              ({ receipt }) => receipt.operationId,
+            ) as unknown as Prisma.InputJsonValue,
+            executionResult: watchResult as unknown as Prisma.InputJsonValue,
+          } : {}),
+        },
+      });
+      await database.monitoredSource.update({
+        where: { id: sourceId },
+        data: { lastFetchAt: now, nextFetchAt: computeNextFetchAt(source.cadence, now) },
+      });
+      return watchResult;
+    };
+    if (!durableReceipts.length) {
+      return persist(prisma as unknown as WebsiteWatchWriteDb);
+    }
+    if (!this.deps.platformWriter) {
+      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter.$transaction(async (transaction) => {
+      const result = await applyDomainAckConsumerTransactions({
+        transaction,
+        acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+          producerId,
+          receipt,
+          domainAckKey: `${sourceId}:${receipt.operationId}`,
+          domainRevision: receipt.resultDigest,
+        })),
+        apply: (database) => persist(database as unknown as WebsiteWatchWriteDb),
+        readback: async (database) => {
+          const operationIds = durableReceipts.map(({ receipt }) => receipt.operationId);
+          const prior = await database.sourceFetch.findFirst({
+            where: {
+              status: 'DONE',
+              executionOperationIds: { equals: operationIds },
+            },
+            orderBy: { finishedAt: 'desc' },
+            select: { executionResult: true },
+          } as never);
+          const authoritative = parseWatchResult(prior?.executionResult);
+          await database.sourceFetch.update({
+            where: { id: fetchRow.id },
+            data: {
+              status: 'REPLAYED',
+              finishedAt: new Date(),
+              executionResult: authoritative as unknown as Prisma.InputJsonValue,
+            },
+          } as never);
+          return authoritative;
+        },
+      });
+      return result.value;
     });
-    await prisma.monitoredSource.update({
-      where: { id: sourceId },
-      data: { lastFetchAt: now, nextFetchAt: computeNextFetchAt(source.cadence, now) },
-    });
-
-    return { sourceId, status: 'DONE', pagesFetched, pagesMissed, added, changed, intentEvents };
   }
 
   /**

@@ -1,11 +1,11 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain, companyIdentity } from '../discovery/identity';
 import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-harvest.provider';
 import { isTerminalExternalActionPolicyDenied } from '../tools/tool-contract';
 import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { BudgetExceededError, runBudgetCents } from '../tools/budget';
+import { runBudgetCents } from '../tools/budget';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   parseExecutionBudgetBinding,
@@ -18,6 +18,9 @@ import {
   assertProductDiscoveryProvenance,
   isSyntheticDiscoveryProvenance,
 } from '../discovery/evidence-license';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
@@ -51,7 +54,12 @@ export interface ProjectIntentResult {
  * 平台采集一次、租户各自投影 —— 与 acquisition/TenantProjectionService 同一架构。
  */
 export class IntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker; budgetStore?: BudgetStore }) {}
+  constructor(private readonly deps: {
+    prisma: PrismaService;
+    broker?: ExecutionBroker;
+    budgetStore?: BudgetStore;
+    platformWriter?: PrismaClient;
+  }) {}
 
   async registerWatch(
     workspaceId: string,
@@ -82,10 +90,11 @@ export class IntentProjectionService {
     const domain = company.domain ? (normalizeDomain(company.domain) ?? undefined) : undefined;
     if (!domain) throw new Error(`company ${canonicalCompanyId} has no domain — cannot watch website`);
 
+    const durableReceipts: DurableExecutionReceipt[] = [];
     const pages = (
       opts?.pages?.length
         ? opts.pages
-        : await this.discoverPagesWithBudget(workspaceId, domain, opts)
+        : await this.discoverPagesWithBudget(workspaceId, domain, opts, durableReceipts)
     ).slice(0, 12);
     const sourceKey = `${WEB_WATCH_KEY}:${domain}`;
     const config = {
@@ -98,13 +107,16 @@ export class IntentProjectionService {
     } as unknown as Prisma.InputJsonValue;
 
     // 平台级 upsert（无 RLS）：已存在则合并页集（并集），否则新建。
-    const prior = await prisma.monitoredSource.findUnique({
+    const persist = async (
+      database: Pick<Prisma.TransactionClient, 'monitoredSource'>,
+    ): Promise<RegisterWatchResult> => {
+    const prior = await database.monitoredSource.findUnique({
       where: { sourceKey },
       select: { id: true, config: true },
     });
     if (prior) {
       const merged = mergePages(prior.config, pages);
-      await prisma.monitoredSource.update({
+      await database.monitoredSource.update({
         where: { id: prior.id },
         data: {
           config: {
@@ -120,7 +132,7 @@ export class IntentProjectionService {
         pages: merged.length,
       };
     }
-    const created = await prisma.monitoredSource.create({
+    const created = await database.monitoredSource.create({
       data: {
         providerKey: WEB_WATCH_KEY,
         sourceKey,
@@ -137,6 +149,36 @@ export class IntentProjectionService {
       created: true,
       pages: pages.length,
     };
+    };
+    if (!durableReceipts.length) return persist(prisma);
+    if (!this.deps.platformWriter) {
+      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter.$transaction(async (tx) => {
+      const result = await applyDomainAckConsumerTransactions({
+        transaction: tx,
+        acknowledgements: durableReceipts.map((durableReceipt) => ({
+          producerId: 'http.get',
+          receipt: durableReceipt,
+          domainAckKey: sourceKey,
+          domainRevision: durableReceipt.resultDigest,
+        })),
+        apply: persist,
+        readback: async (transaction) => {
+          const existing = await transaction.monitoredSource.findUniqueOrThrow({
+            where: { sourceKey },
+            select: { id: true, config: true },
+          });
+          return {
+            sourceId: existing.id,
+            sourceKey,
+            created: false,
+            pages: mergePages(existing.config, pages).length,
+          };
+        },
+      });
+      return result.value;
+    });
   }
 
   /**
@@ -242,6 +284,7 @@ export class IntentProjectionService {
       budgetCapCents?: number;
       executionBudget?: ExecutionBudgetBinding;
     },
+    durableReceipts: DurableExecutionReceipt[] = [],
   ): Promise<{ url: string; kind: PageKind }[]> {
     if (!this.deps.broker) return discoverWatchPages(domain);
     if (!opts?.budgetKey) throw new Error('registerWatch requires budgetKey before sitemap discovery');
@@ -267,6 +310,7 @@ export class IntentProjectionService {
         binding.scopeKey,
         binding.accountKey,
         opts.authorizeExternalAction,
+        durableReceipts,
       );
     }
     await budgets.open({
@@ -281,6 +325,7 @@ export class IntentProjectionService {
         budgetWorkspaceId,
         opts.budgetKey,
         opts.authorizeExternalAction,
+        durableReceipts,
       );
     } finally {
       await budgets.close({ workspaceId: budgetWorkspaceId, accountKey: opts.budgetKey });
@@ -292,6 +337,7 @@ export class IntentProjectionService {
     workspaceId: string,
     budgetKey: string,
     authorizeExternalAction?: () => Promise<boolean>,
+    durableReceipts: DurableExecutionReceipt[] = [],
   ): Promise<{ url: string; kind: PageKind }[]> {
     let budgetError: unknown;
     const pages = await discoverWatchPages(
@@ -301,6 +347,7 @@ export class IntentProjectionService {
         budgetKey,
         authorizeExternalAction,
         (error) => { budgetError = error; },
+        durableReceipts,
       ),
     );
     if (budgetError) throw budgetError;
@@ -312,6 +359,7 @@ export class IntentProjectionService {
     budgetKey: string,
     authorizeExternalAction?: () => Promise<boolean>,
     onBudgetError?: (error: unknown) => void,
+    durableReceipts: DurableExecutionReceipt[] = [],
   ): HttpGetFn | undefined {
     const broker = this.deps.broker;
     if (!broker) {
@@ -320,16 +368,16 @@ export class IntentProjectionService {
     }
     return async (input) => {
       try {
-        return (
-          await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
+        const result = await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
           workspaceId,
           runId: budgetKey,
           correlationId: budgetKey,
           authorizeExternalAction,
-        })
-        ).data;
+        });
+        if (result.durableReceipt) durableReceipts.push(result.durableReceipt);
+        return result.data;
       } catch (error) {
-        if (error instanceof BudgetExceededError || isBudgetControlError(error)) onBudgetError?.(error);
+        if (isExecutionControlError(error)) onBudgetError?.(error);
         throw error;
       }
     };
@@ -459,7 +507,7 @@ export async function discoverWatchPages(
   try {
     urls = await fetchSitemapUrls(domain, httpGet);
   } catch (error) {
-    if (isTerminalExternalActionPolicyDenied(error) || error instanceof BudgetExceededError || isBudgetControlError(error)) {
+    if (isTerminalExternalActionPolicyDenied(error) || isExecutionControlError(error)) {
       throw error;
     }
     urls = [];
@@ -479,10 +527,6 @@ export async function discoverWatchPages(
   return pages.filter((p) => (seen.has(p.url) ? false : (seen.add(p.url), true))).slice(0, 8);
 }
 
-function isBudgetControlError(error: unknown): boolean {
-  return !!error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
-    && (error as { code: string }).code.startsWith('BUDGET_');
-}
 
 function companyOf(config: unknown): { name: string; domain?: string } | undefined {
   const c = (config ?? {}) as Record<string, unknown>;

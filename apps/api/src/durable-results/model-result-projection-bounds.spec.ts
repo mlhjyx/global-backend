@@ -13,6 +13,31 @@ type NumericBounds = Readonly<{
   maximum?: number;
 }>;
 
+const COMMON_MODEL_METADATA_BOUNDS: Readonly<Record<string, NumericBounds>> = {
+  reportedModel: { maxLength: 120 },
+  modelResolutionSource: { maxLength: 40 },
+  'usage.inputTokens': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.outputTokens': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.costUsd': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements': { maxItems: 16 },
+  'usage.gatewaySettlements[].oneOf[0].status': { maxLength: 16 },
+  'usage.gatewaySettlements[].oneOf[0].requestId': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[0].resolverId': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[0].alias': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[0].protocol': { maxLength: 40 },
+  'usage.gatewaySettlements[].oneOf[0].channelId': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].basis': { maxLength: 40 },
+  'usage.gatewaySettlements[].oneOf[0].quota': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].costMicrousd': { minimum: 0, maximum: 1_000_000_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].inputTokens': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[0].outputTokens': { minimum: 0, maximum: 1_000_000_000 },
+  'usage.gatewaySettlements[].oneOf[1].status': { maxLength: 16 },
+  'usage.gatewaySettlements[].oneOf[1].requestId.oneOf[0]': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[1].resolverId': { maxLength: 120 },
+  'usage.gatewaySettlements[].oneOf[1].reason': { maxLength: 40 },
+  callCount: { minimum: 0, maximum: 100 },
+};
+
 const EXPECTED_BOUNDS: Readonly<Partial<Record<
   TypedProjectionSchema,
   Readonly<Record<string, NumericBounds>>
@@ -25,12 +50,14 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.claims[].confidence': { minimum: 0, maximum: 1 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'understanding-profile/v1': {
     'data.industry': { maxLength: 500 },
     'data.summary': { maxLength: 8000 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'understanding-offerings/v1': {
     'data.offerings': { maxItems: 128 },
@@ -51,6 +78,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.offerings[].confidence': { minimum: 0, maximum: 1 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'icp-design/v1': {
     'data.name': { maxLength: 200 },
@@ -103,6 +131,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.qualificationRules[].rationale': { maxLength: 2000 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'icp-query-plan/v1': {
     'data.queries': { maxItems: 64 },
@@ -125,11 +154,13 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.estimatedVolume': { minimum: 0, maximum: 1_000_000_000 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'taxonomy-code/v1': {
     'data.code': { maxLength: 80 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'fit-judgment/v1': {
     'data.verdict': { maxLength: 8 },
@@ -141,6 +172,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.reasons[]': { maxLength: 1000 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'discovery-extract-company/v1': {
     'data.name': { maxLength: 500 },
@@ -155,6 +187,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.confidence': { minimum: 0, maximum: 1 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'discovery-extract-list/v1': {
     'data.listKind': { maxLength: 80 },
@@ -165,6 +198,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.companies[].detailUrl': { maxLength: 2048 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
   'contact-decision-makers/v1': {
     'data.people': { maxItems: 64 },
@@ -178,6 +212,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<
     'data.people[].evidence': { maxLength: 2000 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
   },
 };
 

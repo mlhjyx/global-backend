@@ -3,6 +3,7 @@ import {
   allowedActionsForGuess,
   guessedEmailWritePlan,
   persistGuessedEmail,
+  readbackGuessedEmail,
 } from './email-guess-persist';
 import { GuessResult } from './email-guesser';
 
@@ -181,5 +182,49 @@ describe('email-guess-persist · 落库（fake tx）', () => {
     const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: blockedResult, suppressedEmails: new Set(), now: NOW });
     expect(out.persisted).toBe(false);
     expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('email-guess-persist · authoritative replay readback', () => {
+  it('returns the exact persisted VALID/RISKY point and rejects absent domain state', async () => {
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({ status: 'VALID' })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ status: 'UNVERIFIED' });
+    const tx = { contactPoint: { findUnique } } as never;
+
+    await expect(readbackGuessedEmail(tx, {
+      contactId: 'c1', result: verifiedResult,
+    })).resolves.toEqual({
+      persisted: true,
+      email: 'h.herold@acme.de',
+      status: 'VALID',
+      reason: verifiedResult.reason,
+    });
+    await expect(readbackGuessedEmail(tx, {
+      contactId: 'c1', result: verifiedResult,
+    })).resolves.toEqual({
+      persisted: false, reason: 'authoritative_readback_missing',
+    });
+    await expect(readbackGuessedEmail(tx, {
+      contactId: 'c1', result: verifiedResult,
+    })).resolves.toEqual({
+      persisted: false, reason: 'authoritative_readback_missing',
+    });
+  });
+
+  it('does not invent replay state for a non-persistable or invalid email', async () => {
+    const tx = { contactPoint: { findUnique: vi.fn() } } as never;
+    await expect(readbackGuessedEmail(tx, {
+      contactId: 'c1', result: blockedResult,
+    })).resolves.toEqual({ persisted: false, reason: blockedResult.reason });
+    await expect(readbackGuessedEmail(tx, {
+      contactId: 'c1',
+      result: {
+        ...verifiedResult,
+        best: { ...verifiedResult.best!, email: 'not-an-email' },
+      },
+    })).resolves.toEqual({ persisted: false, reason: 'suppressed' });
+    expect(tx.contactPoint.findUnique).not.toHaveBeenCalled();
   });
 });

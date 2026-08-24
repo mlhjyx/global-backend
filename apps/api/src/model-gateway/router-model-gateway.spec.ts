@@ -13,6 +13,8 @@ import { ModelResult, type ReviewVisionInput } from './types';
 import { AiTraceSink } from './ai-trace.sink';
 import type { BudgetStore } from '../tools/budget-store';
 import { projectGenericOperationResult } from '../tools/generic-operation-projection';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { projectModelResultForReplay } from '../durable-results/model-result-replay';
 
 /**
  * 收口② D：LLM 网关预算门——task.maxCostCents 从纯声明变 reserve-then-settle 真闸。
@@ -20,6 +22,26 @@ import { projectGenericOperationResult } from '../tools/generic-operation-projec
  */
 
 const QUALIFY_TASK = 'discovery.qualify_fit'; // task-registry 里 maxCostCents=20 的真实契约
+const DURABLE_RECEIPT: DurableExecutionReceipt = {
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'ws-1',
+  authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+  accountId: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
+  operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+  operationKey: 'run-1:model:taxonomy.normalize',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'taxonomy-code/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD',
+    unit: 'microusd',
+    callCount: 1,
+    chargedMicrousd: '0',
+    upperBoundMicrousd: '0',
+  },
+  costBasis: 'estimated_upper_bound',
+};
 
 function fakeProvider(impl?: () => Promise<ModelResult<string>>): ModelProvider {
   return {
@@ -75,21 +97,23 @@ function gatewayWith(provider: ModelProvider, budget: BudgetLedger): RouterModel
 }
 
 describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', () => {
-  it('replays an approved generic model projection without a second provider wire', async () => {
-    const provider = fakeProvider(async () => { throw new Error('must not execute'); });
-    const restored = { data: 'cached', provider: 'fake', model: 'm' };
-    const replay = {
-      schema: 'generic-text/v1',
-      project: (result: ModelResult<unknown>) => result,
-      restore: (projection: unknown) => projection as ModelResult<unknown>,
-    };
-    const projection = projectGenericOperationResult({
-      kind: 'model', schema: replay.schema, data: { result: restored },
+  it('returns the ledger-authored receipt from a durable model settlement', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-123' },
+      provider: 'fake',
+      model: 'm',
     });
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-        replay: true, replayProjection: projection,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+      })),
+      settle: vi.fn(async () => ({
+        chargedCents: 0,
+        observedCents: 0,
+        capVariance: false,
+        replay: false,
+        receipt: DURABLE_RECEIPT,
       })),
     } as unknown as BudgetStore;
     const gateway = new RouterModelGateway(
@@ -98,15 +122,199 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       budgetStore,
     );
 
-    await expect(gateway.generateText(
-      { task: QUALIFY_TASK, prompt: 'p' },
-      { workspaceId: 'ws-1', runId: 'run-1', genericReplay: replay },
-    )).resolves.toEqual(restored);
-    expect(provider.generateText).not.toHaveBeenCalled();
+    await expect(gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    )).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
+    expect(budgetStore.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      expect.any(Number),
+      expect.objectContaining({
+        kind: 'model',
+        schema: 'taxonomy-code/v1',
+      }),
+      {
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          upperBoundMicrousd: '400000',
+        },
+        costBasis: 'estimated_upper_bound',
+      },
+    );
   });
 
-  it('atomically settles the approved generic model projection', async () => {
-    const provider = fakeProvider(async () => ({ data: 'ok', provider: 'fake', model: 'm' }));
+  it('persists explicit token-pricing receipt facts for a registered Model task', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-123' },
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 7, outputTokens: 3 },
+      callCount: 1,
+    });
+    const settle = vi.fn(async () => ({
+      chargedCents: 1,
+      observedCents: 1,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    );
+
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      expect.any(Number),
+      expect.objectContaining({ schema: 'taxonomy-code/v1' }),
+      {
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          inputTokens: 7,
+          outputTokens: 3,
+          chargedMicrousd: '10000',
+          upperBoundMicrousd: '400000',
+        },
+        costBasis: 'token_pricing',
+      },
+    );
+  });
+
+  it('uses provider-reported costUsd for both the charged amount and receipt basis even when tokens exist', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-123' },
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 7, outputTokens: 3, costUsd: 0.0125 },
+      callCount: 1,
+    });
+    const settle = vi.fn(async () => ({
+      chargedCents: 2,
+      observedCents: 2,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    );
+
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op' }),
+      2,
+      expect.objectContaining({ schema: 'taxonomy-code/v1' }),
+      {
+        usage: {
+          currency: 'USD',
+          unit: 'microusd',
+          callCount: 1,
+          inputTokens: 7,
+          outputTokens: 3,
+          chargedMicrousd: '20000',
+          upperBoundMicrousd: '400000',
+        },
+        costBasis: 'provider_reported',
+      },
+    );
+  });
+
+  it('replays a registered typed model projection without a second provider wire', async () => {
+    const provider = fakeProvider(async () => { throw new Error('must not execute'); });
+    const restored = { data: { code: 'cached' }, provider: 'fake', model: 'm' };
+    const projection = projectModelResultForReplay('taxonomy-code/v1', restored);
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
+        receipt: DURABLE_RECEIPT,
+      })),
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await expect(gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    )).resolves.toEqual({ ...restored, durableReceipt: DURABLE_RECEIPT });
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it('atomically settles the registered typed model projection', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'ok' },
+      provider: 'fake',
+      model: 'm',
+    });
     const settle = vi.fn(async () => ({ chargedCents: 20, observedCents: 20, capVariance: false, replay: false }));
     const budgetStore = {
       reserve: vi.fn(async () => ({
@@ -119,25 +327,42 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       undefined,
       budgetStore,
     );
-    const replay = {
-      schema: 'generic-text/v1',
-      project: (result: ModelResult<unknown>) => result,
-      restore: (projection: unknown) => projection as ModelResult<unknown>,
-    };
 
-    await gateway.generateText(
-      { task: QUALIFY_TASK, prompt: 'p' },
-      { workspaceId: 'ws-1', runId: 'run-1', genericReplay: replay },
+    await gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
     );
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: 'op' }),
-      20,
-      expect.objectContaining({ kind: 'model', schema: replay.schema }),
+      5,
+      expect.objectContaining({ kind: 'model', schema: 'taxonomy-code/v1' }),
+      {
+        usage: {
+          currency: 'USD', unit: 'microusd', callCount: 1,
+          upperBoundMicrousd: '200000',
+        },
+        costBasis: 'estimated_upper_bound',
+      },
     );
   });
 
   it('retries an unknown success-settlement ACK with the identical projection and never recalls the provider', async () => {
-    const provider = fakeProvider(async () => ({ data: 'ok', provider: 'fake', model: 'm' }));
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'ok' },
+      provider: 'fake',
+      model: 'm',
+      usage: { inputTokens: 5, outputTokens: 2, costUsd: 0.0125 },
+    });
     const settle = vi.fn()
       .mockRejectedValueOnce(new Error('settlement ACK unavailable'))
       .mockResolvedValueOnce({ chargedCents: 20, observedCents: 20, capVariance: false, replay: true });
@@ -152,21 +377,29 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       undefined,
       budgetStore,
     );
-    const replay = {
-      schema: 'generic-text/v1',
-      project: (result: ModelResult<unknown>) => result,
-      restore: (projection: unknown) => projection as ModelResult<unknown>,
-    };
 
-    await expect(gateway.generateText(
-      { task: QUALIFY_TASK, prompt: 'p' },
-      { workspaceId: 'ws-1', runId: 'run-1', genericReplay: replay },
-    )).resolves.toMatchObject({ data: 'ok' });
-    expect(provider.generateText).toHaveBeenCalledTimes(1);
+    await expect(gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    )).resolves.toMatchObject({ data: { code: 'ok' } });
+    expect(provider.generateStructured).toHaveBeenCalledTimes(1);
     expect(settle).toHaveBeenCalledTimes(2);
     expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
     expect(settle.mock.calls[0]?.[2]).toMatchObject({
-      kind: 'model', schema: replay.schema,
+      kind: 'model', schema: 'taxonomy-code/v1',
+    });
+    expect(settle.mock.calls[0]?.[3]).toMatchObject({
+      usage: { chargedMicrousd: '20000' },
+      costBasis: 'provider_reported',
     });
   });
 
@@ -179,7 +412,8 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const budgetStore = {
       reserve: vi.fn(async () => ({
         workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-        replay: true, replayProjection: projection,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
       })),
     } as unknown as BudgetStore;
     const gateway = new RouterModelGateway(
@@ -190,55 +424,50 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     await expect(gateway.generateText(
       { task: QUALIFY_TASK, prompt: 'p' },
       {
-        workspaceId: 'ws-1', runId: 'run-1',
-        genericReplay: {
-          schema: 'generic-text/v1',
-          project: (result) => result,
-          restore: (value) => value as ModelResult<unknown>,
-        },
+        workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1',
       },
     )).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
     expect(provider.generateText).not.toHaveBeenCalled();
   });
 
-  it.each(['restore', 'project'] as const)(
-    'converts a throwing replay %s hook into the stable no-second-wire error',
-    async (throwingHook) => {
-      const provider = fakeProvider(async () => { throw new Error('must not execute'); });
-      const projection = projectGenericOperationResult({
-        kind: 'model', schema: 'generic-text/v1',
-        data: { result: { data: 'cached', provider: 'fake', model: 'm' } },
-      });
-      const budgetStore = {
-        reserve: vi.fn(async () => ({
-          workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
-          replay: true, replayProjection: projection,
-        })),
-      } as unknown as BudgetStore;
-      const gateway = new RouterModelGateway(
-        { route: () => [provider] } as unknown as ModelRouter,
-        undefined,
-        budgetStore,
-      );
+  it('converts typed replay digest drift into the stable no-second-wire error', async () => {
+    const provider = fakeProvider(async () => { throw new Error('must not execute'); });
+    const projection = {
+      ...projectModelResultForReplay('taxonomy-code/v1', {
+        data: { code: 'cached' },
+        provider: 'fake',
+        model: 'm',
+      }),
+      digest: 'b'.repeat(64),
+    };
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        replay: true,
+        replayResult: { resultStrategy: 'typed_projection', projection },
+      })),
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
 
-      await expect(gateway.generateText(
-        { task: QUALIFY_TASK, prompt: 'p' },
-        {
-          workspaceId: 'ws-1', runId: 'run-1',
-          genericReplay: {
-            schema: 'generic-text/v1',
-            restore: throwingHook === 'restore'
-              ? () => { throw new Error('old replay shape'); }
-              : (value) => value as ModelResult<unknown>,
-            project: throwingHook === 'project'
-              ? () => { throw new Error('projection schema changed'); }
-              : (value) => value,
-          },
+    await expect(gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
         },
-      )).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
-      expect(provider.generateText).not.toHaveBeenCalled();
-    },
-  );
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    )).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
 
   it('未开账户 → 不限预算（内部调用照常）', async () => {
     const budget = new BudgetLedger();

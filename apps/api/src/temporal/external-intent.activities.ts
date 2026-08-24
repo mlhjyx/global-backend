@@ -101,11 +101,16 @@ export function createExternalIntentActivities(deps: {
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker;
   budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('external-intent activities require an authoritative BudgetStore');
-  const ingestSvc = new SignalIngestService({ prisma: deps.prisma, broker: deps.broker });
+  const ingestSvc = new SignalIngestService({
+    prisma: deps.prisma,
+    broker: deps.broker,
+    platformWriter: deps.platformWriter,
+  });
   const tedProj = new TedIntentProjectionService({ prisma: deps.prisma });
   const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma });
   const samProj = new SamIntentProjectionService({ prisma: deps.prisma });

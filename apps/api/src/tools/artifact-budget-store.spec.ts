@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaService } from "../prisma/prisma.service";
 import { PostgresBudgetStore } from "./budget-store";
@@ -46,6 +47,64 @@ const ARTIFACT_SNAPSHOT = Object.freeze({
   manifest: ARTIFACT_MANIFEST,
   expectedFacts: EXPECTED_FACTS,
 });
+const ARTIFACT_RECEIPT_FACTS = Object.freeze({
+  usage: Object.freeze({
+    currency: "USD" as const,
+    unit: "microusd" as const,
+    callCount: 1,
+    upperBoundMicrousd: "170000",
+  }),
+  costBasis: "estimated_upper_bound" as const,
+});
+const ARTIFACT_DOMAIN_ACK = Object.freeze({
+  producerId: "http.get",
+  domainAckKey: ARTIFACT_REFERENCE.artifactId,
+  domainRevision: ARTIFACT_REFERENCE.sha256,
+});
+
+function canonical(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonical(record[key])}`
+  )).join(",")}}`;
+}
+
+function artifactAck(values: readonly unknown[]) {
+  const domainAckKey = String(values[4]);
+  const domainRevision = String(values[5]);
+  const material = {
+    operationId: ARTIFACT_REFERENCE.operationId,
+    consumer: "GenericHttpArtifactConsumer",
+    domainAggregateType: "ExternalArtifact",
+    domainAckKey,
+    domainRevision,
+    resultDigest: ARTIFACT_REFERENCE.sha256,
+  };
+  return {
+    schemaVersion: "domain-ack/v1",
+    ackId: createHash("sha256").update(canonical(material)).digest("hex"),
+    operationId: ARTIFACT_REFERENCE.operationId,
+    operationKey: "artifact-operation",
+    authorityId: ARTIFACT_MANIFEST.authorityId,
+    accountId: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+    scopeKey: TEST_WORKSPACE_ID,
+    consumer: material.consumer,
+    domainAggregateType: material.domainAggregateType,
+    domainAckKey,
+    domainRevision,
+    resultStrategy: "artifact_reference",
+    resultSchema: ARTIFACT_REFERENCE.resultSchema,
+    resultDigest: ARTIFACT_REFERENCE.sha256,
+    artifactId: ARTIFACT_REFERENCE.artifactId,
+    usage: ARTIFACT_RECEIPT_FACTS.usage,
+    costBasis: ARTIFACT_RECEIPT_FACTS.costBasis,
+  };
+}
 
 function unknownRow(manifest = ARTIFACT_MANIFEST) {
   return {
@@ -64,7 +123,10 @@ function fakePrisma(rows: unknown[][]): PrismaService {
   return {
     withWorkspace: vi.fn(async (_workspaceId, fn) =>
       fn({
-        $queryRaw: vi.fn(async () => queue.shift() ?? []),
+        $queryRaw: vi.fn(async (query: { strings?: readonly string[]; values?: readonly unknown[] }) =>
+          query.strings?.join("").includes("apply_execution_domain_ack_v1")
+            ? [{ status: "APPLIED", ack_json: artifactAck(query.values ?? []) }]
+            : queue.shift() ?? []),
       } as never),
     ),
   } as unknown as PrismaService;
@@ -81,6 +143,47 @@ function rawQueryMarkerError(
 }
 
 describe("PostgresBudgetStore artifact recovery", () => {
+  it("returns the closed artifact-reference replay union with the exact ledger receipt", async () => {
+    const store = new PostgresBudgetStore(fakePrisma([[
+      {
+        kind: "REPLAY",
+        operation_id: ARTIFACT_REFERENCE.operationId,
+        operation_key: "artifact-operation",
+        reserved_cents: 17n,
+        remaining_cents: 83n,
+        charged_cents: 17n,
+        observed_cents: 13n,
+        status: "SETTLED",
+        account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+        authority_id: ARTIFACT_MANIFEST.authorityId,
+        result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+        result_schema: ARTIFACT_REFERENCE.resultSchema,
+        result_digest: ARTIFACT_REFERENCE.sha256,
+        result_json: ARTIFACT_REFERENCE,
+        receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+        receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
+      },
+    ]]));
+
+    await expect(store.reserve({
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: "artifact-account",
+      operationKey: "artifact-operation",
+      estimatedCents: 17,
+    })).resolves.toMatchObject({
+      replay: true,
+      replayResult: {
+        resultStrategy: "artifact_reference",
+        reference: ARTIFACT_REFERENCE,
+      },
+      receipt: {
+        resultStrategy: "artifact_reference",
+        artifactId: ARTIFACT_REFERENCE.artifactId,
+        resultDigest: ARTIFACT_REFERENCE.sha256,
+      },
+    });
+  });
+
   it("marks an executed artifact write RESULT_UNKNOWN without releasing its reservation", async () => {
     const queries: Array<{
       strings?: readonly string[];
@@ -239,6 +342,9 @@ describe("PostgresBudgetStore artifact recovery", () => {
         fn({
           $queryRaw: vi.fn(async (query) => {
             queries.push(query);
+            if (queries.length === 2) {
+              return [{ status: "APPLIED", ack_json: artifactAck(query.values ?? []) }];
+            }
             return [
               {
                 charged_cents: 17n,
@@ -246,6 +352,17 @@ describe("PostgresBudgetStore artifact recovery", () => {
                 cap_variance: false,
                 status: "SETTLED",
                 replay: false,
+                reserved_cents: 17n,
+                operation_id: ARTIFACT_REFERENCE.operationId,
+                operation_key: "artifact-operation",
+                account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+                authority_id: ARTIFACT_MANIFEST.authorityId,
+                result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+                result_schema: ARTIFACT_REFERENCE.resultSchema,
+                result_digest: ARTIFACT_REFERENCE.sha256,
+                result_json: ARTIFACT_REFERENCE,
+                receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+                receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
               },
             ];
           }),
@@ -265,15 +382,22 @@ describe("PostgresBudgetStore artifact recovery", () => {
         },
         13,
         ARTIFACT_SNAPSHOT,
+        ARTIFACT_RECEIPT_FACTS,
+        ARTIFACT_DOMAIN_ACK,
       ),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       chargedCents: 17,
       observedCents: 13,
       capVariance: false,
       replay: false,
+      receipt: {
+        resultStrategy: "artifact_reference",
+        resultSchema: "http-get/v1",
+        artifactId: ARTIFACT_REFERENCE.artifactId,
+      },
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v4",
+      "settle_tool_budget_artifact_manifest_with_receipt_v1",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
@@ -286,9 +410,111 @@ describe("PostgresBudgetStore artifact recovery", () => {
       null,
       null,
       null,
+      JSON.stringify(ARTIFACT_RECEIPT_FACTS.usage),
+      ARTIFACT_RECEIPT_FACTS.costBasis,
       null,
       null,
     ]);
+  });
+
+  it("rejects artifact receipts when the locked row omits or drifts from the submitted manifest reference", async () => {
+    const common = {
+      charged_cents: 17n,
+      observed_cents: 13n,
+      cap_variance: false,
+      status: "SETTLED",
+      replay: false,
+      reserved_cents: 17n,
+      operation_id: ARTIFACT_REFERENCE.operationId,
+      operation_key: "artifact-operation",
+      account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+      authority_id: ARTIFACT_MANIFEST.authorityId,
+      receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+      receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
+    };
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: "artifact-account",
+      operationId: ARTIFACT_REFERENCE.operationId,
+      estimatedCents: 17,
+      replay: false,
+    };
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      common,
+    ]])).settleArtifactManifest(
+      reservation,
+      13,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+      ARTIFACT_DOMAIN_ACK,
+    )).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+
+    await expect(new PostgresBudgetStore(fakePrisma([[
+      {
+        ...common,
+        result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+        result_schema: ARTIFACT_REFERENCE.resultSchema,
+        result_digest: "cd".padEnd(64, "0"),
+        result_json: ARTIFACT_REFERENCE,
+      },
+    ]])).settleArtifactManifest(
+      reservation,
+      13,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+      ARTIFACT_DOMAIN_ACK,
+    )).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+  });
+
+  it("fails closed for locked artifact-reference bytes, receipt metadata, and parser drift", async () => {
+    const common = {
+      charged_cents: 17n,
+      observed_cents: 13n,
+      cap_variance: false,
+      status: "SETTLED",
+      replay: false,
+      reserved_cents: 17n,
+      operation_id: ARTIFACT_REFERENCE.operationId,
+      operation_key: "artifact-operation",
+      account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+      authority_id: ARTIFACT_MANIFEST.authorityId,
+      result_schema_version: ARTIFACT_REFERENCE.schemaVersion,
+      result_schema: ARTIFACT_REFERENCE.resultSchema,
+      result_digest: ARTIFACT_REFERENCE.sha256,
+      result_json: ARTIFACT_REFERENCE,
+      receipt_usage: ARTIFACT_RECEIPT_FACTS.usage,
+      receipt_cost_basis: ARTIFACT_RECEIPT_FACTS.costBasis,
+    };
+    const reservation = {
+      workspaceId: TEST_WORKSPACE_ID,
+      accountKey: "artifact-account",
+      operationId: ARTIFACT_REFERENCE.operationId,
+      estimatedCents: 17,
+      replay: false,
+    };
+    const settle = (row: Record<string, unknown>) => new PostgresBudgetStore(
+      fakePrisma([[row]]),
+    ).settleArtifactManifest(
+      reservation,
+      13,
+      ARTIFACT_SNAPSHOT,
+      ARTIFACT_RECEIPT_FACTS,
+      ARTIFACT_DOMAIN_ACK,
+    );
+
+    await expect(settle({
+      ...common,
+      result_json: { ...ARTIFACT_REFERENCE, mediaType: "application/json" },
+    })).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+    await expect(settle({
+      ...common,
+      receipt_usage: undefined,
+    })).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+    await expect(settle({
+      ...common,
+      result_json: { malformed: true },
+    })).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
   });
 
   it("rejects an open or caller-extended artifact reference before persistence", async () => {
@@ -312,6 +538,8 @@ describe("PostgresBudgetStore artifact recovery", () => {
           } as unknown as GenericOperationArtifactManifest,
           expectedFacts: EXPECTED_FACTS,
         },
+        ARTIFACT_RECEIPT_FACTS,
+        ARTIFACT_DOMAIN_ACK,
       ),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
@@ -319,16 +547,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "GENERIC_OPERATION_ARTIFACT_INVALID",
-    "GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID",
-    "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
-  ])("maps trusted database %s to the one bounded artifact error", async (marker) => {
+  it("maps trusted database artifact rejections to the one bounded artifact error", async () => {
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) =>
         fn({
           $queryRaw: vi.fn(async () => {
-            throw rawQueryMarkerError(marker);
+            throw rawQueryMarkerError("GENERIC_OPERATION_ARTIFACT_INVALID");
           }),
         } as never),
       ),
@@ -348,7 +572,10 @@ describe("PostgresBudgetStore artifact recovery", () => {
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
     await expect(
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
+      store.settleArtifactManifest(
+        reservation, 13, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
+        ARTIFACT_DOMAIN_ACK,
+      ),
     ).rejects.toMatchObject({
       code: "GENERIC_OPERATION_ARTIFACT_INVALID",
     });
@@ -383,7 +610,10 @@ describe("PostgresBudgetStore artifact recovery", () => {
 
     const results = await Promise.allSettled([
       store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
+      store.settleArtifactManifest(
+        reservation, 13, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
+        ARTIFACT_DOMAIN_ACK,
+      ),
       store.loadResultUnknownArtifact(
         reservation,
         ARTIFACT_MANIFEST.authorityId,

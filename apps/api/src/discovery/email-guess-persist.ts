@@ -59,6 +59,35 @@ export interface PersistGuessOutcome {
   reason: string;
 }
 
+export async function readbackGuessedEmail(
+  tx: Prisma.TransactionClient,
+  args: { contactId: string; result: GuessResult },
+): Promise<PersistGuessOutcome> {
+  const plan = guessedEmailWritePlan(args.result);
+  if (!plan) return { persisted: false, reason: args.result.reason };
+  const email = canonicalizeSuppressionValue('email', plan.email);
+  if (!email) return { persisted: false, reason: 'suppressed' };
+  const point = await tx.contactPoint.findUnique({
+    where: {
+      contactId_type_value: {
+        contactId: args.contactId,
+        type: 'email',
+        value: email,
+      },
+    },
+    select: { status: true },
+  });
+  if (!point || (point.status !== 'VALID' && point.status !== 'RISKY')) {
+    return { persisted: false, reason: 'authoritative_readback_missing' };
+  }
+  return {
+    persisted: true,
+    email,
+    status: point.status,
+    reason: plan.reason,
+  };
+}
+
 /**
  * 把单个联系人的邮箱猜测结果落库。contact 必须已存在（有 contactId）。now 由调用方传入（可测/不读时钟）。
  */

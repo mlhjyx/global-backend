@@ -1,12 +1,14 @@
-import type { ModelResult } from '../model-gateway/types';
 import type { AiContext } from '../model-gateway/types';
+import type { ModelResult } from '../model-gateway/types';
+import type { TypedProjectionSchema } from '../durable-results/durable-result-strategy';
 import type { BudgetStore } from '../tools/budget-store';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-authority.service';
 
 export async function executeIcpBudgetedTask<Output>(input: {
   budgetStore: BudgetStore;
   binding: ExecutionBudgetBinding;
-  execute: (context: Pick<AiContext, 'runId' | 'genericReplay'>) => Promise<ModelResult<Output>>;
+  durableResultSchema: TypedProjectionSchema;
+  execute: (context: Pick<AiContext, 'runId' | 'durableResultSchema'>) => Promise<ModelResult<Output>>;
 }): Promise<ModelResult<Output>> {
   await input.budgetStore.attestAuthorized({
     authorityId: input.binding.authorityId,
@@ -14,28 +16,7 @@ export async function executeIcpBudgetedTask<Output>(input: {
     accountKey: input.binding.accountKey,
   });
   return input.execute({
-      runId: input.binding.accountKey,
-      genericReplay: {
-        schema: 'icp-product-result/v1',
-        project: (result) => ({
-          json: JSON.stringify(result.data),
-          provider: result.provider,
-          model: result.model,
-        }),
-        restore: (value) => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) {
-            throw new Error('ICP_PRODUCT_REPLAY_INVALID');
-          }
-          const record = value as Record<string, unknown>;
-          if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
-            throw new Error('ICP_PRODUCT_REPLAY_INVALID');
-          }
-          return {
-            data: JSON.parse(record.json) as Output,
-            provider: record.provider,
-            model: record.model,
-          };
-        },
-      },
+    runId: input.binding.accountKey,
+    durableResultSchema: input.durableResultSchema,
   });
 }

@@ -17,6 +17,10 @@ import {
   projectGenericOperationResult,
   type GenericOperationProjection,
 } from './generic-operation-projection';
+import { TypedProjectionRegistry } from '../durable-results/typed-projection.registry';
+import { registerCatalogResultProjections } from '../durable-results/catalog-result-projections';
+import { registerSourceResultProjections } from '../durable-results/source-result-projections';
+import { toolExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   legacyToolCostMeasurement,
@@ -95,6 +99,9 @@ export class ToolBroker implements ExecutionBroker {
   private readonly budget: BudgetStore;
   private readonly limiter: RateLimitStore;
   private readonly deps: BrokerDeps;
+  private readonly projectionRegistry = registerSourceResultProjections(
+    registerCatalogResultProjections(new TypedProjectionRegistry()),
+  );
 
   constructor(deps: BrokerDeps) {
     this.deps = deps;
@@ -244,7 +251,9 @@ export class ToolBroker implements ExecutionBroker {
           Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
         ) {
           const replay = tool.durableReplayResult?.(paidDecision.result as unknown as ToolResult<O>);
-          if (replay) return replay;
+          if (replay) {
+            return replay;
+          }
           throw new PaidOperationUnknownError(paidScope.operationKey, 'REPLAY_PAYLOAD_UNAVAILABLE');
         }
         throw new Error(
@@ -270,12 +279,22 @@ export class ToolBroker implements ExecutionBroker {
           try {
             replay = this.replayGenericToolProjection(
               tool,
-              reservation.replayProjection,
+              reservation.replayResult?.resultStrategy === 'typed_projection'
+                ? reservation.replayResult.projection
+                : undefined,
             );
           } catch {
             throw new BudgetOperationReplayError(reservation.operationId);
           }
-          if (replay) return replay;
+          if (replay) {
+            const returned = reservation.receipt
+              ? { ...replay, durableReceipt: reservation.receipt }
+              : replay;
+            if (returned.durableReceipt) {
+              ctx.onDurableReceipt?.(tool.id, returned.durableReceipt);
+            }
+            return returned;
+          }
           throw new BudgetOperationReplayError(reservation.operationId);
         }
       } catch (err) {
@@ -412,20 +431,17 @@ export class ToolBroker implements ExecutionBroker {
       } else if (reservation) {
         let projection: GenericOperationProjection | undefined;
         try {
-          const durableReplay = tool.durableReplayResult?.(result) ?? null;
-          if (tool.durableReplayResult && !durableReplay) {
+          const durableReplay = tool.durableResultStrategy.kind === 'typed_projection'
+            ? result
+            : tool.durableReplayResult?.(result) ?? null;
+          if (
+            tool.durableResultStrategy.kind !== 'typed_projection' &&
+            tool.durableReplayResult && !durableReplay
+          ) {
             throw new Error('approved durable replay hook returned no result');
           }
           projection = durableReplay
-            ? projectGenericOperationResult({
-                kind: 'tool',
-                schema: 'tool-result/v1',
-                data: {
-                  toolId: tool.id,
-                  toolVersion: tool.version,
-                  result: durableReplay,
-                },
-              })
+            ? this.projectToolDurableResult(tool, durableReplay)
             : undefined;
         } catch {
           // The physical tool succeeded, but its result cannot satisfy the
@@ -434,17 +450,37 @@ export class ToolBroker implements ExecutionBroker {
           // result or allow a second physical request.
           throw new BudgetOperationReplayError(reservation.operationId);
         }
-        const settlement = [reservation, result.costCents, projection] as const;
+        const receiptFacts = projection
+          ? toolExecutionReceiptFacts({
+              toolId: tool.id,
+              resultSchema: tool.durableResultStrategy.kind === 'no_physical_call'
+                ? projection.schema
+                : tool.durableResultStrategy.schema,
+              result: result as ToolResult<unknown>,
+              reservedMicrousd: BigInt(reservation.estimatedCents) * 10_000n,
+              chargedMicrousd: BigInt(result.costCents) * 10_000n,
+            })
+          : undefined;
+        const settlement = [
+          reservation,
+          result.costCents,
+          projection,
+          receiptFacts,
+        ] as const;
+        let settled;
         try {
-          await this.budget.settle(...settlement);
+          settled = await this.budget.settle(...settlement);
         } catch {
           try {
             // A lost ACK after commit is safe to retry only with byte-identical
             // cost and projection. PostgreSQL rejects any settlement drift.
-            await this.budget.settle(...settlement);
+            settled = await this.budget.settle(...settlement);
           } catch {
             throw new BudgetOperationReplayError(reservation.operationId);
           }
+        }
+        if (settled?.receipt) {
+          result = { ...result, durableReceipt: settled.receipt };
         }
       }
       this.trace(
@@ -457,6 +493,9 @@ export class ToolBroker implements ExecutionBroker {
         tool.idempotencyKey(input),
         result.degraded,
       );
+      if (result.durableReceipt) {
+        ctx.onDurableReceipt?.(tool.id, result.durableReceipt);
+      }
       return result;
     } finally {
       await release?.();
@@ -470,27 +509,45 @@ export class ToolBroker implements ExecutionBroker {
     if (
       !projection ||
       projection.kind !== 'tool' ||
-      projection.schema !== 'tool-result/v1' ||
+      tool.durableResultStrategy.kind === 'no_physical_call' ||
+      projection.schema !== tool.durableResultStrategy.schema ||
       !projection.data ||
       typeof projection.data !== 'object' ||
       Array.isArray(projection.data)
     ) return null;
-    const envelope = projection.data as Record<string, unknown>;
-    if (
-      envelope.toolId !== tool.id ||
-      envelope.toolVersion !== tool.version ||
-      !tool.durableReplayResult
-    ) return null;
-    const replay = tool.durableReplayResult(
-      envelope.result as ToolResult<O>,
-    );
+    const restored = tool.durableResultStrategy.kind === 'typed_projection'
+      ? this.projectionRegistry.restore(projection.data)
+      : projection.data;
+    const replay = tool.durableResultStrategy.kind === 'typed_projection'
+      ? restored as ToolResult<O>
+      : tool.durableReplayResult?.(restored as ToolResult<O>) ?? null;
     if (!replay) return null;
-    const verified = projectGenericOperationResult({
-      kind: 'tool',
-      schema: 'tool-result/v1',
-      data: { toolId: tool.id, toolVersion: tool.version, result: replay },
-    });
+    const verified = this.projectToolDurableResult(tool, replay);
     return verified.digest === projection.digest ? replay : null;
+  }
+
+  private projectToolDurableResult<I, O>(
+    tool: Tool<I, O>,
+    result: ToolResult<O>,
+  ): GenericOperationProjection {
+    if (tool.durableResultStrategy.kind === 'typed_projection') {
+      return projectGenericOperationResult({
+        kind: 'tool',
+        schema: tool.durableResultStrategy.schema,
+        data: JSON.parse(JSON.stringify(this.projectionRegistry.project(
+          tool.durableResultStrategy.schema,
+          result,
+        ))),
+      });
+    }
+    if (tool.durableResultStrategy.kind === 'no_physical_call') {
+      throw new Error('TOOL_DURABLE_RESULT_STRATEGY_MISSING');
+    }
+    return projectGenericOperationResult({
+      kind: 'tool',
+      schema: tool.durableResultStrategy.schema,
+      data: result,
+    });
   }
 
   private notIncurredMeasurement(): PaidCostMeasurement {

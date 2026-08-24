@@ -9,6 +9,32 @@ import {
 import type { ParsedSanctionsEntity } from '../adapters/ofac-xml';
 import type { PrismaClient } from '@prisma/client';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const SANCTIONS_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'platform',
+  authorityId: '20000000-0000-4000-8000-000000000001',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'sanctions-download',
+  resultStrategy: 'artifact_reference',
+  resultSchema: 'sanctions-download/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: '50000000-0000-4000-8000-000000000001',
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
+});
+
+const ENTITY_XML = `<sdnList>
+  <publshInformation><Publish_Date>08/22/2026</Publish_Date><Record_Count>1</Record_Count></publshInformation>
+  <sdnEntry><uid>36</uid><lastName>AEROCARIBBEAN AIRLINES</lastName><sdnType>Entity</sdnType>
+    <programList><program>CUBA</program></programList>
+  </sdnEntry>
+</sdnList>`;
 
 const ent = (over: Partial<ParsedSanctionsEntity> = {}): ParsedSanctionsEntity => ({
   externalId: '36',
@@ -95,6 +121,49 @@ describe('diffSanctionsEntities', () => {
 });
 
 describe('SanctionsRefreshService — budget context', () => {
+  function successfulOwnerDb() {
+    return {
+      sanctionsSource: {
+        findUniqueOrThrow: vi.fn(async () => ({
+          id: 'source-1', key: 'ofac', format: 'ofac_sdn_xml',
+          url: 'https://example.test/sdn.xml', config: null,
+        })),
+        update: vi.fn(async () => undefined),
+      },
+      sanctionsEntity: {
+        findMany: vi.fn(async () => []),
+        createMany: vi.fn(async () => ({ count: 1 })),
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    } as unknown as PrismaClient;
+  }
+
+  it('persists a successful unreceipted refresh and requires the platform writer once a receipt exists', async () => {
+    const ownerDb = successfulOwnerDb();
+    const withoutReceipt = new SanctionsRefreshService({
+      ownerDb,
+      broker: { invoke: vi.fn(async () => ({
+        data: { body: ENTITY_XML, contentType: 'application/xml', lastModified: null },
+        costCents: 0,
+      })) } as unknown as ExecutionBroker,
+    });
+    await expect(withoutReceipt.refreshSource('source-1', 'platform-run')).resolves.toMatchObject({
+      status: 'DONE', total: 1, added: 1,
+    });
+
+    const withReceipt = new SanctionsRefreshService({
+      ownerDb: successfulOwnerDb(),
+      broker: { invoke: vi.fn(async () => ({
+        data: { body: ENTITY_XML, contentType: 'application/xml', lastModified: null },
+        costCents: 0,
+        durableReceipt: SANCTIONS_RECEIPT,
+      })) } as unknown as ExecutionBroker,
+    });
+    await expect(withReceipt.refreshSource('source-1', 'platform-run'))
+      .rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+  });
+
   it('passes the activity budget key into the ToolBroker context', async () => {
     const invoke = vi.fn(async () => ({
       data: { body: '<sdnList></sdnList>', contentType: 'application/xml', lastModified: null },

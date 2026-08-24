@@ -26,8 +26,9 @@ export const GOOGLE_PATENTS_ATTRIBUTION =
 // publications 表无 assignee 分区/聚簇 → 每查按列全表扫描（只 SELECT 2 列压字节）。maximumBytesBilled 硬顶护额度。
 const DEFAULT_MAX_GB = 200;
 const BYTES_PER_GB = 1024 ** 3;
-const MAX_ROWS_DEFAULT = 500;
-const MAX_ROWS_CEIL = 2000;
+export const GOOGLE_PATENTS_MAX_ROWS = 50;
+const MAX_ROWS_DEFAULT = GOOGLE_PATENTS_MAX_ROWS;
+const MAX_ROWS_CEIL = GOOGLE_PATENTS_MAX_ROWS;
 
 /**
  * 🔴 每 (assigneeNorm, assigneeCountry) **缓存**发明人上限（Codex PR #93 P2-6，数据最小化）——
@@ -72,6 +73,8 @@ export interface PatentInventor {
   name: string;
 }
 export interface PatentRecord {
+  /** Stable public patent row identity for durable replay/domain ACK. */
+  publicationNumber: string;
   /** ≤ MAX_APPLICANTS_PER_PATENT; normalizeRow rejects larger rows fail-closed. */
   applicants: PatentApplicant[];
   inventors: PatentInventor[];
@@ -82,6 +85,14 @@ export interface PatentSearchOptions {
   toYear: number;
   /** 每公司返回专利行上限（防大公司爆量 + 控字节；clamp 到 [1, {@link MAX_ROWS_CEIL}]）。 */
   maxRows?: number;
+}
+
+export interface PatentSearchWithCostFactsResult {
+  readonly patents: PatentRecord[];
+  readonly queried: boolean;
+  readonly maximumBytesBilled: string;
+  readonly observedBytesBilled: string | null;
+  readonly maxRows: number;
 }
 
 /**
@@ -113,6 +124,7 @@ function clampMaxRows(n?: number): number {
 function buildQuery(maxRows: number): string {
   return `
     SELECT
+      publication_number AS publication_number,
       ARRAY(
         SELECT AS STRUCT a.name AS name, a.country_code AS country
         FROM UNNEST(assignee_harmonized) a
@@ -251,6 +263,15 @@ export class BigQueryPatentsClient {
     return String(Math.floor(maxGb * BYTES_PER_GB));
   }
 
+  maximumBytesBilled(): string {
+    return this.maxBytes();
+  }
+
+  canSearchPatentsByAssignee(assignee: string): boolean {
+    const name = assignee?.trim();
+    return Boolean(name && assigneeLikeAnchor(name) && this.getClient());
+  }
+
   /**
    * 按 assignee（公司名）查近 [fromYear, toYear] 专利 → {@link PatentRecord}[]。
    * 无锚/无 creds → 返空（天然 no-op）。查询错误/超额向上抛，由 provider 的 try/catch fail-safe 兜（不在此吞）。
@@ -258,24 +279,72 @@ export class BigQueryPatentsClient {
   async searchPatentsByAssignee(assignee: string, opts: PatentSearchOptions,
     beforeRequest?: () => Promise<void>,
   ): Promise<PatentRecord[]> {
+    return (await this.searchPatentsByAssigneeWithCostFacts(
+      assignee,
+      opts,
+      beforeRequest,
+    )).patents;
+  }
+
+  async searchPatentsByAssigneeWithCostFacts(
+    assignee: string,
+    opts: PatentSearchOptions,
+    beforeRequest?: () => Promise<void>,
+  ): Promise<PatentSearchWithCostFactsResult> {
+    const maximumBytesBilled = this.maxBytes();
+    const maxRows = clampMaxRows(opts.maxRows);
     const name = assignee?.trim();
-    if (!name) return [];
+    if (!name) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    }
     const anchor = assigneeLikeAnchor(name);
-    if (!anchor) return [];
+    if (!anchor) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    }
     const client = this.getClient();
-    if (!client) return []; // 无 creds → 天然 no-op（同 EPO 无 key）
+    if (!client) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    } // 无 creds → 天然 no-op（同 EPO 无 key）
     await beforeRequest?.();
-    const [rows] = await client.query({
-      query: buildQuery(clampMaxRows(opts.maxRows)),
+    const queryOpts = {
+      query: buildQuery(maxRows),
       params: {
         fromDate: yearToStart(opts.fromYear),
         toDate: yearToEnd(opts.toYear),
         assigneeLike: anchor,
       },
       types: { fromDate: 'INT64', toDate: 'INT64', assigneeLike: 'STRING' },
-      maximumBytesBilled: this.maxBytes(),
-    });
-    return (rows ?? []).map(normalizeRow);
+      maximumBytesBilled,
+    };
+    if (client.createQueryJob) {
+      const [job] = await client.createQueryJob(queryOpts);
+      const [rows] = await job.getQueryResults();
+      let meta = job.metadata;
+      if (job.getMetadata) {
+        try {
+          const [refreshed] = await job.getMetadata();
+          meta = refreshed;
+        } catch {
+          /* Missing final metadata keeps observedBytesBilled=null. */
+        }
+      }
+      const observed = bytesFromMeta(meta);
+      return {
+        patents: (rows ?? []).map(normalizeRow),
+        queried: true,
+        maximumBytesBilled,
+        observedBytesBilled: observed === null ? null : String(observed),
+        maxRows,
+      };
+    }
+    const [rows] = await client.query(queryOpts);
+    return {
+      patents: (rows ?? []).map(normalizeRow),
+      queried: true,
+      maximumBytesBilled,
+      observedBytesBilled: null,
+      maxRows,
+    };
   }
 
   /**
@@ -341,6 +410,14 @@ function normCountry(v: unknown): string | undefined {
 
 /** BigQuery 行 → PatentRecord（🔴 inventor **只留 name**，丢 country_code 等 = 数据最小化）。 */
 export function normalizeRow(row: Record<string, unknown>): PatentRecord {
+  const publicationNumber = String(row.publication_number ?? row.publicationNumber ?? '').trim();
+  if (
+    !publicationNumber ||
+    publicationNumber.length > 120 ||
+    !/^[A-Za-z0-9:._/-]+$/u.test(publicationNumber)
+  ) {
+    throw new Error('GOOGLE_PATENTS_PUBLICATION_NUMBER_REQUIRED');
+  }
   const rawApplicants = Array.isArray(row.applicants)
     ? row.applicants as Array<Record<string, unknown>>
     : [];
@@ -358,7 +435,7 @@ export function normalizeRow(row: Record<string, unknown>): PatentRecord {
         .map((i) => ({ name: String(i?.name ?? '').trim() })) // 🔴 只 name
         .filter((i) => i.name)
     : [];
-  return { applicants, inventors };
+  return { publicationNumber, applicants, inventors };
 }
 
 /** 生产单例（env 驱动）。 */

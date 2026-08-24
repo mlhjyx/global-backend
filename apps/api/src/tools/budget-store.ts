@@ -21,7 +21,9 @@ import {
 import {
   invalidGenericOperationArtifact,
   isCanonicalArtifactUuid,
+  type GenericOperationArtifactReference,
 } from '../durable-results/artifact/artifact.types';
+import { parseArtifactReference } from '../durable-results/artifact/artifact-reference.schema';
 import { parseGenericOperationArtifactSnapshot } from '../durable-results/artifact/generic-operation-artifact.repository';
 import {
   expectedFactsFromUnknownRow,
@@ -34,6 +36,14 @@ import {
   type GenericOperationArtifactSubjectRef,
 } from '../durable-results/artifact/generic-operation-artifact-subject.repository';
 import { assertMicrousd } from './microusd';
+import {
+  parseDurableExecutionReceipt,
+  type DurableExecutionReceipt,
+  parseDurableExecutionReceiptFacts,
+  type DurableExecutionReceiptFacts,
+} from '../durable-results/durable-execution-receipt';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 const MAX_KEY_LENGTH = 200;
 
 function bindExpectedArtifactSubject(
@@ -78,13 +88,24 @@ export interface BudgetReservationRequest {
   estimatedCents: number;
 }
 
+export type BudgetReplayResult =
+  | Readonly<{
+      resultStrategy: 'typed_projection';
+      projection: GenericOperationProjection;
+    }>
+  | Readonly<{
+      resultStrategy: 'artifact_reference';
+      reference: GenericOperationArtifactReference;
+    }>;
+
 export interface BudgetReservation {
   workspaceId: string;
   accountKey: string;
   operationId: string;
   estimatedCents: number;
   replay: boolean;
-  replayProjection?: GenericOperationProjection;
+  replayResult?: BudgetReplayResult;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetSettlement {
@@ -92,6 +113,14 @@ export interface BudgetSettlement {
   observedCents: number;
   capVariance: boolean;
   replay: boolean;
+  receipt?: DurableExecutionReceipt;
+  domainAckStatus?: 'APPLIED' | 'REPLAYED';
+}
+
+export interface BudgetDomainAckRequest {
+  readonly producerId: string;
+  readonly domainAckKey: string;
+  readonly domainRevision: string;
 }
 
 export interface BudgetResultUnknownTransition {
@@ -119,7 +148,8 @@ export interface BudgetMicrousdReservation {
   operationId: string;
   estimatedMicrousd: bigint;
   replay: boolean;
-  replayProjection?: GenericOperationProjection;
+  replayResult?: BudgetReplayResult;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetMicrousdSettlement {
@@ -127,6 +157,7 @@ export interface BudgetMicrousdSettlement {
   observedMicrousd: bigint;
   capVariance: boolean;
   replay: boolean;
+  receipt?: DurableExecutionReceipt;
 }
 
 export interface BudgetMicrousdStatus {
@@ -180,6 +211,7 @@ export interface BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement>;
   /** Physical execution started, but the result/object acknowledgement is unknown. */
   markResultUnknown(
@@ -198,6 +230,8 @@ export interface BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
+    receiptFacts: DurableExecutionReceiptFacts,
+    domainAck: BudgetDomainAckRequest,
     subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
@@ -215,6 +249,7 @@ export interface BudgetStore {
     reservation: BudgetMicrousdReservation,
     observedMicrousd: bigint,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetMicrousdSettlement>;
   releaseMicrousd(
     reservation: BudgetMicrousdReservation,
@@ -466,6 +501,16 @@ type MicrousdReserveRow = {
   remaining_microusd: bigint;
   status?: string;
   result_json?: unknown;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  charged_microusd?: bigint | null;
+  observed_microusd?: bigint | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type MicrousdSettleRow = {
@@ -474,6 +519,17 @@ type MicrousdSettleRow = {
   cap_variance: boolean;
   status: string;
   replay?: boolean;
+  reserved_microusd?: bigint;
+  operation_id?: string;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  result_json?: unknown;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type ReserveRow = {
@@ -483,14 +539,35 @@ type ReserveRow = {
   remaining_cents: bigint;
   status?: string;
   result_json?: unknown;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  charged_cents?: bigint | null;
+  observed_cents?: bigint | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type SettleRow = {
   charged_cents: bigint;
   observed_cents: bigint;
+  reserved_cents?: bigint;
   cap_variance: boolean;
   status: string;
   replay?: boolean;
+  operation_id?: string;
+  operation_key?: string;
+  account_id?: string;
+  authority_id?: string | null;
+  result_schema_version?: string | null;
+  result_schema?: string | null;
+  result_digest?: string | null;
+  result_json?: unknown;
+  receipt_usage?: unknown;
+  receipt_cost_basis?: string | null;
 };
 
 type ResultUnknownRow = {
@@ -603,6 +680,242 @@ function toSafeNumber(name: string, value: bigint): number {
   const result = Number(value);
   if (!Number.isSafeInteger(result)) throw new RangeError(`${name} exceeds the JavaScript safe integer range`);
   return result;
+}
+
+function projectionResultStrategy(
+  schemaVersion: string | null | undefined,
+): DurableExecutionReceipt['resultStrategy'] | null {
+  if (schemaVersion === 'generic-operation-projection/v1') return 'typed_projection';
+  if (schemaVersion === 'generic-operation-artifact-ref/v1') return 'artifact_reference';
+  return null;
+}
+
+function artifactIdFromResultJson(resultJson: unknown): string | null {
+  if (!resultJson || typeof resultJson !== 'object' || Array.isArray(resultJson)) return null;
+  const artifactId = (resultJson as Record<string, unknown>).artifactId;
+  return typeof artifactId === 'string' ? artifactId : null;
+}
+
+function durableReceiptFromLedgerRow(input: {
+  readonly scopeKey: string;
+  readonly operationId: string;
+  readonly operationKey?: string;
+  readonly accountId?: string;
+  readonly authorityId?: string | null;
+  readonly resultSchemaVersion?: string | null;
+  readonly resultSchema?: string | null;
+  readonly resultDigest?: string | null;
+  readonly resultJson?: unknown;
+  readonly receiptUsage?: unknown;
+  readonly receiptCostBasis?: string | null;
+}): DurableExecutionReceipt | undefined {
+  const resultStrategy = projectionResultStrategy(input.resultSchemaVersion);
+  if (
+    !input.accountId ||
+    !input.authorityId ||
+    !input.operationKey ||
+    !input.resultSchema ||
+    !input.resultDigest ||
+    !resultStrategy ||
+    !input.receiptUsage ||
+    !input.receiptCostBasis
+  ) {
+    return undefined;
+  }
+  return parseDurableExecutionReceipt({
+    schemaVersion: 'durable-execution-receipt/v1',
+    scopeKey: input.scopeKey,
+    authorityId: input.authorityId,
+    accountId: input.accountId,
+    operationId: input.operationId,
+    operationKey: input.operationKey,
+    resultStrategy,
+    resultSchema: input.resultSchema,
+    resultDigest: input.resultDigest,
+    artifactId: resultStrategy === 'artifact_reference'
+      ? artifactIdFromResultJson(input.resultJson)
+      : null,
+    usage: input.receiptUsage,
+    costBasis: input.receiptCostBasis,
+    status: 'SETTLED',
+  });
+}
+
+function ledgerReceiptMismatch(): never {
+  throw new Error('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (!value || typeof value !== 'object') return ledgerReceiptMismatch();
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(record[key])}`
+  )).join(',')}}`;
+}
+
+function requireLedgerProjectionReceipt(input: {
+  readonly scopeKey: string;
+  readonly expectedOperationId: string;
+  readonly operationId?: string | null;
+  readonly operationKey?: string;
+  readonly accountId?: string;
+  readonly authorityId?: string | null;
+  readonly resultSchemaVersion?: string | null;
+  readonly resultSchema?: string | null;
+  readonly resultDigest?: string | null;
+  readonly resultJson?: unknown;
+  readonly receiptUsage?: unknown;
+  readonly receiptCostBasis?: string | null;
+  readonly expectedProjection: GenericOperationProjection;
+  readonly expectedFacts?: DurableExecutionReceiptFacts;
+}): DurableExecutionReceipt {
+  try {
+    if (
+      !input.operationId ||
+      input.operationId !== input.expectedOperationId ||
+      input.resultSchemaVersion !== input.expectedProjection.schemaVersion ||
+      input.resultSchema !== input.expectedProjection.schema ||
+      input.resultDigest !== input.expectedProjection.digest
+    ) {
+      return ledgerReceiptMismatch();
+    }
+    const lockedProjection = parseGenericOperationProjection(input.resultJson);
+    if (canonicalJson(lockedProjection) !== canonicalJson(input.expectedProjection)) {
+      return ledgerReceiptMismatch();
+    }
+    const receipt = durableReceiptFromLedgerRow({
+      scopeKey: input.scopeKey,
+      operationId: input.operationId,
+      operationKey: input.operationKey,
+      accountId: input.accountId,
+      authorityId: input.authorityId,
+      resultSchemaVersion: input.resultSchemaVersion,
+      resultSchema: input.resultSchema,
+      resultDigest: input.resultDigest,
+      resultJson: input.resultJson,
+      receiptUsage: input.receiptUsage,
+      receiptCostBasis: input.receiptCostBasis,
+    });
+    if (!receipt) return ledgerReceiptMismatch();
+    if (
+      input.expectedFacts &&
+      (canonicalJson(receipt.usage) !== canonicalJson(input.expectedFacts.usage) ||
+        receipt.costBasis !== input.expectedFacts.costBasis)
+    ) {
+      return ledgerReceiptMismatch();
+    }
+    return receipt;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === 'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH'
+    ) {
+      throw error;
+    }
+    return ledgerReceiptMismatch();
+  }
+}
+
+function requireLedgerArtifactReceipt(input: {
+  readonly scopeKey: string;
+  readonly expectedOperationId: string;
+  readonly operationId?: string | null;
+  readonly operationKey?: string;
+  readonly accountId?: string;
+  readonly authorityId?: string | null;
+  readonly resultSchemaVersion?: string | null;
+  readonly resultSchema?: string | null;
+  readonly resultDigest?: string | null;
+  readonly resultJson?: unknown;
+  readonly receiptUsage?: unknown;
+  readonly receiptCostBasis?: string | null;
+  readonly expectedReference: GenericOperationArtifactReference;
+  readonly expectedFacts?: DurableExecutionReceiptFacts;
+}): DurableExecutionReceipt {
+  try {
+    if (
+      !input.operationId ||
+      input.operationId !== input.expectedOperationId ||
+      input.resultSchemaVersion !== input.expectedReference.schemaVersion ||
+      input.resultSchema !== input.expectedReference.resultSchema ||
+      input.resultDigest !== input.expectedReference.sha256
+    ) {
+      return ledgerReceiptMismatch();
+    }
+    const lockedReference = parseArtifactReference(input.resultJson);
+    if (canonicalJson(lockedReference) !== canonicalJson(input.expectedReference)) {
+      return ledgerReceiptMismatch();
+    }
+    const receipt = durableReceiptFromLedgerRow({
+      scopeKey: input.scopeKey,
+      operationId: input.operationId,
+      operationKey: input.operationKey,
+      accountId: input.accountId,
+      authorityId: input.authorityId,
+      resultSchemaVersion: input.resultSchemaVersion,
+      resultSchema: input.resultSchema,
+      resultDigest: input.resultDigest,
+      resultJson: input.resultJson,
+      receiptUsage: input.receiptUsage,
+      receiptCostBasis: input.receiptCostBasis,
+    });
+    if (
+      !receipt ||
+      input.expectedFacts &&
+        (canonicalJson(receipt.usage) !== canonicalJson(input.expectedFacts.usage) ||
+          receipt.costBasis !== input.expectedFacts.costBasis)
+    ) {
+      return ledgerReceiptMismatch();
+    }
+    return receipt;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === 'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH'
+    ) {
+      throw error;
+    }
+    return ledgerReceiptMismatch();
+  }
+}
+
+function replayResultFromLedgerRow(row: {
+  readonly result_schema_version?: string | null;
+  readonly result_json?: unknown;
+}): BudgetReplayResult | undefined {
+  if (row.result_json == null) return undefined;
+  if (row.result_schema_version === 'generic-operation-projection/v1') {
+    return Object.freeze({
+      resultStrategy: 'typed_projection' as const,
+      projection: parseGenericOperationProjection(row.result_json),
+    });
+  }
+  if (row.result_schema_version === 'generic-operation-artifact-ref/v1') {
+    return Object.freeze({
+      resultStrategy: 'artifact_reference' as const,
+      reference: parseArtifactReference(row.result_json),
+    });
+  }
+  return ledgerReceiptMismatch();
+}
+
+function receiptFactsForSettlement(
+  projection: GenericOperationProjection | null,
+  receiptFacts: DurableExecutionReceiptFacts | undefined,
+): DurableExecutionReceiptFacts | null {
+  if (!projection) {
+    if (receiptFacts) throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
+    return null;
+  }
+  if (!receiptFacts) {
+    throw new Error('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
+  }
+  return parseDurableExecutionReceiptFacts(receiptFacts, projection.schema);
 }
 
 function isBudgetAccountUnavailable(error: unknown): boolean {
@@ -797,7 +1110,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       rows = await this.inScope(input.workspaceId, (tx) =>
         tx.$queryRaw<ReserveRow[]>(
-          Prisma.sql`SELECT * FROM reserve_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.operationKey}, ${BigInt(input.estimatedCents)})`,
+          Prisma.sql`SELECT * FROM reserve_tool_budget_with_receipt_v1(${input.workspaceId}, ${input.accountKey}, ${input.operationKey}, ${BigInt(input.estimatedCents)})`,
         ),
       );
     } catch (error) {
@@ -813,17 +1126,53 @@ export class PostgresBudgetStore implements BudgetStore {
       throw new BudgetExceededError(input.accountKey, input.estimatedCents, toSafeNumber('remainingCents', row.remaining_cents));
     }
     if (!row.operation_id) throw new BudgetStoreUnavailableError('budget reserve returned no operation id');
-    const replayProjection =
-      row.kind === 'REPLAY' && row.result_json != null
-        ? parseGenericOperationProjection(row.result_json)
+    const replayResult = row.kind === 'REPLAY'
+      ? replayResultFromLedgerRow(row)
+      : undefined;
+    const receipt = replayResult?.resultStrategy === 'typed_projection'
+      ? requireLedgerProjectionReceipt({
+          scopeKey: input.workspaceId,
+          expectedOperationId: row.operation_id,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedProjection: replayResult.projection,
+        })
+      : replayResult?.resultStrategy === 'artifact_reference'
+        ? requireLedgerArtifactReceipt({
+            scopeKey: input.workspaceId,
+            expectedOperationId: row.operation_id,
+            operationId: row.operation_id,
+            operationKey: row.operation_key,
+            accountId: row.account_id,
+            authorityId: row.authority_id,
+            resultSchemaVersion: row.result_schema_version,
+            resultSchema: row.result_schema,
+            resultDigest: row.result_digest,
+            resultJson: row.result_json,
+            receiptUsage: row.receipt_usage,
+            receiptCostBasis: row.receipt_cost_basis,
+            expectedReference: replayResult.reference,
+          })
         : undefined;
+    if (receipt && receipt.operationKey !== input.operationKey) {
+      ledgerReceiptMismatch();
+    }
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
       operationId: row.operation_id,
       estimatedCents: toSafeNumber('reservedCents', row.reserved_cents),
       replay: row.kind === 'REPLAY',
-      ...(replayProjection ? { replayProjection } : {}),
+      ...(replayResult ? { replayResult } : {}),
+      ...(receipt ? { receipt } : {}),
     };
   }
 
@@ -831,20 +1180,24 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
     const durable = projection
       ? parseGenericOperationProjection(projection)
       : null;
+    const explicitFacts = receiptFactsForSettlement(durable, receiptFacts);
     let rows: SettleRow[];
     try {
       rows = await this.inScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget(
+          Prisma.sql`SELECT * FROM settle_tool_budget_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
             ${durable?.schema ?? null}, ${durable?.digest ?? null},
-            ${durable ? JSON.stringify(durable) : null}::jsonb
+            ${durable ? JSON.stringify(durable) : null}::jsonb,
+            ${explicitFacts ? JSON.stringify(explicitFacts.usage) : null}::jsonb,
+            ${explicitFacts?.costBasis ?? null}
           )`,
         ),
       );
@@ -856,11 +1209,30 @@ export class PostgresBudgetStore implements BudgetStore {
     }
     const row = rows[0];
     if (!row) throw new BudgetStoreUnavailableError('budget settle returned no result');
+    const receipt = durable
+      ? requireLedgerProjectionReceipt({
+          scopeKey: reservation.workspaceId,
+          expectedOperationId: reservation.operationId,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedProjection: durable,
+          expectedFacts: explicitFacts!,
+        })
+      : undefined;
     return {
       chargedCents: toSafeNumber('chargedCents', row.charged_cents),
       observedCents: toSafeNumber('observedCents', row.observed_cents),
       capVariance: row.cap_variance,
       replay: row.replay ?? row.status !== 'SETTLED',
+      ...(receipt ? { receipt } : {}),
     };
   }
 
@@ -1004,6 +1376,8 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
+    receiptFacts: DurableExecutionReceiptFacts,
+    domainAck: BudgetDomainAckRequest,
     subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
@@ -1011,22 +1385,86 @@ export class PostgresBudgetStore implements BudgetStore {
       parseBoundArtifactBudgetSnapshot(snapshot, reservation);
     const manifest = durable.manifest;
     const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
-    let rows: SettleRow[];
+    const explicitFacts = parseDurableExecutionReceiptFacts(
+      receiptFacts,
+      manifest.resultSchema,
+    );
     try {
-      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
-        tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v4(
+      return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
+        const rows = await tx.$queryRaw<SettleRow[]>(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${JSON.stringify(manifest)}::jsonb,
             ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
             ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
+            ${JSON.stringify(explicitFacts.usage)}::jsonb,
+            ${explicitFacts.costBasis},
             ${durableSubject?.subjectType ?? null},
             ${durableSubject?.subjectId ?? null}::uuid
           )`,
-        ),
-      );
+        );
+        const row = rows[0];
+        if (
+          rows.length !== 1 ||
+          !row ||
+          row.status !== 'SETTLED' ||
+          typeof row.charged_cents !== 'bigint' ||
+          typeof row.observed_cents !== 'bigint' ||
+          typeof row.cap_variance !== 'boolean'
+        ) {
+          throw new BudgetStoreUnavailableError(
+            'budget artifact settlement returned no result',
+          );
+        }
+        const expectedReference = Object.freeze({
+          schemaVersion: 'generic-operation-artifact-ref/v1' as const,
+          artifactId: manifest.artifactId,
+          operationId: manifest.operationId,
+          resultSchema: manifest.resultSchema,
+          sha256: manifest.sha256,
+          sizeBytes: manifest.sizeBytes,
+          mediaType: manifest.mediaType,
+          expiresAt: manifest.expiresAt,
+        });
+        const receipt = requireLedgerArtifactReceipt({
+          scopeKey: reservation.workspaceId,
+          expectedOperationId: reservation.operationId,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedReference,
+          expectedFacts: explicitFacts,
+        });
+        const acknowledgement = await applyDomainAckConsumerTransaction({
+          transaction: tx,
+          producerId: domainAck.producerId,
+          receipt,
+          domainAckKey: domainAck.domainAckKey,
+          domainRevision: domainAck.domainRevision,
+          apply: async () => undefined,
+        });
+        if (acknowledgement.status === 'UNRECEIPTED') {
+          throw new Error('DOMAIN_ACK_RECEIPT_REQUIRED');
+        }
+        return {
+          chargedCents: toSafeNumber('chargedCents', row.charged_cents),
+          observedCents: toSafeNumber('observedCents', row.observed_cents),
+          capVariance: row.cap_variance,
+          replay: row.replay ?? false,
+          receipt,
+          domainAckStatus: acknowledgement.status,
+        };
+      });
     } catch (error) {
+      if (isExecutionControlError(error)) throw error;
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
       }
@@ -1043,25 +1481,6 @@ export class PostgresBudgetStore implements BudgetStore {
         'budget artifact settlement unavailable',
       );
     }
-    const row = rows[0];
-    if (
-      rows.length !== 1 ||
-      !row ||
-      row.status !== 'SETTLED' ||
-      typeof row.charged_cents !== 'bigint' ||
-      typeof row.observed_cents !== 'bigint' ||
-      typeof row.cap_variance !== 'boolean'
-    ) {
-      throw new BudgetStoreUnavailableError(
-        'budget artifact settlement returned no result',
-      );
-    }
-    return {
-      chargedCents: toSafeNumber('chargedCents', row.charged_cents),
-      observedCents: toSafeNumber('observedCents', row.observed_cents),
-      capVariance: row.cap_variance,
-      replay: row.replay ?? false,
-    };
   }
 
   async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
@@ -1151,7 +1570,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       rows = await this.inScope(input.workspaceId, (tx) =>
         tx.$queryRaw<MicrousdReserveRow[]>(
-          Prisma.sql`SELECT * FROM reserve_tool_budget_microusd_v1(
+          Prisma.sql`SELECT * FROM reserve_tool_budget_microusd_with_receipt_v1(
             ${input.workspaceId}, ${input.accountKey}, ${input.operationKey},
             ${input.estimatedMicrousd}
           )`,
@@ -1182,17 +1601,53 @@ export class PostgresBudgetStore implements BudgetStore {
         'microusd budget reserve returned no operation id',
       );
     }
-    const replayProjection =
-      row.kind === 'REPLAY' && row.result_json != null
-        ? parseGenericOperationProjection(row.result_json)
+    const replayResult = row.kind === 'REPLAY'
+      ? replayResultFromLedgerRow(row)
+      : undefined;
+    const receipt = replayResult?.resultStrategy === 'typed_projection'
+      ? requireLedgerProjectionReceipt({
+          scopeKey: input.workspaceId,
+          expectedOperationId: row.operation_id,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedProjection: replayResult.projection,
+        })
+      : replayResult?.resultStrategy === 'artifact_reference'
+        ? requireLedgerArtifactReceipt({
+            scopeKey: input.workspaceId,
+            expectedOperationId: row.operation_id,
+            operationId: row.operation_id,
+            operationKey: row.operation_key,
+            accountId: row.account_id,
+            authorityId: row.authority_id,
+            resultSchemaVersion: row.result_schema_version,
+            resultSchema: row.result_schema,
+            resultDigest: row.result_digest,
+            resultJson: row.result_json,
+            receiptUsage: row.receipt_usage,
+            receiptCostBasis: row.receipt_cost_basis,
+            expectedReference: replayResult.reference,
+          })
         : undefined;
+    if (receipt && receipt.operationKey !== input.operationKey) {
+      ledgerReceiptMismatch();
+    }
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
       operationId: row.operation_id,
       estimatedMicrousd: row.reserved_microusd,
       replay: row.kind === 'REPLAY',
-      ...(replayProjection ? { replayProjection } : {}),
+      ...(replayResult ? { replayResult } : {}),
+      ...(receipt ? { receipt } : {}),
     };
   }
 
@@ -1200,20 +1655,24 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetMicrousdReservation,
     observedMicrousd: bigint,
     projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetMicrousdSettlement> {
     assertMicrousd('observedMicrousd', observedMicrousd);
     const durable = projection
       ? parseGenericOperationProjection(projection)
       : null;
+    const explicitFacts = receiptFactsForSettlement(durable, receiptFacts);
     let rows: MicrousdSettleRow[];
     try {
       rows = await this.inScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<MicrousdSettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_microusd_v1(
+          Prisma.sql`SELECT * FROM settle_tool_budget_microusd_with_receipt_v1(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${durable?.schemaVersion ?? null},
             ${durable?.schema ?? null}, ${durable?.digest ?? null},
-            ${durable ? JSON.stringify(durable) : null}::jsonb
+            ${durable ? JSON.stringify(durable) : null}::jsonb,
+            ${explicitFacts ? JSON.stringify(explicitFacts.usage) : null}::jsonb,
+            ${explicitFacts?.costBasis ?? null}
           )`,
         ),
       );
@@ -1229,11 +1688,30 @@ export class PostgresBudgetStore implements BudgetStore {
         'microusd budget settle returned no result',
       );
     }
+    const receipt = durable
+      ? requireLedgerProjectionReceipt({
+          scopeKey: reservation.workspaceId,
+          expectedOperationId: reservation.operationId,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedProjection: durable,
+          expectedFacts: explicitFacts!,
+        })
+      : undefined;
     return {
       chargedMicrousd: row.charged_microusd,
       observedMicrousd: row.observed_microusd,
       capVariance: row.cap_variance,
       replay: row.replay ?? row.status !== 'SETTLED',
+      ...(receipt ? { receipt } : {}),
     };
   }
 

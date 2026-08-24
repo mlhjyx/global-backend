@@ -765,6 +765,8 @@ model SourceFetch {
   error         String?
   startedAt     DateTime  @default(now()) @map("started_at")
   finishedAt    DateTime? @map("finished_at")
+  executionOperationIds Json? @map("execution_operation_ids")
+  executionResult Json? @map("execution_result")
 
   source  MonitoredSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   changes SourceEntityChange[]
@@ -990,6 +992,10 @@ model PatentCacheRefreshAudit {
   bytesScanned BigInt?   @map("bytes_scanned")
   status       String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | SKIPPED_NOSCAN | DENIED | DISABLED | FAILED
   detail       String?   @map("detail")
+  executionOperationIds Json? @map("execution_operation_ids")
+  purged       Int?
+  cached       Int?
+  empty        Int?
 
   @@index([startedAt])
   @@map("patent_cache_refresh_audit")

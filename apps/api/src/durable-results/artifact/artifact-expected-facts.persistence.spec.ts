@@ -14,6 +14,15 @@ import {
   type GenericOperationArtifactReference,
 } from "./artifact.types";
 
+const acknowledgementMock = vi.hoisted(() => vi.fn(async (input: {
+  transaction: unknown;
+  apply: (transaction: unknown) => Promise<unknown>;
+}) => ({ status: "APPLIED", value: await input.apply(input.transaction) })));
+
+vi.mock("../domain-ack-consumer-bindings", () => ({
+  applyDomainAckConsumerTransaction: acknowledgementMock,
+}));
+
 const WORKSPACE_ID = "e03abddd-1307-47cb-a731-7e7a786615a0";
 const AUTHORITY_ID = "42c863b9-7c7e-4d28-8678-60ef9a20219b";
 const OPERATION_ID = "8cf66f2a-1780-453e-8d7d-f70e36cb22a6";
@@ -26,6 +35,15 @@ const EXPECTED_FACTS = Object.freeze({
   sanitizedUrl: "https://example.com/final",
   blocked: null,
 }) satisfies ArtifactExpectedFacts;
+const RECEIPT_FACTS = Object.freeze({
+  usage: Object.freeze({
+    currency: "USD" as const,
+    unit: "microusd" as const,
+    callCount: 1,
+    upperBoundMicrousd: "170000",
+  }),
+  costBasis: "estimated_upper_bound" as const,
+});
 
 const manifest = Object.freeze({
   schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
@@ -223,6 +241,17 @@ describe("artifact expected-facts persistence", () => {
                 cap_variance: false,
                 status: "SETTLED",
                 replay: false,
+                reserved_cents: 17n,
+                operation_id: OPERATION_ID,
+                operation_key: "artifact-operation",
+                account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
+                authority_id: AUTHORITY_ID,
+                result_schema_version: GENERIC_OPERATION_ARTIFACT_REFERENCE_SCHEMA,
+                result_schema: manifest.resultSchema,
+                result_digest: manifest.sha256,
+                result_json: reference,
+                receipt_usage: RECEIPT_FACTS.usage,
+                receipt_cost_basis: RECEIPT_FACTS.costBasis,
               },
             ];
           }),
@@ -242,10 +271,14 @@ describe("artifact expected-facts persistence", () => {
     await budgetStore.settleArtifactManifest(reservation, 13, {
       manifest,
       expectedFacts: EXPECTED_FACTS,
+    }, RECEIPT_FACTS, {
+      producerId: "http.get",
+      domainAckKey: "artifact:test",
+      domainRevision: manifest.sha256,
     });
 
     expect(queries[0]?.strings.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v4",
+      "settle_tool_budget_artifact_manifest_with_receipt_v1",
     );
     expect(queries[0]?.values.slice(-8)).toEqual([
       200,
@@ -254,8 +287,8 @@ describe("artifact expected-facts persistence", () => {
       null,
       null,
       null,
-      null,
-      null,
+      JSON.stringify(RECEIPT_FACTS.usage),
+      RECEIPT_FACTS.costBasis,
     ]);
     expect(queries[0]?.values[3]).toBe(JSON.stringify(manifest));
     expect(queries[0]?.values[3]).not.toContain("expectedFacts");

@@ -41,7 +41,7 @@ function normalize(value: unknown, depth: number, count: { fields: number }): un
     return value;
   }
   if (typeof value === 'number') {
-    if (!Number.isFinite(value) || !Number.isSafeInteger(value)) invalid();
+    if (!Number.isFinite(value) || Object.is(value, -0) || Math.abs(value) > Number.MAX_SAFE_INTEGER) invalid();
     return value;
   }
   if (Array.isArray(value)) {

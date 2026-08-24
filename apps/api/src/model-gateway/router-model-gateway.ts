@@ -14,7 +14,10 @@ import {
   UnavailableBudgetStore,
   type BudgetStore,
 } from '../tools/budget-store';
-import { projectGenericOperationResult } from '../tools/generic-operation-projection';
+import {
+  projectModelResultForReplay,
+  restoreModelResultFromReplay,
+} from '../durable-results/model-result-replay';
 import {
   ExternalActionDeniedError,
   ProviderIdentityError,
@@ -31,6 +34,8 @@ import {
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
 import type { SiteBuildCostReconciliationCatalog } from '../site-builder/site-build-cost-reconciliation-resolver';
+import { modelExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
+import { centsToMicrousd, usdToMicrousdCeil } from '../tools/microusd';
 
 /**
  * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
@@ -46,6 +51,21 @@ function centsFromTokens(usage?: {
   const env = Number(process.env.LLM_CENTS_PER_MTOK);
   const perMtok = Number.isFinite(env) && env > 0 ? env : 100;
   return Math.max(1, Math.ceil((tokens * perMtok) / 1_000_000));
+}
+
+function providerReportedMicrousd(usage?: ModelUsage): bigint | null {
+  const costUsd = usage?.costUsd;
+  if (!Number.isFinite(costUsd) || (costUsd as number) < 0) return null;
+  return usdToMicrousdCeil(String(costUsd));
+}
+
+function centsCeilFromMicrousd(value: bigint): number {
+  const cents = (value + 9_999n) / 10_000n;
+  const result = Number(cents);
+  if (!Number.isSafeInteger(result)) {
+    throw new RangeError('provider-reported Model cost exceeds the cents ledger range');
+  }
+  return result;
 }
 
 /**
@@ -370,27 +390,27 @@ export class RouterModelGateway extends ModelGateway {
         estimatedCents: reserveCents,
       });
       if (reservation.replay) {
-        const replay = reservation.replayProjection;
+        const replay = reservation.replayResult?.resultStrategy === 'typed_projection'
+          ? reservation.replayResult.projection
+          : undefined;
         if (
           replay &&
           replay.kind === 'model' &&
-          ctx.genericReplay &&
-          replay.schema === ctx.genericReplay.schema &&
-          replay.data &&
-          typeof replay.data === 'object' &&
-          !Array.isArray(replay.data)
+          ctx.durableResultSchema &&
+          replay.schema === ctx.durableResultSchema
         ) {
           try {
-            const stored = replay.data as Record<string, unknown>;
-            const restored = ctx.genericReplay.restore(stored.result);
-            const verified = projectGenericOperationResult({
-              kind: 'model',
-              schema: ctx.genericReplay.schema,
-              data: { result: ctx.genericReplay.project(restored) },
-            });
-            if (verified.digest === replay.digest) {
-              return restored as ModelResult<T>;
+            const restored = restoreModelResultFromReplay(
+              ctx.durableResultSchema,
+              replay,
+            ) as ModelResult<T>;
+            const returned = reservation.receipt
+              ? { ...restored, durableReceipt: reservation.receipt }
+              : restored;
+            if (returned.durableReceipt) {
+              ctx.onDurableReceipt?.(input.task, returned.durableReceipt);
             }
+            return returned;
           } catch {
             throw new BudgetOperationReplayError(operationKey);
           }
@@ -460,12 +480,11 @@ export class RouterModelGateway extends ModelGateway {
 
     let projection;
     try {
-      projection = ctx.genericReplay
-        ? projectGenericOperationResult({
-            kind: 'model',
-            schema: ctx.genericReplay.schema,
-            data: { result: ctx.genericReplay.project(result as ModelResult<unknown>) },
-          })
+      projection = ctx.durableResultSchema
+        ? projectModelResultForReplay(
+            ctx.durableResultSchema,
+            result as ModelResult<unknown>,
+          )
         : undefined;
     } catch {
       // A valid provider output exists, but it cannot be represented by the
@@ -473,18 +492,38 @@ export class RouterModelGateway extends ModelGateway {
       // cannot issue a second physical request or settle an empty result.
       throw new BudgetOperationReplayError(operationKey);
     }
-    const costUsd = result.usage?.costUsd;
-    const observedCents = costUsd != null
-      ? Math.ceil(costUsd * 100)
-      : (centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1));
-    const settlement = [reservation, observedCents, projection] as const;
+    const reservedMicrousd = centsToMicrousd(reservation.estimatedCents);
+    const reportedMicrousd = providerReportedMicrousd(result.usage);
+    const tokenPricedCents = reportedMicrousd === null
+      ? centsFromTokens(result.usage)
+      : null;
+    const observedCents = reportedMicrousd !== null
+      ? centsCeilFromMicrousd(reportedMicrousd)
+      : (tokenPricedCents ?? baseCents * (result.callCount ?? 1));
+    const chargedMicrousd = centsToMicrousd(
+      Math.min(observedCents, reservation.estimatedCents),
+    );
+    const receiptFacts = projection && ctx.durableResultSchema
+      ? modelExecutionReceiptFacts({
+          taskId: input.task,
+          resultSchema: ctx.durableResultSchema,
+          result: result as ModelResult<unknown>,
+          reservedMicrousd,
+          chargedMicrousd,
+        })
+      : undefined;
+    const settlement = [reservation, observedCents, projection, receiptFacts] as const;
+    let settled;
     try {
-      await this.budgetStore.settle(...settlement);
+      settled = await this.budgetStore.settle(...settlement);
     } catch {
       // The first failure may be an ACK loss after commit. Repeating the exact
       // same operation/cost/projection is safe; PostgreSQL rejects any drift.
-      await this.budgetStore.settle(...settlement);
+      settled = await this.budgetStore.settle(...settlement);
     }
+    const returnedResult = settled?.receipt
+      ? { ...result, durableReceipt: settled.receipt }
+      : result;
     this.trace?.record({
       workspaceId: ctx.workspaceId,
       task: input.task,
@@ -499,7 +538,10 @@ export class RouterModelGateway extends ModelGateway {
       correlationId: ctx.correlationId,
       modelPolicy: ctx.modelPolicy,
     });
-    return result;
+    if (returnedResult.durableReceipt) {
+      ctx.onDurableReceipt?.(input.task, returnedResult.durableReceipt);
+    }
+    return returnedResult;
   }
 
   private async runPersistent<T>(

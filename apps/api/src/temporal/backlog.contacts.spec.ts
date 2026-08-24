@@ -1,4 +1,34 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const receiptMocks = vi.hoisted(() => ({
+  applyDomainAckConsumerTransactions: vi.fn(async (input: {
+    transaction: unknown;
+    apply: (transaction: unknown) => Promise<unknown>;
+    acknowledgements: Array<{ producerId: string }>;
+  }) => ({
+    status: 'APPLIED',
+    acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+      producerId,
+      status: 'APPLIED',
+    })),
+    value: await input.apply(input.transaction),
+  })),
+  persistDiscoveredContacts: vi.fn(async () => ({
+    created: 1,
+    merged: 0,
+    skippedSuppressed: 0,
+    skippedInvalid: 0,
+  })),
+}));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransactions:
+    receiptMocks.applyDomainAckConsumerTransactions,
+}));
+vi.mock('../discovery/contact-persist', () => ({
+  persistDiscoveredContacts: receiptMocks.persistDiscoveredContacts,
+}));
 import { createBacklogActivities } from './backlog.activities';
 import { BudgetLedger } from '../tools/budget';
 import { InMemoryBudgetStoreAdapter } from '../tools/budget-store';
@@ -16,6 +46,23 @@ import type { ContactDiscoveryResult, ExecutionContext } from '../discovery/prov
 
 const WS = 'ws-1';
 const ICP = 'icp-1';
+const RECEIPT = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: WS,
+  authorityId: '11111111-1111-4111-8111-111111111111',
+  accountId: '22222222-2222-4222-8222-222222222222',
+  operationId: '33333333-3333-4333-8333-333333333333',
+  operationKey: 'backlog-contact-receipt',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'crawl4ai-fetch/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
+}) satisfies DurableExecutionReceipt;
 
 interface FakeCompany {
   id: string;
@@ -79,7 +126,7 @@ function makeDeps(opts: {
     ownerDb: {},
     budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
   } as unknown as Parameters<typeof createBacklogActivities>[0];
-  return { deps, updateManyCalls, discoverCalls };
+  return { deps, tx, updateManyCalls, discoverCalls };
 }
 
 const C = (id: string, domain: string): FakeCompany => ({ id, name: id.toUpperCase(), domain, country: 'DE', dedupeKey: domain });
@@ -173,5 +220,60 @@ describe('discoverContactsBacklog —— 预算打穿停机 + 不 stamp 跳过�
     expect(discoverCalls).toEqual(['REAL-1']);
     expect(updateManyCalls.at(-1)?.ids).toEqual(['real-1']);
     expect(result.scanned).toBe(1);
+  });
+
+  it('collects contact Tool receipts and applies ACK plus contact persistence on the same backlog transaction', async () => {
+    receiptMocks.applyDomainAckConsumerTransactions.mockClear();
+    receiptMocks.persistDiscoveredContacts.mockClear();
+    const { deps, tx } = makeDeps({
+      companies: [C('c1', 'c1.de')],
+      onDiscover: async (_company, ctx) => {
+        ctx.onDurableReceipt?.('crawl4ai.fetch', RECEIPT);
+        return {
+          contacts: [{
+            externalId: 'public-1',
+            fullName: 'Named Person',
+            personalData: true,
+          }],
+          costCents: 0,
+        };
+      },
+    });
+
+    await expect(createBacklogActivities(deps).discoverContactsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+      limit: 1,
+    })).resolves.toMatchObject({ contactsCreated: 1 });
+
+    expect(receiptMocks.applyDomainAckConsumerTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transaction: tx,
+        acknowledgements: [expect.objectContaining({
+          producerId: 'crawl4ai.fetch',
+          receipt: RECEIPT,
+        })],
+      }),
+    );
+    expect(receiptMocks.persistDiscoveredContacts).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ adapterKey: 'decision_maker' }),
+    );
+  });
+
+  it('does not swallow an unexpected receipt producer from the contact adapter', async () => {
+    const { deps } = makeDeps({
+      companies: [C('c1', 'c1.de')],
+      onDiscover: async (_company, ctx) => {
+        ctx.onDurableReceipt?.('unexpected.tool', RECEIPT);
+        return { contacts: [], costCents: 0 };
+      },
+    });
+
+    await expect(createBacklogActivities(deps).discoverContactsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+      limit: 1,
+    })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   });
 });

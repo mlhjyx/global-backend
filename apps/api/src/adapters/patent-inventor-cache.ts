@@ -150,6 +150,9 @@ export function buildSyntheticRecords(rows: CacheInventorRow[]): PatentRecord[] 
     const applicantName = [...g.rawNames].sort()[0];
     if (!applicantName) continue;
     records.push({
+      publicationNumber: `cache:${Buffer.from(`${applicantName}:${g.country || 'unknown'}`)
+        .toString('base64url')
+        .slice(0, 100)}`,
       applicants: [{ name: applicantName, country: g.country || undefined }],
       inventors: g.inventors.map((name) => ({ name })),
     });
@@ -237,7 +240,7 @@ export async function enqueuePatentLookup(
 export type PatentRefreshDb = {
   patentLookupRequest: Pick<PrismaClient['patentLookupRequest'], 'findMany' | 'update'>;
   patentInventorCache: Pick<PrismaClient['patentInventorCache'], 'upsert' | 'deleteMany'>;
-  patentCacheRefreshAudit: Pick<PrismaClient['patentCacheRefreshAudit'], 'create' | 'update'>;
+  patentCacheRefreshAudit: Pick<PrismaClient['patentCacheRefreshAudit'], 'create' | 'update' | 'findFirst'>;
   sourcePolicy: Pick<PrismaClient['sourcePolicy'], 'findUnique'>;
   /** 🔴 kill-switch（P1-1）：`google_patents` 非 ENABLED → 不扫 BQ、不物化 PII。 */
   dataProvider: Pick<PrismaClient['dataProvider'], 'findUnique'>;
@@ -258,6 +261,17 @@ export interface PatentRefreshDeps {
   ttlDays?: number;
   maxAnchors?: number;
   log?: (msg: string) => void;
+  applyScanWithAck?: (
+    scan: RefreshScanResult,
+    persist: (transaction: PatentRefreshDb) => Promise<PatentRefreshSummary>,
+    context: Readonly<{
+      auditId: string;
+      readback: (
+        transaction: PatentRefreshDb,
+        operationIds: readonly string[],
+      ) => Promise<PatentRefreshSummary>;
+    }>,
+  ) => Promise<PatentRefreshSummary>;
 }
 
 export type PatentRefreshStatus =
@@ -412,6 +426,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   // 🔴 P2-7（复审 HIGH 收口）：整个写阶段（盲键 crypto + 墓碑 findMany + upsert）**全包 try/catch** → 任一步抛错
   //   标 audit FAILED、graceful 返回（不逃逸令 audit 卡 RUNNING + Temporal 重试整活动重扫 BQ 烧配额）。scan 成功后
   //   BQ 配额已花，下游任何 DB/crypto 抖动（含 rolling deploy 墓碑表未及应用）绝不触发白白重扫。
+  const persistScan = async (db: PatentRefreshDb): Promise<PatentRefreshSummary> => {
   const resultKeys = new Set<string>();
   let rowCount = 0;
   try {
@@ -487,6 +502,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
       });
     }
   } catch (err) {
+    if (deps.applyScanWithAck) throw err;
     await db.patentCacheRefreshAudit.update({
       where: { id: audit.id },
       data: { finishedAt: new Date(), rowCount, status: 'FAILED', detail: `persist failed: ${String(err).slice(0, 260)}` },
@@ -520,4 +536,50 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   });
 
   return { status: 'OK', anchorCount: anchors.length, rowCount, bytesScanned: scan.bytesScanned, purged, cached, empty };
+  };
+  const readback = async (
+    database: PatentRefreshDb,
+    operationIds: readonly string[],
+  ): Promise<PatentRefreshSummary> => {
+    const row = await database.patentCacheRefreshAudit.findFirst({
+      where: {
+        status: 'OK',
+        executionOperationIds: { equals: [...operationIds] },
+      },
+      orderBy: { finishedAt: 'desc' },
+      select: {
+        status: true,
+        anchorCount: true,
+        rowCount: true,
+        bytesScanned: true,
+        purged: true,
+        cached: true,
+        empty: true,
+      },
+    } as never);
+    if (
+      !row || row.status !== 'OK' ||
+      !Number.isSafeInteger(row.anchorCount) ||
+      !Number.isSafeInteger(row.rowCount) ||
+      !Number.isSafeInteger(row.purged) ||
+      !Number.isSafeInteger(row.cached) ||
+      !Number.isSafeInteger(row.empty)
+    ) {
+      throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    }
+    return {
+      status: 'OK',
+      anchorCount: row.anchorCount,
+      rowCount: row.rowCount,
+      bytesScanned: row.bytesScanned === null
+        ? null
+        : Number(row.bytesScanned),
+      purged: row.purged as number,
+      cached: row.cached as number,
+      empty: row.empty as number,
+    };
+  };
+  return deps.applyScanWithAck
+    ? deps.applyScanWithAck(scan, persistScan, { auditId: audit.id, readback })
+    : persistScan(db);
 }

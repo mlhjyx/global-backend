@@ -12,6 +12,8 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
 export type TaxonomyResolveOptions = {
@@ -153,13 +155,27 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, kind, norm(term),
+        );
+        return null;
+      }
       const node = await this.node(kind, code); // 校验 code 真实存在
-      if (!node) return null;
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, kind, norm(term),
+        );
+        return null;
+      }
       // 沉淀：下次该词确定性命中
-      await this.prisma.termAlias
-        .upsert({ where: { kind_term: { kind, term: norm(term) } }, update: { code, source: 'llm' }, create: { kind, term: norm(term), code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`alias sediment failed: ${String(e).slice(0, 120)}`));
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        kind,
+        norm(term),
+        code,
+      );
       return node;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -217,16 +233,26 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'cpv', term,
+        );
+        return null;
+      }
       const node = await this.node('cpv', code); // 校验 code 真实存在
-      if (!node) return null;
-      await this.prisma.termAlias
-        .upsert({
-          where: { kind_term: { kind: 'cpv', term } },
-          update: { code, source: 'llm' },
-          create: { kind: 'cpv', term, code, source: 'llm' },
-        })
-        .catch((e) => this.logger.warn(`cpv alias sediment failed: ${String(e).slice(0, 120)}`));
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'cpv', term,
+        );
+        return null;
+      }
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        'cpv',
+        term,
+        code,
+      );
       return code;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -284,12 +310,26 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'naics', term,
+        );
+        return null;
+      }
       const node = await this.node('naics', code); // 校验 code 真实存在
-      if (!node) return null;
-      await this.prisma.termAlias
-        .upsert({ where: { kind_term: { kind: 'naics', term } }, update: { code, source: 'llm' }, create: { kind: 'naics', term, code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`naics alias sediment failed: ${String(e).slice(0, 120)}`));
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt, 'naics', term,
+        );
+        return null;
+      }
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        'naics',
+        term,
+        code,
+      );
       return code;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -351,12 +391,28 @@ export class TaxonomyResolver {
         opts.executionBudget,
       );
       const code = result.data?.code;
-      if (!code) return null;
+      if (!code) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt,
+          'fda_product_code', term,
+        );
+        return null;
+      }
       const node = await this.node('fda_product_code', code); // 校验 code 真实存在
-      if (!node) return null;
-      await this.prisma.termAlias
-        .upsert({ where: { kind_term: { kind: 'fda_product_code', term } }, update: { code, source: 'llm' }, create: { kind: 'fda_product_code', term, code, source: 'llm' } })
-        .catch((e) => this.logger.warn(`fda alias sediment failed: ${String(e).slice(0, 120)}`));
+      if (!node) {
+        await this.acknowledgeTaxonomyNoop(
+          opts.workspaceId, result.durableReceipt,
+          'fda_product_code', term,
+        );
+        return null;
+      }
+      await this.persistTermAlias(
+        opts.workspaceId,
+        result.durableReceipt,
+        'fda_product_code',
+        term,
+        code,
+      );
       return code;
     } catch (e) {
       if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
@@ -401,7 +457,7 @@ export class TaxonomyResolver {
         {
           workspaceId: binding.scopeKey,
           runId: binding.accountKey,
-          genericReplay: taxonomyReplay<Output>(),
+          durableResultSchema: 'taxonomy-code/v1',
         },
         { telemetry: this.runtimeTelemetry },
       );
@@ -415,7 +471,7 @@ export class TaxonomyResolver {
         {
           workspaceId,
           runId: accountKey,
-          genericReplay: taxonomyReplay<Output>(),
+          durableResultSchema: 'taxonomy-code/v1',
         },
         { telemetry: this.runtimeTelemetry },
       );
@@ -423,29 +479,45 @@ export class TaxonomyResolver {
       await budgets.close({ workspaceId, accountKey });
     }
   }
-}
 
-function taxonomyReplay<Output>() {
-  return {
-    schema: 'taxonomy-result/v1',
-    project: (result: { data: unknown; provider: string; model: string }) => ({
-      json: JSON.stringify(result.data),
-      provider: result.provider,
-      model: result.model,
-    }),
-    restore: (value: unknown) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new Error('TAXONOMY_REPLAY_INVALID');
-      }
-      const record = value as Record<string, unknown>;
-      if (typeof record.json !== 'string' || typeof record.provider !== 'string' || typeof record.model !== 'string') {
-        throw new Error('TAXONOMY_REPLAY_INVALID');
-      }
-      return {
-        data: JSON.parse(record.json) as Output,
-        provider: record.provider,
-        model: record.model,
-      };
-    },
-  };
+  private async persistTermAlias(
+    workspaceId: string,
+    durableReceipt: DurableExecutionReceipt | undefined,
+    kind: string,
+    term: string,
+    code: string,
+  ): Promise<void> {
+    await this.prisma.withWorkspace(workspaceId, async (tx) => {
+      await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'taxonomy.normalize',
+        receipt: durableReceipt,
+        domainAckKey: `${kind}:${term}`,
+        domainRevision: code,
+        apply: (transaction) => transaction.termAlias.upsert({
+          where: { kind_term: { kind, term } },
+          update: { code, source: 'llm' },
+          create: { kind, term, code, source: 'llm' },
+        }),
+      });
+    });
+  }
+
+  private async acknowledgeTaxonomyNoop(
+    workspaceId: string,
+    durableReceipt: DurableExecutionReceipt | undefined,
+    kind: string,
+    term: string,
+  ): Promise<void> {
+    await this.prisma.withWorkspace(workspaceId, async (transaction) => {
+      await applyDomainAckConsumerTransaction({
+        transaction,
+        producerId: 'taxonomy.normalize',
+        receipt: durableReceipt,
+        domainAckKey: `${kind}:${term}`,
+        domainRevision: durableReceipt?.resultDigest ?? 'noop',
+        apply: async () => undefined,
+      });
+    });
+  }
 }

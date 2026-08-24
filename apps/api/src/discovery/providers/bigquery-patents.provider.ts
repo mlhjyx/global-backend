@@ -16,6 +16,7 @@ import {
 } from '../provider-contract';
 import { pickBestByName, normForMatch } from '../name-match';
 import { normalizePersonName } from '../person-name';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const GOOGLE_PATENTS_BASE = 'https://patents.google.com/'; // 公开专利门户（证据留痕）
 // 🔴 公司对齐门（比公司发现门 0.72 更严）：贴错公司 = 把 A 公司发明人挂到 B 公司，危害大（同 CH/EPO）。
@@ -237,6 +238,7 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
       this.log(`✓ ${name} → ${best.item.name} (${best.score.toFixed(2)}): ${contacts.length} inventors`);
       return { contacts, costCents: 0 };
     } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace。
       this.log(`discover failed: ${String(err).slice(0, 150)}`);
       return { contacts: [], costCents: 0 };

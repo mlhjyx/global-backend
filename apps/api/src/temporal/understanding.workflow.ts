@@ -88,13 +88,15 @@ export async function understandingWorkflow(input: UnderstandingWorkflowInput): 
     Promise.all(
       pages.map(async (p) => ({
         url: p.url,
-        claims: (await modelActs.extractClaims({ workspaceId, text: p.text, ...authorityArgs })).claims,
+        ...(p.durableReceipt ? { crawlDurableReceipt: p.durableReceipt } : {}),
+        ...await modelActs.extractClaims({ workspaceId, text: p.text, ...authorityArgs }),
       })),
     ),
     Promise.all(
       pages.map(async (p) => ({
         url: p.url,
-        offerings: (await modelActs.extractOfferings({ workspaceId, text: p.text, ...authorityArgs })).offerings,
+        ...(p.durableReceipt ? { crawlDurableReceipt: p.durableReceipt } : {}),
+        ...await modelActs.extractOfferings({ workspaceId, text: p.text, ...authorityArgs }),
       })),
     ),
   ]);

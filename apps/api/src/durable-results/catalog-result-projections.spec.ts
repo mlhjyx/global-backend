@@ -389,7 +389,8 @@ const INPI_RAW: RawToolResult = {
 
 const GOOGLE_PATENTS_RAW: RawToolResult = {
   data: {
-    patents: Array.from({ length: 2000 }, (_, index) => ({
+    patents: Array.from({ length: 50 }, (_, index) => ({
+      publicationNumber: `US-${String(index).padStart(4, '0')}-A1`,
       applicants: index === 0
         ? Array.from({ length: 32 }, (_, itemIndex) => ({
             name: itemIndex === 0 ? 'a'.repeat(500) : `Applicant ${itemIndex}`,
@@ -402,6 +403,12 @@ const GOOGLE_PATENTS_RAW: RawToolResult = {
           }))
         : [],
     })),
+    costFacts: {
+      costBasis: 'estimated_upper_bound',
+      maximumBytesBilled: '214748364800',
+      observedBytesBilled: null,
+      maxRows: 50,
+    },
   },
   costCents: 0,
   degraded: true,
@@ -414,6 +421,7 @@ const GOOGLE_PATENTS_RESTORED: RawToolResult = {
       ...patent,
       ...(index === 0 ? { inventors: [] } : {}),
     })),
+    costFacts: GOOGLE_PATENTS_RAW.data.costFacts,
   },
 };
 
@@ -652,12 +660,18 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
   },
   'google-patents-search/v1': {
     ...COMMON_RESULT_BOUNDS,
-    '$.data.patents.maxItems': 2000,
+    '$.data.patents.maxItems': 50,
+    '$.data.patents[].publicationNumber.maxLength': 120,
     '$.data.patents[].applicants.maxItems': 32,
     '$.data.patents[].applicants[].name.maxLength': 500,
     '$.data.patents[].applicants[].country.maxLength': 16,
     '$.data.patents[].inventors.maxItems': 25,
     '$.data.patents[].inventors[].name.maxLength': 500,
+    '$.data.costFacts.costBasis.maxLength': 32,
+    '$.data.costFacts.maximumBytesBilled.maxLength': 24,
+    '$.data.costFacts.observedBytesBilled.oneOf[0].maxLength': 24,
+    '$.data.costFacts.maxRows.minimum': 0,
+    '$.data.costFacts.maxRows.maximum': 50,
   },
   'tradefair-algolia/v1': {
     ...COMMON_RESULT_BOUNDS,
@@ -958,6 +972,67 @@ describe('closed catalog Tool result projections', () => {
       email: 'person@example.test', phone: '+1 555 0100', contactName: 'Named person',
     });
     expect(() => registry.project('mapyourshow-fetch/v1', map)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
+  it('requires Google Patents publicationNumber identity and caps durable rows at 50', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const missingIdentity = cloneRaw(GOOGLE_PATENTS_RAW);
+    delete ((missingIdentity.data.patents as JsonRecord[])[0]).publicationNumber;
+    expect(() => registry.project('google-patents-search/v1', missingIdentity)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const tooMany = cloneRaw(GOOGLE_PATENTS_RAW);
+    (tooMany.data.patents as JsonRecord[]).push({
+      publicationNumber: 'US-0051-A1',
+      applicants: [],
+      inventors: [],
+    });
+    expect(() => registry.project('google-patents-search/v1', tooMany)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+  });
+
+  it('requires canonical Google Patents cost facts and rejects invented observed bytes', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const missingFacts = cloneRaw(GOOGLE_PATENTS_RAW);
+    delete (missingFacts.data as JsonRecord).costFacts;
+    expect(() => registry.project('google-patents-search/v1', missingFacts)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const notIncurred = cloneRaw(GOOGLE_PATENTS_RAW);
+    notIncurred.data.costFacts = {
+      costBasis: 'not_incurred',
+      maximumBytesBilled: '0',
+      observedBytesBilled: null,
+      maxRows: 0,
+    };
+    expect(registry.project('google-patents-search/v1', notIncurred).data).toMatchObject({
+      data: { costFacts: notIncurred.data.costFacts },
+    });
+
+    const inventedObserved = cloneRaw(GOOGLE_PATENTS_RAW);
+    inventedObserved.data.costFacts = {
+      costBasis: 'estimated_upper_bound',
+      maximumBytesBilled: '100',
+      observedBytesBilled: '100',
+      maxRows: 50,
+    };
+    expect(() => registry.project('google-patents-search/v1', inventedObserved)).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
+
+    const exceedsMaximum = cloneRaw(GOOGLE_PATENTS_RAW);
+    exceedsMaximum.data.costFacts = {
+      costBasis: 'provider_reported',
+      maximumBytesBilled: '100',
+      observedBytesBilled: '101',
+      maxRows: 50,
+    };
+    expect(() => registry.project('google-patents-search/v1', exceedsMaximum)).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
   });
@@ -1333,10 +1408,12 @@ describe('closed catalog Tool result projections', () => {
       data: {
         patents: [
           {
+            publicationNumber: 'US-HOME-1',
             applicants: [{ name: 'Siemens AG', country: 'de' }],
             inventors: Array.from({ length: 15 }, (_, index) => inventor(`Home Inventor ${index}`)),
           },
           {
+            publicationNumber: 'US-HOME-2',
             applicants: [{ name: 'Siemens Aktiengesellschaft', country: 'de' }],
             inventors: [
               inventor('Home Inventor 0'),
@@ -1344,6 +1421,7 @@ describe('closed catalog Tool result projections', () => {
             ],
           },
           {
+            publicationNumber: 'US-COAUTHOR',
             applicants: [
               { name: 'Siemens AG', country: 'de' },
               { name: 'Bosch GmbH', country: 'de' },
@@ -1351,10 +1429,17 @@ describe('closed catalog Tool result projections', () => {
             inventors: [inventor('Coauthor Must Not Survive')],
           },
           {
+            publicationNumber: 'US-FOREIGN',
             applicants: [{ name: 'Siemens Inc', country: 'us' }],
             inventors: Array.from({ length: 30 }, (_, index) => inventor(`US Inventor ${index}`)),
           },
         ],
+        costFacts: {
+          costBasis: 'estimated_upper_bound',
+          maximumBytesBilled: '214748364800',
+          observedBytesBilled: null,
+          maxRows: 50,
+        },
       },
       costCents: 0,
     };

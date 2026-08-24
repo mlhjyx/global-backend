@@ -30,9 +30,10 @@ describe('intent activities — platform authority lifecycle', () => {
     const order: string[] = [];
     const fetch = vi.fn(async (_url, context) => {
       order.push('wire');
-      expect(context).toEqual({
+      expect(context).toEqual(expect.objectContaining({
         workspaceId: 'platform', runId: executionBudget.accountKey, correlationId: executionBudget.accountKey,
-      });
+        onDurableReceipt: expect.any(Function),
+      }));
       throw new BudgetOperationReplayError('crawl-op');
     });
     const prisma = {
@@ -68,5 +69,37 @@ describe('intent activities — platform authority lifecycle', () => {
     expect(budgetStore.openAuthorized).not.toHaveBeenCalled();
     expect(budgetStore.close).not.toHaveBeenCalled();
     expect(order).toEqual(['attest', 'wire']);
+  });
+
+  it('rejects an unexpected page receipt producer before website-watch persistence', async () => {
+    const sourceFetchCreate = vi.fn(async () => ({ id: 'fetch-1' }));
+    const activities = createIntentActivities({
+      prisma: {
+        monitoredSource: { findUnique: vi.fn(async () => ({
+          id: 'source-1', providerKey: 'web_watch', sourceKey: 'web_watch:example.com',
+          label: 'Example', status: 'ACTIVE', region: null,
+          config: {
+            company: { name: 'Example', domain: 'example.com' },
+            pages: [{ url: 'https://example.com/' }],
+          },
+        })) },
+        sourcePolicy: { findFirst: vi.fn(async () => null) },
+        sourceFetch: { create: sourceFetchCreate },
+        sourceEntity: { findMany: vi.fn(async () => []) },
+      } as never,
+      fetcher: {
+        fetch: vi.fn(async (_url, context) => {
+          context.onDurableReceipt?.('unexpected.tool', {} as never);
+          return null;
+        }),
+      } as never,
+      budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
+      activityRunId: () => 'workflow-run-1',
+    });
+
+    await expect(activities.watchSource({
+      sourceId: 'source-1', executionContractVersion: 1, executionBudget,
+    })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+    expect(sourceFetchCreate).toHaveBeenCalledOnce();
   });
 });

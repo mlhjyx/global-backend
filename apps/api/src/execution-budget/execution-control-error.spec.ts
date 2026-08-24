@@ -6,8 +6,27 @@ describe('isExecutionControlError', () => {
     'EXECUTION_BUDGET_GRANT_EXPIRED',
     'BUDGET_STORE_UNAVAILABLE',
     'BUDGET_OPERATION_REPLAY_UNAVAILABLE',
+    'DOMAIN_ACK_RECEIPT_BINDING_MISMATCH',
+    'DOMAIN_ACK_MIXED_REPLAY_STATE',
+    'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH',
+    'GENERIC_OPERATION_ARTIFACT_INVALID',
+    'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
   ])('recognizes %s on a direct code', (code) => {
     expect(isExecutionControlError({ code })).toBe(true);
+  });
+
+  it('recognizes deeply Temporal-wrapped receipt, ACK and artifact settlement controls', () => {
+    const failure = {
+      name: 'ActivityFailure',
+      cause: {
+        type: 'ApplicationFailure',
+        cause: {
+          name: 'ArtifactStorageError',
+          cause: { code: 'DURABLE_EXECUTION_RECEIPT_FACTS_CONFLICT' },
+        },
+      },
+    };
+    expect(isExecutionControlError(failure)).toBe(true);
   });
 
   it('recursively recognizes Temporal ActivityFailure cause/type/message fields', () => {

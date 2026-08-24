@@ -18,6 +18,7 @@ import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -110,6 +111,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
       const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query, ctx)));
       for (const s of settled) {
+        if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
         if (s.status !== 'fulfilled') continue;
         for (const rec of s.value) {
           const key = rec.domain ?? `n:${rec.name.toLowerCase()}`;
@@ -164,6 +166,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         );
         text = crawled.data.text.slice(0, 60_000);
       } catch (err) {
+        if (isExecutionControlError(err)) throw err;
         this.log(`skip ${pageUrl}: crawl failed (${String(err).slice(0, 80)})`);
         break;
       }
@@ -227,11 +230,12 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { ...ctx },
+        { ...ctx, durableResultSchema: 'discovery-extract-list/v1' },
         { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data;
     } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
       return null;
     }

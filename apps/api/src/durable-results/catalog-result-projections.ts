@@ -52,7 +52,10 @@ const CH_COMPANY_KEYS = ['companyNumber', 'title', 'companyStatus'] as const;
 const CH_OFFICER_KEYS = ['name', 'officerRole', 'resignedOn', 'officerId'] as const;
 const INPI_COMPANY_KEYS = ['siren', 'name', 'etatAdministratif', 'dirigeants'] as const;
 const INPI_DIRIGEANT_KEYS = ['nom', 'prenoms', 'qualite'] as const;
-const PATENT_KEYS = ['applicants', 'inventors'] as const;
+const PATENT_KEYS = ['publicationNumber', 'applicants', 'inventors'] as const;
+const PATENT_COST_FACT_KEYS = [
+  'costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows',
+] as const;
 const PATENT_APPLICANT_KEYS = ['name', 'country'] as const;
 const PATENT_INVENTOR_KEYS = ['name'] as const;
 const FAIR_EXHIBITOR_KEYS = [
@@ -758,23 +761,36 @@ const patentApplicantSchema = objectSchema({
 }, ['name']);
 const patentInventorSchema = objectSchema({ name: stringSchema(500) }, ['name']);
 const patentSchema = objectSchema({
+  publicationNumber: stringSchema(120),
   applicants: arraySchema(32, patentApplicantSchema),
   inventors: arraySchema(25, patentInventorSchema),
-}, ['applicants', 'inventors']);
+}, ['publicationNumber', 'applicants', 'inventors']);
+const patentCostFactsSchema = objectSchema({
+  costBasis: stringSchema(32, {
+    enum: ['not_incurred', 'estimated_upper_bound', 'provider_reported'],
+  }),
+  maximumBytesBilled: stringSchema(24),
+  observedBytesBilled: { oneOf: [stringSchema(24), { type: 'null' }] },
+  maxRows: numberSchema(0, 50, true),
+}, ['costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows']);
 function projectPatentRecords(value: unknown): unknown[] {
   const groupSeen = new Map<string, Set<string>>();
   return mapArray(value, (item) => {
-    const patent = ownDataRecord(item, PATENT_KEYS, ['applicants', 'inventors']);
+    const patent = ownDataRecord(item, PATENT_KEYS, ['publicationNumber', 'applicants', 'inventors']);
     const applicants = mapArray(field(patent, 'applicants'), (entry) => (
       mapClosedRecord(entry, PATENT_APPLICANT_KEYS, ['name'])
     )) as UnknownRecord[];
     const inputInventors = mapArray(field(patent, 'inventors'), (entry) => (
       mapClosedRecord(entry, PATENT_INVENTOR_KEYS, ['name'])
     )) as UnknownRecord[];
-    if (applicants.length !== 1) return { applicants, inventors: [] };
+    if (applicants.length !== 1) return {
+      publicationNumber: field(patent, 'publicationNumber'), applicants, inventors: [],
+    };
     const sole = applicants[0];
     const applicantKey = normForMatch(String(field(sole, 'name') ?? ''));
-    if (!applicantKey) return { applicants, inventors: [] };
+    if (!applicantKey) return {
+      publicationNumber: field(patent, 'publicationNumber'), applicants, inventors: [],
+    };
     const country = typeof field(sole, 'country') === 'string'
       ? String(field(sole, 'country')).toLowerCase() : '';
     const groupKey = `${applicantKey}\0${country}`;
@@ -787,15 +803,45 @@ function projectPatentRecords(value: unknown): unknown[] {
       seen.add(nameKey);
       inventors.push(inventor);
     }
-    return { applicants, inventors };
+    return { publicationNumber: field(patent, 'publicationNumber'), applicants, inventors };
   });
 }
-const patentsData = (value: unknown) => mapClosedRecord(value, ['patents'], [], {
+function projectPatentCostFacts(value: unknown): unknown {
+  const facts = mapClosedRecord(value, PATENT_COST_FACT_KEYS, [
+    'costBasis', 'maximumBytesBilled', 'observedBytesBilled', 'maxRows',
+  ]);
+  const maximum = BigInt(String(field(facts, 'maximumBytesBilled')));
+  const observed = field(facts, 'observedBytesBilled') === null
+    ? null
+    : BigInt(String(field(facts, 'observedBytesBilled')));
+  if (maximum < 0n || observed !== null && (observed < 0n || observed > maximum)) {
+    projectionInvalid();
+  }
+  if (
+    field(facts, 'costBasis') === 'not_incurred' &&
+    (maximum !== 0n || field(facts, 'observedBytesBilled') !== null ||
+      field(facts, 'maxRows') !== 0)
+  ) projectionInvalid();
+  if (
+    field(facts, 'costBasis') === 'estimated_upper_bound' &&
+    field(facts, 'observedBytesBilled') !== null
+  ) projectionInvalid();
+  if (
+    field(facts, 'costBasis') === 'provider_reported' &&
+    typeof field(facts, 'observedBytesBilled') !== 'string'
+  ) projectionInvalid();
+  return facts;
+}
+const patentsData = (value: unknown) => mapClosedRecord(value, ['patents', 'costFacts'], ['patents', 'costFacts'], {
   patents: projectPatentRecords,
+  costFacts: projectPatentCostFacts,
 });
 const googlePatentsDefinition = definition(
   'google-patents-search/v1',
-  objectSchema({ patents: arraySchema(2000, patentSchema) }, []),
+  objectSchema({
+    patents: arraySchema(50, patentSchema),
+    costFacts: patentCostFactsSchema,
+  }, ['patents', 'costFacts']),
   patentsData,
 );
 

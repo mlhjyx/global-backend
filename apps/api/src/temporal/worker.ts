@@ -357,12 +357,14 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        platformWriter: authorityWriter,
       }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createAcquisitionActivities({
         prisma,
         registry: buildSourceAdapterRegistry(broker),
         budgetStore,
+        platformWriter: authorityWriter,
       }),
       ...createIntentActivities({
         prisma,
@@ -370,6 +372,7 @@ async function main(): Promise<void> {
         ownerDb,
         broker,
         budgetStore,
+        platformWriter: authorityWriter,
       }),
       ...createBacklogActivities({
         prisma,
@@ -379,6 +382,7 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        platformWriter: authorityWriter,
       }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
       ...createExternalIntentActivities({
@@ -387,17 +391,21 @@ async function main(): Promise<void> {
         ownerDb,
         broker,
         budgetStore,
+        platformWriter: authorityWriter,
       }),
       // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
       ...createDeletionActivities({ prisma }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
-      ...createPatentsCacheActivities({ ownerDb, broker, budgetStore }),
+      ...createPatentsCacheActivities({
+        ownerDb, broker, budgetStore, platformWriter: authorityWriter,
+      }),
       // 制裁名单每日刷新（第五门）：owner 写平台表、下载经 broker、刷新后重建 worker 内 screener 索引
       ...createSanctionsRefreshActivities({
         ownerDb,
         broker,
         sanctionsScreening,
         budgetStore,
+        platformWriter: authorityWriter,
       }),
       // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
       ...createSiteBuilderActivities({

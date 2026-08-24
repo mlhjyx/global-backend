@@ -9,6 +9,22 @@ import {
 } from './intent-projection.service';
 import { ToolPolicyDenied } from '../tools/tool-broker';
 import { BudgetOperationReplayError } from '../tools/budget-store';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const HTTP_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'platform',
+  authorityId: '20000000-0000-4000-8000-000000000001',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'http-get',
+  resultStrategy: 'artifact_reference',
+  resultSchema: 'http-get/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: '50000000-0000-4000-8000-000000000001',
+  usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10000' },
+  costBasis: 'estimated_upper_bound',
+});
 
 // 这三个纯函数是 TED P3 / openFDA P3 / web_watch 共享的**幂等基石**——每 sweep 复现同一信号时靠它们判「实质未变」
 // 而不重写 canonical / 不堆 field_evidence。TED P3 实测抓到过 jsonb 键序 bug（DB 取回对象键序被 Postgres 规范化，
@@ -167,6 +183,47 @@ describe('IntentProjectionService — suppression authority materialization gate
 });
 
 describe('IntentProjectionService — watch registration terminal suppression denial', () => {
+  it('collects http.get receipts and refuses platform writes without the exact transaction', async () => {
+    const create = vi.fn();
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: unknown) => unknown) => callback({
+        canonicalCompany: {
+          findUnique: vi.fn(async () => ({
+            id: 'company-1', name: 'Acme GmbH', domain: 'acme.example', region: null,
+          })),
+        },
+        fieldEvidence: { findMany: vi.fn(async () => []) },
+      })),
+      monitoredSource: { findUnique: vi.fn(async () => null), create },
+    };
+    const broker = {
+      invoke: vi.fn(async (_toolId: string, _input: unknown, context: {
+        onDurableReceipt?: (producerId: string, receipt: DurableExecutionReceipt) => void;
+      }) => {
+        context.onDurableReceipt?.('http.get', HTTP_RECEIPT);
+        return {
+          data: {
+            status: 404, ok: false, mediaType: 'text/plain', text: '',
+            finalUrl: 'https://acme.example/sitemap.xml',
+          },
+          costCents: 0,
+          durableReceipt: HTTP_RECEIPT,
+        };
+      }),
+    };
+    const service = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: broker as never,
+      budgetStore: {
+        open: vi.fn(async () => undefined), close: vi.fn(async () => undefined),
+      } as never,
+    });
+    await expect(service.registerWatch('workspace-1', 'company-1', {
+      budgetKey: 'watch:company-1', budgetWorkspaceId: 'platform',
+    })).rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('quarantines historical sandbox evidence before sitemap discovery or monitored-source writes', async () => {
     const create = vi.fn(async () => ({ id: 'monitor-synthetic' }));
     const invoke = vi.fn();

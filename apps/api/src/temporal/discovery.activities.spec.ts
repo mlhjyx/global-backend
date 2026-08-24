@@ -16,6 +16,26 @@ import type {
   ExecutionContext,
   ProviderCompanyRecord,
 } from '../discovery/provider-contract';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const acknowledgementMocks = vi.hoisted(() => ({
+  apply: vi.fn(async (input: {
+    transaction: unknown;
+    acknowledgements: Array<{ producerId: string }>;
+    apply: (transaction: unknown) => Promise<unknown>;
+  }) => ({
+    status: 'APPLIED',
+    acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+      producerId,
+      status: 'APPLIED',
+    })),
+    value: await input.apply(input.transaction),
+  })),
+}));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransactions: acknowledgementMocks.apply,
+}));
 
 /**
  * executeQuery 预算截断透传单测（Codex PR #51 P1，根治版）：fan-out 中某源打穿 run 预算时，**真实 provider
@@ -84,6 +104,24 @@ const DISCOVERY_BINDING = Object.freeze({
   subjectType: 'discovery_run',
   subjectId: `request:${'a'.repeat(64)}`,
   requestSha256: 'a'.repeat(64),
+});
+
+const ENRICHMENT_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: DISCOVERY_BINDING.scopeKey,
+  authorityId: DISCOVERY_BINDING.authorityId,
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'discovery-gleif-enrichment',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'gleif-fetch/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
 });
 
 function authorityBudgetStore(): BudgetStore {
@@ -441,6 +479,49 @@ describe('enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
     const r = await acts.enrichRun(discoveryArgs('run-enrich-ok', { icpId: 'icp-1' }));
     expect(r.budgetTruncated).toBe(false);
   });
+
+  it.each(['enrichRun', 'enrichSignalsRun'] as const)(
+    '%s ACKs a valid no-match enrichment receipt on its exact workspace transaction',
+    async (activityName) => {
+      acknowledgementMocks.apply.mockClear();
+      acknowledgementMocks.apply.mockImplementationOnce(async (input: {
+        transaction: unknown;
+        acknowledgements: Array<{ producerId: string }>;
+        readback: (transaction: unknown) => Promise<unknown>;
+      }) => ({
+        status: 'REPLAYED',
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: 'REPLAYED',
+        })),
+        value: await input.readback(input.transaction),
+      }));
+      const enricher = {
+        key: 'gleif',
+        enrichCompany: vi.fn(async (_company: unknown, ctx: ExecutionContext) => {
+          ctx.onDurableReceipt?.('gleif.fetch', ENRICHMENT_RECEIPT);
+          return { matched: false } as EnrichmentResult;
+        }),
+      };
+      const deps = makeEnrichDeps([enricher]);
+      const result = await createDiscoveryActivities(deps)[activityName](
+        discoveryArgs(`run-${activityName}`, { icpId: 'icp-1' }),
+      );
+
+      expect(result).toMatchObject({ enriched: 1, matched: 0 });
+      expect(acknowledgementMocks.apply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          acknowledgements: [expect.objectContaining({
+            producerId: 'gleif.fetch',
+            receipt: ENRICHMENT_RECEIPT,
+          })],
+        }),
+      );
+      const acknowledgement = acknowledgementMocks.apply.mock.calls.at(-1)?.[0];
+      expect(acknowledgement.apply).toBeTypeOf('function');
+      expect(acknowledgement.readback).toBeTypeOf('function');
+    },
+  );
 
   it('信号富集预算控制失败上抛，不降级为 best-effort', async () => {
     const deps = makeEnrichDeps([budgetSwallowingEnricher]);
