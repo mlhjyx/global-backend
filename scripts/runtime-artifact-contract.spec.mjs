@@ -134,7 +134,7 @@ test('single OCI Dockerfile uses one non-root runtime with api and worker entryp
   assert.match(dockerfile, /generate-runtime-artifact-manifest\.mjs/);
   assert.match(dockerfile, /pnpm --filter @global\/api deploy --prod --frozen-lockfile \/tmp\/api-runtime-deploy/);
   assert.match(dockerfile, /pnpm --filter @global\/site-renderer deploy --prod --frozen-lockfile \/tmp\/renderer-runtime-deploy/);
-  assert.match(dockerfile, /chromium=151\.0\.7922\.137-1~deb12u1/);
+  assert.match(dockerfile, /chromium=151\.0\.7922\.173-1~deb12u1/);
   assert.match(dockerfile, /util-linux=2\.38\.1-5\+deb12u3/);
   assert.match(dockerfile, /dpkg-query -W/);
   assert.match(dockerfile, /ENV CHROME_PATH=\/usr\/bin\/chromium/);
@@ -221,8 +221,8 @@ test('final image verification binds every product component and permits only co
         { name: '@global/contracts', version: '0.0.1' },
         {
           name: 'chromium',
-          version: '151.0.7922.137-1~deb12u1',
-          purl: 'pkg:deb/debian/chromium@151.0.7922.137-1~deb12u1?arch=amd64',
+          version: '151.0.7922.173-1~deb12u1',
+          purl: 'pkg:deb/debian/chromium@151.0.7922.173-1~deb12u1?arch=amd64',
         },
       ],
     }),
@@ -234,7 +234,7 @@ test('final image verification binds every product component and permits only co
       'Package: chromium',
       'Status: install ok installed',
       'Architecture: amd64',
-      'Version: 151.0.7922.137-1~deb12u1',
+      'Version: 151.0.7922.173-1~deb12u1',
       '',
     ].join('\n'),
   );
@@ -378,7 +378,7 @@ test('CycloneDX SBOM is deterministically derived from the production dependency
     operatingSystemPackages: [
       {
         name: 'chromium',
-        version: '151.0.7922.137-1~deb12u1',
+        version: '151.0.7922.173-1~deb12u1',
         architecture: 'amd64',
       },
     ],
@@ -394,7 +394,7 @@ test('CycloneDX SBOM is deterministically derived from the production dependency
     sbom.components.some(
       (component) =>
         component.purl ===
-        'pkg:deb/debian/chromium@151.0.7922.137-1~deb12u1?arch=amd64',
+      'pkg:deb/debian/chromium@151.0.7922.173-1~deb12u1?arch=amd64',
     ),
   );
   assert.ok(sbom.dependencies.some((item) => item.ref === 'pkg:npm/%40global/api@0.0.1'));

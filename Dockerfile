@@ -3,7 +3,7 @@ FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d4
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
-      chromium=151.0.7922.137-1~deb12u1 \
+      chromium=151.0.7922.173-1~deb12u1 \
       util-linux=2.38.1-5+deb12u3 \
       openssl && \
     rm -rf /var/lib/apt/lists/*
