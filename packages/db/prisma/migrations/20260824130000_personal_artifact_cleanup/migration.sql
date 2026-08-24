@@ -225,7 +225,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
-  audit "generic_operation_artifact_subject_tombstone_audit"%ROWTYPE;
+  audit_row "generic_operation_artifact_subject_tombstone_audit"%ROWTYPE;
   inserted_count INTEGER := 0;
   shared_count INTEGER := 0;
   missing_version_count INTEGER := 0;
@@ -240,7 +240,7 @@ BEGIN
     RAISE EXCEPTION 'PERSONAL_ARTIFACT_CLEANUP_DENIED'
       USING ERRCODE = 'P0001';
   END IF;
-  SELECT target.* INTO audit
+  SELECT target.* INTO audit_row
   FROM "generic_operation_artifact_subject_tombstone_audit" target
   WHERE target."deletion_request_id" = p_deletion_request_id
     AND target."workspace_id" = p_workspace_id
@@ -256,9 +256,9 @@ BEGIN
     JOIN "generic_operation_artifact" artifact
       ON artifact."scope_key" = subject."scope_key"
      AND artifact."id" = subject."artifact_id"
-    WHERE subject."workspace_id" = audit."workspace_id"
-      AND subject."subject_type" = audit."subject_type"
-      AND subject."subject_id" = audit."subject_id"
+    WHERE subject."workspace_id" = audit_row."workspace_id"
+      AND subject."subject_type" = audit_row."subject_type"
+      AND subject."subject_id" = audit_row."subject_id"
     ORDER BY artifact."sha256"
   LOOP
     PERFORM pg_advisory_xact_lock(hashtextextended(
@@ -272,9 +272,9 @@ BEGIN
     JOIN "generic_operation_artifact" artifact
       ON artifact."scope_key" = subject."scope_key"
      AND artifact."id" = subject."artifact_id"
-    WHERE subject."workspace_id" = audit."workspace_id"
-      AND subject."subject_type" = audit."subject_type"
-      AND subject."subject_id" = audit."subject_id"
+    WHERE subject."workspace_id" = audit_row."workspace_id"
+      AND subject."subject_type" = audit_row."subject_type"
+      AND subject."subject_id" = audit_row."subject_id"
       AND artifact."privacy_class" = 'PERSONAL_DATA'
   )
   SELECT count(*)::INTEGER INTO shared_count
@@ -302,9 +302,9 @@ BEGIN
     JOIN "generic_operation_artifact" artifact
       ON artifact."scope_key" = subject."scope_key"
      AND artifact."id" = subject."artifact_id"
-    WHERE subject."workspace_id" = audit."workspace_id"
-      AND subject."subject_type" = audit."subject_type"
-      AND subject."subject_id" = audit."subject_id"
+    WHERE subject."workspace_id" = audit_row."workspace_id"
+      AND subject."subject_type" = audit_row."subject_type"
+      AND subject."subject_id" = audit_row."subject_id"
       AND artifact."privacy_class" = 'PERSONAL_DATA'
   )
   SELECT count(*)::INTEGER INTO missing_version_count
@@ -323,9 +323,9 @@ BEGIN
      AND artifact."id" = subject."artifact_id"
     JOIN "generic_operation_artifact_object" object
       ON object."sha256" = artifact."sha256"
-    WHERE subject."workspace_id" = audit."workspace_id"
-      AND subject."subject_type" = audit."subject_type"
-      AND subject."subject_id" = audit."subject_id"
+    WHERE subject."workspace_id" = audit_row."workspace_id"
+      AND subject."subject_type" = audit_row."subject_type"
+      AND subject."subject_id" = audit_row."subject_id"
       AND artifact."privacy_class" = 'PERSONAL_DATA'
       AND object."object_version_id" IS NOT NULL
       AND NOT EXISTS (
@@ -351,7 +351,7 @@ BEGIN
       "object_version_id", "tombstoned_at"
     )
     SELECT p_workspace_id, p_deletion_request_id, eligible.artifact_id,
-      eligible."sha256", eligible."object_version_id", audit."tombstoned_at"
+      eligible."sha256", eligible."object_version_id", audit_row."tombstoned_at"
     FROM eligible
     ON CONFLICT ON CONSTRAINT
       "personal_artifact_cleanup_command_request_object_key" DO NOTHING
@@ -375,7 +375,7 @@ AS $$
 DECLARE
   request_exists BOOLEAN;
   fence_exists BOOLEAN;
-  audit "generic_operation_artifact_subject_tombstone_audit"%ROWTYPE;
+  audit_row "generic_operation_artifact_subject_tombstone_audit"%ROWTYPE;
   shared_count INTEGER;
   version_count INTEGER;
 BEGIN
@@ -391,15 +391,15 @@ BEGIN
   IF NOT request_exists THEN RETURN; END IF;
   SELECT EXISTS(
     SELECT 1
-    FROM "generic_operation_artifact_subject_tombstone_audit" audit
-    WHERE audit."deletion_request_id" = p_deletion_request_id
-      AND audit."workspace_id" = p_workspace_id
+    FROM "generic_operation_artifact_subject_tombstone_audit" audit_source
+    WHERE audit_source."deletion_request_id" = p_deletion_request_id
+      AND audit_source."workspace_id" = p_workspace_id
   ) INTO fence_exists;
   IF NOT fence_exists THEN
     RETURN QUERY SELECT false, false, false;
     RETURN;
   END IF;
-  SELECT target.* INTO audit
+  SELECT target.* INTO audit_row
   FROM "generic_operation_artifact_subject_tombstone_audit" target
   WHERE target."deletion_request_id" = p_deletion_request_id
     AND target."workspace_id" = p_workspace_id;
@@ -409,9 +409,9 @@ BEGIN
     JOIN "generic_operation_artifact" artifact
       ON artifact."scope_key" = subject."scope_key"
      AND artifact."id" = subject."artifact_id"
-    WHERE subject."workspace_id" = audit."workspace_id"
-      AND subject."subject_type" = audit."subject_type"
-      AND subject."subject_id" = audit."subject_id"
+    WHERE subject."workspace_id" = audit_row."workspace_id"
+      AND subject."subject_type" = audit_row."subject_type"
+      AND subject."subject_id" = audit_row."subject_id"
       AND artifact."privacy_class" = 'PERSONAL_DATA'
   )
   SELECT count(*)::INTEGER INTO shared_count
@@ -438,9 +438,9 @@ BEGIN
     JOIN "generic_operation_artifact" artifact
       ON artifact."scope_key" = subject."scope_key"
      AND artifact."id" = subject."artifact_id"
-    WHERE subject."workspace_id" = audit."workspace_id"
-      AND subject."subject_type" = audit."subject_type"
-      AND subject."subject_id" = audit."subject_id"
+    WHERE subject."workspace_id" = audit_row."workspace_id"
+      AND subject."subject_type" = audit_row."subject_type"
+      AND subject."subject_id" = audit_row."subject_id"
       AND artifact."privacy_class" = 'PERSONAL_DATA'
   )
   SELECT count(*)::INTEGER INTO version_count

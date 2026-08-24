@@ -41,4 +41,16 @@ describe('personal artifact cleanup forward migration', () => {
     );
     assert.doesNotMatch(manifestModel, /objectVersionId/);
   });
+
+  it('keeps PL/pgSQL audit variables distinct from SQL aliases', () => {
+    const inspect = migration.slice(
+      migration.indexOf('CREATE FUNCTION inspect_workspace_personal_artifact_cleanup_v1'),
+      migration.indexOf('CREATE FUNCTION claim_workspace_personal_artifact_cleanup_v1'),
+    );
+    assert.match(inspect, /audit_row\s+"generic_operation_artifact_subject_tombstone_audit"%ROWTYPE/);
+    assert.doesNotMatch(
+      inspect,
+      /FROM "generic_operation_artifact_subject_tombstone_audit" audit\b/,
+    );
+  });
 });
