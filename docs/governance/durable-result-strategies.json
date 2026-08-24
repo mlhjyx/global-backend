@@ -1,0 +1,577 @@
+{
+  "schemaVersion": "execution-authority-policy/v2",
+  "cutoverFence": "TASK_6_AUTHORITY_BOUND_PHYSICAL_EXECUTION_NOT_WIRED",
+  "physicalExecutionWiring": {
+    "status": "NOT_WIRED",
+    "protectedFiles": [
+      {
+        "path": "apps/api/src/tools/tool-broker.ts",
+        "sha256": "6d14b42a4bd6b9693edc7bf8a5211ea6fa3644e2311796a473ae1fc15633391e"
+      },
+      {
+        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
+        "sha256": "ee31ded3a9f37367c90dd5bc7d89cb9d2e47eb470c2fd6fa5c92b4673e5ce080"
+      },
+      {
+        "path": "apps/api/src/tools/tool-broker.factory.ts",
+        "sha256": "204f27bd7194d12912a04b376a1c7125d0a17ea4e94c06595b7265680d4ed3bf"
+      },
+      {
+        "path": "apps/api/src/model-gateway/model-gateway.module.ts",
+        "sha256": "29772a82fba11b871fecfa396cb610df7e460d1c7b4c65c3ac0a6bdbcd3c2e04"
+      }
+    ]
+  },
+  "receipt": {
+    "schema": "durable-execution-receipt/v1",
+    "author": "TRUSTED_LEDGER_REQUIRED_AT_TASK_6_CUTOVER",
+    "attachedAtRuntime": false,
+    "fields": [
+      "schemaVersion",
+      "scopeKey",
+      "authorityId",
+      "accountId",
+      "operationId",
+      "operationKey",
+      "resultStrategy",
+      "resultSchema",
+      "resultDigest",
+      "artifactId",
+      "usage",
+      "costBasis",
+      "status"
+    ],
+    "allowedStatus": ["SETTLED"],
+    "tokenCountsOnly": true,
+    "payloadExclusions": [
+      "body",
+      "prompt",
+      "reasoning",
+      "rawResponse",
+      "response",
+      "responseBody",
+      "token",
+      "email",
+      "credential",
+      "credentials",
+      "personalData"
+    ]
+  },
+  "resultDisposition": {
+    "schema": "execution-result-disposition/v1",
+    "kinds": ["valid_output", "result_unknown", "control_error", "replay_error"],
+    "automaticPhysicalRetryAllowed": false,
+    "unknownStatus": "RESULT_UNKNOWN",
+    "controlStatus": "RELEASED",
+    "replayStatus": "SETTLED"
+  },
+  "tools": [
+    {
+      "id": "searxng.search",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "searxng-search/v1",
+      "operationIdentity": "tool:searxng.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "SearchDiscoveryProvider",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "query-digest-and-result-url",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "crawl4ai.fetch",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
+      "operationIdentity": "tool:crawl4ai.fetch:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "WebCrawlKnowledgeSource",
+        "domainAggregateType": "KnowledgeSource",
+        "identitySource": "source-url-and-content-hash",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "wikidata.sparql",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "wikidata-sparql/v1",
+      "operationIdentity": "tool:wikidata.sparql:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "WikidataTaxonomyResolver",
+        "domainAggregateType": "TaxonomyEvidence",
+        "identitySource": "query-digest-and-wikidata-qid",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "osm.overpass",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "osm-overpass/v1",
+      "operationIdentity": "tool:osm.overpass:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "GeoDiscoveryProvider",
+        "domainAggregateType": "LocationEvidence",
+        "identitySource": "osm-element-id",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "smtp.rcpt_probe",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "smtp-probe-verdict/v1",
+      "operationIdentity": "tool:smtp.rcpt_probe:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "EmailVerificationProvider",
+        "domainAggregateType": "EmailVerification",
+        "identitySource": "normalized-email-hash",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "crawl4ai.render",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-render/v1",
+      "operationIdentity": "tool:crawl4ai.render:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "RenderedPageCapture",
+        "domainAggregateType": "KnowledgeSource",
+        "identitySource": "source-url-and-render-hash",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "http.get",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "operationIdentity": "tool:http.get:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "GenericHttpArtifactConsumer",
+        "domainAggregateType": "ExternalArtifact",
+        "identitySource": "url-and-content-hash",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "wikidata.entity",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "wikidata-entity/v1",
+      "operationIdentity": "tool:wikidata.entity:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "WikidataEntityResolver",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "wikidata-qid",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "gleif.fetch",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "gleif-fetch/v1",
+      "operationIdentity": "tool:gleif.fetch:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "LegalEntityEnrichment",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "lei",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "ted.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "ted-search/v1",
+      "operationIdentity": "tool:ted.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "TedTenderDiscoveryProvider",
+        "domainAggregateType": "TenderEvidence",
+        "identitySource": "ted-notice-id",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "openfda.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "openfda-search/v1",
+      "operationIdentity": "tool:openfda.search:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "OpenFdaDiscoveryProvider",
+        "domainAggregateType": "ProductRegistrationEvidence",
+        "identitySource": "registration-or-k-number",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "companies_house.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "companies-house-search/v1",
+      "operationIdentity": "tool:companies_house.search:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "CompanyRegistryDiscoveryProvider",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "company-number-and-officer-id",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "inpi_rne.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "inpi-rne-search/v1",
+      "operationIdentity": "tool:inpi_rne.search:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "CompanyRegistryDiscoveryProvider",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "siren-and-minimized-dirigeant-name",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "google_patents.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "google-patents-search/v1",
+      "operationIdentity": "tool:google_patents.search:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "resultConstraints": {
+        "maxRowsPerOperation": 25,
+        "maxApplicantsPerPatent": 32,
+        "maxInventorsPerPatent": 25,
+        "typedProjectionMaxPatents": 2000,
+        "rawBigQueryRowsRetained": false,
+        "inventorFields": ["name"]
+      },
+      "costConstraints": {
+        "maximumBytesBilled": "214748364800",
+        "costBasis": "estimated_upper_bound",
+        "providerReportedBytesOptional": true,
+        "realBigQueryInTests": false
+      },
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "PatentCacheBrokerScanner",
+        "domainAggregateType": "PatentCacheAnchor",
+        "identitySource": "operation-key-and-normalized-assignee-anchor",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "tradefair.algolia",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "tradefair-algolia/v1",
+      "operationIdentity": "tool:tradefair.algolia:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "TradeFairDiscoveryProvider",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "event-and-exhibitor-id",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "mapyourshow.fetch",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "mapyourshow-fetch/v1",
+      "operationIdentity": "tool:mapyourshow.fetch:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "TradeFairDiscoveryProvider",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "show-and-exhibitor-id",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "samgov.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "samgov-search/v1",
+      "operationIdentity": "tool:samgov.search:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "SamGovDiscoveryProvider",
+        "domainAggregateType": "FederalContractEvidence",
+        "identitySource": "notice-id",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "sanctions.download",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "sanctions-download/v1",
+      "operationIdentity": "tool:sanctions.download:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "SanctionsScreeningCache",
+        "domainAggregateType": "SanctionsDataset",
+        "identitySource": "dataset-source-and-result-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    }
+  ],
+  "modelTasks": [
+    {
+      "taskId": "company_understanding.extract_claims",
+      "callsitePath": "apps/api/src/temporal/understanding.activities.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "understanding-claims/v1",
+      "operationIdentity": "model:company_understanding.extract_claims:<runId>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "UnderstandingActivities.extractClaims",
+        "domainAggregateType": "CompanyProfile",
+        "identitySource": "company-id-and-claims-run-revision",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "taskId": "company_understanding.extract_profile",
+      "callsitePath": "apps/api/src/temporal/understanding.activities.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "understanding-profile/v1",
+      "operationIdentity": "model:company_understanding.extract_profile:<runId>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "UnderstandingActivities.extractAndPersistProfile",
+        "domainAggregateType": "CompanyProfile",
+        "identitySource": "company-id-and-profile-revision",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "company_understanding.extract_offerings",
+      "callsitePath": "apps/api/src/temporal/understanding.activities.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "understanding-offerings/v1",
+      "operationIdentity": "model:company_understanding.extract_offerings:<runId>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "UnderstandingActivities.extractOfferings",
+        "domainAggregateType": "CompanyProfile",
+        "identitySource": "company-id-and-offerings-run-revision",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "icp.design",
+      "callsitePath": "apps/api/src/icp/icp.service.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "icp-design/v1",
+      "operationIdentity": "model:icp.design:<request-hash>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "IcpService.generateFromCompany",
+        "domainAggregateType": "IcpDefinition",
+        "identitySource": "preallocated-icp-id-and-version",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "discovery.query_plan",
+      "callsitePath": "apps/api/src/icp/icp.service.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "icp-query-plan/v1",
+      "operationIdentity": "model:discovery.query_plan:<request-hash>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "IcpService.generateQueryPlan",
+        "domainAggregateType": "DiscoveryQueryPlan",
+        "identitySource": "preallocated-plan-id-and-version",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "taxonomy.normalize",
+      "callsitePath": "apps/api/src/discovery/taxonomy-resolver.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "taxonomy-code/v1",
+      "operationIdentity": "model:taxonomy.normalize:<request-hash>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "TaxonomyResolver",
+        "domainAggregateType": "TermAlias",
+        "identitySource": "taxonomy-kind-and-normalized-term",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "discovery.qualify_fit",
+      "callsitePath": "apps/api/src/discovery/fit-judge.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "fit-judgment/v1",
+      "operationIdentity": "model:discovery.qualify_fit:<request-hash>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "FitJudge.upsertLeadFit",
+        "domainAggregateType": "Lead",
+        "identitySource": "workspace-icp-company-and-revision",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "discovery.extract_company",
+      "callsitePath": "apps/api/src/discovery/providers/public-web.provider.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "discovery-extract-company/v1",
+      "operationIdentity": "model:discovery.extract_company:<request-hash>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "PublicWebDiscoveryProvider.mineDomain",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "normalized-domain",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "discovery.extract_list",
+      "callsitePath": "apps/api/src/discovery/providers/directory.provider.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "discovery-extract-list/v1",
+      "operationIdentity": "model:discovery.extract_list:<request-hash>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "DirectoryDiscoveryProvider.extractList",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "directory-source-and-company-name",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "contact.find_decision_makers",
+      "callsitePath": "apps/api/src/discovery/providers/decision-maker.provider.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "contact-decision-makers/v1",
+      "operationIdentity": "model:contact.find_decision_makers:<request-hash>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "consumer": "DecisionMakerProvider.extract",
+        "domainAggregateType": "Contact",
+        "identitySource": "source-page-and-normalized-person-name-hash",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    }
+  ],
+  "artifactSchemas": [
+    {
+      "schema": "crawl4ai-fetch/v1",
+      "artifactIdRequired": true,
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["text/markdown"],
+      "maxBytes": 300000,
+      "ttlSeconds": 86400
+    },
+    {
+      "schema": "crawl4ai-render/v1",
+      "artifactIdRequired": true,
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["text/html"],
+      "maxBytes": 3000000,
+      "ttlSeconds": 86400
+    },
+    {
+      "schema": "http-get/v1",
+      "artifactIdRequired": true,
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["text/plain"],
+      "maxBytes": 3000000,
+      "ttlSeconds": 86400
+    },
+    {
+      "schema": "sanctions-download/v1",
+      "artifactIdRequired": true,
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": ["application/xml", "text/xml"],
+      "maxBytes": 33554432,
+      "ttlSeconds": 86400
+    }
+  ],
+  "managedExternalAdapters": [
+    {
+      "adapter": "google_patents.bigquery",
+      "managedPath": "apps/api/src/temporal/patent-cache-broker-scanner.ts",
+      "requiredBrokerTool": "google_patents.search",
+      "directPhysicalCalls": "DISALLOWED_IN_MANAGED_ACTIVITY",
+      "testExecution": "NO_REAL_BIGQUERY"
+    }
+  ]
+}
