@@ -196,6 +196,8 @@ function canonicalJson(value: unknown): string {
   throw new Error('unsupported canonical JSON value');
 }
 
+// codeql[js/insufficient-password-hash] This is a non-storage fingerprint
+// for a high-entropy opaque provider token, not a password verifier.
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }

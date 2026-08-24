@@ -7,23 +7,33 @@ const SUFFIX_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const MAX_PREFIX_LENGTH = 40; // 前缀上限，留足空间给尾缀且远离 63 字符 label 顶
 
 export function randomSlugSuffix(length = SUFFIX_LENGTH): string {
-  const bytes = randomBytes(length);
+  const alphabetLength = SUFFIX_ALPHABET.length;
+  const unbiasedLimit = Math.floor(256 / alphabetLength) * alphabetLength;
   let out = '';
-  for (let i = 0; i < length; i += 1) {
-    out += SUFFIX_ALPHABET[bytes[i] % SUFFIX_ALPHABET.length];
+  while (out.length < length) {
+    const bytes = randomBytes(Math.max(length - out.length, 1));
+    for (const byte of bytes) {
+      if (byte >= unbiasedLimit) continue;
+      out += SUFFIX_ALPHABET[byte % alphabetLength];
+      if (out.length === length) break;
+    }
   }
   return out;
 }
 
 /** 拉丁化 kebab 前缀；非拉丁（如纯中文名）产不出前缀时退 'site'。 */
 function slugPrefix(name: string | null): string {
-  const cleaned = (name ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '')
-    .slice(0, MAX_PREFIX_LENGTH)
-    .replace(/-+$/g, '');
+  let normalized = '';
+  for (const character of (name ?? '').toLowerCase()) {
+    if (/^[a-z0-9]$/.test(character)) {
+      normalized += character;
+    } else if (normalized.length > 0 && normalized.at(-1) !== '-') {
+      normalized += '-';
+    }
+  }
+  let cleaned = normalized.slice(0, MAX_PREFIX_LENGTH);
+  while (cleaned.startsWith('-')) cleaned = cleaned.slice(1);
+  while (cleaned.endsWith('-')) cleaned = cleaned.slice(0, -1);
   return cleaned.length > 0 ? cleaned : 'site';
 }
 

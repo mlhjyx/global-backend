@@ -172,6 +172,8 @@ async function readCatalogAsset(
       repositoryPath,
     );
   }
+  // codeql[js/file-system-race] The opened descriptor is identity-checked
+  // against the pre-open lstat and again after reading; no path is reused.
   const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();

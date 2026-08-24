@@ -53,6 +53,8 @@ async function readRegularBounded(file: string, maxBytes: number): Promise<Buffe
   if (!before.isFile() || before.isSymbolicLink() || before.size <= 0 || before.size > maxBytes) {
     throw new Error('child input is not a bounded regular file');
   }
+  // codeql[js/file-system-race] The opened descriptor is identity-checked
+  // against the pre-open lstat and again after reading; no path is reused.
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
