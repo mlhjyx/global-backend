@@ -11,7 +11,6 @@ import {
   settlementChannelSnapshotSha256,
   settlementOpenOxPrice,
   settlementPricingSnapshotSha256,
-  settlementCredentialFingerprint,
   SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION,
   type OpenOxPricingCatalog,
   type SettlementDispatch,
@@ -20,6 +19,8 @@ import {
 } from './site-builder-model-settlement';
 
 const API_KEY = 'test-runtime-token';
+const TOKEN_DIGEST =
+  '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a';
 const NOW = new Date('2026-07-29T06:00:00.000Z');
 const GATEWAY_ORIGIN = 'https://gateway.example.test';
 const CHANNEL_ID = 17;
@@ -147,7 +148,7 @@ function fixture() {
       ledgerMicrousdPerCny: 1_000_000,
     },
     credential: {
-      bearerTokenSha256: settlementCredentialFingerprint(API_KEY),
+      bearerTokenSha256: TOKEN_DIGEST,
       purpose: 'site_builder_runtime',
       quotaMode: 'limited',
       quotaCapPoints: 5_000_000,
@@ -274,7 +275,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256: settlementCredentialFingerprint(API_KEY),
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -331,7 +332,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256: settlementCredentialFingerprint(API_KEY),
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -395,7 +396,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256: settlementCredentialFingerprint(API_KEY),
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -453,7 +454,7 @@ describe('Site Builder zero-generation model preflight', () => {
             op: 'generateStructured',
             providerId: 'gateway',
             gatewayOrigin: GATEWAY_ORIGIN,
-            credentialSha256: settlementCredentialFingerprint(API_KEY),
+            credentialSha256: TOKEN_DIGEST,
             alias: dispatch.alias,
             protocol: dispatch.protocol,
             promptUtf8BytesPerCall: 500,
@@ -501,7 +502,7 @@ describe('Site Builder zero-generation model preflight', () => {
         op: 'generateStructured',
         providerId: 'gateway',
         gatewayOrigin: GATEWAY_ORIGIN,
-        credentialSha256: settlementCredentialFingerprint(API_KEY),
+        credentialSha256: TOKEN_DIGEST,
         alias: dispatch.alias,
         protocol: dispatch.protocol,
         promptUtf8BytesPerCall: 500,
@@ -558,7 +559,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256: settlementCredentialFingerprint(API_KEY),
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -597,7 +598,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256: settlementCredentialFingerprint(API_KEY),
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
