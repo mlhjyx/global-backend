@@ -51,9 +51,14 @@ describe('personal artifact cleanup activity', () => {
       });
     });
     const activities = createPersonalArtifactCleanupActivities({ service: { cleanup } });
-    await expect(activities.cleanupPersonalArtifact(input)).rejects.toThrow(
-      'PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE',
-    );
+    const failure = await activities.cleanupPersonalArtifact(input).catch((error) => error);
+    expect(failure).toMatchObject({
+      message: 'PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE',
+      cause: expect.objectContaining({
+        name: 'PrismaClientInitializationError',
+        code: 'P1001',
+      }),
+    });
   });
 
   it('does not turn invariant violations into an infinite retry', async () => {

@@ -40,7 +40,9 @@ export function createPersonalArtifactCleanupActivities(deps: {
         result = await deps.service.cleanup(input);
       } catch (error) {
         if (transientPersistenceFailure(error)) {
-          throw new Error('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
+          throw new Error('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE', {
+            cause: error,
+          });
         }
         throw error;
       }
