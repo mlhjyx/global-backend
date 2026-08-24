@@ -58,7 +58,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new GlobalHttpExceptionFilter()); // 统一错误模型（PRD 11.15）
 
   // ── 面向前端的安全护栏 ──────────────────────────────────────────────
-  app.use(helmet({ contentSecurityPolicy: false })); // API 无 HTML，关 CSP 免误伤 Swagger UI
+  app.use(helmet()); // Keep CSP enabled for the locally served Swagger/Scalar HTML.
   // CORS 白名单：逗号分隔的允许源；未配置时 dev 放行、prod 收紧。
   app.enableCors({
     origin: resolveCorsOrigin(runtimeSettings.mode, process.env.CORS_ORIGINS),

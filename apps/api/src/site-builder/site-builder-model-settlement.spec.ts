@@ -11,6 +11,7 @@ import {
   settlementChannelSnapshotSha256,
   settlementOpenOxPrice,
   settlementPricingSnapshotSha256,
+  settlementCredentialFingerprint,
   SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_VERSION,
   type OpenOxPricingCatalog,
   type SettlementDispatch,
@@ -146,8 +147,7 @@ function fixture() {
       ledgerMicrousdPerCny: 1_000_000,
     },
     credential: {
-      bearerTokenSha256:
-        '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+      bearerTokenSha256: settlementCredentialFingerprint(API_KEY),
       purpose: 'site_builder_runtime',
       quotaMode: 'limited',
       quotaCapPoints: 5_000_000,
@@ -274,8 +274,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: settlementCredentialFingerprint(API_KEY),
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -332,8 +331,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: settlementCredentialFingerprint(API_KEY),
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -397,8 +395,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: settlementCredentialFingerprint(API_KEY),
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -456,8 +453,7 @@ describe('Site Builder zero-generation model preflight', () => {
             op: 'generateStructured',
             providerId: 'gateway',
             gatewayOrigin: GATEWAY_ORIGIN,
-            credentialSha256:
-              '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+            credentialSha256: settlementCredentialFingerprint(API_KEY),
             alias: dispatch.alias,
             protocol: dispatch.protocol,
             promptUtf8BytesPerCall: 500,
@@ -505,8 +501,7 @@ describe('Site Builder zero-generation model preflight', () => {
         op: 'generateStructured',
         providerId: 'gateway',
         gatewayOrigin: GATEWAY_ORIGIN,
-        credentialSha256:
-          '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+        credentialSha256: settlementCredentialFingerprint(API_KEY),
         alias: dispatch.alias,
         protocol: dispatch.protocol,
         promptUtf8BytesPerCall: 500,
@@ -563,8 +558,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: settlementCredentialFingerprint(API_KEY),
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -603,8 +597,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: settlementCredentialFingerprint(API_KEY),
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,

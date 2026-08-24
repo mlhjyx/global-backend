@@ -192,25 +192,18 @@ interface ImagePipelineChildCommandOptions {
   platform?: NodeJS.Platform;
   processExecPath?: string;
   adjacentCompiled?: string;
-  buildCompiled?: string;
-  exists?: (file: string) => Promise<boolean>;
+  resourceLimiterAvailable?: boolean;
 }
 
 export async function resolveImagePipelineChildCommand(
   options: ImagePipelineChildCommandOptions = {},
 ): Promise<{ command: string; prefix: string[] }> {
-  const fileExists = options.exists ?? exists;
   const adjacentCompiled =
     options.adjacentCompiled ?? path.join(__dirname, 'image-pipeline-child.js');
-  const buildCompiled =
-    options.buildCompiled ??
-    path.join(process.cwd(), 'dist', 'site-builder', 'image-pipeline-child.js');
-  const compiled = await fileExists(adjacentCompiled)
-    ? adjacentCompiled
-    : await fileExists(buildCompiled)
-      ? buildCompiled
-      : null;
-  if (!compiled) throw new Error('compiled image pipeline child is missing; build @global/api first');
+  // The managed image contains the child beside this module. Do not perform an
+  // exists-then-spawn check: the path is build-owned and checking it first
+  // creates a filesystem race between validation and execution.
+  const compiled = adjacentCompiled;
   const nodePrefix = ['--max-old-space-size=256', compiled];
   const platform = options.platform ?? process.platform;
   const processExecPath = options.processExecPath ?? process.execPath;
@@ -218,7 +211,9 @@ export async function resolveImagePipelineChildCommand(
   // address-space and file-descriptor ceiling in addition to the container
   // cgroup; silently falling back would create a second, unsafe runtime path.
   if (platform === 'linux') {
-    if (!(await fileExists('/usr/bin/prlimit'))) {
+    const resourceLimiterAvailable =
+      options.resourceLimiterAvailable ?? (await exists('/usr/bin/prlimit'));
+    if (!resourceLimiterAvailable) {
       throw new Error('IMAGE_PIPELINE_ISOLATION_UNAVAILABLE');
     }
     return {
@@ -316,11 +311,25 @@ async function readRegularFileBounded(
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) {
+    if (
+      !stat.isFile() ||
+      stat.dev !== before.dev ||
+      stat.ino !== before.ino ||
+      stat.size !== before.size ||
+      stat.size <= 0 ||
+      stat.size > maxBytes
+    ) {
       throw new Error(`child output size is invalid for ${expectedName}`);
     }
     const data = await handle.readFile();
-    if (data.length !== stat.size || data.length > maxBytes) {
+    const after = await handle.stat();
+    if (
+      data.length !== stat.size ||
+      data.length > maxBytes ||
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
+      after.size !== stat.size
+    ) {
       throw new Error(`child output changed while reading ${expectedName}`);
     }
     return data;
@@ -375,6 +384,7 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     scratchRoot =
       process.env.SITE_IMAGE_TMP_ROOT ?? path.join(process.cwd(), '.tmp', 'site-builder-image'),
+    private readonly childPath?: string,
   ) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be positive');
     this.timeoutMs = timeoutMs;
@@ -463,7 +473,9 @@ export class IsolatedImagePipelineRunner implements ImagePipelineRunner {
         JSON.stringify({ ...request, inputPath, outputDir: dir }),
         { mode: 0o600, flag: 'wx' },
       );
-      const child = await resolveImagePipelineChildCommand();
+      const child = await resolveImagePipelineChildCommand({
+        adjacentCompiled: this.childPath,
+      });
       await runChild(child.command, [...child.prefix, requestPath, resultPath], this.timeoutMs, signal);
       if (signal?.aborted) throw abortReason(signal);
       const raw = await readRegularFileBounded(resultPath, dir, 'result.json', MAX_RESULT_BYTES);

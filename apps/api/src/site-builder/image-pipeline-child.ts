@@ -56,11 +56,27 @@ async function readRegularBounded(file: string, maxBytes: number): Promise<Buffe
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) {
+    if (
+      !stat.isFile() ||
+      stat.dev !== before.dev ||
+      stat.ino !== before.ino ||
+      stat.size !== before.size ||
+      stat.size <= 0 ||
+      stat.size > maxBytes
+    ) {
       throw new Error('child input size is invalid');
     }
     const data = await handle.readFile();
-    if (data.length !== stat.size || data.length > maxBytes) throw new Error('child input changed while reading');
+    const after = await handle.stat();
+    if (
+      data.length !== stat.size ||
+      data.length > maxBytes ||
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
+      after.size !== stat.size
+    ) {
+      throw new Error('child input changed while reading');
+    }
     return data;
   } finally {
     await handle.close();

@@ -200,6 +200,13 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function settlementCredentialFingerprint(value: string): string {
+  // This is a compatibility fingerprint for a random opaque provider token,
+  // not a password verifier or credential-storage scheme.
+  // codeql[js/insufficient-password-hash]
+  return createHash('sha256').update(value).digest('hex');
+}
+
 function sha256CanonicalJson(value: unknown): string {
   return sha256(canonicalJson(value));
 }
@@ -348,7 +355,7 @@ function assertAttestation(
     snapshot.pricing.ledgerMicrousdPerUsd !== 1_000_000 ||
     snapshot.pricing.ledgerMicrousdPerCny !== 1_000_000 ||
     !SHA256.test(snapshot.credential.bearerTokenSha256) ||
-    snapshot.credential.bearerTokenSha256 !== sha256(apiKey) ||
+    snapshot.credential.bearerTokenSha256 !== settlementCredentialFingerprint(apiKey) ||
     snapshot.credential.purpose !== 'site_builder_runtime' ||
     snapshot.credential.quotaMode !== 'limited' ||
     snapshot.credential.scopeExact !== true ||

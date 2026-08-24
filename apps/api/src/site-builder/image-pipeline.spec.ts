@@ -23,6 +23,13 @@ function sha256(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
+const COMPILED_CHILD = path.join(
+  process.cwd(),
+  'dist',
+  'site-builder',
+  'image-pipeline-child.js',
+);
+
 async function opaqueJpeg(width = 3200, height = 2400): Promise<Buffer> {
   return sharp({
     create: { width, height, channels: 3, background: { r: 80, g: 120, b: 160 } },
@@ -47,8 +54,7 @@ describe('M1-c deterministic image policy', () => {
         platform: 'linux',
         processExecPath: '/usr/bin/node',
         adjacentCompiled: compiled,
-        buildCompiled: '/missing/image-pipeline-child.js',
-        exists: async (candidate) => candidate === compiled,
+        resourceLimiterAvailable: false,
       }),
     ).rejects.toThrow('IMAGE_PIPELINE_ISOLATION_UNAVAILABLE');
   });
@@ -245,7 +251,7 @@ describe('M1-c deterministic image policy', () => {
 
   it('renders the native codec work in a killable isolated child process', async () => {
     const input = await opaqueJpeg(640, 360);
-    const runner = new IsolatedImagePipelineRunner(30_000);
+    const runner = new IsolatedImagePipelineRunner(30_000, undefined, COMPILED_CHILD);
     const inspection = await runner.inspect(input, 'image/jpeg');
     const [plan] = planImageVariants({
       assetKind: 'product_image',
@@ -272,7 +278,11 @@ describe('M1-c deterministic image policy', () => {
     controller.abort(reason);
 
     await expect(
-      new IsolatedImagePipelineRunner(30_000).inspect(input, 'image/jpeg', controller.signal),
+      new IsolatedImagePipelineRunner(30_000, undefined, COMPILED_CHILD).inspect(
+        input,
+        'image/jpeg',
+        controller.signal,
+      ),
     ).rejects.toBe(reason);
   });
 
@@ -282,7 +292,7 @@ describe('M1-c deterministic image policy', () => {
     const controller = new AbortController();
     const reason = new Error('activity cancelled in flight');
     try {
-      const pending = new IsolatedImagePipelineRunner(30_000, scratch).inspect(
+      const pending = new IsolatedImagePipelineRunner(30_000, scratch, COMPILED_CHILD).inspect(
         input,
         'image/jpeg',
         controller.signal,
@@ -300,7 +310,7 @@ describe('M1-c deterministic image policy', () => {
     const scratch = await mkdtemp(path.join(tmpdir(), 'm1c-timeout-'));
     try {
       await expect(
-        new IsolatedImagePipelineRunner(1, scratch).inspect(input, 'image/jpeg'),
+        new IsolatedImagePipelineRunner(1, scratch, COMPILED_CHILD).inspect(input, 'image/jpeg'),
       ).rejects.toThrow('image pipeline timed out after 1ms');
       expect(await readdir(scratch)).toEqual([]);
     } finally {

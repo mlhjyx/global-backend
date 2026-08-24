@@ -20,7 +20,8 @@ function slugPrefix(name: string | null): string {
   const cleaned = (name ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
     .slice(0, MAX_PREFIX_LENGTH)
     .replace(/-+$/g, '');
   return cleaned.length > 0 ? cleaned : 'site';
