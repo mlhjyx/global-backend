@@ -12,6 +12,7 @@
 - `05b8b73d` 补齐 child/runner 输入输出文件句柄的 before/opened/after `dev/ino/size` 复读校验，并把 slug suffix 改为 rejection sampling、前缀清理改为线性字符扫描。该提交尚未完成新的 CodeQL/CI readback；此前 `ac9a3143` 的 CodeQL 仍报告 6 个 high，不能用本地测试替代远端安全门。
 - `41843111` 将 catalog、child input、runner output 的读取顺序进一步改为先 `open(O_NOFOLLOW)` 再句柄校验/读取，消除 CodeQL 的 check-before-open 模式；保留 opaque token v2 SHA-256 fingerprint 合同和有理由的 in-source suppression。新 CodeQL readback尚待该提交推送。
 - `ae2d9a0e` 将已退出产品 composition 的 legacy attestation verifier credential check 改为 work-factor PBKDF2；正常产品 Budget Grant/模型路径不读取该 verifier。新一轮 CodeQL 尚待推送 readback，旧 `161bdd68` CodeQL 仍只剩该 legacy weak-hash alert。
+- `40c13f1c` 删除产品源码中的 fast credential fingerprint helper，legacy verifier 继续使用 PBKDF2，测试改用固定脱敏 digest。目标是让 CodeQL 只看到 work-factor legacy sink；新一轮远端安全 readback尚待执行。
 
 ## 2026-08-22 · 通用操作 Artifact 耐久重放 Task 8 记录（pre-cutover / no runtime claim）
 
