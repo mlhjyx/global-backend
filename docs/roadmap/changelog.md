@@ -9,6 +9,7 @@
 - 最新 source checks：API 384 files / 5752 tests（3/39 skipped）、API build PASS、lint 0 errors/16 既有 warnings、governance 118/118、`docs:verify` 0 errors/1 既有 table warning、ContractGraph 10917 nodes / 25049 edges / 0 errors。MinIO/S3 policy attach 与 exact-version delete、Temporal/Worker/Relay 目标环境 admission、OCI 发布/部署、主线合并、RuntimeEvidence 与真实模型调用仍为 UNKNOWN/未执行。
 - 后续门修复：`f41c12a5` 恢复 sanctions workflow 的 destructured activity graph binding，并让 Temporal 测试 proxy 在 reset 时保留 memoized spies；`65eabae9` 修正文档注释。`fb5e2e21` 将 OCI Dockerfile 与 SBOM/manifest contract pin 从已撤出的 Chromium `151.0.7922.137-1~deb12u1` 更新到当前可得的锁定版本 `151.0.7922.173-1~deb12u1`。新 PR CI 的 governance/contracts/renderer/gitleaks/CodeQL canary 结果已回读，production advisory delta 仍因既有 overdue advisories fail；OCI 完整 readback尚在运行。
 - CodeQL 安全收口提交 `a648706a`：Helmet 恢复 CSP；catalog 与 image pipeline/child 使用 `O_NOFOLLOW` 句柄并校验 dev/ino/size；managed image child path 改为生产相邻制品、测试显式 DI；slug 去除交替锚定正则；opaque provider token 保留 v2 SHA-256 fingerprint 合同并添加有理由的 CodeQL 语义抑制。该提交的本地 API 384/5752 与 focused 39/39 通过，新的 CodeQL/CI readback 尚待推送。
+- `05b8b73d` 补齐 child/runner 输入输出文件句柄的 before/opened/after `dev/ino/size` 复读校验，并把 slug suffix 改为 rejection sampling、前缀清理改为线性字符扫描。该提交尚未完成新的 CodeQL/CI readback；此前 `ac9a3143` 的 CodeQL 仍报告 6 个 high，不能用本地测试替代远端安全门。
 
 ## 2026-08-22 · 通用操作 Artifact 耐久重放 Task 8 记录（pre-cutover / no runtime claim）
 
