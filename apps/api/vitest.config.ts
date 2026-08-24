@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 /**
@@ -6,6 +7,16 @@ import { defineConfig } from "vitest/config";
  * pii-crypto.spec 内自设/删 key 测 fail-closed，覆盖本默认。
  */
 export default defineConfig({
+  resolve: {
+    alias: [
+      {
+        find: /^@global\/test-support$/,
+        replacement: fileURLToPath(
+          new URL("../../packages/test-support/src/index.ts", import.meta.url),
+        ),
+      },
+    ],
+  },
   test: {
     exclude: ["src/site-builder/eval/**", "node_modules/**", "dist/**"],
     env: {
