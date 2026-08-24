@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import {
   chmod,
+  constants,
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
+  open,
   realpath,
   rm,
   writeFile,
@@ -30,7 +31,7 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/webp': 'webp',
 };
 const APPROVED_CATALOG_ASSET_DIRECTORY =
-  'apps/site-renderer/fixtures/design-demo-visuals/';
+  'apps/site-renderer/product-assets/design-demo-visuals/';
 
 function sha256(value: Buffer): string {
   return createHash('sha256').update(value).digest('hex');
@@ -164,13 +165,43 @@ async function readCatalogAsset(
     }
   }
   const resolved = await realpath(candidate);
-  if (!beneath(root, resolved) || !(await lstat(resolved)).isFile()) {
+  if (!beneath(root, resolved)) {
     throw new ControlledAssetMaterializationError(
       'CONTROLLED_ASSET_PATH_FORBIDDEN',
       repositoryPath,
     );
   }
-  return readFile(resolved);
+  // codeql[js/file-system-race] The opened descriptor is identity-checked
+  // after opening and again after reading; no path is reused.
+  const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = await handle.stat();
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.size < 0
+    ) {
+      throw new ControlledAssetMaterializationError(
+        'CONTROLLED_ASSET_PATH_FORBIDDEN',
+        repositoryPath,
+      );
+    }
+    const data = await handle.readFile();
+    const after = await handle.stat();
+    if (
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
+      after.size !== stat.size
+    ) {
+      throw new ControlledAssetMaterializationError(
+        'CONTROLLED_ASSET_PATH_FORBIDDEN',
+        repositoryPath,
+      );
+    }
+    return data;
+  } finally {
+    await handle.close();
+  }
 }
 
 function assertTenantBytes(

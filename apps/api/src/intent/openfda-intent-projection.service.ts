@@ -4,6 +4,7 @@ import { loadMaterializableCompanyState } from '../discovery/company-suppression
 import { OPENFDA_ATTRIBUTION, OPENFDA_LICENSE, FDA_REGISTRATION_DISCLAIMER } from '../adapters/openfda-api';
 import { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant } from '../signals/signal-mappers';
 import { mergeIntent, sameIntent, IntentAttr, IntentEvent } from './intent-projection.service';
+import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 
 // 单一真值在 signals/signal-mappers（摄取层先用：§6 个体户在摄取层即拒）；re-export 保持既有 import 路径不破。
 export { FDA_CLEARANCE, FDA_CLEARANCE_STRENGTH, isLikelyIndividualApplicant };
@@ -141,6 +142,13 @@ export class OpenFdaIntentProjectionService {
       });
       if (!materialization.allowed) return false;
       const { prior } = materialization;
+      if (prior) {
+        const evidenceRows = await tx.fieldEvidence.findMany({
+          where: { entityType: 'company', entityId: prior.id },
+          select: { providerKey: true, license: true },
+        });
+        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) return false;
+      }
 
       const priorAttrs = ((prior?.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
       const priorIntent = priorAttrs.intent as IntentAttr | undefined;

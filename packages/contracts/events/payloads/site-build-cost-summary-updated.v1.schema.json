@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/site-build-cost-summary-updated.v1.schema.json",
+  "title": "SiteBuildCostSummaryUpdatedPayloadV1",
+  "description": "Append-only Site Builder cost projection for SaaS Credits/Billing. All microusd amounts are canonical decimal strings so PostgreSQL BIGINT values retain exact JSON precision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workspaceId", "siteId", "buildRunId", "revision", "summaryDigest", "budget", "totals", "reconciliation"],
+  "properties": {
+    "workspaceId": { "type": "string", "format": "uuid" },
+    "siteId": { "type": "string", "format": "uuid" },
+    "buildRunId": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "summaryDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorizedCapMicrousd", "conservativeChargedMicrousd", "capMicrousd", "reservedMicrousd", "chargedMicrousd", "remainingMicrousd", "paidCallsEnabled", "disabledReason", "exhaustedAt"],
+      "properties": {
+        "authorizedCapMicrousd": { "$ref": "#/$defs/microusd" },
+        "conservativeChargedMicrousd": { "$ref": "#/$defs/microusd" },
+        "capMicrousd": { "$ref": "#/$defs/microusd" },
+        "reservedMicrousd": { "$ref": "#/$defs/microusd" },
+        "chargedMicrousd": { "$ref": "#/$defs/microusd" },
+        "remainingMicrousd": { "$ref": "#/$defs/microusd" },
+        "paidCallsEnabled": { "type": "boolean" },
+        "disabledReason": { "type": ["string", "null"] },
+        "exhaustedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportedCostMicrousd", "calculatedCostMicrousd", "estimatedCostMicrousd", "unknownOperations", "exactCostMicrousd", "upperBoundCostMicrousd"],
+      "properties": {
+        "reportedCostMicrousd": { "$ref": "#/$defs/microusd" },
+        "calculatedCostMicrousd": { "$ref": "#/$defs/microusd" },
+        "estimatedCostMicrousd": { "$ref": "#/$defs/microusd" },
+        "unknownOperations": { "type": "integer", "minimum": 0 },
+        "exactCostMicrousd": { "$ref": "#/$defs/microusd" },
+        "upperBoundCostMicrousd": { "$ref": "#/$defs/microusd" }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pendingOperations", "resolvedOperations", "conflictOperations", "asOf", "revision"],
+      "properties": {
+        "pendingOperations": { "type": "integer", "minimum": 0 },
+        "resolvedOperations": { "type": "integer", "minimum": 0 },
+        "conflictOperations": { "type": "integer", "minimum": 0 },
+        "asOf": { "type": ["string", "null"], "format": "date-time" },
+        "revision": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "microusd": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" }
+  }
+}

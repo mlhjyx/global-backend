@@ -144,9 +144,6 @@ export async function executeStructuredTaskWithRuntime<Output>(
     cachePolicy: { mode: 'disabled' },
     retryPolicy: { transportMaxAttempts: 1, contentRepairMaxAttempts: 0 },
     validateOutput: (_taskInput, output) => {
-      // Preserve the legacy gateway contract: development stubs are interpreted
-      // by the bounded business task, while production providers remain strict.
-      if (gatewayResult?.provider === 'stub') return;
       const validation = checkAgainstSchema(input.schema, output);
       if (!validation.valid) throw new Error(`output invalid: ${(validation.errors ?? []).join('; ')}`);
       input.validateOutput?.(output);

@@ -7,7 +7,7 @@ import {
 } from "@nestjs/swagger";
 import type { Response } from "express";
 import { PrismaService } from "../prisma/prisma.service";
-import { BuildIdentityService } from "../runtime/build-attestation";
+import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import {
   BUILD_HEALTH_RESPONSE_SCHEMA,
   LIVE_HEALTH_RESPONSE_SCHEMA,
@@ -22,7 +22,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly readinessService: RuntimeReadinessService,
-    private readonly buildIdentity: BuildIdentityService,
+    private readonly buildIdentity: RuntimeReleaseIdentityService,
   ) {}
 
   @Get()
@@ -92,8 +92,8 @@ export class HealthController {
     description: "至少一项必需证据失败或尚未证明",
     schema: RUNTIME_READINESS_RESPONSE_SCHEMA,
   })
-  async ready(@Res({ passthrough: true }) response: Response) {
-    const report = await this.readinessService.check();
+  ready(@Res({ passthrough: true }) response: Response) {
+    const report = this.readinessService.current();
     if (report.status !== "ready") response.status(503);
     return report;
   }

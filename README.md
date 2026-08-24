@@ -36,7 +36,7 @@ packages/db/         Prisma schema + migrations（RLS）
 packages/contracts/  OpenAPI 导出 · 事件 envelope · SiteSpec/DQ-1 共享契约
 docs/                文档树（见上表）
 infra/               searxng 等本地服务配置
-docker-compose.yml   9 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/MinIO/embeddings/Docling/SearXNG
+docker-compose.yml   10 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/MinIO/MinIO bootstrap/embeddings/Docling/SearXNG
 ```
 
 ## 本地起步
@@ -44,7 +44,7 @@ docker-compose.yml   9 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/Mi
 ```bash
 cd /global/backend
 pnpm install --frozen-lockfile
-docker compose -p global up -d             # 9 个 global-* 服务
+docker compose -p global up -d             # 10 个 global-* 服务（含一次性 MinIO bootstrap）
 DATABASE_URL=postgresql://global:global@localhost:5432/global_dev pnpm --filter @global/db exec prisma migrate deploy
 pnpm --filter @global/db generate
 systemctl status temporal-dev              # Ubuntu 26.04：Temporal :7233 由 systemd 托管

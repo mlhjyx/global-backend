@@ -1,0 +1,67 @@
+# Managed development runtime. Supply GLOBAL_BACKEND_IMAGE as a repository
+# reference pinned by digest (name@sha256:...). The same reference is passed into
+# startup admission, which derives the digest suffix. Promotion never rebuilds it.
+x-backend-environment: &backend-environment
+  NODE_ENV: production
+  APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+  RUNTIME_IMAGE_REFERENCE: ${GLOBAL_BACKEND_IMAGE}
+  GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT: ${GENERIC_OPERATION_ARTIFACT_S3_ENDPOINT:?set the artifact S3 endpoint}
+  GENERIC_OPERATION_ARTIFACT_S3_BUCKET: ${GENERIC_OPERATION_ARTIFACT_S3_BUCKET:?set the artifact S3 bucket}
+  GENERIC_OPERATION_ARTIFACT_S3_REGION: ${GENERIC_OPERATION_ARTIFACT_S3_REGION:-us-east-1}
+  GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY:?set the artifact S3 access key}
+  GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:?set the artifact S3 secret key}
+  GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE: ${GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE:-false}
+
+x-backend-runtime: &backend-runtime
+  profiles: [managed-runtime]
+  image: ${GLOBAL_BACKEND_IMAGE:?set GLOBAL_BACKEND_IMAGE to name@sha256:digest}
+  user: "10001:10001"
+  env_file:
+    - .secrets/backend-runtime.env
+  environment: *backend-environment
+  network_mode: host
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 256
+  mem_limit: ${GLOBAL_BACKEND_MEMORY_LIMIT:-4g}
+  cpus: ${GLOBAL_BACKEND_CPU_LIMIT:-2.0}
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: 1024
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=2g,uid=10001,gid=10001
+    - /home/global/.cache:rw,noexec,nosuid,nodev,size=512m,uid=10001,gid=10001
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    minio-bootstrap:
+      condition: service_completed_successfully
+  restart: unless-stopped
+  stop_grace_period: 90s
+
+services:
+  api:
+    <<: *backend-runtime
+    container_name: global-api
+    env_file:
+      - .secrets/backend-runtime.env
+      - .secrets/backend-api-runtime.env
+    command: ["api"]
+
+  worker:
+    <<: *backend-runtime
+    container_name: global-worker
+    env_file:
+      - .secrets/backend-runtime.env
+      - .secrets/backend-worker-runtime.env
+    environment:
+      <<: *backend-environment
+      GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:?set the personal artifact cleanup S3 access key}
+      GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:?set the personal artifact cleanup S3 secret key}
+    command: ["worker"]

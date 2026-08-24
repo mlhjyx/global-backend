@@ -1,4 +1,4 @@
-import { CanonicalNode, TaxonomyKind } from './taxonomy-resolver';
+import { CanonicalNode, TaxonomyKind, type TaxonomyResolveOptions } from './taxonomy-resolver';
 import { PlanQueryShape } from './icp-to-cpv';
 
 // openFDA 仅美国市场 → ICP 目标市场门（镜像 TED 覆盖门，方向相反：非美国目标 → 不注入）。
@@ -8,8 +8,8 @@ const MANUFACTURER_ESTABLISHMENT_TYPE = 'Manufacture Medical Device';
 
 /** resolveIcpToFda 依赖的最小 taxonomy 面（结构化 —— 真 TaxonomyResolver 天然满足，便于单测替身）。 */
 export interface FdaTaxonomyPort {
-  resolveMany(kind: TaxonomyKind, terms: string[], opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<CanonicalNode[]>;
-  resolveFdaProductCode(product: string, panelCodes: string[], opts?: { allowLlm?: boolean; workspaceId?: string }): Promise<string | null>;
+  resolveMany(kind: TaxonomyKind, terms: string[], opts?: TaxonomyResolveOptions): Promise<CanonicalNode[]>;
+  resolveFdaProductCode(product: string, panelCodes: string[], opts?: TaxonomyResolveOptions): Promise<string | null>;
   listFdaProductCodes(panelCodes: string[]): Promise<string[]>;
 }
 
@@ -42,7 +42,7 @@ export interface IcpToFdaResult {
 export async function resolveIcpToFda(
   taxonomy: FdaTaxonomyPort,
   input: IcpToFdaInput,
-  opts?: { allowLlm?: boolean; workspaceId?: string },
+  opts?: TaxonomyResolveOptions,
 ): Promise<IcpToFdaResult> {
   const warnings: string[] = [];
 

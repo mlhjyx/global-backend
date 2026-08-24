@@ -43,17 +43,25 @@ pnpm --filter @global/api build
 pnpm --filter @global/api test
 ```
 
-## 4. 所有权、worktree 与外部动作
+## 4. 单一产品运行路径（Production Parity）
+
+- 开发环境是生产实现的低风险运行实例，不是替代实现。凡可能由真实用户、真实数据或真实外部服务触发的能力，development、pilot 与 production 必须共用业务代码、API/Workflow/Task/数据合同、身份与权限语义、Provider 路由、验证、预算结算、持久化、幂等、重试、降级、错误和 readiness 语义，并从同一种不可变制品运行。
+- 环境差异只允许位于信任根、secret、endpoint、网络暴露、资源额度、可观测性和部署拓扑等配置边界；允许项及尚未清理的迁移债务必须逐项登记在 [`environment-parity-policy.json`](docs/governance/environment-parity-policy.json)，由 `pnpm governance:verify` 校验精确源码指纹。未登记分支、失效豁免和恢复旧分支一律失败。
+- 不因一致性复用生产密钥、生产租户或生产数据。开发使用独立凭据、JWKS、端点、数据与较低额度，但不得更换验证器、业务算法、状态模型或失败策略。
+- Stub、Fake、Sandbox、fixture、visual gallery、Dev Token verifier 和 evaluation runner 只可由测试入口或独立测试 workspace 注入；产品 composition root、运行依赖、OCI/Release 制品与用户站点不得包含或自动 fallback 到这些能力。单元测试可与源码相邻，但必须被产品编译与制品排除。
+- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。
+
+## 5. 所有权、worktree 与外部动作
 
 - Codex 是当前开发主体；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
 - `/global/backend` 主工作区只作 main 与现场审计；功能施工使用 `/global/backend/.codex/worktrees/<topic>` 的持久隔离 worktree 与 `codex/<topic>` 分支。
 - 远端 PR 合入后，根 `main` 以 `node scripts/governance-main-worktree-sync.mjs status` 只读检查、以同一脚本的 `apply` 动作受控跟随；后者只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 执行 `merge --ff-only`，必须证明入站路径不触碰本地 tracked/untracked/ignored 现场，并在操作前后保持完整 status 一致。它不代替 PR/CI/review/用户合并授权，也不 stash、reset、clean 或清理分支/worktree。
 - 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。
 - 保留用户删除、未跟踪文件、脏工作区、独有提交和历史证据。不得使用 `git reset --hard`、`git clean -fdx` 或未经明确授权的递归删除。
-- 网络工具默认只读。push、开/改 PR、发消息、发布、部署、合并、付费调用、远程任务、第三方配置与凭据变更都需要用户对该动作的明确授权。
+- 网络工具默认只读。push、开/改 PR、发消息、发布、部署、合并、由 Codex/operator 发起的付费调用或 evaluation、远程任务、第三方配置与凭据变更都需要用户对该动作的明确授权。正常产品请求携带有效 SaaS 签名 Budget Grant 时，该 Grant 是本次 BuildRun 的产品费用授权，不再要求聊天式逐次批准；它不授权开发者额外探测、评测或扩大额度。
 - 技术完成、机器检查、独立 review、产品决策卡、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。
 
-## 5. 实现与安全门
+## 6. 实现与安全门
 
 - 复杂改动先计划；新功能和 bugfix 必须按 RED → GREEN → refactor 做 TDD，并维持相关范围 80%+ 覆盖。
 - 在系统边界做 schema 校验；外部数据、URL、身份、权限、费用和 provider 响应全部不可信，必须 fail closed。
@@ -63,7 +71,7 @@ pnpm --filter @global/api test
 - API 唯一真值是 code-first [`packages/contracts/openapi/openapi.json`](packages/contracts/openapi/openapi.json)。文档引用 operationId，不手抄 path/operation 总数。
 - 所有 GitHub Actions 外部 `uses:` 必须锁定已从官方 tag 只读解析的 40 位 commit SHA，并保留人类可读的版本注释。`pnpm governance:verify` 扫描全部 workflow；新增未登记或 moving-tag action 必须失败。治理脚本、机器政策、schema、runtime evidence 与 release 目录必须保持在 CODEOWNERS 最终规则块内。
 
-## 6. Provider、追踪、证据与发布
+## 7. Provider、追踪、证据与发布
 
 - Provider 当前机器真值为 [`docs/governance/provider-registry.json`](docs/governance/provider-registry.json)，人类页由 `pnpm governance:providers` 生成；seed key、SourceClass 与默认 enablement 漂移必须使 CI 失败。
 - Capability → Core Object → operationId → code → test → Scenario 的机器链位于 [`docs/governance/delivery-traceability.json`](docs/governance/delivery-traceability.json)。路径存在只证明 anchor 存在，不证明运行通过。
@@ -71,15 +79,16 @@ pnpm --filter @global/api test
 - `PILOT`/`GA` 必须同时拥有当前 PASS RuntimeEvidence 与有效 Release Bundle。每条机器追踪链须声明 `required_evidence_kinds`，Release Bundle 的 `traceability_bindings` 必须把同一 chain、capability 与同一 evidence set 精确绑定。Release Bundle 使用 [`release-bundle.schema.json`](docs/governance/release-bundle.schema.json)，并分别记录机器检查、独立 reviewer、用户授权和 merge-method provenance。这些字段和 URL 仅是声明；在可信的独立外部 readback verifier 绑定其身份与内容前，`external_provenance` 必须保持 `EXTERNAL_UNVERIFIED`，验证器必须阻断晋级。伪造 `VERIFIED`、URL 或模板都不是发布证据。
 - 运行 `pnpm governance:verify` 与 `pnpm docs:verify`。不得为过 CI 删除历史、改写 evidence 或把文件移出受控范围。
 
-## 7. 模型、评测与费用
+## 8. 模型、评测与费用
 
 - 当前非运行时候选合同只认 `site-builder-model-candidate-baseline/2026-08-07-v3` 及其[生成页](docs/site-builder/model-candidate-baseline.md)；这个 ID 不是 active route、质量 evidence 或 dispatch 授权。
 - 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
-- “暂不调用模型”表示零费用、离线或 create-only。真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权。
-- 未知余额、价格、scope、身份、结算或输出上限一律停止；不得扩大候选、顺手测试媒体或使用通用渠道“测试”按钮制造真实费用。
-- 模型失败、非 2xx、响应解析失败、超时与 repair 都必须按已观察费用结算；unknown settlement 不得冒充零费用。
+- 正常产品 BuildRun 的费用权威来自 SaaS Control Plane 签发的一次性、短期、请求绑定 Budget Grant；本仓只验签、原子消费、reserve/settle/reconcile 并回报，不另设隐藏的产品总金额门。缺失、非法、过期、跨 workspace/operation/request（已有 Site 时还必须绑定 site）或重复挪用的 Grant 必须在创建 Run、启动 Workflow 和调用模型前拒绝。
+- “暂不调用模型”仍表示 Codex/operator/evaluation 的零费用、离线或 create-only 边界。此类 ad-hoc/evaluation 真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权；正常产品 Grant 与该授权不能互相推导。
+- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。
+- Provider kill switch、单次 task/wire/token/output 上限、幂等和异常停用继续保留；24 小时人工 settlement attestation 不得作为正常产品运行授权或调用门。
 
-## 8. 文档与交付
+## 9. 文档与交付
 
 - 稳定规则写本文件或治理页；当前事实写 `docs/status/current.md`；追加历史写 changelog；原始/冻结证明写 evidence；架构承重决定写 ADR。
 - 不在多个 current 文档复制同一事实。迁移旧文字时保留 Git provenance，并在 changelog/evidence 索引留下 successor 指针。

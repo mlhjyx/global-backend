@@ -32,7 +32,7 @@ test("current repository keeps representative business and dynamic chains comple
       node.id.startsWith("service:temporal-schedule:") &&
       !node.id.includes("registration"),
   );
-  assert.equal(schedules.length, 8);
+  assert.equal(schedules.length, 9);
   for (const schedule of schedules) {
     assert.equal(
       graph.edges.some(
@@ -65,6 +65,7 @@ test("current repository keeps representative business and dynamic chains comple
         "CompanyProfileCreated",
         "DeletionRequested",
         "DiscoveryRunRequested",
+        "PersonalArtifactCleanupRequested",
         "QualifyRequested",
       ],
     ],
@@ -80,6 +81,7 @@ test("current repository keeps representative business and dynamic chains comple
         "KnowledgeConflictDetected",
         "LeadQualified",
         "LeadsScored",
+        "SiteBuildCostSummaryUpdated",
       ],
     ],
   ]);

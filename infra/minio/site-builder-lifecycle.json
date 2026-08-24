@@ -1,0 +1,17 @@
+{
+  "Rules": [
+    {
+      "Expiration": {
+        "Days": 1
+      },
+      "ID": "global-variant-attempt-ttl",
+      "Status": "Enabled",
+      "Filter": {
+        "Tag": {
+          "Key": "global-lifecycle",
+          "Value": "variant-attempt"
+        }
+      }
+    }
+  ]
+}

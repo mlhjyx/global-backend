@@ -14,13 +14,8 @@ import {
   ReviewVisionInput,
   VISION_REVIEW_MATERIAL_CLASSES,
 } from '../types';
-import {
-  PaidModelPreflightError,
-  type PaidModelCallPlan,
-  type PaidModelPreflightEvidence,
-  type PaidModelSettlementController,
-} from '../paid-model-settlement';
 import { resolveReportedModelIdentity } from '../model-identity';
+import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from '../new-api-request-bound-settlement';
 import { snapshotVisionReviewInput } from '../vision-review-input';
 
 /**
@@ -51,8 +46,6 @@ export interface OpenAICompatConfig {
    * this; PR6 supplies the reviewed fixture catalog to its evaluation client.
    */
   visionEvalFixtureDigests?: Readonly<Record<string, string>>;
-  /** Durable Site Builder calls require this zero-generation preflight/resolver. */
-  paidModelSettlement?: PaidModelSettlementController;
 }
 
 /** 剥 markdown 围栏（部分模型在 json_object 模式下仍偶发 ```json…``` 包裹结构化输出）。 */
@@ -233,23 +226,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   async health(): Promise<HealthStatus> {
     return { healthy: true, detail: this.cfg.model };
-  }
-
-  async preflightPaidCall(input: PaidModelCallPlan, ctx: AiContext): Promise<PaidModelPreflightEvidence> {
-    if (!this.cfg.paidModelSettlement) {
-      throw new PaidModelPreflightError('ATTESTATION_UNAVAILABLE');
-    }
-    const protocol = this.cfg.modelTransports?.[input.alias] ?? 'openai-chat-completions';
-    return this.cfg.paidModelSettlement.preflight(
-      {
-        ...input,
-        providerId: this.id,
-        gatewayOrigin: new URL(this.cfg.baseUrl).origin,
-        credentialSha256: createHash('sha256').update(this.cfg.apiKey).digest('hex'),
-        protocol,
-      },
-      ctx,
-    );
   }
 
   async generateText(input: GenerateTextInput, ctx: AiContext): Promise<ModelResult<string>> {
@@ -439,35 +415,16 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx: AiContext | undefined,
   ): Promise<ModelUsage | undefined> {
     if (!ctx?.paidCost) return usage;
-    const evidence = ctx.paidCost.settlementPreflight;
-    const controller = this.cfg.paidModelSettlement;
-    if (!evidence || !controller) {
-      return {
-        ...usage,
-        gatewaySettlements: [
-          {
-            status: 'unknown',
-            requestId: response.headers.get('x-oneapi-request-id'),
-            resolverId: evidence?.resolverId ?? 'unavailable',
-            reason: 'log_unavailable',
-          },
-        ],
-      };
-    }
-    const observation = await controller.resolve({
-      requestId: response.headers.get('x-oneapi-request-id'),
-      evidence,
-      usage,
-    });
     return {
       ...usage,
-      ...(observation.status === 'settled'
-        ? {
-            inputTokens: observation.inputTokens,
-            outputTokens: observation.outputTokens,
-          }
-        : {}),
-      gatewaySettlements: [observation],
+      gatewaySettlements: [
+        {
+          status: 'unknown',
+          requestId: response.headers.get('x-oneapi-request-id'),
+          resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+          reason: 'log_unavailable',
+        },
+      ],
     };
   }
 
@@ -480,9 +437,13 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const settled = observations.filter((observation) => observation.status === 'settled');
     const settledInputTokens = settled.reduce((sum, observation) => sum + observation.inputTokens, 0);
     const settledOutputTokens = settled.reduce((sum, observation) => sum + observation.outputTokens, 0);
+    // token 对账只在“全部观测已结算”时有意义：unknown 观测不携带 token
+    // 事实，把 body token 与零 settled token 比较会产生伪 mismatch，并
+    // 误销其中的 settled 事实（全部改标 log_invalid）。
     const mismatch =
-      (bodyUsage.inputTokens !== undefined && bodyUsage.inputTokens !== settledInputTokens) ||
-      (bodyUsage.outputTokens !== undefined && bodyUsage.outputTokens !== settledOutputTokens);
+      settled.length === observations.length &&
+      ((bodyUsage.inputTokens !== undefined && bodyUsage.inputTokens !== settledInputTokens) ||
+        (bodyUsage.outputTokens !== undefined && bodyUsage.outputTokens !== settledOutputTokens));
     return {
       inputTokens: settled.length === observations.length ? settledInputTokens : bodyUsage.inputTokens,
       outputTokens: settled.length === observations.length ? settledOutputTokens : bodyUsage.outputTokens,

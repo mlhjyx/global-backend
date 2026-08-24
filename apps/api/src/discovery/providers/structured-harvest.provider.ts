@@ -13,6 +13,7 @@ import {
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import { isAllowedByRobots } from '../../adapters/robots';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { extractJsonLd } from './digital-footprint.provider';
 import {
   detectAtsBoard,
@@ -284,7 +285,10 @@ async function fetchText(url: string, httpGet: HttpGetFn): Promise<string> {
 }
 
 function rethrowSuppressionActionDenied(error: unknown): void {
-  if (isTerminalExternalActionPolicyDenied(error)) throw error;
+  if (
+    isTerminalExternalActionPolicyDenied(error) ||
+    isExecutionControlError(error)
+  ) throw error;
 }
 
 async function recoverExternalActionFailure<T>(promise: Promise<T>, fallback: T): Promise<T> {

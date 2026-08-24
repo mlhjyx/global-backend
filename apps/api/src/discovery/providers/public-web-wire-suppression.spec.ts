@@ -7,12 +7,12 @@ vi.mock('../../adapters/robots', () => ({
 import { PublicWebDiscoveryProvider } from './public-web.provider';
 import { ToolBroker } from '../../tools/tool-broker';
 import { ToolRegistry } from '../../tools/tool-registry';
-import { BudgetLedger } from '../../tools/budget';
+import { InMemoryBudgetStoreAdapter } from '@global/test-support';
 import { RateLimiter } from '../../tools/rate-limiter';
 import type { Tool } from '../../tools/tool-contract';
 
 describe('PublicWebDiscoveryProvider — per-wire suppression propagation', () => {
-  it('stops the second crawl when suppression is committed after the first wire', async () => {
+  it('keeps pre-identity artifact crawling held before either suppression callback or wire', async () => {
     const execute = vi.fn(async () => ({
       data: {
         url: 'https://example.com/',
@@ -39,6 +39,14 @@ describe('PublicWebDiscoveryProvider — per-wire suppression propagation', () =
       },
       capabilities: { produces: ['contact'], accepts: ['domain'] },
       idempotencyKey: ({ url }: { url: string }) => url,
+      durableResultStrategy: {
+        kind: 'artifact_reference',
+        schema: 'crawl4ai-fetch/v1',
+        maxBytes: 1_000,
+        mediaTypes: ['text/markdown'],
+        privacyClass: 'PERSONAL_DATA',
+        ttlSeconds: 86_400,
+      },
       healthCheck: async () => ({ healthy: true }),
       execute,
     } as Tool;
@@ -46,7 +54,7 @@ describe('PublicWebDiscoveryProvider — per-wire suppression propagation', () =
     registry.register(tool);
     const broker = new ToolBroker({
       registry,
-      budget: new BudgetLedger(),
+      budgetStore: new InMemoryBudgetStoreAdapter() as never,
       limiter: new RateLimiter(),
     });
     const authorizeExternalAction = vi
@@ -58,15 +66,17 @@ describe('PublicWebDiscoveryProvider — per-wire suppression propagation', () =
       broker,
     });
 
-    await provider.discoverContacts(
+    await expect(provider.discoverContacts(
       { name: 'Example GmbH', domain: 'example.com' },
       {
         workspaceId: 'workspace-1',
         authorizeExternalAction,
       },
-    );
+    )).rejects.toMatchObject({
+      reason: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+    });
 
-    expect(authorizeExternalAction).toHaveBeenCalledTimes(2);
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect(authorizeExternalAction).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 });

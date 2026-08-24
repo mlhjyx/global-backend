@@ -152,8 +152,13 @@
                             "build_sha",
                             "built_at",
                             "artifact_digest",
+                            "artifact_manifest_digest",
+                            "sbom_digest",
+                            "source_tree_digest",
+                            "renderer_digest",
                             "migration_revision",
-                            "schema_digest"
+                            "schema_digest",
+                            "image_digest"
                           ],
                           "properties": {
                             "attested": {
@@ -165,7 +170,7 @@
                             "schema_version": {
                               "type": "string",
                               "enum": [
-                                "global-runtime-build-attestation/v1"
+                                "global-runtime-release-identity/v1"
                               ]
                             },
                             "build_sha": {
@@ -177,6 +182,26 @@
                               "format": "date-time"
                             },
                             "artifact_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            },
+                            "artifact_manifest_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            },
+                            "sbom_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            },
+                            "source_tree_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            },
+                            "renderer_digest": {
+                              "type": "string",
+                              "pattern": "^sha256:[0-9a-f]{64}$"
+                            },
+                            "image_digest": {
                               "type": "string",
                               "pattern": "^sha256:[0-9a-f]{64}$"
                             },
@@ -194,7 +219,8 @@
                           "additionalProperties": false,
                           "required": [
                             "attested",
-                            "schema_version"
+                            "schema_version",
+                            "code"
                           ],
                           "properties": {
                             "attested": {
@@ -206,8 +232,11 @@
                             "schema_version": {
                               "type": "string",
                               "enum": [
-                                "global-runtime-build-attestation/v1"
+                                "global-runtime-release-identity/v1"
                               ]
+                            },
+                            "code": {
+                              "type": "string"
                             }
                           }
                         }
@@ -241,7 +270,8 @@
                     "status",
                     "service",
                     "ts",
-                    "components"
+                    "components",
+                    "capabilities"
                   ],
                   "properties": {
                     "status": {
@@ -261,116 +291,1107 @@
                       "type": "string",
                       "format": "date-time"
                     },
+                    "capabilities": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "execution_budget_jwks",
+                        "workspace_budget_authority",
+                        "platform_budget_authority"
+                      ],
+                      "properties": {
+                        "execution_budget_jwks": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "workspace_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
                     "components": {
                       "type": "object",
                       "additionalProperties": false,
                       "required": [
                         "database",
+                        "migration",
                         "temporal_control_plane",
                         "worker",
                         "outbox_relay",
+                        "api_runtime",
+                        "storage",
+                        "redis",
+                        "model_gateway",
+                        "renderer",
+                        "browser",
+                        "budget_grant_verification",
+                        "auth_jwks",
                         "admission"
                       ],
                       "properties": {
                         "database": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
+                        },
+                        "migration": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         },
                         "temporal_control_plane": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "worker": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "outbox_relay": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
+                        },
+                        "api_runtime": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "storage": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "redis": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "model_gateway": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "renderer": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "browser": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "budget_grant_verification": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "auth_jwks": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         },
                         "admission": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         }
                       }
                     }
@@ -390,7 +1411,8 @@
                     "status",
                     "service",
                     "ts",
-                    "components"
+                    "components",
+                    "capabilities"
                   ],
                   "properties": {
                     "status": {
@@ -410,116 +1432,1107 @@
                       "type": "string",
                       "format": "date-time"
                     },
+                    "capabilities": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "execution_budget_jwks",
+                        "workspace_budget_authority",
+                        "platform_budget_authority"
+                      ],
+                      "properties": {
+                        "execution_budget_jwks": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "workspace_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "platform_budget_authority": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
                     "components": {
                       "type": "object",
                       "additionalProperties": false,
                       "required": [
                         "database",
+                        "migration",
                         "temporal_control_plane",
                         "worker",
                         "outbox_relay",
+                        "api_runtime",
+                        "storage",
+                        "redis",
+                        "model_gateway",
+                        "renderer",
+                        "browser",
+                        "budget_grant_verification",
+                        "auth_jwks",
                         "admission"
                       ],
                       "properties": {
                         "database": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
+                        },
+                        "migration": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         },
                         "temporal_control_plane": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "worker": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         },
                         "outbox_relay": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
+                        },
+                        "api_runtime": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "storage": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "redis": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "model_gateway": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "renderer": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "browser": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "budget_grant_verification": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "auth_jwks": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         },
                         "admission": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "status"
-                          ],
-                          "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "ok",
-                                "failed",
-                                "not_proven"
-                              ]
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
                             },
-                            "code": {
-                              "type": "string"
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
                             }
-                          }
+                          ]
                         }
                       }
                     }
@@ -624,6 +2637,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "requestBody": {
@@ -649,6 +2673,134 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -1345,6 +3497,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "responses": {
@@ -1360,6 +3523,134 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IcpDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -1863,6 +4154,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "responses": {
@@ -1878,6 +4180,134 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/QueryPlanDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -2005,6 +4435,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "responses": {
@@ -2030,6 +4471,134 @@
                           "format": "uuid"
                         },
                         "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
                           "type": "string"
                         }
                       }
@@ -2289,6 +4858,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "responses": {
@@ -2306,6 +4886,134 @@
                       "type": "object",
                       "additionalProperties": true,
                       "description": "联系人发现结果（新建联系人/联系点计数）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -2341,6 +5049,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "requestBody": {
@@ -2368,6 +5087,134 @@
                       "type": "object",
                       "additionalProperties": true,
                       "description": "验证结果（status + 探测细节留痕）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -2403,6 +5250,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "requestBody": {
@@ -2430,6 +5288,134 @@
                       "type": "object",
                       "additionalProperties": true,
                       "description": "邮箱猜测结果（补全计数 + 逐决策人状态/落库态）"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -4427,6 +7413,17 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9._:-]+$"
             }
+          },
+          {
+            "name": "X-Site-Build-Budget-Grant",
+            "required": true,
+            "in": "header",
+            "description": "SaaS 签发、绑定本次 intake 请求的一次性费用授权 JWS",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "requestBody": {
@@ -4492,6 +7489,74 @@
               }
             }
           },
+          "402": {
+            "description": "费用授权缺失、非法或过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "费用授权与 workspace/intake 请求不匹配",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "BUDGET_GRANT_SCOPE_MISMATCH"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "409": {
             "description": "幂等键复用冲突或 workspace 已有站点",
             "content": {
@@ -4513,6 +7578,7 @@
                           "type": "string",
                           "enum": [
                             "IDEMPOTENCY_KEY_REUSED",
+                            "BUDGET_GRANT_REUSED",
                             "SITE_LIMIT_REACHED"
                           ]
                         },
@@ -4547,6 +7613,40 @@
                           "type": "string",
                           "enum": [
                             "DEMO_LAUNCH_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "费用授权验签或 Site Builder runtime 暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY"
                           ]
                         },
                         "message": {
@@ -7671,6 +10771,17 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9._:-]{1,128}$"
             }
+          },
+          {
+            "name": "X-Site-Build-Budget-Grant",
+            "required": true,
+            "in": "header",
+            "description": "SaaS 签发、绑定本次构建请求的一次性费用授权 JWS",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "requestBody": {
@@ -7791,6 +10902,129 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
+                            "BUILD_CANCEL_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "BUDGET_GRANT_REQUIRED、BUDGET_GRANT_INVALID 或 BUDGET_GRANT_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
+                            "BUILD_CANCEL_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "BUDGET_GRANT_SCOPE_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -7842,6 +11076,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -7893,6 +11134,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -7944,6 +11192,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -7995,6 +11250,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8046,6 +11308,71 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
+                            "BUILD_CANCEL_UNAVAILABLE",
+                            "QUOTA_EXCEEDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BUDGET_GRANT_VERIFICATION_UNAVAILABLE 或 SITE_BUILD_RUNTIME_NOT_READY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR",
+                            "INVALID_IDEMPOTENCY_KEY",
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "NOT_FOUND",
+                            "BUILD_IN_PROGRESS",
+                            "BUILD_SCOPE_UNAVAILABLE",
+                            "BUILD_OPTION_UNAVAILABLE",
+                            "BUILD_TARGET_NOT_FOUND",
+                            "BUILD_TARGET_AMBIGUOUS",
+                            "BUILD_ACTIVE_SPEC_INVALID",
+                            "BUILD_NOT_CANCELLABLE",
+                            "BUILD_ALREADY_TERMINAL",
+                            "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8144,6 +11471,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8195,6 +11529,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8293,6 +11634,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8344,6 +11692,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8395,6 +11750,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -8446,6 +11808,13 @@
                             "BUILD_NOT_CANCELLABLE",
                             "BUILD_ALREADY_TERMINAL",
                             "BUILD_LAUNCH_UNAVAILABLE",
+                            "BUDGET_GRANT_REQUIRED",
+                            "BUDGET_GRANT_INVALID",
+                            "BUDGET_GRANT_EXPIRED",
+                            "BUDGET_GRANT_SCOPE_MISMATCH",
+                            "BUDGET_GRANT_REUSED",
+                            "BUDGET_GRANT_VERIFICATION_UNAVAILABLE",
+                            "SITE_BUILD_RUNTIME_NOT_READY",
                             "BUILD_CANCEL_UNAVAILABLE",
                             "QUOTA_EXCEEDED"
                           ]
@@ -10057,13 +13426,14 @@
               "budget",
               "totals",
               "usage",
-              "operations"
+              "operations",
+              "reconciliation"
             ],
             "properties": {
               "schemaVersion": {
                 "type": "string",
                 "enum": [
-                  "site-builder-cost-summary/v1"
+                  "site-builder-cost-summary/v2"
                 ]
               },
               "currency": {
@@ -10083,29 +13453,39 @@
                 "additionalProperties": false,
                 "required": [
                   "capMicrousd",
+                  "authorizedCapMicrousd",
                   "reservedMicrousd",
                   "chargedMicrousd",
+                  "conservativeChargedMicrousd",
                   "remainingMicrousd",
                   "paidCallsEnabled",
                   "disabledReason",
                   "exhaustedAt"
                 ],
                 "properties": {
+                  "authorizedCapMicrousd": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "conservativeChargedMicrousd": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
                   "capMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "reservedMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "chargedMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "remainingMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "paidCallsEnabled": {
                     "type": "boolean"
@@ -10128,24 +13508,34 @@
                   "reportedCostMicrousd",
                   "calculatedCostMicrousd",
                   "estimatedCostMicrousd",
-                  "unknownOperations"
+                  "unknownOperations",
+                  "exactCostMicrousd",
+                  "upperBoundCostMicrousd"
                 ],
                 "properties": {
                   "reportedCostMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "calculatedCostMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "estimatedCostMicrousd": {
-                    "type": "integer",
-                    "minimum": 0
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   },
                   "unknownOperations": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "exactCostMicrousd": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "upperBoundCostMicrousd": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
                   }
                 }
               },
@@ -10204,6 +13594,40 @@
                     "minimum": 0
                   }
                 }
+              },
+              "reconciliation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "pendingOperations",
+                  "resolvedOperations",
+                  "conflictOperations",
+                  "asOf",
+                  "revision"
+                ],
+                "properties": {
+                  "pendingOperations": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "resolvedOperations": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "conflictOperations": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "asOf": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
               }
             },
             "nullable": true
@@ -10212,6 +13636,10 @@
             "type": "string",
             "nullable": true,
             "description": "泛化错误；不含 worker/provider 诊断"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
           },
           "startedAt": {
             "type": "string",
@@ -10232,6 +13660,7 @@
           "progress",
           "steps",
           "error",
+          "errorCode",
           "startedAt",
           "finishedAt",
           "costSummary"

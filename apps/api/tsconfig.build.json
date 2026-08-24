@@ -1,4 +1,13 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "dist", "test", "**/*.spec.ts", "src/temporal/testing"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*.spec.ts",
+    "**/*.test-fixture.ts",
+    "src/temporal/testing",
+    "src/site-builder/eval",
+    "src/site-builder/design/m1eb-golden.ts"
+  ]
 }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import countries from 'world-countries';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
@@ -7,6 +7,8 @@ import { normForMatch } from '../discovery/name-match';
 import { parseOfacXml, type ParsedSanctionsEntity, type ParsedSanctionsList } from '../adapters/ofac-xml';
 import { parseEuFsf } from '../adapters/eu-fsf-xml';
 import type { SanctionsDownloadInput, SanctionsDownloadOutput } from '../tools/source-tools';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 
 /**
  * 制裁名单刷新服务（Temporal 每日 Schedule 活动 + verify 脚本用）。owner 连接写平台表（绕 RLS）。
@@ -140,6 +142,7 @@ export interface SanctionsRefreshSummary {
 
 export interface SanctionsRefreshDeps {
   ownerDb: PrismaClient; // owner 连接（绕 RLS，写平台表）
+  platformWriter?: PrismaClient;
   broker: ExecutionBroker;
 }
 
@@ -156,17 +159,18 @@ export class SanctionsRefreshService {
   constructor(private readonly deps: SanctionsRefreshDeps) {}
 
   /** 刷新全部 ENABLED 源（单源失败 fail-safe）。 */
-  async refreshAll(): Promise<SanctionsRefreshSummary[]> {
+  async refreshAll(budgetKey?: string): Promise<SanctionsRefreshSummary[]> {
     const sources = await this.deps.ownerDb.sanctionsSource.findMany({ where: { status: 'ENABLED' } });
     const out: SanctionsRefreshSummary[] = [];
     for (const src of sources) {
       try {
-        out.push(await this.refreshSource(src.id));
+        out.push(await this.refreshSource(src.id, budgetKey));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await this.deps.ownerDb.sanctionsSource
           .update({ where: { id: src.id }, data: { lastRefreshedAt: new Date(), lastFetchStatus: 'FAILED' } })
           .catch(() => undefined);
+        if (isExecutionControlError(err)) throw err;
         out.push({ sourceKey: src.key, status: 'FAILED', total: 0, added: 0, updated: 0, unchanged: 0, withdrawn: 0, publishDate: null, error: msg });
       }
     }
@@ -174,7 +178,7 @@ export class SanctionsRefreshService {
   }
 
   /** 刷新单源：broker 下载 → 解析 → diff → 批量 upsert + 撤下 → 更新审计。 */
-  async refreshSource(sourceId: string): Promise<SanctionsRefreshSummary> {
+  async refreshSource(sourceId: string, budgetKey?: string): Promise<SanctionsRefreshSummary> {
     const src = await this.deps.ownerDb.sanctionsSource.findUniqueOrThrow({ where: { id: sourceId } });
     const parse = PARSERS[src.format];
     if (!parse) throw new Error(`unsupported sanctions format: ${src.format}`);
@@ -183,7 +187,11 @@ export class SanctionsRefreshService {
     const res = await this.deps.broker.invoke<SanctionsDownloadInput, SanctionsDownloadOutput>(
       'sanctions.download',
       { url: src.url, userAgent },
-      { workspaceId: PLATFORM_WORKSPACE, purpose: 'sanctions_screening' },
+      {
+        workspaceId: PLATFORM_WORKSPACE,
+        purpose: 'sanctions_screening',
+        ...(budgetKey ? { runId: budgetKey } : {}),
+      },
     );
     const parsed = parse(res.data.body);
     const listVersion = parsed.publishDate ?? new Date().toISOString().slice(0, 10);
@@ -206,43 +214,7 @@ export class SanctionsRefreshService {
     const diff = diffSanctionsEntities(existing, desired);
 
     const now = new Date();
-    for (const chunk of chunks(diff.toCreate, CHUNK)) {
-      await this.deps.ownerDb.sanctionsEntity.createMany({
-        data: chunk.map((d) => ({ sourceId, ...toRow(d) })),
-        skipDuplicates: true,
-      });
-    }
-    for (const d of diff.toUpdate) {
-      await this.deps.ownerDb.sanctionsEntity.update({
-        where: { sourceId_externalId: { sourceId, externalId: d.externalId } },
-        data: { ...toRow(d), lastSeenAt: now, withdrawnAt: null },
-      });
-    }
-    // H1：未变实体仅廉价批量更 listVersion + lastSeenAt（不逐行 UPDATE，防发版全表逐行改）。
-    for (const chunk of chunks(diff.unchangedExternalIds, CHUNK)) {
-      await this.deps.ownerDb.sanctionsEntity.updateMany({
-        where: { sourceId, externalId: { in: chunk } },
-        data: { listVersion, lastSeenAt: now },
-      });
-    }
-    for (const chunk of chunks(diff.toWithdrawExternalIds, CHUNK)) {
-      await this.deps.ownerDb.sanctionsEntity.updateMany({
-        where: { sourceId, externalId: { in: chunk } },
-        data: { withdrawnAt: now },
-      });
-    }
-
-    await this.deps.ownerDb.sanctionsSource.update({
-      where: { id: sourceId },
-      data: {
-        publishDate: parsed.publishDate ? new Date(`${parsed.publishDate}T00:00:00.000Z`) : undefined,
-        recordCount: parsed.entities.length,
-        lastRefreshedAt: now,
-        lastFetchStatus: 'DONE',
-      },
-    });
-
-    return {
+    const summary: SanctionsRefreshSummary = {
       sourceKey: src.key,
       status: 'DONE',
       total: parsed.entities.length,
@@ -252,6 +224,62 @@ export class SanctionsRefreshService {
       withdrawn: diff.toWithdrawExternalIds.length,
       publishDate: parsed.publishDate,
     };
+    const persist = async (
+      database: Pick<Prisma.TransactionClient, 'sanctionsEntity' | 'sanctionsSource'>,
+    ): Promise<SanctionsRefreshSummary> => {
+    for (const chunk of chunks(diff.toCreate, CHUNK)) {
+      await database.sanctionsEntity.createMany({
+        data: chunk.map((d) => ({ sourceId, ...toRow(d) })),
+        skipDuplicates: true,
+      });
+    }
+    for (const d of diff.toUpdate) {
+      await database.sanctionsEntity.update({
+        where: { sourceId_externalId: { sourceId, externalId: d.externalId } },
+        data: { ...toRow(d), lastSeenAt: now, withdrawnAt: null },
+      });
+    }
+    // H1：未变实体仅廉价批量更 listVersion + lastSeenAt（不逐行 UPDATE，防发版全表逐行改）。
+    for (const chunk of chunks(diff.unchangedExternalIds, CHUNK)) {
+      await database.sanctionsEntity.updateMany({
+        where: { sourceId, externalId: { in: chunk } },
+        data: { listVersion, lastSeenAt: now },
+      });
+    }
+    for (const chunk of chunks(diff.toWithdrawExternalIds, CHUNK)) {
+      await database.sanctionsEntity.updateMany({
+        where: { sourceId, externalId: { in: chunk } },
+        data: { withdrawnAt: now },
+      });
+    }
+
+    await database.sanctionsSource.update({
+      where: { id: sourceId },
+      data: {
+        publishDate: parsed.publishDate ? new Date(`${parsed.publishDate}T00:00:00.000Z`) : undefined,
+        recordCount: parsed.entities.length,
+        lastRefreshedAt: now,
+        lastFetchStatus: 'DONE',
+      },
+    });
+
+    return summary;
+    };
+    if (!res.durableReceipt) return persist(this.deps.ownerDb);
+    if (!this.deps.platformWriter) {
+      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter.$transaction(async (tx) => {
+      const applied = await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'sanctions.download',
+        receipt: res.durableReceipt,
+        domainAckKey: sourceId,
+        domainRevision: res.durableReceipt!.resultDigest,
+        apply: persist,
+      });
+      return applied.value ?? summary;
+    });
   }
 }
 

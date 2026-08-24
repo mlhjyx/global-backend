@@ -1,6 +1,4 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createHash, pbkdf2Sync } from 'node:crypto';
 import {
   GatewaySettlementObservation,
   PAID_MODEL_PROTOCOLS,
@@ -202,6 +200,19 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function legacyAttestationCredentialHash(value: string): string {
+  // The retired file-attestation validator is not the product fingerprint
+  // contract. If legacy callers invoke it, use a work-factor hash rather than
+  // reintroducing a fast password-style computation.
+  return pbkdf2Sync(
+    value,
+    'site-builder-retired-attestation/v2',
+    100_000,
+    32,
+    'sha256',
+  ).toString('hex');
+}
+
 function sha256CanonicalJson(value: unknown): string {
   return sha256(canonicalJson(value));
 }
@@ -350,7 +361,7 @@ function assertAttestation(
     snapshot.pricing.ledgerMicrousdPerUsd !== 1_000_000 ||
     snapshot.pricing.ledgerMicrousdPerCny !== 1_000_000 ||
     !SHA256.test(snapshot.credential.bearerTokenSha256) ||
-    snapshot.credential.bearerTokenSha256 !== sha256(apiKey) ||
+    snapshot.credential.bearerTokenSha256 !== legacyAttestationCredentialHash(apiKey) ||
     snapshot.credential.purpose !== 'site_builder_runtime' ||
     snapshot.credential.quotaMode !== 'limited' ||
     snapshot.credential.scopeExact !== true ||
@@ -985,40 +996,6 @@ export class NewApiSiteBuilderModelSettlement implements PaidModelSettlementCont
       reason: 'log_unavailable',
     };
   }
-}
-
-export function loadSiteBuilderModelSettlement(
-  env: NodeJS.ProcessEnv = process.env,
-  deps: RuntimeDeps = {},
-): PaidModelSettlementController | undefined {
-  const attestationPath =
-    env.SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH?.trim();
-  if (!attestationPath) return undefined;
-  const expectedFileSha256 =
-    env.SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256?.trim();
-  if (!expectedFileSha256 || !SHA256.test(expectedFileSha256)) {
-    throw new Error(
-      'SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256 is required',
-    );
-  }
-  const gatewayUrl = env.MODEL_GATEWAY_URL?.trim();
-  const apiKey = env.MODEL_GATEWAY_KEY?.trim();
-  if (!gatewayUrl || !apiKey) {
-    throw new Error('model gateway credential is required for settlement');
-  }
-  const bytes = readFileSync(resolve(attestationPath));
-  if (sha256(bytes) !== expectedFileSha256) {
-    throw new Error('model settlement attestation file digest mismatch');
-  }
-  const parsed = JSON.parse(bytes.toString('utf8')) as unknown;
-  const attestation = assertAttestation(
-    parsed,
-    env,
-    gatewayUrl,
-    apiKey,
-    deps.now?.() ?? new Date(),
-  );
-  return new NewApiSiteBuilderModelSettlement(attestation, apiKey, deps);
 }
 
 export function settlementAttestationSnapshotSha256(

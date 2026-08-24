@@ -1,9 +1,10 @@
 // Proves the app calls ONE gateway (中转站) with a task-selected model name, and
-// falls back to the stub if the gateway is down — without any real vendor call.
+// falls back to an explicitly injected test fixture if the gateway is down —
+// without any real vendor call.
 const { ModelProviderRegistry } = require('../dist/model-gateway/model-provider.registry');
 const { ModelRouter } = require('../dist/model-gateway/model-router');
 const { RouterModelGateway } = require('../dist/model-gateway/router-model-gateway');
-const { StubModelProvider } = require('../dist/model-gateway/providers/stub-model.provider');
+const { createSchemaFixtureStubModelProvider } = require('@global/test-support/model');
 
 // Fake 中转站 provider: echoes back the model name it was asked to resolve.
 const gatewayFake = (fail = false) => ({
@@ -30,12 +31,12 @@ const ctx = { workspaceId: 'ws-1' };
 
 (async () => {
   // 1) app → 中转站, carrying the task-selected model name.
-  const routed = await gatewayWith(new StubModelProvider(), gatewayFake()).generateText(
+  const routed = await gatewayWith(gatewayFake(), createSchemaFixtureStubModelProvider()).generateText(
     { task: 'company_understanding.extract_claims', prompt: 'x', model: 'deepseek-chat' },
     ctx,
   );
-  // 2) 中转站 down → fall back to stub so the pipeline still runs in dev.
-  const fellBack = await gatewayWith(new StubModelProvider(), gatewayFake(true)).generateText(
+  // 2) 中转站 down → fall back only inside this explicit test composition.
+  const fellBack = await gatewayWith(gatewayFake(true), createSchemaFixtureStubModelProvider()).generateText(
     { task: 'company_understanding.extract_claims', prompt: 'x', model: 'deepseek-chat' },
     ctx,
   );
@@ -46,7 +47,7 @@ const ctx = { workspaceId: 'ws-1' };
   const ok = routed.provider === 'gateway' && routed.data === 'resolved:deepseek-chat' && fellBack.provider === 'stub';
   console.log(
     ok
-      ? '\nMODEL GATEWAY: PASS ✅ (single 中转站 endpoint, task-selected model, stub fallback)'
+      ? '\nMODEL GATEWAY: PASS ✅ (single 中转站 endpoint, task-selected model, explicit test fixture)'
       : '\nMODEL GATEWAY: FAIL ❌',
   );
   process.exit(ok ? 0 : 1);

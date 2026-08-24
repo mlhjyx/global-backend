@@ -29,10 +29,10 @@ import { SITE_BUILDER_GENERATIVE_TASK_IDS } from './task-route-bindings';
  *
  * 职责分层（刻意不重复网关已有的轮子）：
  * - 本层：输入 JSON Schema fail-fast → 固化 prompt（用户数据只进模板变量位，C2 结构性保证）
- *   → 按 task 路由（模型/预算/超时/effort）→ 模型回退链 → 🔴 stub 拒绝（假数据绝不充真，
- *   fit-judge 先例）→ 用量聚合 → 可诊断聚合错误。
+ *   → 按 task 路由（模型/预算/超时/effort）→ 模型回退链 → 用量聚合
+ *   → 可诊断聚合错误。
  * - 网关内：输出 JSON Schema 校验 + 一次修复重试（PRD 9.6）、trace；预算 reserve-settle
- *   仅对已 `budgetLedger.open` 的账户生效——refurbish 尚未 open（M1 单 run 成本结构上有界，
+ *   仅对已由持久 BudgetStore 开立的账户生效；refurbish 使用专用 Grant/Spend ledger，
  *   无 runaway），预算门真接线 + 截断路径 usage 结算见 fast-follow。
  * - 任务模块内：业务出口闸（如 brandProfile 的 evidence 闸）——确定性纯函数，不进本层。
  */
@@ -97,10 +97,7 @@ export class AiTaskError extends Error {
   ) {
     super(
       `AI task ${taskId} failed on all models: ` +
-        attempts.map((a) => `${a.model}: ${a.error}`).join(' | ') +
-        // 复审 F3：dev 链 [gateway, stub] 下网关失败会落 stub→被拒，聚合错误全是「stub refused」；
-        // 真实根因（503/截断/schema）只在 ai_trace，提示排障者去查。
-        ' — (dev: stub fallback ⇒ 上游网关本次失败，真实根因见 ai_trace)',
+        attempts.map((a) => `${a.model}: ${a.error}`).join(' | '),
     );
     this.name = 'AiTaskError';
   }
@@ -244,12 +241,6 @@ export async function runAiTask<TIn, TOut>(
         : await Promise.race([execution, timeout!]);
       const result: ModelResult<TOut> = runtimeResult.gatewayResult;
       usage = addUsage(usage, result.usage, result.callCount ?? 1);
-      if (result.provider === 'stub') {
-        // 🔴 stub 兜底绝不写真实产物：dev 网关瞬时失败会 fallback 到 stub（罐头输出）。
-        throw new Error(
-          'stub provider refused (fake data must never pass as real)',
-        );
-      }
       return {
         data: result.data,
         model: result.model,

@@ -7,6 +7,7 @@ import {
   type GatewayVisionTransport,
 } from './openai-compatible.provider';
 import { ProviderHttpError, ProviderIdentityError, ProviderOutputError } from './provider-output-error';
+import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from '../new-api-request-bound-settlement';
 
 /**
  * M1-b 网关增量（09 §2.4 AiTask 工程护栏的 provider 侧）：
@@ -104,67 +105,39 @@ describe('OpenAICompatibleProvider — reasoning_effort 透传', () => {
   });
 });
 
-describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
-  it('lets request-bound settlement outlive the caller generation deadline', async () => {
-    const preflight = {
-      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
-      attestationId: 'provider-settlement-test',
-      snapshotSha256: 'a'.repeat(64),
-      resolverId: 'new-api-token-log-v1',
-      taskId: 'site_builder.copy',
-      alias: 'deepseek-v4-pro',
-      protocol: 'openai-chat-completions' as const,
-      expectedChannelId: 9,
-      pricingAuthority: 'openox_model_marketplace' as const,
-      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
-      pricingSnapshotSha256: 'b'.repeat(64),
-      pricingCurrency: 'CNY' as const,
-      inputPriceMicrounitsPerMillionTokens: 2_000_000,
-      outputPriceMicrounitsPerMillionTokens: 10_000_000,
-      ledgerMicrousdPerPricingUnit: 1_000_000,
-      gatewayCredentialQuotaCapPoints: 5_000_000,
-      gatewayCredentialRemainingPoints: 4_500_000,
-      maxOutputTokensPerCall: 1_000,
-      pricedMaximumMicrousd: 100_000,
-    };
-    const resolve = vi.fn(async () => ({
-      status: 'settled' as const,
-      requestId: 'req_provider_paid_001',
-      resolverId: preflight.resolverId,
-      alias: preflight.alias,
-      protocol: preflight.protocol,
-      channelId: preflight.expectedChannelId,
-      basis: 'openox_catalog_token_pricing' as const,
-      quota: 500,
-      costMicrousd: 1_000,
-      inputTokens: 10,
-      outputTokens: 5,
-    }));
-    const paidProvider = new OpenAICompatibleProvider({
+describe('OpenAICompatibleProvider — request-bound settlement observation', () => {
+  // 同步逐请求结算（preflight/resolve controller）已移除：provider 只把
+  // 网关 requestId 以 unknown 观测附着到 usage，精确费用由异步 reconciliation
+  // sweep 按 requestId 补登。这里的合同是“观测永不丢失”。
+  const PAID_CTX = {
+    workspaceId: '11111111-1111-4111-8111-111111111111',
+    runId: '22222222-2222-4222-8222-222222222222',
+    paidCost: {
+      siteId: '33333333-3333-4333-8333-333333333333',
+      scopeKey: 'copy:model:0',
+    },
+  } as const;
+
+  const paidProvider = (model: string, transports?: Record<string, GatewayModelTransport>) =>
+    new OpenAICompatibleProvider({
       id: 'gateway',
       baseUrl: 'https://gateway.example.test/v1',
       apiKey: 'runtime-token',
-      model: 'deepseek-v4-pro',
-      paidModelSettlement: {
-        preflight: vi.fn(async () => preflight),
-        resolve,
-      },
+      model,
+      ...(transports ? { modelTransports: transports } : {}),
     });
+
+  it('keeps the request-bound observation when the caller generation aborts after the response', async () => {
     const generation = new AbortController();
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
-        generation.abort(
-          new DOMException('generation deadline', 'TimeoutError'),
-        );
+        generation.abort(new DOMException('generation deadline', 'TimeoutError'));
         return new Response(
           JSON.stringify({
             model: 'deepseek-v4-pro',
             choices: [
-              {
-                message: { content: '{"ok":true}' },
-                finish_reason: 'stop',
-              },
+              { message: { content: '{"ok":true}' }, finish_reason: 'stop' },
             ],
             usage: { prompt_tokens: 10, completion_tokens: 5 },
           }),
@@ -179,7 +152,7 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       }),
     );
 
-    const result = await paidProvider.generateStructured(
+    const result = await paidProvider('deepseek-v4-pro').generateStructured(
       {
         task: 'site_builder.copy',
         prompt: 'p',
@@ -187,78 +160,23 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
         model: 'deepseek-v4-pro',
         signal: generation.signal,
       },
-      {
-        workspaceId: '11111111-1111-4111-8111-111111111111',
-        runId: '22222222-2222-4222-8222-222222222222',
-        paidCost: {
-          siteId: '33333333-3333-4333-8333-333333333333',
-          scopeKey: 'copy:model:0',
-          settlementPreflight: preflight,
-        },
-      },
+      PAID_CTX,
     );
 
-    expect(resolve).toHaveBeenCalledWith({
-      requestId: 'req_provider_paid_001',
-      evidence: preflight,
-      usage: undefined,
-    });
-    expect(resolve.mock.calls[0]![0]).not.toHaveProperty('signal');
+    // 调用方 abort 不得丢弃费用事实：观测仍随 result.usage 进入结算账本。
     expect(result.usage).toMatchObject({
       gatewaySettlements: [
-        expect.objectContaining({
-          status: 'settled',
+        {
+          status: 'unknown',
           requestId: 'req_provider_paid_001',
-        }),
+          resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+          reason: 'log_unavailable',
+        },
       ],
     });
   });
 
-  it('settles from the request header before parsing a malformed success body', async () => {
-    const preflight = {
-      schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
-      attestationId: 'provider-malformed-body-test',
-      snapshotSha256: 'a'.repeat(64),
-      resolverId: 'new-api-token-log-v1',
-      taskId: 'site_builder.copy',
-      alias: 'deepseek-v4-pro',
-      protocol: 'openai-chat-completions' as const,
-      expectedChannelId: 9,
-      pricingAuthority: 'openox_model_marketplace' as const,
-      pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
-      pricingSnapshotSha256: 'b'.repeat(64),
-      pricingCurrency: 'CNY' as const,
-      inputPriceMicrounitsPerMillionTokens: 2_000_000,
-      outputPriceMicrounitsPerMillionTokens: 10_000_000,
-      ledgerMicrousdPerPricingUnit: 1_000_000,
-      gatewayCredentialQuotaCapPoints: 5_000_000,
-      gatewayCredentialRemainingPoints: 4_500_000,
-      maxOutputTokensPerCall: 1_000,
-      pricedMaximumMicrousd: 100_000,
-    };
-    const resolve = vi.fn(async () => ({
-      status: 'settled' as const,
-      requestId: 'req_malformed_paid_001',
-      resolverId: preflight.resolverId,
-      alias: preflight.alias,
-      protocol: preflight.protocol,
-      channelId: preflight.expectedChannelId,
-      basis: 'openox_catalog_token_pricing' as const,
-      quota: 500,
-      costMicrousd: 1_000,
-      inputTokens: 10,
-      outputTokens: 5,
-    }));
-    const paidProvider = new OpenAICompatibleProvider({
-      id: 'gateway',
-      baseUrl: 'https://gateway.example.test/v1',
-      apiKey: 'runtime-token',
-      model: preflight.alias,
-      paidModelSettlement: {
-        preflight: vi.fn(async () => preflight),
-        resolve,
-      },
-    });
+  it('attaches the request-bound observation before parsing a malformed success body', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -273,104 +191,33 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
       ),
     );
 
-    const error = await paidProvider
+    const error = await paidProvider('deepseek-v4-pro')
       .generateStructured(
-        {
-          task: preflight.taskId,
-          prompt: 'p',
-          schema: {},
-          model: preflight.alias,
-        },
-        {
-          workspaceId: '11111111-1111-4111-8111-111111111111',
-          runId: '22222222-2222-4222-8222-222222222222',
-          paidCost: {
-            siteId: '33333333-3333-4333-8333-333333333333',
-            scopeKey: 'copy:model:0',
-            settlementPreflight: preflight,
-          },
-        },
+        { task: 'site_builder.copy', prompt: 'p', schema: {}, model: 'deepseek-v4-pro' },
+        PAID_CTX,
       )
       .catch((caught: unknown) => caught);
 
+    // body 解析失败时 token 数不可得，但 requestId 观测必须先于解析附着，
+    // 否则 FAILED+unknown spend 无法按稳定 requestId 做受控事实恢复。
     expect(error).toBeInstanceOf(ProviderOutputError);
     expect((error as ProviderOutputError).usage).toMatchObject({
-      inputTokens: 10,
-      outputTokens: 5,
       gatewaySettlements: [
-        expect.objectContaining({
-          status: 'settled',
+        {
+          status: 'unknown',
           requestId: 'req_malformed_paid_001',
-        }),
+          resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+          reason: 'log_unavailable',
+        },
       ],
     });
-    expect(resolve).toHaveBeenCalledOnce();
-  });
-
-  it('keeps ordinary non-paid HTTP failures non-billable', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('gateway unavailable', { status: 503 })),
-    );
-
-    await expect(
-      provider.generateStructured({
-        task: 't',
-        prompt: 'p',
-        schema: {},
-      }),
-    ).rejects.toBeInstanceOf(ProviderHttpError);
   });
 
   it.each(['openai-responses', 'anthropic-messages'] satisfies GatewayModelTransport[])(
-    'settles %s before parsing malformed JSON',
+    'attaches the request-bound observation for %s before parsing malformed JSON',
     async (transport) => {
       const alias = `paid-${transport}`;
-      const preflight = {
-        schemaVersion: 'site-builder-paid-model-preflight-evidence/v2' as const,
-        attestationId: `provider-${transport}-test`,
-        snapshotSha256: 'a'.repeat(64),
-        resolverId: 'new-api-token-log-v1',
-        taskId: 'site_builder.copy',
-        alias,
-        protocol: transport,
-        expectedChannelId: 9,
-        pricingAuthority: 'openox_model_marketplace' as const,
-        pricingSourceUrl: 'https://openox.tech/api/public/pricing-catalog',
-        pricingSnapshotSha256: 'b'.repeat(64),
-        pricingCurrency: 'CNY' as const,
-        inputPriceMicrounitsPerMillionTokens: 2_000_000,
-        outputPriceMicrounitsPerMillionTokens: 10_000_000,
-        ledgerMicrousdPerPricingUnit: 1_000_000,
-        gatewayCredentialQuotaCapPoints: 5_000_000,
-        gatewayCredentialRemainingPoints: 4_500_000,
-        maxOutputTokensPerCall: 1_000,
-        pricedMaximumMicrousd: 100_000,
-      };
-      const resolve = vi.fn(async () => ({
-        status: 'settled' as const,
-        requestId: `req_${transport.replaceAll('-', '_')}`,
-        resolverId: preflight.resolverId,
-        alias,
-        protocol: transport,
-        channelId: preflight.expectedChannelId,
-        basis: 'openox_catalog_token_pricing' as const,
-        quota: 500,
-        costMicrousd: 1_000,
-        inputTokens: 10,
-        outputTokens: 5,
-      }));
-      const paidProvider = new OpenAICompatibleProvider({
-        id: 'gateway',
-        baseUrl: 'https://gateway.example.test/v1',
-        apiKey: 'runtime-token',
-        model: alias,
-        modelTransports: { [alias]: transport },
-        paidModelSettlement: {
-          preflight: vi.fn(async () => preflight),
-          resolve,
-        },
-      });
+      const requestId = `req_${transport.replaceAll('-', '_')}`;
       vi.stubGlobal(
         'fetch',
         vi.fn(
@@ -379,42 +226,48 @@ describe('OpenAICompatibleProvider — request-bound paid settlement', () => {
               status: 200,
               headers: {
                 'content-type': 'application/json',
-                'x-oneapi-request-id': `req_${transport.replaceAll('-', '_')}`,
+                'x-oneapi-request-id': requestId,
               },
             }),
         ),
       );
 
-      const error = await paidProvider
+      const error = await paidProvider(alias, { [alias]: transport })
         .generateStructured(
-          {
-            task: preflight.taskId,
-            prompt: 'p',
-            schema: {},
-            model: alias,
-            maxTokens: 100,
-          },
-          {
-            workspaceId: '11111111-1111-4111-8111-111111111111',
-            runId: '22222222-2222-4222-8222-222222222222',
-            paidCost: {
-              siteId: '33333333-3333-4333-8333-333333333333',
-              scopeKey: 'copy:model:0',
-              settlementPreflight: preflight,
-            },
-          },
+          { task: 'site_builder.copy', prompt: 'p', schema: {}, model: alias, maxTokens: 100 },
+          PAID_CTX,
         )
         .catch((caught: unknown) => caught);
 
       expect(error).toBeInstanceOf(ProviderOutputError);
       expect((error as ProviderOutputError).usage).toMatchObject({
-        inputTokens: 10,
-        outputTokens: 5,
-        gatewaySettlements: [expect.objectContaining({ status: 'settled' })],
+        gatewaySettlements: [
+          {
+            status: 'unknown',
+            requestId,
+            resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+            reason: 'log_unavailable',
+          },
+        ],
       });
-      expect(resolve).toHaveBeenCalledOnce();
     },
   );
+
+  it('omits settlement observations for non-paid calls', async () => {
+    mockChatResponse({
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+
+    const result = await paidProvider('deepseek-v4-pro').generateStructured({
+      task: 'site_builder.copy',
+      prompt: 'p',
+      schema: {},
+      model: 'deepseek-v4-pro',
+    });
+
+    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+  });
 });
 
 describe('OpenAICompatibleProvider — 空输出显式失败', () => {

@@ -279,6 +279,7 @@ function makeDecideTx(
     icpDefinition: { findUnique: async () => ({ version: 3 }) },
     // 鲜度模型 v2：decide 用 groupBy 取每分级最早 fetchedAt。mock 忠实按 dataClass 归组取 min。
     fieldEvidence: {
+      findMany: vi.fn(async () => []),
       groupBy: async () => {
         const toMs = (v: Date | string): number => (v instanceof Date ? v.getTime() : Date.parse(String(v)));
         const minByClass = new Map<string, Date | string>();
@@ -329,6 +330,29 @@ function makeDecideService(
 const decideCtx = { workspaceId: WS, userId: 'user-1' } as any;
 
 describe('LeadService.decide(accept) — 同事务取数、payload=快照（对旧代码 RED）', () => {
+  it('历史 sandbox evidence 被隔离，不能进入 LeadQualified 或改变 lead 状态', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, decisionCreate);
+    tx.fieldEvidence.findMany = vi.fn(async () => [{
+      id: 'fixture-evidence',
+      providerKey: 'public_web',
+      license: 'fixture',
+    }]);
+    const svc = makeDecideService(tx);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: { error: { code: 'SYNTHETIC_PROVENANCE_QUARANTINED' } },
+    });
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(decisionCreate).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith({
+      where: { entityId: { in: [COMPANY_ID, CONTACT_ID] } },
+      select: { providerKey: true, license: true },
+    });
+  });
+
   it('accept → outboxEvent.create payload 为 v1 快照且 schemaVersion=1', async () => {
     const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
     const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);

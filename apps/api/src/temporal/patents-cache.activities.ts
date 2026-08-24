@@ -1,6 +1,56 @@
-import type { PrismaClient } from '@prisma/client';
-import { bigqueryPatents } from '../adapters/bigquery-patents';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { refreshPatentCache, type PatentRefreshDb, type PatentRefreshSummary } from '../adapters/patent-inventor-cache';
+import type { BudgetStore } from '../tools/budget-store';
+import { UnavailableBudgetStore } from '../tools/budget-store';
+import type { ExecutionBroker } from '../tools/tool-contract';
+import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
+import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
+import { createPatentCacheBrokerScanner } from './patent-cache-broker-scanner';
+import { PATENTS_CACHE_REFRESH_SCHEDULE_ID } from './understanding.constants';
+import {
+  applyDomainAckConsumerTransactions,
+} from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+export const PATENT_CACHE_BROKER_MAX_ANCHORS = 25;
+
+async function readbackPatentRefresh(
+  transaction: PatentRefreshDb,
+  context: Readonly<{
+    auditId: string;
+    readback: (
+      transaction: PatentRefreshDb,
+      operationIds: readonly string[],
+    ) => Promise<PatentRefreshSummary>;
+  }>,
+  receipts: readonly DurableExecutionReceipt[],
+): Promise<PatentRefreshSummary> {
+  const operationIds = receipts.map((receipt) => receipt.operationId);
+  const summary = await context.readback(transaction, operationIds);
+  await transaction.patentCacheRefreshAudit.update({
+    where: { id: context.auditId },
+    data: {
+      finishedAt: new Date(),
+      status: 'REPLAYED',
+      anchorCount: summary.anchorCount,
+      rowCount: summary.rowCount,
+      bytesScanned: summary.bytesScanned === null
+        ? null
+        : BigInt(Math.round(summary.bytesScanned)),
+      purged: summary.purged,
+      cached: summary.cached,
+      empty: summary.empty,
+      detail: 'authoritative replay readback',
+    },
+  } as never);
+  return summary;
+}
+
+function boundedMaxAnchors(value: number | undefined): number {
+  return Number.isSafeInteger(value) && value !== undefined && value > 0
+    ? Math.min(value, PATENT_CACHE_BROKER_MAX_ANCHORS)
+    : PATENT_CACHE_BROKER_MAX_ANCHORS;
+}
 
 /**
  * 专利发明人缓存刷新的 Temporal 活动（scale-safe #89，第 5 个周期 Schedule 驱动）。
@@ -8,13 +58,72 @@ import { refreshPatentCache, type PatentRefreshDb, type PatentRefreshSummary } f
  * 一次共享大扫（BigQuery Job User 只读，护栏②④⑥ 下推）→ 落 postgres 缓存。空队列 → 零 BQ 成本跳过。
  * 🔴 §8.8 用途门自守 + 保留期清理 + encryptPii 落盘 均在 {@link refreshPatentCache} 内。
  */
-export function createPatentsCacheActivities(deps: { ownerDb: PrismaClient }) {
+export function createPatentsCacheActivities(deps: {
+  ownerDb: PrismaClient;
+  platformWriter?: PrismaClient;
+  broker: ExecutionBroker;
+  budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
+}) {
+  const budgets = deps.budgetStore ?? new UnavailableBudgetStore('patents cache activities require an authoritative BudgetStore');
   return {
-    async refreshPatentCacheActivity(input?: { maxAnchors?: number }): Promise<PatentRefreshSummary> {
+    async refreshPatentCacheActivity(input: ({ maxAnchors?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<PatentRefreshSummary> {
+      const binding = await attestPlatformScheduleActivity({
+        args: input, budgetStore: budgets, scheduleId: PATENTS_CACHE_REFRESH_SCHEDULE_ID, activityRunId: deps.activityRunId,
+      });
+      const durableReceipts: DurableExecutionReceipt[] = [];
       return refreshPatentCache({
         db: deps.ownerDb as unknown as PatentRefreshDb, // 全 delegate ⊇ PatentRefreshDb 子集
-        bq: bigqueryPatents, // env 驱动惰性建真 client；无 SA key → 天然 no-op（扫描返空）
-        maxAnchors: input?.maxAnchors,
+        bq: createPatentCacheBrokerScanner({
+          broker: deps.broker,
+          accountKey: binding.accountKey,
+          onDurableReceipt: (producerId, durableReceipt) => {
+            if (producerId !== 'google_patents.search') {
+              throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+            }
+            durableReceipts.push(durableReceipt);
+          },
+        }),
+        applyScanWithAck: async (_scan, persist, context) => {
+          if (!durableReceipts.length) return persist(deps.ownerDb as unknown as PatentRefreshDb);
+          if (!deps.platformWriter) {
+            throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+          }
+          return deps.platformWriter.$transaction(async (tx) => {
+            const result = await applyDomainAckConsumerTransactions({
+              transaction: tx,
+              acknowledgements: durableReceipts.map((durableReceipt) => ({
+                producerId: 'google_patents.search',
+                receipt: durableReceipt,
+                domainAckKey: `${binding.accountKey}:${durableReceipt.operationId}`,
+                domainRevision: durableReceipt.resultDigest,
+              })),
+              apply: async (transaction) => {
+                const database = transaction as unknown as PatentRefreshDb;
+                const summary = await persist(database);
+                await database.patentCacheRefreshAudit.update({
+                  where: { id: context.auditId },
+                  data: {
+                    executionOperationIds: durableReceipts.map(
+                      (receipt) => receipt.operationId,
+                    ) as unknown as Prisma.InputJsonValue,
+                    purged: summary.purged,
+                    cached: summary.cached,
+                    empty: summary.empty,
+                  },
+                } as never);
+                return summary;
+              },
+              readback: (transaction) => readbackPatentRefresh(
+                transaction as unknown as PatentRefreshDb,
+                context,
+                durableReceipts,
+              ),
+            });
+            return result.value;
+          });
+        },
+        maxAnchors: boundedMaxAnchors(input.maxAnchors),
         log: (msg) => console.warn(`[patents-cache-refresh] ${msg}`),
       });
     },

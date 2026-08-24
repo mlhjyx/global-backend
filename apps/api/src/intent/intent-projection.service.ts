@@ -1,14 +1,25 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain, companyIdentity } from '../discovery/identity';
 import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-harvest.provider';
 import { isTerminalExternalActionPolicyDenied } from '../tools/tool-contract';
-import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
 import { PageKind, classifyPageKind } from './page-signals';
 import { WEB_WATCH_KEY } from './website-watch.service';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
+import {
+  assertProductDiscoveryProvenance,
+  isSyntheticDiscoveryProvenance,
+} from '../discovery/evidence-license';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 const DEFAULT_CADENCE_MS = 24 * 60 * 60 * 1000; // 网站变更日级足够（研究：招聘/新闻日级、广告库月级）
 const MAX_EVENTS_KEPT = 20; // 每公司 attributes.intent 保留的滚动事件数
@@ -42,28 +53,46 @@ export interface ProjectIntentResult {
  * 平台采集一次、租户各自投影 —— 与 acquisition/TenantProjectionService 同一架构。
  */
 export class IntentProjectionService {
-  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: {
+    prisma: PrismaService;
+    broker?: ExecutionBroker;
+    budgetStore?: BudgetStore;
+    platformWriter?: PrismaClient;
+  }) {}
 
   async registerWatch(
     workspaceId: string,
     canonicalCompanyId: string,
     opts?: { pages?: { url: string; kind?: PageKind }[]; cadenceMs?: number;
       authorizeExternalAction?: () => Promise<boolean>;
+      budgetKey?: string;
+      budgetWorkspaceId?: string;
+      executionBudget?: ExecutionBudgetBinding;
     },
   ): Promise<RegisterWatchResult> {
     const { prisma } = this.deps;
-    const company = await prisma.withWorkspace(workspaceId, (tx) =>
-      tx.canonicalCompany.findUnique({ where: { id: canonicalCompanyId }, select: { name: true, domain: true, region: true },
-      }),
-    );
+    const company = await prisma.withWorkspace(workspaceId, async (tx) => {
+      const candidate = await tx.canonicalCompany.findUnique({
+        where: { id: canonicalCompanyId },
+        select: { id: true, name: true, domain: true, region: true },
+      });
+      if (!candidate) return null;
+      const evidenceRows = await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: candidate.id },
+        select: { providerKey: true, license: true },
+      });
+      for (const evidence of evidenceRows) assertProductDiscoveryProvenance(evidence);
+      return candidate;
+    });
     if (!company) throw new Error(`canonical_company ${canonicalCompanyId} not found in workspace`);
     const domain = company.domain ? (normalizeDomain(company.domain) ?? undefined) : undefined;
     if (!domain) throw new Error(`company ${canonicalCompanyId} has no domain — cannot watch website`);
 
+    const durableReceipts: DurableExecutionReceipt[] = [];
     const pages = (
       opts?.pages?.length
         ? opts.pages
-        : await discoverWatchPages(domain, this.sitemapHttpGet(opts?.authorizeExternalAction))
+        : await this.discoverPagesWithBudget(workspaceId, domain, opts, durableReceipts)
     ).slice(0, 12);
     const sourceKey = `${WEB_WATCH_KEY}:${domain}`;
     const config = {
@@ -76,13 +105,16 @@ export class IntentProjectionService {
     } as unknown as Prisma.InputJsonValue;
 
     // 平台级 upsert（无 RLS）：已存在则合并页集（并集），否则新建。
-    const prior = await prisma.monitoredSource.findUnique({
+    const persist = async (
+      database: Pick<Prisma.TransactionClient, 'monitoredSource'>,
+    ): Promise<RegisterWatchResult> => {
+    const prior = await database.monitoredSource.findUnique({
       where: { sourceKey },
       select: { id: true, config: true },
     });
     if (prior) {
       const merged = mergePages(prior.config, pages);
-      await prisma.monitoredSource.update({
+      await database.monitoredSource.update({
         where: { id: prior.id },
         data: {
           config: {
@@ -98,7 +130,7 @@ export class IntentProjectionService {
         pages: merged.length,
       };
     }
-    const created = await prisma.monitoredSource.create({
+    const created = await database.monitoredSource.create({
       data: {
         providerKey: WEB_WATCH_KEY,
         sourceKey,
@@ -115,6 +147,36 @@ export class IntentProjectionService {
       created: true,
       pages: pages.length,
     };
+    };
+    if (!durableReceipts.length) return persist(prisma);
+    if (!this.deps.platformWriter) {
+      throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter.$transaction(async (tx) => {
+      const result = await applyDomainAckConsumerTransactions({
+        transaction: tx,
+        acknowledgements: durableReceipts.map((durableReceipt) => ({
+          producerId: 'http.get',
+          receipt: durableReceipt,
+          domainAckKey: sourceKey,
+          domainRevision: durableReceipt.resultDigest,
+        })),
+        apply: persist,
+        readback: async (transaction) => {
+          const existing = await transaction.monitoredSource.findUniqueOrThrow({
+            where: { sourceKey },
+            select: { id: true, config: true },
+          });
+          return {
+            sourceId: existing.id,
+            sourceKey,
+            created: false,
+            pages: mergePages(existing.config, pages).length,
+          };
+        },
+      });
+      return result.value;
+    });
   }
 
   /**
@@ -163,6 +225,11 @@ export class IntentProjectionService {
         });
         if (!materialization.allowed || !materialization.prior) return false;
         const company = materialization.prior;
+        const evidenceRows = await tx.fieldEvidence.findMany({
+          where: { entityType: 'company', entityId: company.id },
+          select: { providerKey: true, license: true },
+        });
+        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) return false;
 
         const events = changes.map(toIntentEvent);
         const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
@@ -205,20 +272,96 @@ export class IntentProjectionService {
    * 无租户 → PLATFORM_WORKSPACE 哨兵（只入工具 Trace/预算，绝不流入任何 AiContext）。
    * 无 broker = 不允许原始出网 → undefined（discoverWatchPages 跳过 sitemap/探测，退既有兜底页集）。
    */
-  private sitemapHttpGet(authorizeExternalAction?: () => Promise<boolean>): HttpGetFn | undefined {
+  private async discoverPagesWithBudget(
+    workspaceId: string,
+    domain: string,
+    opts?: {
+      authorizeExternalAction?: () => Promise<boolean>;
+      budgetKey?: string;
+      budgetWorkspaceId?: string;
+      executionBudget?: ExecutionBudgetBinding;
+    },
+    durableReceipts: DurableExecutionReceipt[] = [],
+  ): Promise<{ url: string; kind: PageKind }[]> {
+    if (!this.deps.broker) return discoverWatchPages(domain);
+    if (!opts?.budgetKey) throw new Error('registerWatch requires budgetKey before sitemap discovery');
+    const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
+    const budgets = this.deps.budgetStore
+      ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
+    if (!opts.executionBudget) {
+      throw new Error('EXECUTION_BUDGET_BINDING_REQUIRED');
+    }
+    const binding = parseExecutionBudgetBinding(opts.executionBudget, {
+      scopeKey: budgetWorkspaceId,
+      purpose: 'discovery.run',
+      subjectType: 'discovery_run',
+    });
+    if (opts.budgetKey !== binding.accountKey) {
+      throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
+    }
+    await budgets.attestAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+    });
+    return this.discoverWatchPages(
+      domain,
+      binding.scopeKey,
+      binding.accountKey,
+      opts.authorizeExternalAction,
+      durableReceipts,
+    );
+  }
+
+  private async discoverWatchPages(
+    domain: string,
+    workspaceId: string,
+    budgetKey: string,
+    authorizeExternalAction?: () => Promise<boolean>,
+    durableReceipts: DurableExecutionReceipt[] = [],
+  ): Promise<{ url: string; kind: PageKind }[]> {
+    let budgetError: unknown;
+    const pages = await discoverWatchPages(
+      domain,
+      this.sitemapHttpGet(
+        workspaceId,
+        budgetKey,
+        authorizeExternalAction,
+        (error) => { budgetError = error; },
+        durableReceipts,
+      ),
+    );
+    if (budgetError) throw budgetError;
+    return pages;
+  }
+
+  private sitemapHttpGet(
+    workspaceId: string,
+    budgetKey: string,
+    authorizeExternalAction?: () => Promise<boolean>,
+    onBudgetError?: (error: unknown) => void,
+    durableReceipts: DurableExecutionReceipt[] = [],
+  ): HttpGetFn | undefined {
     const broker = this.deps.broker;
     if (!broker) {
       console.warn('[intent-projection] broker unavailable — skip sitemap discovery (fail-closed, no raw egress)');
       return undefined;
     }
-    return async (input) =>
-      (
-        await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
-          workspaceId: PLATFORM_WORKSPACE,
-          correlationId: 'register-watch',
+    return async (input) => {
+      try {
+        const result = await broker.invoke<HttpGetInput, HttpGetOutput>('http.get', input, {
+          workspaceId,
+          runId: budgetKey,
+          correlationId: budgetKey,
           authorizeExternalAction,
-        })
-      ).data;
+        });
+        if (result.durableReceipt) durableReceipts.push(result.durableReceipt);
+        return result.data;
+      } catch (error) {
+        if (isExecutionControlError(error)) onBudgetError?.(error);
+        throw error;
+      }
+    };
   }
 }
 
@@ -345,7 +488,9 @@ export async function discoverWatchPages(
   try {
     urls = await fetchSitemapUrls(domain, httpGet);
   } catch (error) {
-    if (isTerminalExternalActionPolicyDenied(error)) throw error;
+    if (isTerminalExternalActionPolicyDenied(error) || isExecutionControlError(error)) {
+      throw error;
+    }
     urls = [];
   }
   const pathLen = (u: string) => {
@@ -362,6 +507,7 @@ export async function discoverWatchPages(
   const seen = new Set<string>();
   return pages.filter((p) => (seen.has(p.url) ? false : (seen.add(p.url), true))).slice(0, 8);
 }
+
 
 function companyOf(config: unknown): { name: string; domain?: string } | undefined {
   const c = (config ?? {}) as Record<string, unknown>;

@@ -1,8 +1,9 @@
 import { PrismaClient } from '@prisma/client';
+import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { BudgetExceededError, budgetLedger, sweepBudgetCents } from '../tools/budget';
+import { BudgetExceededError, BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
 import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
 import { resolveIcpToNaics } from '../discovery/icp-to-naics';
@@ -97,8 +98,15 @@ export function createExternalIntentActivities(deps: {
   taxonomy: TaxonomyResolver;
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker;
+  budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
+  activityRunId?: () => string | undefined;
 }) {
-  const ingestSvc = new SignalIngestService({ prisma: deps.prisma, broker: deps.broker });
+  const ingestSvc = new SignalIngestService({
+    prisma: deps.prisma,
+    broker: deps.broker,
+    platformWriter: deps.platformWriter,
+  });
   const tedProj = new TedIntentProjectionService({ prisma: deps.prisma });
   const openfdaProj = new OpenFdaIntentProjectionService({ prisma: deps.prisma });
   const samProj = new SamIntentProjectionService({ prisma: deps.prisma });
@@ -208,7 +216,7 @@ export function createExternalIntentActivities(deps: {
 
     /**
      * 平台层摄取（ingest-once 核心）：全部 ICP 的查询面按指纹**全局去重**，每唯一 (provider, 指纹, 时间窗)
-     * 只拉一次 → source_signal。预算：`sweep:external-intent` 开账（sweepBudgetCents 上界），
+     * 只拉一次 → source_signal。预算账户只能来自外部签名 authority；缺失时保持 non-consuming HOLD，
      * BudgetExceededError → 停止后续拉取（已落库的信号仍供投影），**显性上报不静默**。
      */
     async ingestExternalSignals(args: {
@@ -216,6 +224,7 @@ export function createExternalIntentActivities(deps: {
       tedEnabled: boolean;
       openfdaEnabled: boolean;
       samgovEnabled: boolean;
+      budgetScopeId?: string;
       maxNotices?: number;
       maxRecords?: number;
     }): Promise<IngestSweepSummary> {
@@ -247,7 +256,16 @@ export function createExternalIntentActivities(deps: {
       summary.samSpecs = samParams ? 1 : 0;
       if (!tedByFp.size && !fdaByFp.size && !samParams) return summary;
 
-      budgetLedger.open(SWEEP_BUDGET_KEY, sweepBudgetCents());
+      let activityRunId: string | undefined;
+      try {
+        activityRunId = deps.activityRunId?.() ?? ActivityContext.current().info.workflowExecution?.runId;
+      } catch {
+        activityRunId = undefined;
+      }
+      const replayScopeId = args.budgetScopeId ?? activityRunId;
+      const budgetKey = replayScopeId ? `${SWEEP_BUDGET_KEY}:${replayScopeId}` : SWEEP_BUDGET_KEY;
+      // Pre-cutover HOLD: the external Control Plane has not supplied this
+      // schedule's authority transport, so no Backend-authored account is opened.
       try {
         const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {
           try {
@@ -260,6 +278,7 @@ export function createExternalIntentActivities(deps: {
             summary.signalsUpserted += r.signalsUpserted; // ledgerHit 归 0（本轮真实落库数，不跨窗双计）
             return true;
           } catch (err) {
+            if (err instanceof BudgetOperationReplayError) throw err;
             if (err instanceof BudgetExceededError) {
               summary.budgetExceeded = true; // 显性截断：预算打穿即停拉（绝不静默假完成）
               summary.errors.push('budget_exceeded');
@@ -273,22 +292,22 @@ export function createExternalIntentActivities(deps: {
         for (const params of tedByFp.values()) {
           const live = await liveEnabled(); // 每指纹 live 重读：中途 ops 关停本轮即生效
           if (!live.ted) break;
-          if (!(await runOne(() => ingestSvc.ingestTed(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+          if (!(await runOne(() => ingestSvc.ingestTed(params, { budgetKey })))) return summary;
         }
         for (const params of fdaByFp.values()) {
           const live = await liveEnabled();
           if (!live.openfda) break;
-          if (!(await runOne(() => ingestSvc.ingestFda(params, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+          if (!(await runOne(() => ingestSvc.ingestFda(params, { budgetKey })))) return summary;
         }
         if (samParams) {
           const live = await liveEnabled(); // live 重读：中途 ops 关停本轮即生效
           if (live.samgov) {
-            if (!(await runOne(() => ingestSvc.ingestSam(samParams, { budgetKey: SWEEP_BUDGET_KEY })))) return summary;
+            if (!(await runOne(() => ingestSvc.ingestSam(samParams, { budgetKey })))) return summary;
           }
         }
         return summary;
       } finally {
-        budgetLedger.close(SWEEP_BUDGET_KEY);
+        // No authority-bound account was opened by this pre-cutover schedule.
       }
     },
 

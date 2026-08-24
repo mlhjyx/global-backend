@@ -1,4 +1,5 @@
 import { RawSourceEntity } from './clean';
+import type { ToolContext } from '../tools/tool-contract';
 
 /**
  * 采集源适配器（源无关）：给定源配置，抓回一批原始实体。
@@ -13,7 +14,7 @@ import { RawSourceEntity } from './clean';
 export interface MonitoredSourceAdapter {
   providerKey: string;
   /** 抓取该源全量（或 limit 上限内）原始实体。可重复调用（幂等 by externalId）。 */
-  fetch(config: Record<string, unknown>, limit?: number): Promise<RawSourceEntity[]>;
+  fetch(config: Record<string, unknown>, limit?: number, context?: ToolContext): Promise<RawSourceEntity[]>;
 }
 
 /** 按 providerKey 注册源适配器。 */

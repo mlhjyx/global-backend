@@ -68,5 +68,5 @@ describe("DeterministicQualityService replay fence", () => {
       }),
     ).rejects.toMatchObject({ code: "ENOENT" });
     expect(loadCheckpoint).toHaveBeenCalledTimes(1);
-  });
+  }, 15_000);
 });

@@ -15,6 +15,10 @@ import {
 import { WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { isLikelyIndividualApplicant } from './signal-mappers';
 import { loadMaterializableCompanyState } from '../discovery/company-suppression-gate';
+import {
+  assertProductDiscoveryProvenance,
+  syntheticDiscoveryEntityIds,
+} from '../discovery/evidence-license';
 
 const DEFAULT_WEB_WATCH_REPLAY_MS = 90 * 86_400_000; // web_watch 事实重放窗（受保留期清理约束——GDPR 存储限制即复算地平线）
 const DEFAULT_PAGE_LIMIT = 200;
@@ -75,6 +79,11 @@ export class IntentRecomputeService {
         select: { id: true, name: true, domain: true, dedupeKey: true, attributes: true, status: true },
       });
       if (!candidate) return null;
+      const evidenceRows = await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: candidate.id },
+        select: { providerKey: true, license: true },
+      });
+      for (const evidence of evidenceRows) assertProductDiscoveryProvenance(evidence);
       const materialization = await loadMaterializableCompanyState(
         tx,
         workspaceId,
@@ -154,21 +163,32 @@ export class IntentRecomputeService {
   ): Promise<RecomputeWorkspaceResult> {
     const { prisma } = this.deps;
     const limit = opts?.limit ?? DEFAULT_PAGE_LIMIT;
-    const companies = await prisma.withWorkspace(workspaceId, (tx) =>
-      tx.canonicalCompany.findMany({
+    const { companies, productCompanies } = await prisma.withWorkspace(workspaceId, async (tx) => {
+      const rawCompanies = await tx.canonicalCompany.findMany({
         where: opts?.cursor ? { id: { gt: opts.cursor } } : {},
         select: { id: true },
         orderBy: { id: 'asc' },
         take: limit,
-      }),
-    );
+      });
+      const evidenceRows = rawCompanies.length
+        ? await tx.fieldEvidence.findMany({
+            where: { entityType: 'company', entityId: { in: rawCompanies.map((company) => company.id) } },
+            select: { entityId: true, providerKey: true, license: true },
+          })
+        : [];
+      const quarantinedIds = syntheticDiscoveryEntityIds(evidenceRows);
+      return {
+        companies: rawCompanies,
+        productCompanies: rawCompanies.filter((company) => !quarantinedIds.has(company.id)),
+      };
+    });
     const out: RecomputeWorkspaceResult = {
       companiesScanned: companies.length,
       companiesRebuilt: 0,
       companiesCleared: 0,
       nextCursor: companies.length === limit ? companies[companies.length - 1].id : null,
     };
-    for (const c of companies) {
+    for (const c of productCompanies) {
       const r = await this.recomputeCompany(workspaceId, c.id, opts);
       if (r === 'rebuilt') out.companiesRebuilt += 1;
       if (r === 'cleared') out.companiesCleared += 1;
@@ -185,6 +205,11 @@ export class IntentRecomputeService {
     return this.deps.prisma.withWorkspace(workspaceId, async (tx) => {
       const materialization = await loadMaterializableCompanyState(tx, workspaceId, company.dedupeKey, company);
       if (!materialization.allowed || materialization.prior?.id !== company.id) return false;
+      const evidenceRows = await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: company.id },
+        select: { providerKey: true, license: true },
+      });
+      for (const evidence of evidenceRows) assertProductDiscoveryProvenance(evidence);
       if (!write) return true;
       const currentAttributes = jsonAttributes(materialization.prior.attributes);
       const { intent: _priorIntent, ...withoutIntent } = currentAttributes;

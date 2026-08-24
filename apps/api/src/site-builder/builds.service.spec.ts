@@ -1,5 +1,6 @@
 import { HttpException, NotFoundException } from "@nestjs/common";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   RELEASE_MANIFEST_V2_SCHEMA_VERSION,
   releaseArtifactDigest,
@@ -18,6 +19,8 @@ import {
   buildM1ebGoldenFixtures,
   type M1ebGoldenFixture,
 } from "./design/m1eb-golden";
+import { buildRequestHash, normalizeBuildRequest } from "./build-request-contract";
+import type { VerifiedSiteBuildBudgetGrant } from "./site-build-budget-grant";
 
 const CTX = {
   userId: "u1",
@@ -35,8 +38,35 @@ interface FakeDb {
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
   budgets: Record<string, unknown>[];
+  grants: Record<string, unknown>[];
   steps: Record<string, unknown>[];
   idempotencies: Record<string, unknown>[];
+}
+
+function buildGrant(
+  siteId: string,
+  input: Parameters<BuildsService["create"]>[2],
+): VerifiedSiteBuildBudgetGrant {
+  const instant = new Date();
+  return {
+    schemaVersion: "site-builder-budget-grant/v1",
+    issuer: "https://saas.test",
+    audience: "global-backend:site-builder-budget",
+    jti: randomUUID(),
+    purpose: "site_builder.build_run",
+    operation: "refurbish",
+    workspaceId: CTX.workspaceId,
+    siteId,
+    requestSha256: buildRequestHash(siteId, normalizeBuildRequest(input)),
+    currency: "USD",
+    unit: "microusd",
+    capMicrousd: 5_000_000n,
+    tokenSha256: randomUUID().replaceAll("-", "").padEnd(64, "0"),
+    issuedAt: instant,
+    notBefore: instant,
+    expiresAt: new Date(instant.getTime() + 300_000),
+    expiredAtVerification: false,
+  };
 }
 
 interface ActiveV2Base {
@@ -123,9 +153,7 @@ function makeService(
             },
           ],
     runs: [...(opts.existingRuns ?? [])],
-    budgets: (opts.existingRuns ?? [])
-      .filter((run) => run.kind === "refurbish")
-      .map((run) => ({
+    budgets: (opts.existingRuns ?? []).map((run) => ({
         buildRunId: run.id,
         workspaceId: CTX.workspaceId,
         siteId: run.siteId,
@@ -136,14 +164,71 @@ function makeService(
         disabledReason: null,
         exhaustedAt: null,
       })),
+    grants: (opts.existingRuns ?? []).map((run) => ({
+        id: randomUUID(),
+        buildRunId: run.id,
+        workspaceId: CTX.workspaceId,
+        siteId: run.siteId,
+        issuer: "https://saas.test",
+        jti: randomUUID(),
+        operation: "refurbish",
+        requestSha256: "a".repeat(64),
+        tokenSha256: "b".repeat(64),
+      })),
     steps: [],
     idempotencies: [...(opts.existingIdempotencies ?? [])],
   };
   let seq = db.runs.length;
-  const executeRaw = vi.fn(async () => 0);
+  const emulateBudgetFunction = (
+    strings: TemplateStringsArray,
+    values: unknown[],
+  ) => {
+    const sql = strings.join("?");
+    if (sql.includes("create_site_build_budget_from_grant")) {
+      const [workspaceId, buildRunId] = values;
+      const grant = db.grants.find(
+        (row) => row.buildRunId === buildRunId && row.workspaceId === workspaceId,
+      );
+      if (!grant) throw new Error("fake authorized grant is missing");
+      if (!db.budgets.some((row) => row.buildRunId === buildRunId)) {
+        db.budgets.push({
+          buildRunId,
+          workspaceId,
+          siteId: grant.siteId,
+          capMicrousd: grant.capMicrousd,
+          reservedMicrousd: 0n,
+          chargedMicrousd: 0n,
+          paidCallsEnabled: true,
+          disabledReason: null,
+          exhaustedAt: null,
+        });
+      }
+      return;
+    }
+    if (sql.includes("disable_site_build_paid_calls")) {
+      const [workspaceId, buildRunId, reason] = values;
+      const budget = db.budgets.find(
+        (row) => row.buildRunId === buildRunId && row.workspaceId === workspaceId,
+      );
+      if (!budget) throw new Error("fake authorized budget is missing");
+      Object.assign(budget, {
+        paidCallsEnabled: false,
+        disabledReason: reason,
+      });
+    }
+  };
+  const executeRaw = vi.fn(
+    async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      emulateBudgetFunction(strings, values);
+      return 0;
+    },
+  );
   const tx = {
     $executeRaw: executeRaw,
-    $queryRaw: async () => [{ reconciled: 0 }],
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      emulateBudgetFunction(strings, values);
+      return [{ reconciled: 0 }];
+    },
     site: {
       findUnique: async ({ where }: { where: { id: string } }) =>
         db.sites.find((site) => site.id === where.id) ?? null,
@@ -266,7 +351,24 @@ function makeService(
         return { count: 1 };
       },
     },
+    siteBuildBudgetGrant: {
+      findUnique: async ({ where }: { where: Record<string, unknown> }) => {
+        if (typeof where.buildRunId === "string") {
+          return db.grants.find((grant) => grant.buildRunId === where.buildRunId) ?? null;
+        }
+        const key = where.issuer_jti as { issuer: string; jti: string };
+        return db.grants.find((grant) => grant.issuer === key.issuer && grant.jti === key.jti) ?? null;
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: randomUUID(), ...data };
+        db.grants.push(row);
+        return row;
+      },
+    },
     siteBuildSpend: {
+      findMany: async () => [],
+    },
+    siteBuildSpendReconciliation: {
       findMany: async () => [],
     },
     siteBuildRun: {
@@ -381,14 +483,22 @@ function makeService(
     },
     ...opts.launcher,
   };
+  const assertReady = vi.fn(async () => undefined);
+  const service = new BuildsService(prisma as never, launcher, {
+    assertReady,
+  } as never);
+  const create = service.create.bind(service);
+  service.create = ((ctx, siteId, input, grant) =>
+    create(ctx, siteId, input, grant ?? buildGrant(siteId, input))) as typeof service.create;
   return {
-    service: new BuildsService(prisma as never, launcher),
+    service,
     db,
     launched,
     launchedInputs,
     recovered,
     cancelled,
     executeRaw,
+    assertReady,
   };
 }
 
@@ -444,6 +554,29 @@ describe("BuildsService.create", () => {
       }),
     ]);
     expect(launched).toEqual(["run-1"]);
+  });
+
+  it("rechecks grant expiry after serialization and leaves zero new rows", async () => {
+    const { service, db, launched } = makeService();
+    const request = { ...BASE, idempotencyKey: "expired-after-lock" };
+    const grant = buildGrant(SITE_ID, request);
+    grant.expiresAt = new Date(Date.now() - 61_000);
+    grant.issuedAt = new Date(grant.expiresAt.getTime() - 300_000);
+    grant.notBefore = grant.issuedAt;
+
+    const error = await service
+      .create(CTX, SITE_ID, request, grant)
+      .catch((caught) => caught);
+
+    expect(errorContract(error)).toMatchObject({
+      status: 402,
+      code: "BUDGET_GRANT_EXPIRED",
+    });
+    expect(db.runs).toHaveLength(0);
+    expect(db.grants).toHaveLength(0);
+    expect(db.budgets).toHaveLength(0);
+    expect(db.idempotencies).toHaveLength(0);
+    expect(launched).toHaveLength(0);
   });
 
   it("returns 404 when the site is not workspace-visible", async () => {
@@ -551,6 +684,68 @@ describe("BuildsService.create", () => {
     expect(db.runs).toHaveLength(1);
     expect(db.idempotencies).toHaveLength(1);
     expect(launched).toEqual(["run-1"]);
+  });
+
+  it("allows only the exact consumed Grant digest to replay after expiry", async () => {
+    const { service, db, launched } = makeService();
+    const request = { ...BASE, idempotencyKey: "expired-replay-authority" };
+    const consumed = buildGrant(SITE_ID, request);
+    const first = await service.create(CTX, SITE_ID, request, consumed);
+
+    const exactExpired = {
+      ...consumed,
+      expiresAt: new Date(Date.now() - 61_000),
+      expiredAtVerification: true,
+    };
+    await expect(
+      service.create(CTX, SITE_ID, request, exactExpired),
+    ).resolves.toEqual(first);
+
+    const unconsumedExpired = buildGrant(SITE_ID, request);
+    unconsumedExpired.expiresAt = new Date(Date.now() - 61_000);
+    unconsumedExpired.expiredAtVerification = true;
+    const error = await service
+      .create(CTX, SITE_ID, request, unconsumedExpired)
+      .catch((caught) => caught);
+    expect(errorContract(error)).toMatchObject({
+      status: 402,
+      code: "BUDGET_GRANT_EXPIRED",
+    });
+    expect(db.runs).toHaveLength(1);
+    expect(db.grants).toHaveLength(1);
+    expect(launched).toHaveLength(1);
+  });
+
+  it("rejects a different token that reuses the consumed JTI before idempotent replay", async () => {
+    const { service, db, launched } = makeService();
+    const request = { ...BASE, idempotencyKey: "same-jti-different-token" };
+    await service.create(CTX, SITE_ID, request);
+    const reused = buildGrant(SITE_ID, request);
+    reused.issuer = String(db.grants[0]!.issuer);
+    reused.jti = String(db.grants[0]!.jti);
+    reused.tokenSha256 = "f".repeat(64);
+
+    const error = await service
+      .create(CTX, SITE_ID, request, reused)
+      .catch((caught) => caught);
+
+    expect(errorContract(error)).toMatchObject({
+      status: 409,
+      code: "BUDGET_GRANT_REUSED",
+    });
+    expect(db.runs).toHaveLength(1);
+    expect(db.grants).toHaveLength(1);
+    expect(launched).toHaveLength(1);
+  });
+
+  it("returns an existing idempotent run while runtime readiness is temporarily unavailable", async () => {
+    const { service, launched, assertReady } = makeService();
+    const request = { ...BASE, idempotencyKey: "ready-independent-replay" };
+    const first = await service.create(CTX, SITE_ID, request);
+    assertReady.mockRejectedValueOnce(new Error("SITE_BUILD_RUNTIME_NOT_READY"));
+
+    await expect(service.create(CTX, SITE_ID, request)).resolves.toEqual(first);
+    expect(launched).toHaveLength(1);
   });
 
   it("replays a durable partial-build key even if the active pointer later changes", async () => {
@@ -1108,13 +1303,10 @@ describe("BuildsService.get / cancel", () => {
     });
     expect(db.runs[0]).toMatchObject({ status: "cancelled" });
     expect(db.runs[0].costSummary).toMatchObject({
-      schemaVersion: "site-builder-cost-summary/v1",
-      budget: {
-        reservedMicrousd: 0,
-        paidCallsEnabled: false,
-        disabledReason: "cancellation_requested",
-      },
-      operations: { unknown: 0 },
+      schemaVersion: "site-builder-cost-summary/v2",
+      budget: { conservativeChargedMicrousd: "0" },
+      totals: { upperBoundCostMicrousd: "0" },
+      reconciliation: { pendingOperations: 0, conflictOperations: 0 },
     });
     expect(db.steps).toHaveLength(7);
     expect(db.steps.every((step) => step.status === "aborted")).toBe(true);

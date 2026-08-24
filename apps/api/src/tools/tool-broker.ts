@@ -3,8 +3,23 @@ import { ExecutionBroker,
   SourcePolicyDenyReason, Tool, ToolContext, ToolResult,
 } from './tool-contract';
 import { ToolRegistry } from './tool-registry';
-import { BudgetLedger, BudgetExceededError, budgetLedger } from './budget';
-import { RateLimiter, rateLimiter } from './rate-limiter';
+import type { RateLimitStore } from './rate-limiter';
+import {
+  BudgetOperationReplayError,
+  BudgetExceededError,
+  type BudgetReservation,
+  type BudgetStore,
+  UnavailableBudgetStore,
+} from './budget-store';
+import { UnavailableRateLimitStore } from './redis-rate-limit-store';
+import {
+  projectGenericOperationResult,
+  type GenericOperationProjection,
+} from './generic-operation-projection';
+import { TypedProjectionRegistry } from '../durable-results/typed-projection.registry';
+import { registerCatalogResultProjections } from '../durable-results/catalog-result-projections';
+import { registerSourceResultProjections } from '../durable-results/source-result-projections';
+import { toolExecutionReceiptFacts } from '../durable-results/execution-receipt-facts';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   legacyToolCostMeasurement,
@@ -15,6 +30,21 @@ import {
   type PaidOperationReservation,
   type SiteBuildCostLedger,
 } from '../site-builder/site-build-cost-ledger';
+
+/**
+ * These schemas require the GenericOperationArtifactService plus a Task 5
+ * company/contact subject binding. The additive artifact foundation exists,
+ * but the current product callers cannot supply a truthful subject for a
+ * platform sanctions list or for a company that has not been identified yet.
+ * Keep the exact inventory here so an artifact declaration can never fall
+ * through to the small inline projection path.
+ */
+const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
+  'crawl4ai-fetch/v1',
+  'crawl4ai-render/v1',
+  'http-get/v1',
+  'sanctions-download/v1',
+]);
 
 /**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
@@ -38,8 +68,8 @@ export class ToolPolicyDenied extends Error {
 
 export interface BrokerDeps {
   registry: ToolRegistry;
-  budget?: BudgetLedger;
-  limiter?: RateLimiter;
+  budgetStore?: BudgetStore;
+  limiter?: RateLimitStore;
   /** 查某域名的 source_policy（返回 null=未登记；{suspended, allowedPurpose,...}）。 */
   sourcePolicyReader?: (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
   /** 记一条工具调用 Trace（成本/延迟/合规决策）。fire-and-forget。 */
@@ -78,15 +108,21 @@ function extractDomain(input: unknown): string | null {
 
 export class ToolBroker implements ExecutionBroker {
   private readonly registry: ToolRegistry;
-  private readonly budget: BudgetLedger;
-  private readonly limiter: RateLimiter;
+  private readonly budget: BudgetStore;
+  private readonly limiter: RateLimitStore;
   private readonly deps: BrokerDeps;
+  private readonly projectionRegistry = registerSourceResultProjections(
+    registerCatalogResultProjections(new TypedProjectionRegistry()),
+  );
 
   constructor(deps: BrokerDeps) {
     this.deps = deps;
     this.registry = deps.registry;
-    this.budget = deps.budget ?? budgetLedger;
-    this.limiter = deps.limiter ?? rateLimiter;
+    this.budget =
+      deps.budgetStore ??
+      new UnavailableBudgetStore('ToolBroker was created without an authoritative BudgetStore');
+    this.limiter =
+      deps.limiter ?? new UnavailableRateLimitStore('ToolBroker was created without an authoritative RateLimitStore');
     for (const t of this.registry.all()) this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
   }
 
@@ -183,10 +219,10 @@ export class ToolBroker implements ExecutionBroker {
     }
     // 注：robots 由抓取类工具内部 isAllowedByRobots 强制（已实现），此处不重复。
 
-    // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the durable
-    // database ledger; all other legacy callers retain the process-local ledger.
+    // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
+    // ledger; every other product caller uses the injected durable BudgetStore.
     const runId = ctx.runId ?? ctx.workspaceId;
-    let reservation: { runId: string; estCents: number } | undefined;
+    let reservation: BudgetReservation | undefined;
     let paidScope: PaidOperationReservation | undefined;
     if (ctx.paidCost) {
       if (!this.deps.paidLedger || !ctx.runId || !ctx.siteId) {
@@ -225,7 +261,9 @@ export class ToolBroker implements ExecutionBroker {
           Object.prototype.hasOwnProperty.call(paidDecision.result, 'data')
         ) {
           const replay = tool.durableReplayResult?.(paidDecision.result as unknown as ToolResult<O>);
-          if (replay) return replay;
+          if (replay) {
+            return replay;
+          }
           throw new PaidOperationUnknownError(paidScope.operationKey, 'REPLAY_PAYLOAD_UNAVAILABLE');
         }
         throw new Error(
@@ -234,17 +272,82 @@ export class ToolBroker implements ExecutionBroker {
       }
     } else {
       try {
-        reservation = this.budget.reserve(runId, tool.cost.estimatedCents);
+        reservation = await this.budget.reserve({
+          workspaceId: ctx.workspaceId,
+          accountKey: runId,
+          operationKey: paidOperationKey([
+            runId,
+            'tool-budget',
+            tool.id,
+            tool.version,
+            tool.idempotencyKey(input),
+          ]),
+          estimatedMicrousd: BigInt(tool.cost.estimatedCents) * 10_000n,
+        });
+        if (reservation.replay) {
+          let replay: ToolResult<O> | null;
+          try {
+            replay = this.replayGenericToolProjection(
+              tool,
+              reservation.replayResult?.resultStrategy === 'typed_projection'
+                ? reservation.replayResult.projection
+                : undefined,
+            );
+          } catch {
+            throw new BudgetOperationReplayError(reservation.operationId);
+          }
+          if (replay) {
+            const returned = reservation.receipt
+              ? { ...replay, durableReceipt: reservation.receipt }
+              : replay;
+            if (returned.durableReceipt) {
+              ctx.onDurableReceipt?.(tool.id, returned.durableReceipt);
+            }
+            return returned;
+          }
+          throw new BudgetOperationReplayError(reservation.operationId);
+        }
       } catch (err) {
-        if (err instanceof BudgetExceededError) {
+        if (
+          err instanceof BudgetExceededError ||
+          (err instanceof Error && 'code' in err && err.code === 'BUDGET_EXCEEDED')
+        ) {
           this.trace(ctx, tool, 'DENIED', `budget exceeded: ${err.message.slice(0, 150)}`, 0, now() - started);
         }
         throw err;
       }
     }
 
+    // The four governed artifact producers must never use ToolBroker's small
+    // typed-projection settlement as a physical fallback. Their approved
+    // PERSONAL_DATA contract requires a real company/contact subject before
+    // object persistence; current platform/pre-identity callers cannot provide
+    // one. Release only because execute() has not started, then fail closed.
+    // Site Builder's separately governed paid ledger remains outside this
+    // generic authority/artifact cutover.
+    if (
+      !ctx.paidCost &&
+      reservation &&
+      tool.durableResultStrategy.kind === 'artifact_reference' &&
+      SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS.has(tool.durableResultStrategy.schema)
+    ) {
+      await this.budget.release(reservation);
+      this.trace(
+        ctx,
+        tool,
+        'DENIED',
+        'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+        0,
+        now() - started,
+      );
+      throw new ToolPolicyDenied(
+        toolId,
+        'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+      );
+    }
+
     // 4) 限流（令牌桶 + 每域延迟）
-    let release: (() => void) | undefined;
+    let release: (() => void | Promise<void>) | undefined;
     try {
       release = await this.limiter.acquire(toolId, now());
     } catch (error) {
@@ -256,13 +359,31 @@ export class ToolBroker implements ExecutionBroker {
           errorCode: 'NOT_EXECUTED',
         });
       } else if (reservation) {
-        this.budget.settle(reservation, 0);
+        await this.budget.release(reservation);
       }
       throw error;
     }
     const domain = extractDomain(input);
     if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
-      await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+      try {
+        await this.limiter.respectDomainDelay(domain, tool.rateLimit.perDomainCrawlDelayMs, now());
+      } catch (error) {
+        try {
+          if (paidScope) {
+            await this.settlePersistentOperation({
+              scope: paidScope,
+              status: 'RELEASED',
+              measurement: this.notIncurredMeasurement(),
+              errorCode: 'NOT_EXECUTED',
+            });
+          } else if (reservation) {
+            await this.budget.release(reservation);
+          }
+        } finally {
+          await release?.();
+        }
+        throw error;
+      }
     }
 
     // 5) 执行 + 6) settle + 7) trace
@@ -287,7 +408,7 @@ export class ToolBroker implements ExecutionBroker {
               errorCode: 'SUPPRESSION_ACTION_GATE',
             });
           } else if (reservation) {
-            this.budget.settle(reservation, 0);
+            await this.budget.release(reservation);
           }
           this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
           throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
@@ -306,7 +427,7 @@ export class ToolBroker implements ExecutionBroker {
               errorCode: 'SUPPRESSION_ACTION_GATE',
             });
           } else if (reservation) {
-            this.budget.settle(reservation, 0);
+            await this.budget.release(reservation);
           }
           this.trace(ctx, tool, 'DENIED', 'suppression_action_gate', 0, now() - started);
           throw new ToolPolicyDenied(toolId, 'suppression_action_gate');
@@ -320,9 +441,10 @@ export class ToolBroker implements ExecutionBroker {
             measurement: this.unknownMeasurement(paidScope.reservationMicrousd),
             errorCode: 'TOOL_CALL_ERROR',
           });
-        } else if (reservation) {
-          this.budget.settle(reservation, 0); // legacy non-site behavior
         }
+        // For the generic BudgetStore, once execute() starts an upstream request
+        // may have happened even when no result arrived. The reservation therefore
+        // remains RESERVED; releasing it would allow another physical request.
         this.trace(ctx, tool, 'ERROR', String(err).slice(0, 200), 0, now() - started);
         throw err;
       }
@@ -348,7 +470,59 @@ export class ToolBroker implements ExecutionBroker {
           },
         });
       } else if (reservation) {
-        this.budget.settle(reservation, result.costCents);
+        let projection: GenericOperationProjection | undefined;
+        try {
+          const durableReplay = tool.durableResultStrategy.kind === 'typed_projection'
+            ? result
+            : tool.durableReplayResult?.(result) ?? null;
+          if (
+            tool.durableResultStrategy.kind !== 'typed_projection' &&
+            tool.durableReplayResult && !durableReplay
+          ) {
+            throw new Error('approved durable replay hook returned no result');
+          }
+          projection = durableReplay
+            ? this.projectToolDurableResult(tool, durableReplay)
+            : undefined;
+        } catch {
+          // The physical tool succeeded, but its result cannot satisfy the
+          // approved durable contract. Keep the operation unresolved and make
+          // the caller fail explicitly; never downgrade to an empty provider
+          // result or allow a second physical request.
+          throw new BudgetOperationReplayError(reservation.operationId);
+        }
+        const receiptFacts = projection
+          ? toolExecutionReceiptFacts({
+              toolId: tool.id,
+              resultSchema: tool.durableResultStrategy.kind === 'no_physical_call'
+                ? projection.schema
+                : tool.durableResultStrategy.schema,
+              result: result as ToolResult<unknown>,
+               reservedMicrousd: reservation.estimatedMicrousd,
+              chargedMicrousd: BigInt(result.costCents) * 10_000n,
+            })
+          : undefined;
+        const settlement = [
+          reservation,
+           BigInt(result.costCents) * 10_000n,
+          projection,
+          receiptFacts,
+        ] as const;
+        let settled;
+        try {
+          settled = await this.budget.settle(...settlement);
+        } catch {
+          try {
+            // A lost ACK after commit is safe to retry only with byte-identical
+            // cost and projection. PostgreSQL rejects any settlement drift.
+            settled = await this.budget.settle(...settlement);
+          } catch {
+            throw new BudgetOperationReplayError(reservation.operationId);
+          }
+        }
+        if (settled?.receipt) {
+          result = { ...result, durableReceipt: settled.receipt };
+        }
       }
       this.trace(
         ctx,
@@ -360,10 +534,61 @@ export class ToolBroker implements ExecutionBroker {
         tool.idempotencyKey(input),
         result.degraded,
       );
+      if (result.durableReceipt) {
+        ctx.onDurableReceipt?.(tool.id, result.durableReceipt);
+      }
       return result;
     } finally {
-      release?.();
+      await release?.();
     }
+  }
+
+  private replayGenericToolProjection<I, O>(
+    tool: Tool<I, O>,
+    projection: GenericOperationProjection | undefined,
+  ): ToolResult<O> | null {
+    if (
+      !projection ||
+      projection.kind !== 'tool' ||
+      tool.durableResultStrategy.kind === 'no_physical_call' ||
+      projection.schema !== tool.durableResultStrategy.schema ||
+      !projection.data ||
+      typeof projection.data !== 'object' ||
+      Array.isArray(projection.data)
+    ) return null;
+    const restored = tool.durableResultStrategy.kind === 'typed_projection'
+      ? this.projectionRegistry.restore(projection.data)
+      : projection.data;
+    const replay = tool.durableResultStrategy.kind === 'typed_projection'
+      ? restored as ToolResult<O>
+      : tool.durableReplayResult?.(restored as ToolResult<O>) ?? null;
+    if (!replay) return null;
+    const verified = this.projectToolDurableResult(tool, replay);
+    return verified.digest === projection.digest ? replay : null;
+  }
+
+  private projectToolDurableResult<I, O>(
+    tool: Tool<I, O>,
+    result: ToolResult<O>,
+  ): GenericOperationProjection {
+    if (tool.durableResultStrategy.kind === 'typed_projection') {
+      return projectGenericOperationResult({
+        kind: 'tool',
+        schema: tool.durableResultStrategy.schema,
+        data: JSON.parse(JSON.stringify(this.projectionRegistry.project(
+          tool.durableResultStrategy.schema,
+          result,
+        ))),
+      });
+    }
+    if (tool.durableResultStrategy.kind === 'no_physical_call') {
+      throw new Error('TOOL_DURABLE_RESULT_STRATEGY_MISSING');
+    }
+    return projectGenericOperationResult({
+      kind: 'tool',
+      schema: tool.durableResultStrategy.schema,
+      data: result,
+    });
   }
 
   private notIncurredMeasurement(): PaidCostMeasurement {

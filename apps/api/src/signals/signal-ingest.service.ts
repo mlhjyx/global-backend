@@ -1,7 +1,6 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
-import { BudgetExceededError } from '../tools/budget';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { OpenFdaSearchInput, OpenFdaSearchOutput, SamSearchInput, SamSearchOutput, TedSearchInput, TedSearchOutput } from '../tools/source-tools';
 import type { Fda510kClearance } from '../adapters/openfda-api';
@@ -16,6 +15,9 @@ import {
   windowKeyFor,
 } from './signal-query';
 import { MapOutcome, mapFdaClearance, mapSamSourcesSought, mapTedNotice } from './signal-mappers';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 
 /**
  * 平台层信号摄取（收口⑤ ingest-once）：外部源 → source_signal 一等事实，**拉取一次服务所有租户**。
@@ -29,7 +31,11 @@ import { MapOutcome, mapFdaClearance, mapSamSourcesSought, mapTedNotice } from '
  *  - 状态机：expireStale（ACTIVE 且过期 → EXPIRED，sweep 头部调）；revoke（合规撤回入口）。
  */
 export class SignalIngestService {
-  constructor(private readonly deps: { prisma: PrismaService; broker?: ExecutionBroker }) {}
+  constructor(private readonly deps: {
+    prisma: PrismaService;
+    broker?: ExecutionBroker;
+    platformWriter?: PrismaClient;
+  }) {}
 
   async ingestTed(
     params: { cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number; maxRecords?: number },
@@ -54,7 +60,12 @@ export class SignalIngestService {
         ctx,
       );
       const notices: TedContractNotice[] = res.data.notices ?? [];
-      return { records: notices.length, outcomes: notices.map((n) => mapTedNotice(n, ctx.observedAt)) };
+      return {
+        records: notices.length,
+        outcomes: notices.map((n) => mapTedNotice(n, ctx.observedAt)),
+        producerId: 'ted.search',
+        durableReceipt: res.durableReceipt,
+      };
     });
   }
 
@@ -80,7 +91,12 @@ export class SignalIngestService {
         ctx,
       );
       const clearances: Fda510kClearance[] = res.data.clearances ?? [];
-      return { records: clearances.length, outcomes: clearances.map((c) => mapFdaClearance(c, ctx.observedAt)) };
+      return {
+        records: clearances.length,
+        outcomes: clearances.map((c) => mapFdaClearance(c, ctx.observedAt)),
+        producerId: 'openfda.search',
+        durableReceipt: res.durableReceipt,
+      };
     });
   }
 
@@ -101,7 +117,12 @@ export class SignalIngestService {
         ctx,
       );
       const notices: SamSourcesSought[] = res.data.notices ?? [];
-      return { records: notices.length, outcomes: notices.map((n) => mapSamSourcesSought(n, ctx.observedAt)) };
+      return {
+        records: notices.length,
+        outcomes: notices.map((n) => mapSamSourcesSought(n, ctx.observedAt)),
+        producerId: 'samgov.search',
+        durableReceipt: res.durableReceipt,
+      };
     });
   }
 
@@ -152,7 +173,12 @@ export class SignalIngestService {
     fetch: (
       broker: ExecutionBroker,
       ctx: { workspaceId: string; runId?: string; correlationId: string; purpose: string[]; observedAt: Date },
-    ) => Promise<{ records: number; outcomes: MapOutcome[] }>,
+    ) => Promise<{
+      records: number;
+      outcomes: MapOutcome[];
+      producerId: 'ted.search' | 'openfda.search' | 'samgov.search';
+      durableReceipt?: DurableExecutionReceipt;
+    }>,
   ): Promise<IngestOutcome> {
     const nowMs = opts?.nowMs ?? Date.now();
     const fingerprint = queryFingerprint(spec);
@@ -176,7 +202,12 @@ export class SignalIngestService {
       return { ...base, error: 'broker_unavailable' };
     }
 
-    let fetched: { records: number; outcomes: MapOutcome[] };
+    let fetched: {
+      records: number;
+      outcomes: MapOutcome[];
+      producerId: 'ted.search' | 'openfda.search' | 'samgov.search';
+      durableReceipt?: DurableExecutionReceipt;
+    };
     try {
       fetched = await fetch(this.deps.broker, {
         workspaceId: PLATFORM_WORKSPACE,
@@ -186,21 +217,93 @@ export class SignalIngestService {
         observedAt: new Date(nowMs),
       });
     } catch (err) {
-      if (err instanceof BudgetExceededError) throw err; // 预算真拦截透传（绝不吞成 ERROR 账本行）
+      if (isExecutionControlError(err)) throw err;
       const msg = String(err).slice(0, 300);
       await this.writeLedgerError(spec, fingerprint, windowKey, msg);
       console.warn(`[signal-ingest] fetch failed provider=${spec.provider}: ${msg.slice(0, 150)}`);
       return { ...base, error: msg.slice(0, 150) };
     }
 
-    const { upserted, skipped } = await this.persistSignals(fetched.outcomes);
-    await this.writeLedger(spec, fingerprint, windowKey, {
-      recordsFetched: fetched.records, signalsUpserted: upserted, status: 'OK', error: null,
-    });
-    return { ...base, recordsFetched: fetched.records, signalsUpserted: upserted, skipped };
+    let persisted: {
+      upserted: number;
+      skipped: Record<string, number>;
+      recordsFetched: number;
+    };
+    const skippedFromOutcomes = (): Record<string, number> => {
+      const skipped: Record<string, number> = {};
+      for (const outcome of fetched.outcomes) {
+        if (!outcome.row) skipped[outcome.skip] = (skipped[outcome.skip] ?? 0) + 1;
+      }
+      return skipped;
+    };
+    if (fetched.durableReceipt) {
+      if (!this.deps.platformWriter) {
+        throw new Error('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+      }
+      persisted = await this.deps.platformWriter.$transaction(async (tx) => {
+        const applied = await applyDomainAckConsumerTransaction({
+          transaction: tx,
+          producerId: fetched.producerId,
+          receipt: fetched.durableReceipt,
+          domainAckKey: `${spec.provider}:${fingerprint}:${windowKey}`,
+          domainRevision: fetched.durableReceipt!.resultDigest,
+          apply: async (transaction) => {
+            const result = await this.persistSignals(fetched.outcomes, transaction);
+            await this.writeLedger(spec, fingerprint, windowKey, {
+              recordsFetched: fetched.records,
+              signalsUpserted: result.upserted,
+              status: 'OK',
+              error: null,
+            }, transaction);
+            return { ...result, recordsFetched: fetched.records };
+          },
+        });
+        if (applied.value) return applied.value;
+        const ledger = await tx.signalIngest.findUnique({
+          where: {
+            providerKey_queryFingerprint_windowKey: {
+              providerKey: spec.provider,
+              queryFingerprint: fingerprint,
+              windowKey,
+            },
+          },
+          select: {
+            recordsFetched: true,
+            signalsUpserted: true,
+            status: true,
+          },
+        });
+        if (!ledger || ledger.status !== 'OK') {
+          throw new Error('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+        }
+        return {
+          upserted: ledger.signalsUpserted,
+          recordsFetched: ledger.recordsFetched,
+          skipped: skippedFromOutcomes(),
+        };
+      });
+    } else {
+      const result = await this.persistSignals(fetched.outcomes, this.deps.prisma);
+      await this.writeLedger(spec, fingerprint, windowKey, {
+        recordsFetched: fetched.records,
+        signalsUpserted: result.upserted,
+        status: 'OK', error: null,
+      });
+      persisted = { ...result, recordsFetched: fetched.records };
+    }
+    const { upserted, skipped } = persisted;
+    return {
+      ...base,
+      recordsFetched: persisted.recordsFetched,
+      signalsUpserted: upserted,
+      skipped,
+    };
   }
 
-  private async persistSignals(outcomes: MapOutcome[]): Promise<{ upserted: number; skipped: Record<string, number> }> {
+  private async persistSignals(
+    outcomes: MapOutcome[],
+    database: Pick<Prisma.TransactionClient, 'sourceSignal'>,
+  ): Promise<{ upserted: number; skipped: Record<string, number> }> {
     let upserted = 0;
     const skipped: Record<string, number> = {};
     for (const o of outcomes) {
@@ -209,7 +312,7 @@ export class SignalIngestService {
         continue;
       }
       const r = o.row;
-      await this.deps.prisma.sourceSignal.upsert({
+      await database.sourceSignal.upsert({
         where: {
           providerKey_externalId_signalType_subjectKey: {
             providerKey: r.providerKey, externalId: r.externalId, signalType: r.signalType, subjectKey: r.subjectKey,
@@ -244,8 +347,9 @@ export class SignalIngestService {
     fingerprint: string,
     windowKey: string,
     patch: { recordsFetched: number; signalsUpserted: number; status: 'OK' | 'ERROR'; error: string | null },
+    database: Pick<Prisma.TransactionClient, 'signalIngest'> = this.deps.prisma,
   ): Promise<void> {
-    await this.deps.prisma.signalIngest.upsert({
+    await database.signalIngest.upsert({
       where: { providerKey_queryFingerprint_windowKey: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey } },
       create: {
         providerKey: spec.provider,

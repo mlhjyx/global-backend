@@ -13,6 +13,61 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RuntimeProcessRole {
+  API
+  WORKER
+  OUTBOX_RELAY
+
+  @@map("runtime_process_role")
+}
+
+enum RuntimeProcessState {
+  STARTING
+  READY
+  DRAINING
+  STOPPED
+
+  @@map("runtime_process_state")
+}
+
+enum SiteBuildSpendReconciliationStatus {
+  UNRESOLVED
+  RESOLVED
+  CONFLICT
+  EXPIRED
+
+  @@map("site_build_spend_reconciliation_status")
+}
+
+enum ToolBudgetOperationStatus {
+  RESERVED
+  RESULT_UNKNOWN
+  SETTLED
+  RELEASED
+
+  @@map("tool_budget_operation_status")
+}
+
+enum ExecutionBudgetAuthorityKind {
+  WORKSPACE_GRANT
+  PLATFORM_GRANT
+
+  @@map("execution_budget_authority_kind")
+}
+
+enum ExecutionBudgetPurpose {
+  ICP_DESIGN            @map("icp.design")
+  ICP_QUERY_PLAN        @map("icp.query_plan")
+  UNDERSTANDING_RUN     @map("understanding.run")
+  DISCOVERY_RUN         @map("discovery.run")
+  CONTACT_VERIFY        @map("contact.verify")
+  PLATFORM_ACQUISITION  @map("platform.acquisition")
+  PLATFORM_INTENT_WATCH @map("platform.intent_watch")
+  PLATFORM_SANCTIONS    @map("platform.sanctions")
+
+  @@map("execution_budget_purpose")
+}
+
 // ── Tenancy & infrastructure ──────────────────────────────────────────────
 
 model Workspace {
@@ -21,11 +76,295 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  companyProfiles  CompanyProfile[]
-  outboxEvents     OutboxEvent[]
-  outboxDeliveries OutboxDelivery[]
+  companyProfiles                                CompanyProfile[]
+  outboxEvents                                   OutboxEvent[]
+  outboxDeliveries                               OutboxDelivery[]
+  executionBudgetAuthorities                     ExecutionBudgetAuthority[]
+  genericOperationArtifacts                      GenericOperationArtifact[]
+  genericOperationArtifactSubjects               GenericOperationArtifactSubject[]               @relation("GenericOperationArtifactSubjectWorkspace")
+  genericOperationArtifactSubjectTombstones      GenericOperationArtifactSubjectTombstone[]      @relation("GenericOperationArtifactSubjectTombstoneWorkspace")
+  genericOperationArtifactSubjectTombstoneAudits GenericOperationArtifactSubjectTombstoneAudit[] @relation("GenericOperationArtifactSubjectTombstoneAuditWorkspace")
 
   @@map("workspace")
+}
+
+/// Platform process identity heartbeat. Managed API/Worker/relay processes are
+/// admitted from the same immutable artifact; this table is not tenant data.
+model RuntimeProcessLease {
+  id                String              @id @default(uuid()) @db.Uuid
+  instanceId        String              @unique @map("instance_id") @db.Uuid
+  role              RuntimeProcessRole
+  state             RuntimeProcessState @default(STARTING)
+  taskQueue         String?             @map("task_queue") @db.VarChar(191)
+  buildSha          String              @map("build_sha") @db.VarChar(40)
+  imageDigest       String              @map("image_digest") @db.VarChar(71)
+  artifactDigest    String              @map("artifact_digest") @db.VarChar(71)
+  migrationRevision String              @map("migration_revision") @db.VarChar(191)
+  startedAt         DateTime            @map("started_at") @db.Timestamptz(3)
+  lastSeenAt        DateTime            @map("last_seen_at") @db.Timestamptz(3)
+  stoppedAt         DateTime?           @map("stopped_at") @db.Timestamptz(3)
+
+  @@index([role, state, lastSeenAt], map: "runtime_process_lease_role_state_seen_idx")
+  @@index([taskQueue, state, lastSeenAt], map: "runtime_process_lease_queue_state_seen_idx")
+  @@index([imageDigest, artifactDigest, state, lastSeenAt], map: "runtime_process_lease_artifact_state_seen_idx")
+  @@map("runtime_process_lease")
+}
+
+/// Workspace-wide durable budget used by non-Site-Builder ToolBroker flows.
+/// All arithmetic is performed by database functions; runtime code has no DML grant.
+model ToolBudgetAccount {
+  id                    String    @id @default(uuid()) @db.Uuid
+  scopeKey              String    @map("scope_key") @db.VarChar(200)
+  accountKey            String    @map("account_key") @db.VarChar(200)
+  generation            Int       @default(1)
+  capCents              BigInt    @map("cap_cents")
+  reservedCents         BigInt    @default(0) @map("reserved_cents")
+  chargedCents          BigInt    @default(0) @map("charged_cents")
+  reservedMicrousd      BigInt    @default(0) @map("reserved_microusd")
+  chargedMicrousd       BigInt    @default(0) @map("charged_microusd")
+  exhausted             Boolean   @default(false)
+  refCount              Int       @default(1) @map("ref_count")
+  authorityId           String?   @map("authority_id") @db.Uuid
+  authorizedCapMicrousd BigInt?   @map("authorized_cap_microusd")
+  closedAt              DateTime? @map("closed_at") @db.Timestamptz(3)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  operations ToolBudgetOperation[]
+  authority  ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
+
+  @@unique([scopeKey, accountKey], map: "tool_budget_account_scope_key")
+  @@unique([scopeKey, id], map: "tool_budget_account_scope_id_key")
+  @@index([scopeKey, exhausted, closedAt], map: "tool_budget_account_scope_state_idx")
+  @@index([authorityId], map: "tool_budget_account_authority_idx")
+  @@map("tool_budget_account")
+}
+
+/// Verified external spending authority. Signed claim fields are immutable;
+/// only narrow database functions advance lifecycle counters/timestamps.
+model ExecutionBudgetAuthority {
+  id                  String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeKey            String                       @map("scope_key") @db.VarChar(200)
+  authorityKind       ExecutionBudgetAuthorityKind @map("authority_kind")
+  workspaceId         String?                      @map("workspace_id") @db.Uuid
+  issuer              String                       @db.VarChar(512)
+  audience            String                       @db.VarChar(191)
+  jti                 String                       @db.Uuid
+  tokenSha256         String                       @map("token_sha256") @db.VarChar(64)
+  schemaVersion       String                       @map("schema_version") @db.VarChar(80)
+  purpose             ExecutionBudgetPurpose
+  subjectType         String                       @map("subject_type") @db.VarChar(191)
+  subjectId           String                       @map("subject_id") @db.VarChar(191)
+  requestSha256       String?                      @map("request_sha256") @db.VarChar(64)
+  scheduleId          String?                      @map("schedule_id") @db.VarChar(191)
+  currency            String                       @db.VarChar(3)
+  unit                String                       @db.VarChar(16)
+  capMicrousd         BigInt?                      @map("cap_microusd")
+  capPerRunMicrousd   BigInt?                      @map("cap_per_run_microusd")
+  campaignCapMicrousd BigInt?                      @map("campaign_cap_microusd")
+  maxRuns             BigInt?                      @map("max_runs")
+  runsConsumed        BigInt                       @default(0) @map("runs_consumed")
+  issuedAt            DateTime                     @map("issued_at") @db.Timestamptz(3)
+  notBefore           DateTime                     @map("not_before") @db.Timestamptz(3)
+  expiresAt           DateTime                     @map("expires_at") @db.Timestamptz(3)
+  consumedAt          DateTime?                    @map("consumed_at") @db.Timestamptz(3)
+  revokedAt           DateTime?                    @map("revoked_at") @db.Timestamptz(3)
+  createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  workspace   Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
+  accounts    ToolBudgetAccount[]
+  revocations ExecutionBudgetAuthorityRevocation[]
+  artifacts   GenericOperationArtifact[]
+
+  @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
+  @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
+  @@index([workspaceId, purpose, expiresAt], map: "execution_budget_authority_workspace_purpose_expiry_idx")
+  @@index([scheduleId, purpose, expiresAt], map: "execution_budget_authority_schedule_purpose_expiry_idx")
+  @@map("execution_budget_authority")
+}
+
+/// Append-only revocation fact. The copied scope participates in both RLS and
+/// a composite FK so a workspace cannot revoke another scope by guessing an id.
+model ExecutionBudgetAuthorityRevocation {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeKey    String   @map("scope_key") @db.VarChar(200)
+  authorityId String   @map("authority_id") @db.Uuid
+  reason      String   @db.VarChar(80)
+  revokedAt   DateTime @default(now()) @map("revoked_at") @db.Timestamptz(3)
+
+  authority ExecutionBudgetAuthority @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_revocation_scope_fkey")
+
+  @@unique([authorityId], map: "execution_budget_authority_revocation_authority_key")
+  @@index([scopeKey, revokedAt], map: "execution_budget_authority_revocation_scope_time_idx")
+  @@map("execution_budget_authority_revocation")
+}
+
+model ToolBudgetOperation {
+  id                          String                    @id @default(uuid()) @db.Uuid
+  scopeKey                    String                    @map("scope_key") @db.VarChar(200)
+  accountId                   String                    @map("account_id") @db.Uuid
+  generation                  Int
+  operationKey                String                    @map("operation_key") @db.VarChar(200)
+  amountUnit                  String                    @default("cent") @map("amount_unit") @db.VarChar(16)
+  reservedCents               BigInt                    @map("reserved_cents")
+  observedCents               BigInt?                   @map("observed_cents")
+  chargedCents                BigInt?                   @map("charged_cents")
+  reservedMicrousd            BigInt?                   @map("reserved_microusd")
+  observedMicrousd            BigInt?                   @map("observed_microusd")
+  chargedMicrousd             BigInt?                   @map("charged_microusd")
+  resultSchemaVersion         String?                   @map("result_schema_version") @db.VarChar(80)
+  resultSchema                String?                   @map("result_schema") @db.VarChar(100)
+  resultDigest                String?                   @map("result_digest") @db.VarChar(64)
+  resultJson                  Json?                     @map("result_json")
+  expectedArtifact            Json?                     @map("expected_artifact")
+  expectedArtifactSubjectType String?                   @map("expected_artifact_subject_type") @db.VarChar(16)
+  expectedArtifactSubjectId   String?                   @map("expected_artifact_subject_id") @db.Uuid
+  expectedHttpStatus          Int?                      @map("expected_http_status") @db.SmallInt
+  expectedHttpOk              Boolean?                  @map("expected_http_ok")
+  expectedSanitizedUrl        String?                   @map("expected_sanitized_url") @db.VarChar(2000)
+  expectedContentHash         String?                   @map("expected_content_hash") @db.Char(24)
+  expectedBlockedCode         String?                   @map("expected_blocked_code") @db.VarChar(80)
+  expectedRobotsBlocked       Boolean?                  @map("expected_robots_blocked")
+  status                      ToolBudgetOperationStatus @default(RESERVED)
+  createdAt                   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  settledAt                   DateTime?                 @map("settled_at") @db.Timestamptz(3)
+
+  account  ToolBudgetAccount         @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
+  artifact GenericOperationArtifact?
+
+  @@unique([accountId, generation, operationKey], map: "tool_budget_operation_generation_key")
+  @@unique([scopeKey, id], map: "tool_budget_operation_scope_id_key")
+  @@index([scopeKey, accountId, status], map: "tool_budget_operation_scope_account_status_idx")
+  @@map("tool_budget_operation")
+}
+
+/// Immutable metadata for a large durable Tool result. The body remains in
+/// content-addressed object storage and never enters PostgreSQL JSONB.
+model GenericOperationArtifact {
+  id                    String   @id @default(uuid()) @db.Uuid
+  scopeKey              String   @map("scope_key") @db.VarChar(200)
+  workspaceId           String?  @map("workspace_id") @db.Uuid
+  authorityId           String   @map("authority_id") @db.Uuid
+  operationId           String   @map("operation_id") @db.Uuid
+  resultSchema          String   @map("result_schema") @db.VarChar(100)
+  objectKey             String   @map("object_key") @db.VarChar(200)
+  sha256                String   @db.Char(64)
+  sizeBytes             BigInt   @map("size_bytes")
+  mediaType             String   @map("media_type") @db.VarChar(160)
+  privacyClass          String   @map("privacy_class") @db.VarChar(40)
+  sourceDigest          String?  @map("source_digest") @db.Char(64)
+  expectedHttpStatus    Int?     @map("expected_http_status") @db.SmallInt
+  expectedHttpOk        Boolean? @map("expected_http_ok")
+  expectedSanitizedUrl  String?  @map("expected_sanitized_url") @db.VarChar(2000)
+  expectedContentHash   String?  @map("expected_content_hash") @db.Char(24)
+  expectedBlockedCode   String?  @map("expected_blocked_code") @db.VarChar(80)
+  expectedRobotsBlocked Boolean? @map("expected_robots_blocked")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt             DateTime @map("expires_at") @db.Timestamptz(3)
+
+  workspace Workspace?                       @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
+  authority ExecutionBudgetAuthority         @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
+  operation ToolBudgetOperation              @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+  object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, mediaType, privacyClass], references: [sha256, objectKey, sizeBytes, mediaType, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_metadata_fkey")
+  subject   GenericOperationArtifactSubject?
+
+  @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
+  @@unique([scopeKey, operationId], map: "generic_operation_artifact_scope_operation_key")
+  @@index([scopeKey, authorityId, operationId], map: "generic_operation_artifact_scope_authority_operation_idx")
+  @@index([scopeKey, sha256, resultSchema], map: "generic_operation_artifact_scope_digest_schema_idx")
+  @@index([workspaceId, expiresAt], map: "generic_operation_artifact_workspace_expiry_idx")
+  @@index([privacyClass, expiresAt], map: "generic_operation_artifact_privacy_expiry_idx")
+  @@map("generic_operation_artifact")
+}
+
+/// Append-only PERSONAL_DATA lookup. It contains only the existing rights-flow
+/// subject discriminator and row UUID; identity text and artifact bytes remain
+/// forbidden. One artifact can bind to exactly one DSR subject.
+model GenericOperationArtifactSubject {
+  artifactId  String   @id @map("artifact_id") @db.Uuid
+  scopeKey    String   @map("scope_key") @db.VarChar(200)
+  workspaceId String   @map("workspace_id") @db.Uuid
+  subjectType String   @map("subject_type") @db.VarChar(16)
+  subjectId   String   @map("subject_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  artifact  GenericOperationArtifact @relation(fields: [scopeKey, artifactId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_subject_artifact_scope_fkey")
+  workspace Workspace                @relation("GenericOperationArtifactSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_subject_workspace_fkey")
+
+  @@unique([scopeKey, artifactId], map: "generic_operation_artifact_subject_scope_id_key")
+  @@index([workspaceId, subjectType, subjectId, artifactId], map: "generic_operation_artifact_subject_lookup_idx")
+  @@map("generic_operation_artifact_subject")
+}
+
+/// Append-only subject-wide DSR fence. It intentionally survives artifact
+/// expiry and blocks future PERSONAL_DATA binding for the same workspace row.
+model GenericOperationArtifactSubjectTombstone {
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  subjectType  String   @map("subject_type") @db.VarChar(16)
+  subjectId    String   @map("subject_id") @db.Uuid
+  tombstonedAt DateTime @default(now()) @map("tombstoned_at") @db.Timestamptz(3)
+
+  workspace Workspace                                       @relation("GenericOperationArtifactSubjectTombstoneWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_subject_tombstone_workspace_fkey")
+  audits    GenericOperationArtifactSubjectTombstoneAudit[]
+
+  @@id([workspaceId, subjectType, subjectId])
+  @@index([workspaceId, tombstonedAt], map: "generic_operation_artifact_subject_tombstone_time_idx")
+  @@map("generic_operation_artifact_subject_tombstone")
+}
+
+/// Per-request append-only audit linking repeated DSR requests to the durable
+/// subject-wide fence. Repeated lawful requests never rewrite the first fence.
+model GenericOperationArtifactSubjectTombstoneAudit {
+  deletionRequestId String   @id @map("deletion_request_id") @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  subjectType       String   @map("subject_type") @db.VarChar(16)
+  subjectId         String   @map("subject_id") @db.Uuid
+  tombstonedAt      DateTime @default(now()) @map("tombstoned_at") @db.Timestamptz(3)
+
+  request   DeletionRequest                          @relation(fields: [deletionRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "goa_subject_tombstone_audit_request_fkey")
+  workspace Workspace                                @relation("GenericOperationArtifactSubjectTombstoneAuditWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "goa_subject_tombstone_audit_workspace_fkey")
+  tombstone GenericOperationArtifactSubjectTombstone @relation(fields: [workspaceId, subjectType, subjectId], references: [workspaceId, subjectType, subjectId], onDelete: Restrict, onUpdate: Restrict, map: "goa_subject_tombstone_audit_subject_fkey")
+
+  @@index([workspaceId, subjectType, subjectId, tombstonedAt], map: "generic_operation_artifact_subject_tombstone_audit_subject_idx")
+  @@map("generic_operation_artifact_subject_tombstone_audit")
+}
+
+/// Physical metadata for one globally content-addressed immutable object.
+/// Source receipts and expiry remain per-operation manifest policy.
+model GenericOperationArtifactObject {
+  sha256          String   @id @db.Char(64)
+  objectKey       String   @unique(map: "generic_operation_artifact_object_key_key") @map("object_key") @db.VarChar(200)
+  sizeBytes       BigInt   @map("size_bytes")
+  mediaType       String   @map("media_type") @db.VarChar(160)
+  privacyClass    String   @map("privacy_class") @db.VarChar(40)
+  objectVersionId String?  @map("object_version_id") @db.VarChar(1024)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  artifacts GenericOperationArtifact[]
+
+  @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
+  @@map("generic_operation_artifact_object")
+}
+
+model PersonalArtifactCleanupCommand {
+  commandId         String    @id @default(uuid()) @map("command_id") @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  deletionRequestId String    @map("deletion_request_id") @db.Uuid
+  artifactId        String    @map("artifact_id") @db.Uuid
+  sha256            String    @db.Char(64)
+  objectVersionId   String    @map("object_version_id") @db.VarChar(1024)
+  tombstonedAt      DateTime  @map("tombstoned_at") @db.Timestamptz(3)
+  attempt           Int       @default(1)
+  status            String    @default("PENDING") @db.VarChar(16)
+  objectStatus      String?   @map("object_status") @db.VarChar(16)
+  lastErrorCode     String?   @map("last_error_code") @db.VarChar(80)
+  claimedAt         DateTime? @map("claimed_at") @db.Timestamptz(3)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([deletionRequestId, sha256, objectVersionId], map: "personal_artifact_cleanup_command_request_object_key")
+  @@index([workspaceId, deletionRequestId, status, createdAt], map: "personal_artifact_cleanup_command_claim_idx")
+  @@map("personal_artifact_cleanup_command")
 }
 
 /// AI 调用追踪（PRD 9.10）：每次 ModelGateway 调用一行 — task/model/延迟/tokens/结果。
@@ -448,6 +787,8 @@ model SourceFetch {
   error         String?
   startedAt     DateTime  @default(now()) @map("started_at")
   finishedAt    DateTime? @map("finished_at")
+  executionOperationIds Json? @map("execution_operation_ids")
+  executionResult Json? @map("execution_result")
 
   source  MonitoredSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   changes SourceEntityChange[]
@@ -673,6 +1014,10 @@ model PatentCacheRefreshAudit {
   bytesScanned BigInt?   @map("bytes_scanned")
   status       String    @default("RUNNING") @map("status") // RUNNING | OK | SKIPPED_EMPTY | SKIPPED_NOSCAN | DENIED | DISABLED | FAILED
   detail       String?   @map("detail")
+  executionOperationIds Json? @map("execution_operation_ids")
+  purged       Int?
+  cached       Int?
+  empty        Int?
 
   @@index([startedAt])
   @@map("patent_cache_refresh_audit")
@@ -1032,7 +1377,8 @@ model DeletionRequest {
   updatedAt   DateTime  @updatedAt @map("updated_at")
   completedAt DateTime? @map("completed_at")
 
-  receipt DeletionReceipt?
+  receipt                       DeletionReceipt?
+  artifactSubjectTombstoneAudit GenericOperationArtifactSubjectTombstoneAudit?
 
   @@index([workspaceId])
   @@index([workspaceId, status])
@@ -1410,6 +1756,7 @@ model SiteBuildRun {
   site                     Site                          @relation(fields: [siteId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction)
   stepRecords              SiteBuildStep[]
   budget                   SiteBuildBudget?
+  budgetGrant              SiteBuildBudgetGrant?
   spendRecords             SiteBuildSpend[]
   taskAttempts             SiteBuildTaskAttempt[]
   publishableClaimSnapshot SitePublishableClaimSnapshot?
@@ -1468,6 +1815,37 @@ model SiteBuildBudget {
   @@unique([buildRunId, workspaceId, siteId], map: "site_build_budget_scope_key")
   @@index([workspaceId, buildRunId], map: "site_build_budget_workspace_run_idx")
   @@map("site_build_budget")
+}
+
+/// One immutable SaaS spending authority consumed atomically with a BuildRun.
+/// The raw compact JWS is never persisted; tokenSha256 binds safe replays.
+model SiteBuildBudgetGrant {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  siteId        String   @map("site_id") @db.Uuid
+  buildRunId    String   @unique @map("build_run_id") @db.Uuid
+  issuer        String   @db.VarChar(512)
+  audience      String   @db.VarChar(256)
+  jti           String   @db.Uuid
+  schemaVersion String   @map("schema_version") @db.VarChar(80)
+  purpose       String   @db.VarChar(80)
+  operation     String   @db.VarChar(32)
+  requestSha256 String   @map("request_sha256") @db.VarChar(64)
+  tokenSha256   String   @map("token_sha256") @db.VarChar(64)
+  currency      String   @db.VarChar(3)
+  unit          String   @db.VarChar(16)
+  capMicrousd   BigInt   @map("cap_microusd")
+  issuedAt      DateTime @map("issued_at") @db.Timestamptz(3)
+  notBefore     DateTime @map("not_before") @db.Timestamptz(3)
+  expiresAt     DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt    DateTime @default(now()) @map("consumed_at") @db.Timestamptz(3)
+
+  buildRun SiteBuildRun @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_budget_grant_run_scope_fkey")
+
+  @@unique([issuer, jti], map: "site_build_budget_grant_issuer_jti_key")
+  @@unique([buildRunId, workspaceId, siteId], map: "site_build_budget_grant_scope_key")
+  @@index([workspaceId, siteId, consumedAt], map: "site_build_budget_grant_workspace_site_consumed_idx")
+  @@map("site_build_budget_grant")
 }
 
 /// One durable logical AI task attempt per build. A new Temporal Activity attempt
@@ -1529,13 +1907,43 @@ model SiteBuildSpend {
   createdAt              DateTime  @default(now()) @map("created_at")
   settledAt              DateTime? @map("settled_at")
 
-  buildRun    SiteBuildRun          @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
-  taskAttempt SiteBuildTaskAttempt? @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
+  buildRun        SiteBuildRun                   @relation(fields: [buildRunId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: Cascade, onUpdate: NoAction, map: "site_build_spend_run_scope_fkey")
+  taskAttempt     SiteBuildTaskAttempt?          @relation(fields: [taskAttemptId, workspaceId, siteId], references: [id, workspaceId, siteId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_attempt_scope_fkey")
+  reconciliations SiteBuildSpendReconciliation[]
 
   @@unique([buildRunId, operationKey], map: "site_build_spend_run_operation_key")
+  @@unique([id, workspaceId, siteId, buildRunId], map: "site_build_spend_scope_key")
   @@index([workspaceId, buildRunId, kind, status], map: "site_build_spend_workspace_run_kind_status_idx")
   @@index([taskAttemptId], map: "site_build_spend_task_attempt_idx")
   @@map("site_build_spend")
+}
+
+/// Append-only later observations for a conservatively settled physical call.
+model SiteBuildSpendReconciliation {
+  id                String                             @id @default(uuid()) @db.Uuid
+  workspaceId       String                             @map("workspace_id") @db.Uuid
+  siteId            String                             @map("site_id") @db.Uuid
+  buildRunId        String                             @map("build_run_id") @db.Uuid
+  spendId           String                             @map("spend_id") @db.Uuid
+  attemptNo         Int                                @map("attempt_no")
+  status            SiteBuildSpendReconciliationStatus
+  resolverId        String                             @map("resolver_id") @db.VarChar(191)
+  requestId         String?                            @map("request_id") @db.VarChar(191)
+  receiptDigest     String?                            @map("receipt_digest") @db.VarChar(64)
+  costBasis         String?                            @map("cost_basis") @db.VarChar(32)
+  exactCostMicrousd BigInt?                            @map("exact_cost_microusd")
+  inputTokens       Int?                               @map("input_tokens")
+  outputTokens      Int?                               @map("output_tokens")
+  observedAt        DateTime                           @map("observed_at") @db.Timestamptz(3)
+  meta              Json?
+  createdAt         DateTime                           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  spend SiteBuildSpend @relation(fields: [spendId, workspaceId, siteId, buildRunId], references: [id, workspaceId, siteId, buildRunId], onDelete: NoAction, onUpdate: NoAction, map: "site_build_spend_reconciliation_spend_scope_fkey")
+
+  @@unique([spendId, attemptNo], map: "site_build_spend_reconciliation_attempt_key")
+  @@unique([spendId, receiptDigest], map: "site_build_spend_reconciliation_receipt_key")
+  @@index([workspaceId, buildRunId, status, createdAt], map: "site_build_spend_reconciliation_workspace_run_status_idx")
+  @@map("site_build_spend_reconciliation")
 }
 
 /// 素材：presign→PUT 直传→commit 三步（07 §3）。active object_key 由部分唯一索引守护。

@@ -69,7 +69,11 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=160m,uid=101,gid=101
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1",
+        ]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -99,7 +103,7 @@ services:
   # Tenant isolation = key prefix ws/{workspace_id}/… + presigned URLs; bucket is
   # never public. Console at http://localhost:9001 (dev creds below, dev only).
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: global-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -107,8 +111,11 @@ services:
       - "127.0.0.1:9000:9000" # S3 API
       - "127.0.0.1:9001:9001" # Web console (dev only)
     environment:
-      MINIO_ROOT_USER: global
-      MINIO_ROOT_PASSWORD: global-minio-dev # dev only — never reuse in prod
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-global}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-global-minio-dev} # dev only — never reuse in prod
+      # Development-only KMS root used to exercise the same SSE-S3 bucket
+      # contract. Supply through local environment; never commit its key bytes.
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:?set a development-only MinIO KMS key}
     volumes:
       - miniodata:/data
     healthcheck:
@@ -116,6 +123,31 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Single deployment owner for the private Site Builder bucket. API and Worker
+  # validate this immutable contract but never race lifecycle configuration PUTs.
+  minio-bootstrap:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: global-minio-bootstrap
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/config/bootstrap.sh"]
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-global}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-global-minio-dev}
+      S3_BUCKET: ${S3_BUCKET:-global-site-builder}
+      GENERIC_OPERATION_ARTIFACT_S3_BUCKET: ${GENERIC_OPERATION_ARTIFACT_S3_BUCKET:?set the dedicated artifact bucket}
+      GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY:?set the artifact runtime access key}
+      GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:?set the artifact runtime secret key}
+      GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY:?set the PERSONAL_DATA read access key}
+      GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:?set the PERSONAL_DATA read secret key}
+      GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:?set the personal artifact cleanup access key}
+      GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:?set the personal artifact cleanup secret key}
+    volumes:
+      - ./infra/minio:/config:ro
+    restart: "no"
 
   # Self-hosted embeddings for the knowledge base (docs/site-builder/02 D14:
   # BGE-M3, 1024-dim, 100+ languages; company data never leaves the host).

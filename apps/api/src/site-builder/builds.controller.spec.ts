@@ -45,12 +45,36 @@ describe('BuildsController public progress response', () => {
     const idempotency = operation.parameters.find(
       (parameter) => parameter.name === 'idempotency-key',
     );
+    const budgetGrant = operation.parameters.find(
+      (parameter) => parameter.name === 'X-Site-Build-Budget-Grant',
+    );
     expect(idempotency?.schema).toMatchObject({
       type: 'string',
       minLength: 1,
       maxLength: 128,
       pattern: '^[A-Za-z0-9._:-]{1,128}$',
     });
+    expect(budgetGrant).toMatchObject({
+      name: 'X-Site-Build-Budget-Grant',
+      required: true,
+      in: 'header',
+      schema: { type: 'string', minLength: 1, maxLength: 16_384 },
+    });
+    const intakeBudgetGrant = spec.paths['/api/v1/site-builder/intake'].post
+      .parameters.find(
+        (parameter) => parameter.name === 'X-Site-Build-Budget-Grant',
+      );
+    expect(intakeBudgetGrant).toMatchObject({
+      name: 'X-Site-Build-Budget-Grant',
+      required: true,
+      in: 'header',
+      schema: { type: 'string', minLength: 1, maxLength: 16_384 },
+    });
+    expect(
+      JSON.stringify(
+        spec.paths['/api/v1/site-builder/intake'].post.responses['409'],
+      ),
+    ).toContain('BUDGET_GRANT_REUSED');
     expect(operation.responses).toHaveProperty('422');
     expect(operation.requestBody.content['application/json'].schema).toEqual({
       type: 'object',
@@ -107,14 +131,17 @@ describe('BuildsController public progress response', () => {
         finishedAt: new Date('2026-07-17T00:01:00.000Z'),
       }),
     };
-    const controller = new BuildsController(builds as never);
+    const controller = new BuildsController(builds as never, {} as never);
 
     const response = await controller.get(
       CTX,
       '22222222-2222-4222-8222-222222222222',
     );
 
-    expect(response.data.error).toBe('build failed');
+    expect(response.data).toMatchObject({
+      error: 'build could not complete during P2_assets',
+      errorCode: 'BUILD_FAILED',
+    });
     expect(JSON.stringify(response)).not.toContain('10.0.0.7');
     expect(JSON.stringify(response)).not.toContain('secret-token');
   });
@@ -134,7 +161,7 @@ describe('BuildsController public progress response', () => {
         finishedAt: null,
       }),
     };
-    const controller = new BuildsController(builds as never);
+    const controller = new BuildsController(builds as never, {} as never);
 
     const response = await controller.get(
       CTX,
@@ -142,6 +169,7 @@ describe('BuildsController public progress response', () => {
     );
 
     expect(response.data.error).toBeNull();
+    expect(response.data.errorCode).toBeNull();
   });
 
   it('exports the non-null progress shape as strings plus a step array', () => {

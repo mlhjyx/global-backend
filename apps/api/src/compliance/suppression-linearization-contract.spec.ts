@@ -61,21 +61,22 @@ describe('suppression writer/action linearization topology', () => {
     }
   });
 
-  it('manual and backlog contact/email paths authorize each adapter or contact before network processing', () => {
+  it('manual contact/email paths authorize each candidate and backlog has no network-processing path', () => {
     const service = read('apps/api/src/discovery/discovery.service.ts');
     const backlog = read('apps/api/src/temporal/backlog.activities.ts');
     expect(service).toContain('contactMayUseExternalProcessing');
     expect(service.match(/companyMayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    expect(backlog).toContain('contactMayUseExternalProcessing');
-    expect(backlog.match(/mayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(10);
+    expect(backlog).toContain('EXECUTION_BUDGET_PLATFORM_AUTHORITY_REQUIRED');
+    expect(backlog).not.toContain('mayUseExternalProcessing');
   });
 
-  it('passes the company-scoped action gate into backlog watch sitemap and probe wires', () => {
+  it('parks backlog watch before sitemap or probe wires exist', () => {
     const source = read('apps/api/src/temporal/backlog.activities.ts');
     const body = source.slice(
       source.indexOf('async registerWatchesBacklog'),
       source.indexOf('async discoverContactsBacklog'),
     );
-    expect(body).toContain('authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id)');
+    expect(body).toContain('return authorityHold()');
+    expect(body).not.toContain('authorizeExternalAction');
   });
 });

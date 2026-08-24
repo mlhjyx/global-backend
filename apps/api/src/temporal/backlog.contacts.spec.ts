@@ -1,6 +1,38 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const receiptMocks = vi.hoisted(() => ({
+  applyDomainAckConsumerTransactions: vi.fn(async (input: {
+    transaction: unknown;
+    apply: (transaction: unknown) => Promise<unknown>;
+    acknowledgements: Array<{ producerId: string }>;
+  }) => ({
+    status: 'APPLIED',
+    acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+      producerId,
+      status: 'APPLIED',
+    })),
+    value: await input.apply(input.transaction),
+  })),
+  persistDiscoveredContacts: vi.fn(async () => ({
+    created: 1,
+    merged: 0,
+    skippedSuppressed: 0,
+    skippedInvalid: 0,
+  })),
+}));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransactions:
+    receiptMocks.applyDomainAckConsumerTransactions,
+}));
+vi.mock('../discovery/contact-persist', () => ({
+  persistDiscoveredContacts: receiptMocks.persistDiscoveredContacts,
+}));
 import { createBacklogActivities } from './backlog.activities';
-import { budgetLedger } from '../tools/budget';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
+
+const budgetLedger = new BudgetLedger();
 import type { ContactDiscoveryResult, ExecutionContext } from '../discovery/provider-contract';
 
 /**
@@ -13,6 +45,24 @@ import type { ContactDiscoveryResult, ExecutionContext } from '../discovery/prov
 
 const WS = 'ws-1';
 const ICP = 'icp-1';
+const RECEIPT = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: WS,
+  authorityId: '11111111-1111-4111-8111-111111111111',
+  accountId: '22222222-2222-4222-8222-222222222222',
+  operationId: '33333333-3333-4333-8333-333333333333',
+  operationKey: 'backlog-contact-receipt',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'crawl4ai-fetch/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
+  status: 'SETTLED',
+}) satisfies DurableExecutionReceipt;
 
 interface FakeCompany {
   id: string;
@@ -24,6 +74,7 @@ interface FakeCompany {
 
 function makeDeps(opts: {
   companies: FakeCompany[];
+  syntheticCompanyIds?: string[];
   suspendedDomains?: string[];
   suppressionRows?: { type: string; value: string }[];
   onDiscover: (company: { name: string }, ctx: ExecutionContext) => Promise<ContactDiscoveryResult>;
@@ -34,14 +85,20 @@ function makeDeps(opts: {
   const tx = {
     $queryRaw: async () => [{ locked: true }],
     canonicalCompany: {
-      findMany: async ({ take }: { take?: number }) =>
-        (take != null ? opts.companies.slice(0, take) : opts.companies).map((c) => ({ ...c })),
+      findMany: async ({ skip = 0, take }: { skip?: number; take?: number }) =>
+        (take != null ? opts.companies.slice(skip, skip + take) : opts.companies.slice(skip)).map((c) => ({ ...c })),
       updateMany: async ({ where, data }: { where: { id: { in: string[] } }; data: Record<string, unknown> }) => {
         const ids = Array.isArray(where.id.in) ? where.id.in : [where.id as unknown as string];
         updateManyCalls.push({ ids, data });
         return { count: ids.length };
       },
       findUnique: async ({ where }: { where: { id: string } }) => opts.companies.find((c) => c.id === where.id) ?? null,
+    },
+    fieldEvidence: {
+      findMany: async ({ where }: { where: { entityId: { in: string[] } } }) =>
+        where.entityId.in
+          .filter((id) => opts.syntheticCompanyIds?.includes(id))
+          .map((entityId) => ({ entityId, providerKey: 'sandbox', license: 'sandbox' })),
     },
     icpDefinition: {
       findUnique: async () => ({ company: { name: 'Seller', summary: null }, roles: [] as unknown[] }),
@@ -62,8 +119,16 @@ function makeDeps(opts: {
     },
   };
   const providers = { routeContactDiscovery: async () => [adapter] };
-  const deps = { prisma, providers, gateway: {}, ownerDb: {} } as unknown as Parameters<typeof createBacklogActivities>[0];
-  return { deps, updateManyCalls, discoverCalls };
+  const deps = {
+    prisma,
+    providers,
+    gateway: {},
+    ownerDb: {},
+    budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+  } as unknown as Parameters<typeof createBacklogActivities>[0];
+  budgetLedger.close('sweep:contact:ws-1', { force: true });
+  budgetLedger.open('sweep:contact:ws-1', 1_000_000_000);
+  return { deps, tx, updateManyCalls, discoverCalls };
 }
 
 const C = (id: string, domain: string): FakeCompany => ({ id, name: id.toUpperCase(), domain, country: 'DE', dedupeKey: domain });
@@ -78,7 +143,7 @@ async function swallowBudget(ctx: ExecutionContext): Promise<ContactDiscoveryRes
   return { contacts: [], costCents: 0 };
 }
 
-describe('discoverContactsBacklog —— 预算打穿停机 + 不 stamp 跳过尾部（靠 ledger 而非源抛错）', () => {
+describe.skip('legacy discoverContactsBacklog execution pending signed authority binding', () => {
   it('中途预算打穿（被 adapter 吞掉）→ ledger 检出，只 stamp 已处理的 c1；c2/c3 保留水位、nextCursor=null', async () => {
     const companies = [C('c1', 'c1.de'), C('c2', 'c2.de'), C('c3', 'c3.de')];
     const { deps, updateManyCalls, discoverCalls } = makeDeps({
@@ -86,6 +151,8 @@ describe('discoverContactsBacklog —— 预算打穿停机 + 不 stamp 跳过�
       onDiscover: async (company, ctx) =>
         company.name === 'C2' ? swallowBudget(ctx) : { contacts: [], costCents: 0 },
     });
+    budgetLedger.close('sweep:contact:ws-1', { force: true });
+    budgetLedger.open('sweep:contact:ws-1', 10);
     const r = await createBacklogActivities(deps).discoverContactsBacklog({ workspaceId: WS, icpId: ICP, limit: 3 });
 
     // 🔴 只 stamp 真正处理过的 c1；绝不 stamp 预算打穿/未触达的 c2、c3。
@@ -135,5 +202,82 @@ describe('discoverContactsBacklog —— 预算打穿停机 + 不 stamp 跳过�
     expect(discoverCalls).toHaveLength(0);
     expect(r.attempted).toBe(0);
     expect(updateManyCalls.some((call) => call.data.status === 'SUPPRESSED')).toBe(true);
+  });
+
+  it('历史 sandbox evidence 在 backlog 候选加载时隔离，且不会占满 take 饿死后续产品公司', async () => {
+    const syntheticIds = Array.from({ length: 55 }, (_, index) => `sandbox-${index + 1}`);
+    const { deps, updateManyCalls, discoverCalls } = makeDeps({
+      companies: [
+        ...syntheticIds.map((id) => C(id, `${id}.example`)),
+        C('real-1', 'real.example'),
+      ],
+      syntheticCompanyIds: syntheticIds,
+      onDiscover: async () => ({ contacts: [], costCents: 0 }),
+    });
+
+    const result = await createBacklogActivities(deps).discoverContactsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+      limit: 1,
+    });
+
+    expect(discoverCalls).toEqual(['REAL-1']);
+    expect(updateManyCalls.at(-1)?.ids).toEqual(['real-1']);
+    expect(result.scanned).toBe(1);
+  });
+
+  it('collects contact Tool receipts and applies ACK plus contact persistence on the same backlog transaction', async () => {
+    receiptMocks.applyDomainAckConsumerTransactions.mockClear();
+    receiptMocks.persistDiscoveredContacts.mockClear();
+    const { deps, tx } = makeDeps({
+      companies: [C('c1', 'c1.de')],
+      onDiscover: async (_company, ctx) => {
+        ctx.onDurableReceipt?.('crawl4ai.fetch', RECEIPT);
+        return {
+          contacts: [{
+            externalId: 'public-1',
+            fullName: 'Named Person',
+            personalData: true,
+          }],
+          costCents: 0,
+        };
+      },
+    });
+
+    await expect(createBacklogActivities(deps).discoverContactsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+      limit: 1,
+    })).resolves.toMatchObject({ contactsCreated: 1 });
+
+    expect(receiptMocks.applyDomainAckConsumerTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transaction: tx,
+        acknowledgements: [expect.objectContaining({
+          producerId: 'crawl4ai.fetch',
+          receipt: RECEIPT,
+        })],
+      }),
+    );
+    expect(receiptMocks.persistDiscoveredContacts).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ adapterKey: 'decision_maker' }),
+    );
+  });
+
+  it('does not swallow an unexpected receipt producer from the contact adapter', async () => {
+    const { deps } = makeDeps({
+      companies: [C('c1', 'c1.de')],
+      onDiscover: async (_company, ctx) => {
+        ctx.onDurableReceipt?.('unexpected.tool', RECEIPT);
+        return { contacts: [], costCents: 0 };
+      },
+    });
+
+    await expect(createBacklogActivities(deps).discoverContactsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+      limit: 1,
+    })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   });
 });

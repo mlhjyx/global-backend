@@ -59,6 +59,15 @@ describe('resolveRuntimeSettings', () => {
     ).toThrow(/NODE_ENV.*production/i);
   });
 
+  it('runs the production-compiled OCI artifact as a managed development instance', () => {
+    expect(
+      resolveRuntimeSettings({
+        APP_ENVIRONMENT: 'development',
+        NODE_ENV: 'production',
+      }),
+    ).toEqual({ mode: 'development', bindHost: '127.0.0.1', port: 3000 });
+  });
+
   it('requires production to declare a non-wildcard bind explicitly', () => {
     expect(() => resolveRuntimeSettings({ NODE_ENV: 'production' })).toThrow(
       /API_BIND_HOST.*production/i,
@@ -89,7 +98,7 @@ describe('resolveRuntimeSettings', () => {
   });
 
   it('uses the resolved runtime mode as the CORS default security boundary', () => {
-    expect(resolveCorsOrigin('development', undefined)).toBe(true);
+    expect(resolveCorsOrigin('development', undefined)).toBe(false);
     expect(resolveCorsOrigin('test', '')).toBe(true);
     expect(resolveCorsOrigin('pilot', undefined)).toBe(false);
     expect(resolveCorsOrigin('production', '')).toBe(false);
@@ -130,5 +139,12 @@ describe('resolveRuntimeSettings', () => {
     expect(source).toContain('resolveRuntimeSettings(process.env)');
     expect(source).toMatch(/app\.listen\(runtimeSettings\.port,\s*runtimeSettings\.bindHost\)/);
     expect(source).not.toMatch(/app\.listen\(port\)/);
+  });
+
+  it('preserves Express 4 nested-query semantics on the Express 5 runtime', () => {
+    const source = readFileSync(join(import.meta.dirname, '..', 'main.ts'), 'utf8');
+    expect(source).toContain("import type { NestExpressApplication } from '@nestjs/platform-express'");
+    expect(source).toContain('NestFactory.create<NestExpressApplication>(AppModule)');
+    expect(source).toContain("app.set('query parser', 'extended')");
   });
 });

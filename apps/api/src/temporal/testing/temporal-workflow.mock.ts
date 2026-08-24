@@ -53,6 +53,12 @@ export function setPatched(fn: (patchId: string) => boolean): void {
   patchedFn = fn;
 }
 
+let currentWorkflowInfo: Readonly<{ runId: string }> = Object.freeze({ runId: 'test-workflow-run' });
+export function workflowInfo(): Readonly<{ runId: string }> { return currentWorkflowInfo; }
+export function setWorkflowInfo(value: Readonly<{ runId: string }>): void {
+  currentWorkflowInfo = Object.freeze({ runId: value.runId });
+}
+
 /**
  * 模拟 `@temporalio/workflow` 的 `isCancellation`：按错误名判定（测试用
  * `Object.assign(new Error('…'), { name: 'CancelledFailure' })` 构造取消）。
@@ -89,10 +95,15 @@ export const log = {
   error: vi.fn(),
 };
 
-/** `beforeEach` 调用：清空注册表 + logger，杜绝跨用例 spy 状态泄漏。 */
+/** `beforeEach` 调用：复位 memoized spy + logger，杜绝跨用例状态泄漏。 */
 export function resetActivities(): void {
-  for (const key of Object.keys(registry)) delete registry[key];
+  // Keep memoized spies alive so workflows that use a destructured
+  // `proxyActivities` binding remain connected to the same test registry
+  // across beforeEach resets. Resetting implementations/call history is
+  // enough; deleting entries would leave those closed-over bindings stale.
+  for (const mock of Object.values(registry)) mock.mockReset();
   patchedFn = () => true;
+  currentWorkflowInfo = Object.freeze({ runId: 'test-workflow-run' });
   log.debug.mockReset();
   log.info.mockReset();
   log.warn.mockReset();

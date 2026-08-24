@@ -19,3 +19,66 @@ describe('AI task registry personal-data boundaries', () => {
     expect(description).toMatch(/个人数据/);
   });
 });
+
+describe('AI task registry model execution policy invariants', () => {
+  it('tightens only output contracts for the ten projected tasks', () => {
+    const expected = {
+      'company_understanding.extract_claims': {
+        model: 'deepseek-v4-flash', risk: 'medium', humanGate: true,
+        allowedTools: ['crawl4ai.fetch'], maxCostCents: 20, timeoutMs: 180000,
+      },
+      'company_understanding.extract_profile': {
+        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        allowedTools: [], maxCostCents: 10, timeoutMs: 120000,
+      },
+      'company_understanding.extract_offerings': {
+        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        allowedTools: [], maxCostCents: 20, timeoutMs: 180000,
+      },
+      'icp.design': {
+        model: 'deepseek-v4-pro', risk: 'medium', humanGate: true,
+        allowedTools: [], maxCostCents: 40, timeoutMs: 180000,
+      },
+      'discovery.query_plan': {
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: true,
+        allowedTools: [], maxCostCents: 40, timeoutMs: 180000,
+      },
+      'taxonomy.normalize': {
+        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        allowedTools: [], maxCostCents: 5, timeoutMs: 60000,
+      },
+      'discovery.qualify_fit': {
+        model: 'deepseek-v4-pro', risk: 'low', humanGate: false,
+        allowedTools: [], maxCostCents: 20, timeoutMs: 180000,
+      },
+      'discovery.extract_company': {
+        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 15,
+        timeoutMs: 180000,
+      },
+      'discovery.extract_list': {
+        model: 'deepseek-v4-flash', risk: 'low', humanGate: false,
+        allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 20,
+        timeoutMs: 180000,
+      },
+      'contact.find_decision_makers': {
+        model: 'deepseek-v4-flash', risk: 'medium', humanGate: false,
+        allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 15,
+        timeoutMs: 120000,
+      },
+    } as const;
+
+    for (const [taskId, policy] of Object.entries(expected)) {
+      const task = getTask(taskId);
+      expect(task).toBeTruthy();
+      expect({
+        model: task!.model,
+        risk: task!.risk,
+        humanGate: task!.humanGate,
+        allowedTools: task!.allowedTools ?? [],
+        maxCostCents: task!.maxCostCents,
+        timeoutMs: task!.timeoutMs,
+      }).toEqual(policy);
+    }
+  });
+});

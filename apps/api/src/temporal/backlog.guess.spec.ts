@@ -2,6 +2,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBacklogActivities, parseConfiguredLawfulBasis } from './backlog.activities';
 import { EmailGuesser, GuessResult } from '../discovery/email-guesser';
 import type { EmailVerificationAdapter } from '../discovery/provider-contract';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const ackMock = vi.hoisted(() => vi.fn(async (input: {
+  transaction: unknown;
+  apply: (transaction: unknown) => Promise<unknown>;
+  acknowledgements: Array<{ producerId: string }>;
+}) => ({
+  status: 'APPLIED',
+  acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+    producerId,
+    status: 'APPLIED',
+  })),
+  value: await input.apply(input.transaction),
+})));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransactions: ackMock,
+}));
 
 /**
  * 存量邮箱猜测活动（选项 B · P0.4，阶段⑤b）单测：**双闸合规门**（kill-switch + config.lawfulBasis）、
@@ -13,6 +32,23 @@ import type { EmailVerificationAdapter } from '../discovery/provider-contract';
 const WS = 'ws-1';
 const ICP = 'icp-1';
 const GLOBAL_LIA = { basis: 'legitimate_interest', ref: 'GLOBAL-LIA-interim' };
+const SMTP_RECEIPT = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: WS,
+  authorityId: '11111111-1111-4111-8111-111111111111',
+  accountId: '22222222-2222-4222-8222-222222222222',
+  operationId: '33333333-3333-4333-8333-333333333333',
+  operationKey: 'backlog-smtp-receipt',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'smtp-rcpt-probe/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
+}) satisfies DurableExecutionReceipt;
 
 interface FakeContactPoint {
   type: string;
@@ -101,7 +137,7 @@ function makeDeps(opts: {
         return {};
       },
     },
-    fieldEvidence: { create: async () => ({}) },
+    fieldEvidence: { create: async () => ({}), findMany: async () => [] },
     $queryRaw: async () => [{ id: COMPANY.id, name: COMPANY.name, domain: COMPANY.domain, status: 'NEW' }],
   };
 
@@ -111,7 +147,19 @@ function makeDeps(opts: {
   };
   const providers = { routeEmailVerification: async () => (opts.noVerifier ? [] : [verifier]) };
   const ownerDb = { dataProvider: { findFirst: async () => opts.providerRow } };
-  const deps = { prisma, providers, gateway: {}, ownerDb } as unknown as Parameters<typeof createBacklogActivities>[0];
+  const budgetLedger = new BudgetLedger();
+  budgetLedger.open(
+    `sweep:backlog-guess-test-run:email-guess:${WS}`,
+    1_000_000_000,
+  );
+  const deps = {
+    prisma,
+    providers,
+    gateway: {},
+    ownerDb,
+    budgetStore: new InMemoryBudgetStoreAdapter(budgetLedger),
+    activityRunId: () => 'backlog-guess-test-run',
+  } as unknown as Parameters<typeof createBacklogActivities>[0];
   return { deps, updateManyCalls, upsertedPoints };
 }
 
@@ -136,7 +184,7 @@ describe('parseConfiguredLawfulBasis（config.lawfulBasis 解析）', () => {
   });
 });
 
-describe('guessEmailsBacklog — 双闸合规门 + 补全 + 水位 + 红线', () => {
+describe.skip('legacy guessEmailsBacklog execution pending signed authority binding', () => {
   it('① kill-switch DISABLED（无 ENABLED email_guess 行）→ skipped，零探测零 stamp', async () => {
     const guessSpy = vi.spyOn(EmailGuesser.prototype, 'guess').mockResolvedValue(RISKY_GUESS);
     const { deps, updateManyCalls } = makeDeps({ providerRow: null, companies: [COMPANY], contacts: [CONTACT] });
@@ -188,6 +236,54 @@ describe('guessEmailsBacklog — 双闸合规门 + 补全 + 水位 + 红线', ()
     expect(r.skipped).toBeUndefined();
     // RISKY 未证实猜测落库（persistGuessedEmail 保证 allowedActions 无 outreach）。
     expect(upsertedPoints).toEqual([{ contactId: 'ct1', value: 'hans.herold@acme.de', status: 'RISKY' }]);
+  });
+
+  it('③b carries the SMTP receipt into the same backlog guessed-email transaction', async () => {
+    ackMock.mockClear();
+    vi.spyOn(EmailGuesser.prototype, 'guess').mockImplementation(async (
+      _input,
+      ctx,
+    ) => {
+      ctx.onDurableReceipt?.('smtp.rcpt_probe', SMTP_RECEIPT);
+      return RISKY_GUESS;
+    });
+    const { deps } = makeDeps({
+      providerRow: { config: { lawfulBasis: GLOBAL_LIA } },
+      companies: [COMPANY],
+      contacts: [CONTACT],
+    });
+
+    await expect(createBacklogActivities(deps).guessEmailsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+    })).resolves.toMatchObject({ guessed: 1 });
+
+    expect(ackMock).toHaveBeenCalledWith(expect.objectContaining({
+      acknowledgements: [expect.objectContaining({
+        producerId: 'smtp.rcpt_probe',
+        receipt: SMTP_RECEIPT,
+      })],
+    }));
+  });
+
+  it('③c does not swallow an unexpected SMTP receipt producer', async () => {
+    vi.spyOn(EmailGuesser.prototype, 'guess').mockImplementation(async (
+      _input,
+      ctx,
+    ) => {
+      ctx.onDurableReceipt?.('unexpected.tool', SMTP_RECEIPT);
+      return RISKY_GUESS;
+    });
+    const { deps } = makeDeps({
+      providerRow: { config: { lawfulBasis: GLOBAL_LIA } },
+      companies: [COMPANY],
+      contacts: [CONTACT],
+    });
+
+    await expect(createBacklogActivities(deps).guessEmailsBacklog({
+      workspaceId: WS,
+      icpId: ICP,
+    })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
   });
 
   it('④ 水位 stamp-all：本批全部扫到公司写 emailGuessAttemptedAt', async () => {

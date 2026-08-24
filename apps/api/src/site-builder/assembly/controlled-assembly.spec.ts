@@ -99,7 +99,7 @@ const templates: QualifiedComponentTemplateRepository = {
       readFileSync(
         path.join(
           ROOT,
-          `apps/site-renderer/fixtures/component-qualification/${slug}-spec.json`,
+          `apps/site-renderer/product-assets/component-catalog-v1/${slug}-spec.json`,
         ),
         "utf8",
       ),
@@ -680,7 +680,7 @@ describe("M1-e-B controlled asset materialization", () => {
     try {
       const approved = path.join(
         temp,
-        "apps/site-renderer/fixtures/design-demo-visuals",
+        "apps/site-renderer/product-assets/design-demo-visuals",
       );
       await mkdir(approved, { recursive: true });
       await writeFile(path.join(temp, "target.svg"), "<svg/>");
@@ -696,7 +696,7 @@ describe("M1-e-B controlled asset materialization", () => {
       const bytes = Buffer.from("<svg/>");
       const hash = createHash("sha256").update(bytes).digest("hex");
       pack.assets[0]!.repositoryPath =
-        "apps/site-renderer/fixtures/design-demo-visuals/link.svg";
+        "apps/site-renderer/product-assets/design-demo-visuals/link.svg";
       pack.assets[0]!.sha256 = hash;
       const { digest: _digest, ...draft } = data.designBrief;
       const brief = finalizeDesignBriefV2({
@@ -727,8 +727,8 @@ describe("M1-e-B controlled asset materialization", () => {
       ).rejects.toThrow("CONTROLLED_ASSET_PATH_FORBIDDEN");
 
       for (const repositoryPath of [
-        "apps/site-renderer/fixtures/design-demo-visuals-private/secret.svg",
-        "apps/site-renderer/fixtures/design-demo-visuals/../../../.env",
+        "apps/site-renderer/product-assets/design-demo-visuals-private/secret.svg",
+        "apps/site-renderer/product-assets/design-demo-visuals/../../../.env",
       ]) {
         pack.assets[0]!.repositoryPath = repositoryPath;
         const { digest: _briefDigest, ...briefDraft } = brief;

@@ -1,7 +1,3 @@
-import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { VERIFIED_GATEWAY_MODEL_TRANSPORTS } from '../model-gateway/model-transports';
 import { PaidModelPreflightError } from '../model-gateway/paid-model-settlement';
@@ -11,7 +7,6 @@ import {
 } from './agents/task-routes';
 import {
   NewApiSiteBuilderModelSettlement,
-  loadSiteBuilderModelSettlement,
   settlementAttestationSnapshotSha256,
   settlementChannelSnapshotSha256,
   settlementOpenOxPrice,
@@ -24,6 +19,8 @@ import {
 } from './site-builder-model-settlement';
 
 const API_KEY = 'test-runtime-token';
+const TOKEN_DIGEST =
+  '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a';
 const NOW = new Date('2026-07-29T06:00:00.000Z');
 const GATEWAY_ORIGIN = 'https://gateway.example.test';
 const CHANNEL_ID = 17;
@@ -151,8 +148,7 @@ function fixture() {
       ledgerMicrousdPerCny: 1_000_000,
     },
     credential: {
-      bearerTokenSha256:
-        '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+      bearerTokenSha256: TOKEN_DIGEST,
       purpose: 'site_builder_runtime',
       quotaMode: 'limited',
       quotaCapPoints: 5_000_000,
@@ -260,61 +256,6 @@ function paidContext() {
 }
 
 describe('Site Builder zero-generation model preflight', () => {
-  it('loads only a digest-bound, current, exact-scope attestation', () => {
-    const { attestation } = fixture();
-    const directory = mkdtempSync(join(tmpdir(), 'site-builder-settlement-'));
-    const path = join(directory, 'attestation.json');
-    const bytes = JSON.stringify(attestation);
-    writeFileSync(path, bytes, { mode: 0o600 });
-    try {
-      expect(() =>
-        loadSiteBuilderModelSettlement(
-          {
-            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
-            MODEL_GATEWAY_KEY: API_KEY,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: createHash(
-              'sha256',
-            )
-              .update(bytes)
-              .digest('hex'),
-          },
-          { now: () => NOW },
-        ),
-      ).not.toThrow();
-      expect(
-        loadSiteBuilderModelSettlement(
-          {
-            ...REVIEWED_RUNTIME_ROUTE_ENV,
-            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
-            MODEL_GATEWAY_KEY: API_KEY,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: createHash(
-              'sha256',
-            )
-              .update(bytes)
-              .digest('hex'),
-          },
-          { now: () => NOW, fetch: vi.fn(liveFetch) as typeof fetch },
-        ),
-      ).toBeInstanceOf(NewApiSiteBuilderModelSettlement);
-      expect(() =>
-        loadSiteBuilderModelSettlement(
-          {
-            ...REVIEWED_RUNTIME_ROUTE_ENV,
-            MODEL_GATEWAY_URL: `${GATEWAY_ORIGIN}/v1`,
-            MODEL_GATEWAY_KEY: API_KEY,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_PATH: path,
-            SITE_BUILDER_MODEL_SETTLEMENT_ATTESTATION_SHA256: '0'.repeat(64),
-          },
-          { now: () => NOW },
-        ),
-      ).toThrow('attestation file digest mismatch');
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
   it('covers every current task route and produces bounded redacted evidence', async () => {
     const { attestation, entries } = fixture();
     const fetchMock = vi.fn(liveFetch);
@@ -334,8 +275,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -392,8 +332,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -457,8 +396,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -516,8 +454,7 @@ describe('Site Builder zero-generation model preflight', () => {
             op: 'generateStructured',
             providerId: 'gateway',
             gatewayOrigin: GATEWAY_ORIGIN,
-            credentialSha256:
-              '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+            credentialSha256: TOKEN_DIGEST,
             alias: dispatch.alias,
             protocol: dispatch.protocol,
             promptUtf8BytesPerCall: 500,
@@ -565,8 +502,7 @@ describe('Site Builder zero-generation model preflight', () => {
         op: 'generateStructured',
         providerId: 'gateway',
         gatewayOrigin: GATEWAY_ORIGIN,
-        credentialSha256:
-          '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+        credentialSha256: TOKEN_DIGEST,
         alias: dispatch.alias,
         protocol: dispatch.protocol,
         promptUtf8BytesPerCall: 500,
@@ -623,8 +559,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,
@@ -663,8 +598,7 @@ describe('Site Builder zero-generation model preflight', () => {
           op: 'generateStructured',
           providerId: 'gateway',
           gatewayOrigin: GATEWAY_ORIGIN,
-          credentialSha256:
-            '7268834abc98ce207e4fdeb7b7189e365f62f4b6b85ce2739750a8c3bda0438a',
+          credentialSha256: TOKEN_DIGEST,
           alias: dispatch.alias,
           protocol: dispatch.protocol,
           promptUtf8BytesPerCall: 500,

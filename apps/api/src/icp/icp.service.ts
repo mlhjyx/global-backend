@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,6 +17,18 @@ import { resolveIcpToCpv, buildTedQuery, collectIndustryTerms, splitTerms } from
 import { resolveIcpToFda, buildFdaQuery } from '../discovery/icp-to-fda';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
+import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
+import { executeIcpBudgetedTask } from './icp-budget-execution';
+import {
+  assertFreshExecutionBudgetBinding,
+  ExecutionBudgetAuthorityService,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-authority.service';
+import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import {
+  applyDomainAckConsumerTransaction,
+  domainAggregateIdForReceipt,
+} from '../durable-results/domain-ack-consumer-bindings';
 
 interface IcpModelOutput {
   name: string;
@@ -34,6 +48,13 @@ interface IcpModelOutput {
     weight?: number;
     rationale?: string;
   }[];
+}
+
+function isExecutionControlError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' &&
+    (code.startsWith('BUDGET_') || code.startsWith('EXECUTION_BUDGET_'));
 }
 
 interface QueryPlanModelOutput {
@@ -58,10 +79,25 @@ export class IcpService {
     private readonly prisma: PrismaService,
     private readonly gateway: ModelGateway,
     private readonly runtimeTelemetry: LangfuseRuntimeTelemetryService,
+    private readonly authority: ExecutionBudgetAuthorityService,
+    @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
   ) {}
 
   /** AI-design an ICP from the seller company's APPROVED claims (PRD 5.4 / 7.5). */
-  async generateFromCompany(ctx: RequestContext, companyId: string) {
+  async generateFromCompany(
+    ctx: RequestContext,
+    companyId: string,
+    compactJws?: string,
+  ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /companies/:companyId/icps',
+        companyId,
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     const { company, claims, offerings } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
       if (!company) {
@@ -89,23 +125,39 @@ export class IcpService {
       : '';
     const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
 
-    const result = await executeStructuredTaskWithRuntime<IcpModelOutput>(
-      this.gateway,
-      {
-        task: contract.id,
-        prompt,
-        system: contract.description,
-        model: contract.model,
-        schema: contract.outputSchema,
-      },
-      { workspaceId: ctx.workspaceId, userId: ctx.userId },
-      { telemetry: this.runtimeTelemetry },
-    );
+    const result = await executeIcpBudgetedTask<IcpModelOutput>({
+      budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP generation requires an authoritative BudgetStore'),
+      binding,
+      durableResultSchema: 'icp-design/v1',
+      execute: (budgetContext) => executeStructuredTaskWithRuntime<IcpModelOutput>(
+        this.gateway,
+        {
+          task: contract.id,
+          prompt,
+          system: contract.description,
+          model: contract.model,
+          schema: contract.outputSchema,
+        },
+        { workspaceId: ctx.workspaceId, userId: ctx.userId, ...budgetContext },
+        { telemetry: this.runtimeTelemetry },
+      ),
+    });
     const out = result.data;
 
+    const icpId = result.durableReceipt
+      ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
+      : undefined;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const icp = await tx.icpDefinition.create({
+      const applied = await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'icp.design',
+        receipt: result.durableReceipt,
+        domainAckKey: icpId ?? companyId,
+        domainRevision: result.durableReceipt?.resultDigest ?? '1',
+        apply: async (transaction) => {
+      const icp = await transaction.icpDefinition.create({
         data: {
+          ...(icpId ? { id: icpId } : {}),
           workspaceId: ctx.workspaceId,
           companyId,
           name: out.name ?? '未命名 ICP',
@@ -119,7 +171,7 @@ export class IcpService {
         },
       });
       for (const p of out.personas ?? []) {
-        await tx.persona.create({
+        await transaction.persona.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
@@ -130,7 +182,7 @@ export class IcpService {
         });
       }
       for (const r of out.buying_committee ?? []) {
-        await tx.buyingCommitteeRole.create({
+        await transaction.buyingCommitteeRole.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
@@ -144,7 +196,7 @@ export class IcpService {
       for (const r of out.qualification_rules ?? []) {
         const kind = String(r.kind).toUpperCase();
         if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) continue; // 丢弃不合法提议
-        await tx.qualificationRule.create({
+        await transaction.qualificationRule.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
@@ -157,7 +209,10 @@ export class IcpService {
           },
         });
       }
-      return this.full(tx, icp.id);
+      return this.full(transaction, icp.id);
+        },
+      });
+      return applied.value ?? this.full(tx, icpId!);
     });
   }
 
@@ -411,7 +466,20 @@ export class IcpService {
   // ── 查询计划（LED-005）────────────────────────────────────────────────────
 
   /** AI translates an ACTIVE ICP into an ordered multi-source query plan (Discover input). */
-  async generateQueryPlan(ctx: RequestContext, icpId: string) {
+  async generateQueryPlan(
+    ctx: RequestContext,
+    icpId: string,
+    compactJws?: string,
+  ) {
+    const binding = await this.authority.consumeWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope: workspaceExecutionBudgetRequestScope({
+        operation: 'POST /icps/:icpId/query-plans',
+        icpId,
+      }),
+    });
+    assertFreshExecutionBudgetBinding(binding);
     const icp = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
     );
@@ -431,29 +499,45 @@ export class IcpService {
       exclusions: icp.exclusions,
       rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
     };
-    const result = await executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
-      this.gateway,
-      {
-        task: contract.id,
-        prompt: `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`,
-        system: contract.description,
-        model: contract.model,
-        schema: contract.outputSchema,
-      },
-      { workspaceId: ctx.workspaceId, userId: ctx.userId },
-      { telemetry: this.runtimeTelemetry },
-    );
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。`;
+    const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
+      budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
+      binding,
+      durableResultSchema: 'icp-query-plan/v1',
+      execute: (budgetContext) => executeStructuredTaskWithRuntime<QueryPlanModelOutput>(
+        this.gateway,
+        {
+          task: contract.id,
+          prompt: queryPlanPrompt,
+          system: contract.description,
+          model: contract.model,
+          schema: contract.outputSchema,
+        },
+        { workspaceId: ctx.workspaceId, userId: ctx.userId, ...budgetContext },
+        { telemetry: this.runtimeTelemetry },
+      ),
+    });
     const out = result.data;
 
     // §2.3/§8.7 冷路径 ICP→CPV：解析 ICP 行业/产品/目标市场 → CPV + buyer-country，确定性注入一条
     // TED 中标发现查询（LLM 绝不臆造 CPV 码）。人工门（DRAFT→READY）可见解析结果 + 覆盖 warning。
-    let queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries']);
+    let queries = await this.injectTedQuery(ctx.workspaceId, icp, (out.queries ?? []) as QueryPlanModelOutput['queries'], binding);
     // §2.3/§8.7 冷路径 ICP→FDA：解析 ICP 行业/产品/贸易侧 → FDA product code + importer 过滤，确定性注入 openFDA 发现查询。
-    queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries);
+    queries = await this.injectFdaQuery(ctx.workspaceId, icp, queries, binding);
 
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.discoveryQueryPlan.create({
+    const queryPlanId = result.durableReceipt
+      ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')
+      : undefined;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const applied = await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId: 'discovery.query_plan',
+        receipt: result.durableReceipt,
+        domainAckKey: queryPlanId ?? icpId,
+        domainRevision: result.durableReceipt?.resultDigest ?? '1',
+        apply: (transaction) => transaction.discoveryQueryPlan.create({
         data: {
+          ...(queryPlanId ? { id: queryPlanId } : {}),
           workspaceId: ctx.workspaceId,
           icpId,
           status: 'DRAFT', // 人工确认（→READY）后才可被 Discover 执行
@@ -461,7 +545,12 @@ export class IcpService {
           estimatedVolume: Number.isFinite(out.estimated_volume) ? Math.round(out.estimated_volume) : null,
         },
       }),
-    );
+      });
+      if (applied.value) return applied.value;
+      return tx.discoveryQueryPlan.findUniqueOrThrow({
+        where: { id: queryPlanId! },
+      });
+    });
   }
 
   /**
@@ -473,20 +562,26 @@ export class IcpService {
     workspaceId: string,
     icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
     planned: QueryPlanModelOutput['queries'],
+    binding: ExecutionBudgetBinding,
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
     // §8.7 稳健：从 company_attributes + planner 各查询双路采集行业词（拆逗号），防单字段缺失/合并串漏掉 TED 注入。
     const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
     const targetCountries = splitTerms(icp.targetMarkets);
     try {
-      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry);
+      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry, this.budgetStore);
       const cpv = await resolveIcpToCpv(
         taxonomy,
         { industryTerms, product: attrs.product ? String(attrs.product) : undefined, targetCountries },
-        { workspaceId },
+        {
+          workspaceId: binding.scopeKey,
+          runId: binding.accountKey,
+          executionBudget: binding,
+        },
       );
       return buildTedQuery(cpv, planned) as QueryPlanModelOutput['queries'];
     } catch (e) {
+      if (isExecutionControlError(e)) throw e;
        
       console.warn(`[icp] icp→cpv resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;
@@ -502,11 +597,12 @@ export class IcpService {
     workspaceId: string,
     icp: { companyAttributes: Prisma.JsonValue; targetMarkets: Prisma.JsonValue },
     planned: QueryPlanModelOutput['queries'],
+    binding: ExecutionBudgetBinding,
   ): Promise<QueryPlanModelOutput['queries']> {
     const attrs = (icp.companyAttributes ?? {}) as Record<string, unknown>;
     const industryTerms = collectIndustryTerms(icp.companyAttributes, planned);
     try {
-      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry);
+      const taxonomy = new TaxonomyResolver(this.prisma, this.gateway, this.runtimeTelemetry, this.budgetStore);
       const fda = await resolveIcpToFda(
         taxonomy,
         {
@@ -515,10 +611,15 @@ export class IcpService {
           tradeSide: attrs.trade_side ? String(attrs.trade_side) : undefined,
           targetCountries: splitTerms(icp.targetMarkets), // openFDA 仅美国市场门（非美国目标 → 不注入）
         },
-        { workspaceId },
+        {
+          workspaceId: binding.scopeKey,
+          runId: binding.accountKey,
+          executionBudget: binding,
+        },
       );
       return buildFdaQuery(fda, planned) as QueryPlanModelOutput['queries'];
     } catch (e) {
+      if (isExecutionControlError(e)) throw e;
        
       console.warn(`[icp] icp→fda resolve failed (计划不阻断): ${String(e).slice(0, 120)}`);
       return planned;

@@ -1,4 +1,4 @@
-import { Context } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
@@ -8,12 +8,40 @@ import { extractSameSiteLinks, selectKeySubpages } from '../adapters/site-links'
 import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import {
+  type BudgetStore,
+  UnavailableBudgetStore,
+} from '../tools/budget-store';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import {
+  applyDomainAckConsumerTransaction,
+  applyDomainAckConsumerTransactions,
+} from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export interface UnderstandingInput {
   workspaceId: string;
   companyId: string;
   website: string;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
 }
+
+interface UnderstandingAuthorityInput {
+  workspaceId: string;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
+}
+
+type UnderstandingAuthorityEnvelope = Readonly<{
+  workspaceId?: string;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
+}>;
 
 interface ExtractedClaim {
   type: string;
@@ -33,6 +61,7 @@ interface ExtractedOffering {
 export interface CrawledPage {
   url: string;
   text: string;
+  durableReceipt?: DurableExecutionReceipt;
 }
 
 /** Keep Temporal payloads bounded — a page beyond this adds noise, not facts. */
@@ -52,8 +81,49 @@ export function createUnderstandingActivities(deps: {
   /** 收口②：页面抓取经 ToolBroker（crawl4ai.fetch，白名单绑定 extract_claims 契约）。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
+  budgetStore?: BudgetStore;
+  activityRunId?: () => string | undefined;
 }) {
-  const crawlViaBroker = async (workspaceId: string, url: string): Promise<string> => {
+  const budgets =
+    deps.budgetStore ??
+    new UnavailableBudgetStore('understanding activities require an authoritative BudgetStore');
+
+  const requireAuthority = (args: UnderstandingAuthorityEnvelope): ExecutionBudgetBinding => {
+    let binding: ExecutionBudgetBinding;
+    try {
+      if (args.executionContractVersion !== 2 || !args.workspaceId) throw new Error('invalid version');
+      binding = parseExecutionBudgetBinding(args.executionBudget, {
+        scopeKey: args.workspaceId,
+        purpose: 'understanding.run',
+        subjectType: 'company',
+      });
+    } catch {
+      throw ApplicationFailure.nonRetryable(
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      );
+    }
+    return binding;
+  };
+
+  const withRunBudget = async <T>(
+    args: UnderstandingAuthorityInput,
+    execute: (accountKey: string) => Promise<T>,
+  ): Promise<T> => {
+    const binding = requireAuthority(args);
+    await budgets.attestAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+    });
+    return execute(binding.accountKey);
+  };
+
+  const crawlViaBroker = async (
+    workspaceId: string,
+    url: string,
+    accountKey: string,
+  ): Promise<{ text: string; durableReceipt?: DurableExecutionReceipt }> => {
     if (!deps.broker) throw new Error('understanding: broker unavailable (fail-closed, no raw egress)');
     const r = await deps.broker.invoke<{ url: string }, CrawlResult>(
       'crawl4ai.fetch',
@@ -65,17 +135,41 @@ export function createUnderstandingActivities(deps: {
         taskContractId: 'company_understanding.extract_claims',
         correlationId: url,
         purpose: ['discovery', 'enrichment'],
+        runId: accountKey,
       },
     );
-    return r.data.text;
+    return {
+      text: r.data.text,
+      ...(r.durableReceipt ? { durableReceipt: r.durableReceipt } : {}),
+    };
+  };
+
+  const acknowledgeProfileNoop = async (
+    workspaceId: string,
+    companyId: string,
+    durableReceipt: DurableExecutionReceipt | undefined,
+  ): Promise<void> => {
+    await deps.prisma.withWorkspace(workspaceId, async (transaction) => {
+      await applyDomainAckConsumerTransaction({
+        transaction,
+        producerId: 'company_understanding.extract_profile',
+        receipt: durableReceipt,
+        domainAckKey: companyId,
+        domainRevision: durableReceipt?.resultDigest ?? 'noop',
+        apply: async () => undefined,
+      });
+    });
   };
 
   return {
     async setStatus(args: {
       companyId: string;
       workspaceId: string;
+      executionContractVersion?: 2;
+      executionBudget?: ExecutionBudgetBinding;
       status: 'ENRICHING' | 'REVIEW' | 'ACTIVE';
     }): Promise<void> {
+      requireAuthority(args);
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.companyProfile.update({
           where: { id: args.companyId },
@@ -84,102 +178,164 @@ export function createUnderstandingActivities(deps: {
       );
     },
 
-    async crawlWebsite(args: { workspaceId: string; website: string }): Promise<CrawledPage> {
-      const text = await crawlViaBroker(args.workspaceId, args.website);
-      return { url: args.website, text: text.slice(0, MAX_PAGE_CHARS) };
+    async crawlWebsite(args: UnderstandingAuthorityInput & { website: string }): Promise<CrawledPage> {
+      return withRunBudget(args, async (accountKey) => {
+        const crawled = await crawlViaBroker(args.workspaceId, args.website, accountKey);
+        return {
+          url: args.website,
+          text: crawled.text.slice(0, MAX_PAGE_CHARS),
+          ...(crawled.durableReceipt
+            ? { durableReceipt: crawled.durableReceipt }
+            : {}),
+        };
+      });
     },
 
     /** Deterministic: pick key subpages (products/about/certifications/cases/contact…). */
-    async selectSubpages(args: { markdown: string; website: string }): Promise<string[]> {
+    async selectSubpages(args: UnderstandingAuthorityEnvelope & { markdown: string; website: string }): Promise<string[]> {
+      requireAuthority(args);
       const links = extractSameSiteLinks(args.markdown, args.website);
       return selectKeySubpages(links, MAX_SUBPAGES);
     },
 
     /** Crawl subpages, tolerating individual failures — a broken page must not kill the run. */
-    async crawlPages(args: { workspaceId: string; urls: string[] }): Promise<{ pages: CrawledPage[] }> {
-      const settled = await Promise.allSettled(args.urls.map((u) => crawlViaBroker(args.workspaceId, u)));
-      const pages: CrawledPage[] = [];
-      settled.forEach((s, i) => {
-        if (s.status === 'fulfilled' && s.value.trim()) {
-          pages.push({ url: args.urls[i], text: s.value.slice(0, MAX_PAGE_CHARS) });
-        } else if (s.status === 'rejected') {
-
-          console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
-        }
+    async crawlPages(args: UnderstandingAuthorityInput & { urls: string[] }): Promise<{ pages: CrawledPage[] }> {
+      return withRunBudget(args, async (accountKey) => {
+        const settled = await Promise.allSettled(
+          args.urls.map((u) => crawlViaBroker(args.workspaceId, u, accountKey)),
+        );
+        const pages: CrawledPage[] = [];
+        settled.forEach((s, i) => {
+          if (s.status === 'fulfilled' && s.value.text.trim()) {
+            pages.push({
+              url: args.urls[i],
+              text: s.value.text.slice(0, MAX_PAGE_CHARS),
+              ...(s.value.durableReceipt
+                ? { durableReceipt: s.value.durableReceipt }
+                : {}),
+            });
+          } else if (s.status === 'rejected') {
+            if (isExecutionControlError(s.reason)) throw s.reason;
+            console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
+          }
+        });
+        return { pages };
       });
-      return { pages };
     },
 
-    async extractClaims(args: { workspaceId: string; text: string }): Promise<{ claims: ExtractedClaim[] }> {
-      const contract = getTask('company_understanding.extract_claims');
-      const result = await executeStructuredTaskWithRuntime(
-        deps.gateway,
-        {
-          task: contract?.id ?? 'company_understanding.extract_claims',
-          prompt: args.text,
-          system: contract?.description,
-          model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
-          schema: contract?.outputSchema ?? { required: ['claims'] },
-        },
-        { workspaceId: args.workspaceId },
-        { telemetry: deps.runtimeTelemetry },
-      );
-      const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
-      // Stub gateway returns { claims: null }; synthesize a deterministic sample
-      // so the loop is observable end-to-end until a real model is registered.
-      const claims: ExtractedClaim[] = Array.isArray(fromModel)
-        ? fromModel
-        : [{ type: 'capability', statement: 'Stub-extracted capability claim', evidence: '(stub)', confidence: 0.5 }];
-      return { claims };
+    async extractClaims(args: UnderstandingAuthorityInput & { text: string }): Promise<{
+      claims: ExtractedClaim[];
+      durableReceipt?: DurableExecutionReceipt;
+    }> {
+      return withRunBudget(args, async (accountKey) => {
+        const contract = getTask('company_understanding.extract_claims');
+        const result = await executeStructuredTaskWithRuntime(
+          deps.gateway,
+          {
+            task: contract?.id ?? 'company_understanding.extract_claims',
+            prompt: args.text,
+            system: contract?.description,
+            model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
+            schema: contract?.outputSchema ?? { required: ['claims'] },
+          },
+          {
+            workspaceId: args.workspaceId,
+            runId: accountKey,
+            durableResultSchema: 'understanding-claims/v1',
+          },
+          { telemetry: deps.runtimeTelemetry },
+        );
+        const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
+        if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_CLAIMS_INVALID');
+        return {
+          claims: fromModel,
+          ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
+        };
+      });
     },
 
     /** 画像回填（KNW-002/5.2.3）：行业 + 简介，只在首页文本上跑一次。 */
     async extractAndPersistProfile(args: UnderstandingInput & { text: string }): Promise<void> {
-      const contract = getTask('company_understanding.extract_profile');
-      const result = await executeStructuredTaskWithRuntime(
-        deps.gateway,
-        {
-          task: contract?.id ?? 'company_understanding.extract_profile',
-          prompt: args.text,
-          system: contract?.description,
-          model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
-        },
-        { workspaceId: args.workspaceId },
-        { telemetry: deps.runtimeTelemetry },
-      );
-      const out = result.data as { industry?: string; summary?: string };
-      if (!out?.industry && !out?.summary) return; // stub/空输出不回填
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.companyProfile.update({
-          where: { id: args.companyId },
-          data: {
-            ...(out.industry ? { industry: out.industry } : {}),
-            ...(out.summary ? { summary: out.summary } : {}),
+      return withRunBudget(args, async (accountKey) => {
+        const contract = getTask('company_understanding.extract_profile');
+        const result = await executeStructuredTaskWithRuntime(
+          deps.gateway,
+          {
+            task: contract?.id ?? 'company_understanding.extract_profile',
+            prompt: args.text,
+            system: contract?.description,
+            model: contract?.model,
+            schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
           },
-        }),
-      );
+          {
+            workspaceId: args.workspaceId,
+            runId: accountKey,
+            durableResultSchema: 'understanding-profile/v1',
+          },
+          { telemetry: deps.runtimeTelemetry },
+        );
+        const out = result.data as { industry?: string; summary?: string };
+        if (!out?.industry && !out?.summary) {
+          await acknowledgeProfileNoop(
+            args.workspaceId,
+            args.companyId,
+            result.durableReceipt,
+          );
+          return;
+        }
+        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          await applyDomainAckConsumerTransaction({
+            transaction: tx,
+            producerId: 'company_understanding.extract_profile',
+            receipt: result.durableReceipt,
+            domainAckKey: args.companyId,
+            domainRevision: result.durableReceipt?.resultDigest ?? '1',
+            apply: (transaction) => transaction.companyProfile.update({
+            where: { id: args.companyId },
+            data: {
+              ...(out.industry ? { industry: out.industry } : {}),
+              ...(out.summary ? { summary: out.summary } : {}),
+            },
+          }),
+          });
+        });
+      });
     },
 
     async extractOfferings(args: {
       workspaceId: string;
+      executionContractVersion?: 2;
+      executionBudget?: ExecutionBudgetBinding;
       text: string;
-    }): Promise<{ offerings: ExtractedOffering[] }> {
-      const contract = getTask('company_understanding.extract_offerings');
-      const result = await executeStructuredTaskWithRuntime(
-        deps.gateway,
-        {
-          task: contract?.id ?? 'company_understanding.extract_offerings',
-          prompt: args.text,
-          system: contract?.description,
-          model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['offerings'] },
-        },
-        { workspaceId: args.workspaceId },
-        { telemetry: deps.runtimeTelemetry },
-      );
-      const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
-      return { offerings: Array.isArray(fromModel) ? fromModel : [] };
+    }): Promise<{
+      offerings: ExtractedOffering[];
+      durableReceipt?: DurableExecutionReceipt;
+    }> {
+      return withRunBudget(args, async (accountKey) => {
+        const contract = getTask('company_understanding.extract_offerings');
+        const result = await executeStructuredTaskWithRuntime(
+          deps.gateway,
+          {
+            task: contract?.id ?? 'company_understanding.extract_offerings',
+            prompt: args.text,
+            system: contract?.description,
+            model: contract?.model,
+            schema: contract?.outputSchema ?? { required: ['offerings'] },
+          },
+          {
+            workspaceId: args.workspaceId,
+            runId: accountKey,
+            durableResultSchema: 'understanding-offerings/v1',
+          },
+          { telemetry: deps.runtimeTelemetry },
+        );
+        const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
+        if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_OFFERINGS_INVALID');
+        return {
+          offerings: fromModel,
+          ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
+        };
+      });
     },
 
     /**
@@ -188,16 +344,39 @@ export function createUnderstandingActivities(deps: {
      * duplicates collapse into one claim with evidence from each page.
      */
     async persistClaims(
-      args: UnderstandingInput & { pages: { url: string; claims: ExtractedClaim[] }[] },
+      args: UnderstandingInput & { pages: {
+        url: string;
+        claims: ExtractedClaim[];
+        durableReceipt?: DurableExecutionReceipt;
+        crawlDurableReceipt?: DurableExecutionReceipt;
+      }[] },
     ): Promise<{ claimCount: number }> {
+      requireAuthority(args);
       // 幂等（PRD 11.16）：at-least-once 的活动重试不得重复写入。
       // 每页的 source+claims 在同一事务里原子落库，ingestKey = runId+页URL；
       // 已存在则整页跳过。
       const runId = Context.current().info.workflowExecution?.runId ?? Context.current().info.activityId;
-      let claimCount = 0;
-      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+      const claimCount = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: args.pages.flatMap((page) => [
+            ...(page.durableReceipt ? [{
+              producerId: 'company_understanding.extract_claims',
+              receipt: page.durableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:claims`,
+              domainRevision: page.durableReceipt.resultDigest,
+            }] : []),
+            ...(page.crawlDurableReceipt ? [{
+              producerId: 'crawl4ai.fetch',
+              receipt: page.crawlDurableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:crawl`,
+              domainRevision: page.crawlDurableReceipt.resultDigest,
+            }] : []),
+          ]),
+          apply: async (transaction) => {
+        let appliedClaimCount = 0;
         // KNW-004 冲突检测的对照集：本公司既有（其他来源/往次运行）的有效 Claim
-        const priorClaims = await tx.claim.findMany({
+        const priorClaims = await transaction.claim.findMany({
           where: { companyId: args.companyId, status: { in: ['APPROVED', 'NEEDS_REVIEW'] } },
           select: { id: true, type: true, statement: true },
         });
@@ -206,12 +385,12 @@ export function createUnderstandingActivities(deps: {
         for (const page of args.pages) {
           if (!page.claims.length) continue;
           const ingestKey = `${runId}:${page.url}`;
-          const existing = await tx.knowledgeSource.findFirst({
+          const existing = await transaction.knowledgeSource.findFirst({
             where: { companyId: args.companyId, ingestKey },
             select: { id: true },
           });
           if (existing) continue; // 本次运行已写过该页
-          const source = await tx.knowledgeSource.create({
+          const source = await transaction.knowledgeSource.create({
             data: {
               workspaceId: args.workspaceId,
               companyId: args.companyId,
@@ -225,7 +404,7 @@ export function createUnderstandingActivities(deps: {
             const key = c.statement.toLowerCase().replace(/\s+/g, ' ').trim();
             let claimId = byStatement.get(key);
             if (!claimId) {
-              const claim = await tx.claim.create({
+              const claim = await transaction.claim.create({
                 data: {
                   workspaceId: args.workspaceId,
                   companyId: args.companyId,
@@ -238,14 +417,14 @@ export function createUnderstandingActivities(deps: {
               });
               claimId = claim.id;
               byStatement.set(key, claimId);
-              claimCount += 1;
+              appliedClaimCount += 1;
               // KNW-004：与既有同类型 Claim 高度相似但不相同 → 冲突，供人工裁决，绝不静默覆盖
               const rival = priorClaims.find(
                 (p) => p.type === c.type && p.statement !== c.statement && jaccard(p.statement, c.statement) >= 0.55,
               );
               if (rival && conflictBudget > 0) {
                 conflictBudget -= 1;
-                await tx.knowledgeConflict.create({
+                await transaction.knowledgeConflict.create({
                   data: {
                     workspaceId: args.workspaceId,
                     companyId: args.companyId,
@@ -254,7 +433,7 @@ export function createUnderstandingActivities(deps: {
                     claimType: c.type,
                   },
                 });
-                await tx.outboxEvent.create({
+                await transaction.outboxEvent.create({
                   data: {
                     workspaceId: args.workspaceId,
                     eventType: 'KnowledgeConflictDetected',
@@ -265,7 +444,7 @@ export function createUnderstandingActivities(deps: {
                 });
               }
             }
-            await tx.evidence.create({
+            await transaction.evidence.create({
               data: {
                 workspaceId: args.workspaceId,
                 claimId,
@@ -277,14 +456,27 @@ export function createUnderstandingActivities(deps: {
             });
           }
         }
+        return appliedClaimCount;
+          },
+          readback: (transaction) => transaction.claim.count({
+            where: { companyId: args.companyId },
+          }),
+        });
+        return result.value;
       });
       return { claimCount };
     },
 
     /** Merge per-page offerings by name and upsert (idempotent on re-runs). */
     async persistOfferings(
-      args: UnderstandingInput & { pages: { url: string; offerings: ExtractedOffering[] }[] },
+      args: UnderstandingInput & { pages: {
+        url: string;
+        offerings: ExtractedOffering[];
+        durableReceipt?: DurableExecutionReceipt;
+        crawlDurableReceipt?: DurableExecutionReceipt;
+      }[] },
     ): Promise<{ offeringCount: number }> {
+      requireAuthority(args);
       const merged = new Map<string, ExtractedOffering & { sourceUrl: string }>();
       for (const page of args.pages) {
         for (const o of page.offerings) {
@@ -296,9 +488,26 @@ export function createUnderstandingActivities(deps: {
           }
         }
       }
-      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        for (const o of merged.values()) {
-          await tx.offering.upsert({
+      const offeringCount = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: args.pages.flatMap((page) => [
+            ...(page.durableReceipt ? [{
+              producerId: 'company_understanding.extract_offerings',
+              receipt: page.durableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:offerings`,
+              domainRevision: page.durableReceipt.resultDigest,
+            }] : []),
+            ...(page.crawlDurableReceipt ? [{
+              producerId: 'crawl4ai.fetch',
+              receipt: page.crawlDurableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:crawl`,
+              domainRevision: page.crawlDurableReceipt.resultDigest,
+            }] : []),
+          ]),
+          apply: async (transaction) => {
+          for (const o of merged.values()) {
+          await transaction.offering.upsert({
             where: { companyId_name: { companyId: args.companyId, name: o.name } },
             update: {
               description: o.description ?? null,
@@ -319,8 +528,15 @@ export function createUnderstandingActivities(deps: {
             },
           });
         }
+          return merged.size;
+          },
+          readback: (transaction) => transaction.offering.count({
+            where: { companyId: args.companyId },
+          }),
+        });
+        return result.value;
       });
-      return { offeringCount: merged.size };
+      return { offeringCount };
     },
 
     /**
@@ -331,14 +547,38 @@ export function createUnderstandingActivities(deps: {
     async persistPublicContacts(
       args: UnderstandingInput & { pages: CrawledPage[] },
     ): Promise<{ contactCount: number }> {
+      requireAuthority(args);
       const contacts = extractPublicContacts(args.pages);
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.companyProfile.update({
-          where: { id: args.companyId },
-          data: { publicContacts: contacts as never },
-        }),
-      );
-      return { contactCount: contacts.length };
+      const contactCount = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: args.pages.flatMap((page) =>
+            page.durableReceipt ? [{
+              producerId: 'crawl4ai.fetch',
+              receipt: page.durableReceipt,
+              domainAckKey: `${args.companyId}:${page.url}:public-contacts`,
+              domainRevision: page.durableReceipt.resultDigest,
+            }] : []),
+          apply: async (transaction) => {
+            await transaction.companyProfile.update({
+              where: { id: args.companyId },
+              data: { publicContacts: contacts as never },
+            });
+            return contacts.length;
+          },
+          readback: async (transaction) => {
+            const profile = await transaction.companyProfile.findUniqueOrThrow({
+              where: { id: args.companyId },
+              select: { publicContacts: true },
+            });
+            return Array.isArray(profile.publicContacts)
+              ? profile.publicContacts.length
+              : 0;
+          },
+        });
+        return result.value;
+      });
+      return { contactCount };
     },
   };
 }

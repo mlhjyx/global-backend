@@ -385,11 +385,11 @@
       "baselinePattern": "../styles/global.css",
       "expectedPaths": [
         "apps/site-renderer/src/layouts/Base.astro",
-        "apps/site-renderer/src/pages/gallery.astro"
+        "apps/site-renderer-visual-harness/src/pages/gallery.astro"
       ],
       "allowedPaths": [
         "apps/site-renderer/src/layouts/Base.astro",
-        "apps/site-renderer/src/pages/gallery.astro",
+        "apps/site-renderer-visual-harness/src/pages/gallery.astro",
         "apps/site-renderer/src/styles/global.css"
       ],
       "unifiedSources": ["contractgraph"]

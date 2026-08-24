@@ -12,6 +12,7 @@ export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([
   'DiscoveryRunRequested',
   'QualifyRequested',
   'DeletionRequested', // 收口⑥ PR-B：relay dispatch → 起 deletionWorkflow（Art.17 擦除编排）
+  'PersonalArtifactCleanupRequested',
   'AssetObjectCleanupRequested', // R2-A4 staging + MF0-B strict canonical/Variant cleanup
 ]);
 
@@ -26,6 +27,7 @@ export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
   'ClaimExpired',
   'KnowledgeConflictDetected',
   'DeletionCompleted', // 收口⑥ PR-B：擦除完成对外交付事件（🔴 payload 只计数 + subject 引用，无 PII）
+  'SiteBuildCostSummaryUpdated', // v1 append-only reconciliation projection for SaaS Credits/Billing
 ]);
 
 /** pull sink：SaaS 主动 GET /events + POST /events/ack。 */
@@ -47,6 +49,134 @@ export interface OutboxEventRow {
   causationId: string | null;
   privacyClassification: string;
   payload: unknown;
+}
+
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHA256 = /^[0-9a-f]{64}$/;
+const DECIMAL = /^(0|[1-9][0-9]*)$/;
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return (
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+  );
+}
+
+/** Machine boundary for SiteBuildCostSummaryUpdated/v1 delivery. */
+export function matchesSiteBuildCostSummaryUpdatedV1(
+  ev: Pick<
+    OutboxEventRow,
+    | "eventType"
+    | "schemaVersion"
+    | "workspaceId"
+    | "aggregateType"
+    | "aggregateId"
+    | "payload"
+  >,
+): boolean {
+  if (ev.eventType !== "SiteBuildCostSummaryUpdated") return true;
+  const payload = record(ev.payload);
+  const budget = record(payload?.budget);
+  const totals = record(payload?.totals);
+  const reconciliation = record(payload?.reconciliation);
+  const decimalFields = (value: Record<string, unknown>, keys: string[]) =>
+    keys.every(
+      (key) => typeof value[key] === "string" && DECIMAL.test(value[key]),
+    );
+  return Boolean(
+    ev.schemaVersion === 1 &&
+      ev.aggregateType === "SiteBuildRun" &&
+      UUID.test(ev.workspaceId) &&
+      UUID.test(ev.aggregateId) &&
+      payload &&
+      exactKeys(payload, [
+        "workspaceId",
+        "siteId",
+        "buildRunId",
+        "revision",
+        "summaryDigest",
+        "budget",
+        "totals",
+        "reconciliation",
+      ]) &&
+      payload.workspaceId === ev.workspaceId &&
+      typeof payload.siteId === "string" &&
+      UUID.test(payload.siteId) &&
+      payload.buildRunId === ev.aggregateId &&
+      Number.isSafeInteger(payload.revision) &&
+      Number(payload.revision) >= 0 &&
+      typeof payload.summaryDigest === "string" &&
+      SHA256.test(payload.summaryDigest) &&
+      budget &&
+      exactKeys(budget, [
+        "authorizedCapMicrousd",
+        "conservativeChargedMicrousd",
+        "capMicrousd",
+        "reservedMicrousd",
+        "chargedMicrousd",
+        "remainingMicrousd",
+        "paidCallsEnabled",
+        "disabledReason",
+        "exhaustedAt",
+      ]) &&
+      decimalFields(budget, [
+        "authorizedCapMicrousd",
+        "conservativeChargedMicrousd",
+        "capMicrousd",
+        "reservedMicrousd",
+        "chargedMicrousd",
+        "remainingMicrousd",
+      ]) &&
+      typeof budget.paidCallsEnabled === "boolean" &&
+      (budget.disabledReason === null ||
+        typeof budget.disabledReason === "string") &&
+      (budget.exhaustedAt === null || typeof budget.exhaustedAt === "string") &&
+      totals &&
+      exactKeys(totals, [
+        "reportedCostMicrousd",
+        "calculatedCostMicrousd",
+        "estimatedCostMicrousd",
+        "unknownOperations",
+        "exactCostMicrousd",
+        "upperBoundCostMicrousd",
+      ]) &&
+      decimalFields(totals, [
+        "reportedCostMicrousd",
+        "calculatedCostMicrousd",
+        "estimatedCostMicrousd",
+        "exactCostMicrousd",
+        "upperBoundCostMicrousd",
+      ]) &&
+      Number.isSafeInteger(totals.unknownOperations) &&
+      Number(totals.unknownOperations) >= 0 &&
+      reconciliation &&
+      exactKeys(reconciliation, [
+        "pendingOperations",
+        "resolvedOperations",
+        "conflictOperations",
+        "asOf",
+        "revision",
+      ]) &&
+      [
+        reconciliation.pendingOperations,
+        reconciliation.resolvedOperations,
+        reconciliation.conflictOperations,
+        reconciliation.revision,
+      ].every((value) => Number.isSafeInteger(value) && Number(value) >= 0) &&
+      reconciliation.revision === payload.revision &&
+      (reconciliation.asOf === null ||
+        typeof reconciliation.asOf === "string")
+  );
 }
 
 /** 对外事件信封（packages/contracts/events/envelope.schema.json 的 snake_case 形状）。 */

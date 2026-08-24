@@ -13,6 +13,7 @@ import {
 } from '../provider-contract';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -147,7 +148,8 @@ export class DecisionMakerProvider {
           },
         );
         text = crawled.data.text.slice(0, 30_000);
-      } catch {
+      } catch (err) {
+        if (isExecutionControlError(err)) throw err;
         continue;
       }
       if (text.trim().length < 120) continue;
@@ -205,7 +207,8 @@ export class DecisionMakerProvider {
         .filter((s) => s.w > 0)
         .sort((a, b) => b.w - a.w);
       for (const s of scored) if (!picked.includes(s.l)) picked.push(s.l);
-    } catch {
+    } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       // 首页抓不到也无妨，走固定路径兜底
     }
     for (const p of FIXED_PATHS) {
@@ -256,11 +259,12 @@ export class DecisionMakerProvider {
           schema: contract?.outputSchema ?? { required: ['people'] },
         },
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { ...ctx },
+        { ...ctx, durableResultSchema: 'contact-decision-makers/v1' },
         { telemetry: this.deps.runtimeTelemetry },
       );
       return result.data?.people ?? [];
     } catch (err) {
+      if (isExecutionControlError(err)) throw err;
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
       return [];
     }

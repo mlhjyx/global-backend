@@ -1,56 +1,140 @@
-# systemd units — 开机自启 API + Temporal worker
+# API / Worker immutable OCI runtime
 
-Ubuntu 服务器（见 [AGENTS.md §3](../../AGENTS.md)）上让**后端 API 与 Temporal worker 开机自启、崩溃自愈**的两个 systemd 单元。跑**构建产物**（`node dist/*.js`，非 watch），由 systemd 托管；配合 docker 整栈 + `temporal-dev.service`，重启后整栈自恢复。
+`global-api.service` and `global-worker.service` start the same immutable backend
+OCI image through different commands. A source checkout, a mutable `dist/` folder,
+or a watch process is never an accepted managed runtime.
 
-| 单元 | 进程 | 端口/职责 |
-|---|---|---|
-| `global-api.service` | `node dist/main.js` | API，监听 `:3000` |
-| `global-worker.service` | `node dist/temporal/worker.js` | Temporal worker（无监听端口） |
+This document is an operator contract. It does not authorize an image push,
+deployment, restart, migration, provider call, or production promotion.
 
-## 前置假设（换机/换路径时按需改 unit）
+## Build and promotion contract
 
-- 代码 checkout 在 `/global/backend`，工作目录 `WorkingDirectory=/global/backend/apps/api`（两入口 `import 'dotenv/config'` 从 cwd 载 `apps/api/.env`）。
-- Node 用 fnm 稳定默认路径 `/root/.fnm/aliases/default/bin/node`（systemd 无 shell PATH，不能用 fnm 的 per-shell 临时路径）。
-- `root` 用户；`docker.service` + `temporal-dev.service` 已存在并 enabled。
-- 所有 `pnpm`/`docker compose` 命令均从仓库根目录 `/global/backend` 执行。
-- **已先构建**：`cd /global/backend && pnpm --filter @global/api build`（unit 跑 `dist/`，不含热重载）。
-
-## 安装
+Build once from an exact clean commit. The build emits the API/Worker `dist`, a
+pruned renderer runtime, an artifact manifest, CycloneDX SBOM, and
+`build-attestation.json`. The attestation binds the source tree, renderer,
+manifest, SBOM, schema, and migration revision.
 
 ```bash
 cd /global/backend
-# 1) 建 symlink（改了本仓文件即生效，比 cp 好）
-sudo ln -sf /global/backend/infra/systemd/global-api.service    /etc/systemd/system/global-api.service
+test -z "$(git status --porcelain)"
+export BUILD_SHA="$(git rev-parse HEAD)"
+export BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+docker build \
+  --build-arg "BUILD_SHA=${BUILD_SHA}" \
+  --build-arg "BUILT_AT=${BUILT_AT}" \
+  --tag global-backend-build:${BUILD_SHA} \
+  .
+```
+
+The registry publication workflow must return one exact reference such as
+`registry.example/global-backend@sha256:<64-lowercase-hex>`. Development,
+pre-production, and production promote that same reference; they do not rebuild
+it. `GLOBAL_BACKEND_IMAGE` is the single configuration source for both the
+container image and runtime identity admission. Do not configure a second digest
+variable.
+
+The image requires only two entrypoints:
+
+```text
+<exact-image-reference> api
+<exact-image-reference> worker
+```
+
+## Managed development configuration
+
+Store the exact reference and runtime secrets outside Git in
+`/global/backend/.secrets/backend-runtime.env`:
+
+```text
+GLOBAL_BACKEND_IMAGE=registry.example/global-backend@sha256:<digest>
+```
+
+The same file supplies the runtime's required endpoints and secret references.
+All managed modes use `NODE_ENV=production`; `APP_ENVIRONMENT` may identify
+development, pilot, or production but never selects an alternative business,
+auth, validation, provider, persistence, fallback, cost, or readiness path.
+
+Before starting a candidate image, deploy its additive migrations with the
+explicit migration-owner connection. This is an external database action and
+must follow its own approval and backup policy.
+
+Then provision the three exclusive PostgreSQL login principals used by runtime
+lease writers. Supply the owner URL, three distinct bounded login names, and
+three generated passwords through the environment or secret manager; the script
+does not contain credentials and safely rotates existing passwords:
+
+```bash
+bash infra/postgres/provision-runtime-lease-principals.sh
+bash infra/postgres/verify-runtime-lease-principal-permissions.sh
+```
+
+The API-only secret file `.secrets/backend-api-runtime.env` contains
+`RUNTIME_API_LEASE_DATABASE_URL` and
+`RUNTIME_OUTBOX_RELAY_LEASE_DATABASE_URL`. The Worker-only file
+`.secrets/backend-worker-runtime.env` contains
+`RUNTIME_WORKER_LEASE_DATABASE_URL`. The common secret file must not duplicate
+these URLs. Each login inherits exactly one of `runtime_api`, `runtime_worker`,
+or `runtime_outbox_relay`; `app_user` remains read-only for the lease table.
+
+```bash
+cd /global/backend
+docker compose -p global \
+  -f docker-compose.yml \
+  -f infra/backend-runtime.compose.yml \
+  --profile managed-runtime config --quiet
+```
+
+## Drain-and-swap
+
+Use the platform's ingress/control-plane drain to pause new BuildRuns, then:
+
+1. mark the old worker draining and wait for a safe workflow-task boundary;
+2. stop the old worker so one task queue cannot contain two active digests;
+3. start the new worker and wait for its matching READY lease;
+4. start or switch the API only after worker, relay, migration, storage, Redis,
+   Model Gateway, renderer identity, and Budget Grant verification are ready;
+5. resume BuildRun admission only after exact readback succeeds.
+
+The systemd units delegate to the managed Compose profile:
+
+```bash
+sudo ln -sf /global/backend/infra/systemd/global-api.service /etc/systemd/system/global-api.service
 sudo ln -sf /global/backend/infra/systemd/global-worker.service /etc/systemd/system/global-worker.service
-# 2) 重载 + 开机自启 + 立即起
 sudo systemctl daemon-reload
-sudo systemctl enable --now global-api.service global-worker.service
-# 3) 核验
-systemctl is-active global-api global-worker         # 期望 active
-curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/api/portal   # 期望 200
 ```
 
-## 日常管理
+Starting, enabling, stopping, or restarting these services is a deployment
+action and is deliberately not part of repository verification.
+
+## Exact readback
+
+Read back the running container configuration and both health contracts. Do not
+infer identity from the source checkout or the local tag.
 
 ```bash
-systemctl status  global-api global-worker    # 状态
-systemctl restart global-api global-worker     # rebuild 后必须重启才加载新 dist
-journalctl -u global-api -f                     # 跟日志
+docker inspect global-api global-worker \
+  --format '{{.Name}} image={{.Config.Image}} id={{.Image}} user={{.Config.User}}'
+curl --fail --silent http://127.0.0.1:3000/health/build
+curl --fail --silent http://127.0.0.1:3000/health/ready
 ```
 
-> **改代码后**：systemd 跑的是构建产物；从 `/global/backend` 执行 `pnpm --filter @global/api build` 后，
-> 再执行 `systemctl restart global-api global-worker` 才生效。
+Acceptance requires:
 
-## 🔴 与热重载开发的端口让位
+- both container `.Config.Image` values equal the approved
+  `GLOBAL_BACKEND_IMAGE` byte-for-byte;
+- both image IDs match and both containers run as UID/GID `10001`;
+- `/health/build` reports the expected commit, image, artifact, manifest, SBOM,
+  renderer, schema, and migration digests;
+- `/health/ready` reports every component ready and the API/Worker/Relay leases
+  carry one matching release identity;
+- no second active digest exists on the same Temporal task queue.
 
-systemd 的 `global-api` 占 `:3000`；`pnpm --filter @global/api start:dev`（nest --watch）也要 `:3000`，会冲突。热重载开发前先让位：
+## Rollback boundary
 
-```bash
-cd /global/backend
-systemctl stop global-api                       # 先停 systemd 版
-pnpm --filter @global/api start:dev             # 再跑 watch
-# 开发完交还：
-systemctl start global-api
-```
+Rollback selects the saved N-1 exact image reference; it never rebuilds N-1.
+If the current database revision is incompatible with N-1, keep BuildRun
+admission paused and forward-fix. Do not perform a destructive database rollback.
 
-worker 无端口冲突（Temporal 允许多 poller），systemd worker 与手动 worker 可并存。
+Source watch remains an editor-feedback process only. It cannot receive user
+BuildRuns, real credentials/data, paid calls, or RuntimeEvidence, and it must not
+share the managed Temporal task queue.

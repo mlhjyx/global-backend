@@ -12,3 +12,75 @@
 export function resolveEvidenceLicense(recordLicense: string | undefined, providerKey: string): string {
   return recordLicense ?? (providerKey === 'sandbox' ? 'sandbox' : 'licensed');
 }
+
+export interface DiscoveryProvenanceMarker {
+  readonly providerKey?: unknown;
+  readonly license?: unknown;
+}
+
+export interface DiscoveryEntityProvenanceMarker extends DiscoveryProvenanceMarker {
+  readonly entityId: string;
+}
+
+const SYNTHETIC_PROVENANCE_MARKERS = new Set(['sandbox', 'stub', 'fake', 'synthetic', 'fixture']);
+
+function normalizedMarker(value: unknown): string | null {
+  return typeof value === 'string' ? value.trim().toLowerCase() : null;
+}
+
+/**
+ * Historical synthetic rows remain immutable provenance, but they are never product input.
+ * Both columns are checked because legacy rows may expose the marker only through
+ * `field_evidence.license` or a raw payload copied from an old provider response.
+ */
+export function isSyntheticDiscoveryProvenance(
+  provenance: DiscoveryProvenanceMarker | null | undefined,
+): boolean {
+  if (!provenance) return false;
+  const providerKey = normalizedMarker(provenance.providerKey);
+  const license = normalizedMarker(provenance.license);
+  return (
+    (providerKey !== null && SYNTHETIC_PROVENANCE_MARKERS.has(providerKey)) ||
+    (license !== null && SYNTHETIC_PROVENANCE_MARKERS.has(license))
+  );
+}
+
+export class SyntheticDiscoveryProvenanceError extends Error {
+  readonly code = 'SYNTHETIC_DISCOVERY_PROVENANCE';
+
+  constructor() {
+    super('synthetic discovery provenance is quarantined from the product path');
+    this.name = 'SyntheticDiscoveryProvenanceError';
+  }
+}
+
+export function assertProductDiscoveryProvenance(provenance: DiscoveryProvenanceMarker): void {
+  if (isSyntheticDiscoveryProvenance(provenance)) {
+    throw new SyntheticDiscoveryProvenanceError();
+  }
+}
+
+/**
+ * Converts one bounded evidence query into a quarantine set without mutating or
+ * deleting historical rows. Callers keep pagination based on the unfiltered
+ * source page, then exclude these ids before any product derivation.
+ */
+export function syntheticDiscoveryEntityIds(
+  rows: readonly DiscoveryEntityProvenanceMarker[],
+): ReadonlySet<string> {
+  return new Set(rows.filter(isSyntheticDiscoveryProvenance).map((row) => row.entityId));
+}
+
+export function isProductDiscoveryRawRecord(record: {
+  readonly providerKey?: unknown;
+  readonly payload?: unknown;
+}): boolean {
+  const payload =
+    record.payload !== null && typeof record.payload === 'object'
+      ? (record.payload as Readonly<Record<string, unknown>>)
+      : undefined;
+  return !isSyntheticDiscoveryProvenance({
+    providerKey: record.providerKey,
+    license: payload?.license,
+  });
+}

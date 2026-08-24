@@ -26,6 +26,12 @@ export const SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW =
   'siteReleaseMaintenanceSweepWorkflow';
 export const SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID =
   'site-builder-release-maintenance';
+export const SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW =
+  'siteBuildCostReconciliationSweepWorkflow';
+export const SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID =
+  'site-builder-cost-reconciliation';
 export const ASSET_OBJECT_CLEANUP_WORKFLOW = 'assetObjectCleanupWorkflow';
 // 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
 export const DELETION_WORKFLOW = 'deletionWorkflow';
+export const PERSONAL_ARTIFACT_CLEANUP_WORKFLOW =
+  'personalArtifactCleanupWorkflow';

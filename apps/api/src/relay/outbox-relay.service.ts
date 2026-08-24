@@ -1,19 +1,46 @@
-import { createHmac } from 'node:crypto';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { TemporalClient } from '../temporal/temporal.client';
+import { createHmac } from "node:crypto";
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
+import { PrismaClient } from "@prisma/client";
+import { TemporalClient } from "../temporal/temporal.client";
 import {
   DELETION_WORKFLOW,
   DISCOVERY_WORKFLOW,
   ASSET_OBJECT_CLEANUP_WORKFLOW,
   QUALIFY_WORKFLOW,
+  PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
-} from '../temporal/understanding.constants';
-import { matchesAssetCleanupPayload, parseAssetCleanupCommand } from '../temporal/asset-cleanup.contract';
-import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
-import { seedSanctions } from '../sanctions/sanctions-seed';
-import { INTEGRATION_EVENTS, INTERNAL_COMMANDS, PULL_SINK, WEBHOOK_SINK, toEnvelope } from './event-registry';
+} from "../temporal/understanding.constants";
+import {
+  matchesAssetCleanupPayload,
+  parseAssetCleanupCommand,
+} from "../temporal/asset-cleanup.contract";
+import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
+import {
+  assertMigrationCompatible,
+  RuntimeProcessLeaseService,
+} from "../runtime/runtime-process-lease";
+import { RuntimeAdmissionService } from "../runtime/runtime-admission";
+import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
+import { seedSanctions } from "../sanctions/sanctions-seed";
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from "../execution-budget/execution-budget-binding";
+import {
+  INTEGRATION_EVENTS,
+  INTERNAL_COMMANDS,
+  PULL_SINK,
+  WEBHOOK_SINK,
+  matchesSiteBuildCostSummaryUpdatedV1,
+  toEnvelope,
+} from "./event-registry";
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -44,7 +71,7 @@ const MAX_ERROR_LEN = 500;
 class NonRetryableOutboxCommandError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'NonRetryableOutboxCommandError';
+    this.name = "NonRetryableOutboxCommandError";
   }
 }
 
@@ -80,51 +107,156 @@ type FetchLike = (
 
 @Injectable()
 export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger('OutboxRelay');
+  private readonly logger = new Logger("OutboxRelay");
   private readonly db: PrismaClient;
   private readonly fetchFn: FetchLike;
   private timer?: NodeJS.Timeout;
   private running = false;
   private expireCounter = 0;
+  private initialized = false;
+  private leaseStartingPublished = false;
+  private readiness:
+    | Readonly<{ status: "ready" }>
+    | Readonly<{
+        status: "not_ready";
+        code:
+          | "OUTBOX_RELAY_DATABASE_UNAVAILABLE"
+          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED"
+          | "OUTBOX_RELAY_MIGRATION_MISMATCH";
+      }> = {
+    status: "not_ready",
+    code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+  };
 
   constructor(
     private readonly temporal: TemporalClient,
     // 可选注入（@Optional：Nest 无 provider 时注入 undefined）→ 单测传 mock db/fetch，生产走默认。
     @Optional() db?: PrismaClient,
     @Optional() fetchFn?: FetchLike,
+    @Optional() private readonly leases?: RuntimeProcessLeaseService,
+    @Optional() private readonly admission?: RuntimeAdmissionService,
+    @Optional() private readonly releaseIdentity?: RuntimeReleaseIdentityService,
   ) {
-    this.db = db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+    this.db =
+      db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
     this.fetchFn = fetchFn ?? ((url, init) => fetch(url, init));
   }
 
   async onModuleInit(): Promise<void> {
-    await this.db.$connect();
+    await this.reconnect();
+    this.timer = setInterval(() => {
+      void this.managedTick();
+    }, 2000);
+    this.timer.unref();
+  }
+
+  getReadiness():
+    | Readonly<{ status: "ready" }>
+    | Readonly<{
+        status: "not_ready";
+        code:
+          | "OUTBOX_RELAY_DATABASE_UNAVAILABLE"
+          | "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED"
+          | "OUTBOX_RELAY_MIGRATION_MISMATCH";
+      }> {
+    return this.readiness;
+  }
+
+  async reconnect(): Promise<boolean> {
+    if (this.admission && !this.admission.current().admitted) {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_RUNTIME_ADMISSION_CLOSED",
+      };
+      this.logger.error("outbox relay runtime admission is closed; relay remains non-consuming");
+      return false;
+    }
+    try {
+      await this.db.$connect();
+      if (!(await this.migrationCompatible())) return false;
+      if (!this.leaseStartingPublished) {
+        await this.leases?.heartbeat("OUTBOX_RELAY", "STARTING", null);
+        this.leaseStartingPublished = true;
+      }
+      if (!this.initialized) {
+        await this.initializePlatformState();
+        this.initialized = true;
+      }
+      await this.leases?.heartbeat("OUTBOX_RELAY", "READY", null);
+      this.readiness = { status: "ready" };
+      return true;
+    } catch {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+      };
+      this.logger.error(
+        "outbox relay database initialization unavailable; readiness remains closed",
+      );
+      return false;
+    }
+  }
+
+  async initializePlatformState(): Promise<void> {
     // 平台配置播种（data_provider 无 RLS，owner 连接写入）。失败要**大声**：seed 静默失败意味着
     // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
-    await new DiscoveryProviderRegistry().seed(this.db).catch((err) => {
-      this.logger.error(
-        `provider seed FAILED — providers may be invisible to routing (no-op pipeline): ${String(err)}`,
-      );
-    });
+    await new DiscoveryProviderRegistry().seed(this.db);
     // 制裁名单源 + source_policy seed（第五门，DISABLED；API-only 部署也需登记 source_policy 供 broker 门）。
-    await seedSanctions(this.db).catch((err) => {
-      this.logger.error(`sanctions seed FAILED — refresh/screening may be misconfigured: ${String(err)}`);
-    });
+    await seedSanctions(this.db);
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。
     if (process.env.SAAS_WEBHOOK_URL && !this.webhookEnabled()) {
       this.logger.error(
-        'SAAS_WEBHOOK_URL 已配置但 webhook sink 拒绝启用：需同时配 SAAS_WEBHOOK_SECRET 且 URL 为 https://（dev 例外：localhost/127.0.0.1）。当前不建 webhook 交付行、不派送。',
+        "SAAS_WEBHOOK_URL 已配置但 webhook sink 拒绝启用：需同时配 SAAS_WEBHOOK_SECRET 且 URL 为 https://（dev 例外：localhost/127.0.0.1）。当前不建 webhook 交付行、不派送。",
       );
     }
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, 2000);
   }
 
   async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
-    await this.db.$disconnect();
+    if (this.readiness.status === "ready") {
+      await this.leases
+        ?.heartbeat("OUTBOX_RELAY", "STOPPED", null)
+        .catch(() => this.logger.error("outbox relay stop heartbeat failed"));
+    }
+    await this.db.$disconnect().catch(() => undefined);
+    this.readiness = {
+      status: "not_ready",
+      code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+    };
+  }
+
+  private async managedTick(): Promise<void> {
+    if (this.readiness.status !== "ready" && !(await this.reconnect())) return;
+    if (!(await this.migrationCompatible())) return;
+    try {
+      await this.leases?.heartbeat("OUTBOX_RELAY", "READY", null);
+    } catch {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+      };
+      this.logger.error(
+        "outbox relay heartbeat failed; readiness remains closed",
+      );
+      return;
+    }
+    await this.tick();
+  }
+
+  private async migrationCompatible(): Promise<boolean> {
+    if (!this.releaseIdentity) return true;
+    try {
+      await assertMigrationCompatible(this.db as never, this.releaseIdentity.current());
+      return true;
+    } catch {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_MIGRATION_MISMATCH",
+      };
+      this.logger.error("outbox relay migration is incompatible; relay remains non-consuming");
+      return false;
+    }
   }
 
   async tick(): Promise<void> {
@@ -135,7 +267,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
       const events = (await this.db.outboxEvent.findMany({
         where: { publishedAt: null, parkedAt: null },
-        orderBy: { id: 'asc' },
+        orderBy: { id: "asc" },
         take: BATCH_SIZE,
       })) as OutboxEventRecord[];
       for (const ev of events) {
@@ -172,15 +304,32 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
             where: { id: ev.id },
             data: { parkedAt: new Date() },
           });
-          this.logger.error(`invalid internal command ${ev.eventId} parked: ${err.message}`);
+          this.logger.error(
+            `invalid internal command ${ev.eventId} parked: ${err.message}`,
+          );
           return;
         }
-        this.logger.error(`dispatch failed for event ${ev.eventId}: ${String(err)}`);
+        this.logger.error(
+          `dispatch failed for event ${ev.eventId}: ${String(err)}`,
+        );
       }
       return;
     }
     if (INTEGRATION_EVENTS.has(ev.eventType)) {
-      const sinks = [PULL_SINK, ...(this.webhookEnabled() ? [WEBHOOK_SINK] : [])];
+      if (!matchesSiteBuildCostSummaryUpdatedV1(ev)) {
+        await this.db.outboxEvent.update({
+          where: { id: ev.id },
+          data: { parkedAt: new Date() },
+        });
+        this.logger.error(
+          `invalid integration event ${ev.eventId} parked: payload contract mismatch`,
+        );
+        return;
+      }
+      const sinks = [
+        PULL_SINK,
+        ...(this.webhookEnabled() ? [WEBHOOK_SINK] : []),
+      ];
       try {
         await this.db.$transaction(async (tx) => {
           await tx.outboxDelivery.createMany({
@@ -197,7 +346,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           });
         });
       } catch (err) {
-        this.logger.error(`delivery routing failed for event ${ev.eventId}: ${String(err)}`);
+        this.logger.error(
+          `delivery routing failed for event ${ev.eventId}: ${String(err)}`,
+        );
       }
       return;
     }
@@ -228,7 +379,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (!url || !secret) return false;
     try {
       const parsed = new URL(url);
-      return parsed.protocol === 'https:' || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      return (
+        parsed.protocol === "https:" ||
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1"
+      );
     } catch {
       return false; // URL 畸形 → 拒绝启用（onModuleInit 已大声报过配置不完整）
     }
@@ -246,10 +401,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     const due = await this.db.outboxDelivery.findMany({
       where: {
         sink: WEBHOOK_SINK,
-        status: 'PENDING',
+        status: "PENDING",
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
       },
-      orderBy: { id: 'asc' },
+      orderBy: { id: "asc" },
       take: BATCH_SIZE,
       include: { event: true },
     });
@@ -258,13 +413,15 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         const body = JSON.stringify(toEnvelope(d.event));
         const timestamp = now.toISOString();
         // 签名覆盖 timestamp + body：消费端复算 HMAC 验真伪 + 按时间窗（建议 5min）拒重放。
-        const signature = createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+        const signature = createHmac("sha256", secret)
+          .update(`${timestamp}.${body}`)
+          .digest("hex");
         const res = await this.fetchFn(url, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'content-type': 'application/json',
-            'x-timestamp': timestamp,
-            'x-signature': `sha256=${signature}`,
+            "content-type": "application/json",
+            "x-timestamp": timestamp,
+            "x-signature": `sha256=${signature}`,
           },
           body,
           signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
@@ -273,8 +430,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           // CAS：只翻 PENDING → ACKED。与 ACK API / 多实例竞态时 count=0 → 已被他方推进，本轮跳过
           // （防把 ACKED 覆写回去或重复置位）。
           await this.db.outboxDelivery.updateMany({
-            where: { id: d.id, status: 'PENDING' },
-            data: { status: 'ACKED', deliveredAt: now, ackedAt: now },
+            where: { id: d.id, status: "PENDING" },
+            data: { status: "ACKED", deliveredAt: now, ackedAt: now },
           });
           continue;
         }
@@ -299,12 +456,12 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     const isDead = attempts >= MAX_WEBHOOK_ATTEMPTS;
     const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** attempts, BACKOFF_CAP_MS);
     const r = await this.db.outboxDelivery.updateMany({
-      where: { id: d.id, status: 'PENDING', attempts: d.attempts },
+      where: { id: d.id, status: "PENDING", attempts: d.attempts },
       data: {
         attempts,
         lastError: error.slice(0, MAX_ERROR_LEN),
         nextAttemptAt: new Date(now.getTime() + backoffMs),
-        ...(isDead ? { status: 'DEAD' } : {}),
+        ...(isDead ? { status: "DEAD" } : {}),
       },
     });
     if (r.count === 0) return; // 乐观锁失手：行已被他方推进（ACK/另一实例记账）
@@ -321,7 +478,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (this.expireCounter !== 0) return;
     const now = new Date();
     const expired = await this.db.claim.findMany({
-      where: { status: 'APPROVED', validUntil: { lt: now } },
+      where: { status: "APPROVED", validUntil: { lt: now } },
       select: {
         id: true,
         workspaceId: true,
@@ -341,18 +498,18 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           const update = await tx.claim.updateMany({
             where: {
               id: c.id,
-              status: 'APPROVED',
+              status: "APPROVED",
               version: c.version,
               validUntil: { lt: now },
             },
-            data: { status: 'EXPIRED', version: { increment: 1 } },
+            data: { status: "EXPIRED", version: { increment: 1 } },
           });
           if (update.count === 0) return false;
           await tx.outboxEvent.create({
             data: {
               workspaceId: c.workspaceId,
-              eventType: 'ClaimExpired',
-              aggregateType: 'Claim',
+              eventType: "ClaimExpired",
+              aggregateType: "Claim",
               aggregateId: c.id,
               payload: {
                 companyId: c.companyId,
@@ -366,7 +523,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         if (changed) expiredCount += 1;
       } catch (err) {
         // 单条失败不阻断本批其余 claim；未翻状态的下轮扫描仍会重试。
-        this.logger.error(`claim expiry failed for ${c.id} (下轮重试): ${String(err)}`);
+        this.logger.error(
+          `claim expiry failed for ${c.id} (下轮重试): ${String(err)}`,
+        );
       }
     }
     if (expiredCount) {
@@ -388,7 +547,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.temporal.client.workflow.start(workflowType, options);
       this.logger.log(`started ${what}`);
     } catch (err) {
-      if ((err as Error)?.name === 'WorkflowExecutionAlreadyStartedError') {
+      if ((err as Error)?.name === "WorkflowExecutionAlreadyStartedError") {
         this.logger.log(`${what} already running — merged`);
       } else throw err;
     }
@@ -402,8 +561,24 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     aggregateId: string;
     payload: unknown;
   }): Promise<void> {
-    if (ev.eventType === 'CompanyProfileCreated') {
-      const payload = (ev.payload ?? {}) as { website?: string };
+    if (ev.eventType === "CompanyProfileCreated") {
+      const payload = (ev.payload ?? {}) as {
+        website?: string;
+        executionBudget?: unknown;
+      };
+      let executionBudget: ExecutionBudgetBinding;
+      try {
+        if (ev.schemaVersion !== 2) throw new Error('legacy command version');
+        executionBudget = parseExecutionBudgetBinding(payload.executionBudget, {
+          scopeKey: ev.workspaceId,
+          purpose: "understanding.run",
+          subjectType: "company",
+        });
+      } catch {
+        throw new NonRetryableOutboxCommandError(
+          'EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED',
+        );
+      }
       await this.startWorkflowIdempotent(
         UNDERSTANDING_WORKFLOW,
         {
@@ -413,15 +588,34 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
             {
               workspaceId: ev.workspaceId,
               companyId: ev.aggregateId,
-              website: payload.website ?? '',
+              website: payload.website ?? "",
+              executionContractVersion: 2,
+              executionBudget,
             },
           ],
         },
         `understanding workflow for company ${ev.aggregateId}`,
       );
     }
-    if (ev.eventType === 'DiscoveryRunRequested') {
-      const payload = (ev.payload ?? {}) as { planId?: string; icpId?: string };
+    if (ev.eventType === "DiscoveryRunRequested") {
+      const payload = (ev.payload ?? {}) as {
+        planId?: string;
+        icpId?: string;
+        executionBudget?: unknown;
+      };
+      let executionBudget: ExecutionBudgetBinding;
+      try {
+        if (ev.schemaVersion !== 2) throw new Error('legacy command version');
+        executionBudget = parseExecutionBudgetBinding(payload.executionBudget, {
+          scopeKey: ev.workspaceId,
+          purpose: "discovery.run",
+          subjectType: "discovery_run",
+        });
+      } catch {
+        throw new NonRetryableOutboxCommandError(
+          'EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED',
+        );
+      }
       await this.startWorkflowIdempotent(
         DISCOVERY_WORKFLOW,
         {
@@ -431,15 +625,17 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
             {
               workspaceId: ev.workspaceId,
               runId: ev.aggregateId,
-              planId: payload.planId ?? '',
-              icpId: payload.icpId ?? '',
+              planId: payload.planId ?? "",
+              icpId: payload.icpId ?? "",
+              executionContractVersion: 2,
+              executionBudget,
             },
           ],
         },
         `discovery workflow for run ${ev.aggregateId}`,
       );
     }
-    if (ev.eventType === 'QualifyRequested') {
+    if (ev.eventType === "QualifyRequested") {
       await this.startWorkflowIdempotent(
         QUALIFY_WORKFLOW,
         {
@@ -451,7 +647,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         `qualify workflow for icp ${ev.aggregateId}`,
       );
     }
-    if (ev.eventType === 'DeletionRequested') {
+    if (ev.eventType === "DeletionRequested") {
       // 收口⑥ PR-B：起 GDPR Art.17 删除编排。workflowId=deletion-<requestId> 唯一，重放合并到在跑实例。
       const payload = (ev.payload ?? {}) as {
         subjectType?: string;
@@ -466,26 +662,62 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
             {
               workspaceId: ev.workspaceId,
               deletionRequestId: ev.aggregateId,
-              subjectType: payload.subjectType ?? '',
-              subjectId: payload.subjectId ?? '',
+              subjectType: payload.subjectType ?? "",
+              subjectId: payload.subjectId ?? "",
             },
           ],
         },
         `deletion workflow for request ${ev.aggregateId}`,
       );
     }
-    if (ev.eventType === 'AssetObjectCleanupRequested') {
+    if (ev.eventType === "PersonalArtifactCleanupRequested") {
+      const payload =
+        ev.payload !== null &&
+        typeof ev.payload === 'object' &&
+        !Array.isArray(ev.payload)
+          ? (ev.payload as Record<string, unknown>)
+          : null;
+      if (
+        ev.schemaVersion !== 1 ||
+        !payload ||
+        Reflect.ownKeys(payload).length !== 1 ||
+        payload.deletionRequestId !== ev.aggregateId
+      ) {
+        throw new NonRetryableOutboxCommandError(
+          'personal artifact cleanup payload contract mismatch',
+        );
+      }
+      await this.startWorkflowIdempotent(
+        PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
+        {
+          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          workflowId: `personal-artifact-cleanup-${ev.aggregateId}`,
+          args: [
+            {
+              workspaceId: ev.workspaceId,
+              deletionRequestId: ev.aggregateId,
+            },
+          ],
+        },
+        `personal artifact cleanup for request ${ev.aggregateId}`,
+      );
+    }
+    if (ev.eventType === "AssetObjectCleanupRequested") {
       const payload = (ev.payload ?? {}) as Record<string, unknown>;
       let command: ReturnType<typeof parseAssetCleanupCommand>;
       try {
         if (payload.assetId !== ev.aggregateId) {
-          throw new Error('cleanup payload assetId must match Outbox aggregateId');
+          throw new Error(
+            "cleanup payload assetId must match Outbox aggregateId",
+          );
         }
         if (
-          (payload.objectClass === 'staging' && ev.schemaVersion !== 1) ||
-          (payload.objectClass === 'canonical' && ev.schemaVersion !== 2)
+          (payload.objectClass === "staging" && ev.schemaVersion !== 1) ||
+          (payload.objectClass === "canonical" && ev.schemaVersion !== 2)
         ) {
-          throw new Error('cleanup Outbox schemaVersion does not match objectClass');
+          throw new Error(
+            "cleanup Outbox schemaVersion does not match objectClass",
+          );
         }
         command = parseAssetCleanupCommand({
           eventId: ev.eventId,
@@ -494,15 +726,19 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           siteId: payload.siteId,
           objectClass: payload.objectClass,
           reason: payload.reason,
-          ...(payload.objectClass === 'staging'
+          ...(payload.objectClass === "staging"
             ? { objectKey: payload.objectKey, notBefore: payload.notBefore }
             : { canonical: payload.canonical, variants: payload.variants }),
         });
         if (!matchesAssetCleanupPayload(payload, command)) {
-          throw new Error('cleanup Outbox payload contains unknown or mismatched fields');
+          throw new Error(
+            "cleanup Outbox payload contains unknown or mismatched fields",
+          );
         }
       } catch (error) {
-        throw new NonRetryableOutboxCommandError(error instanceof Error ? error.message : String(error));
+        throw new NonRetryableOutboxCommandError(
+          error instanceof Error ? error.message : String(error),
+        );
       }
       await this.startWorkflowIdempotent(
         ASSET_OBJECT_CLEANUP_WORKFLOW,

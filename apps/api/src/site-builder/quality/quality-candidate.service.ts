@@ -31,6 +31,7 @@ import {
   type RunDeterministicQualityInput,
 } from "./deterministic-quality.service";
 import type { DeterministicQualityResult } from "./deterministic-quality";
+import type { QualityCandidateArtifactRef } from "./quality-candidate-artifact";
 
 export interface QualityCandidateIdentity extends SiteReleaseCandidateFence {
   workspaceId: string;
@@ -38,7 +39,10 @@ export interface QualityCandidateIdentity extends SiteReleaseCandidateFence {
   siteVersionId: string;
   buildRunId: string;
   designBriefDigest: string;
-  root: string;
+  /** New histories carry only this immutable object-store reference. */
+  artifact?: QualityCandidateArtifactRef;
+  /** Pre-production-parity history compatibility; never emitted by new activities. */
+  root?: string;
 }
 
 export interface PreparedQualityRepair {
@@ -141,6 +145,7 @@ export class QualityCandidateService {
   async assembleQualityCandidate(input: {
     identity: QualityCandidateIdentity;
     designBrief: DesignBriefV2;
+    materializedRoot: string;
   }): Promise<SiteSpecV1_1> {
     const brief = validateDesignBriefV2(input.designBrief);
     const persisted = await this.loadPersistedCandidate(input.identity);
@@ -151,7 +156,7 @@ export class QualityCandidateService {
       throw new Error("QUALITY_CANDIDATE_FENCE_LOST");
     }
     await assertRendererOutputMatches({
-      root: input.identity.root,
+      root: input.materializedRoot,
       candidateSpecDigest: input.identity.specDigest,
       basePath: input.identity.basePath,
       siteOrigin: input.identity.siteOrigin,
@@ -163,13 +168,14 @@ export class QualityCandidateService {
   async evaluateQualityCandidate(input: {
     identity: QualityCandidateIdentity;
     designBrief: DesignBriefV2;
+    materializedRoot: string;
     quality: QualityEvaluationInput;
   }): Promise<DeterministicQualityResult> {
     const spec = await this.assembleQualityCandidate(input);
     const result = await this.deterministicQuality.evaluate({
       ...input.quality,
       spec,
-      buildRoot: input.identity.root,
+      buildRoot: input.materializedRoot,
       basePath: input.identity.basePath,
       siteOrigin: input.identity.siteOrigin,
       rendererOutputDigest: input.identity.rendererOutputDigest,
@@ -184,6 +190,7 @@ export class QualityCandidateService {
 
   async applyQualityRepair(input: {
     identity: QualityCandidateIdentity;
+    materializedRoot: string;
     context: ClosedRepairContext;
     evaluation: Parameters<
       ClosedRepairService["generateCatalog"]
@@ -215,7 +222,7 @@ export class QualityCandidateService {
       persisted.specDigest !== input.identity.specDigest;
     if (!replayingCommittedResult) {
       await assertRendererOutputMatches({
-        root: input.identity.root,
+        root: input.materializedRoot,
         candidateSpecDigest: input.identity.specDigest,
         basePath: input.identity.basePath,
         siteOrigin: input.identity.siteOrigin,
@@ -315,7 +322,7 @@ export class QualityCandidateService {
       // selected digest, and a retry may re-render and promote the same option.
       await prepared.promote();
       await assertRendererOutputMatches({
-        root: input.identity.root,
+        root: input.materializedRoot,
         candidateSpecDigest: resultDigest,
         basePath: input.identity.basePath,
         siteOrigin: input.identity.siteOrigin,
@@ -362,7 +369,7 @@ export class QualityCandidateService {
     }
     if (!persisted.readyReplay) {
       await assertRendererOutputMatches({
-        root: candidate.root,
+        root: materializeInput.root,
         candidateSpecDigest: candidate.specDigest,
         basePath: candidate.basePath,
         siteOrigin: candidate.siteOrigin,

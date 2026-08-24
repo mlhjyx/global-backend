@@ -16,7 +16,7 @@ const rendererRoot = path.resolve(import.meta.dirname, "..");
 const fixturesRoot = path.join(rendererRoot, "fixtures", "m1-e-b-golden");
 const sourceAssetsRoot = path.join(
   rendererRoot,
-  "fixtures",
+  "product-assets",
   "design-demo-visuals",
 );
 const snapshotRoot = path.join(

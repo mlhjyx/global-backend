@@ -1,4 +1,4 @@
-import { proxyActivities, log } from '@temporalio/workflow';
+import { patched, proxyActivities, log, workflowInfo } from '@temporalio/workflow';
 import type {
   BacklogActivities,
   ContactBacklogResult,
@@ -8,6 +8,27 @@ import type {
   WatchBacklogResult,
 } from './backlog.activities';
 import type { QualifyActivities } from './qualify.activities';
+
+const BACKLOG_AUTHORITY_HOLD = 'EXECUTION_BUDGET_PLATFORM_AUTHORITY_REQUIRED';
+
+/** Exact new failure only: preserving every predecessor failure-history catch
+ * keeps Temporal replay command sequences deterministic without a patch flag. */
+function isBacklogAuthorityHold(error: unknown): boolean {
+  const visited = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth <= 12 && current && typeof current === 'object'; depth++) {
+    if (visited.has(current)) return false;
+    visited.add(current);
+    const record = current as Record<string, unknown>;
+    if (
+      record.type === BACKLOG_AUTHORITY_HOLD ||
+      record.code === BACKLOG_AUTHORITY_HOLD ||
+      record.message === BACKLOG_AUTHORITY_HOLD
+    ) return true;
+    current = record.cause;
+  }
+  return false;
+}
 
 // 资格门批 = 每家一次 LLM 结构化调用。实测 gemini-2.5-pro 单家 10-30s（含 schema 修复重试可更长）
 // → 批默认 20 家 × 30s ≈ 10 分钟，配 30 分钟上界（40×20s 曾逼近 15 分钟超时线，会整批重试）。
@@ -62,6 +83,8 @@ export interface BacklogSweepTargetStats {
  * 阶段间无跨项依赖 → 顺序执行即可；单阶段失败不阻断后续阶段（fail-safe）。
  */
 export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<BacklogSweepTargetStats[]> {
+  // Preserve command arguments for workflow histories that predate durable per-run budget scopes.
+  const budgetScopeId = patched('backlog-durable-budget-scope-v1') ? workflowInfo().runId : undefined;
   const targets =
     input?.workspaceId && input?.icpId
       ? [{ workspaceId: input.workspaceId, icpId: input.icpId }]
@@ -84,7 +107,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxFitRounds ?? 60); round++) {
-        const r: FitBacklogResult = await fitActs.qualifyFitBacklog({ ...t, limit: input?.fitBatch ?? 20, cursor });
+        const r: FitBacklogResult = await fitActs.qualifyFitBacklog({ ...t, budgetScopeId, limit: input?.fitBatch ?? 20, cursor });
         stats.fit.scanned += r.scanned;
         stats.fit.judged += r.judged;
         for (const [k, v] of Object.entries(r.verdicts)) stats.fit.verdicts[k] = (stats.fit.verdicts[k] ?? 0) + v;
@@ -95,6 +118,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         }
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 资格门阶段失败（网关不可用等），不阻断后续', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -102,7 +126,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxEnrichRounds ?? 10); round++) {
-        const r: EnrichBacklogResult = await fitActs.enrichBacklog({ workspaceId: t.workspaceId, limit: input?.enrichBatch ?? 25, cursor });
+        const r: EnrichBacklogResult = await fitActs.enrichBacklog({ workspaceId: t.workspaceId, budgetScopeId, limit: input?.enrichBatch ?? 25, cursor });
         stats.enrich.scanned += r.scanned;
         stats.enrich.attempted += r.attempted;
         stats.enrich.matched += r.matched;
@@ -110,6 +134,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -117,7 +142,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxSignalRounds ?? 3); round++) {
-        const r: EnrichBacklogResult = await slowActs.enrichSignalsBacklog({ workspaceId: t.workspaceId, limit: input?.signalBatch ?? 12, cursor });
+        const r: EnrichBacklogResult = await slowActs.enrichSignalsBacklog({ workspaceId: t.workspaceId, budgetScopeId, limit: input?.signalBatch ?? 12, cursor });
         stats.signals.scanned += r.scanned;
         stats.signals.attempted += r.attempted;
         stats.signals.matched += r.matched;
@@ -125,6 +150,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -132,13 +158,14 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxWatchRounds ?? 3); round++) {
-        const r: WatchBacklogResult = await slowActs.registerWatchesBacklog({ workspaceId: t.workspaceId, limit: input?.watchBatch ?? 12, cursor });
+        const r: WatchBacklogResult = await slowActs.registerWatchesBacklog({ workspaceId: t.workspaceId, budgetScopeId, limit: input?.watchBatch ?? 12, cursor });
         stats.watches.scanned += r.scanned;
         stats.watches.registered += r.registered;
         cursor = r.nextCursor;
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -146,7 +173,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxContactRounds ?? 3); round++) {
-        const r: ContactBacklogResult = await slowActs.discoverContactsBacklog({ ...t, limit: input?.contactBatch ?? 8, cursor });
+        const r: ContactBacklogResult = await slowActs.discoverContactsBacklog({ ...t, budgetScopeId, limit: input?.contactBatch ?? 8, cursor });
         stats.contacts.scanned += r.scanned;
         stats.contacts.attempted += r.attempted;
         stats.contacts.contactsCreated += r.contactsCreated;
@@ -154,6 +181,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -161,7 +189,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
     try {
       let cursor: string | null = null;
       for (let round = 0; round < (input?.maxGuessRounds ?? 3); round++) {
-        const r: GuessEmailsBacklogResult = await slowActs.guessEmailsBacklog({ ...t, limit: input?.guessBatch ?? 6, cursor });
+        const r: GuessEmailsBacklogResult = await slowActs.guessEmailsBacklog({ ...t, budgetScopeId, limit: input?.guessBatch ?? 6, cursor });
         stats.guesses.scanned += r.scanned;
         stats.guesses.attempted += r.attempted;
         stats.guesses.guessed += r.guessed;
@@ -169,6 +197,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 

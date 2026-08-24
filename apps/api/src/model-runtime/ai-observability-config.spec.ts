@@ -48,7 +48,7 @@ describe('AI observability deployment contract', () => {
     expect(runtimeModule).toContain('@Global()');
     expect(runtimeModule).toContain('exports: [LangfuseRuntimeTelemetryService]');
     expect(discoveryModule).toContain(
-      'inject: [ModelGateway, PrismaService, LangfuseRuntimeTelemetryService]',
+      'inject: [ModelGateway, PrismaService, LangfuseRuntimeTelemetryService, TOOL_BUDGET_STORE]',
     );
     expect(discoveryModule).toContain('runtimeTelemetry,');
   });

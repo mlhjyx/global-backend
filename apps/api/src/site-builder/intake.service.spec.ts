@@ -1,5 +1,6 @@
 import { BadGatewayException, HttpException, HttpStatus } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
 import type { RequestContext } from "../auth/request-context";
 import type { DemoV0LaunchInput, DemoV0Launcher } from "./demo-launcher";
 import {
@@ -7,6 +8,8 @@ import {
   type IntakeInput,
   type IntakeResult,
 } from "./intake.service";
+import { intakeRequestHash } from "./intake.service";
+import type { VerifiedSiteBuildBudgetGrant } from "./site-build-budget-grant";
 
 const CTX: RequestContext = {
   userId: "u1",
@@ -35,14 +38,8 @@ interface FakeDb {
   sites: Record<string, unknown>[];
   runs: Record<string, unknown>[];
   keys: Record<string, unknown>[];
-}
-
-interface TargetCreate {
-  (
-    ctx: RequestContext,
-    input: IntakeInput,
-    idempotencyKey?: string,
-  ): Promise<IntakeResult>;
+  budgets: Record<string, unknown>[];
+  grants: Record<string, unknown>[];
 }
 
 function callCreate(
@@ -50,9 +47,29 @@ function callCreate(
   ctx: RequestContext,
   input: IntakeInput,
   idempotencyKey?: string,
+  verifiedGrant?: VerifiedSiteBuildBudgetGrant,
 ): Promise<IntakeResult> {
-  // 这个适配让目标契约在生产签名尚未实现时仍能运行并形成行为 RED，而不是停在 TS2554。
-  return (service.create as TargetCreate)(ctx, input, idempotencyKey);
+  const instant = new Date();
+  const grant: VerifiedSiteBuildBudgetGrant = {
+    schemaVersion: "site-builder-budget-grant/v1",
+    issuer: "https://saas.test",
+    audience: "global-backend:site-builder-budget",
+    jti: randomUUID(),
+    purpose: "site_builder.build_run",
+    operation: "intake",
+    workspaceId: ctx.workspaceId,
+    siteId: null,
+    requestSha256: intakeRequestHash(input),
+    currency: "USD",
+    unit: "microusd",
+    capMicrousd: 5_000_000n,
+    tokenSha256: randomUUID().replaceAll("-", "").padEnd(64, "0"),
+    issuedAt: instant,
+    notBefore: instant,
+    expiresAt: new Date(instant.getTime() + 300_000),
+    expiredAtVerification: false,
+  };
+  return service.create(ctx, input, idempotencyKey, verifiedGrant ?? grant);
 }
 
 function clone<T>(value: T): T {
@@ -74,6 +91,8 @@ function makeService(
     sites: [],
     runs: [],
     keys: [],
+    budgets: [],
+    grants: [],
   };
   let companyProfileSeq = 0;
   let siteSeq = 0;
@@ -102,7 +121,32 @@ function makeService(
   }
 
   const tx = {
-    $executeRaw: async () => 0,
+    $executeRaw: async (
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => {
+      if (strings.join("?").includes("create_site_build_budget_from_grant")) {
+        const [workspaceId, buildRunId] = values;
+        const grant = db.grants.find(
+          (row) => row.buildRunId === buildRunId && row.workspaceId === workspaceId,
+        );
+        if (!grant) throw new Error("fake authorized grant is missing");
+        if (!db.budgets.some((row) => row.buildRunId === buildRunId)) {
+          db.budgets.push({
+            buildRunId,
+            workspaceId,
+            siteId: grant.siteId,
+            capMicrousd: grant.capMicrousd,
+            reservedMicrousd: 0n,
+            chargedMicrousd: 0n,
+            paidCallsEnabled: true,
+            disabledReason: null,
+            exhaustedAt: null,
+          });
+        }
+      }
+      return 0;
+    },
     workspace: {
       upsert: async ({ where, create }: { where: { id: string }; create: { id: string } }) => {
         const existing = db.workspaces.find((workspace) => workspace.id === where.id);
@@ -197,6 +241,29 @@ function makeService(
         return { count: 1 };
       },
     },
+    siteBuildBudget: {
+      findUnique: async ({ where }: { where: { buildRunId: string } }) =>
+        db.budgets.find((row) => row.buildRunId === where.buildRunId) ?? null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { ...data };
+        db.budgets.push(row);
+        return row;
+      },
+    },
+    siteBuildBudgetGrant: {
+      findUnique: async ({ where }: { where: Record<string, unknown> }) => {
+        if (typeof where.buildRunId === "string") {
+          return db.grants.find((row) => row.buildRunId === where.buildRunId) ?? null;
+        }
+        const key = where.issuer_jti as { issuer: string; jti: string };
+        return db.grants.find((row) => row.issuer === key.issuer && row.jti === key.jti) ?? null;
+      },
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: randomUUID(), ...data };
+        db.grants.push(row);
+        return row;
+      },
+    },
     idempotencyKey: {
       findUnique: async ({
         where,
@@ -253,10 +320,14 @@ function makeService(
       }),
     } as unknown as DemoV0Launcher);
 
+  const assertReady = vi.fn(async () => undefined);
   return {
-    service: new IntakeService(prisma as never, launcher),
+    service: new IntakeService(prisma as never, launcher, {
+      assertReady,
+    } as never),
     db,
     launches,
+    assertReady,
   };
 }
 
@@ -376,6 +447,44 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
     ]);
   });
 
+  it("锁等待后 Grant 过期时返回 402 且事务零写入", async () => {
+    const { service, db, launches } = makeService();
+    const instant = new Date(Date.now() - 361_000);
+    const grant: VerifiedSiteBuildBudgetGrant = {
+      schemaVersion: "site-builder-budget-grant/v1",
+      issuer: "https://saas.test",
+      audience: "global-backend:site-builder-budget",
+      jti: randomUUID(),
+      purpose: "site_builder.build_run",
+      operation: "intake",
+      workspaceId: CTX.workspaceId,
+      siteId: null,
+      requestSha256: intakeRequestHash(BASE_INTAKE),
+      currency: "USD",
+      unit: "microusd",
+      capMicrousd: 5_000_000n,
+      tokenSha256: "b".repeat(64),
+      issuedAt: instant,
+      notBefore: instant,
+      expiresAt: new Date(instant.getTime() + 300_000),
+      expiredAtVerification: false,
+    };
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, "expired-after-lock", grant),
+      HttpStatus.PAYMENT_REQUIRED,
+      "BUDGET_GRANT_EXPIRED",
+    );
+    expect(db.workspaces).toHaveLength(0);
+    expect(db.companyProfiles).toHaveLength(0);
+    expect(db.sites).toHaveLength(0);
+    expect(db.runs).toHaveLength(0);
+    expect(db.grants).toHaveLength(0);
+    expect(db.budgets).toHaveLength(0);
+    expect(db.keys).toHaveLength(0);
+    expect(launches).toHaveLength(0);
+  });
+
   it("hasWebsite=true 仍走同一 demo 契约；websiteUrl 仅作为 intake 背景保留", async () => {
     const { service, db } = makeService();
     const input = {
@@ -463,6 +572,116 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
       response: first,
     });
+    expect(launches).toHaveLength(1);
+  });
+
+  it("Grant 过期后仅 exact consumed digest 可按 intake key 重放", async () => {
+    const { service, db, launches } = makeService();
+    const instant = new Date();
+    const consumed: VerifiedSiteBuildBudgetGrant = {
+      schemaVersion: "site-builder-budget-grant/v1",
+      issuer: "https://saas.test",
+      audience: "global-backend:site-builder-budget",
+      jti: randomUUID(),
+      purpose: "site_builder.build_run",
+      operation: "intake",
+      workspaceId: CTX.workspaceId,
+      siteId: null,
+      requestSha256: intakeRequestHash(BASE_INTAKE),
+      currency: "USD",
+      unit: "microusd",
+      capMicrousd: 5_000_000n,
+      tokenSha256: "a".repeat(64),
+      issuedAt: instant,
+      notBefore: instant,
+      expiresAt: new Date(instant.getTime() + 300_000),
+      expiredAtVerification: false,
+    };
+    const first = await callCreate(
+      service,
+      CTX,
+      BASE_INTAKE,
+      "intake-expired-replay",
+      consumed,
+    );
+
+    await expect(
+      callCreate(service, CTX, BASE_INTAKE, "intake-expired-replay", {
+        ...consumed,
+        expiresAt: new Date(Date.now() - 61_000),
+        expiredAtVerification: true,
+      }),
+    ).resolves.toEqual(first);
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, "intake-expired-replay", {
+        ...consumed,
+        jti: randomUUID(),
+        tokenSha256: "b".repeat(64),
+        expiresAt: new Date(Date.now() - 61_000),
+        expiredAtVerification: true,
+      }),
+      HttpStatus.PAYMENT_REQUIRED,
+      "BUDGET_GRANT_EXPIRED",
+    );
+    expect(db.runs).toHaveLength(1);
+    expect(db.grants).toHaveLength(1);
+    expect(launches).toHaveLength(1);
+  });
+
+  it("相同 intake key 也不能掩盖 same JTI/different token 冲突", async () => {
+    const { service, db, launches } = makeService();
+    const key = "same-jti-different-token";
+    await callCreate(service, CTX, BASE_INTAKE, key);
+    const instant = new Date();
+    const reused: VerifiedSiteBuildBudgetGrant = {
+      schemaVersion: "site-builder-budget-grant/v1",
+      issuer: String(db.grants[0]!.issuer),
+      audience: "global-backend:site-builder-budget",
+      jti: String(db.grants[0]!.jti),
+      purpose: "site_builder.build_run",
+      operation: "intake",
+      workspaceId: CTX.workspaceId,
+      siteId: null,
+      requestSha256: intakeRequestHash(BASE_INTAKE),
+      currency: "USD",
+      unit: "microusd",
+      capMicrousd: 5_000_000n,
+      tokenSha256: "f".repeat(64),
+      issuedAt: instant,
+      notBefore: instant,
+      expiresAt: new Date(instant.getTime() + 300_000),
+      expiredAtVerification: false,
+    };
+
+    await expectHttpError(
+      callCreate(service, CTX, BASE_INTAKE, key, reused),
+      HttpStatus.CONFLICT,
+      "BUDGET_GRANT_REUSED",
+    );
+    expect(db.runs).toHaveLength(1);
+    expect(db.grants).toHaveLength(1);
+    expect(launches).toHaveLength(1);
+  });
+
+  it("runtime 不就绪时仍可只读重放已存在的 intake run", async () => {
+    const { service, launches, assertReady } = makeService();
+    const first = await callCreate(
+      service,
+      CTX,
+      BASE_INTAKE,
+      "ready-independent-intake-replay",
+    );
+    assertReady.mockRejectedValueOnce(new Error("SITE_BUILD_RUNTIME_NOT_READY"));
+
+    await expect(
+      callCreate(
+        service,
+        CTX,
+        BASE_INTAKE,
+        "ready-independent-intake-replay",
+      ),
+    ).resolves.toEqual(first);
     expect(launches).toHaveLength(1);
   });
 

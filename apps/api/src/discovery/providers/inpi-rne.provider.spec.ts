@@ -136,6 +136,23 @@ describe('inpi_rne · discoverContacts', () => {
     expect(res.contacts).toHaveLength(1); // 同名归一去重（name-merge 内在语义）
   });
 
+  it('按归一名去重后每公司最多保留 25 位 dirigeant', async () => {
+    const dirigeants = [
+      dir('DUPONT', 'JEAN', 'Gérant'),
+      dir('DUPONT', 'JEAN', 'Président'),
+      ...Array.from({ length: 39 }, (_, index) => (
+        dir(`NOM${index}`, `PRENOM${index}`, 'Directeur')
+      )),
+    ];
+    const broker = fakeBroker({ search: () => [hit('1', 'ACME', dirigeants)] });
+    const res = await new InpiRneContactProvider({ broker }).discoverContacts(
+      { name: 'ACME', domain: 'acme.fr', country: 'FR' },
+      CTX,
+    );
+    expect(res.contacts).toHaveLength(25);
+    expect(new Set(res.contacts.map((contact) => contact.fullName)).size).toBe(25);
+  });
+
   it('🔴 歧义/低 margin 公司对齐 → 弃（返空，绝不挂错公司）', async () => {
     const broker = fakeBroker({ search: () => [hit('1', 'Acme', [dir('X', 'Y', 'Gérant')]), hit('2', 'Acme', [dir('Z', 'W', 'Gérant')])] });
     const res = await new InpiRneContactProvider({ broker }).discoverContacts(

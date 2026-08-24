@@ -26,6 +26,9 @@ import { SitePreviewArtifactService } from './site-preview-artifact.service';
 import { StorageQualityArtifactSink } from './quality/quality-artifact-sink';
 import { DeterministicQualityService } from './quality/deterministic-quality.service';
 import { ClosedRepairService } from './quality/closed-repair.service';
+import { SiteBuildBudgetGrantVerifier } from './site-build-budget-grant';
+import { SiteBuildRuntimeGuard } from '../runtime/site-build-runtime.guard';
+import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readiness-registry';
 
 /**
  * 独立站建设（docs/site-builder/02 §1）。M0：intake + 站点档案 + 素材/KB 地基。
@@ -51,6 +54,13 @@ import { ClosedRepairService } from './quality/closed-repair.service';
     StorageQualityArtifactSink,
     DeterministicQualityService,
     ClosedRepairService,
+    {
+      provide: SiteBuildBudgetGrantVerifier,
+      inject: [RuntimeReadinessContributorRegistry],
+      useFactory: (registry: RuntimeReadinessContributorRegistry) =>
+        new SiteBuildBudgetGrantVerifier(process.env, {}, registry),
+    },
+    SiteBuildRuntimeGuard,
     SitePreviewArtifactService,
     ImagePipelineService,
     { provide: IMAGE_PIPELINE_RUNNER, useFactory: () => new IsolatedImagePipelineRunner() },

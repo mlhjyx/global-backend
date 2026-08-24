@@ -1,29 +1,60 @@
-import { createHash } from 'node:crypto';
-import { assertToolExternalActionAuthorized, Tool, ToolContext } from './tool-contract';
-import { ToolRegistry } from './tool-registry';
-import { searxSearchPaged, SearxResult, SearxCategory } from '../adapters/searxng';
-import { crawlUrl } from '../adapters/web-crawler';
-import { isAllowedByRobots } from '../adapters/robots';
-import { discoverCompaniesByIndustry, WikidataCompany } from '../adapters/wikidata';
-import { discoverByArea, OsmPlace } from '../adapters/openstreetmap';
-import { resolvePublicIp } from '../adapters/net-guard';
-import { smtpRcptProbe, SENDER_DOMAIN } from '../adapters/smtp-probe';
+import { createHash } from "node:crypto";
+import { CATALOG_RESULT_PROJECTION_SCHEMAS } from "../durable-results/catalog-result-projections";
+import { SOURCE_RESULT_PROJECTION_SCHEMAS } from "../durable-results/source-result-projections";
+import {
+  assertToolExternalActionAuthorized,
+  Tool,
+  ToolContext,
+} from "./tool-contract";
+import { ToolRegistry } from "./tool-registry";
+import {
+  searxSearchPaged,
+  SearxResult,
+  SearxCategory,
+} from "../adapters/searxng";
+import { crawlUrl } from "../adapters/web-crawler";
+import { isAllowedByRobots } from "../adapters/robots";
+import {
+  discoverCompaniesByIndustry,
+  WikidataCompany,
+} from "../adapters/wikidata";
+import { discoverByArea, OsmPlace } from "../adapters/openstreetmap";
+import { resolvePublicIp } from "../adapters/net-guard";
+import { smtpRcptProbe, SENDER_DOMAIN } from "../adapters/smtp-probe";
 import {
   normalizeEvidenceText,
-  sanitizeEvidenceUrl } from '../site-builder/agents/evidence-ref';
+  sanitizeEvidenceUrl,
+} from "../site-builder/agents/evidence-ref";
 
-const hash = (s: string): string => createHash('sha256').update(s).digest('hex').slice(0, 24);
+const hash = (s: string): string =>
+  createHash("sha256").update(s).digest("hex").slice(0, 24);
 const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
 
-function beforeExternalRequest(ctx: ToolContext): (() => Promise<void>) | undefined {
-  return ctx.authorizeExternalAction ? () => assertToolExternalActionAuthorized(ctx) : undefined;
+export const MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES = 300_000;
+const DEFAULT_CRAWL4AI_FETCH_CHARS = 40_000;
+const MAX_CRAWL4AI_FETCH_CHARS = 100_000;
+
+function boundedCrawl4aiFetchChars(value: number | undefined): number {
+  if (!Number.isSafeInteger(value) || value === undefined || value < 0) {
+    return DEFAULT_CRAWL4AI_FETCH_CHARS;
+  }
+  return Math.min(value, MAX_CRAWL4AI_FETCH_CHARS);
+}
+
+function beforeExternalRequest(
+  ctx: ToolContext,
+): (() => Promise<void>) | undefined {
+  return ctx.authorizeExternalAction
+    ? () => assertToolExternalActionAuthorized(ctx)
+    : undefined;
 }
 
 function publicOrigin(rawUrl: string | undefined): string | null {
   if (!rawUrl) return null;
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
     return `${parsed.origin}/`;
   } catch {
     return null;
@@ -37,30 +68,34 @@ export const searxngSearchTool: Tool<
     categories?: SearxCategory[];
     engines?: string[];
     language?: string;
-    timeRange?: 'day' | 'week' | 'month' | 'year';
+    timeRange?: "day" | "week" | "month" | "year";
     pages?: number;
   },
   { results: SearxResult[] }
 > = {
-  id: 'searxng.search',
-  version: '1.0.0',
-  category: 'search',
-  sourceClass: 'public_intelligence',
-  cost: { unit: 'request', estimatedCents: 0, external: false },
+  id: "searxng.search",
+  version: "1.0.0",
+  category: "search",
+  sourceClass: "public_intelligence",
+  cost: { unit: "request", estimatedCents: 0, external: false },
   rateLimit: { rps: 3, concurrency: 3 },
   // site_builder：品牌研究（site_builder.brand_profile）复用元搜索。sourcePolicy=none 下用途门被短路，
   // 声明为语义一致/前瞻（若日后转 advisory 亦不误拒 site_builder 调用）。
   compliance: {
-    sourcePolicy: 'none',
+    sourcePolicy: "none",
     respectsRobots: false,
     personalData: false,
-    allowedPurpose: ['discovery', 'site_builder'],
+    allowedPurpose: ["discovery", "site_builder"],
     reversible: true,
     authRequired: false,
-    risk: 'low',
+    risk: "low",
   },
-  capabilities: { produces: ['domain'], accepts: ['keywords'] },
+  capabilities: { produces: ["domain"], accepts: ["keywords"] },
   idempotencyKey: (i) => `searxng.search:${stableKey(i)}`,
+  durableResultStrategy: {
+    kind: "typed_projection",
+    schema: CATALOG_RESULT_PROJECTION_SCHEMAS["searxng.search"],
+  },
   durableReplayResult: (result) => ({
     data: {
       results: result.data.results.flatMap((item) => {
@@ -73,7 +108,7 @@ export const searxngSearchTool: Tool<
   }),
   healthCheck: async () => {
     try {
-      const r = await searxSearchPaged({ q: 'test', language: 'en' }, 1, 8000);
+      const r = await searxSearchPaged({ q: "test", language: "en" }, 1, 8000);
       return { healthy: r.length >= 0 };
     } catch {
       return { healthy: false };
@@ -96,109 +131,140 @@ export const searxngSearchTool: Tool<
 
 /** crawl4ai.fetch —— 抓单页（需 source_policy + robots）。maxChars 由调用方按任务上下文需求指定
  *  （名录列表页 60k vs 普通页 40k——复审抓到统一 40k 令 directory 抽取静默丢 1/3 上下文）。 */
-export const crawl4aiFetchTool: Tool<
+export interface Crawl4aiFetchToolDependencies {
+  crawlUrl: typeof crawlUrl;
+  isAllowedByRobots: typeof isAllowedByRobots;
+}
+
+export function createCrawl4aiFetchTool(
+  dependencies: Crawl4aiFetchToolDependencies = { crawlUrl, isAllowedByRobots },
+): Tool<
   { url: string; maxChars?: number },
   { url: string; text: string; contentHash: string }
-> = {
-  id: 'crawl4ai.fetch',
-  version: '1.0.0',
-  category: 'fetch',
-  sourceClass: 'public_intelligence',
-  cost: { unit: 'page', estimatedCents: 1, external: false },
-  rateLimit: { rps: 2, concurrency: 3, perDomainCrawlDelayMs: 2000 },
-  // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
-  // site_builder：品牌研究抓站主自有官网——advisory 用途门下必须声明，否则 purpose=['site_builder'] 空集被拒。
-  compliance: {
-    sourcePolicy: 'advisory',
-    respectsRobots: true,
-    personalData: false,
-    allowedPurpose: ['discovery', 'enrichment', 'site_builder'],
-    reversible: true,
-    authRequired: false,
-    risk: 'low',
-  },
-  capabilities: {
-    produces: ['company', 'domain', 'contact'],
-    accepts: ['domain'],
-  },
-  idempotencyKey: (i) => `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}`,
-  durableReplayResult: (result) => {
-    const text = normalizeEvidenceText(result.data.text);
-    const url = sanitizeEvidenceUrl(result.data.url);
-    if (!url) return null;
-    const contentHash = hash(text);
-    return {
-      data: { url, text, contentHash },
-      costCents: result.costCents,
-      ...(result.provenance
-        ? {
-            provenance: {
-              ...result.provenance,
-              sourceUrl: sanitizeEvidenceUrl(result.provenance.sourceUrl),
-              contentHash,
-            },
-          }
-        : {}),
-      ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
-    };
-  },
-  healthCheck: async () => ({ healthy: true, detail: 'crawl4ai' }),
-  execute: async (input, ctx) => {
-    if (
-      !(await isAllowedByRobots(input.url, {
-        authorizeExternalAction: ctx.authorizeExternalAction,
-      }))
-    ) {
-      // robots 禁抓 → 合规放弃（不换 UA）。返回空文本，不计失败。
+> {
+  return {
+    id: "crawl4ai.fetch",
+    version: "1.0.0",
+    category: "fetch",
+    sourceClass: "public_intelligence",
+    cost: { unit: "page", estimatedCents: 1, external: false },
+    rateLimit: { rps: 2, concurrency: 3, perDomainCrawlDelayMs: 2000 },
+    // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
+    // site_builder：品牌研究抓站主自有官网——advisory 用途门下必须声明，否则 purpose=['site_builder'] 空集被拒。
+    compliance: {
+      sourcePolicy: "advisory",
+      respectsRobots: true,
+      personalData: false,
+      allowedPurpose: ["discovery", "enrichment", "site_builder"],
+      reversible: true,
+      authRequired: false,
+      risk: "low",
+    },
+    capabilities: {
+      produces: ["company", "domain", "contact"],
+      accepts: ["domain"],
+    },
+    idempotencyKey: (i) =>
+      `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}`,
+    durableResultStrategy: {
+      kind: "artifact_reference",
+      schema: "crawl4ai-fetch/v1",
+      maxBytes: MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES,
+      mediaTypes: ["text/markdown"],
+      privacyClass: "PERSONAL_DATA",
+      ttlSeconds: 86_400,
+    },
+    durableReplayResult: (result) => {
+      const text = normalizeEvidenceText(result.data.text);
+      const url = sanitizeEvidenceUrl(result.data.url);
+      if (!url) return null;
+      if (Buffer.byteLength(text, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES)
+        return null;
+      const contentHash = hash(text);
       return {
-        data: { url: input.url, text: '', contentHash: '' },
-        costCents: 0,
+        data: { url, text, contentHash },
+        costCents: result.costCents,
+        ...(result.provenance
+          ? {
+              provenance: {
+                ...result.provenance,
+                sourceUrl: sanitizeEvidenceUrl(result.provenance.sourceUrl),
+                contentHash,
+              },
+            }
+          : {}),
+        ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
       };
-    }
-    const r = await crawlUrl(input.url, () => assertToolExternalActionAuthorized(ctx));
-    const text = r.text.slice(0, Math.min(input.maxChars ?? 40_000, 100_000));
-    return {
-      data: { url: input.url, text, contentHash: hash(text) },
-      costCents: 1,
-      provenance: {
-        sourceUrl: input.url,
-        fetchedAt: new Date().toISOString(),
-        contentHash: hash(text),
-        parserVersion: 'crawl4ai/1',
-      },
-    };
-  },
-};
+    },
+    healthCheck: async () => ({ healthy: true, detail: "crawl4ai" }),
+    execute: async (input, ctx) => {
+      if (
+        !(await dependencies.isAllowedByRobots(input.url, {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+        }))
+      ) {
+        // robots 禁抓 → 合规放弃（不换 UA）。返回空文本，不计失败。
+        return {
+          data: { url: input.url, text: "", contentHash: "" },
+          costCents: 0,
+        };
+      }
+      const r = await dependencies.crawlUrl(input.url, () =>
+        assertToolExternalActionAuthorized(ctx),
+      );
+      const text = r.text.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
+      if (Buffer.byteLength(text, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
+        throw new Error("CRAWL4AI_FETCH_RESULT_TOO_LARGE");
+      }
+      return {
+        data: { url: input.url, text, contentHash: hash(text) },
+        costCents: 1,
+        provenance: {
+          sourceUrl: input.url,
+          fetchedAt: new Date().toISOString(),
+          contentHash: hash(text),
+          parserVersion: "crawl4ai/1",
+        },
+      };
+    },
+  };
+}
+
+export const crawl4aiFetchTool = createCrawl4aiFetchTool();
 
 /** wikidata.sparql —— 结构化企业发现（免费 CC0，无需 source_policy）。 */
 export const wikidataTool: Tool<
   { industryQids: string[]; countryQid?: string; limit?: number },
   { companies: WikidataCompany[] }
 > = {
-  id: 'wikidata.sparql',
-  version: '1.0.0',
-  category: 'structured_source',
-  sourceClass: 'company_registry',
-  cost: { unit: 'call', estimatedCents: 0, external: true },
+  id: "wikidata.sparql",
+  version: "1.0.0",
+  category: "structured_source",
+  sourceClass: "company_registry",
+  cost: { unit: "call", estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
   // required：受治理数据源（未登记 fail-closed）；治理域固定为 SPARQL 端点，seed 于 provider.registry。
   compliance: {
-    sourcePolicy: 'required',
-    policyDomain: 'query.wikidata.org',
+    sourcePolicy: "required",
+    policyDomain: "query.wikidata.org",
     respectsRobots: false,
     personalData: false,
-    allowedPurpose: ['discovery', 'enrichment'],
+    allowedPurpose: ["discovery", "enrichment"],
     reversible: true,
     authRequired: false,
-    risk: 'low',
+    risk: "low",
   },
   capabilities: {
-    produces: ['company', 'relation'],
-    accepts: ['keywords'],
+    produces: ["company", "relation"],
+    accepts: ["keywords"],
     enrichesOnly: false,
   },
   idempotencyKey: (i) => `wikidata.sparql:${stableKey(i)}`,
-  healthCheck: async () => ({ healthy: true, detail: 'wdqs' }),
+  durableResultStrategy: {
+    kind: "typed_projection",
+    schema: CATALOG_RESULT_PROJECTION_SCHEMAS["wikidata.sparql"],
+  },
+  healthCheck: async () => ({ healthy: true, detail: "wdqs" }),
   execute: async (input, ctx) => {
     const companies = await discoverCompaniesByIndustry(
       {
@@ -212,9 +278,9 @@ export const wikidataTool: Tool<
       data: { companies },
       costCents: 0,
       provenance: {
-        sourceUrl: 'https://query.wikidata.org/sparql',
+        sourceUrl: "https://query.wikidata.org/sparql",
         fetchedAt: new Date().toISOString(),
-        parserVersion: 'wikidata/1',
+        parserVersion: "wikidata/1",
       },
     };
   },
@@ -225,26 +291,30 @@ export const osmOverpassTool: Tool<
   { areaName: string; tagFilters: { k: string; v?: string }[]; limit?: number },
   { places: OsmPlace[] }
 > = {
-  id: 'osm.overpass',
-  version: '1.0.0',
-  category: 'structured_source',
-  sourceClass: 'industry_data',
-  cost: { unit: 'call', estimatedCents: 0, external: true },
+  id: "osm.overpass",
+  version: "1.0.0",
+  category: "structured_source",
+  sourceClass: "industry_data",
+  cost: { unit: "call", estimatedCents: 0, external: true },
   rateLimit: { rps: 1, concurrency: 1 },
   // required：受治理数据源；主端点 overpass-api.de（adapter 可能落 kumi 镜像，治理键固定主端点）。
   compliance: {
-    sourcePolicy: 'required',
-    policyDomain: 'overpass-api.de',
+    sourcePolicy: "required",
+    policyDomain: "overpass-api.de",
     respectsRobots: false,
     personalData: false,
-    allowedPurpose: ['discovery'],
+    allowedPurpose: ["discovery"],
     reversible: true,
     authRequired: false,
-    risk: 'low',
+    risk: "low",
   },
-  capabilities: { produces: ['company'], accepts: ['coordinates', 'keywords'] },
+  capabilities: { produces: ["company"], accepts: ["coordinates", "keywords"] },
   idempotencyKey: (i) => `osm.overpass:${stableKey(i)}`,
-  healthCheck: async () => ({ healthy: true, detail: 'overpass' }),
+  durableResultStrategy: {
+    kind: "typed_projection",
+    schema: CATALOG_RESULT_PROJECTION_SCHEMAS["osm.overpass"],
+  },
+  healthCheck: async () => ({ healthy: true, detail: "overpass" }),
   execute: async (input, ctx) => {
     const places = await discoverByArea(
       {
@@ -258,9 +328,9 @@ export const osmOverpassTool: Tool<
       data: { places },
       costCents: 0,
       provenance: {
-        sourceUrl: 'overpass-api',
+        sourceUrl: "overpass-api",
         fetchedAt: new Date().toISOString(),
-        parserVersion: 'osm/1',
+        parserVersion: "osm/1",
       },
     };
   },
@@ -301,11 +371,11 @@ export function createSmtpRcptProbeTool(
   },
 ): Tool<SmtpProbeInput, SmtpProbeOutput> {
   return {
-    id: 'smtp.rcpt_probe',
-    version: '1.0.0',
-    category: 'verify',
-    sourceClass: 'email_verification',
-    cost: { unit: 'call', estimatedCents: 0, external: false },
+    id: "smtp.rcpt_probe",
+    version: "1.0.0",
+    category: "verify",
+    sourceClass: "email_verification",
+    cost: { unit: "call", estimatedCents: 0, external: false },
     // MX 出网要克制：低 rps + 小并发，避免被反垃圾 tarpit/拉黑（每域延迟由 source_policy 兜）。
     rateLimit: { rps: 1, concurrency: 2 },
     // personalData:true —— rcptTo 可含具名人邮箱（john.doe@…），RCPT 握手会把地址发给对端 MX；
@@ -314,17 +384,32 @@ export function createSmtpRcptProbeTool(
     // 只要域策略允许其一即放行（仍受 SUSPENDED 硬门约束）；避免只登记 ['discovery'] 的域被误拒。
     // advisory：标的=任意公司邮箱域（要求预登记会杀死邮箱验证）；登记即强制 SUSPENDED/用途门。
     compliance: {
-      sourcePolicy: 'advisory',
+      sourcePolicy: "advisory",
       respectsRobots: false,
       personalData: true,
-      allowedPurpose: ['discovery', 'enrichment'],
+      allowedPurpose: ["discovery", "enrichment"],
       reversible: true,
       authRequired: false,
-      risk: 'medium',
+      risk: "medium",
     },
-    capabilities: { produces: [], accepts: ['domain'] },
-    idempotencyKey: (i) => `smtp.rcpt_probe:${stableKey({ domain: i.domain, mxHost: i.mxHost, rcptTo: i.rcptTo })}`,
-    healthCheck: async () => ({ healthy: true, detail: 'smtp' }),
+    capabilities: { produces: [], accepts: ["domain"] },
+    idempotencyKey: (i) =>
+      `smtp.rcpt_probe:${stableKey({ domain: i.domain, mxHost: i.mxHost, rcptTo: i.rcptTo })}`,
+    durableResultStrategy: {
+      kind: "typed_projection",
+      schema: SOURCE_RESULT_PROJECTION_SCHEMAS["smtp.rcpt_probe"],
+    },
+    durableReplayResult: (result) => ({
+      data: {
+        reachable: result.data.reachable,
+        mailFromCode: result.data.mailFromCode,
+        codes: result.data.codes.slice(0, 8),
+        egressBlocked: result.data.egressBlocked,
+      },
+      costCents: result.costCents,
+      degraded: result.degraded,
+    }),
+    healthCheck: async () => ({ healthy: true, detail: "smtp" }),
     execute: async (input, ctx) => {
       // 🛡️ SSRF 护栏：连接前解析 MX 主机并拒私网/内网/云元数据 IP，直连解析出的公网 IP
       // （避免 connect 时二次解析的 TOCTOU/DNS rebinding）。拦截即返回，不发生任何出网。
@@ -336,13 +421,17 @@ export function createSmtpRcptProbeTool(
             reachable: false,
             mailFromCode: null,
             codes: [],
-            egressBlocked: guard.reason ?? 'unsafe',
+            egressBlocked: guard.reason ?? "unsafe",
           },
           costCents: 0,
         };
       }
       await assertToolExternalActionAuthorized(ctx);
-      const probe = await dependencies.executeSmtpProbe(guard.ip, `verify@${SENDER_DOMAIN}`, input.rcptTo);
+      const probe = await dependencies.executeSmtpProbe(
+        guard.ip,
+        `verify@${SENDER_DOMAIN}`,
+        input.rcptTo,
+      );
       return {
         data: {
           reachable: probe.reachable,

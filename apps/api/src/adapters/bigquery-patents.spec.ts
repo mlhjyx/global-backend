@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BigQueryPatentsClient,
   BigQueryLike,
+  GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED,
+  MAX_APPLICANTS_PER_PATENT,
   assigneeLikeAnchor,
   normalizeRow,
 } from './bigquery-patents';
@@ -56,15 +58,18 @@ describe('BigQueryPatents · assigneeLikeAnchor（SQL 宽预筛锚）', () => {
 describe('BigQueryPatents · normalizeRow（🔴 数据最小化）', () => {
   it('inventor 只留 name（丢 country_code）；applicant 留 alpha-2 国别', () => {
     const rec = normalizeRow({
+      publication_number: 'US-123-A1',
       applicants: [{ name: 'SIEMENS AG', country: 'DE' }],
       inventors: [{ name: 'SCHMIDT, JOHANN', country: 'DE' }], // country 应被丢弃
     });
+    expect(rec.publicationNumber).toBe('US-123-A1');
     expect(rec.applicants).toEqual([{ name: 'SIEMENS AG', country: 'de' }]);
     expect(rec.inventors).toEqual([{ name: 'SCHMIDT, JOHANN' }]); // 🔴 无 country
     expect((rec.inventors[0] as Record<string, unknown>).country).toBeUndefined();
   });
   it('非 alpha-2 国别 → undefined；空名过滤', () => {
     const rec = normalizeRow({
+      publication_number: 'US-456-A1',
       applicants: [
         { name: 'Foo', country: 'Germany' }, // 非 alpha-2 → undefined
         { name: '', country: 'US' }, // 空名 → 过滤
@@ -75,7 +80,18 @@ describe('BigQueryPatents · normalizeRow（🔴 数据最小化）', () => {
     expect(rec.inventors).toEqual([{ name: 'Jane Doe' }]);
   });
   it('缺字段/非数组 → 空数组（防御式）', () => {
-    expect(normalizeRow({})).toEqual({ applicants: [], inventors: [] });
+    expect(() => normalizeRow({ applicants: [], inventors: [] })).toThrow(
+      'GOOGLE_PATENTS_PUBLICATION_NUMBER_REQUIRED',
+    );
+  });
+  it('applicant 数超过 Tool output contract 时 fail closed，而不是盲截断改变 sole-applicant 语义', () => {
+    expect(() => normalizeRow({
+      publication_number: 'US-999-A1',
+      applicants: Array.from({ length: MAX_APPLICANTS_PER_PATENT + 1 }, (_, index) => ({
+        name: `Applicant ${index}`, country: 'DE',
+      })),
+      inventors: [{ name: 'Inventor' }],
+    })).toThrow('GOOGLE_PATENTS_APPLICANTS_LIMIT_EXCEEDED');
   });
 });
 
@@ -85,21 +101,28 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
   it('查询参数 + maximumBytesBilled 成本护栏贯穿；行归一', async () => {
     let seen: Parameters<BigQueryLike['query']>[0] | undefined;
     const client = new BigQueryPatentsClient({
-      maxGb: 50,
       makeClient: () =>
         fakeClient(
-          [{ applicants: [{ name: 'Siemens AG', country: 'DE' }], inventors: [{ name: 'Hans Müller', country: 'DE' }] }],
+          [{
+            publication_number: 'US-789-A1',
+            applicants: [{ name: 'Siemens AG', country: 'DE' }],
+            inventors: [{ name: 'Hans Müller', country: 'DE' }],
+          }],
           (opts) => (seen = opts),
         ),
     });
     const out = await client.searchPatentsByAssignee('Siemens AG', { fromYear: 2021, toYear: 2026 });
     // 结果归一（inventor 丢 country）
     expect(out).toEqual([
-      { applicants: [{ name: 'Siemens AG', country: 'de' }], inventors: [{ name: 'Hans Müller' }] },
+      {
+        publicationNumber: 'US-789-A1',
+        applicants: [{ name: 'Siemens AG', country: 'de' }],
+        inventors: [{ name: 'Hans Müller' }],
+      },
     ]);
     // 查询参数：日期 INT64 YYYYMMDD + 锚 + 成本硬顶
     expect(seen?.params).toMatchObject({ fromDate: 20210101, toDate: 20261231, assigneeLike: '%SIEMENS%' });
-    expect(seen?.maximumBytesBilled).toBe(String(50 * GB)); // 🔴 护 1TB/月免费额度
+    expect(seen?.maximumBytesBilled).toBe(GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED);
   });
 
   it('无锚（公司名全停用词）→ 空、client 不被调', async () => {
@@ -137,7 +160,49 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
     let seen: Parameters<BigQueryLike['query']>[0] | undefined;
     const client = new BigQueryPatentsClient({ makeClient: () => fakeClient([], (opts) => (seen = opts)) });
     await client.searchPatentsByAssignee('Siemens', { fromYear: 2021, toYear: 2026, maxRows: 99999 });
-    expect(seen?.query).toContain('LIMIT 2000'); // clamp 到 MAX_ROWS_CEIL
+    expect(seen?.query).toContain('LIMIT 50'); // manifest/tool durable cap
+  });
+
+  it('searchPatentsByAssigneeWithCostFacts records provider-observed bytes only from completed job metadata', async () => {
+    const client = new BigQueryPatentsClient({
+      makeClient: () => fakeJobClient([{
+        publication_number: 'US-789-A1',
+        applicants: [{ name: 'Siemens AG', country: 'DE' }],
+        inventors: [{ name: 'Hans Müller', country: 'DE' }],
+      }], '123456'),
+    });
+
+    await expect(client.searchPatentsByAssigneeWithCostFacts(
+      'Siemens AG',
+      { fromYear: 2021, toYear: 2026, maxRows: 5 },
+    )).resolves.toEqual({
+      patents: [{
+        publicationNumber: 'US-789-A1',
+        applicants: [{ name: 'Siemens AG', country: 'de' }],
+        inventors: [{ name: 'Hans Müller' }],
+      }],
+      queried: true,
+      maximumBytesBilled: GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED,
+      observedBytesBilled: '123456',
+      maxRows: 5,
+    });
+  });
+
+  it('searchPatentsByAssigneeWithCostFacts returns explicit no-query facts without creating a client', async () => {
+    const makeClient = vi.fn();
+    const client = new BigQueryPatentsClient({ makeClient });
+
+    await expect(client.searchPatentsByAssigneeWithCostFacts(
+      'The Co',
+      { fromYear: 2021, toYear: 2026 },
+    )).resolves.toEqual({
+      patents: [],
+      queried: false,
+      maximumBytesBilled: GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED,
+      observedBytesBilled: null,
+      maxRows: 0,
+    });
+    expect(makeClient).not.toHaveBeenCalled();
   });
 });
 
@@ -155,14 +220,14 @@ describe('BigQueryPatents · maximumBytesBilled 成本护栏（env/默认路径�
     return seen?.maximumBytesBilled;
   }
 
-  it('零配置（无 deps.maxGb、无 env）→ 默认 200GB', async () => {
+  it('零配置仍使用 reviewed 200GB hard cap', async () => {
     delete process.env.GOOGLE_PATENTS_MAX_GB;
     expect(await capturedMaxBytes()).toBe(String(200 * GB));
   });
 
-  it('env 有效正值 → 尊重运维意图', async () => {
+  it('env cannot override the reviewed hard cap', async () => {
     process.env.GOOGLE_PATENTS_MAX_GB = '75';
-    expect(await capturedMaxBytes()).toBe(String(75 * GB));
+    expect(await capturedMaxBytes()).toBe(GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED);
   });
 
   it('env=0（或负/NaN）→ 回落默认 200GB（不静默放行 0 字节顶）', async () => {

@@ -9,7 +9,10 @@ import type { Mock } from 'vitest';
  */
 
 // 工厂动态 import 与下方静态 import 解析到同一模块实例 → 同一 spy 注册表。
-vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
+vi.mock('@temporalio/workflow', async () => ({
+  ...(await import('./testing/temporal-workflow.mock')),
+  workflowInfo: () => ({ runId: 'external-intent-workflow-run' }),
+}));
 
 import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { externalIntentSweepWorkflow } from './external-intent.workflow';
@@ -57,6 +60,26 @@ const firstOrder = (m: Mock): number => m.mock.invocationCallOrder[0];
 beforeEach(() => resetActivities());
 
 describe('externalIntentSweepWorkflow — 单次 live 重读 + 穿线（PR #70 缺口守）', () => {
+  it('ingest activity failure rejects the workflow instead of projecting stale data as a successful sweep', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    acts.ingestExternalSignals.mockRejectedValue(new Error('BUDGET_OPERATION_REPLAY_UNAVAILABLE'));
+
+    await expect(externalIntentSweepWorkflow({})).rejects.toThrow('BUDGET_OPERATION_REPLAY_UNAVAILABLE');
+    expect(acts.projectExternalIntentForIcp).not.toHaveBeenCalled();
+  });
+
+  it('recognizes a Temporal ActivityFailure cause type even when the outer message omits the budget code', async () => {
+    primeHappyPath([target('ws-1', 'icp-1')]);
+    acts.ingestExternalSignals.mockRejectedValue({
+      name: 'ActivityFailure',
+      message: 'Activity task failed',
+      cause: { type: 'BudgetOperationReplayError', message: 'durable result unavailable' },
+    });
+
+    await expect(externalIntentSweepWorkflow({})).rejects.toMatchObject({ name: 'ActivityFailure' });
+    expect(acts.projectExternalIntentForIcp).not.toHaveBeenCalled();
+  });
+
   it('happy path：liveProviderState 恰调一次，其快照 thread 进每个投影（同引用），调用顺序 live 在 ingest 后、投影前', async () => {
     const t1 = target('ws-1', 'icp-1');
     const t2 = target('ws-2', 'icp-2');

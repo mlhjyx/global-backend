@@ -24,10 +24,10 @@ export const GOOGLE_PATENTS_ATTRIBUTION =
   'Google Patents Public Data by IFI CLAIMS Patent Services, licensed under CC BY 4.0.';
 
 // publications 表无 assignee 分区/聚簇 → 每查按列全表扫描（只 SELECT 2 列压字节）。maximumBytesBilled 硬顶护额度。
-const DEFAULT_MAX_GB = 200;
-const BYTES_PER_GB = 1024 ** 3;
-const MAX_ROWS_DEFAULT = 500;
-const MAX_ROWS_CEIL = 2000;
+export const GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED = '214748364800';
+export const GOOGLE_PATENTS_MAX_ROWS = 50;
+const MAX_ROWS_DEFAULT = GOOGLE_PATENTS_MAX_ROWS;
+const MAX_ROWS_CEIL = GOOGLE_PATENTS_MAX_ROWS;
 
 /**
  * 🔴 每 (assigneeNorm, assigneeCountry) **缓存**发明人上限（Codex PR #93 P2-6，数据最小化）——
@@ -35,6 +35,14 @@ const MAX_ROWS_CEIL = 2000;
  * （Siemens/Philips 五年数千发明人）刷新只落 ≤25，不把上千无用发明人 PII 静态化到 TTL 到期。
  */
 export const MAX_INVENTORS_PER_ASSIGNEE = 25;
+/**
+ * Per-publication applicant ceiling for the Tool output contract. More than
+ * this cannot be truncated safely: applicant count decides whether a patent
+ * is sole-owned, and every name participates in conservative company
+ * alignment. The direct query therefore fails closed instead of changing that
+ * meaning after a physical BigQuery result.
+ */
+export const MAX_APPLICANTS_PER_PATENT = 32;
 
 // publication_date 为 INT64 YYYYMMDD（如 20200115）。
 const yearToStart = (y: number): number => y * 10000 + 101; // Jan 01
@@ -64,6 +72,9 @@ export interface PatentInventor {
   name: string;
 }
 export interface PatentRecord {
+  /** Stable public patent row identity for durable replay/domain ACK. */
+  publicationNumber: string;
+  /** ≤ MAX_APPLICANTS_PER_PATENT; normalizeRow rejects larger rows fail-closed. */
   applicants: PatentApplicant[];
   inventors: PatentInventor[];
 }
@@ -73,6 +84,14 @@ export interface PatentSearchOptions {
   toYear: number;
   /** 每公司返回专利行上限（防大公司爆量 + 控字节；clamp 到 [1, {@link MAX_ROWS_CEIL}]）。 */
   maxRows?: number;
+}
+
+export interface PatentSearchWithCostFactsResult {
+  readonly patents: PatentRecord[];
+  readonly queried: boolean;
+  readonly maximumBytesBilled: string;
+  readonly observedBytesBilled: string | null;
+  readonly maxRows: number;
 }
 
 /**
@@ -104,6 +123,7 @@ function clampMaxRows(n?: number): number {
 function buildQuery(maxRows: number): string {
   return `
     SELECT
+      publication_number AS publication_number,
       ARRAY(
         SELECT AS STRUCT a.name AS name, a.country_code AS country
         FROM UNNEST(assignee_harmonized) a
@@ -212,7 +232,6 @@ function bytesFromMeta(meta?: BigQueryJobMeta): number | null {
 export interface BigQueryPatentsDeps {
   /** 测试注入用；生产走 env 惰性建真 client。 */
   makeClient?: () => BigQueryLike;
-  maxGb?: number;
 }
 
 export class BigQueryPatentsClient {
@@ -236,10 +255,16 @@ export class BigQueryPatentsClient {
   }
 
   private maxBytes(): string {
-    const envGb = Number(process.env.GOOGLE_PATENTS_MAX_GB);
-    // 显式判断而非 `|| DEFAULT`：运维设 =0（或负/NaN）都回落默认，但**有效正值**（含很小值）尊重运维意图。
-    const maxGb = this.deps.maxGb ?? (Number.isFinite(envGb) && envGb > 0 ? envGb : DEFAULT_MAX_GB);
-    return String(Math.floor(maxGb * BYTES_PER_GB));
+    return GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED;
+  }
+
+  maximumBytesBilled(): string {
+    return this.maxBytes();
+  }
+
+  canSearchPatentsByAssignee(assignee: string): boolean {
+    const name = assignee?.trim();
+    return Boolean(name && assigneeLikeAnchor(name) && this.getClient());
   }
 
   /**
@@ -249,24 +274,72 @@ export class BigQueryPatentsClient {
   async searchPatentsByAssignee(assignee: string, opts: PatentSearchOptions,
     beforeRequest?: () => Promise<void>,
   ): Promise<PatentRecord[]> {
+    return (await this.searchPatentsByAssigneeWithCostFacts(
+      assignee,
+      opts,
+      beforeRequest,
+    )).patents;
+  }
+
+  async searchPatentsByAssigneeWithCostFacts(
+    assignee: string,
+    opts: PatentSearchOptions,
+    beforeRequest?: () => Promise<void>,
+  ): Promise<PatentSearchWithCostFactsResult> {
+    const maximumBytesBilled = this.maxBytes();
+    const maxRows = clampMaxRows(opts.maxRows);
     const name = assignee?.trim();
-    if (!name) return [];
+    if (!name) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    }
     const anchor = assigneeLikeAnchor(name);
-    if (!anchor) return [];
+    if (!anchor) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    }
     const client = this.getClient();
-    if (!client) return []; // 无 creds → 天然 no-op（同 EPO 无 key）
+    if (!client) {
+      return { patents: [], queried: false, maximumBytesBilled, observedBytesBilled: null, maxRows: 0 };
+    } // 无 creds → 天然 no-op（同 EPO 无 key）
     await beforeRequest?.();
-    const [rows] = await client.query({
-      query: buildQuery(clampMaxRows(opts.maxRows)),
+    const queryOpts = {
+      query: buildQuery(maxRows),
       params: {
         fromDate: yearToStart(opts.fromYear),
         toDate: yearToEnd(opts.toYear),
         assigneeLike: anchor,
       },
       types: { fromDate: 'INT64', toDate: 'INT64', assigneeLike: 'STRING' },
-      maximumBytesBilled: this.maxBytes(),
-    });
-    return (rows ?? []).map(normalizeRow);
+      maximumBytesBilled,
+    };
+    if (client.createQueryJob) {
+      const [job] = await client.createQueryJob(queryOpts);
+      const [rows] = await job.getQueryResults();
+      let meta = job.metadata;
+      if (job.getMetadata) {
+        try {
+          const [refreshed] = await job.getMetadata();
+          meta = refreshed;
+        } catch {
+          /* Missing final metadata keeps observedBytesBilled=null. */
+        }
+      }
+      const observed = bytesFromMeta(meta);
+      return {
+        patents: (rows ?? []).map(normalizeRow),
+        queried: true,
+        maximumBytesBilled,
+        observedBytesBilled: observed === null ? null : String(observed),
+        maxRows,
+      };
+    }
+    const [rows] = await client.query(queryOpts);
+    return {
+      patents: (rows ?? []).map(normalizeRow),
+      queried: true,
+      maximumBytesBilled,
+      observedBytesBilled: null,
+      maxRows,
+    };
   }
 
   /**
@@ -332,8 +405,22 @@ function normCountry(v: unknown): string | undefined {
 
 /** BigQuery 行 → PatentRecord（🔴 inventor **只留 name**，丢 country_code 等 = 数据最小化）。 */
 export function normalizeRow(row: Record<string, unknown>): PatentRecord {
-  const applicants = Array.isArray(row.applicants)
-    ? (row.applicants as Array<Record<string, unknown>>)
+  const publicationNumber = String(row.publication_number ?? row.publicationNumber ?? '').trim();
+  if (
+    !publicationNumber ||
+    publicationNumber.length > 120 ||
+    !/^[A-Za-z0-9:._/-]+$/u.test(publicationNumber)
+  ) {
+    throw new Error('GOOGLE_PATENTS_PUBLICATION_NUMBER_REQUIRED');
+  }
+  const rawApplicants = Array.isArray(row.applicants)
+    ? row.applicants as Array<Record<string, unknown>>
+    : [];
+  if (rawApplicants.length > MAX_APPLICANTS_PER_PATENT) {
+    throw new Error('GOOGLE_PATENTS_APPLICANTS_LIMIT_EXCEEDED');
+  }
+  const applicants = rawApplicants.length
+    ? rawApplicants
         .map((a) => ({ name: String(a?.name ?? '').trim(), country: normCountry(a?.country),
         }))
         .filter((a) => a.name)
@@ -343,7 +430,7 @@ export function normalizeRow(row: Record<string, unknown>): PatentRecord {
         .map((i) => ({ name: String(i?.name ?? '').trim() })) // 🔴 只 name
         .filter((i) => i.name)
     : [];
-  return { applicants, inventors };
+  return { publicationNumber, applicants, inventors };
 }
 
 /** 生产单例（env 驱动）。 */

@@ -44,7 +44,14 @@ export class DataRightsService implements OnModuleInit {
     } finally {
       await owner.$disconnect();
     }
-    await this.loadRules();
+    // 单一产品运行路径：缺 managed dependency 时进程必须能启动做诊断
+    // （readiness 由 database 组件关闭）。规则为空 → 引擎对 red 数据 fail-closed，
+    // 与 seed 失败同语义；绝不允许在这里抛错杀死 bootstrap。
+    try {
+      await this.loadRules();
+    } catch (err) {
+      this.logger.error(`jurisdiction_policy loadRules FAILED — DataRights fail-closed with zero rules: ${String(err)}`);
+    }
   }
 
   /** 从 DB 加载当前版本规则到内存缓存（app_user SELECT，无 RLS 平台表）。 */

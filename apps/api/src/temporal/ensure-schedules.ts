@@ -19,8 +19,11 @@ import {
   SANCTIONS_REFRESH_WORKFLOW,
   SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID,
   SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW,
+  SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID,
+  SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
 } from './understanding.constants';
+import { isPlatformScheduleId, platformScheduleWorkflowInput } from './platform-schedule-authority';
 
 /**
  * 幂等保障平台三个周期 Schedule 存在（采集 sweep / intent sweep / 存量对账 sweep）。
@@ -44,6 +47,8 @@ const SPECS = [
   { id: KB_RECOVERY_SWEEP_SCHEDULE_ID, workflowType: KB_RECOVERY_SWEEP_WORKFLOW, everyEnv: 'KB_RECOVERY_SWEEP_EVERY', everyDefault: '5m' },
   // R1 Release 对账与回收；workflow 始终可调度，但 activity 默认 no-op，须 ops 显式开启删除。
   { id: SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID, workflowType: SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW, everyEnv: 'SITE_RELEASE_MAINTENANCE_SWEEP_EVERY', everyDefault: '24h' },
+  // 有效输出但精确费用待定：每分钟检查持久重试档位；activity 不得重新调用模型。
+  { id: SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID, workflowType: SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW, everyEnv: 'SITE_BUILD_COST_RECONCILIATION_EVERY', everyDefault: '1m' },
 ];
 
 export async function ensurePlatformSchedules(): Promise<void> {
@@ -53,6 +58,9 @@ export async function ensurePlatformSchedules(): Promise<void> {
     for (const s of SPECS) {
       try {
         const isKbRecovery = s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID;
+        const isCostReconciliation =
+          s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID;
+        const authorityInput = isPlatformScheduleId(s.id) ? platformScheduleWorkflowInput(s.id) : undefined;
         await client.schedule.create({
           scheduleId: s.id,
           spec: { intervals: [{ every: (process.env[s.everyEnv] ?? s.everyDefault) as Duration }] },
@@ -60,24 +68,38 @@ export async function ensurePlatformSchedules(): Promise<void> {
             type: 'startWorkflow',
             workflowType: s.workflowType,
             taskQueue: UNDERSTANDING_TASK_QUEUE,
-            args: isKbRecovery ? [{ limit: 10 }] : [{}],
+            args: authorityInput ? [authorityInput] : isKbRecovery
+              ? [{ limit: 10 }]
+              : isCostReconciliation ? [{ limit: 50 }] : [{}],
             // KB workflow 自身也只有两轮 10m activity；Schedule 再加顶层硬截止，防异常 history 长占 SKIP 锁。
             ...(isKbRecovery ? { workflowExecutionTimeout: '22 minutes' } : {}),
+            ...(isCostReconciliation ? { workflowExecutionTimeout: '3 minutes' } : {}),
           },
           policies: { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' },
         });
         console.log(`[worker] schedule '${s.id}' created (every ${process.env[s.everyEnv] ?? s.everyDefault}, overlap=SKIP)`);
       } catch (e) {
-        if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) {
-          if (s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID) {
+          if ((e as Error)?.name === 'ScheduleAlreadyRunning' || /already/i.test(String(e))) {
+          if (isPlatformScheduleId(s.id) || s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID || s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID) {
             // R2-A2 的有界执行参数属于正确性门，不能让已存在的开发/生产 Schedule 永久沿用旧 action。
             // 只更新 action；频率、overlap、暂停状态与 ops note 全部保留。
+            const limit =
+              s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID ? 10 : s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID ? 50 : 1;
+            const workflowExecutionTimeout =
+              s.id === KB_RECOVERY_SWEEP_SCHEDULE_ID
+                ? '22 minutes'
+                : s.id === SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID
+                  ? '3 minutes'
+                  : undefined;
+            const args = isPlatformScheduleId(s.id) ? [platformScheduleWorkflowInput(s.id)] : [{ limit }];
             await client.schedule.getHandle(s.id).update((previous) => ({
               spec: previous.spec,
               action: {
                 ...previous.action,
-                args: [{ limit: 10 }],
-                workflowExecutionTimeout: '22 minutes',
+                workflowType: s.workflowType,
+                taskQueue: UNDERSTANDING_TASK_QUEUE,
+                args,
+                ...(workflowExecutionTimeout ? { workflowExecutionTimeout } : {}),
               },
               policies: previous.policies,
               state: previous.state,

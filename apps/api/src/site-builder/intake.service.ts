@@ -6,12 +6,20 @@ import {
   Inject,
   Injectable,
   Logger,
+  HttpStatus,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { RequestContext } from "../auth/request-context";
 import { PrismaService } from "../prisma/prisma.service";
 import { DEMO_V0_LAUNCHER, DemoV0Launcher } from "./demo-launcher";
 import { makeSlug } from "./slug";
+import {
+  assertBudgetGrantConsumable,
+  isBudgetGrantExpiredStorageError,
+  SiteBuildBudgetGrantError,
+  type VerifiedSiteBuildBudgetGrant,
+} from "./site-build-budget-grant";
+import { SiteBuildRuntimeGuard } from "../runtime/site-build-runtime.guard";
 
 /** 注册引导 6 项（01 §3.1）。DTO 层已校验形状，此处保留业务不变式。 */
 export interface IntakeInput {
@@ -155,6 +163,7 @@ export class IntakeService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(DEMO_V0_LAUNCHER) private readonly demoLauncher: DemoV0Launcher,
+    private readonly runtimeGuard: SiteBuildRuntimeGuard,
   ) {}
 
   private async persistTemporalAck(
@@ -199,6 +208,7 @@ export class IntakeService {
     ctx: RequestContext,
     input: IntakeInput,
     rawIdempotencyKey?: string,
+    budgetGrant?: VerifiedSiteBuildBudgetGrant,
   ): Promise<IntakeResult> {
     if (input.hasWebsite && !input.websiteUrl) {
       throw new BadRequestException(
@@ -211,23 +221,35 @@ export class IntakeService {
 
     const idempotencyKey = normalizeIdempotencyKey(rawIdempotencyKey);
     const requestHash = intakeRequestHash(input);
+    if (!budgetGrant) {
+      throw new SiteBuildBudgetGrantError(
+        "BUDGET_GRANT_REQUIRED",
+        HttpStatus.PAYMENT_REQUIRED,
+      );
+    }
+    if (
+      budgetGrant.workspaceId !== ctx.workspaceId ||
+      budgetGrant.siteId !== null ||
+      budgetGrant.operation !== "intake" ||
+      budgetGrant.requestSha256 !== requestHash
+    ) {
+      throw new SiteBuildBudgetGrantError(
+        "BUDGET_GRANT_SCOPE_MISMATCH",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const readinessFailure = await this.runtimeGuard
+      .assertReady()
+      .then(() => null)
+      .catch((error: unknown) => error);
     const nameEn = input.company.nameEn?.trim() || null;
 
     const prepared = await this.prisma.withWorkspace(
       ctx.workspaceId,
       async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-build-grant-${budgetGrant.issuer}-${budgetGrant.jti}`}))`;
         // 同 workspace 的“幂等查/一站限制/建站/建 run/写 response”必须原子串行。
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`site-intake-${ctx.workspaceId}`}))`;
-
-        // SaaS owns tenant identity; this backend materializes only the FK
-        // anchor. Site Builder may be the first write for a freshly issued
-        // workspace token, so provision it in the same locked transaction
-        // before CompanyProfile (which has a real Workspace FK).
-        await tx.workspace.upsert({
-          where: { id: ctx.workspaceId },
-          update: {},
-          create: { id: ctx.workspaceId },
-        });
 
         if (idempotencyKey) {
           const prior = await tx.idempotencyKey.findUnique({
@@ -268,12 +290,95 @@ export class IntakeService {
                 "corrupt site-builder intake idempotency reference",
               );
             }
+            const [existingGrant, existingBudget] = await Promise.all([
+              tx.siteBuildBudgetGrant.findUnique({
+                where: { buildRunId: run.id },
+              }),
+              tx.siteBuildBudget.findUnique({
+                where: { buildRunId: run.id },
+              }),
+            ]);
+            if (!existingGrant || !existingBudget) {
+              throw new Error("intake idempotency reference has no spending authority");
+            }
+            const exactConsumedGrant =
+              existingGrant.issuer === budgetGrant.issuer &&
+              existingGrant.jti === budgetGrant.jti;
+            if (exactConsumedGrant) {
+              if (existingGrant.tokenSha256 !== budgetGrant.tokenSha256) {
+                throw new ConflictException(
+                  structuredError(
+                    "BUDGET_GRANT_REUSED",
+                    "budget grant was already consumed with a different token",
+                  ),
+                );
+              }
+            } else {
+              // Do not let an old Idempotency-Key turn an unconsumed expired
+              // Grant into an accepted authorization. Only the exact consumed
+              // token digest has post-expiry replay semantics.
+              assertBudgetGrantConsumable(budgetGrant);
+            }
             return {
               response,
               run,
             };
           }
         }
+
+        const consumedGrant = await tx.siteBuildBudgetGrant.findUnique({
+          where: {
+            issuer_jti: {
+              issuer: budgetGrant.issuer,
+              jti: budgetGrant.jti,
+            },
+          },
+        });
+        if (consumedGrant) {
+          if (
+            consumedGrant.tokenSha256 !== budgetGrant.tokenSha256 ||
+            consumedGrant.workspaceId !== ctx.workspaceId ||
+            consumedGrant.operation !== "intake" ||
+            consumedGrant.requestSha256 !== requestHash
+          ) {
+            throw new ConflictException(
+              structuredError(
+                "BUDGET_GRANT_REUSED",
+                "budget grant was already consumed by a different intake request",
+              ),
+            );
+          }
+          const run = await tx.siteBuildRun.findUnique({
+            where: { id: consumedGrant.buildRunId },
+            select: {
+              id: true,
+              siteId: true,
+              status: true,
+              temporalRunId: true,
+            },
+          });
+          if (!run) throw new Error("budget grant references a missing intake build");
+          return {
+            response: {
+              siteId: run.siteId,
+              buildId: run.id,
+              status: "generating_demo" as const,
+            },
+            run,
+          };
+        }
+        if (readinessFailure) throw readinessFailure;
+        assertBudgetGrantConsumable(budgetGrant);
+
+        // SaaS owns tenant identity; this backend materializes only the FK
+        // anchor. Site Builder may be the first write for a freshly issued
+        // workspace token, so provision it in the same transaction before
+        // CompanyProfile, but only after replay and runtime-readiness gates.
+        await tx.workspace.upsert({
+          where: { id: ctx.workspaceId },
+          update: {},
+          create: { id: ctx.workspaceId },
+        });
 
         const existing = await tx.site.findFirst({
           where: { workspaceId: ctx.workspaceId },
@@ -381,6 +486,38 @@ export class IntakeService {
             status: "queued",
           },
         });
+        try {
+          await tx.siteBuildBudgetGrant.create({
+            data: {
+            workspaceId: ctx.workspaceId,
+            siteId: site.id,
+            buildRunId: run.id,
+            issuer: budgetGrant.issuer,
+            audience: budgetGrant.audience,
+            jti: budgetGrant.jti,
+            schemaVersion: budgetGrant.schemaVersion,
+            purpose: budgetGrant.purpose,
+            operation: budgetGrant.operation,
+            requestSha256: budgetGrant.requestSha256,
+            tokenSha256: budgetGrant.tokenSha256,
+            currency: budgetGrant.currency,
+            unit: budgetGrant.unit,
+            capMicrousd: budgetGrant.capMicrousd,
+            issuedAt: budgetGrant.issuedAt,
+            notBefore: budgetGrant.notBefore,
+            expiresAt: budgetGrant.expiresAt,
+            },
+          });
+        } catch (error) {
+          if (isBudgetGrantExpiredStorageError(error)) {
+            throw new SiteBuildBudgetGrantError(
+              "BUDGET_GRANT_EXPIRED",
+              HttpStatus.PAYMENT_REQUIRED,
+            );
+          }
+          throw error;
+        }
+        await tx.$executeRaw`SELECT create_site_build_budget_from_grant(${ctx.workspaceId}::uuid, ${run.id}::uuid)`;
         const response: IntakeResult = {
           siteId: site.id,
           buildId: run.id,

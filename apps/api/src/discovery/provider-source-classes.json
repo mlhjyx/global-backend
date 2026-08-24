@@ -16,12 +16,5 @@
   "google_patents": ["contact_discovery"],
   "samgov": ["public_intelligence"],
   "web_watch": ["public_intelligence"],
-  "email_guess": ["email_verification"],
-  "sandbox": [
-    "trade_data",
-    "b2b_company_person",
-    "company_registry",
-    "public_intelligence",
-    "industry_data"
-  ]
+  "email_guess": ["email_verification"]
 }

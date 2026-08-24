@@ -6,10 +6,18 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
+import { PostgresBudgetStore, TOOL_BUDGET_STORE, type BudgetStore } from '../tools/budget-store';
+import { ExecutionBudgetModule } from '../execution-budget/execution-budget.module';
 
 @Module({
+  imports: [ExecutionBudgetModule],
   controllers: [DiscoveryController],
   providers: [
+    {
+      provide: TOOL_BUDGET_STORE,
+      useFactory: (prisma: PrismaService) => new PostgresBudgetStore(prisma),
+      inject: [PrismaService],
+    },
     DiscoveryService,
     {
       provide: DiscoveryProviderRegistry,
@@ -19,16 +27,17 @@ import { LangfuseRuntimeTelemetryService } from '../model-runtime';
         gateway: ModelGateway,
         prisma: PrismaService,
         runtimeTelemetry: LangfuseRuntimeTelemetryService,
+        budgetStore: BudgetStore,
       ) => {
         const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
         return new DiscoveryProviderRegistry({
           gateway,
-          broker: buildToolBroker({ sourcePolicyReader }),
+          broker: buildToolBroker({ sourcePolicyReader, prisma, budgetStore }),
           prisma, // 专利缓存读/enqueue 闭包（app_user，平台表无 RLS）
           runtimeTelemetry,
         });
       },
-      inject: [ModelGateway, PrismaService, LangfuseRuntimeTelemetryService],
+      inject: [ModelGateway, PrismaService, LangfuseRuntimeTelemetryService, TOOL_BUDGET_STORE],
     },
   ],
   exports: [DiscoveryProviderRegistry],

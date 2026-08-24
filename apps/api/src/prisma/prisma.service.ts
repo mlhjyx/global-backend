@@ -2,6 +2,46 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { piiExtension } from '../compliance/pii-crypto.extension';
 
+export type DatabaseReadiness =
+  | Readonly<{ status: 'ready' }>
+  | Readonly<{
+      status: 'not_ready';
+      code: 'DATABASE_UNAVAILABLE' | 'DATABASE_PRINCIPAL_INVALID';
+    }>;
+
+export interface DatabasePrincipalEvidence {
+  sessionUser: string;
+  currentUser: string;
+  rolSuper: boolean;
+  rolBypassRls: boolean;
+  rolCreateDb: boolean;
+  rolCreateRole: boolean;
+  rolReplication: boolean;
+  rolInherit: boolean;
+  memberships: string[];
+}
+
+export function isAuthorizedAppDatabasePrincipal(
+  evidence: DatabasePrincipalEvidence | undefined,
+): boolean {
+  return Boolean(
+    evidence &&
+      evidence.sessionUser === 'app_user' &&
+      evidence.currentUser === 'app_user' &&
+      !evidence.rolSuper &&
+      !evidence.rolBypassRls &&
+      !evidence.rolCreateDb &&
+      !evidence.rolCreateRole &&
+      !evidence.rolReplication &&
+      evidence.rolInherit &&
+      Array.isArray(evidence.memberships) &&
+      evidence.memberships.length === 0,
+  );
+}
+
+const UNAVAILABLE_APP_DATABASE_URL =
+  'postgresql://app_user@127.0.0.1:1/unavailable?connect_timeout=1';
+
 /**
  * Connects as the non-superuser app_user (APP_DATABASE_URL) so RLS is enforced.
  * Domain services run their DB work inside withWorkspace() — never raw find
@@ -16,17 +56,32 @@ import { piiExtension } from '../compliance/pii-crypto.extension';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     super({
-      datasourceUrl: process.env.APP_DATABASE_URL ?? process.env.DATABASE_URL,
+      datasourceUrl:
+        process.env.APP_DATABASE_URL?.trim() || UNAVAILABLE_APP_DATABASE_URL,
     });
     return this.$extends(piiExtension) as unknown as PrismaService;
   }
 
   async onModuleInit(): Promise<void> {
-    await this.$connect();
+    await this.reconnect();
   }
 
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
+  }
+
+  /** Re-attempts the same app_user connection; failures stay bounded and fail closed. */
+  async reconnect(): Promise<DatabaseReadiness> {
+    try {
+      await this.$connect();
+      return { status: 'ready' };
+    } catch {
+      return { status: 'not_ready', code: 'DATABASE_UNAVAILABLE' };
+    }
+  }
+
+  getReadiness(): DatabaseReadiness {
+    return { status: 'not_ready', code: 'DATABASE_UNAVAILABLE' };
   }
 
   /** Run `fn` in a transaction scoped to one workspace (sets app.current_workspace_id). */

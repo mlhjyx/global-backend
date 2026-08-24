@@ -68,6 +68,7 @@ interface FakeTenant {
     }
   >;
   evidence: { field: string; providerKey: string; value: unknown }[];
+  syntheticEntityIds: Set<string>;
 }
 
 /** 平台 source_signal + 租户 canonical/fieldEvidence 的内存假体。 */
@@ -77,6 +78,7 @@ function fakePrisma(
 ): PrismaService & FakeTenant {
   const companies: FakeTenant['companies'] = new Map();
   const evidence: FakeTenant['evidence'] = [];
+  const syntheticEntityIds = new Set<string>();
   const tx = {
     $queryRaw: async () => [{ locked: true }],
     suppressionRecord: {
@@ -141,6 +143,10 @@ function fakePrisma(
       },
     },
     fieldEvidence: {
+      findMany: async ({ where }: { where: { entityId: string } }) =>
+        syntheticEntityIds.has(where.entityId)
+          ? [{ entityId: where.entityId, providerKey: 'sandbox', license: 'sandbox' }]
+          : [],
       create: async ({ data }: { data: { field: string; providerKey: string; value: unknown } }) => {
         evidence.push({
           field: data.field,
@@ -154,6 +160,7 @@ function fakePrisma(
   return {
     companies,
     evidence,
+    syntheticEntityIds,
     sourceSignal: {
       // 支持 (occurredAt desc, id desc) 稳定排序 + Prisma cursor 分页（cursor/skip）——投影端分页扫描 CPV 匹配。
       findMany: async ({
@@ -209,6 +216,28 @@ describe('cpvOverlap —— CPV 子树匹配（去尾零前缀，双向）', () 
 });
 
 describe('TedIntentProjectionService.projectTenders —— 从 source_signal 只读投影（收口⑤反转）', () => {
+  it('既有 canonical 带 synthetic evidence 时不派生招标 intent 或新证据', async () => {
+    const signal = tedSignal({ name: 'Synthetic Buyer', occurredAt: new Date(now - DAY_MS) });
+    const prisma = fakePrisma([signal]);
+    prisma.companies.set(signal.subjectKey, {
+      id: 'co-synthetic',
+      workspaceId: WS,
+      dedupeKey: signal.subjectKey,
+      name: signal.subjectName,
+      country: signal.subjectCountry,
+      status: 'NEW',
+      attributes: {},
+      version: 1,
+    });
+    prisma.syntheticEntityIds.add('co-synthetic');
+
+    await expect(
+      new TedIntentProjectionService({ prisma }).projectTenders(WS, params),
+    ).resolves.toMatchObject({ companiesTouched: 0, eventsProjected: 0 });
+    expect(prisma.companies.get(signal.subjectKey)?.attributes.intent).toBeUndefined();
+    expect(prisma.evidence).toHaveLength(0);
+  });
+
   it('ACTIVE 信号按 CPV 子树×国别（ISO-3→alpha-2）匹配 → 新建买方线索 + TENDER_PUBLISHED + CC BY 双证据', async () => {
     const at = new Date(now - 3 * DAY_MS);
     const prisma = fakePrisma([

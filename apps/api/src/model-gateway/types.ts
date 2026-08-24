@@ -1,4 +1,6 @@
 import type { ModelExecutionTrace } from '@global/contracts';
+import type { TypedProjectionSchema } from '../durable-results/durable-result-strategy';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
 import type { GatewaySettlementObservation } from './paid-model-settlement';
 
@@ -7,7 +9,7 @@ export interface AiContext {
   /** 必须是真实 workspace uuid（ai_trace/usage_ledger @db.Uuid 列；伪值=记账静默失败）。 */
   workspaceId: string;
   userId?: string;
-  /** 预算归账键（BudgetLedger reserve-then-settle 按 runId ?? workspaceId 归账）。 */
+  /** 持久预算归账键（reserve-then-settle 按 runId ?? workspaceId 归账）。 */
   runId?: string;
   correlationId?: string;
   /**
@@ -19,6 +21,13 @@ export interface AiContext {
   modelPolicy?: ModelExecutionTrace;
   /** R4-B durable paid-operation namespace. Presence requires a persistent ledger. */
   paidCost?: PaidCostContext;
+  /** Registered typed durable-result schema for model replay. */
+  durableResultSchema?: TypedProjectionSchema;
+  /** Collects only the closed ledger receipt for the actual domain transaction. */
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 export interface ModelUsage {
@@ -47,6 +56,8 @@ export interface ModelResult<T> {
   /** 本次结果实际发生的模型调用数（generateStructured 校验-修复重试=2；缺省视为 1）——
    *  供**无 usage 上报**时按调用数结算预算，防修复调用被少记（否则退还预留的另一半，硬上界形同虚设）。 */
   callCount?: number;
+  /** Ledger-authored durable receipt returned by authoritative settlement, when available. */
+  durableReceipt?: DurableExecutionReceipt;
 }
 
 export interface GenerateTextInput {

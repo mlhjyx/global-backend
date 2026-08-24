@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -29,9 +30,37 @@ const validAttestation = {
   build_sha: 'a'.repeat(40),
   built_at: '2026-08-10T00:00:00.000Z',
   artifact_digest: `sha256:${'b'.repeat(64)}`,
+  artifact_manifest_digest: `sha256:${'d'.repeat(64)}`,
+  sbom_digest: `sha256:${'e'.repeat(64)}`,
+  source_tree_digest: `sha256:${'f'.repeat(64)}`,
+  renderer_digest: `sha256:${'1'.repeat(64)}`,
   migration_revision: '20260809010101_runtime_receipts',
   schema_digest: `sha256:${'c'.repeat(64)}`,
 };
+
+function digest(value: string): string {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+async function writeRuntimeProvenance(distRoot: string): Promise<void> {
+  const sbom = '{"bomFormat":"CycloneDX"}\n';
+  await writeFile(join(distRoot, 'runtime-sbom.cdx.json'), sbom);
+  await writeFile(
+    join(distRoot, 'artifact-manifest.json'),
+    JSON.stringify({
+      schema_version: 'global-runtime-artifact-manifest/v1',
+      build_sha: validAttestation.build_sha,
+      built_at: validAttestation.built_at,
+      source_tree_digest: validAttestation.source_tree_digest,
+      sbom: { sha256: digest(sbom) },
+      components: [
+        { name: 'api', digest: `sha256:${'2'.repeat(64)}` },
+        { name: 'contracts', digest: `sha256:${'3'.repeat(64)}` },
+        { name: 'renderer', digest: validAttestation.renderer_digest },
+      ],
+    }),
+  );
+}
 
 describe('build attestation', () => {
   it('accounts the stable bytes actually read before retaining an artifact buffer', () => {
@@ -62,18 +91,18 @@ describe('build attestation', () => {
     ).toThrow(/artifact_digest/i);
   });
 
-  it('allows an explicitly unattested development process but never pilot', async () => {
+  it('allows an explicitly unattested test process but no managed environment', async () => {
     const directory = await temporaryDirectory();
     const missing = join(directory, 'build-attestation.json');
 
     await expect(
-      loadBuildIdentity({ mode: 'development', path: missing, artifactRoot: directory }),
+      loadBuildIdentity({ mode: 'test', path: missing, artifactRoot: directory }),
     ).resolves.toEqual({
       attested: false,
       schema_version: 'global-runtime-build-attestation/v1',
     });
     await expect(
-      loadBuildIdentity({ mode: 'pilot', path: missing, artifactRoot: directory }),
+      loadBuildIdentity({ mode: 'development', path: missing, artifactRoot: directory }),
     ).rejects.toThrow(
       /attestation.*required/i,
     );
@@ -202,6 +231,7 @@ describe('build attestation', () => {
       recursive: true,
     });
     await writeFile(join(distRoot, 'main.js'), 'compiled application');
+    await writeRuntimeProvenance(distRoot);
     await writeFile(schemaTarget, 'model RuntimeReceipt {}');
     await symlink(schemaTarget, schemaLink);
     execFileSync('mkfifo', [schemaFifo]);
@@ -242,6 +272,7 @@ describe('build attestation', () => {
     await mkdir(distRoot);
     await mkdir(join(migrationsRoot, '20260809010101_runtime_receipts'), { recursive: true });
     await writeFile(join(distRoot, 'main.js'), 'compiled application');
+    await writeRuntimeProvenance(distRoot);
     await writeFile(schemaPath, 'model RuntimeReceipt {}');
     await writeFile(
       join(migrationsRoot, '20260809010101_runtime_receipts', 'migration.sql'),
@@ -268,6 +299,10 @@ describe('build attestation', () => {
     expect(generated).toMatchObject({
       build_sha: validAttestation.build_sha,
       migration_revision: '20260809010101_runtime_receipts',
+      source_tree_digest: validAttestation.source_tree_digest,
+      renderer_digest: validAttestation.renderer_digest,
+      artifact_manifest_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      sbom_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
     });
     await expect(
       loadBuildIdentity({

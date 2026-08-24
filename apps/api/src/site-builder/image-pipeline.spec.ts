@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { IsolatedImagePipelineRunner } from './image-pipeline-runner';
+import {
+  IsolatedImagePipelineRunner,
+  imagePipelineChildEnvironment,
+  resolveImagePipelineChildCommand,
+} from './image-pipeline-runner';
 import {
   IMAGE_PIPELINE_VERSION,
   RESPONSIVE_IMAGE_WIDTHS,
@@ -18,6 +22,13 @@ import {
 function sha256(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex');
 }
+
+const COMPILED_CHILD = path.join(
+  process.cwd(),
+  'dist',
+  'site-builder',
+  'image-pipeline-child.js',
+);
 
 async function opaqueJpeg(width = 3200, height = 2400): Promise<Buffer> {
   return sharp({
@@ -36,6 +47,26 @@ async function transparentPng(width = 3200, height = 2400): Promise<Buffer> {
 }
 
 describe('M1-c deterministic image policy', () => {
+  it('fails closed when a managed Linux image decoder has no native resource limiter', async () => {
+    const compiled = '/app/apps/api/dist/site-builder/image-pipeline-child.js';
+    await expect(
+      resolveImagePipelineChildCommand({
+        platform: 'linux',
+        processExecPath: '/usr/bin/node',
+        adjacentCompiled: compiled,
+        resourceLimiterAvailable: false,
+      }),
+    ).rejects.toThrow('IMAGE_PIPELINE_ISOLATION_UNAVAILABLE');
+  });
+
+  it('runs the image child with production semantics in every managed environment', () => {
+    expect(imagePipelineChildEnvironment({ PATH: '/usr/bin', NODE_ENV: 'development' })).toEqual({
+      PATH: '/usr/bin',
+      NODE_ENV: 'production',
+      VIPS_BLOCK_UNTRUSTED: '1',
+    });
+  });
+
   it('locks the versioned kind→role policy and responsive widths', () => {
     expect(IMAGE_PIPELINE_VERSION).toMatch(
       /^sharp-0\.35\.3-vips-[0-9.]+-m1c\.\d+$/,
@@ -220,7 +251,7 @@ describe('M1-c deterministic image policy', () => {
 
   it('renders the native codec work in a killable isolated child process', async () => {
     const input = await opaqueJpeg(640, 360);
-    const runner = new IsolatedImagePipelineRunner(30_000);
+    const runner = new IsolatedImagePipelineRunner(30_000, undefined, COMPILED_CHILD);
     const inspection = await runner.inspect(input, 'image/jpeg');
     const [plan] = planImageVariants({
       assetKind: 'product_image',
@@ -247,7 +278,11 @@ describe('M1-c deterministic image policy', () => {
     controller.abort(reason);
 
     await expect(
-      new IsolatedImagePipelineRunner(30_000).inspect(input, 'image/jpeg', controller.signal),
+      new IsolatedImagePipelineRunner(30_000, undefined, COMPILED_CHILD).inspect(
+        input,
+        'image/jpeg',
+        controller.signal,
+      ),
     ).rejects.toBe(reason);
   });
 
@@ -257,7 +292,7 @@ describe('M1-c deterministic image policy', () => {
     const controller = new AbortController();
     const reason = new Error('activity cancelled in flight');
     try {
-      const pending = new IsolatedImagePipelineRunner(30_000, scratch).inspect(
+      const pending = new IsolatedImagePipelineRunner(30_000, scratch, COMPILED_CHILD).inspect(
         input,
         'image/jpeg',
         controller.signal,
@@ -275,7 +310,7 @@ describe('M1-c deterministic image policy', () => {
     const scratch = await mkdtemp(path.join(tmpdir(), 'm1c-timeout-'));
     try {
       await expect(
-        new IsolatedImagePipelineRunner(1, scratch).inspect(input, 'image/jpeg'),
+        new IsolatedImagePipelineRunner(1, scratch, COMPILED_CHILD).inspect(input, 'image/jpeg'),
       ).rejects.toThrow('image pipeline timed out after 1ms');
       expect(await readdir(scratch)).toEqual([]);
     } finally {

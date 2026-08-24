@@ -1,4 +1,5 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
@@ -6,11 +7,19 @@ import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-j
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
-import { resolveEvidenceLicense } from '../discovery/evidence-license';
+import {
+  assertProductDiscoveryProvenance,
+  isProductDiscoveryRawRecord,
+  resolveEvidenceLicense,
+} from '../discovery/evidence-license';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
-import { BudgetExceededError, budgetLedger, runBudgetCents } from '../tools/budget';
+import {
+  BudgetExceededError,
+  type BudgetStore,
+  UnavailableBudgetStore,
+} from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import {
   companyMayUseExternalProcessing,
@@ -18,13 +27,28 @@ import {
 } from '../discovery/company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
+import {
+  parseExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from '../execution-budget/execution-budget-binding';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
   runId: string;
   planId: string;
   icpId: string;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
 }
+
+type DiscoveryActivityInput = Readonly<{
+  workspaceId: string;
+  executionContractVersion?: 2;
+  executionBudget?: ExecutionBudgetBinding;
+}>;
 
 export interface PlanQuery {
   source_class: string;
@@ -39,6 +63,13 @@ const SIGNAL_ENRICH_LIMIT = 12; // 信号富集慢（抓官网/sitemap），单 
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 const WATCH_REGISTER_LIMIT = 12; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
+const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
+  'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
+  'http.get', 'inpi_rne.search', 'mapyourshow.fetch', 'openfda.search',
+  'osm.overpass', 'searxng.search', 'smtp.rcpt_probe', 'tradefair.algolia',
+  'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
+  'discovery.extract_list', 'contact.find_decision_makers',
+]);
 
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
@@ -53,10 +84,35 @@ export function createDiscoveryActivities(deps: {
   /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
+  budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
 }) {
-  // 收口② D「真开账」：每个活动入口幂等 open（open 取较大值，重复无害；账本进程内，
-  // 活动重试/换 worker 也能重新立账）。run 结束由 finalizeRun close。
-  const ensureRunBudget = (runId: string): void => budgetLedger.open(runId, runBudgetCents());
+  const budgets =
+    deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
+  const ensureRunBudget = async (
+    args: DiscoveryActivityInput,
+  ): Promise<ExecutionBudgetBinding> => {
+    let binding: ExecutionBudgetBinding;
+    try {
+      if (args.executionContractVersion !== 2) throw new Error('invalid version');
+      binding = parseExecutionBudgetBinding(args.executionBudget, {
+        scopeKey: args.workspaceId,
+        purpose: 'discovery.run',
+        subjectType: 'discovery_run',
+      });
+    } catch {
+      throw ApplicationFailure.nonRetryable(
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+        'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
+      );
+    }
+    await budgets.attestAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+    });
+    return binding;
+  };
   const authorizeCompanyExternalAction =
     (workspaceId: string, companyId: string): (() => Promise<boolean>) =>
     () =>
@@ -64,20 +120,16 @@ export function createDiscoveryActivities(deps: {
 
   return {
     /**
-     * run 起始清账：强制关闭本 runId 可能残留的预算账户（含 wasExhausted 打标）。用于同 runId 的**重试**：
-     * 上次 attempt 若在 finalizeRun 前崩溃，进程内账户与打穿标记会残留（budgetLedger 无 GC），
-     * 令重试的首个 executeQuery 误报 budgetTruncated。workflow 起始调一次即从干净状态起（单 worker 前提下）。
-     *
-     * 权衡（对抗复审 MEDIUM）：重试因此拿到**全新 cap**，不继承崩溃 attempt 已发生的 settledCents ——
-     * 极端下同 runId 跨 attempt 实际花费可达 ~2×cap（cap 目前是宽松占位值，可接受）。反面（保留残留账户）
-     * 更糟：残留的打穿标记会令**每次**重试都被永久误判截断、run 永不成功。真正的跨 attempt 成本对账需
-     * 待预算基建换持久化后端（budget.ts 顶注已记档），非本进程内实现能力范围。
+     * Frozen compatibility activity name/shape for pre-authority histories.
+     * Replayed completions remain deterministic; a still-pending legacy command
+     * has no v2 envelope and is parked non-retryably by ensureRunBudget.
      */
-    async resetRunBudget(args: { runId: string }): Promise<void> {
-      budgetLedger.close(args.runId, { force: true });
+    async resetRunBudget(args: DiscoveryActivityInput & { runId: string }): Promise<void> {
+      await ensureRunBudget(args);
     },
 
-    async loadPlanQueries(args: { workspaceId: string; planId: string }): Promise<{ queries: PlanQuery[] }> {
+    async loadPlanQueries(args: DiscoveryActivityInput & { planId: string }): Promise<{ queries: PlanQuery[] }> {
+      await ensureRunBudget(args);
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const plan = await tx.discoveryQueryPlan.findUnique({ where: { id: args.planId },
         });
@@ -97,12 +149,13 @@ export function createDiscoveryActivities(deps: {
      * raw 原样落地（幂等 by externalId）。
      * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
      */
-    async executeQuery(args: { workspaceId: string; runId: string; query: PlanQuery }): Promise<{
+    async executeQuery(args: DiscoveryActivityInput & { runId: string; query: PlanQuery }): Promise<{
       rawCount: number;
       costCents: number;
       provider: string | null;
       budgetTruncated: boolean;
     }> {
+      const binding = await ensureRunBudget(args);
       // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
       // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
       // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
@@ -112,7 +165,11 @@ export function createDiscoveryActivities(deps: {
       if (deps.taxonomy) {
         const industryTerms = [enriched.industry, enriched.sub_industry].flat().filter(Boolean).map(String);
         const countryTerms = [enriched.country, enriched.region].flat().filter(Boolean).map(String);
-        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, { workspaceId: args.workspaceId });
+        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
+          workspaceId: args.workspaceId,
+          runId: binding.accountKey,
+          executionBudget: binding,
+        });
         if (inds.length) {
           enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
           enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
@@ -121,6 +178,8 @@ export function createDiscoveryActivities(deps: {
         for (const ct of countryTerms) {
           const c = await deps.taxonomy.resolve('country', ct, {
             workspaceId: args.workspaceId,
+            runId: binding.accountKey,
+            executionBudget: binding,
           });
           if (c?.wikidataQid) {
             enriched._countryQid = c.wikidataQid;
@@ -148,6 +207,9 @@ export function createDiscoveryActivities(deps: {
         deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
       );
       if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
+      for (const adapter of adapters) {
+        assertProductDiscoveryProvenance({ providerKey: adapter.key });
+      }
       if (!adapters.length)
         return {
           rawCount: 0,
@@ -158,26 +220,64 @@ export function createDiscoveryActivities(deps: {
 
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
-      ensureRunBudget(args.runId);
       const ctx: ExecutionContext = {
         workspaceId: args.workspaceId,
-        runId: args.runId,
-        correlationId: args.runId,
+        runId: binding.accountKey,
+        correlationId: binding.accountKey,
       };
       const blockedDomains = suspended.map((s) => s.domain);
       const settled = await Promise.allSettled(
-        adapters.map((a) => a.discoverCompanies(q, ctx, { blockedDomains }).then((r) => ({ key: a.key, r }))),
+        adapters.map(async (a) => {
+          const durableReceipts: Array<{
+            producerId: string;
+            receipt: DurableExecutionReceipt;
+          }> = [];
+          const r = await a.discoverCompanies(q, {
+            ...ctx,
+            onDurableReceipt: (producerId, receipt) => {
+              if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
+                throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+              }
+              durableReceipts.push({ producerId, receipt });
+            },
+          }, { blockedDomains });
+          return { key: a.key, r, durableReceipts };
+        }),
       );
+      for (const result of settled) {
+        if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
+          throw result.reason;
+        }
+        if (result.status !== 'fulfilled') continue;
+        assertProductDiscoveryProvenance({ providerKey: result.value.key });
+        for (const record of result.value.r.records) {
+          assertProductDiscoveryProvenance({
+            providerKey: result.value.key,
+            license: record.license,
+          });
+        }
+      }
       // 预算耗尽绝不被吞成假成功。**不能**靠「某源 reject」判断——provider 的 fail-safe catch 会把
       // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
-      // 改由 BudgetLedger 唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
+      // 改由持久预算账户唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
       // wasExhausted=true → 显性上报截断，让 workflow 判 PARTIAL 而非假 DONE（各源 fail-safe 拿到的部分记录仍落库）。
-      const budgetTruncated = budgetLedger.wasExhausted(args.runId);
+      const budgetTruncated = (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted;
 
       // ── 事务内：持久化各源 raw（带来源留痕），providerKey 区分来源 ──
       // 用 createMany({skipDuplicates}) 单语句写入：撞唯一键会被跳过而非 abort 事务
       // （Postgres 里 catch 单条 P2002 会毒化整个事务）。批内先按 externalId 去重。
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const persisted = await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: settled.flatMap((item) => item.status === 'fulfilled'
+            ? item.value.durableReceipts.map(({ producerId, receipt }) => ({
+                producerId,
+                receipt,
+                domainAckKey: `${args.runId}:${item.value.key}:${receipt.operationId}`,
+                domainRevision: receipt.resultDigest,
+              }))
+            : []),
+          apply: async (transaction) => {
         let rawCount = 0;
         let totalCost = 0;
         const providersHit: string[] = [];
@@ -207,7 +307,7 @@ export function createDiscoveryActivities(deps: {
               costCents: 0,
             }));
           if (rows.length) {
-            const created = await tx.rawSourceRecord.createMany({
+            const created = await transaction.rawSourceRecord.createMany({
               data: rows,
               skipDuplicates: true,
             });
@@ -216,7 +316,7 @@ export function createDiscoveryActivities(deps: {
           totalCost += r.costCents;
         }
         if (totalCost > 0) {
-          await tx.usageLedger.create({
+          await transaction.usageLedger.create({
             data: {
               workspaceId: args.workspaceId,
               resourceType: 'provider_call',
@@ -234,6 +334,26 @@ export function createDiscoveryActivities(deps: {
           provider: providersHit.join('+') || null,
           budgetTruncated,
         };
+          },
+          readback: async (transaction) => {
+            const fulfilled = settled.filter((item) => item.status === 'fulfilled');
+            return {
+              rawCount: await transaction.rawSourceRecord.count({
+                where: { runId: args.runId, sourceClass: q.sourceClass },
+              }),
+              costCents: fulfilled.reduce(
+                (sum, item) => sum + item.value.r.costCents,
+                0,
+              ),
+              provider: fulfilled
+                .filter((item) => item.value.r.records.length > 0)
+                .map((item) => item.value.key)
+                .join('+') || null,
+              budgetTruncated,
+            };
+          },
+        });
+        return persisted.value;
       });
     },
 
@@ -241,10 +361,11 @@ export function createDiscoveryActivities(deps: {
      * 归一 + 身份解析（PRD 8.8）+ 字段级 Evidence（8.10）+ Suppression 标记。
      * 幂等：canonical 按 dedupeKey upsert；identity_link 按 (canonical,raw) 去重。
      */
-    async canonicalizeRun(args: {
+    async canonicalizeRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
     }): Promise<{ companies: number; suppressed: number }> {
+      await ensureRunBudget(args);
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         // Canonical materialization participates in the same linearization
         // protocol as suppression creation and downstream PII commits. This
@@ -260,6 +381,7 @@ export function createDiscoveryActivities(deps: {
         let companies = 0;
         let suppressed = 0;
         for (const raw of raws) {
+          if (!isProductDiscoveryRawRecord(raw)) continue;
           const rec = raw.payload as unknown as {
             name?: string;
             domain?: string;
@@ -374,19 +496,21 @@ export function createDiscoveryActivities(deps: {
      * 判定即 CandidateAssessment：发现候选就建 Lead 行（status=DISCOVERED、无 scores），评分阶段再填 scores。
      * fit 挂 Lead 而非 canonical —— 同 workspace 多 ICP 各自独立判，互不覆盖。网络调用在事务外，落库在事务内。
      */
-    async qualifyFitForRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{
+    async qualifyFitForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       judged: number;
       verdicts: Record<string, number>;
       skippedForBudget: number;
     }> {
-      ensureRunBudget(args.runId); // fit 判定（LLM）消耗计入本 run 预算
+      const binding = await ensureRunBudget(args); // fit 判定（LLM）消耗计入同一 authority 账户
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
-        const rawIds = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId },
-          select: { id: true },
-        });
+        const rawIds = (
+          await tx.rawSourceRecord.findMany({
+            where: { runId: args.runId },
+            select: { id: true, providerKey: true, payload: true },
+          })
+        ).filter(isProductDiscoveryRawRecord);
         const links = await tx.identityLink.findMany({
           where: {
             canonicalType: 'company',
@@ -440,7 +564,7 @@ export function createDiscoveryActivities(deps: {
         try {
           const authorizeExternalAction = authorizeCompanyExternalAction(args.workspaceId, c.id);
           judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
-            runId: args.runId,
+            runId: binding.accountKey,
             runtimeTelemetry: deps.runtimeTelemetry,
             authorizeExternalAction,
           });
@@ -473,12 +597,13 @@ export function createDiscoveryActivities(deps: {
      * 幂等：按 enricher key 命名空间存 attributes，已有该源命名空间则跳过（重跑不重复写证据）。
      * 网络调用在事务外，每家命中后单独落库（attributes 命名空间合并 + 逐字段 field_evidence）。
      */
-    async enrichRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{
+    async enrichRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;
       matched: number;
       provider: string | null;
       budgetTruncated: boolean;
     }> {
+      const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
       );
@@ -492,10 +617,12 @@ export function createDiscoveryActivities(deps: {
 
       // 本 run 归一出、且过了本 run ICP 资格门（Lead.fitVerdict='match'）的公司
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const rawIds = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId },
-          select: { id: true },
-        });
+        const rawIds = (
+          await tx.rawSourceRecord.findMany({
+            where: { runId: args.runId },
+            select: { id: true, providerKey: true, payload: true },
+          })
+        ).filter(isProductDiscoveryRawRecord);
         const links = await tx.identityLink.findMany({
           where: {
             canonicalType: 'company',
@@ -521,16 +648,26 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
-      ensureRunBudget(args.runId);
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
       for (const c of companies.slice(0, ENRICH_LIMIT)) {
+        const durableReceipts: Array<{
+          producerId: string;
+          receipt: DurableExecutionReceipt;
+        }> = [];
+        const captureEnrichmentReceipt = (
+          producerId: string,
+          receipt: DurableExecutionReceipt,
+        ): void => {
+          durableReceipts.push({ producerId, receipt });
+        };
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
-          runId: args.runId,
-          correlationId: args.runId,
+          runId: binding.accountKey,
+          correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          onDurableReceipt: captureEnrichmentReceipt,
         };
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         // 所有 enricher 互补并跑；已有该源命名空间的跳过（幂等）
@@ -554,20 +691,41 @@ export function createDiscoveryActivities(deps: {
               ctx,
             );
             if (r.matched) hits.push({ key: e.key, result: r });
-          } catch {
+          } catch (error) {
+            if (isExecutionControlError(error)) throw error;
             // 单富集源失败不影响其余
           }
         }
         enriched += 1;
-        if (!hits.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          commitCompanyEnrichmentResults(tx, {
-            workspaceId: args.workspaceId,
-            companyId: c.id,
-            hits,
-            status: 'ENRICHED',
-          }),
-        );
+        if (!hits.length && !durableReceipts.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const result = await applyDomainAckConsumerTransactions({
+            transaction: tx,
+            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+              producerId,
+              receipt,
+              domainAckKey: `${c.id}:${receipt.operationId}:enrichment`,
+              domainRevision: receipt.resultDigest,
+            })),
+            apply: (transaction) => hits.length
+              ? commitCompanyEnrichmentResults(transaction, {
+                  workspaceId: args.workspaceId,
+                  companyId: c.id,
+                  hits,
+                  status: 'ENRICHED',
+                })
+              : Promise.resolve(false),
+            readback: async (transaction) => {
+              const current = await transaction.canonicalCompany.findUnique({
+                where: { id: c.id },
+                select: { attributes: true },
+              });
+              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+              return hits.some((hit) => Object.hasOwn(attributes, hit.key));
+            },
+          });
+          return result.value;
+        });
         if (!committed) continue;
         matched += 1;
         hits.forEach((h) => providersHit.add(h.key));
@@ -578,7 +736,7 @@ export function createDiscoveryActivities(deps: {
         enriched,
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
-        budgetTruncated: budgetLedger.wasExhausted(args.runId),
+        budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
       };
     },
 
@@ -589,12 +747,13 @@ export function createDiscoveryActivities(deps: {
      *  - TTL 刷新：命名空间 `_ts` 在 SIGNAL_TTL_MS 内则跳过（信号时变，不能像 GLEIF 静态事实那样一次写死）。
      *  - 每家 heartbeat + 上限 SIGNAL_ENRICH_LIMIT，防长活动被判卡死。
      */
-    async enrichSignalsRun(args: { workspaceId: string; runId: string; icpId: string }): Promise<{
+    async enrichSignalsRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;
       matched: number;
       provider: string | null;
       budgetTruncated: boolean;
     }> {
+      const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
       );
@@ -617,10 +776,12 @@ export function createDiscoveryActivities(deps: {
       );
 
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const rawIds = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId },
-          select: { id: true },
-        });
+        const rawIds = (
+          await tx.rawSourceRecord.findMany({
+            where: { runId: args.runId },
+            select: { id: true, providerKey: true, payload: true },
+          })
+        ).filter(isProductDiscoveryRawRecord);
         const links = await tx.identityLink.findMany({
           where: {
             canonicalType: 'company',
@@ -647,17 +808,27 @@ export function createDiscoveryActivities(deps: {
         });
       });
 
-      ensureRunBudget(args.runId);
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
       const nowMs = Date.now();
       for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
+        const durableReceipts: Array<{
+          producerId: string;
+          receipt: DurableExecutionReceipt;
+        }> = [];
+        const captureEnrichmentReceipt = (
+          producerId: string,
+          receipt: DurableExecutionReceipt,
+        ): void => {
+          durableReceipts.push({ producerId, receipt });
+        };
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
-          runId: args.runId,
-          correlationId: args.runId,
+          runId: binding.accountKey,
+          correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+          onDurableReceipt: captureEnrichmentReceipt,
         };
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
 
@@ -683,20 +854,41 @@ export function createDiscoveryActivities(deps: {
               ctx,
             );
             if (r.matched) hits.push({ key: e.key, result: r });
-          } catch {
+          } catch (error) {
+            if (isExecutionControlError(error)) throw error;
             /* 单信号源失败不影响其余 */
           }
         }
         enriched += 1;
-        if (!hits.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          commitCompanyEnrichmentResults(tx, {
-            workspaceId: args.workspaceId,
-            companyId: c.id,
-            hits,
-            signalTimestamp: new Date(nowMs),
-          }),
-        );
+        if (!hits.length && !durableReceipts.length) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const result = await applyDomainAckConsumerTransactions({
+            transaction: tx,
+            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
+              producerId,
+              receipt,
+              domainAckKey: `${c.id}:${receipt.operationId}:signal-enrichment`,
+              domainRevision: receipt.resultDigest,
+            })),
+            apply: (transaction) => hits.length
+              ? commitCompanyEnrichmentResults(transaction, {
+                  workspaceId: args.workspaceId,
+                  companyId: c.id,
+                  hits,
+                  signalTimestamp: new Date(nowMs),
+                })
+              : Promise.resolve(false),
+            readback: async (transaction) => {
+              const current = await transaction.canonicalCompany.findUnique({
+                where: { id: c.id },
+                select: { attributes: true },
+              });
+              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+              return hits.some((hit) => Object.hasOwn(attributes, hit.key));
+            },
+          });
+          return result.value;
+        });
         if (!committed) continue;
         matched += 1;
         hits.forEach((h) => providersHit.add(h.key));
@@ -705,7 +897,7 @@ export function createDiscoveryActivities(deps: {
         enriched,
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
-        budgetTruncated: budgetLedger.wasExhausted(args.runId),
+        budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
       };
     },
 
@@ -715,20 +907,25 @@ export function createDiscoveryActivities(deps: {
      * 交给独立 intentSweep 持续盯产品/招聘/供应商招募/新闻页变更 → intent 事件 → 投影进 attributes.intent.*。
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
      */
-    async registerWatchesForRun(args: {
+    async registerWatchesForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       icpId: string;
     }): Promise<{ candidates: number; registered: number }> {
+      const binding = await ensureRunBudget(args);
       const intentSvc = new IntentProjectionService({
         prisma: deps.prisma,
         broker: deps.broker,
+        budgetStore: budgets,
+        platformWriter: deps.platformWriter,
       });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const rawIds = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId },
-          select: { id: true },
-        });
+        const rawIds = (
+          await tx.rawSourceRecord.findMany({
+            where: { runId: args.runId },
+            select: { id: true, providerKey: true, payload: true },
+          })
+        ).filter(isProductDiscoveryRawRecord);
         const links = await tx.identityLink.findMany({
           where: {
             canonicalType: 'company',
@@ -758,9 +955,13 @@ export function createDiscoveryActivities(deps: {
             continue;
           await intentSvc.registerWatch(args.workspaceId, c.id, {
             authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
+            budgetKey: binding.accountKey,
+            budgetWorkspaceId: binding.scopeKey,
+            executionBudget: binding,
           });
           registered += 1;
-        } catch {
+        } catch (error) {
+          if (isExecutionControlError(error)) throw error;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
@@ -775,11 +976,12 @@ export function createDiscoveryActivities(deps: {
      * enqueue = 廉价 upsert（非慢活动/无 BQ 出网），故上限比 web_watch 宽；capped 记 log（不静默截断）。
      * 冷启动时序（首次 contact discovery 早于首刷）由 Step 10 灰度启用的**手跑刷新预热**兜（见设计文档）。
      */
-    async enqueuePatentLookupsForRun(args: {
+    async enqueuePatentLookupsForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       icpId: string;
     }): Promise<{ candidates: number; enqueued: number }> {
+      await ensureRunBudget(args);
       // 🔴 P1-1 kill-switch（Codex PR #93）：google_patents 非 ENABLED（seed=DISABLED，未签 LIA/DPIA）→ 不 enqueue。
       // PII 物化的真正闸在 refreshPatentCache（DISABLED 时不扫）；此处止住队列积压——「DISABLED=不物化」不变式
       // 的前哨（也免翻 ENABLED 瞬间冷启动把历史积压一次性全扫）。data_provider 平台表无 RLS，app_user 有 SELECT。
@@ -789,10 +991,12 @@ export function createDiscoveryActivities(deps: {
       });
       if (provider?.status !== 'ENABLED') return { candidates: 0, enqueued: 0 };
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const rawIds = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId },
-          select: { id: true },
-        });
+        const rawIds = (
+          await tx.rawSourceRecord.findMany({
+            where: { runId: args.runId },
+            select: { id: true, providerKey: true, payload: true },
+          })
+        ).filter(isProductDiscoveryRawRecord);
         const links = await tx.identityLink.findMany({
           where: {
             canonicalType: 'company',
@@ -830,7 +1034,7 @@ export function createDiscoveryActivities(deps: {
       return { candidates: companies.length, enqueued };
     },
 
-    async finalizeRun(args: {
+    async finalizeRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       planId: string;
@@ -838,6 +1042,7 @@ export function createDiscoveryActivities(deps: {
       status: 'DONE' | 'PARTIAL' | 'FAILED';
       stats: Record<string, unknown>;
     }): Promise<void> {
+      await ensureRunBudget(args);
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         await tx.discoveryRun.update({
           where: { id: args.runId },
@@ -883,7 +1088,6 @@ export function createDiscoveryActivities(deps: {
           });
         }
       });
-      budgetLedger.close(args.runId, { force: true }); // 收口② D：run 终点强制关账（run 内多活动各 open 过）
     },
   };
 }

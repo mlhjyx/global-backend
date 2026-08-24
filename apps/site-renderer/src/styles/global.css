@@ -1,6 +1,6 @@
 /*
  * 全局站点样式（原 Base.astro 的 <style is:global>，抽出供画廊页等共享）。
- * 由 Base.astro 与 src/pages/__gallery.astro import。改这里同步影响所有渲染。
+ * 产品由 Base.astro 导入；隔离的 site-renderer-visual-harness 也复用本样式。
  */
 * { box-sizing: border-box; margin: 0; }
 html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }

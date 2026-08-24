@@ -30,6 +30,11 @@ import {
   UpdateIcpDto,
   UpdateRuleDto,
 } from './dto/qualification.dto';
+import {
+  ApiExecutionBudgetGrant,
+  asExecutionBudgetHttpBoundary,
+  ExecutionBudgetGrant,
+} from '../execution-budget/execution-budget-grant.decorator';
 
 @ApiTags('ICP')
 @ApiBearerAuth()
@@ -43,12 +48,20 @@ export class IcpController {
   @RequireScopes('acquisition:write')
   @HttpCode(201)
   @ApiOperation({ summary: '基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）' })
+  @ApiExecutionBudgetGrant()
   @ApiEnvelope(IcpDto, { status: 201 })
   async generate(
     @Ctx() ctx: RequestContext,
     @Param('companyId', ParseUUIDPipe) companyId: string,
+    @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<IcpDto>> {
-    return envelope(IcpDto.from(await this.icps.generateFromCompany(ctx, companyId)));
+    return envelope(
+      IcpDto.from(
+        await asExecutionBudgetHttpBoundary(() =>
+          this.icps.generateFromCompany(ctx, companyId, compactJws),
+        ),
+      ),
+    );
   }
 
   @Get('icps')
@@ -169,12 +182,20 @@ export class IcpController {
   @RequireScopes('acquisition:write')
   @HttpCode(201)
   @ApiOperation({ summary: '从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）' })
+  @ApiExecutionBudgetGrant()
   @ApiEnvelope(QueryPlanDto, { status: 201 })
   async generateQueryPlan(
     @Ctx() ctx: RequestContext,
     @Param('icpId', ParseUUIDPipe) icpId: string,
+    @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<QueryPlanDto>> {
-    return envelope(QueryPlanDto.from(await this.icps.generateQueryPlan(ctx, icpId)));
+    return envelope(
+      QueryPlanDto.from(
+        await asExecutionBudgetHttpBoundary(() =>
+          this.icps.generateQueryPlan(ctx, icpId, compactJws),
+        ),
+      ),
+    );
   }
 
   @Get('icps/:icpId/query-plans')

@@ -1,4 +1,5 @@
-import { Tool, ToolCategory, ToolSourceClass } from './tool-contract';
+import { isDurableResultStrategy } from "../durable-results/durable-result-strategy";
+import { Tool, ToolCategory, ToolSourceClass } from "./tool-contract";
 
 /**
  * Tool Registry（确定性，非 LLM）——PRD 9.13。Tool 的注册表 + 路由器。
@@ -11,7 +12,10 @@ import { Tool, ToolCategory, ToolSourceClass } from './tool-contract';
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>();
-  private readonly healthCache = new Map<string, { healthy: boolean; at: number }>();
+  private readonly healthCache = new Map<
+    string,
+    { healthy: boolean; at: number }
+  >();
   private readonly healthTtlMs = 60_000;
 
   register(tool: Tool): void {
@@ -19,8 +23,24 @@ export class ToolRegistry {
       throw new Error(`tool ${tool.id} already registered`);
     }
     // 装载期校验契约完整（缺字段即启动失败，避免运行期惊喜）
-    for (const f of ['version', 'category', 'cost', 'rateLimit', 'compliance', 'capabilities'] as const) {
+    for (const f of [
+      "version",
+      "category",
+      "cost",
+      "rateLimit",
+      "compliance",
+      "capabilities",
+    ] as const) {
       if (tool[f] == null) throw new Error(`tool ${tool.id} missing ${f}`);
+    }
+    const strategy = tool.durableResultStrategy;
+    if (strategy === undefined)
+      throw new Error("TOOL_DURABLE_RESULT_STRATEGY_REQUIRED");
+    if (
+      !isDurableResultStrategy(strategy) ||
+      (strategy.kind === "no_physical_call" && tool.cost.external)
+    ) {
+      throw new Error("TOOL_DURABLE_RESULT_STRATEGY_INVALID");
     }
     this.tools.set(tool.id, tool);
   }
@@ -45,9 +65,18 @@ export class ToolRegistry {
   }): Promise<Tool[]> {
     let cands = this.all().filter((t) => {
       if (query.category && t.category !== query.category) return false;
-      if (query.sourceClass && t.sourceClass !== query.sourceClass) return false;
-      if (query.produces && !t.capabilities.produces.includes(query.produces as never)) return false;
-      if (query.maxUnitCents != null && t.cost.estimatedCents > query.maxUnitCents) return false;
+      if (query.sourceClass && t.sourceClass !== query.sourceClass)
+        return false;
+      if (
+        query.produces &&
+        !t.capabilities.produces.includes(query.produces as never)
+      )
+        return false;
+      if (
+        query.maxUnitCents != null &&
+        t.cost.estimatedCents > query.maxUnitCents
+      )
+        return false;
       return true;
     });
 
@@ -60,14 +89,17 @@ export class ToolRegistry {
 
     const riskOrder = { low: 0, medium: 1, high: 2 };
     cands.sort(
-      (a, b) => a.cost.estimatedCents - b.cost.estimatedCents || riskOrder[a.compliance.risk] - riskOrder[b.compliance.risk],
+      (a, b) =>
+        a.cost.estimatedCents - b.cost.estimatedCents ||
+        riskOrder[a.compliance.risk] - riskOrder[b.compliance.risk],
     );
     return cands;
   }
 
   private async isHealthy(tool: Tool): Promise<boolean> {
     const cached = this.healthCache.get(tool.id);
-    if (cached && Date.now() - cached.at < this.healthTtlMs) return cached.healthy;
+    if (cached && Date.now() - cached.at < this.healthTtlMs)
+      return cached.healthy;
     let healthy = true;
     try {
       healthy = (await tool.healthCheck()).healthy;

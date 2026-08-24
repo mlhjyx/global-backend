@@ -1,11 +1,40 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  SanctionsRefreshService,
   countryToAlpha2,
   toDesiredEntity,
   diffSanctionsEntities,
   type ExistingEntityRow,
 } from './sanctions-refresh.service';
 import type { ParsedSanctionsEntity } from '../adapters/ofac-xml';
+import type { PrismaClient } from '@prisma/client';
+import type { ExecutionBroker } from '../tools/tool-contract';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const SANCTIONS_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'platform',
+  authorityId: '20000000-0000-4000-8000-000000000001',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'sanctions-download',
+  resultStrategy: 'artifact_reference',
+  resultSchema: 'sanctions-download/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: '50000000-0000-4000-8000-000000000001',
+  usage: {
+    currency: 'USD', unit: 'microusd', callCount: 1,
+    upperBoundMicrousd: '10000',
+  },
+  costBasis: 'estimated_upper_bound',
+});
+
+const ENTITY_XML = `<sdnList>
+  <publshInformation><Publish_Date>08/22/2026</Publish_Date><Record_Count>1</Record_Count></publshInformation>
+  <sdnEntry><uid>36</uid><lastName>AEROCARIBBEAN AIRLINES</lastName><sdnType>Entity</sdnType>
+    <programList><program>CUBA</program></programList>
+  </sdnEntry>
+</sdnList>`;
 
 const ent = (over: Partial<ParsedSanctionsEntity> = {}): ParsedSanctionsEntity => ({
   externalId: '36',
@@ -88,5 +117,107 @@ describe('diffSanctionsEntities', () => {
     ];
     const diff = diffSanctionsEntities(existing, [d1]);
     expect(diff.toWithdrawExternalIds).toEqual(['99']);
+  });
+});
+
+describe('SanctionsRefreshService — budget context', () => {
+  function successfulOwnerDb() {
+    return {
+      sanctionsSource: {
+        findUniqueOrThrow: vi.fn(async () => ({
+          id: 'source-1', key: 'ofac', format: 'ofac_sdn_xml',
+          url: 'https://example.test/sdn.xml', config: null,
+        })),
+        update: vi.fn(async () => undefined),
+      },
+      sanctionsEntity: {
+        findMany: vi.fn(async () => []),
+        createMany: vi.fn(async () => ({ count: 1 })),
+        update: vi.fn(async () => undefined),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    } as unknown as PrismaClient;
+  }
+
+  it('persists a successful unreceipted refresh and requires the platform writer once a receipt exists', async () => {
+    const ownerDb = successfulOwnerDb();
+    const withoutReceipt = new SanctionsRefreshService({
+      ownerDb,
+      broker: { invoke: vi.fn(async () => ({
+        data: { body: ENTITY_XML, contentType: 'application/xml', lastModified: null },
+        costCents: 0,
+      })) } as unknown as ExecutionBroker,
+    });
+    await expect(withoutReceipt.refreshSource('source-1', 'platform-run')).resolves.toMatchObject({
+      status: 'DONE', total: 1, added: 1,
+    });
+
+    const withReceipt = new SanctionsRefreshService({
+      ownerDb: successfulOwnerDb(),
+      broker: { invoke: vi.fn(async () => ({
+        data: { body: ENTITY_XML, contentType: 'application/xml', lastModified: null },
+        costCents: 0,
+        durableReceipt: SANCTIONS_RECEIPT,
+      })) } as unknown as ExecutionBroker,
+    });
+    await expect(withReceipt.refreshSource('source-1', 'platform-run'))
+      .rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+  });
+
+  it('passes the activity budget key into the ToolBroker context', async () => {
+    const invoke = vi.fn(async () => ({
+      data: { body: '<sdnList></sdnList>', contentType: 'application/xml', lastModified: null },
+      costCents: 0,
+    }));
+    const update = vi.fn(async () => undefined);
+    const ownerDb = {
+      sanctionsSource: {
+        findUniqueOrThrow: vi.fn(async () => ({
+          id: 'source-1',
+          key: 'ofac',
+          format: 'ofac_sdn_xml',
+          url: 'https://example.test/sdn.xml',
+          config: null,
+        })),
+        update,
+      },
+      sanctionsEntity: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const service = new SanctionsRefreshService({
+      ownerDb,
+      broker: { invoke } as unknown as ExecutionBroker,
+    });
+
+    await expect(
+      service.refreshSource('source-1', 'sanctions-refresh:workflow-run'),
+    ).rejects.toThrow('shrink guard');
+    expect(invoke).toHaveBeenCalledWith(
+      'sanctions.download',
+      expect.objectContaining({ url: 'https://example.test/sdn.xml' }),
+      {
+        workspaceId: 'platform',
+        purpose: 'sanctions_screening',
+        runId: 'sanctions-refresh:workflow-run',
+      },
+    );
+  });
+
+  it('rethrows nested authority denial and does not continue to a later source', async () => {
+    const failure = { name: 'ActivityFailure', cause: { type: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' } };
+    const invoke = vi.fn(async () => Promise.reject(failure));
+    const update = vi.fn(async () => undefined);
+    const sources = [
+      { id: 'source-1', key: 'ofac', format: 'ofac_sdn_xml', url: 'https://example.test/1.xml', config: null },
+      { id: 'source-2', key: 'eu', format: 'eu_fsf_xml', url: 'https://example.test/2.xml', config: null },
+    ];
+    const ownerDb = { sanctionsSource: {
+      findMany: vi.fn(async () => sources),
+      findUniqueOrThrow: vi.fn(async ({ where }: { where: { id: string } }) => sources.find((source) => source.id === where.id)),
+      update,
+    } } as unknown as PrismaClient;
+    const service = new SanctionsRefreshService({ ownerDb, broker: { invoke } as unknown as ExecutionBroker });
+    await expect(service.refreshAll('platform-account')).rejects.toBe(failure);
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'source-1' }, data: expect.objectContaining({ lastFetchStatus: 'FAILED' }) }));
   });
 });

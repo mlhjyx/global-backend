@@ -5,6 +5,7 @@
  */
 
 import type { CompanyIdentifier } from './identity';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export type SourceClass =
   | 'trade_data'
@@ -40,6 +41,10 @@ export interface ExecutionContext {
    * and platform discovery behavior; callers must never synthesize `true`.
    */
   authorizeExternalAction?: () => Promise<boolean>;
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 /** Fail-closed helper for direct DNS/robots boundaries that are not Tool calls. */
@@ -201,6 +206,11 @@ export interface EmailVerifyContext {
   suppressed?: boolean;
   /** Rechecked before direct MX lookup and passed to ToolBroker for SMTP. */
   authorizeExternalAction?: () => Promise<boolean>;
+  /** Closed ledger receipt callback; a returned SMTP receipt must never be discarded. */
+  onDurableReceipt?: (
+    producerId: string,
+    receipt: DurableExecutionReceipt,
+  ) => void;
 }
 
 /** 邮箱验证（发送前实时验证，PRD 7.4.7）。 */

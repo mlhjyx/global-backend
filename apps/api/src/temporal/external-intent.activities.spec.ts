@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import { createExternalIntentActivities } from './external-intent.activities';
+import type { BudgetStore } from '../tools/budget-store';
 
 /**
  * 收口⑤ fast-follow（Codex #56 P1）：投影活动的 DataProvider **kill-switch live 重读**回归。
@@ -21,6 +22,55 @@ const TARGET = {
   fdaProductCodes: ['LLZ'],
   naicsCodes: ['3339'],
 };
+
+describe('ingestExternalSignals — durable workflow budget scope', () => {
+  it('does not auto-open an account from an explicit workflow scope', async () => {
+    const open = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const budgetStore = { open, close } as unknown as BudgetStore;
+    const ownerDb = {
+      dataProvider: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+      budgetStore,
+    });
+
+    await acts.ingestExternalSignals({
+      targets: [{ ...TARGET }],
+      tedEnabled: true,
+      openfdaEnabled: false,
+      samgovEnabled: false,
+      budgetScopeId: 'workflow-stable-scope',
+    });
+
+    expect(open).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('old histories cannot derive an automatic account from workflow execution', async () => {
+    const open = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const budgetStore = { open, close } as unknown as BudgetStore;
+    const ownerDb = {
+      dataProvider: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+      budgetStore,
+      activityRunId: () => 'legacy-external-intent-run',
+    });
+
+    await acts.ingestExternalSignals({
+      targets: [{ ...TARGET }], tedEnabled: true, openfdaEnabled: false, samgovEnabled: false,
+    });
+    expect(open).not.toHaveBeenCalled();
+  });
+});
 
 /** 构造只喂投影路径所需依赖的活动集：sourceSignal.findMany 探针 + DataProvider live 状态（findProviders 探针=owner-DB 读计数）。 */
 function makeActs(live: { ted: string; openfda: string }) {
@@ -177,6 +227,7 @@ function recomputeActs() {
   const tx = {
     $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
     suppressionRecord: { findMany: vi.fn(async () => []) },
+    fieldEvidence: { findMany: vi.fn(async () => []) },
     canonicalCompany: {
       findMany: async ({ take, where }: { take: number; where?: { id?: { gt?: string } } }) =>
         Array.from({ length: take }, (_, i) => ({ id: `${where?.id?.gt ?? 'c'}-${i}` })),

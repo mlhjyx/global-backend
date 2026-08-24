@@ -4,6 +4,12 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageFetcher } from '../intent/page-fetcher';
 import { WebsiteWatchService, WatchResult, WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { IntentProjectionService, ProjectIntentResult } from '../intent/intent-projection.service';
+import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
+import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
+import { attestPlatformScheduleActivity } from './platform-schedule-authority.activities';
+import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 const DUE_LIMIT = 50;
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000; // web_watch intent 事件保留 90 天（可 arg 覆盖）
@@ -21,12 +27,18 @@ export function createIntentActivities(deps: {
   fetcher: PageFetcher;
   ownerDb?: PrismaClient;
   broker?: ExecutionBroker; // 收口②：registerWatch 的 sitemap 发现经 http.get 工具（无 broker → fail-closed 不出网）
+  budgetStore?: BudgetStore;
+  platformWriter?: PrismaClient;
+  activityRunId?: () => string | undefined;
 }) {
-  const watchSvc = new WebsiteWatchService({ prisma: deps.prisma, fetcher: deps.fetcher });
-  const projSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker });
+  const budgets = deps.budgetStore ?? new UnavailableBudgetStore('intent activities require an authoritative BudgetStore');
+  const projSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker, budgetStore: budgets });
+  const attest = (args: PlatformScheduleAuthorityActivityInput) =>
+    attestPlatformScheduleActivity({ args, budgetStore: budgets, scheduleId: INTENT_SWEEP_SCHEDULE_ID, activityRunId: deps.activityRunId });
   return {
     /** 到期的 web_watch 自动源（ACTIVE + cadence.everyMs>0 + nextFetchAt 到期）。cadence 过滤下推 DB。 */
-    async listDueWatches(args?: { limit?: number }): Promise<{ sourceIds: string[] }> {
+    async listDueWatches(args: ({ limit?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ sourceIds: string[] }> {
+      await attest(args);
       // 引擎级 kill-switch：data_provider 'web_watch' 非 ENABLED → 全局停抓（ops 一键关闭定时对外抓取）。
       const provider = await deps.prisma.dataProvider.findUnique({ where: { key: WEB_WATCH_KEY }, select: { status: true } });
       if (provider && provider.status !== 'ENABLED') return { sourceIds: [] };
@@ -47,21 +59,48 @@ export function createIntentActivities(deps: {
     },
 
     /** 对一个 web_watch 源跑一次页面监控（抓每页→抽信号→diff→写 intent 事件）。幂等 by (source,url)。 */
-    async watchSource(args: { sourceId: string }): Promise<WatchResult> {
+    async watchSource(args: { sourceId: string } & PlatformScheduleAuthorityActivityInput): Promise<WatchResult> {
+      const binding = await attest(args);
+      const durableReceipts: Array<{
+        producerId: string;
+        receipt: DurableExecutionReceipt;
+      }> = [];
+      const capturePageReceipt = (
+        producerId: string,
+        receipt: DurableExecutionReceipt,
+      ): void => {
+        if (producerId !== 'crawl4ai.render') {
+          throw new Error('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+        }
+        durableReceipts.push({ producerId, receipt });
+      };
+      const watchSvc = new WebsiteWatchService({
+        prisma: deps.prisma,
+        fetcher: { fetch: (url) => deps.fetcher.fetch(url, {
+          workspaceId: PLATFORM_WORKSPACE,
+          runId: binding.accountKey,
+          correlationId: binding.accountKey,
+          onDurableReceipt: capturePageReceipt,
+        }) },
+        platformWriter: deps.platformWriter,
+        durableReceipts,
+      });
       return watchSvc.watch(args.sourceId);
     },
 
     /** 把平台层新 intent 事件投影进某租户 canonical（attributes.intent.* + field_evidence）。按需触发。 */
-    async projectIntentForWorkspace(args: { workspaceId: string; sinceMs?: number }): Promise<ProjectIntentResult> {
+    async projectIntentForWorkspace(args: { workspaceId: string; sinceMs?: number } & PlatformScheduleAuthorityActivityInput): Promise<ProjectIntentResult> {
+      await attest(args);
       return projSvc.projectIntent(args.workspaceId, args.sinceMs ? { sinceMs: args.sinceMs } : undefined);
     },
 
     /** sweep 收尾：把近窗口新 intent 事件投影进**全部**租户（owner 只读列 workspace，逐租户 RLS 投影）。 */
-    async projectIntentAllWorkspaces(args?: { sinceMs?: number }): Promise<{
+    async projectIntentAllWorkspaces(args: ({ sinceMs?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{
       workspaces: number;
       companiesTouched: number;
       eventsProjected: number;
     }> {
+      await attest(args);
       if (!deps.ownerDb) return { workspaces: 0, companiesTouched: 0, eventsProjected: 0 };
       const workspaces = await deps.ownerDb.workspace.findMany({ select: { id: true } });
       let companiesTouched = 0;
@@ -79,8 +118,10 @@ export function createIntentActivities(deps: {
     },
 
     /** 保留期清理：删除超期的 web_watch 变更事件（GDPR 存储限制）。sweep 每轮起始调一次。 */
-    async purgeStaleIntentEvents(args?: { olderThanMs?: number }): Promise<{ deleted: number }> {
-      return watchSvc.purgeStaleEvents(args?.olderThanMs ?? DEFAULT_RETENTION_MS);
+    async purgeStaleIntentEvents(args: ({ olderThanMs?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ deleted: number }> {
+      await attest(args);
+      return new WebsiteWatchService({ prisma: deps.prisma, fetcher: deps.fetcher })
+        .purgeStaleEvents(args?.olderThanMs ?? DEFAULT_RETENTION_MS);
     },
   };
 }

@@ -1,9 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
-import { BudgetExceededError } from '../tools/budget';
+import { BudgetExceededError, BudgetOperationReplayError } from '../tools/budget-store';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -38,6 +41,7 @@ export interface FitJudgment {
     business_model: string;
     reasons: string[];
   };
+  durableReceipt?: DurableExecutionReceipt;
 }
 
 interface FitOutput {
@@ -65,7 +69,13 @@ export async function upsertLeadFit(
   canonicalCompanyId: string,
   judgment: FitJudgment,
 ): Promise<void> {
-  await tx.lead.upsert({
+  await applyDomainAckConsumerTransaction({
+    transaction: tx,
+    producerId: 'discovery.qualify_fit',
+    receipt: judgment.durableReceipt,
+    domainAckKey: `${workspaceId}:${icpId}:${canonicalCompanyId}`,
+    domainRevision: judgment.durableReceipt?.resultDigest ?? judgment.verdict,
+    apply: (transaction) => transaction.lead.upsert({
     where: { workspaceId_icpId_canonicalCompanyId: { workspaceId, icpId, canonicalCompanyId,
       },
     },
@@ -82,6 +92,7 @@ export async function upsertLeadFit(
       fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
       queue: judgment.verdict === 'mismatch' ? 'rejected' : 'needs_review',
     },
+  }),
   });
 }
 
@@ -117,6 +128,7 @@ export async function judgeFitCompany(
   const contract = getTask('discovery.qualify_fit')!;
   const products = (company.attributes as { products?: string[] } | null)?.products ?? [];
   let out: FitOutput;
+  let durableReceipt: DurableExecutionReceipt | undefined;
   try {
     const result = await executeStructuredTaskWithRuntime<FitOutput>(
       gateway,
@@ -137,18 +149,20 @@ export async function judgeFitCompany(
         workspaceId,
         runId: opts?.runId,
         authorizeExternalAction: opts?.authorizeExternalAction,
+        durableResultSchema: 'fit-judgment/v1',
       },
       { telemetry: opts?.runtimeTelemetry },
     );
-    // 🔴 stub 兜底绝不写真实判定：dev 里网关瞬时失败会 fallback 到 stub（罐头 null 输出），
-    // 归一化后变成 weak 假判定污染 canonical（实测抓到 2 家：fit_reasons 全 null）。宁可不判、
-    // 下个 sweep 真模型重试。
-    if (result.provider === 'stub') return null;
     out = result.data;
+    durableReceipt = result.durableReceipt;
   } catch (err) {
     // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
     // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
-    if (err instanceof BudgetExceededError) throw err;
+    if (
+      err instanceof BudgetExceededError ||
+      err instanceof BudgetOperationReplayError ||
+      isExecutionControlError(err)
+    ) throw err;
     return null;
   }
   const verdict = (
@@ -163,5 +177,6 @@ export async function judgeFitCompany(
       business_model: out.business_model_gate,
       reasons: out.reasons,
     },
+    ...(durableReceipt ? { durableReceipt } : {}),
   };
 }

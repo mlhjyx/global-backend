@@ -4,6 +4,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import helmet from 'helmet';
@@ -13,6 +14,7 @@ import {
   resolveCorsOrigin,
   resolveRuntimeSettings,
 } from './runtime/runtime-environment';
+import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-identity';
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
@@ -45,14 +47,22 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
 
 async function bootstrap(): Promise<void> {
   const runtimeSettings = resolveRuntimeSettings(process.env);
-  const app = await NestFactory.create(AppModule);
+  await initializeRuntimeReleaseIdentity({
+    mode: runtimeSettings.mode,
+    artifactRoot: resolve(__dirname),
+    env: process.env,
+  });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Express 5 defaults to the simple query parser. Preserve the existing
+  // nested-query contract while using the patched qs release from its tree.
+  app.set('query parser', 'extended');
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useGlobalFilters(new GlobalHttpExceptionFilter()); // 统一错误模型（PRD 11.15）
 
   // ── 面向前端的安全护栏 ──────────────────────────────────────────────
-  app.use(helmet({ contentSecurityPolicy: false })); // API 无 HTML，关 CSP 免误伤 Swagger UI
+  app.use(helmet()); // Keep CSP enabled for the locally served Swagger/Scalar HTML.
   // CORS 白名单：逗号分隔的允许源；未配置时 dev 放行、prod 收紧。
   app.enableCors({
     origin: resolveCorsOrigin(runtimeSettings.mode, process.env.CORS_ORIGINS),

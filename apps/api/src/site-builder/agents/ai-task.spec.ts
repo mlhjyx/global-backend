@@ -5,6 +5,8 @@ import { ModelRouter } from '../../model-gateway/model-router';
 import { RouterModelGateway } from '../../model-gateway/router-model-gateway';
 import type { AiContext, GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
 import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
+import type { BudgetStore } from '../../tools/budget-store';
 import { PaidOperationUnknownError } from '../site-build-cost-ledger';
 import { AiTaskError, runAiTask, SiteBuilderTaskDefinition } from './ai-task';
 import type { TaskRoute } from './task-routes';
@@ -251,7 +253,7 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(out.usage).toEqual({ inputTokens: 20, outputTokens: 10, calls: 2 });
   });
 
-  it('dev real+stub 链把硬门错误直接交回 AiTask，保留 real usage 后切模型', async () => {
+  it('显式测试 provider 链把硬门错误直接交回 AiTask，保留 real usage 后切模型', async () => {
     const guardedDef: SiteBuilderTaskDefinition<EchoIn, EchoOut> = {
       ...DEF,
       validateOutput: (_input, output) => {
@@ -284,6 +286,9 @@ describe('runAiTask — 回退链与显式失败', () => {
     } as unknown as ModelProvider;
     const router = { route: () => [real, stub] } as unknown as ModelRouter;
     const gateway = new RouterModelGateway(router);
+    const testBudget = new BudgetLedger();
+    testBudget.open(CTX.runId, 10_000);
+    gateway.budgetStore = new InMemoryBudgetStoreAdapter(testBudget) as unknown as BudgetStore;
 
     const out = await runAiTask(guardedDef, { name: 'Acme' }, {
       gateway,
@@ -310,19 +315,20 @@ describe('runAiTask — 回退链与显式失败', () => {
     expect(out.usage).toEqual({ inputTokens: 17, outputTokens: 8, calls: 2 });
   });
 
-  it('🔴 stub 兜底拒绝：provider=stub 视为失败换下一模型（假数据绝不充真，fit-judge 先例）', async () => {
-    const { gateway } = gatewayReturning(async (i) => {
-      if (i.model === 'model-a') {
-        return {
-          data: { headline: 'stub junk' },
-          provider: 'stub',
-          model: 'stub-v0',
-        };
-      }
-      return okResult(i.model ?? '?');
-    });
+  it('provider id 不改变 schema/task 验证语义', async () => {
+    const { gateway, calls } = gatewayReturning(async () => ({
+      data: { headline: 'Precision pumps' },
+      provider: 'stub',
+      model: 'stub-v0',
+    }));
     const out = await runAiTask(DEF, { name: 'Acme' }, { gateway, ctx: CTX, route: ROUTE });
-    expect(out.model).toBe('model-b');
+    expect(out).toMatchObject({
+      model: 'stub-v0',
+      provider: 'stub',
+      data: { headline: 'Precision pumps' },
+      fallbackIndex: 0,
+    });
+    expect(calls).toHaveLength(1);
   });
 
   it('全链失败 → AiTaskError 聚合每个模型的失败原因（可诊断，不吞错）', async () => {

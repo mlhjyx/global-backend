@@ -23,23 +23,70 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
       maxContacts: 5,
       maxProbe: 3,
     });
-    expect(guessEmailsForCompany).toHaveBeenCalledWith(CTX, 'company-1', {
-      lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42', note: 'note' },
-      allowPersonalWithoutBasis: true,
-      maxContacts: 5,
-      maxProbe: 3,
-    });
+    expect(guessEmailsForCompany).toHaveBeenCalledWith(
+      CTX,
+      'company-1',
+      {
+        lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42', note: 'note' },
+        allowPersonalWithoutBasis: true,
+        maxContacts: 5,
+        maxProbe: 3,
+      },
+      undefined,
+      {
+        lawfulBasis: 'legitimate_interest',
+        lawfulBasisRef: 'LIA-42',
+        lawfulBasisNote: 'note',
+        allowPersonalWithoutBasis: true,
+        maxContacts: 5,
+        maxProbe: 3,
+      },
+    );
   });
 
   it('无 body → lawfulBasis undefined（无基础即门 blocked，诚实不探）；其余透传 undefined', async () => {
     const guessEmailsForCompany = vi.fn().mockResolvedValue({});
     const controller = new DiscoveryController({ guessEmailsForCompany } as unknown as DiscoveryService);
     await controller.guessEmails(CTX, 'company-1', undefined);
-    expect(guessEmailsForCompany).toHaveBeenCalledWith(CTX, 'company-1', {
-      lawfulBasis: undefined,
-      allowPersonalWithoutBasis: undefined,
-      maxContacts: undefined,
-      maxProbe: undefined,
+    expect(guessEmailsForCompany).toHaveBeenCalledWith(
+      CTX,
+      'company-1',
+      {
+        lawfulBasis: undefined,
+        allowPersonalWithoutBasis: undefined,
+        maxContacts: undefined,
+        maxProbe: undefined,
+      },
+      undefined,
+      undefined,
+    );
+  });
+
+  it('computes Verify authority scope from the public DTO before reshaping it', async () => {
+    const verifyContactPoint = vi.fn().mockResolvedValue({ ok: true });
+    const controller = new DiscoveryController({ verifyContactPoint } as unknown as DiscoveryService);
+
+    await controller.verify(CTX, 'point-1', {
+      lawfulBasis: 'legitimate_interest',
+      lawfulBasisRef: 'LIA-42',
+      lawfulBasisNote: 'note',
+      allowPersonalWithoutBasis: true,
     });
+
+    expect(verifyContactPoint).toHaveBeenCalledWith(
+      CTX,
+      'point-1',
+      {
+        lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42', note: 'note' },
+        allowPersonalWithoutBasis: true,
+      },
+      undefined,
+      {
+        lawfulBasis: 'legitimate_interest',
+        lawfulBasisRef: 'LIA-42',
+        lawfulBasisNote: 'note',
+        allowPersonalWithoutBasis: true,
+      },
+    );
   });
 });

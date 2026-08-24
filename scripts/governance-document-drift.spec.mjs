@@ -46,6 +46,80 @@ test("governance changes preserve the active Copy fixed-source boundary", () => 
   );
 });
 
+test("the Authority closeout coverage preserves the complete budget and readiness denominator", () => {
+  const record = read(
+    "docs/implementation-records/execution-budget-authority-contract.md",
+  );
+  const requiredCoverageTokens = [
+    "--coverage.include='src/execution-budget/**/*.ts'",
+    "--coverage.include=src/runtime/managed-dependency-readiness.ts",
+    "--coverage.include=src/health/runtime-readiness.service.ts",
+    "--coverage.include=src/health/health.controller.ts",
+    "--coverage.include=src/health/health-openapi.schemas.ts",
+    "--coverage.include=src/runtime/site-build-runtime.guard.ts",
+    "--coverage.include=src/tools/budget-store.ts",
+    "src/tools/budget-store.spec.ts",
+  ];
+
+  for (const token of requiredCoverageTokens) {
+    assert.ok(record.includes(token), `Authority coverage omits ${token}`);
+  }
+  assert.match(record, /statements 88\.76% \(632\/712\)/i);
+  assert.match(record, /branches 88\.21% \(479\/543\)/i);
+});
+
+test("the Authority durable record uses the code-first health path and executable local verification commands", () => {
+  const record = read(
+    "docs/implementation-records/execution-budget-authority-contract.md",
+  );
+  const requiredTokens = [
+    "GET /api/v1/health/ready",
+    "pnpm --filter @global/db exec prisma validate",
+    "pnpm --filter @global/db generate",
+    "pnpm docs:verify",
+    "pnpm code-intelligence:scan",
+    "pnpm --filter @global/code-intelligence exec tsx src/cli.ts status --repo ../..",
+    "pnpm --filter @global/code-intelligence exec tsx src/cli.ts impact",
+  ];
+
+  for (const token of requiredTokens) {
+    assert.ok(record.includes(token), `Authority record omits ${token}`);
+  }
+  assert.doesNotMatch(record, /GET \/health\/ready\b/u);
+});
+
+test("the Copy fixed-source governance document reflects the active reviewed successor", () => {
+  const governance = read(
+    "docs/implementation-records/copy-fixed-source-impact-governance.md",
+  );
+  const eligibility = JSON.parse(
+    read("docs/evidence/site-builder/copy-runtime-eligibility.json"),
+  );
+
+  assert.match(governance, /active v22/i);
+  assert.doesNotMatch(governance, /\bv15\b/i);
+  assert.match(governance, /reviewed exact path-set successor/i);
+  assert.match(
+    governance,
+    new RegExp(eligibility.stale_scope.replaceAll("_", "[_]"), "u"),
+  );
+  assert.match(governance, /STALE_HOLD/);
+  assert.match(governance, /NOT_AUTHORIZED/);
+  assert.match(governance, /BLOCKED/);
+  assert.match(governance, /REBASE_FIXED_SOURCE_BEFORE_DISPATCH/);
+  assert.match(governance, /successor[^\n]*(?:不是|不等于)[^\n]*CURRENT/i);
+  assert.match(governance, /successor[^\n]*(?:不代表|不构成)[^\n]*rebaseline/i);
+  assert.match(governance, /successor[^\n]*(?:不授权|不能授权)[^\n]*dispatch/i);
+  assert.doesNotMatch(
+    governance,
+    /STALE_HOLD` 当前只允许 `packages\/db\/prisma\/schema\.prisma`/,
+  );
+
+  for (const path of eligibility.drifted_paths) {
+    assert.ok(governance.includes(path), `Copy governance omits ${path}`);
+  }
+});
+
 test("AGENTS.md remains a stable entrypoint without versioned current-state mirrors", () => {
   const agents = read("AGENTS.md");
   const lines = agents.trimEnd().split("\n");
@@ -73,13 +147,13 @@ test("CLAUDE.md remains a small compatibility pointer instead of a truth mirror"
   );
 });
 
-test("README reports completed M1 and the current nine-service Compose topology", () => {
+test("README reports completed M1 and the current ten-service Compose topology", () => {
   const readme = read("README.md");
   const serviceNames = composeServiceNames(read("docker-compose.yml"));
 
   assert.match(readme, /获客侧[^\n]*冻结已解除/);
   assert.match(readme, /Site Builder M1[^\n]*已完成/);
-  assert.equal(serviceNames.length, 9);
+  assert.equal(serviceNames.length, 10);
   assert.match(readme, new RegExp(`${serviceNames.length} 服务`));
   assert.ok(serviceNames.includes("openox-video-compat"));
   assert.match(readme, /openox-video-compat/);

@@ -275,7 +275,99 @@ test("the required build emits an exact-SHA runtime attestation after the final 
   assert.match(attestationStep, /BUILT_AT="\$\(date -u/);
   assert.match(
     attestationStep,
+    /node scripts\/prepare-site-renderer-runtime\.mjs/,
+  );
+  assert.match(
+    attestationStep,
+    /pnpm --filter @global\/api --filter @global\/site-renderer list --prod --depth Infinity --json/,
+  );
+  assert.match(attestationStep, /node scripts\/generate-runtime-sbom\.mjs/);
+  assert.match(
+    attestationStep,
+    /node scripts\/generate-runtime-artifact-manifest\.mjs/,
+  );
+  assert.match(
+    attestationStep,
+    /node scripts\/verify-runtime-artifact\.mjs apps\/api\/dist/,
+  );
+  assert.match(
+    attestationStep,
     /pnpm exec tsx apps\/api\/scripts\/generate-build-attestation\.mts/,
   );
+  assert.ok(
+    attestationStep.indexOf("generate-runtime-sbom.mjs") <
+      attestationStep.indexOf("generate-runtime-artifact-manifest.mjs") &&
+      attestationStep.indexOf("generate-runtime-artifact-manifest.mjs") <
+        attestationStep.indexOf("generate-build-attestation.mts"),
+    "SBOM and artifact manifest must be fixed before the attestation is emitted",
+  );
   assert.doesNotMatch(attestationStep, /git rev-parse|git describe|git status/);
+});
+
+test("the required build runs only the isolated zero-dispatch evaluation runner suite", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const evalStep = namedStepBlock(
+    buildJob,
+    "Site Builder isolated zero-dispatch evaluation boundary",
+  );
+
+  assert.match(
+    evalStep,
+    /run: pnpm --filter @global\/site-builder-eval-runner test\s*$/m,
+  );
+  assert.doesNotMatch(evalStep, /^\s+(?:env|with):/m);
+});
+
+test("the required build executes and inspects the exact-SHA immutable OCI contract", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const attestationStep = namedStepBlock(
+    buildJob,
+    "Generate and verify API build attestation",
+  );
+  const ociStep = namedStepBlock(
+    buildJob,
+    "Build and inspect immutable OCI runtime",
+  );
+
+  assert.ok(buildJob.indexOf(ociStep) > buildJob.indexOf(attestationStep));
+  assert.match(ociStep, /BUILD_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(ociStep, /git diff --exit-code/);
+  assert.match(ociStep, /git ls-files --others --exclude-standard/);
+  assert.match(ociStep, /docker build/);
+  assert.match(ociStep, /--build-arg "BUILD_SHA=\$\{BUILD_SHA\}"/);
+  assert.match(ociStep, /--build-arg "BUILT_AT=\$\{BUILT_AT\}"/);
+  assert.match(ociStep, /docker image inspect/);
+  assert.match(ociStep, /docker cp/);
+  assert.match(ociStep, /verify-runtime-artifact\.mjs/);
+  assert.match(ociStep, /runtime-image-verifier\.mjs \/app/);
+  assert.match(ociStep, /--entrypoint openssl/);
+  assert.match(ociStep, /--entrypoint \/usr\/bin\/chromium/);
+  assert.match(ociStep, /data:text\/html,<title>oci-browser-smoke<\/title>/);
+  assert.doesNotMatch(ociStep, /docker push|buildx build.*--push/);
+});
+
+test("the required build verifies runtime lease roles against disposable PostgreSQL", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const permissionStep = namedStepBlock(
+    buildJob,
+    "Runtime lease principal PostgreSQL permissions",
+  );
+
+  assert.match(buildJob, /pgvector\/pgvector@sha256:[0-9a-f]{64}/);
+  assert.match(permissionStep, /prisma migrate deploy/);
+  assert.match(
+    permissionStep,
+    /provision-runtime-lease-principals\.sh/,
+  );
+  assert.match(
+    permissionStep,
+    /verify-runtime-lease-principal-permissions\.sh/,
+  );
+  assert.match(permissionStep, /verify-app-database-principal\.mts/);
+  assert.match(permissionStep, /ALTER ROLE app_user BYPASSRLS/);
+  assert.match(permissionStep, /ALTER ROLE app_user NOBYPASSRLS/);
+  assert.doesNotMatch(permissionStep, /production|global_dev/);
 });

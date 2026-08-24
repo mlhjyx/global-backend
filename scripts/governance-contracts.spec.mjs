@@ -3,6 +3,7 @@ import test from "node:test";
 
 import "./governance-ci-topology.spec.mjs";
 import "./governance-document-drift.spec.mjs";
+import "./environment-parity-policy.spec.mjs";
 import "./governance-main-worktree-sync.spec.mjs";
 import "./governance-oasdiff-action-pin.spec.mjs";
 import "./copy-fixed-source-impact.spec.mjs";

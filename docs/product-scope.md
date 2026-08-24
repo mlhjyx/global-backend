@@ -9,17 +9,18 @@
 
 ## 0. 术语表
 
-| 术语                     | 意思                                                                                                                |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| **ICP**                  | 理想客户画像——客户告诉系统「我要找什么样的买家」（行业/国家/规模/排除条件/买家委员会角色）                          |
-| **Lead / 线索**          | 「某家公司 × 某个 ICP」的候选评估对象，带六维评分与四队列（推荐/待确认/拒绝/禁止）                                  |
-| **LeadQualifiedPackage** | 本仓最终交付物：一条合格线索的**不可变快照包**（公司是谁+证据+评分+联系人+合规结论+建议动作），以事件发给 SaaS 平台 |
-| **QGO**                  | 合格增长商机（北极星单位）——SaaS 平台把合格线索确认成的「值得销售跟进的机会」                                       |
-| **SAO**                  | 销售接受的商机——销售正式认领 QGO 并开始推进                                                                         |
-| **Suppression**          | 全局禁联名单——退订/投诉/删除请求过的对象，任何对外动作前第一道检查                                                  |
-| **Reachability**         | 可达性——有没有验证过的联系方式；联系不上的公司分再高也不进推荐队列                                                  |
-| **Evidence / 证据**      | 每个关键字段都记录「从哪来、什么时候、什么许可、多可信」，可回溯可删除                                              |
-| **DSR**                  | 数据主体请求——欧盟个人依法要求查看/删除其数据，必须能精确执行                                                       |
+| 术语                     | 意思                                                                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ICP**                  | 理想客户画像——客户告诉系统「我要找什么样的买家」（行业/国家/规模/排除条件/买家委员会角色）                                                                       |
+| **Lead / 线索**          | 「某家公司 × 某个 ICP」的候选评估对象，带六维评分与四队列（推荐/待确认/拒绝/禁止）                                                                               |
+| **LeadQualifiedPackage** | 本仓最终交付物：一条合格线索的**不可变快照包**（公司是谁+证据+评分+联系人+合规结论+建议动作），以事件发给 SaaS 平台                                              |
+| **QGO**                  | 合格增长商机（北极星单位）——SaaS 平台把合格线索确认成的「值得销售跟进的机会」                                                                                    |
+| **SAO**                  | 销售接受的商机——销售正式认领 QGO 并开始推进                                                                                                                      |
+| **Suppression**          | 全局禁联名单——退订/投诉/删除请求过的对象，任何对外动作前第一道检查                                                                                               |
+| **Reachability**         | 可达性——有没有验证过的联系方式；联系不上的公司分再高也不进推荐队列                                                                                               |
+| **Evidence / 证据**      | 每个关键字段都记录「从哪来、什么时候、什么许可、多可信」，可回溯可删除                                                                                           |
+| **DSR**                  | 数据主体请求——欧盟个人依法要求查看/删除其数据，必须能精确执行                                                                                                    |
+| **Budget Grant**         | SaaS Control Plane 对单次 Site Builder BuildRun 签发的一次性、短期、请求绑定费用授权；本仓验签并执行 durable reserve/settle/reconcile，不拥有订阅或 Credits 主账 |
 
 ## 1. 产品是什么
 
@@ -43,8 +44,8 @@
 ## 3. 完整产品上下文地图（五层，本仓只实现 ★ 两层）
 
 ```
-SaaS Control Plane（A 拥有）：身份 / Organization / Workspace / Membership / Billing
-        ↓ JWKS token
+SaaS Control Plane（A 拥有）：身份 / Organization / Workspace / Membership / Billing / Credits
+        ↓ JWKS token + Site Builder Budget Grant
 Growth Strategy（产品脊柱，见 §5）：Goal / GrowthInitiative / OfferingSnapshot / MarketThesis / ICPVersion / Pack Snapshot
         ↓
 ★ Buyer Intelligence（本仓核心）：多源采集 / 公司身份解析 / Evidence / 数据权利 / Signal / 联系人可达性
@@ -74,6 +75,8 @@ Learning & Economics：Touchpoint / Attribution / Feedback / Experiment / Cost /
 
 - **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
 - **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
+- **费用权威接缝（ADR-024）**：SaaS 是 subscription、Billing 与 Credits 的 SoR，并为正常产品 BuildRun 签发一次性 Budget Grant；本仓只验证 workspace/operation/request/cap（已有 Site 时也验证 site）、原子消费授权、执行持久预算账本并追加结算/对账。Backend 不另设隐藏的产品总金额门，产品 Grant 也不授权 Codex/operator 的 ad-hoc/evaluation 调用。
+- **环境语义（ADR-024）**：development、pilot、production 采用同一产品运行路径和不可变制品；凭据、JWKS、endpoint、数据、资源和网络暴露可以独立配置，但不得替换业务实现、验证、持久化、费用、错误或 readiness 语义。测试替身与 fixture 不进入产品 composition root、Release 或用户站点。
 - **as-built 审计基线**：M0、R0–R4、M1-c、M1-d、R1-min、DI-0、M1-e-A 与 M1-e-B 均已进入主线。Demo v0 固定 `SiteSpec 1.0` / ReleaseManifest v1；受控精装修链使用 `SiteSpec 1.1` / ReleaseManifest v2，旧版本保持双读兼容且不后台迁移。
 - **当前状态**：M1-e-B/M1-f 已完成六个 approved Family、受控组装与确定性质量循环；M1-g 已完成 12 视觉集、确定性发布门和文本候选报告，未过门候选不切路由。获客线可在重新审计、明确 owner/验收后恢复实现；两条线不混改共享 ownership。
 - **权威规则**：承重决策只进 ADR-013~020；具体产品/施工真值在 Site Builder 00–14、当前状态和路线。v3.1/v3.2、旧 Word 和研究稿是历史输入，不得直接覆盖活文档或代码。
@@ -93,15 +96,15 @@ Goal（业务目标：如进入德国市场）
 
 对本仓的当下含义：discovery/enrichment/intent 管线不依赖 campaign_id（现状已如此，保持）；本仓事件预留 `initiativeId?` 字段。
 
-## 6. 团队 ownership 与三接缝
+## 6. 团队 ownership 与四接缝
 
-| 方                                     | 拥有                                                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| A（SaaS 平台）                         | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing                     |
-| B（接口层，同库）                      | JWKS 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射                             |
-| Codex（本仓当前开发主体；用户 C 拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规 |
+| 方                                     | 拥有                                                                                                                         |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| A（SaaS 平台）                         | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing/Credits SoR、Site Builder Budget Grant 签发 |
+| B（接口层，同库）                      | JWKS 与 Budget Grant 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射                                     |
+| Codex（本仓当前开发主体；用户 C 拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规                         |
 
-三接缝：① **JWKS**——A 签发登录凭证、我们只验签解出租户；② **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK；③ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封）在实现前先经 B/A 评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
+四接缝：① **JWKS**——A 签发登录凭证、我们只验签解出租户；② **Budget Grant**——A 对正常产品 BuildRun 签发短期、一次性、workspace/operation/request 绑定金额授权（已有 Site 时也绑定 site），本仓不签发、不扩额；③ **事件出口**——合格线索以事件包交付，SaaS 拉取并 ACK，Site Builder 费用摘要通过事务性 Outbox 回报；④ **OpenAPI**——契约由代码自动生成、唯一真值，不造 mock；**关键 Schema（LeadQualified 快照、事件信封、统一信封、Budget Grant）在实现前先经 B/A 评审**，code-first 仍是生成事实源。技术细节见 [architecture/current.md](architecture/current.md) §6-§7。
 
 ## 7. 首个商业切口
 

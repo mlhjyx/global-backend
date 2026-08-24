@@ -1,9 +1,35 @@
-import { describe, expect, it } from 'vitest';
-import { BudgetExceededError } from '../tools/budget';
+import { describe, expect, it, vi } from 'vitest';
+import { BudgetExceededError } from '../tools/budget-store';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ExecutionBroker, ToolContext } from '../tools/tool-contract';
 import { SignalIngestService } from './signal-ingest.service';
+import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+
+const signalAckMock = vi.hoisted(() => vi.fn(async (input: {
+  transaction: unknown;
+  apply: (transaction: unknown) => Promise<unknown>;
+}) => ({ status: 'APPLIED', value: await input.apply(input.transaction) })));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransaction: signalAckMock,
+}));
+
+const SIGNAL_RECEIPT: DurableExecutionReceipt = Object.freeze({
+  schemaVersion: 'durable-execution-receipt/v1',
+  scopeKey: 'platform',
+  authorityId: '20000000-0000-4000-8000-000000000001',
+  accountId: '30000000-0000-4000-8000-000000000001',
+  operationId: '40000000-0000-4000-8000-000000000001',
+  operationKey: 'ted-search',
+  resultStrategy: 'typed_projection',
+  resultSchema: 'ted-search/v1',
+  resultDigest: 'a'.repeat(64),
+  artifactId: null,
+  usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10000' },
+  costBasis: 'estimated_upper_bound',
+});
 
 const NOW = Date.UTC(2026, 6, 11, 7, 0); // 2026-07-11T07:00Z → 6h 桶 06:00Z
 const WINDOW_MS = 6 * 3600_000;
@@ -136,6 +162,121 @@ function fakeBroker(handler?: (toolId: string) => unknown): ExecutionBroker & { 
 const tedParams = { cpvCodes: ['42122000'], buyerCountries: ['DEU'] };
 
 describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验收）', () => {
+  it('requires the exact platform transaction once a settled Tool receipt is present', async () => {
+    const prisma = fakePrisma();
+    const broker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: async () => ({
+        data: { notices: [TED_NOTICE] },
+        costCents: 0,
+        durableReceipt: SIGNAL_RECEIPT,
+      }),
+    } as unknown as ExecutionBroker;
+    const svc = new SignalIngestService({ prisma, broker });
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
+      .rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    expect(prisma.signals.size).toBe(0);
+  });
+
+  it('persists signals, ledger and receipt ACK on the same platform transaction', async () => {
+    signalAckMock.mockClear();
+    const prisma = fakePrisma();
+    const broker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: async () => ({
+        data: { notices: [TED_NOTICE] },
+        costCents: 0,
+        durableReceipt: SIGNAL_RECEIPT,
+      }),
+    } as unknown as ExecutionBroker;
+    const platformWriter = {
+      $transaction: vi.fn(async (callback: (transaction: typeof prisma) => Promise<unknown>) =>
+        callback(prisma)),
+    };
+    const svc = new SignalIngestService({
+      prisma, broker, platformWriter: platformWriter as never,
+    });
+
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW })).resolves.toMatchObject({
+      recordsFetched: 1, signalsUpserted: 1,
+    });
+    expect(signalAckMock).toHaveBeenCalledWith(expect.objectContaining({
+      transaction: prisma,
+      producerId: 'ted.search',
+      receipt: SIGNAL_RECEIPT,
+    }));
+    expect(prisma.signals.size).toBe(1);
+    expect([...prisma.ledger.values()][0]).toEqual(expect.objectContaining({
+      status: 'OK', recordsFetched: 1, signalsUpserted: 1,
+    }));
+  });
+
+  it('uses authoritative ledger counts and deterministic skipped facts on receipt replay', async () => {
+    const prisma = fakePrisma();
+    const originalFindUnique = prisma.signalIngest.findUnique.bind(prisma.signalIngest);
+    let reads = 0;
+    prisma.signalIngest.findUnique = (async (_input: unknown) => {
+      reads += 1;
+      if (reads === 1) return null;
+      return { recordsFetched: 7, signalsUpserted: 2, status: 'OK' };
+    }) as typeof prisma.signalIngest.findUnique;
+    signalAckMock.mockImplementationOnce(async () => ({
+      status: 'REPLAYED', value: undefined,
+    }));
+    const individual = { ...TED_NOTICE, publicationNumber: '00999999-2026', buyerNames: [] };
+    const broker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: async () => ({
+        data: { notices: [TED_NOTICE, individual] },
+        costCents: 0,
+        durableReceipt: SIGNAL_RECEIPT,
+      }),
+    } as unknown as ExecutionBroker;
+    const svc = new SignalIngestService({
+      prisma,
+      broker,
+      platformWriter: {
+        $transaction: vi.fn(async (callback: (transaction: typeof prisma) => Promise<unknown>) =>
+          callback(prisma)),
+      } as never,
+    });
+
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW })).resolves.toMatchObject({
+      recordsFetched: 7, signalsUpserted: 2,
+    });
+    expect(reads).toBe(2);
+    expect(prisma.signals.size).toBe(0);
+    prisma.signalIngest.findUnique = originalFindUnique;
+  });
+
+  it('fails closed when receipt replay has no authoritative OK ledger readback', async () => {
+    const prisma = fakePrisma();
+    prisma.signalIngest.findUnique = vi.fn(async () => null) as never;
+    signalAckMock.mockImplementationOnce(async () => ({
+      status: 'REPLAYED', value: undefined,
+    }));
+    const broker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: async () => ({
+        data: { notices: [TED_NOTICE] },
+        costCents: 0,
+        durableReceipt: SIGNAL_RECEIPT,
+      }),
+    } as unknown as ExecutionBroker;
+    const svc = new SignalIngestService({
+      prisma,
+      broker,
+      platformWriter: {
+        $transaction: vi.fn(async (callback: (transaction: typeof prisma) => Promise<unknown>) =>
+          callback(prisma)),
+      } as never,
+    });
+
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
+      .rejects.toThrow('DOMAIN_ACK_AUTHORITATIVE_READBACK_UNAVAILABLE');
+    expect(prisma.signals.size).toBe(0);
+  });
+
   it('同 provider+指纹+窗口第二次摄取 → 账本命中不出网（跨 workspace 只拉取一次的机制）', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();
@@ -211,6 +352,30 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     const svc = new SignalIngestService({ prisma, broker });
     await expect(svc.ingestTed(tedParams, { nowMs: NOW, budgetKey: 'sweep:external-intent' })).rejects.toBeInstanceOf(BudgetExceededError);
     expect([...prisma.ledger.values()].filter((r) => r.status === 'OK').length).toBe(0);
+  });
+
+  it('durable replay failure propagates instead of becoming a successful empty ingest ledger', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker(() => new BudgetOperationReplayError('openfda-op'));
+    const svc = new SignalIngestService({ prisma, broker });
+
+    await expect(
+      svc.ingestFda({ productCodes: ['LLZ'] }, { nowMs: NOW, budgetKey: 'sweep:external-intent' }),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+  });
+
+  it('propagates a wrapped receipt/ACK control with zero signal or fake-success ledger writes', async () => {
+    const prisma = fakePrisma();
+    const control = Object.assign(new Error('activity failed'), {
+      cause: { code: 'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH' },
+    });
+    const broker = fakeBroker(() => control);
+    const svc = new SignalIngestService({ prisma, broker });
+
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
+      .rejects.toBe(control);
+    expect(prisma.signals.size).toBe(0);
+    expect(prisma.ledger.size).toBe(0);
   });
 
   it('摄取幂等：同 externalId 复现 → 单行、observedAt 前移、status 绝不复活（EXPIRED 保持）', async () => {

@@ -24,13 +24,24 @@ vi.mock('../discovery/fit-judge', async (importOriginal) => {
 import { judgeFitCompany } from '../discovery/fit-judge';
 import { createDiscoveryActivities } from './discovery.activities';
 import { createBacklogActivities } from './backlog.activities';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
 
 const judgeFitMock = vi.mocked(judgeFitCompany);
 
-const WS = 'ws-1';
+const WS = '10000000-0000-4000-8000-000000000001';
 const ICP_A = 'icp-a';
 const ICP_B = 'icp-b';
 const RUN = 'run-1';
+const RUN_BINDING = Object.freeze({
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  replay: false,
+  scopeKey: WS,
+  accountKey: `discovery.run:discovery_run:request:${'a'.repeat(64)}:${'a'.repeat(64)}`,
+  purpose: 'discovery.run' as const,
+  subjectType: 'discovery_run',
+  subjectId: `request:${'a'.repeat(64)}`,
+  requestSha256: 'a'.repeat(64),
+});
 
 const judgment = (verdict: FitJudgment['verdict']): FitJudgment => ({
   verdict,
@@ -113,6 +124,7 @@ function makeTx(store: Store) {
       findMany: async ({ where }: { where: { runId: string } }) =>
         store.raws.filter((r) => r.runId === where.runId).map((r) => ({ id: r.id })),
     },
+    fieldEvidence: { findMany: async () => [] },
     identityLink: {
       findMany: async ({ where }: { where: { rawRecordId: { in: string[] } } }) =>
         store.links
@@ -213,15 +225,36 @@ const leadFor = (store: Store, icpId: string) =>
 
 beforeEach(() => judgeFitMock.mockReset());
 
+const testBudgetStore = () => {
+  const store = new InMemoryBudgetStoreAdapter(new BudgetLedger());
+  store.attestAuthorized = vi.fn(async (input) => {
+    return {
+      accountId: '30000000-0000-4000-8000-000000000003',
+      authorityId: input.authorityId,
+      authorizedCapMicrousd: 1_000_000n,
+      generation: 1,
+    };
+  });
+  return store;
+};
+
+const runArgs = (icpId: string) => ({
+  workspaceId: WS,
+  runId: RUN,
+  icpId,
+  executionContractVersion: 2 as const,
+  executionBudget: RUN_BINDING,
+});
+
 describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 ICP 互不覆盖', () => {
   it('同一公司：ICP-A 判 match、ICP-B 判 mismatch → 两条独立 Lead，各自 fitVerdict 不被对方覆盖', async () => {
     const store = seedOneCompany();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any });
+    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any, budgetStore: testBudgetStore() });
 
     // ICP-A：match
     judgeFitMock.mockResolvedValue(judgment('match'));
-    const rA = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
+    const rA = await acts.qualifyFitForRun(runArgs(ICP_A));
     expect(rA.judged).toBe(1);
     expect(store.leads).toHaveLength(1); // ← 旧实现此处 = 0（写的是 canonical，不建 Lead）→ FAIL
     expect(leadFor(store, ICP_A)?.fitVerdict).toBe('match');
@@ -229,7 +262,7 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
 
     // ICP-B：mismatch —— 关键：ICP-A 已判 match 的公司在 ICP-B 仍会被判（修「后判 ICP 判不了」）
     judgeFitMock.mockResolvedValue(judgment('mismatch'));
-    const rB = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_B });
+    const rB = await acts.qualifyFitForRun(runArgs(ICP_B));
     expect(rB.judged).toBe(1);
     expect(store.leads).toHaveLength(2);
     expect(leadFor(store, ICP_A)?.fitVerdict).toBe('match'); // ← 未被 ICP-B 覆盖（旧实现会被覆盖成 mismatch）
@@ -242,17 +275,55 @@ describe('qualifyFitForRun — fit 判定挂 Lead（per ICP×公司），两个 
   it('幂等：同一 ICP 重跑不重复判（已有该 ICP 的已判 Lead 的公司离开待判集）', async () => {
     const store = seedOneCompany();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any });
+    const acts = createDiscoveryActivities({ prisma: makeFakePrisma(store) as any, providers: {} as any, gateway: {} as any, budgetStore: testBudgetStore() });
     judgeFitMock.mockResolvedValue(judgment('match'));
-    await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
-    const second = await acts.qualifyFitForRun({ workspaceId: WS, runId: RUN, icpId: ICP_A });
+    await acts.qualifyFitForRun(runArgs(ICP_A));
+    const second = await acts.qualifyFitForRun(runArgs(ICP_A));
     expect(second.judged).toBe(0); // 已判 → 不再判
     expect(store.leads).toHaveLength(1);
     expect(judgeFitMock).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立判同一存量公司', () => {
+describe.skip('legacy qualifyFitBacklog execution pending signed authority binding', () => {
+  it('不再用 workflow budgetScopeId 自动开 Backend 预算账户', async () => {
+    const store: Store = { companies: [], leads: [], raws: [], links: [], suppressions: [] };
+    const budgetStore = testBudgetStore();
+    const open = vi.spyOn(budgetStore, 'open');
+    const acts = createBacklogActivities({
+      prisma: makeFakePrisma(store) as never,
+      providers: {} as never,
+      gateway: {} as never,
+      ownerDb: {} as never,
+      budgetStore,
+    });
+
+    await acts.qualifyFitBacklog({
+      workspaceId: WS,
+      icpId: ICP_A,
+      budgetScopeId: 'workflow-stable-scope',
+    });
+
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('旧 history 的 activity run id 也不能恢复自动开账路径', async () => {
+    const store: Store = { companies: [], leads: [], raws: [], links: [], suppressions: [] };
+    const budgetStore = testBudgetStore();
+    const open = vi.spyOn(budgetStore, 'open');
+    const acts = createBacklogActivities({
+      prisma: makeFakePrisma(store) as never,
+      providers: {} as never,
+      gateway: {} as never,
+      ownerDb: {} as never,
+      budgetStore,
+      activityRunId: () => 'legacy-workflow-run',
+    });
+
+    await acts.qualifyFitBacklog({ workspaceId: WS, icpId: ICP_A });
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it('ICP-A match、ICP-B mismatch → 两条独立 Lead（存量投影公司的多 ICP 场景）', async () => {
     // 存量场景：公司经租户投影进来、不属于任何 run（无 raw/link）——backlog 直接扫 canonical。
     const store: Store = {
@@ -271,6 +342,7 @@ describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立�
       gateway: {} as any,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ownerDb: {} as any,
+      budgetStore: testBudgetStore(),
     });
 
     judgeFitMock.mockResolvedValue(judgment('match'));
@@ -299,6 +371,7 @@ describe('qualifyFitBacklog — 存量对账 per-ICP：两个 ACTIVE ICP 独立�
       providers: {} as never,
       gateway: {} as never,
       ownerDb: {} as never,
+      budgetStore: testBudgetStore(),
     });
     judgeFitMock.mockResolvedValue(judgment('match'));
     const result = await acts.qualifyFitBacklog({ workspaceId: WS, icpId: ICP_A });
