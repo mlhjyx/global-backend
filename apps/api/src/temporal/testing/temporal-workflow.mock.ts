@@ -95,7 +95,7 @@ export const log = {
   error: vi.fn(),
 };
 
-/** `beforeEach` 调用：清空注册表 + logger，杜绝跨用例 spy 状态泄漏。 */
+/** `beforeEach` 调用：复位 memoized spy + logger，杜绝跨用例状态泄漏。 */
 export function resetActivities(): void {
   // Keep memoized spies alive so workflows that use a destructured
   // `proxyActivities` binding remain connected to the same test registry
