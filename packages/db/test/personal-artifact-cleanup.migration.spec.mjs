@@ -53,4 +53,10 @@ describe('personal artifact cleanup forward migration', () => {
       /FROM "generic_operation_artifact_subject_tombstone_audit" audit\b/,
     );
   });
+
+  it('keeps PostgreSQL regex repetition within engine limits for VersionId', () => {
+    assert.doesNotMatch(migration, /\{1,1024\}/);
+    assert.match(migration, /char_length\("object_version_id"\) BETWEEN 1 AND 1024/);
+    assert.match(migration, /char_length\(p_object_version_id\) NOT BETWEEN 1 AND 1024/);
+  });
 });

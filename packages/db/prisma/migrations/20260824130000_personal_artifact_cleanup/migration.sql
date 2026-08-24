@@ -5,7 +5,10 @@ ALTER TABLE "generic_operation_artifact_object"
   ADD CONSTRAINT "generic_operation_artifact_object_version_check"
     CHECK (
       "object_version_id" IS NULL
-      OR "object_version_id" ~ '^[A-Za-z0-9._~+/=-]{1,1024}$'
+      OR (
+        char_length("object_version_id") BETWEEN 1 AND 1024
+        AND "object_version_id" ~ '^[A-Za-z0-9._~+/=-]+$'
+      )
     );
 
 CREATE TABLE "personal_artifact_cleanup_command" (
@@ -39,7 +42,10 @@ CREATE TABLE "personal_artifact_cleanup_command" (
   CONSTRAINT "personal_artifact_cleanup_command_digest_check"
     CHECK ("sha256" ~ '^[0-9a-f]{64}$'),
   CONSTRAINT "personal_artifact_cleanup_command_version_check"
-    CHECK ("object_version_id" ~ '^[A-Za-z0-9._~+/=-]{1,1024}$'),
+    CHECK (
+      char_length("object_version_id") BETWEEN 1 AND 1024
+      AND "object_version_id" ~ '^[A-Za-z0-9._~+/=-]+$'
+    ),
   CONSTRAINT "personal_artifact_cleanup_command_attempt_check"
     CHECK ("attempt" >= 1 AND "attempt" <= 2147483647),
   CONSTRAINT "personal_artifact_cleanup_command_status_check"
@@ -106,7 +112,8 @@ DECLARE
   changed INTEGER;
 BEGIN
   IF p_object_version_id IS NULL
-    OR p_object_version_id !~ '^[A-Za-z0-9._~+/=-]{1,1024}$'
+    OR char_length(p_object_version_id) NOT BETWEEN 1 AND 1024
+    OR p_object_version_id !~ '^[A-Za-z0-9._~+/=-]+$'
   THEN
     RAISE EXCEPTION 'GENERIC_OPERATION_ARTIFACT_INVALID'
       USING ERRCODE = 'P0001';
