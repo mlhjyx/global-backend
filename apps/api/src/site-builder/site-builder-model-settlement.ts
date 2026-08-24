@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, pbkdf2Sync } from 'node:crypto';
 import {
   GatewaySettlementObservation,
   PAID_MODEL_PROTOCOLS,
@@ -209,6 +209,19 @@ export function settlementCredentialFingerprint(value: string): string {
   return createHash('sha256').update(value).digest('hex'); // lgtm[js/insufficient-password-hash]
 }
 
+function legacyAttestationCredentialHash(value: string): string {
+  // The retired file-attestation validator is not the product fingerprint
+  // contract. If legacy callers invoke it, use a work-factor hash rather than
+  // reintroducing a fast password-style computation.
+  return pbkdf2Sync(
+    value,
+    'site-builder-retired-attestation/v2',
+    100_000,
+    32,
+    'sha256',
+  ).toString('hex');
+}
+
 function sha256CanonicalJson(value: unknown): string {
   return sha256(canonicalJson(value));
 }
@@ -357,7 +370,7 @@ function assertAttestation(
     snapshot.pricing.ledgerMicrousdPerUsd !== 1_000_000 ||
     snapshot.pricing.ledgerMicrousdPerCny !== 1_000_000 ||
     !SHA256.test(snapshot.credential.bearerTokenSha256) ||
-    snapshot.credential.bearerTokenSha256 !== settlementCredentialFingerprint(apiKey) ||
+    snapshot.credential.bearerTokenSha256 !== legacyAttestationCredentialHash(apiKey) ||
     snapshot.credential.purpose !== 'site_builder_runtime' ||
     snapshot.credential.quotaMode !== 'limited' ||
     snapshot.credential.scopeExact !== true ||
