@@ -140,4 +140,11 @@ describe('resolveRuntimeSettings', () => {
     expect(source).toMatch(/app\.listen\(runtimeSettings\.port,\s*runtimeSettings\.bindHost\)/);
     expect(source).not.toMatch(/app\.listen\(port\)/);
   });
+
+  it('preserves Express 4 nested-query semantics on the Express 5 runtime', () => {
+    const source = readFileSync(join(import.meta.dirname, '..', 'main.ts'), 'utf8');
+    expect(source).toContain("import type { NestExpressApplication } from '@nestjs/platform-express'");
+    expect(source).toContain('NestFactory.create<NestExpressApplication>(AppModule)');
+    expect(source).toContain("app.set('query parser', 'extended')");
+  });
 });

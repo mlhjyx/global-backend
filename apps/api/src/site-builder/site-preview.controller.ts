@@ -4,6 +4,17 @@ import type { Response } from 'express';
 
 import { SitePreviewArtifactService } from './site-preview-artifact.service';
 
+function normalizeWildcardPath(value: string | string[]): string {
+  const segments = Array.isArray(value) ? value : [value];
+  if (
+    segments.length === 0 ||
+    segments.some((segment) => typeof segment !== 'string' || segment.length === 0)
+  ) {
+    throw new Error('SITE_PREVIEW_INVALID_PATH');
+  }
+  return segments.join('/');
+}
+
 @ApiExcludeController()
 @Controller('preview')
 export class SitePreviewController {
@@ -34,12 +45,12 @@ export class SitePreviewController {
     return this.send(slug, '', response);
   }
 
-  @Get(':slug/:assetPath(*)')
+  @Get(':slug/*assetPath')
   async asset(
     @Param('slug') slug: string,
-    @Param('assetPath') assetPath: string,
+    @Param('assetPath') assetPath: string | string[],
     @Res() response: Response,
   ): Promise<void> {
-    return this.send(slug, assetPath, response);
+    return this.send(slug, normalizeWildcardPath(assetPath), response);
   }
 }

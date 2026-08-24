@@ -4,7 +4,7 @@
   "active_binding_artifact_id": "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-15-v22-v1",
   "active_binding_source_bundle_digest": "5f4c321e9d48f0208e5b293a4d40d8f648c0414b8a429a789bed63cf4f874ac0",
   "status": "STALE_HOLD",
-  "current_source_fingerprint": "420eab961cbb3fdbe6098cdbf0d30d2206590b1aa3f877f04fbfd31775a741ba",
+  "current_source_fingerprint": "f999aaeb79137d22f5b90b2f85da3b61d6aee7554232a2aa15cd7be8c2303d55",
   "drifted_paths": [
     "apps/api/package.json",
     "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",

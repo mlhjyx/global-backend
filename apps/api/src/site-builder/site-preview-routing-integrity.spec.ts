@@ -18,6 +18,8 @@ describe('R1 object-backed preview routing', () => {
     expect(siteBuilderModule).toContain('SitePreviewArtifactService');
     expect(controller).toContain("@Controller('preview')");
     expect(controller).toContain('@ApiExcludeController()');
+    expect(controller).toContain("@Get(':slug/*assetPath')");
+    expect(controller).not.toContain(':assetPath(*)');
   });
 
   it('uses one narrow SECURITY DEFINER resolver because public previews have no tenant token', async () => {
