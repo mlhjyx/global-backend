@@ -224,4 +224,3 @@ export function parseDurableExecutionReceipt(value: unknown): DurableExecutionRe
     status: 'SETTLED',
   });
 }
-
