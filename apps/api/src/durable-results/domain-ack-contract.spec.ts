@@ -95,6 +95,20 @@ describe('domain ACK declaration contract', () => {
       expect(() => parseDomainAckContract(candidate)).toThrow('DOMAIN_ACK_CONTRACT_INVALID');
     }
   });
+
+  it('preserves ACK state after artifact expiry while raw access remains a separate gate', () => {
+    const acknowledgedAfterArtifactExpiry = {
+      ...personalAck,
+      resultStrategy: 'artifact_reference',
+      resultSchema: 'http-get/v1',
+      artifactId: '892b2e0e-990a-4c66-89d9-2ce467a0da4d',
+      acknowledgedAt: '2026-08-25T10:20:30.000Z',
+    };
+
+    expect(parseDomainAckContract(acknowledgedAfterArtifactExpiry)).toEqual(
+      acknowledgedAfterArtifactExpiry,
+    );
+  });
 });
 
 describe('valid/unknown/control/replay disposition contract', () => {

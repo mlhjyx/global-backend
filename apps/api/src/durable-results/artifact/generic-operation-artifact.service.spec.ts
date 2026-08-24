@@ -188,6 +188,74 @@ function persistInput() {
 }
 
 describe('GenericOperationArtifactService', () => {
+  it('requires a bounded subject only for PERSONAL_DATA before reading the producer', async () => {
+    let producerReads = 0;
+    const deps = dependencies();
+    const personal = {
+      ...persistInput(),
+      privacyClass: 'PERSONAL_DATA' as const,
+      source: source(() => {
+        producerReads += 1;
+      }),
+    };
+
+    await expect(deps.service.persist(personal)).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+    await expect(deps.service.persist({
+      ...persistInput(),
+      subjectRef: {
+        subjectType: 'contact' as const,
+        subjectId: 'b8b3ee5c-fbb8-42ef-a382-9c10c16dca72',
+      },
+    })).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+
+    expect(producerReads).toBe(0);
+    expect(deps.store.stage).not.toHaveBeenCalled();
+  });
+
+  it('settles PERSONAL_DATA with only the exact bounded subject reference', async () => {
+    const personalStaged = Object.freeze({
+      ...staged,
+      privacyClass: 'PERSONAL_DATA' as const,
+    });
+    const personalStored = Object.freeze({
+      ...stored,
+      privacyClass: 'PERSONAL_DATA' as const,
+    });
+    const deps = dependencies({
+      stage: async (input) => {
+        for await (const _chunk of input.source.body) {
+          // Consume the one bounded producer stream.
+        }
+        return personalStaged;
+      },
+      promote: async () => personalStored,
+      inspect: async () => personalStored,
+    });
+    const subjectRef = Object.freeze({
+      subjectType: 'contact' as const,
+      subjectId: 'b8b3ee5c-fbb8-42ef-a382-9c10c16dca72',
+    });
+
+    await expect(deps.service.persist({
+      ...persistInput(),
+      privacyClass: 'PERSONAL_DATA',
+      subjectRef,
+    })).resolves.toMatchObject({ artifactId: ARTIFACT_ID });
+
+    expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
+      reservation,
+      13,
+      expect.objectContaining({
+        manifest: expect.objectContaining({ privacyClass: 'PERSONAL_DATA' }),
+      }),
+      subjectRef,
+    );
+  });
+
   it('persists in the exact ordered protocol and returns a closed reference', async () => {
     const deps = dependencies();
 
