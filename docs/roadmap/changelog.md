@@ -1,6 +1,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-08-24 · Production Parity PERSONAL_DATA cleanup runtime readback
+
+- `codex/production-parity` 的 exact clean HEAD `50c23d8de738ba7bdac9b9b2ff85630bab8473a1` 收口了 PERSONAL_DATA artifact cleanup 的物理 runtime wiring：内部 exact S3 VersionId、tombstone/audit commit fence、shared-digest advisory fence、durable cleanup command、Outbox→Temporal retry/backoff 与独立 cleanup principal。ToolBroker 的 `GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD` 仍保持，未新增 producer 旁路。
+- 用户授权的 disposable PostgreSQL 16 验证使用本机已有 `pgvector/pgvector:pg16`、内部临时网络与 tmpfs 数据目录；全新数据库应用 98 个迁移，真实 `app_user` 通过受控函数完成 inspect/enqueue/claim/complete/replay，验证 exact VersionId、FORCE RLS、直表权限拒绝、跨 workspace deny 与 shared subject binding fence。临时容器和网络已清理；该记录不触碰 retained `global-postgres`。
+- 运行验证先后捕获并修复两个迁移缺陷：PL/pgSQL `audit` 局部变量与 SQL alias 歧义、PostgreSQL 不支持 `{1,1024}` 重复上限。修复提交为 `da7b92c0`、`bb5a9d03`，并新增 migration regression tests；cleanup activity 的异常 cause 保留修复为 `50c23d8d`。
+- 最新 source checks：API 384 files / 5752 tests（3/39 skipped）、API build PASS、lint 0 errors/16 既有 warnings、governance 118/118、`docs:verify` 0 errors/1 既有 table warning、ContractGraph 10917 nodes / 25049 edges / 0 errors。MinIO/S3 policy attach 与 exact-version delete、Temporal/Worker/Relay 目标环境 admission、OCI 发布/部署、主线合并、RuntimeEvidence 与真实模型调用仍为 UNKNOWN/未执行。
+
 ## 2026-08-22 · 通用操作 Artifact 耐久重放 Task 8 记录（pre-cutover / no runtime claim）
 
 - 新增 [通用操作 Artifact 耐久重放实现记录](../implementation-records/generic-operation-artifact-replay.md)，固定 Task 1–7 在 `codex/production-parity` 的 `a06eb7f4f29d8b9dd0ed47f52a1d86d60a13379b` 审查基线：closed small reference、digest-derived immutable key、七个 additive artifact migrations、expected facts、`RESULT_UNKNOWN` recovery、bounded materializers，以及 deployment-owned MinIO lifecycle/IAM/readiness contract。
