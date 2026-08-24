@@ -6,9 +6,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 const repositoryRoot = new URL("../", import.meta.url);
-const BASE_COMMIT = "fcb61e3060dd3289fec93bca11d02584f8080791";
+const BASE_COMMIT = "866ede782579815dd3cd46bcaffb0c1d9626cf46";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-08-24T14:35:16.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -865,7 +866,7 @@ test("production audit input must be a complete production-only pnpm report", as
   );
 });
 
-test("repository baseline is a current, exact-main-bound 36-advisory snapshot", async () => {
+test("repository baseline is a current, exact-main-bound 10-advisory snapshot", async () => {
   const { validateProductionAuditBaseline } =
     await import("./supply-chain-audit.mjs");
   const repositoryBaseline = JSON.parse(
@@ -874,16 +875,16 @@ test("repository baseline is a current, exact-main-bound 36-advisory snapshot", 
     ),
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
-    now: NOW,
+    now: REPOSITORY_BASELINE_NOW,
     expectedBootstrapBase: BASE_COMMIT,
   });
   assert.deepEqual(validation.issues, []);
-  assert.equal(repositoryBaseline.summary.advisories, 36);
+  assert.equal(repositoryBaseline.summary.advisories, 10);
   assert.deepEqual(repositoryBaseline.summary.vulnerabilities, {
     info: 0,
-    low: 4,
-    moderate: 14,
-    high: 18,
+    low: 3,
+    moderate: 4,
+    high: 3,
     critical: 0,
   });
   assert.equal(repositoryBaseline.source.base_commit, BASE_COMMIT);
