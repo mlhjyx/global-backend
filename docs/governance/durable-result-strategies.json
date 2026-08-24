@@ -290,7 +290,10 @@
         "inventorFields": ["name"]
       },
       "costConstraints": {
-        "maximumBytesBilled": "214748364800",
+        "configuredDefaultMaximumBytesBilled": "214748364800",
+        "requiredMaximumBytesBilledAtCutover": "214748364800",
+        "runtimeHardMaximumBytesBilled": null,
+        "runtimeOverrideStatus": "UNBOUNDED_PRE_CUTOVER",
         "costBasis": "estimated_upper_bound",
         "providerReportedBytesOptional": true,
         "realBigQueryInTests": false

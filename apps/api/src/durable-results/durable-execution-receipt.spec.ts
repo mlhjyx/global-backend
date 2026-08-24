@@ -121,6 +121,23 @@ describe('durable execution receipt contract', () => {
       },
       costBasis: 'not_incurred',
     })).toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
+    expect(() => parseDurableExecutionReceipt({
+      ...typedReceipt,
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 0,
+        inputTokens: 99, bytesProcessed: '123',
+        chargedMicrousd: '0', upperBoundMicrousd: '0',
+      },
+      costBasis: 'not_incurred',
+    })).toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
+    expect(() => parseDurableExecutionReceipt({
+      ...typedReceipt,
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 0,
+        chargedMicrousd: '100', upperBoundMicrousd: '100',
+      },
+      costBasis: 'provider_reported',
+    })).toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
   });
 
   it('accepts null-prototype data properties but rejects proxies and accessors', () => {

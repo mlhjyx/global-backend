@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const SCRIPT_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const DEFAULT_REPO_ROOT = resolve(SCRIPT_DIR, '..');
@@ -33,6 +34,18 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/discovery/providers/public-web.provider.ts', taskId: 'discovery.extract_company', schema: 'discovery-extract-company/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/directory.provider.ts', taskId: 'discovery.extract_list', schema: 'discovery-extract-list/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/decision-maker.provider.ts', taskId: 'contact.find_decision_makers', schema: 'contact-decision-makers/v1' }),
+]);
+
+export const EXPECTED_MODEL_GATEWAY_BOUNDARIES = Object.freeze([
+  'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
+  'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
+]);
+
+export const EXPECTED_PROTECTED_WIRING_PATHS = Object.freeze([
+  'apps/api/src/model-gateway/model-gateway.module.ts',
+  'apps/api/src/model-gateway/router-model-gateway.ts',
+  'apps/api/src/tools/tool-broker.factory.ts',
+  'apps/api/src/tools/tool-broker.ts',
 ]);
 
 const RECEIPT_FIELDS = Object.freeze([
@@ -68,6 +81,79 @@ function sameSet(left, right) {
   return JSON.stringify(sorted(left)) === JSON.stringify(sorted(right));
 }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
+
+function analyzeTypeScript(path, source) {
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const modelCalls = [];
+  const toolCalls = [];
+  const bigQueryValueImports = new Set();
+  let importsGoogleBigQuery = false;
+  let constructsBigQuery = false;
+  function visit(node) {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const moduleName = node.moduleSpecifier.text;
+      if (moduleName === '@google-cloud/bigquery') importsGoogleBigQuery = true;
+      if (moduleName.endsWith('/adapters/bigquery-patents') || moduleName === '../adapters/bigquery-patents') {
+        const clause = node.importClause;
+        const bindings = clause?.namedBindings;
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (
+              !clause.isTypeOnly && !element.isTypeOnly &&
+              ['bigqueryPatents', 'BigQueryPatentsClient'].includes(importedName)
+            ) bigQueryValueImports.add(element.name.text);
+          }
+        }
+      }
+    }
+    if (ts.isNewExpression(node)) {
+      const constructorName = node.expression.getText(sourceFile);
+      if (constructorName === 'BigQuery' || bigQueryValueImports.has(constructorName)) {
+        constructsBigQuery = true;
+      }
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      const receiver = node.expression.expression.getText(sourceFile);
+      if (
+        ['generateText', 'generateStructured', 'reviewVision'].includes(method) ||
+        (method === 'embed' && /(?:gateway|modelGateway)$/i.test(receiver))
+      ) modelCalls.push(Object.freeze({ method, position: node.getStart(sourceFile) }));
+      if (method === 'invoke') {
+        const first = node.arguments[0];
+        if (first && ts.isStringLiteralLike(first)) {
+          toolCalls.push(Object.freeze({ toolId: first.text, position: node.getStart(sourceFile) }));
+        }
+      }
+      if (bigQueryValueImports.has(receiver)) constructsBigQuery = true;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return Object.freeze({
+    modelCalls: Object.freeze(modelCalls),
+    toolCalls: Object.freeze(toolCalls),
+    importsGoogleBigQuery,
+    constructsBigQuery,
+  });
+}
+
+export function inspectExecutionAuthoritySource(path, source) {
+  const analysis = analyzeTypeScript(path, source);
+  return Object.freeze({
+    modelMethods: Object.freeze(analysis.modelCalls.map((entry) => entry.method)),
+    toolIds: Object.freeze(analysis.toolCalls.map((entry) => entry.toolId)),
+    importsGoogleBigQuery: analysis.importsGoogleBigQuery,
+    constructsBigQuery: analysis.constructsBigQuery,
+  });
+}
 
 async function listFiles(root, relative) {
   const entries = await readdir(resolve(root, relative), { withFileTypes: true });
@@ -233,14 +319,19 @@ function validateTools(manifest, path, issues) {
         ])
       ) issues.push(issue('EXECUTION_AUTHORITY_PATENT_RESULT_CONTRACT_INVALID', path, 'Patent Cache result constraints do not match current bounded path', id));
       if (
-        !isRecord(cost) || cost.maximumBytesBilled !== '214748364800' ||
+        !isRecord(cost) || cost.configuredDefaultMaximumBytesBilled !== '214748364800' ||
+        cost.requiredMaximumBytesBilledAtCutover !== '214748364800' ||
+        cost.runtimeHardMaximumBytesBilled !== null ||
+        cost.runtimeOverrideStatus !== 'UNBOUNDED_PRE_CUTOVER' ||
         cost.costBasis !== 'estimated_upper_bound' ||
         cost.providerReportedBytesOptional !== true || cost.realBigQueryInTests !== false ||
         !sameSet(Object.keys(cost), [
-          'maximumBytesBilled', 'costBasis', 'providerReportedBytesOptional',
-          'realBigQueryInTests',
+          'configuredDefaultMaximumBytesBilled',
+          'requiredMaximumBytesBilledAtCutover',
+          'runtimeHardMaximumBytesBilled', 'runtimeOverrideStatus', 'costBasis',
+          'providerReportedBytesOptional', 'realBigQueryInTests',
         ])
-      ) issues.push(issue('EXECUTION_AUTHORITY_PATENT_COST_CONTRACT_INVALID', path, 'Patent Cache cost constraints must remain bounded and offline-tested', id));
+      ) issues.push(issue('EXECUTION_AUTHORITY_PATENT_COST_CONTRACT_INVALID', path, 'Patent Cache cost contract must expose the unbounded pre-cutover override and required Task 6 hard cap', id));
     }
   }
 }
@@ -296,6 +387,13 @@ async function validateProtectedFiles(repoRoot, manifest, path, issues) {
   ) {
     issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'physical execution wiring must remain NOT_WIRED'));
     return;
+  }
+  const protectedPaths = wiring.protectedFiles.map((entry) => entry?.path).filter(Boolean);
+  if (
+    !sameSet(protectedPaths, EXPECTED_PROTECTED_WIRING_PATHS) ||
+    new Set(protectedPaths).size !== EXPECTED_PROTECTED_WIRING_PATHS.length
+  ) {
+    issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'protected files must be the exact four Router/ToolBroker composition paths'));
   }
   for (const entry of wiring.protectedFiles) {
     if (
@@ -415,6 +513,41 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   if (!sameSet(discoveredModelTasks, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))) {
     issues.push(issue('EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src', 'generic product Model task inventory drifted from the closed registry'));
   }
+  const modelBoundaryCalls = [];
+  const toolPhysicalCalls = [];
+  const allProductSources = (await listFiles(repoRoot, 'apps/api/src'))
+    .filter((path) => path.endsWith('.ts') && !path.endsWith('.spec.ts'))
+    .filter((path) => !path.startsWith('apps/api/src/model-gateway/'));
+  for (const path of allProductSources) {
+    const content = await readText(repoRoot, path);
+    const analysis = analyzeTypeScript(path, content);
+    const ordinals = new Map();
+    for (const call of analysis.modelCalls) {
+      const method = call.method;
+      const ordinal = (ordinals.get(method) ?? 0) + 1;
+      ordinals.set(method, ordinal);
+      modelBoundaryCalls.push(`${path}#${method}#${ordinal}`);
+    }
+    const toolOrdinals = new Map();
+    for (const call of analysis.toolCalls) {
+      const ordinal = (toolOrdinals.get(call.toolId) ?? 0) + 1;
+      toolOrdinals.set(call.toolId, ordinal);
+      toolPhysicalCalls.push(`${path}#${call.toolId}#${ordinal}`);
+      if (!EXPECTED_TOOL_IDS.includes(call.toolId)) {
+        issues.push(issue('EXECUTION_AUTHORITY_UNREGISTERED_TOOL_CALL', path, `uncatalogued ToolBroker call ${call.toolId}`, call.toolId));
+      }
+    }
+  }
+  if (!sameSet(modelBoundaryCalls, EXPECTED_MODEL_GATEWAY_BOUNDARIES)) {
+    const expected = new Set(EXPECTED_MODEL_GATEWAY_BOUNDARIES);
+    const actual = new Set(modelBoundaryCalls);
+    for (const key of sorted(actual).filter((entry) => !expected.has(entry))) {
+      issues.push(issue('EXECUTION_AUTHORITY_DIRECT_MODEL_GATEWAY_CALL', key.split('#')[0], `uncatalogued ModelGateway boundary ${key}`));
+    }
+    for (const key of EXPECTED_MODEL_GATEWAY_BOUNDARIES.filter((entry) => !actual.has(entry))) {
+      issues.push(issue('EXECUTION_AUTHORITY_MODEL_GATEWAY_BOUNDARY_MISSING', key.split('#')[0], `missing ModelGateway boundary ${key}`));
+    }
+  }
   const modelProjectionSource = await readText(repoRoot, 'apps/api/src/durable-results/model-result-projections.ts');
   for (const entry of EXPECTED_MODEL_TASKS) {
     const callsite = await readText(repoRoot, entry.path);
@@ -446,6 +579,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     [patentScanner, 'const MAX_PATENTS_PER_ANCHOR = 25'],
     [patentScanner, '"google_patents.search"'],
     [patentAdapter, 'const DEFAULT_MAX_GB = 200'],
+    [patentAdapter, 'this.deps.maxGb ??'],
     [patentAdapter, 'MAX_APPLICANTS_PER_PATENT = 32'],
     [patentProjectionSpec, "'$.data.patents.maxItems': 2000"],
     [patentProjectionSpec, "'$.data.patents[].inventors.maxItems': 25"],
@@ -454,10 +588,25 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     issues.push(issue('EXECUTION_AUTHORITY_PATENT_SOURCE_CONSTRAINT_MISMATCH', 'apps/api/src', 'Patent Cache source constraints drifted from manifest', 'google_patents.search'));
   }
   const patentsActivity = await readText(repoRoot, 'apps/api/src/temporal/patents-cache.activities.ts');
-  if (
-    patentsActivity.includes("from '../adapters/bigquery-patents'") ||
-    patentsActivity.includes('bigqueryPatents.') || patentScanner.includes('bigqueryPatents.')
-  ) issues.push(issue('EXECUTION_AUTHORITY_DIRECT_BIGQUERY_BYPASS', 'apps/api/src/temporal', 'managed Patent Cache activity bypasses google_patents.search', 'google_patents.search'));
+  if (!patentsActivity.includes('createPatentCacheBrokerScanner')) {
+    issues.push(issue('EXECUTION_AUTHORITY_PATENT_BROKER_ROUTE_MISSING', 'apps/api/src/temporal/patents-cache.activities.ts', 'Patent Cache activity must retain the broker scanner route', 'google_patents.search'));
+  }
+  const bigQueryAllowed = new Set([
+    'apps/api/src/adapters/bigquery-patents.ts',
+    'apps/api/src/tools/source-tools.ts',
+  ]);
+  for (const path of (await listFiles(repoRoot, 'apps/api/src'))
+    .filter((entry) => entry.endsWith('.ts') && !entry.endsWith('.spec.ts'))) {
+    if (bigQueryAllowed.has(path)) continue;
+    const analysis = analyzeTypeScript(path, await readText(repoRoot, path));
+    if (analysis.importsGoogleBigQuery || analysis.constructsBigQuery) {
+      issues.push(issue('EXECUTION_AUTHORITY_DIRECT_BIGQUERY_BYPASS', path, 'BigQuery physical access is allowed only inside the google_patents.search Tool adapter', 'google_patents.search'));
+    }
+  }
+  return Object.freeze({
+    modelGatewayBoundaryCount: modelBoundaryCalls.length,
+    physicalToolCallsiteCount: toolPhysicalCalls.length,
+  });
 }
 
 function validateManagedAdapters(manifest, path, issues) {
@@ -480,8 +629,8 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   const repoRoot = resolve(options.repoRoot ?? DEFAULT_REPO_ROOT);
   const manifestPath = options.manifestPath ?? DEFAULT_MANIFEST_PATH;
   const issues = [];
-  let manifest;
-  if (!existsSync(resolve(repoRoot, manifestPath))) {
+  let manifest = options.manifest;
+  if (manifest === undefined && !existsSync(resolve(repoRoot, manifestPath))) {
     missingManifestInventory(manifestPath, issues);
     return Object.freeze({
       ok: false,
@@ -489,13 +638,15 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
       toolCount: 0,
       modelTaskCount: 0,
       physicalExecutionWiring: 'UNKNOWN',
+      physicalToolCallsiteCount: 0,
+      modelGatewayBoundaryCount: 0,
     });
   }
   try {
-    manifest = await readJson(repoRoot, manifestPath);
+    if (manifest === undefined) manifest = await readJson(repoRoot, manifestPath);
   } catch (error) {
     issues.push(issue('EXECUTION_AUTHORITY_MANIFEST_INVALID', manifestPath, error instanceof Error ? error.message : String(error)));
-    return Object.freeze({ ok: false, issues: Object.freeze(issues), toolCount: 0, modelTaskCount: 0, physicalExecutionWiring: 'UNKNOWN' });
+    return Object.freeze({ ok: false, issues: Object.freeze(issues), toolCount: 0, modelTaskCount: 0, physicalExecutionWiring: 'UNKNOWN', physicalToolCallsiteCount: 0, modelGatewayBoundaryCount: 0 });
   }
   validateTopLevel(manifest, manifestPath, issues);
   validateReceipt(manifest, manifestPath, issues);
@@ -504,19 +655,21 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   validateArtifacts(manifest, manifestPath, issues);
   validateManagedAdapters(manifest, manifestPath, issues);
   await validateProtectedFiles(repoRoot, manifest, manifestPath, issues);
-  await scanCurrentSources(repoRoot, manifest, issues);
+  const callsites = await scanCurrentSources(repoRoot, manifest, issues);
   return Object.freeze({
     ok: issues.length === 0,
     issues: Object.freeze(issues),
     toolCount: Array.isArray(manifest.tools) ? manifest.tools.length : 0,
     modelTaskCount: Array.isArray(manifest.modelTasks) ? manifest.modelTasks.length : 0,
     physicalExecutionWiring: manifest.physicalExecutionWiring?.status ?? 'UNKNOWN',
+    physicalToolCallsiteCount: callsites.physicalToolCallsiteCount,
+    modelGatewayBoundaryCount: callsites.modelGatewayBoundaryCount,
   });
 }
 
 function render(result) {
   if (result.ok) {
-    return `execution-authority-policy: PASS tools=${result.toolCount} modelTasks=${result.modelTaskCount} physicalExecutionWiring=${result.physicalExecutionWiring}\n`;
+    return `execution-authority-policy: PASS tools=${result.toolCount} modelTasks=${result.modelTaskCount} toolCallsites=${result.physicalToolCallsiteCount} modelGatewayBoundaries=${result.modelGatewayBoundaryCount} physicalExecutionWiring=${result.physicalExecutionWiring}\n`;
   }
   const lines = ['execution-authority-policy: FAIL'];
   for (const entry of result.issues) {

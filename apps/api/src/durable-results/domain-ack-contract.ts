@@ -195,9 +195,10 @@ export function parseDomainAckContract(value: unknown): DomainAckContract {
 }
 
 export function parseExecutionResultDisposition(value: unknown): ExecutionResultDisposition {
-  const kind = value && typeof value === 'object'
-    ? Object.getOwnPropertyDescriptor(value, 'kind')?.value
-    : undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || types.isProxy(value)) {
+    dispositionInvalid();
+  }
+  const kind = Object.getOwnPropertyDescriptor(value, 'kind')?.value;
   if (kind === 'valid_output') {
     const source = ownDataRecord(value, VALID_KEYS, dispositionInvalid);
     if (

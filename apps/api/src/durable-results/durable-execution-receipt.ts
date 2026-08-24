@@ -177,6 +177,10 @@ function parseUsage(value: unknown, costBasis: DurableExecutionCostBasis): Durab
   if (billed !== undefined && maximumBilled !== undefined && billed > maximumBilled) invalid();
   if (costBasis === 'provider_reported' && charged === undefined) invalid();
   if (
+    costBasis !== 'not_incurred' &&
+    (result.callCount === undefined || result.callCount < 1)
+  ) invalid();
+  if (
     costBasis === 'token_pricing' &&
     (charged === undefined || upper === undefined ||
       (result.inputTokens === undefined && result.outputTokens === undefined))
@@ -186,7 +190,12 @@ function parseUsage(value: unknown, costBasis: DurableExecutionCostBasis): Durab
   }
   if (
     costBasis === 'not_incurred' &&
-    (result.callCount !== 0 || charged !== 0n || upper !== 0n)
+    (
+      result.callCount !== 0 || charged !== 0n || upper !== 0n ||
+      result.inputTokens !== undefined || result.outputTokens !== undefined ||
+      result.bytesProcessed !== undefined || result.bytesBilled !== undefined ||
+      result.maximumBytesBilled !== undefined
+    )
   ) invalid();
   return result;
 }

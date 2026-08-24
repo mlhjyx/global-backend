@@ -166,4 +166,25 @@ describe('valid/unknown/control/replay disposition contract', () => {
         .toThrow('EXECUTION_RESULT_DISPOSITION_INVALID');
     }
   });
+
+  it('rejects a Proxy before invoking any descriptor trap', () => {
+    let descriptorTrapCalls = 0;
+    const candidate = new Proxy({
+      schemaVersion: 'execution-result-disposition/v1',
+      kind: 'result_unknown',
+      code: 'GENERIC_OPERATION_RESULT_UNKNOWN',
+      operationStatus: 'RESULT_UNKNOWN',
+      operationId: receipt.operationId,
+      operationKey: receipt.operationKey,
+      automaticPhysicalRetryAllowed: false,
+    }, {
+      getOwnPropertyDescriptor(target, property) {
+        descriptorTrapCalls += 1;
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+    });
+    expect(() => parseExecutionResultDisposition(candidate))
+      .toThrow('EXECUTION_RESULT_DISPOSITION_INVALID');
+    expect(descriptorTrapCalls).toBe(0);
+  });
 });
