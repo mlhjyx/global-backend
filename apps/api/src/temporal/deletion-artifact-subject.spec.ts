@@ -27,6 +27,14 @@ describe('deletion artifact subject freeze', () => {
           replay: false,
         }];
       }
+      if (text.includes('enqueue_workspace_personal_artifact_cleanup_v1')) {
+        order.push('cleanup-command');
+        return [{
+          command_count: 1,
+          shared_hold_count: 0,
+          version_hold_count: 0,
+        }];
+      }
       order.push('policy-lock');
       return [];
     });
@@ -37,6 +45,13 @@ describe('deletion artifact subject freeze', () => {
         updateMany: vi.fn(async () => {
           order.push('frozen');
           return { count: 1 };
+        }),
+      },
+      outboxEvent: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => {
+          order.push('cleanup-outbox');
+          return {};
         }),
       },
     };
@@ -56,6 +71,24 @@ describe('deletion artifact subject freeze', () => {
       contactIds: [],
     });
 
-    expect(order).toEqual(['policy-lock', 'artifact-tombstone', 'frozen']);
+    expect(order).toEqual([
+      'policy-lock',
+      'artifact-tombstone',
+      'cleanup-command',
+      'cleanup-outbox',
+      'frozen',
+    ]);
+    expect(tx.outboxEvent.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: WORKSPACE_ID,
+        eventType: 'PersonalArtifactCleanupRequested',
+        aggregateType: 'DeletionRequest',
+        aggregateId: DELETION_REQUEST_ID,
+        privacyClassification: 'RESTRICTED',
+        payload: {
+          deletionRequestId: DELETION_REQUEST_ID,
+        },
+      },
+    });
   });
 });

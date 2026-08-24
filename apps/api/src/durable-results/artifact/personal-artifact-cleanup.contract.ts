@@ -23,6 +23,9 @@ export interface PersonalArtifactCleanupCommand {
 
 export type PersonalArtifactCleanupClaim =
   | Readonly<{ status: "TOMBSTONE_FENCE_NOT_COMMITTED" }>
+  | Readonly<{ status: "SHARED_OBJECT_STILL_REFERENCED" }>
+  | Readonly<{ status: "EXACT_OBJECT_VERSION_UNAVAILABLE" }>
+  | Readonly<{ status: "NO_CLEANUP_REQUIRED" }>
   | Readonly<{ status: "CROSS_WORKSPACE_DENIED" }>
   | Readonly<{
       status: "COMPLETED";
@@ -54,7 +57,10 @@ export interface PersonalArtifactCleanupCommandRepository {
       deletionRequestId: string;
     }>,
   ): Promise<PersonalArtifactCleanupClaim>;
-  complete(command: PersonalArtifactCleanupCommand): Promise<void>;
+  complete(
+    command: PersonalArtifactCleanupCommand,
+    objectStatus: "DELETED" | "ABSENT",
+  ): Promise<void>;
   scheduleRetry(
     command: PersonalArtifactCleanupCommand,
     failure: PersonalArtifactCleanupFailure,
@@ -78,8 +84,18 @@ export interface PrivilegedPersonalArtifactCleanupPort {
 
 export type PersonalArtifactCleanupResult =
   | Readonly<{
+      status: "NO_ACTION";
+      reason: "NO_CLEANUP_REQUIRED";
+    }>
+  | Readonly<{
       status: "HOLD";
       reason: "TOMBSTONE_FENCE_NOT_COMMITTED";
+    }>
+  | Readonly<{
+      status: "HOLD";
+      reason:
+        | "SHARED_OBJECT_STILL_REFERENCED"
+        | "EXACT_OBJECT_VERSION_UNAVAILABLE";
     }>
   | Readonly<{
       status: "DENIED";
@@ -206,6 +222,15 @@ function parseClaim(value: unknown): PersonalArtifactCleanupClaim | null {
   if (fence?.status === "TOMBSTONE_FENCE_NOT_COMMITTED") {
     return Object.freeze({ status: "TOMBSTONE_FENCE_NOT_COMMITTED" });
   }
+  if (fence?.status === "SHARED_OBJECT_STILL_REFERENCED") {
+    return Object.freeze({ status: "SHARED_OBJECT_STILL_REFERENCED" });
+  }
+  if (fence?.status === "EXACT_OBJECT_VERSION_UNAVAILABLE") {
+    return Object.freeze({ status: "EXACT_OBJECT_VERSION_UNAVAILABLE" });
+  }
+  if (fence?.status === "NO_CLEANUP_REQUIRED") {
+    return Object.freeze({ status: "NO_CLEANUP_REQUIRED" });
+  }
   if (fence?.status === "CROSS_WORKSPACE_DENIED") {
     return Object.freeze({ status: "CROSS_WORKSPACE_DENIED" });
   }
@@ -277,6 +302,18 @@ export class PersonalArtifactCleanupService {
         reason: "TOMBSTONE_FENCE_NOT_COMMITTED",
       });
     }
+    if (
+      claim.status === "SHARED_OBJECT_STILL_REFERENCED" ||
+      claim.status === "EXACT_OBJECT_VERSION_UNAVAILABLE"
+    ) {
+      return Object.freeze({ status: "HOLD", reason: claim.status });
+    }
+    if (claim.status === "NO_CLEANUP_REQUIRED") {
+      return Object.freeze({
+        status: "NO_ACTION",
+        reason: "NO_CLEANUP_REQUIRED",
+      });
+    }
     if (claim.status === "CROSS_WORKSPACE_DENIED") {
       return Object.freeze({
         status: "DENIED",
@@ -323,7 +360,7 @@ export class PersonalArtifactCleanupService {
       if (objectStatus !== "DELETED" && objectStatus !== "ABSENT") {
         throw new Error("invalid privileged cleanup result");
       }
-      await this.commands.complete(command);
+      await this.commands.complete(command, objectStatus);
       return Object.freeze({
         status: "COMPLETED",
         commandId: command.commandId,

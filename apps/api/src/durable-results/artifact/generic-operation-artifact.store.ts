@@ -96,6 +96,8 @@ export interface StagedArtifact {
 
 export interface StoredArtifact {
   readonly objectKey: string;
+  /** Exact immutable object version, internal only. */
+  readonly versionId: string;
   readonly sha256: string;
   readonly sizeBytes: string;
   readonly mediaType: string;

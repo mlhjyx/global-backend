@@ -64,6 +64,16 @@ function cleanupPort(
 }
 
 describe("PersonalArtifactCleanupService", () => {
+  it("completes a recheck when another governed request already removed every eligible version", async () => {
+    const commands = repository({ status: "NO_CLEANUP_REQUIRED" });
+    const store = cleanupPort();
+    const service = new PersonalArtifactCleanupService(commands, store);
+    await expect(service.cleanup({
+      workspaceId: WORKSPACE_ID,
+      deletionRequestId: DELETION_REQUEST_ID,
+    })).resolves.toEqual({ status: "NO_ACTION", reason: "NO_CLEANUP_REQUIRED" });
+    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+  });
   it("does not delete before the database tombstone and audit fence are committed", async () => {
     const commands = repository({ status: "TOMBSTONE_FENCE_NOT_COMMITTED" });
     const store = cleanupPort();
@@ -133,7 +143,7 @@ describe("PersonalArtifactCleanupService", () => {
     expect(durable).not.toHaveProperty("objectKey");
     expect(durable).not.toHaveProperty("body");
     expect(durable).not.toHaveProperty("subjectId");
-    expect(commands.complete).toHaveBeenCalledWith(durable);
+    expect(commands.complete).toHaveBeenCalledWith(durable, "DELETED");
   });
 
   it("treats an absent exact version as an idempotent completed cleanup", async () => {
@@ -153,7 +163,7 @@ describe("PersonalArtifactCleanupService", () => {
       objectStatus: "ABSENT",
       replay: false,
     });
-    expect(commands.complete).toHaveBeenCalledWith(durable);
+    expect(commands.complete).toHaveBeenCalledWith(durable, "ABSENT");
   });
 
   it("replays a completed durable command without another physical delete", async () => {

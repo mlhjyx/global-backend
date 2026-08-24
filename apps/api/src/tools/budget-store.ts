@@ -197,6 +197,8 @@ export interface BudgetStore {
     receiptFacts: DurableExecutionReceiptFacts,
     domainAck: BudgetDomainAckRequest,
     subjectRef?: GenericOperationArtifactSubjectRef,
+    /** Internal exact object version; never enters manifest/reference/receipt. */
+    objectVersionId?: string,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -1112,6 +1114,7 @@ export class PostgresBudgetStore implements BudgetStore {
     receiptFacts: DurableExecutionReceiptFacts,
     domainAck: BudgetDomainAckRequest,
     subjectRef?: GenericOperationArtifactSubjectRef,
+    objectVersionId?: string,
   ): Promise<BudgetSettlement> {
     assertMicrousd('observedMicrousd', observedMicrousd);
     const { snapshot: durable, columns: facts } =
@@ -1125,7 +1128,20 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
         const rows = await tx.$queryRaw<MicrousdSettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
+          objectVersionId
+            ? Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v3(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
+            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
+            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
+            ${JSON.stringify(explicitFacts.usage)}::jsonb,
+            ${explicitFacts.costBasis},
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid,
+            ${objectVersionId}
+          )`
+            : Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
             ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},

@@ -132,6 +132,13 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
     bootstrap,
     /GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY/,
   );
+  assert.match(bootstrap, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
+  assert.match(bootstrap, /generic-operation-artifact-personal-cleanup/);
+  assert.match(bootstrap, /"s3:GetObjectVersion"/);
+  assert.match(bootstrap, /"s3:DeleteObjectVersion"/);
+  assert.match(bootstrap, /"s3:GetBucketLocation"/);
+  assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
+  assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY/);
 });
 
 test('MinIO bootstrap rejects merged principals before the first mc mutation', async () => {
@@ -160,6 +167,10 @@ test('MinIO bootstrap rejects merged principals before the first mc mutation', a
             'personal-reader',
           GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:
             'personal-password-123',
+          GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:
+            'cleanup-writer',
+          GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:
+            'cleanup-password-123',
         },
       }),
       /artifact storage principals must be distinct/,
@@ -193,6 +204,18 @@ test('development API and Worker use one immutable image reference and wait for 
     'GENERIC_OPERATION_ARTIFACT_S3_FORCE_PATH_STYLE',
   ]) {
     assert.match(compose, new RegExp(`${name}: \\$\\{${name}`));
+  }
+  for (const name of [
+    'GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY',
+    'GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY',
+  ]) {
+    const apiService = compose.slice(
+      compose.indexOf('\n  api:'),
+      compose.indexOf('\n  worker:'),
+    );
+    const workerService = compose.slice(compose.indexOf('\n  worker:'));
+    assert.match(workerService, new RegExp(`${name}: \\$\\{${name}`));
+    assert.doesNotMatch(apiService, new RegExp(`${name}:`));
   }
   assert.doesNotMatch(
     compose,

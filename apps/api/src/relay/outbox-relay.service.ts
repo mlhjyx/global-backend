@@ -13,6 +13,7 @@ import {
   DISCOVERY_WORKFLOW,
   ASSET_OBJECT_CLEANUP_WORKFLOW,
   QUALIFY_WORKFLOW,
+  PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from "../temporal/understanding.constants";
@@ -667,6 +668,38 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `deletion workflow for request ${ev.aggregateId}`,
+      );
+    }
+    if (ev.eventType === "PersonalArtifactCleanupRequested") {
+      const payload =
+        ev.payload !== null &&
+        typeof ev.payload === 'object' &&
+        !Array.isArray(ev.payload)
+          ? (ev.payload as Record<string, unknown>)
+          : null;
+      if (
+        ev.schemaVersion !== 1 ||
+        !payload ||
+        Reflect.ownKeys(payload).length !== 1 ||
+        payload.deletionRequestId !== ev.aggregateId
+      ) {
+        throw new NonRetryableOutboxCommandError(
+          'personal artifact cleanup payload contract mismatch',
+        );
+      }
+      await this.startWorkflowIdempotent(
+        PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
+        {
+          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          workflowId: `personal-artifact-cleanup-${ev.aggregateId}`,
+          args: [
+            {
+              workspaceId: ev.workspaceId,
+              deletionRequestId: ev.aggregateId,
+            },
+          ],
+        },
+        `personal artifact cleanup for request ${ev.aggregateId}`,
       );
     }
     if (ev.eventType === "AssetObjectCleanupRequested") {

@@ -17,6 +17,7 @@ import {
 } from '../compliance/deletion.types';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { GenericOperationArtifactSubjectRepository } from '../durable-results/artifact/generic-operation-artifact-subject.repository';
+import { PersonalArtifactCleanupEnqueuer } from '../durable-results/artifact/personal-artifact-cleanup.repository';
 
 /**
  * 收口⑥ PR-B 删除编排（GDPR Art.17）的 Temporal 活动。deletionWorkflow 四步：
@@ -34,6 +35,7 @@ import { GenericOperationArtifactSubjectRepository } from '../durable-results/ar
 export function createDeletionActivities(deps: { prisma: PrismaService }) {
   const { prisma } = deps;
   const artifactSubjects = new GenericOperationArtifactSubjectRepository();
+  const artifactCleanup = new PersonalArtifactCleanupEnqueuer();
 
   return {
     async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedErasureTargets> {
@@ -52,6 +54,14 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             subjectType: input.subjectType,
             subjectId: input.subjectId,
           },
+        });
+        // The command and Outbox row become externally visible only if this
+        // transaction commits the tombstone/audit fence. Enqueue derives
+        // digest/version from trusted rows and returns aggregate HOLD counts;
+        // it never exposes another workspace's subject/artifact identifiers.
+        await artifactCleanup.enqueue(tx, {
+          workspaceId: input.workspaceId,
+          deletionRequestId: input.deletionRequestId,
         });
         // company 主体：**冻结即标 SUPPRESSED**（不等到 eraseSubject）——联系人发现/存量 sweep 以 company.status
         // ==='SUPPRESSED' 为载入闸门，尽早置位可拦下 freeze 之后才发起的发现，收窄「漏网新联系人」窗口。

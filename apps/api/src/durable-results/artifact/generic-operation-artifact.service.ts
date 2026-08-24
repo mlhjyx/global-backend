@@ -195,7 +195,7 @@ function sameStoredArtifact(
   expected: Pick<
     GenericOperationArtifactManifest,
     'objectKey' | 'sha256' | 'sizeBytes' | 'mediaType' | 'resultSchema' | 'privacyClass'
-  >,
+  > & Readonly<{ versionId?: string }>,
 ): actual is StoredArtifact {
   return Boolean(
     actual &&
@@ -204,7 +204,8 @@ function sameStoredArtifact(
       actual.sizeBytes === expected.sizeBytes &&
       actual.mediaType === expected.mediaType &&
       actual.resultSchema === expected.resultSchema &&
-      actual.privacyClass === expected.privacyClass,
+      actual.privacyClass === expected.privacyClass &&
+      (expected.versionId === undefined || actual.versionId === expected.versionId),
   );
 }
 
@@ -327,7 +328,7 @@ function snapshotExpectedManifest(
 
 function buildManifest(
   input: PersistGenericOperationArtifactInput,
-  stored: StoredArtifact,
+  stored: Omit<StoredArtifact, 'versionId'>,
   artifactId: string,
   createdAt: string,
   sourceDigest: string | null,
@@ -498,6 +499,7 @@ export class GenericOperationArtifactService {
           receiptFacts,
           domainAck,
           subjectRef,
+          promoted.versionId,
         )
       : await this.budgetStore.settleArtifactManifest(
           input.reservation,
@@ -505,6 +507,8 @@ export class GenericOperationArtifactService {
           snapshot,
           receiptFacts,
           domainAck,
+          undefined,
+          promoted.versionId,
         );
     await this.cleanup(staged.artifactId);
     return receiptResult(
@@ -566,6 +570,7 @@ export class GenericOperationArtifactService {
           receiptFacts,
           domainAck,
           subjectRef,
+          inspected.versionId,
         )
       : await this.budgetStore.settleArtifactManifest(
           input.reservation,
@@ -573,6 +578,8 @@ export class GenericOperationArtifactService {
           snapshot,
           receiptFacts,
           domainAck,
+          undefined,
+          inspected.versionId,
         );
     await this.cleanup(expected.artifactId);
     return receiptResult(

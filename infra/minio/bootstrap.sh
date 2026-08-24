@@ -10,6 +10,8 @@ set -eu
 : "${GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:?GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY is required}"
 : "${GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY:?GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY is required}"
 : "${GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY:?GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY is required}"
+: "${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY:?GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY is required}"
+: "${GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY:?GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY is required}"
 
 validate_bucket() {
   variable_name=$1
@@ -67,7 +69,10 @@ fi
 
 if [ "$MINIO_ROOT_USER" = "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY" ] ||
    [ "$MINIO_ROOT_USER" = "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY" ] ||
-   [ "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY" = "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY" ]; then
+   [ "$MINIO_ROOT_USER" = "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY" ] ||
+   [ "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY" = "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY" ] ||
+   [ "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY" = "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY" ] ||
+   [ "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY" = "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY" ]; then
   echo "artifact storage principals must be distinct" >&2
   exit 2
 fi
@@ -75,9 +80,13 @@ fi
 validate_secret MINIO_ROOT_PASSWORD "$MINIO_ROOT_PASSWORD"
 validate_secret GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY"
 validate_secret GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY"
+validate_secret GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY"
 if [ "$MINIO_ROOT_PASSWORD" = "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY" ] ||
    [ "$MINIO_ROOT_PASSWORD" = "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY" ] ||
-   [ "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY" = "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY" ]; then
+   [ "$MINIO_ROOT_PASSWORD" = "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY" ] ||
+   [ "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY" = "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY" ] ||
+   [ "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY" = "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY" ] ||
+   [ "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY" = "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY" ]; then
   echo "artifact storage secrets must be distinct" >&2
   exit 2
 fi
@@ -133,6 +142,7 @@ assert_contains "$encryption_info" sse-s3 artifact-encryption
 
 runtime_policy=/tmp/generic-operation-artifact-runtime-policy.json
 personal_policy=/tmp/generic-operation-artifact-personal-read-policy.json
+cleanup_policy=/tmp/generic-operation-artifact-personal-cleanup-policy.json
 
 cat > "$runtime_policy" <<EOF
 {
@@ -242,6 +252,29 @@ cat > "$runtime_policy" <<EOF
 }
 EOF
 
+cat > "$cleanup_policy" <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetBucketLocation"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObjectVersion", "s3:DeleteObjectVersion"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET/generic-operation-results/v1/sha256/*"],
+      "Condition": {
+        "StringEquals": {
+          "s3:ExistingObjectTag/artifact-privacy": "PERSONAL_DATA"
+        }
+      }
+    }
+  ]
+}
+EOF
+
 cat > "$personal_policy" <<EOF
 {
   "Version": "2012-10-17",
@@ -262,13 +295,17 @@ EOF
 
 mc admin policy create deployment generic-operation-artifact-runtime "$runtime_policy"
 mc admin policy create deployment generic-operation-artifact-personal-read "$personal_policy"
+mc admin policy create deployment generic-operation-artifact-personal-cleanup "$cleanup_policy"
 mc admin user add deployment "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY" "$GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY"
 mc admin user add deployment "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY" "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY"
+mc admin user add deployment "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY" "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY"
 mc admin policy attach deployment generic-operation-artifact-runtime --user "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY"
 mc admin policy attach deployment generic-operation-artifact-personal-read --user "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY"
+mc admin policy attach deployment generic-operation-artifact-personal-cleanup --user "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY"
 
 runtime_user_info=$(mc admin user info deployment "$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY" --json)
 personal_user_info=$(mc admin user info deployment "$GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY" --json)
+cleanup_user_info=$(mc admin user info deployment "$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY" --json)
 assert_contains "$runtime_user_info" "\"accessKey\":\"$GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY\"" artifact-runtime-user
 assert_contains "$runtime_user_info" '"policyName":"generic-operation-artifact-runtime"' artifact-runtime-user
 assert_contains "$runtime_user_info" '"userStatus":"enabled"' artifact-runtime-user
@@ -277,5 +314,9 @@ assert_contains "$personal_user_info" "\"accessKey\":\"$GENERIC_OPERATION_ARTIFA
 assert_contains "$personal_user_info" '"policyName":"generic-operation-artifact-personal-read"' artifact-personal-user
 assert_contains "$personal_user_info" '"userStatus":"enabled"' artifact-personal-user
 assert_not_contains "$personal_user_info" '"memberOf"' artifact-personal-user
+assert_contains "$cleanup_user_info" "\"accessKey\":\"$GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY\"" artifact-cleanup-user
+assert_contains "$cleanup_user_info" '"policyName":"generic-operation-artifact-personal-cleanup"' artifact-cleanup-user
+assert_contains "$cleanup_user_info" '"userStatus":"enabled"' artifact-cleanup-user
+assert_not_contains "$cleanup_user_info" '"memberOf"' artifact-cleanup-user
 
 echo '{"status":"OBJECT_STORAGE_PROVISIONED"}'

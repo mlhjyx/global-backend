@@ -55,6 +55,7 @@ const staged: StagedArtifact = Object.freeze({
 
 const stored: StoredArtifact = Object.freeze({
   objectKey: OBJECT_KEY,
+  versionId: 'version-1',
   sha256: SHA256,
   sizeBytes: String(BODY.byteLength),
   mediaType: 'text/plain',
@@ -442,6 +443,8 @@ describe('GenericOperationArtifactService', () => {
         domainAckKey: ARTIFACT_ID,
         domainRevision: SHA256,
       },
+      undefined,
+      'version-1',
     );
   });
 

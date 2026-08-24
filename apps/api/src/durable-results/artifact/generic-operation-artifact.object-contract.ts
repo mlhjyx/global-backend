@@ -30,6 +30,16 @@ export interface ArtifactDescriptor {
 
 export interface StoredArtifactContract extends ArtifactDescriptor {
   readonly objectKey: string;
+  /** Internal immutable S3 identity. Never enters public manifests/references. */
+  readonly versionId: string;
+}
+
+const VERSION_ID_PATTERN = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
+
+export function isCanonicalArtifactObjectVersionId(
+  value: unknown,
+): value is string {
+  return typeof value === 'string' && VERSION_ID_PATTERN.test(value);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -56,6 +66,7 @@ export function parseStoredArtifactContract(
   const metadata = asMetadata(head?.Metadata);
   const contentLength = head?.ContentLength;
   const contentType = head?.ContentType;
+  const versionId = head?.VersionId;
   const resultSchema = metadata?.['result-schema'];
   const privacyClass = metadata?.['privacy-class'];
   const tags = asRecord(taggingOutput)?.TagSet;
@@ -72,6 +83,7 @@ export function parseStoredArtifactContract(
     resultSchema.length > 100 ||
     !RESULT_SCHEMA_PATTERN.test(resultSchema) ||
     !PRIVACY_CLASSES.has(privacyClass as ArtifactPrivacyClass) ||
+    !isCanonicalArtifactObjectVersionId(versionId) ||
     metadata.schema !== GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA ||
     metadata.sha256 !== sha256 ||
     metadata['size-bytes'] !== String(contentLength) ||
@@ -87,6 +99,7 @@ export function parseStoredArtifactContract(
   }
   return Object.freeze({
     objectKey: contentAddressedObjectKey(sha256),
+    versionId,
     sha256,
     sizeBytes: metadata['size-bytes'],
     mediaType: contentType,

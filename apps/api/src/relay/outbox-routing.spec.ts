@@ -1,7 +1,10 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OutboxRelayService } from "./outbox-relay.service";
-import { ASSET_OBJECT_CLEANUP_WORKFLOW } from "../temporal/understanding.constants";
+import {
+  ASSET_OBJECT_CLEANUP_WORKFLOW,
+  PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
+} from "../temporal/understanding.constants";
 
 /**
  * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等 8 种）
@@ -552,6 +555,32 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
         ],
       }),
     );
+    expect(ev.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it("PersonalArtifactCleanupRequested → starts the request-bound cleanup workflow without key/body/PII", async () => {
+    const deletionRequestId = "33333333-3333-4333-8333-333333333333";
+    const ev = makeEvent({
+      eventType: "PersonalArtifactCleanupRequested",
+      aggregateType: "DeletionRequest",
+      aggregateId: deletionRequestId,
+      privacyClassification: "RESTRICTED",
+      payload: { deletionRequestId },
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
+      expect.objectContaining({
+        workflowId: `personal-artifact-cleanup-${deletionRequestId}`,
+        args: [{ workspaceId: ev.workspaceId, deletionRequestId }],
+      }),
+    );
+    expect(Reflect.ownKeys(vi.mocked(temporal.client.workflow.start).mock.calls[0]?.[1]?.args?.[0] ?? {}))
+      .toEqual(["workspaceId", "deletionRequestId"]);
     expect(ev.publishedAt).toBeInstanceOf(Date);
   });
 

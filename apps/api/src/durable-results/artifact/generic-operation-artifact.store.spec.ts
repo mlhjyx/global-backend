@@ -261,6 +261,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const stored = await result;
     expect(stored).toEqual({
       objectKey: contentAddressedObjectKey(staged.sha256),
+      versionId: 'version-1',
       sha256: staged.sha256,
       sizeBytes: '3',
       mediaType: staged.mediaType,
@@ -377,6 +378,7 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       contentType: staged.mediaType,
       tagSet: [{ Key: 'artifact-privacy', Value: staged.privacyClass }],
       serverSideEncryption: 'AES256',
+      versionId: 'version-existing',
       metadata: {
         sha256: staged.sha256,
         'size-bytes': staged.sizeBytes,

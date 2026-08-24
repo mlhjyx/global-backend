@@ -29,6 +29,7 @@ interface MemoryObject {
   readonly metadata: Readonly<Record<string, string>>;
   readonly tagSet?: readonly Readonly<{ Key: string; Value: string }>[];
   readonly serverSideEncryption?: string;
+  readonly versionId: string;
 }
 interface Failure extends Error {
   readonly $metadata?: Readonly<{ httpStatusCode?: number }>;
@@ -138,6 +139,7 @@ export class MemoryS3Client implements ArtifactS3Client {
         metadata: Object.freeze({}),
         tagSet: Object.freeze([]),
         serverSideEncryption: 'AES256',
+        versionId: `staging-version-${this.objects.size + 1}`,
       });
       this.multipartUploads.delete(uploadId as string);
       if (this.stagingPutAckFailure) {
@@ -182,6 +184,7 @@ export class MemoryS3Client implements ArtifactS3Client {
         metadata: Object.freeze({ ...(input.Metadata ?? {}) }),
         tagSet: Object.freeze(tagSet),
         serverSideEncryption: input.ServerSideEncryption,
+        versionId: 'version-1',
       });
       if (!isFinal && this.stagingPutAckFailure) {
         this.stagingPutAckAbort?.abort();
@@ -205,6 +208,7 @@ export class MemoryS3Client implements ArtifactS3Client {
         ContentType: value.contentType,
         Metadata: value.metadata,
         ServerSideEncryption: value.serverSideEncryption,
+        VersionId: value.versionId,
       };
     }
     if (command instanceof GetObjectTaggingCommand) {
@@ -233,6 +237,7 @@ export class MemoryS3Client implements ArtifactS3Client {
         Metadata:
           (isFinalKey ? this.finalReadbackMetadata : null) ?? value.metadata,
         ServerSideEncryption: value.serverSideEncryption,
+        VersionId: value.versionId,
         Body: (async function* () {
           for (const chunk of chunks) yield Uint8Array.from(chunk);
         })(),

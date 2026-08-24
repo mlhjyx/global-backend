@@ -18,6 +18,13 @@ import { createIntentActivities } from "./intent.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
 import { createDeletionActivities } from "./deletion.activities";
+import { createPersonalArtifactCleanupActivities } from './personal-artifact-cleanup.activities';
+import { PersonalArtifactCleanupService } from '../durable-results/artifact/personal-artifact-cleanup.contract';
+import {
+  personalArtifactCleanupPersistence,
+  PrismaPersonalArtifactCleanupCommandRepository,
+} from '../durable-results/artifact/personal-artifact-cleanup.repository';
+import { createPersonalArtifactCleanupRuntime } from '../durable-results/artifact/personal-artifact-cleanup.runtime';
 import { createPatentsCacheActivities } from "./patents-cache.activities";
 import { createSanctionsRefreshActivities } from "./sanctions-refresh.activities";
 import { createPlatformScheduleAuthorityActivities } from './platform-schedule-authority.activities';
@@ -197,6 +204,27 @@ async function main(): Promise<void> {
     check: () => checkImagePipelineIsolationReadiness(),
     onBlocked: dependencyBlocked,
   });
+  const personalArtifactCleanupRuntime = await (async () => {
+    try {
+      return createPersonalArtifactCleanupRuntime(process.env);
+    } catch {
+      await runtimeTelemetry.shutdown();
+      return holdWorkerNotReady(
+        'PERSONAL_ARTIFACT_CLEANUP_CONFIG_INVALID',
+        runtimeLeases,
+      );
+    }
+  })();
+  const personalArtifactCleanupService = new PersonalArtifactCleanupService(
+    new PrismaPersonalArtifactCleanupCommandRepository(
+      personalArtifactCleanupPersistence(prisma),
+    ),
+    personalArtifactCleanupRuntime.port,
+  );
+  await waitForWorkerDependencyAdmission({
+    check: () => personalArtifactCleanupRuntime.checkReadiness(),
+    onBlocked: dependencyBlocked,
+  });
   const rendererBuildIdentity = rendererRuntimeIdentity(releaseIdentity);
   const releaseService = new SiteReleaseService(prisma, siteBuilderStorage, {
     buildIdentity: rendererBuildIdentity,
@@ -227,6 +255,7 @@ async function main(): Promise<void> {
   const platformWriterDb = platformWriterUrl ? new PrismaClient({ datasourceUrl: platformWriterUrl }) : undefined;
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
+    personalArtifactCleanupRuntime.destroy();
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeTelemetry.shutdown();
@@ -395,6 +424,9 @@ async function main(): Promise<void> {
       }),
       // 收口⑥ PR-B 删除编排（GDPR Art.17，on-demand：DeletionService 按 deletion_request 触发 deletionWorkflow）
       ...createDeletionActivities({ prisma }),
+      ...createPersonalArtifactCleanupActivities({
+        service: personalArtifactCleanupService,
+      }),
       // 专利发明人缓存刷新（scale-safe #89，第 5 个周期 Schedule；owner 连接写平台表 patent_*、读 source_policy 门）
       ...createPatentsCacheActivities({
         ownerDb, broker, budgetStore, platformWriter: authorityWriter,
@@ -471,6 +503,7 @@ async function main(): Promise<void> {
       const checks = await Promise.all([
         siteBuilderStorage.checkReadiness(),
         checkGenericArtifactStorageReadiness(process.env),
+        personalArtifactCleanupRuntime.checkReadiness(),
         checkRedisReadiness(process.env),
         checkModelGatewayReadiness(process.env),
         checkBrowserReadiness(process.env),
@@ -500,6 +533,7 @@ async function main(): Promise<void> {
       .heartbeat("WORKER", "STOPPED", UNDERSTANDING_TASK_QUEUE)
       .catch(() => undefined);
     await runtimeTelemetry.shutdown();
+    personalArtifactCleanupRuntime.destroy();
     await platformWriterDb?.$disconnect().catch(() => undefined);
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeLeaseStore.onApplicationShutdown();
