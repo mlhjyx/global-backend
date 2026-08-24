@@ -24,8 +24,7 @@ export const GOOGLE_PATENTS_ATTRIBUTION =
   'Google Patents Public Data by IFI CLAIMS Patent Services, licensed under CC BY 4.0.';
 
 // publications 表无 assignee 分区/聚簇 → 每查按列全表扫描（只 SELECT 2 列压字节）。maximumBytesBilled 硬顶护额度。
-const DEFAULT_MAX_GB = 200;
-const BYTES_PER_GB = 1024 ** 3;
+export const GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED = '214748364800';
 export const GOOGLE_PATENTS_MAX_ROWS = 50;
 const MAX_ROWS_DEFAULT = GOOGLE_PATENTS_MAX_ROWS;
 const MAX_ROWS_CEIL = GOOGLE_PATENTS_MAX_ROWS;
@@ -233,7 +232,6 @@ function bytesFromMeta(meta?: BigQueryJobMeta): number | null {
 export interface BigQueryPatentsDeps {
   /** 测试注入用；生产走 env 惰性建真 client。 */
   makeClient?: () => BigQueryLike;
-  maxGb?: number;
 }
 
 export class BigQueryPatentsClient {
@@ -257,10 +255,7 @@ export class BigQueryPatentsClient {
   }
 
   private maxBytes(): string {
-    const envGb = Number(process.env.GOOGLE_PATENTS_MAX_GB);
-    // 显式判断而非 `|| DEFAULT`：运维设 =0（或负/NaN）都回落默认，但**有效正值**（含很小值）尊重运维意图。
-    const maxGb = this.deps.maxGb ?? (Number.isFinite(envGb) && envGb > 0 ? envGb : DEFAULT_MAX_GB);
-    return String(Math.floor(maxGb * BYTES_PER_GB));
+    return GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED;
   }
 
   maximumBytesBilled(): string {

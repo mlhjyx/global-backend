@@ -24,7 +24,7 @@ const TARGET = {
 };
 
 describe('ingestExternalSignals — durable workflow budget scope', () => {
-  it('reopens an explicit workflow scope in replay mode', async () => {
+  it('does not auto-open an account from an explicit workflow scope', async () => {
     const open = vi.fn(async () => undefined);
     const close = vi.fn(async () => undefined);
     const budgetStore = { open, close } as unknown as BudgetStore;
@@ -46,14 +46,11 @@ describe('ingestExternalSignals — durable workflow budget scope', () => {
       budgetScopeId: 'workflow-stable-scope',
     });
 
-    expect(open).toHaveBeenCalledWith(expect.objectContaining({
-      replayScope: true,
-      accountKey: expect.stringContaining('workflow-stable-scope'),
-    }));
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
   });
 
-  it('old histories derive the replay scope from activity workflow execution', async () => {
+  it('old histories cannot derive an automatic account from workflow execution', async () => {
     const open = vi.fn(async () => undefined);
     const close = vi.fn(async () => undefined);
     const budgetStore = { open, close } as unknown as BudgetStore;
@@ -71,10 +68,7 @@ describe('ingestExternalSignals — durable workflow budget scope', () => {
     await acts.ingestExternalSignals({
       targets: [{ ...TARGET }], tedEnabled: true, openfdaEnabled: false, samgovEnabled: false,
     });
-    expect(open).toHaveBeenCalledWith(expect.objectContaining({
-      replayScope: true,
-      accountKey: expect.stringContaining('legacy-external-intent-run'),
-    }));
+    expect(open).not.toHaveBeenCalled();
   });
 });
 

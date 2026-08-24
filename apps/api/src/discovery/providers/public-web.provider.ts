@@ -258,11 +258,13 @@ export class PublicWebDiscoveryProvider
         try {
           const p = await crawl(link);
           pages.push({ url: link, text: p.data.text.slice(0, 40_000) });
-        } catch {
+        } catch (error) {
+          if (isExecutionControlError(error)) throw error;
           // 单页失败可容忍
         }
       }
-    } catch {
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
       return { contacts: [], costCents: 0 };
     }
 

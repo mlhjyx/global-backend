@@ -95,7 +95,7 @@ export interface PersistGenericOperationArtifactInput {
   /** Required only for workspace PERSONAL_DATA; contains row ids, never identity text. */
   readonly subjectRef?: GenericOperationArtifactSubjectRef;
   readonly expiresAt: string;
-  readonly actualCents: number;
+  readonly observedMicrousd: bigint;
   /** Small closed facts captured from the same physical operation result. */
   readonly expectedFacts?: unknown;
   readonly signal?: AbortSignal;
@@ -104,7 +104,7 @@ export interface PersistGenericOperationArtifactInput {
 export interface RecoverUnknownGenericOperationArtifactInput {
   readonly reservation: BudgetReservation;
   readonly authorityId: string;
-  readonly actualCents: number;
+  readonly observedMicrousd: bigint;
   /** Re-supplied from the durable rights-flow input; never inferred from body bytes. */
   readonly subjectRef?: GenericOperationArtifactSubjectRef;
   readonly signal?: AbortSignal;
@@ -481,7 +481,7 @@ export class GenericOperationArtifactService {
     const reference = referenceFromManifest(manifest);
     const receiptFacts = artifactExecutionReceiptFacts({
       resultSchema: manifest.resultSchema,
-      reservedMicrousd: BigInt(input.reservation.estimatedCents) * 10_000n,
+      reservedMicrousd: input.reservation.estimatedMicrousd,
     });
     const domainAck = {
       producerId: artifactProducerIdForResultSchema(
@@ -493,7 +493,7 @@ export class GenericOperationArtifactService {
     const settlement = subjectRef
       ? await this.budgetStore.settleArtifactManifest(
           input.reservation,
-          input.actualCents,
+          input.observedMicrousd,
           snapshot,
           receiptFacts,
           domainAck,
@@ -501,7 +501,7 @@ export class GenericOperationArtifactService {
         )
       : await this.budgetStore.settleArtifactManifest(
           input.reservation,
-          input.actualCents,
+          input.observedMicrousd,
           snapshot,
           receiptFacts,
           domainAck,
@@ -549,7 +549,7 @@ export class GenericOperationArtifactService {
     const reference = referenceFromManifest(expected);
     const receiptFacts = artifactExecutionReceiptFacts({
       resultSchema: expected.resultSchema,
-      reservedMicrousd: BigInt(input.reservation.estimatedCents) * 10_000n,
+      reservedMicrousd: input.reservation.estimatedMicrousd,
     });
     const domainAck = {
       producerId: artifactProducerIdForResultSchema(
@@ -561,7 +561,7 @@ export class GenericOperationArtifactService {
     const settlement = subjectRef
       ? await this.budgetStore.settleArtifactManifest(
           input.reservation,
-          input.actualCents,
+          input.observedMicrousd,
           snapshot,
           receiptFacts,
           domainAck,
@@ -569,7 +569,7 @@ export class GenericOperationArtifactService {
         )
       : await this.budgetStore.settleArtifactManifest(
           input.reservation,
-          input.actualCents,
+          input.observedMicrousd,
           snapshot,
           receiptFacts,
           domainAck,

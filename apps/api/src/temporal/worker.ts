@@ -241,7 +241,7 @@ async function main(): Promise<void> {
   const authorityWriter = platformWriterDb;
   try { await authorityWriter.$connect(); }
   catch { await holdPlatformNotReady('PLATFORM_BUDGET_AUTHORITY_WRITER_UNAVAILABLE'); }
-  const budgetStore = new PostgresBudgetStore(prisma, ownerDb, authorityWriter);
+  const budgetStore = new PostgresBudgetStore(prisma, authorityWriter);
 
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。

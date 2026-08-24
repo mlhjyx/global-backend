@@ -3,9 +3,7 @@ import { Context as ActivityContext } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { BudgetExceededError, sweepBudgetCents } from '../tools/budget';
-import { BudgetOperationReplayError, type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
-import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
+import { BudgetExceededError, BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
 import { resolveIcpToCpv, collectIndustryTerms, splitTerms, PlanQueryShape } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda } from '../discovery/icp-to-fda';
 import { resolveIcpToNaics } from '../discovery/icp-to-naics';
@@ -104,8 +102,6 @@ export function createExternalIntentActivities(deps: {
   platformWriter?: PrismaClient;
   activityRunId?: () => string | undefined;
 }) {
-  const budgets =
-    deps.budgetStore ?? new UnavailableBudgetStore('external-intent activities require an authoritative BudgetStore');
   const ingestSvc = new SignalIngestService({
     prisma: deps.prisma,
     broker: deps.broker,
@@ -220,7 +216,7 @@ export function createExternalIntentActivities(deps: {
 
     /**
      * 平台层摄取（ingest-once 核心）：全部 ICP 的查询面按指纹**全局去重**，每唯一 (provider, 指纹, 时间窗)
-     * 只拉一次 → source_signal。预算：`sweep:external-intent` 开账（sweepBudgetCents 上界），
+     * 只拉一次 → source_signal。预算账户只能来自外部签名 authority；缺失时保持 non-consuming HOLD，
      * BudgetExceededError → 停止后续拉取（已落库的信号仍供投影），**显性上报不静默**。
      */
     async ingestExternalSignals(args: {
@@ -268,12 +264,8 @@ export function createExternalIntentActivities(deps: {
       }
       const replayScopeId = args.budgetScopeId ?? activityRunId;
       const budgetKey = replayScopeId ? `${SWEEP_BUDGET_KEY}:${replayScopeId}` : SWEEP_BUDGET_KEY;
-      await budgets.open({
-        workspaceId: PLATFORM_WORKSPACE,
-        accountKey: budgetKey,
-        capCents: sweepBudgetCents(),
-        replayScope: Boolean(replayScopeId),
-      });
+      // Pre-cutover HOLD: the external Control Plane has not supplied this
+      // schedule's authority transport, so no Backend-authored account is opened.
       try {
         const runOne = async (fetch: () => Promise<IngestOutcome>): Promise<boolean> => {
           try {
@@ -315,7 +307,7 @@ export function createExternalIntentActivities(deps: {
         }
         return summary;
       } finally {
-        await budgets.close({ workspaceId: PLATFORM_WORKSPACE, accountKey: budgetKey });
+        // No authority-bound account was opened by this pre-cutover schedule.
       }
     },
 

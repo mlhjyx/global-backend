@@ -34,7 +34,7 @@ const reservation: BudgetReservation = Object.freeze({
   workspaceId: WORKSPACE_ID,
   accountKey: 'artifact-account',
   operationId: OPERATION_ID,
-  estimatedCents: 17,
+  estimatedMicrousd: 170_000n,
   replay: false,
 });
 const recoveryReservation: BudgetReservation = Object.freeze({
@@ -163,7 +163,7 @@ function dependencies(overrides: {
   const budgetStore = {
     markResultUnknown: vi.fn(async () => {
       order.push('unknown');
-      return { reservedCents: reservation.estimatedCents, replay: false };
+      return { reservedMicrousd: reservation.estimatedMicrousd, replay: false };
     }),
     loadResultUnknownArtifact: vi.fn(overrides.loadResultUnknownArtifact ?? (async () => {
       order.push('load-expected');
@@ -172,8 +172,8 @@ function dependencies(overrides: {
     settleArtifactManifest: vi.fn(overrides.settleArtifactManifest ?? (async (settlementReservation) => {
       order.push('atomic-settle');
       return {
-        chargedCents: reservation.estimatedCents,
-        observedCents: 13,
+        chargedMicrousd: reservation.estimatedMicrousd,
+        observedMicrousd: 130_000n,
         capVariance: false,
         replay: false,
         receipt: {
@@ -206,7 +206,7 @@ function persistInput() {
     resultSchema: 'http-get/v1',
     privacyClass: 'CONFIDENTIAL_TENANT' as const,
     expiresAt: EXPIRES_AT,
-    actualCents: 13,
+    observedMicrousd: 130_000n,
     expectedFacts,
   };
 }
@@ -421,7 +421,7 @@ describe('GenericOperationArtifactService', () => {
     });
     expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
       platformReservation,
-      13,
+      130_000n,
       expect.objectContaining({
         manifest: expect.objectContaining({
           scopeKind: 'platform',
@@ -451,7 +451,7 @@ describe('GenericOperationArtifactService', () => {
     await expect(deps.service.recoverUnknown({
       reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
-      actualCents: 13,
+      observedMicrousd: 130_000n,
     })).resolves.toMatchObject({
       reference: {
         artifactId: ARTIFACT_ID,
@@ -485,7 +485,7 @@ describe('GenericOperationArtifactService', () => {
     await expect(deps.service.recoverUnknown({
       reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
-      actualCents: 13,
+      observedMicrousd: 130_000n,
     })).rejects.toEqual(
       new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID'),
     );
@@ -504,7 +504,7 @@ describe('GenericOperationArtifactService', () => {
         sha256: 'ff'.repeat(32),
         body: 'forbidden',
       },
-      actualCents: 13,
+      observedMicrousd: 130_000n,
     };
 
     await expect(
@@ -525,7 +525,7 @@ describe('GenericOperationArtifactService', () => {
     await expect(deps.service.recoverUnknown({
       reservation: recoveryReservation,
       authorityId: AUTHORITY_ID,
-      actualCents: 13,
+      observedMicrousd: 130_000n,
     })).rejects.toMatchObject({
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });

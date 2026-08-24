@@ -13,7 +13,6 @@ import {
   isTrustedExecutionBudgetDatabaseMarker,
   mapExecutionBudgetPersistenceError,
 } from '../execution-budget/execution-budget-authority.repository';
-import { BudgetExceededError, type BudgetLedger } from './budget';
 import {
   parseGenericOperationProjection,
   type GenericOperationProjection,
@@ -79,15 +78,6 @@ function parseOptionalArtifactSubject(
 }
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
-export { BudgetExceededError } from './budget';
-
-export interface BudgetReservationRequest {
-  workspaceId: string;
-  accountKey: string;
-  operationKey: string;
-  estimatedCents: number;
-}
-
 export type BudgetReplayResult =
   | Readonly<{
       resultStrategy: 'typed_projection';
@@ -98,25 +88,6 @@ export type BudgetReplayResult =
       reference: GenericOperationArtifactReference;
     }>;
 
-export interface BudgetReservation {
-  workspaceId: string;
-  accountKey: string;
-  operationId: string;
-  estimatedCents: number;
-  replay: boolean;
-  replayResult?: BudgetReplayResult;
-  receipt?: DurableExecutionReceipt;
-}
-
-export interface BudgetSettlement {
-  chargedCents: number;
-  observedCents: number;
-  capVariance: boolean;
-  replay: boolean;
-  receipt?: DurableExecutionReceipt;
-  domainAckStatus?: 'APPLIED' | 'REPLAYED';
-}
-
 export interface BudgetDomainAckRequest {
   readonly producerId: string;
   readonly domainAckKey: string;
@@ -124,25 +95,18 @@ export interface BudgetDomainAckRequest {
 }
 
 export interface BudgetResultUnknownTransition {
-  reservedCents: number;
+  reservedMicrousd: bigint;
   replay: boolean;
 }
 
-export interface BudgetStatus {
-  remainingCents: number;
-  exhausted: boolean;
-  open: boolean;
-}
-
-/** Additive Task 1 surface. No product caller uses this before Task 6. */
-export interface BudgetMicrousdReservationRequest {
+export interface BudgetReservationRequest {
   workspaceId: string;
   accountKey: string;
   operationKey: string;
   estimatedMicrousd: bigint;
 }
 
-export interface BudgetMicrousdReservation {
+export interface BudgetReservation {
   workspaceId: string;
   accountKey: string;
   operationId: string;
@@ -152,15 +116,16 @@ export interface BudgetMicrousdReservation {
   receipt?: DurableExecutionReceipt;
 }
 
-export interface BudgetMicrousdSettlement {
+export interface BudgetSettlement {
   chargedMicrousd: bigint;
   observedMicrousd: bigint;
   capVariance: boolean;
   replay: boolean;
   receipt?: DurableExecutionReceipt;
+  domainAckStatus?: 'APPLIED' | 'REPLAYED';
 }
 
-export interface BudgetMicrousdStatus {
+export interface BudgetStatus {
   remainingMicrousd: bigint;
   exhausted: boolean;
   open: boolean;
@@ -189,8 +154,7 @@ export interface PlatformBudgetRunAdmission extends BudgetAccountAuthorization {
 
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
 export interface BudgetStore {
-  open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void>;
-  openAuthorized(input: {
+  open(input: {
     authorityId: string;
     scopeKey: string;
     accountKey: string;
@@ -209,7 +173,7 @@ export interface BudgetStore {
   reserve(input: BudgetReservationRequest): Promise<BudgetReservation>;
   settle(
     reservation: BudgetReservation,
-    actualCents: number,
+    observedMicrousd: bigint,
     projection?: GenericOperationProjection,
     receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement>;
@@ -228,7 +192,7 @@ export interface BudgetStore {
   /** Atomically appends the manifest and settles its exact closed reference. */
   settleArtifactManifest(
     reservation: BudgetReservation,
-    actualCents: number,
+    observedMicrousd: bigint,
     snapshot: GenericOperationArtifactSnapshot,
     receiptFacts: DurableExecutionReceiptFacts,
     domainAck: BudgetDomainAckRequest,
@@ -241,28 +205,6 @@ export interface BudgetStore {
    * must retain operations and forbid a new generation while any are unresolved.
    */
   close(input: { workspaceId: string; accountKey: string; force?: boolean }): Promise<void>;
-  /** Additive native-unit API. Authority-bound accounts remain nonspendable until Task 6. */
-  reserveMicrousd(
-    input: BudgetMicrousdReservationRequest,
-  ): Promise<BudgetMicrousdReservation>;
-  settleMicrousd(
-    reservation: BudgetMicrousdReservation,
-    observedMicrousd: bigint,
-    projection?: GenericOperationProjection,
-    receiptFacts?: DurableExecutionReceiptFacts,
-  ): Promise<BudgetMicrousdSettlement>;
-  releaseMicrousd(
-    reservation: BudgetMicrousdReservation,
-  ): Promise<BudgetMicrousdSettlement>;
-  statusMicrousd(input: {
-    workspaceId: string;
-    accountKey: string;
-  }): Promise<BudgetMicrousdStatus>;
-  closeMicrousd(input: {
-    workspaceId: string;
-    accountKey: string;
-    force?: boolean;
-  }): Promise<void>;
 }
 
 export class BudgetStoreUnavailableError extends Error {
@@ -299,7 +241,7 @@ export class BudgetOperationReplayError extends Error {
   }
 }
 
-export class BudgetMicrousdExceededError extends Error {
+export class BudgetExceededError extends Error {
   readonly code = 'BUDGET_EXCEEDED';
 
   constructor(
@@ -310,7 +252,7 @@ export class BudgetMicrousdExceededError extends Error {
     super(
       `budget exceeded for account ${accountKey}: need ${neededMicrousd} microusd, remaining ${remainingMicrousd} microusd`,
     );
-    this.name = 'BudgetMicrousdExceededError';
+    this.name = 'BudgetExceededError';
   }
 }
 
@@ -321,11 +263,7 @@ export class UnavailableBudgetStore implements BudgetStore {
     throw new BudgetStoreUnavailableError(this.reason);
   }
 
-  async open(): Promise<void> {
-    this.unavailable();
-  }
-
-  async openAuthorized(): Promise<BudgetAccountAuthorization> {
+  async open(): Promise<BudgetAccountAuthorization> {
     return this.unavailable();
   }
 
@@ -369,129 +307,6 @@ export class UnavailableBudgetStore implements BudgetStore {
     this.unavailable();
   }
 
-  async reserveMicrousd(): Promise<BudgetMicrousdReservation> {
-    return this.unavailable();
-  }
-
-  async settleMicrousd(): Promise<BudgetMicrousdSettlement> {
-    return this.unavailable();
-  }
-
-  async releaseMicrousd(): Promise<BudgetMicrousdSettlement> {
-    return this.unavailable();
-  }
-
-  async statusMicrousd(): Promise<BudgetMicrousdStatus> {
-    return this.unavailable();
-  }
-
-  async closeMicrousd(): Promise<void> {
-    this.unavailable();
-  }
-}
-
-/** Compatibility wrapper used only when tests explicitly inject a BudgetLedger. */
-export class InMemoryBudgetStoreAdapter implements BudgetStore {
-  constructor(private readonly ledger: BudgetLedger) {}
-
-  async open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void> {
-    this.ledger.open(input.accountKey, input.capCents);
-  }
-
-  async openAuthorized(): Promise<BudgetAccountAuthorization> {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-    );
-  }
-
-  async admitPlatformRun(): Promise<PlatformBudgetRunAdmission> {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-    );
-  }
-
-  async attestAuthorized(): Promise<BudgetAccountAuthorization> {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-    );
-  }
-
-  async reserve(input: BudgetReservationRequest): Promise<BudgetReservation> {
-    const handle = this.ledger.reserve(input.accountKey, input.estimatedCents);
-    return {
-      workspaceId: input.workspaceId,
-      accountKey: input.accountKey,
-      operationId: input.operationKey,
-      estimatedCents: handle.estCents,
-      replay: false,
-    };
-  }
-
-  async settle(reservation: BudgetReservation, actualCents: number): Promise<BudgetSettlement> {
-    this.ledger.settle({ runId: reservation.accountKey, estCents: reservation.estimatedCents }, actualCents);
-    return { chargedCents: actualCents, observedCents: actualCents, capVariance: false, replay: false };
-  }
-
-  async markResultUnknown(): Promise<BudgetResultUnknownTransition> {
-    throw new BudgetStoreUnavailableError(
-      'in-memory budget store cannot persist unknown artifact results',
-    );
-  }
-
-  async loadResultUnknownArtifact(): Promise<GenericOperationArtifactSnapshot | null> {
-    throw new BudgetStoreUnavailableError(
-      'in-memory budget store cannot recover unknown artifact results',
-    );
-  }
-
-  async settleArtifactManifest(): Promise<BudgetSettlement> {
-    throw new BudgetStoreUnavailableError(
-      'in-memory budget store cannot persist artifact references',
-    );
-  }
-
-  async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
-    this.ledger.settle({ runId: reservation.accountKey, estCents: reservation.estimatedCents }, 0);
-    return { chargedCents: 0, observedCents: 0, capVariance: false, replay: false };
-  }
-
-  async status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus> {
-    return {
-      remainingCents: this.ledger.remainingCents(input.accountKey),
-      exhausted: this.ledger.wasExhausted(input.accountKey),
-      open: Number.isFinite(this.ledger.remainingCents(input.accountKey)),
-    };
-  }
-
-  async close(input: { workspaceId: string; accountKey: string; force?: boolean }): Promise<void> {
-    this.ledger.close(input.accountKey, { force: input.force });
-  }
-
-  private microusdUnavailable(): never {
-    throw new BudgetStoreUnavailableError(
-      'deprecated cents-only test adapter has no native microusd ledger',
-    );
-  }
-
-  async reserveMicrousd(): Promise<BudgetMicrousdReservation> {
-    return this.microusdUnavailable();
-  }
-
-  async settleMicrousd(): Promise<BudgetMicrousdSettlement> {
-    return this.microusdUnavailable();
-  }
-
-  async releaseMicrousd(): Promise<BudgetMicrousdSettlement> {
-    return this.microusdUnavailable();
-  }
-
-  async statusMicrousd(): Promise<BudgetMicrousdStatus> {
-    return this.microusdUnavailable();
-  }
-
-  async closeMicrousd(): Promise<void> {
-    this.microusdUnavailable();
-  }
 }
 
 type MicrousdReserveRow = {
@@ -532,46 +347,8 @@ type MicrousdSettleRow = {
   receipt_cost_basis?: string | null;
 };
 
-type ReserveRow = {
-  kind: 'EXECUTE' | 'REPLAY' | 'DENIED' | 'ACCOUNT_UNAVAILABLE';
-  operation_id: string | null;
-  reserved_cents: bigint;
-  remaining_cents: bigint;
-  status?: string;
-  result_json?: unknown;
-  operation_key?: string;
-  account_id?: string;
-  authority_id?: string | null;
-  charged_cents?: bigint | null;
-  observed_cents?: bigint | null;
-  result_schema_version?: string | null;
-  result_schema?: string | null;
-  result_digest?: string | null;
-  receipt_usage?: unknown;
-  receipt_cost_basis?: string | null;
-};
-
-type SettleRow = {
-  charged_cents: bigint;
-  observed_cents: bigint;
-  reserved_cents?: bigint;
-  cap_variance: boolean;
-  status: string;
-  replay?: boolean;
-  operation_id?: string;
-  operation_key?: string;
-  account_id?: string;
-  authority_id?: string | null;
-  result_schema_version?: string | null;
-  result_schema?: string | null;
-  result_digest?: string | null;
-  result_json?: unknown;
-  receipt_usage?: unknown;
-  receipt_cost_basis?: string | null;
-};
-
 type ResultUnknownRow = {
-  reserved_cents: bigint;
+  reserved_microusd: bigint;
   status: string;
   replay: boolean;
   recoverable: boolean;
@@ -668,18 +445,6 @@ function assertPlatformBudgetRunAdmission(
   assertKey('subjectId', input.subjectId);
   assertKey('scheduleId', input.scheduleId);
   assertKey('accountKey', input.accountKey);
-}
-
-function assertCents(name: string, value: number, allowZero = false): void {
-  if (!Number.isSafeInteger(value) || value < (allowZero ? 0 : 1)) {
-    throw new TypeError(`${name} must be a ${allowZero ? 'non-negative' : 'positive'} safe integer`);
-  }
-}
-
-function toSafeNumber(name: string, value: bigint): number {
-  const result = Number(value);
-  if (!Number.isSafeInteger(result)) throw new RangeError(`${name} exceeds the JavaScript safe integer range`);
-  return result;
 }
 
 function projectionResultStrategy(
@@ -922,10 +687,6 @@ function isBudgetAccountUnavailable(error: unknown): boolean {
   return error instanceof Error && error.message.includes('TOOL_BUDGET_ACCOUNT_UNAVAILABLE');
 }
 
-function isBudgetUnsettled(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('TOOL_BUDGET_UNSETTLED_OPERATIONS');
-}
-
 function isAuthorityLifecycleUnavailable(error: unknown): boolean {
   return isTrustedExecutionBudgetDatabaseMarker(
     error,
@@ -962,19 +723,9 @@ function authorityLifecycleUnavailable(): ExecutionBudgetGrantError {
 export class PostgresBudgetStore implements BudgetStore {
   constructor(
     private readonly prisma: PrismaService,
-    /** Legacy platform/owner connection; authority-aware operations never use this fallback. */
-    private readonly platformDb?: PrismaClient,
     /** Connection authenticated as the deployment-owned platform authority writer principal. */
     private readonly authorityPlatformWriter?: PrismaClient,
   ) {}
-
-  private async inScope<T>(scopeKey: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-    if (scopeKey === 'platform') {
-      if (!this.platformDb) throw new BudgetStoreUnavailableError('platform budget store requires an owner connection');
-      return this.platformDb.$transaction(fn);
-    }
-    return this.prisma.withWorkspace(scopeKey, fn);
-  }
 
   private async inAuthorityScope<T>(
     scopeKey: string,
@@ -1000,25 +751,7 @@ export class PostgresBudgetStore implements BudgetStore {
     return this.prisma.withWorkspace(scopeKey, fn);
   }
 
-  async open(input: { workspaceId: string; accountKey: string; capCents: number; replayScope?: boolean }): Promise<void> {
-    assertKey('accountKey', input.accountKey);
-    assertCents('capCents', input.capCents);
-    try {
-      await this.inScope(input.workspaceId, async (tx) => {
-        await tx.$queryRaw(
-          Prisma.sql`SELECT * FROM open_tool_budget(${input.workspaceId}, ${input.accountKey}, ${BigInt(input.capCents)}, ${input.replayScope ?? false})`,
-        );
-      });
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      if (isBudgetUnsettled(error)) throw new BudgetUnsettledOperationsError(input.accountKey);
-      throw error;
-    }
-  }
-
-  async openAuthorized(input: {
+  async open(input: {
     authorityId: string;
     scopeKey: string;
     accountKey: string;
@@ -1030,7 +763,7 @@ export class PostgresBudgetStore implements BudgetStore {
     try {
       const rows = await this.inAuthorityScope(input.scopeKey, (tx) =>
         tx.$queryRaw<AuthorizedOpenRow[]>(
-          Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
+          Prisma.sql`SELECT * FROM open_tool_budget(
             ${input.scopeKey}, ${input.authorityId}::uuid, ${input.accountKey},
             ${input.replayScope ?? false}
           )`,
@@ -1105,12 +838,12 @@ export class PostgresBudgetStore implements BudgetStore {
     assertKey('operationKey', input.operationKey);
     // Zero-priced tools still reserve an operation row so distributed idempotency
     // cannot be bypassed merely because the configured price is zero.
-    assertCents('estimatedCents', input.estimatedCents, true);
-    let rows: ReserveRow[];
+    assertMicrousd('estimatedMicrousd', input.estimatedMicrousd);
+    let rows: MicrousdReserveRow[];
     try {
-      rows = await this.inScope(input.workspaceId, (tx) =>
-        tx.$queryRaw<ReserveRow[]>(
-          Prisma.sql`SELECT * FROM reserve_tool_budget_with_receipt_v1(${input.workspaceId}, ${input.accountKey}, ${input.operationKey}, ${BigInt(input.estimatedCents)})`,
+      rows = await this.inAuthorityScope(input.workspaceId, (tx) =>
+        tx.$queryRaw<MicrousdReserveRow[]>(
+          Prisma.sql`SELECT * FROM reserve_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.operationKey}, ${input.estimatedMicrousd})`,
         ),
       );
     } catch (error) {
@@ -1123,484 +856,9 @@ export class PostgresBudgetStore implements BudgetStore {
     const row = rows[0];
     if (!row || row.kind === 'ACCOUNT_UNAVAILABLE') throw new BudgetAccountUnavailableError(input.accountKey);
     if (row.kind === 'DENIED') {
-      throw new BudgetExceededError(input.accountKey, input.estimatedCents, toSafeNumber('remainingCents', row.remaining_cents));
+      throw new BudgetExceededError(input.accountKey, input.estimatedMicrousd, row.remaining_microusd);
     }
     if (!row.operation_id) throw new BudgetStoreUnavailableError('budget reserve returned no operation id');
-    const replayResult = row.kind === 'REPLAY'
-      ? replayResultFromLedgerRow(row)
-      : undefined;
-    const receipt = replayResult?.resultStrategy === 'typed_projection'
-      ? requireLedgerProjectionReceipt({
-          scopeKey: input.workspaceId,
-          expectedOperationId: row.operation_id,
-          operationId: row.operation_id,
-          operationKey: row.operation_key,
-          accountId: row.account_id,
-          authorityId: row.authority_id,
-          resultSchemaVersion: row.result_schema_version,
-          resultSchema: row.result_schema,
-          resultDigest: row.result_digest,
-          resultJson: row.result_json,
-          receiptUsage: row.receipt_usage,
-          receiptCostBasis: row.receipt_cost_basis,
-          expectedProjection: replayResult.projection,
-        })
-      : replayResult?.resultStrategy === 'artifact_reference'
-        ? requireLedgerArtifactReceipt({
-            scopeKey: input.workspaceId,
-            expectedOperationId: row.operation_id,
-            operationId: row.operation_id,
-            operationKey: row.operation_key,
-            accountId: row.account_id,
-            authorityId: row.authority_id,
-            resultSchemaVersion: row.result_schema_version,
-            resultSchema: row.result_schema,
-            resultDigest: row.result_digest,
-            resultJson: row.result_json,
-            receiptUsage: row.receipt_usage,
-            receiptCostBasis: row.receipt_cost_basis,
-            expectedReference: replayResult.reference,
-          })
-        : undefined;
-    if (receipt && receipt.operationKey !== input.operationKey) {
-      ledgerReceiptMismatch();
-    }
-    return {
-      workspaceId: input.workspaceId,
-      accountKey: input.accountKey,
-      operationId: row.operation_id,
-      estimatedCents: toSafeNumber('reservedCents', row.reserved_cents),
-      replay: row.kind === 'REPLAY',
-      ...(replayResult ? { replayResult } : {}),
-      ...(receipt ? { receipt } : {}),
-    };
-  }
-
-  async settle(
-    reservation: BudgetReservation,
-    actualCents: number,
-    projection?: GenericOperationProjection,
-    receiptFacts?: DurableExecutionReceiptFacts,
-  ): Promise<BudgetSettlement> {
-    assertCents('actualCents', actualCents, true);
-    const durable = projection
-      ? parseGenericOperationProjection(projection)
-      : null;
-    const explicitFacts = receiptFactsForSettlement(durable, receiptFacts);
-    let rows: SettleRow[];
-    try {
-      rows = await this.inScope(reservation.workspaceId, (tx) =>
-        tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_with_receipt_v1(
-            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${BigInt(actualCents)}, ${durable?.schemaVersion ?? null},
-            ${durable?.schema ?? null}, ${durable?.digest ?? null},
-            ${durable ? JSON.stringify(durable) : null}::jsonb,
-            ${explicitFacts ? JSON.stringify(explicitFacts.usage) : null}::jsonb,
-            ${explicitFacts?.costBasis ?? null}
-          )`,
-        ),
-      );
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      throw error;
-    }
-    const row = rows[0];
-    if (!row) throw new BudgetStoreUnavailableError('budget settle returned no result');
-    const receipt = durable
-      ? requireLedgerProjectionReceipt({
-          scopeKey: reservation.workspaceId,
-          expectedOperationId: reservation.operationId,
-          operationId: row.operation_id,
-          operationKey: row.operation_key,
-          accountId: row.account_id,
-          authorityId: row.authority_id,
-          resultSchemaVersion: row.result_schema_version,
-          resultSchema: row.result_schema,
-          resultDigest: row.result_digest,
-          resultJson: row.result_json,
-          receiptUsage: row.receipt_usage,
-          receiptCostBasis: row.receipt_cost_basis,
-          expectedProjection: durable,
-          expectedFacts: explicitFacts!,
-        })
-      : undefined;
-    return {
-      chargedCents: toSafeNumber('chargedCents', row.charged_cents),
-      observedCents: toSafeNumber('observedCents', row.observed_cents),
-      capVariance: row.cap_variance,
-      replay: row.replay ?? row.status !== 'SETTLED',
-      ...(receipt ? { receipt } : {}),
-    };
-  }
-
-  async markResultUnknown(
-    reservation: BudgetReservation,
-    expected?: GenericOperationArtifactSnapshot,
-    subjectRef?: GenericOperationArtifactSubjectRef,
-  ): Promise<BudgetResultUnknownTransition> {
-    const bound = expected
-      ? parseBoundArtifactBudgetSnapshot(expected, reservation)
-      : null;
-    const durable = bound?.snapshot ?? null;
-    const facts = bound?.columns ?? null;
-    const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
-    let rows: ResultUnknownRow[];
-    try {
-      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
-        tx.$queryRaw<ResultUnknownRow[]>(
-          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v4(
-            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${durable ? JSON.stringify(durable.manifest) : null}::jsonb,
-            ${facts?.expectedHttpStatus ?? null},
-            ${facts?.expectedHttpOk ?? null},
-            ${facts?.expectedSanitizedUrl ?? null},
-            ${facts?.expectedContentHash ?? null},
-            ${facts?.expectedBlockedCode ?? null},
-            ${facts?.expectedRobotsBlocked ?? null},
-            ${durableSubject?.subjectType ?? null},
-            ${durableSubject?.subjectId ?? null}::uuid
-          )`,
-        ),
-      );
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      if (isTrustedArtifactDatabaseInvalid(error)) {
-        return invalidGenericOperationArtifact();
-      }
-      if (
-        error instanceof BudgetStoreUnavailableError ||
-        error instanceof ExecutionBudgetGrantError
-      ) {
-        throw error;
-      }
-      throw new BudgetStoreUnavailableError(
-        'budget unknown-result transition unavailable',
-      );
-    }
-    const row = rows[0];
-    if (
-      rows.length !== 1 ||
-      !row ||
-      row.status !== 'RESULT_UNKNOWN' ||
-      typeof row.reserved_cents !== 'bigint' ||
-      typeof row.replay !== 'boolean' ||
-      typeof row.recoverable !== 'boolean' ||
-      row.recoverable !== Boolean(durable)
-    ) {
-      throw new BudgetStoreUnavailableError(
-        'budget unknown-result transition returned no result',
-      );
-    }
-    const reservedCents = toSafeNumber('reservedCents', row.reserved_cents);
-    if (reservedCents !== reservation.estimatedCents) {
-      throw new BudgetStoreUnavailableError(
-        'budget unknown-result transition changed the reservation',
-      );
-    }
-    return { reservedCents, replay: row.replay };
-  }
-
-  async loadResultUnknownArtifact(
-    reservation: BudgetReservation,
-    authorityId: string,
-    subjectRef?: GenericOperationArtifactSubjectRef,
-  ): Promise<GenericOperationArtifactSnapshot | null> {
-    if (
-      !isCanonicalArtifactUuid(reservation.operationId) ||
-      !isCanonicalArtifactUuid(authorityId) ||
-      (reservation.workspaceId !== 'platform' &&
-        !isCanonicalArtifactUuid(reservation.workspaceId))
-    ) {
-      return invalidGenericOperationArtifact();
-    }
-    const durableSubject = parseOptionalArtifactSubject(subjectRef);
-    let rows: UnknownArtifactRow[];
-    try {
-      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
-        tx.$queryRaw<UnknownArtifactRow[]>(
-          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v4(
-            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${authorityId}::uuid,
-            ${durableSubject?.subjectType ?? null},
-            ${durableSubject?.subjectId ?? null}::uuid
-          )`,
-        ),
-      );
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      if (isTrustedArtifactDatabaseInvalid(error)) {
-        return invalidGenericOperationArtifact();
-      }
-      if (
-        error instanceof BudgetStoreUnavailableError ||
-        error instanceof ExecutionBudgetGrantError
-      ) {
-        throw error;
-      }
-      throw new BudgetStoreUnavailableError(
-        'budget unknown-result recovery unavailable',
-      );
-    }
-    if (rows.length !== 1 || !rows[0]) {
-      throw new BudgetStoreUnavailableError(
-        'budget unknown-result recovery returned no result',
-      );
-    }
-    const row = rows[0];
-    const snapshot = parseGenericOperationArtifactSnapshot({
-      manifest: row.expected_manifest,
-      expectedFacts: expectedFactsFromUnknownRow(row),
-    });
-    const manifest = snapshot.manifest;
-    if (
-      manifest.authorityId !== authorityId ||
-      manifest.operationId !== reservation.operationId ||
-      (reservation.workspaceId === 'platform'
-        ? manifest.scopeKind !== 'platform' || manifest.workspaceId !== null
-        : manifest.scopeKind !== 'workspace' ||
-          manifest.workspaceId !== reservation.workspaceId)
-    ) {
-      return invalidGenericOperationArtifact();
-    }
-    return snapshot;
-  }
-
-  async settleArtifactManifest(
-    reservation: BudgetReservation,
-    actualCents: number,
-    snapshot: GenericOperationArtifactSnapshot,
-    receiptFacts: DurableExecutionReceiptFacts,
-    domainAck: BudgetDomainAckRequest,
-    subjectRef?: GenericOperationArtifactSubjectRef,
-  ): Promise<BudgetSettlement> {
-    assertCents('actualCents', actualCents, true);
-    const { snapshot: durable, columns: facts } =
-      parseBoundArtifactBudgetSnapshot(snapshot, reservation);
-    const manifest = durable.manifest;
-    const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
-    const explicitFacts = parseDurableExecutionReceiptFacts(
-      receiptFacts,
-      manifest.resultSchema,
-    );
-    try {
-      return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
-        const rows = await tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v1(
-            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${BigInt(actualCents)}, ${JSON.stringify(manifest)}::jsonb,
-            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
-            ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
-            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
-            ${JSON.stringify(explicitFacts.usage)}::jsonb,
-            ${explicitFacts.costBasis},
-            ${durableSubject?.subjectType ?? null},
-            ${durableSubject?.subjectId ?? null}::uuid
-          )`,
-        );
-        const row = rows[0];
-        if (
-          rows.length !== 1 ||
-          !row ||
-          row.status !== 'SETTLED' ||
-          typeof row.charged_cents !== 'bigint' ||
-          typeof row.observed_cents !== 'bigint' ||
-          typeof row.cap_variance !== 'boolean'
-        ) {
-          throw new BudgetStoreUnavailableError(
-            'budget artifact settlement returned no result',
-          );
-        }
-        const expectedReference = Object.freeze({
-          schemaVersion: 'generic-operation-artifact-ref/v1' as const,
-          artifactId: manifest.artifactId,
-          operationId: manifest.operationId,
-          resultSchema: manifest.resultSchema,
-          sha256: manifest.sha256,
-          sizeBytes: manifest.sizeBytes,
-          mediaType: manifest.mediaType,
-          expiresAt: manifest.expiresAt,
-        });
-        const receipt = requireLedgerArtifactReceipt({
-          scopeKey: reservation.workspaceId,
-          expectedOperationId: reservation.operationId,
-          operationId: row.operation_id,
-          operationKey: row.operation_key,
-          accountId: row.account_id,
-          authorityId: row.authority_id,
-          resultSchemaVersion: row.result_schema_version,
-          resultSchema: row.result_schema,
-          resultDigest: row.result_digest,
-          resultJson: row.result_json,
-          receiptUsage: row.receipt_usage,
-          receiptCostBasis: row.receipt_cost_basis,
-          expectedReference,
-          expectedFacts: explicitFacts,
-        });
-        const acknowledgement = await applyDomainAckConsumerTransaction({
-          transaction: tx,
-          producerId: domainAck.producerId,
-          receipt,
-          domainAckKey: domainAck.domainAckKey,
-          domainRevision: domainAck.domainRevision,
-          apply: async () => undefined,
-        });
-        if (acknowledgement.status === 'UNRECEIPTED') {
-          throw new Error('DOMAIN_ACK_RECEIPT_REQUIRED');
-        }
-        return {
-          chargedCents: toSafeNumber('chargedCents', row.charged_cents),
-          observedCents: toSafeNumber('observedCents', row.observed_cents),
-          capVariance: row.cap_variance,
-          replay: row.replay ?? false,
-          receipt,
-          domainAckStatus: acknowledgement.status,
-        };
-      });
-    } catch (error) {
-      if (isExecutionControlError(error)) throw error;
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      if (isTrustedArtifactDatabaseInvalid(error)) {
-        return invalidGenericOperationArtifact();
-      }
-      if (
-        error instanceof BudgetStoreUnavailableError ||
-        error instanceof ExecutionBudgetGrantError
-      ) {
-        throw error;
-      }
-      throw new BudgetStoreUnavailableError(
-        'budget artifact settlement unavailable',
-      );
-    }
-  }
-
-  async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
-    let rows: SettleRow[];
-    try {
-      rows = await this.inScope(reservation.workspaceId, (tx) =>
-        tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM release_tool_budget(${reservation.workspaceId}, ${reservation.operationId}::uuid)`,
-        ),
-      );
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      throw error;
-    }
-    const row = rows[0];
-    if (!row) throw new BudgetStoreUnavailableError('budget release returned no result');
-    return {
-      chargedCents: toSafeNumber('chargedCents', row.charged_cents),
-      observedCents: toSafeNumber('observedCents', row.observed_cents),
-      capVariance: row.cap_variance,
-      replay: row.replay ?? row.status !== 'RELEASED',
-    };
-  }
-
-  async status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus> {
-    assertKey('accountKey', input.accountKey);
-    let rows: Array<{
-      remaining_cents: bigint;
-      exhausted: boolean;
-      ref_count: number;
-    }>;
-    try {
-      rows = await this.inScope(input.workspaceId, (tx) =>
-        tx.$queryRaw<
-          Array<{
-            remaining_cents: bigint;
-            exhausted: boolean;
-            ref_count: number;
-          }>
-        >(
-          Prisma.sql`SELECT * FROM tool_budget_status(${input.workspaceId}, ${input.accountKey})`,
-        ),
-      );
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      throw error;
-    }
-    const row = rows[0];
-    return row
-      ? {
-          remainingCents: toSafeNumber('remainingCents', row.remaining_cents),
-          exhausted: row.exhausted,
-          open: row.ref_count > 0,
-        }
-      : { remainingCents: 0, exhausted: false, open: false };
-  }
-
-  async close(input: { workspaceId: string; accountKey: string; force?: boolean }): Promise<void> {
-    assertKey('accountKey', input.accountKey);
-    // `force` only drops stale holders. It never releases operations or permits
-    // a new generation while PostgreSQL still has RESERVED work.
-    try {
-      await this.inScope(input.workspaceId, async (tx) => {
-        await tx.$queryRaw(
-          Prisma.sql`SELECT close_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.force ?? false})`,
-        );
-      });
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      throw error;
-    }
-  }
-
-  async reserveMicrousd(
-    input: BudgetMicrousdReservationRequest,
-  ): Promise<BudgetMicrousdReservation> {
-    assertKey('accountKey', input.accountKey);
-    assertKey('operationKey', input.operationKey);
-    assertMicrousd('estimatedMicrousd', input.estimatedMicrousd);
-    let rows: MicrousdReserveRow[];
-    try {
-      rows = await this.inScope(input.workspaceId, (tx) =>
-        tx.$queryRaw<MicrousdReserveRow[]>(
-          Prisma.sql`SELECT * FROM reserve_tool_budget_microusd_with_receipt_v1(
-            ${input.workspaceId}, ${input.accountKey}, ${input.operationKey},
-            ${input.estimatedMicrousd}
-          )`,
-        ),
-      );
-    } catch (error) {
-      if (isAuthorityLifecycleUnavailable(error)) {
-        throw authorityLifecycleUnavailable();
-      }
-      if (isBudgetAccountUnavailable(error)) {
-        throw new BudgetAccountUnavailableError(input.accountKey);
-      }
-      throw error;
-    }
-    const row = rows[0];
-    if (!row || row.kind === 'ACCOUNT_UNAVAILABLE') {
-      throw new BudgetAccountUnavailableError(input.accountKey);
-    }
-    if (row.kind === 'DENIED') {
-      throw new BudgetMicrousdExceededError(
-        input.accountKey,
-        input.estimatedMicrousd,
-        row.remaining_microusd,
-      );
-    }
-    if (!row.operation_id) {
-      throw new BudgetStoreUnavailableError(
-        'microusd budget reserve returned no operation id',
-      );
-    }
     const replayResult = row.kind === 'REPLAY'
       ? replayResultFromLedgerRow(row)
       : undefined;
@@ -1651,12 +909,12 @@ export class PostgresBudgetStore implements BudgetStore {
     };
   }
 
-  async settleMicrousd(
-    reservation: BudgetMicrousdReservation,
+  async settle(
+    reservation: BudgetReservation,
     observedMicrousd: bigint,
     projection?: GenericOperationProjection,
     receiptFacts?: DurableExecutionReceiptFacts,
-  ): Promise<BudgetMicrousdSettlement> {
+  ): Promise<BudgetSettlement> {
     assertMicrousd('observedMicrousd', observedMicrousd);
     const durable = projection
       ? parseGenericOperationProjection(projection)
@@ -1664,9 +922,9 @@ export class PostgresBudgetStore implements BudgetStore {
     const explicitFacts = receiptFactsForSettlement(durable, receiptFacts);
     let rows: MicrousdSettleRow[];
     try {
-      rows = await this.inScope(reservation.workspaceId, (tx) =>
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<MicrousdSettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_microusd_with_receipt_v1(
+          Prisma.sql`SELECT * FROM settle_tool_budget(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${durable?.schemaVersion ?? null},
             ${durable?.schema ?? null}, ${durable?.digest ?? null},
@@ -1683,11 +941,7 @@ export class PostgresBudgetStore implements BudgetStore {
       throw error;
     }
     const row = rows[0];
-    if (!row) {
-      throw new BudgetStoreUnavailableError(
-        'microusd budget settle returned no result',
-      );
-    }
+    if (!row) throw new BudgetStoreUnavailableError('budget settle returned no result');
     const receipt = durable
       ? requireLedgerProjectionReceipt({
           scopeKey: reservation.workspaceId,
@@ -1715,16 +969,259 @@ export class PostgresBudgetStore implements BudgetStore {
     };
   }
 
-  async releaseMicrousd(
-    reservation: BudgetMicrousdReservation,
-  ): Promise<BudgetMicrousdSettlement> {
+  async markResultUnknown(
+    reservation: BudgetReservation,
+    expected?: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
+  ): Promise<BudgetResultUnknownTransition> {
+    const bound = expected
+      ? parseBoundArtifactBudgetSnapshot(expected, reservation)
+      : null;
+    const durable = bound?.snapshot ?? null;
+    const facts = bound?.columns ?? null;
+    const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
+    let rows: ResultUnknownRow[];
+    try {
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<ResultUnknownRow[]>(
+          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v5(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${durable ? JSON.stringify(durable.manifest) : null}::jsonb,
+            ${facts?.expectedHttpStatus ?? null},
+            ${facts?.expectedHttpOk ?? null},
+            ${facts?.expectedSanitizedUrl ?? null},
+            ${facts?.expectedContentHash ?? null},
+            ${facts?.expectedBlockedCode ?? null},
+            ${facts?.expectedRobotsBlocked ?? null},
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
+      if (
+        error instanceof BudgetStoreUnavailableError ||
+        error instanceof ExecutionBudgetGrantError
+      ) {
+        throw error;
+      }
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result transition unavailable',
+      );
+    }
+    const row = rows[0];
+    if (
+      rows.length !== 1 ||
+      !row ||
+      row.status !== 'RESULT_UNKNOWN' ||
+      typeof row.reserved_microusd !== 'bigint' ||
+      typeof row.replay !== 'boolean' ||
+      typeof row.recoverable !== 'boolean' ||
+      row.recoverable !== Boolean(durable)
+    ) {
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result transition returned no result',
+      );
+    }
+    const reservedMicrousd = row.reserved_microusd;
+    if (reservedMicrousd !== reservation.estimatedMicrousd) {
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result transition changed the reservation',
+      );
+    }
+    return { reservedMicrousd, replay: row.replay };
+  }
+
+  async loadResultUnknownArtifact(
+    reservation: BudgetReservation,
+    authorityId: string,
+    subjectRef?: GenericOperationArtifactSubjectRef,
+  ): Promise<GenericOperationArtifactSnapshot | null> {
+    if (
+      !isCanonicalArtifactUuid(reservation.operationId) ||
+      !isCanonicalArtifactUuid(authorityId) ||
+      (reservation.workspaceId !== 'platform' &&
+        !isCanonicalArtifactUuid(reservation.workspaceId))
+    ) {
+      return invalidGenericOperationArtifact();
+    }
+    const durableSubject = parseOptionalArtifactSubject(subjectRef);
+    let rows: UnknownArtifactRow[];
+    try {
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
+        tx.$queryRaw<UnknownArtifactRow[]>(
+          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v5(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${authorityId}::uuid,
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid
+          )`,
+        ),
+      );
+    } catch (error) {
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
+      if (
+        error instanceof BudgetStoreUnavailableError ||
+        error instanceof ExecutionBudgetGrantError
+      ) {
+        throw error;
+      }
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result recovery unavailable',
+      );
+    }
+    if (rows.length !== 1 || !rows[0]) {
+      throw new BudgetStoreUnavailableError(
+        'budget unknown-result recovery returned no result',
+      );
+    }
+    const row = rows[0];
+    const snapshot = parseGenericOperationArtifactSnapshot({
+      manifest: row.expected_manifest,
+      expectedFacts: expectedFactsFromUnknownRow(row),
+    });
+    const manifest = snapshot.manifest;
+    if (
+      manifest.authorityId !== authorityId ||
+      manifest.operationId !== reservation.operationId ||
+      (reservation.workspaceId === 'platform'
+        ? manifest.scopeKind !== 'platform' || manifest.workspaceId !== null
+        : manifest.scopeKind !== 'workspace' ||
+          manifest.workspaceId !== reservation.workspaceId)
+    ) {
+      return invalidGenericOperationArtifact();
+    }
+    return snapshot;
+  }
+
+  async settleArtifactManifest(
+    reservation: BudgetReservation,
+    observedMicrousd: bigint,
+    snapshot: GenericOperationArtifactSnapshot,
+    receiptFacts: DurableExecutionReceiptFacts,
+    domainAck: BudgetDomainAckRequest,
+    subjectRef?: GenericOperationArtifactSubjectRef,
+  ): Promise<BudgetSettlement> {
+    assertMicrousd('observedMicrousd', observedMicrousd);
+    const { snapshot: durable, columns: facts } =
+      parseBoundArtifactBudgetSnapshot(snapshot, reservation);
+    const manifest = durable.manifest;
+    const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
+    const explicitFacts = parseDurableExecutionReceiptFacts(
+      receiptFacts,
+      manifest.resultSchema,
+    );
+    try {
+      return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
+        const rows = await tx.$queryRaw<MicrousdSettleRow[]>(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
+            ${reservation.workspaceId}, ${reservation.operationId}::uuid,
+            ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
+            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
+            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
+            ${JSON.stringify(explicitFacts.usage)}::jsonb,
+            ${explicitFacts.costBasis},
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid
+          )`,
+        );
+        const row = rows[0];
+        if (
+          rows.length !== 1 ||
+          !row ||
+          row.status !== 'SETTLED' ||
+          typeof row.charged_microusd !== 'bigint' ||
+          typeof row.observed_microusd !== 'bigint' ||
+          typeof row.cap_variance !== 'boolean'
+        ) {
+          throw new BudgetStoreUnavailableError(
+            'budget artifact settlement returned no result',
+          );
+        }
+        const expectedReference = Object.freeze({
+          schemaVersion: 'generic-operation-artifact-ref/v1' as const,
+          artifactId: manifest.artifactId,
+          operationId: manifest.operationId,
+          resultSchema: manifest.resultSchema,
+          sha256: manifest.sha256,
+          sizeBytes: manifest.sizeBytes,
+          mediaType: manifest.mediaType,
+          expiresAt: manifest.expiresAt,
+        });
+        const receipt = requireLedgerArtifactReceipt({
+          scopeKey: reservation.workspaceId,
+          expectedOperationId: reservation.operationId,
+          operationId: row.operation_id,
+          operationKey: row.operation_key,
+          accountId: row.account_id,
+          authorityId: row.authority_id,
+          resultSchemaVersion: row.result_schema_version,
+          resultSchema: row.result_schema,
+          resultDigest: row.result_digest,
+          resultJson: row.result_json,
+          receiptUsage: row.receipt_usage,
+          receiptCostBasis: row.receipt_cost_basis,
+          expectedReference,
+          expectedFacts: explicitFacts,
+        });
+        const acknowledgement = await applyDomainAckConsumerTransaction({
+          transaction: tx,
+          producerId: domainAck.producerId,
+          receipt,
+          domainAckKey: domainAck.domainAckKey,
+          domainRevision: domainAck.domainRevision,
+          apply: async () => undefined,
+        });
+        if (acknowledgement.status === 'UNRECEIPTED') {
+          throw new Error('DOMAIN_ACK_RECEIPT_REQUIRED');
+        }
+        return {
+          chargedMicrousd: row.charged_microusd,
+          observedMicrousd: row.observed_microusd,
+          capVariance: row.cap_variance,
+          replay: row.replay ?? false,
+          receipt,
+          domainAckStatus: acknowledgement.status,
+        };
+      });
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
+      if (isAuthorityLifecycleUnavailable(error)) {
+        throw authorityLifecycleUnavailable();
+      }
+      if (isTrustedArtifactDatabaseInvalid(error)) {
+        return invalidGenericOperationArtifact();
+      }
+      if (
+        error instanceof BudgetStoreUnavailableError ||
+        error instanceof ExecutionBudgetGrantError
+      ) {
+        throw error;
+      }
+      throw new BudgetStoreUnavailableError(
+        'budget artifact settlement unavailable',
+      );
+    }
+  }
+
+  async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
     let rows: MicrousdSettleRow[];
     try {
-      rows = await this.inScope(reservation.workspaceId, (tx) =>
+      rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<MicrousdSettleRow[]>(
-          Prisma.sql`SELECT * FROM release_tool_budget_microusd_v1(
-            ${reservation.workspaceId}, ${reservation.operationId}::uuid
-          )`,
+          Prisma.sql`SELECT * FROM release_tool_budget(${reservation.workspaceId}, ${reservation.operationId}::uuid)`,
         ),
       );
     } catch (error) {
@@ -1734,11 +1231,7 @@ export class PostgresBudgetStore implements BudgetStore {
       throw error;
     }
     const row = rows[0];
-    if (!row) {
-      throw new BudgetStoreUnavailableError(
-        'microusd budget release returned no result',
-      );
-    }
+    if (!row) throw new BudgetStoreUnavailableError('budget release returned no result');
     return {
       chargedMicrousd: row.charged_microusd,
       observedMicrousd: row.observed_microusd,
@@ -1747,10 +1240,7 @@ export class PostgresBudgetStore implements BudgetStore {
     };
   }
 
-  async statusMicrousd(input: {
-    workspaceId: string;
-    accountKey: string;
-  }): Promise<BudgetMicrousdStatus> {
+  async status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus> {
     assertKey('accountKey', input.accountKey);
     let rows: Array<{
       remaining_microusd: bigint;
@@ -1758,11 +1248,15 @@ export class PostgresBudgetStore implements BudgetStore {
       ref_count: number;
     }>;
     try {
-      rows = await this.inScope(input.workspaceId, (tx) =>
-        tx.$queryRaw(
-          Prisma.sql`SELECT * FROM tool_budget_status_microusd_v1(
-            ${input.workspaceId}, ${input.accountKey}
-          )`,
+      rows = await this.inAuthorityScope(input.workspaceId, (tx) =>
+        tx.$queryRaw<
+          Array<{
+            remaining_microusd: bigint;
+            exhausted: boolean;
+            ref_count: number;
+          }>
+        >(
+          Prisma.sql`SELECT * FROM tool_budget_status(${input.workspaceId}, ${input.accountKey})`,
         ),
       );
     } catch (error) {
@@ -1781,18 +1275,14 @@ export class PostgresBudgetStore implements BudgetStore {
       : { remainingMicrousd: 0n, exhausted: false, open: false };
   }
 
-  async closeMicrousd(input: {
-    workspaceId: string;
-    accountKey: string;
-    force?: boolean;
-  }): Promise<void> {
+  async close(input: { workspaceId: string; accountKey: string; force?: boolean }): Promise<void> {
     assertKey('accountKey', input.accountKey);
+    // `force` only drops stale holders. It never releases operations or permits
+    // a new generation while PostgreSQL still has RESERVED work.
     try {
-      await this.inScope(input.workspaceId, async (tx) => {
+      await this.inAuthorityScope(input.workspaceId, async (tx) => {
         await tx.$queryRaw(
-          Prisma.sql`SELECT close_tool_budget_microusd_v1(
-            ${input.workspaceId}, ${input.accountKey}, ${input.force ?? false}
-          )`,
+          Prisma.sql`SELECT close_tool_budget(${input.workspaceId}, ${input.accountKey}, ${input.force ?? false})`,
         );
       });
     } catch (error) {
@@ -1802,4 +1292,5 @@ export class PostgresBudgetStore implements BudgetStore {
       throw error;
     }
   }
+
 }

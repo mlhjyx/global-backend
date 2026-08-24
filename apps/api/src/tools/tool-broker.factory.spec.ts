@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { BudgetLedger } from './budget';
-import { InMemoryBudgetStoreAdapter } from './budget-store';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
 import { buildToolBroker } from './tool-broker.factory';
 
 const originalToolRedisUrl = process.env.TOOL_RATE_LIMIT_REDIS_URL;
@@ -19,7 +18,6 @@ describe('buildToolBroker Redis composition', () => {
     process.env.TOOL_RATE_LIMIT_REDIS_URL = configured;
     delete process.env.REDIS_URL;
     const budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger());
-    await budgetStore.open({ workspaceId: 'workspace-1', accountKey: 'run-1', capCents: 1 });
     const broker = buildToolBroker({ budgetStore });
 
     const call = broker.invoke(

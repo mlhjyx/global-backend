@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BigQueryPatentsClient,
   BigQueryLike,
+  GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED,
   MAX_APPLICANTS_PER_PATENT,
   assigneeLikeAnchor,
   normalizeRow,
@@ -100,7 +101,6 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
   it('查询参数 + maximumBytesBilled 成本护栏贯穿；行归一', async () => {
     let seen: Parameters<BigQueryLike['query']>[0] | undefined;
     const client = new BigQueryPatentsClient({
-      maxGb: 50,
       makeClient: () =>
         fakeClient(
           [{
@@ -122,7 +122,7 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
     ]);
     // 查询参数：日期 INT64 YYYYMMDD + 锚 + 成本硬顶
     expect(seen?.params).toMatchObject({ fromDate: 20210101, toDate: 20261231, assigneeLike: '%SIEMENS%' });
-    expect(seen?.maximumBytesBilled).toBe(String(50 * GB)); // 🔴 护 1TB/月免费额度
+    expect(seen?.maximumBytesBilled).toBe(GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED);
   });
 
   it('无锚（公司名全停用词）→ 空、client 不被调', async () => {
@@ -165,7 +165,6 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
 
   it('searchPatentsByAssigneeWithCostFacts records provider-observed bytes only from completed job metadata', async () => {
     const client = new BigQueryPatentsClient({
-      maxGb: 50,
       makeClient: () => fakeJobClient([{
         publication_number: 'US-789-A1',
         applicants: [{ name: 'Siemens AG', country: 'DE' }],
@@ -183,7 +182,7 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
         inventors: [{ name: 'Hans Müller' }],
       }],
       queried: true,
-      maximumBytesBilled: String(50 * GB),
+      maximumBytesBilled: GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED,
       observedBytesBilled: '123456',
       maxRows: 5,
     });
@@ -191,7 +190,7 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
 
   it('searchPatentsByAssigneeWithCostFacts returns explicit no-query facts without creating a client', async () => {
     const makeClient = vi.fn();
-    const client = new BigQueryPatentsClient({ maxGb: 50, makeClient });
+    const client = new BigQueryPatentsClient({ makeClient });
 
     await expect(client.searchPatentsByAssigneeWithCostFacts(
       'The Co',
@@ -199,7 +198,7 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
     )).resolves.toEqual({
       patents: [],
       queried: false,
-      maximumBytesBilled: String(50 * GB),
+      maximumBytesBilled: GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED,
       observedBytesBilled: null,
       maxRows: 0,
     });
@@ -221,14 +220,14 @@ describe('BigQueryPatents · maximumBytesBilled 成本护栏（env/默认路径�
     return seen?.maximumBytesBilled;
   }
 
-  it('零配置（无 deps.maxGb、无 env）→ 默认 200GB', async () => {
+  it('零配置仍使用 reviewed 200GB hard cap', async () => {
     delete process.env.GOOGLE_PATENTS_MAX_GB;
     expect(await capturedMaxBytes()).toBe(String(200 * GB));
   });
 
-  it('env 有效正值 → 尊重运维意图', async () => {
+  it('env cannot override the reviewed hard cap', async () => {
     process.env.GOOGLE_PATENTS_MAX_GB = '75';
-    expect(await capturedMaxBytes()).toBe(String(75 * GB));
+    expect(await capturedMaxBytes()).toBe(GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED);
   });
 
   it('env=0（或负/NaN）→ 回落默认 200GB（不静默放行 0 字节顶）', async () => {

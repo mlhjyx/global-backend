@@ -3,13 +3,12 @@ import { ExecutionBroker,
   SourcePolicyDenyReason, Tool, ToolContext, ToolResult,
 } from './tool-contract';
 import { ToolRegistry } from './tool-registry';
-import { BudgetLedger, BudgetExceededError } from './budget';
 import type { RateLimitStore } from './rate-limiter';
 import {
   BudgetOperationReplayError,
+  BudgetExceededError,
   type BudgetReservation,
   type BudgetStore,
-  InMemoryBudgetStoreAdapter,
   UnavailableBudgetStore,
 } from './budget-store';
 import { UnavailableRateLimitStore } from './redis-rate-limit-store';
@@ -33,6 +32,21 @@ import {
 } from '../site-builder/site-build-cost-ledger';
 
 /**
+ * These schemas require the GenericOperationArtifactService plus a Task 5
+ * company/contact subject binding. The additive artifact foundation exists,
+ * but the current product callers cannot supply a truthful subject for a
+ * platform sanctions list or for a company that has not been identified yet.
+ * Keep the exact inventory here so an artifact declaration can never fall
+ * through to the small inline projection path.
+ */
+const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
+  'crawl4ai-fetch/v1',
+  'crawl4ai-render/v1',
+  'http-get/v1',
+  'sanctions-download/v1',
+]);
+
+/**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
  * 所有确定性闸门收敛于此（工具内部不自证）。顺序（评审确定）：
  *   allowedTools 白名单 → source_policy/robots/license 合规 → 预算 reserve
@@ -54,8 +68,6 @@ export class ToolPolicyDenied extends Error {
 
 export interface BrokerDeps {
   registry: ToolRegistry;
-  /** @deprecated Explicit unit-test compatibility only. Product composition injects budgetStore. */
-  budget?: BudgetLedger;
   budgetStore?: BudgetStore;
   limiter?: RateLimitStore;
   /** 查某域名的 source_policy（返回 null=未登记；{suspended, allowedPurpose,...}）。 */
@@ -108,9 +120,7 @@ export class ToolBroker implements ExecutionBroker {
     this.registry = deps.registry;
     this.budget =
       deps.budgetStore ??
-      (deps.budget
-        ? new InMemoryBudgetStoreAdapter(deps.budget)
-        : new UnavailableBudgetStore('ToolBroker was created without an authoritative BudgetStore'));
+      new UnavailableBudgetStore('ToolBroker was created without an authoritative BudgetStore');
     this.limiter =
       deps.limiter ?? new UnavailableRateLimitStore('ToolBroker was created without an authoritative RateLimitStore');
     for (const t of this.registry.all()) this.limiter.configure(t.id, t.rateLimit.rps, t.rateLimit.concurrency);
@@ -272,7 +282,7 @@ export class ToolBroker implements ExecutionBroker {
             tool.version,
             tool.idempotencyKey(input),
           ]),
-          estimatedCents: tool.cost.estimatedCents,
+          estimatedMicrousd: BigInt(tool.cost.estimatedCents) * 10_000n,
         });
         if (reservation.replay) {
           let replay: ToolResult<O> | null;
@@ -298,11 +308,42 @@ export class ToolBroker implements ExecutionBroker {
           throw new BudgetOperationReplayError(reservation.operationId);
         }
       } catch (err) {
-        if (err instanceof BudgetExceededError) {
+        if (
+          err instanceof BudgetExceededError ||
+          (err instanceof Error && 'code' in err && err.code === 'BUDGET_EXCEEDED')
+        ) {
           this.trace(ctx, tool, 'DENIED', `budget exceeded: ${err.message.slice(0, 150)}`, 0, now() - started);
         }
         throw err;
       }
+    }
+
+    // The four governed artifact producers must never use ToolBroker's small
+    // typed-projection settlement as a physical fallback. Their approved
+    // PERSONAL_DATA contract requires a real company/contact subject before
+    // object persistence; current platform/pre-identity callers cannot provide
+    // one. Release only because execute() has not started, then fail closed.
+    // Site Builder's separately governed paid ledger remains outside this
+    // generic authority/artifact cutover.
+    if (
+      !ctx.paidCost &&
+      reservation &&
+      tool.durableResultStrategy.kind === 'artifact_reference' &&
+      SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS.has(tool.durableResultStrategy.schema)
+    ) {
+      await this.budget.release(reservation);
+      this.trace(
+        ctx,
+        tool,
+        'DENIED',
+        'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+        0,
+        now() - started,
+      );
+      throw new ToolPolicyDenied(
+        toolId,
+        'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+      );
     }
 
     // 4) 限流（令牌桶 + 每域延迟）
@@ -457,13 +498,13 @@ export class ToolBroker implements ExecutionBroker {
                 ? projection.schema
                 : tool.durableResultStrategy.schema,
               result: result as ToolResult<unknown>,
-              reservedMicrousd: BigInt(reservation.estimatedCents) * 10_000n,
+               reservedMicrousd: reservation.estimatedMicrousd,
               chargedMicrousd: BigInt(result.costCents) * 10_000n,
             })
           : undefined;
         const settlement = [
           reservation,
-          result.costCents,
+           BigInt(result.costCents) * 10_000n,
           projection,
           receiptFacts,
         ] as const;

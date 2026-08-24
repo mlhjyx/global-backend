@@ -43,6 +43,24 @@ function brokerForCompanyDiscovery(): ExecutionBroker {
 }
 
 describe('discovery providers rethrow execution-control errors', () => {
+  it('PublicWebDiscoveryProvider rethrows the artifact subject-binding HOLD from contact crawl catches', async () => {
+    const hold = Object.assign(new Error('artifact held before wire'), {
+      code: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD',
+    });
+    const broker: ExecutionBroker = {
+      checkSourcePolicy: async () => ({ allowed: true }),
+      invoke: vi.fn(async () => { throw hold; }) as unknown as ExecutionBroker['invoke'],
+    };
+    const provider = new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker,
+    });
+
+    await expect(
+      provider.discoverContacts({ name: 'Acme GmbH', domain: 'acme.example' }, CTX),
+    ).rejects.toBe(hold);
+  });
+
   it('PublicWebDiscoveryProvider rethrows control errors from crawl catches', async () => {
     const provider = new PublicWebDiscoveryProvider({
       gateway: {} as never,

@@ -4,7 +4,7 @@ import { SourceAdapterRegistry } from './source-adapter';
 import { cleanEntity, CleanedEntity } from './clean';
 import { MISS_THRESHOLD, computeNextFetchAt } from './monitored-source.lifecycle';
 import type { ToolContext } from '../tools/tool-contract';
-import { BudgetExceededError } from '../tools/budget';
+import { BudgetExceededError } from '../tools/budget-store';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';

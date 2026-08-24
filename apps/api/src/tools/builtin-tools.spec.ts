@@ -10,7 +10,7 @@ import {
   SmtpProbeOutput,
 } from './builtin-tools';
 import { ToolBroker, ToolPolicyDenied } from './tool-broker';
-import { BudgetLedger } from './budget';
+import { InMemoryBudgetStoreAdapter } from '@global/test-support';
 import { RateLimiter } from './rate-limiter';
 import type { ToolResult } from './tool-contract';
 
@@ -18,7 +18,7 @@ function broker(sourcePolicyReader?: (d: string) => Promise<{ suspended: boolean
   const registry = registerBuiltinTools(new ToolRegistry());
   return new ToolBroker({
     registry,
-    budget: new BudgetLedger(),
+    budgetStore: new InMemoryBudgetStoreAdapter() as never,
     limiter: new RateLimiter(),
     sourcePolicyReader,
     traceRecorder: () => {},

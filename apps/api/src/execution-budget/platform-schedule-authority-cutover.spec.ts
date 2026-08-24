@@ -29,7 +29,7 @@ describe('platform schedule authority database cutover', () => {
       readFile(new URL('../../.env.example', import.meta.url), 'utf8'),
     ]);
     expect(worker).toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL');
-    expect(worker).toMatch(/new PostgresBudgetStore\(\s*prisma,\s*ownerDb,\s*authorityWriter,?\s*\)/);
+    expect(worker).toMatch(/new PostgresBudgetStore\(\s*prisma,\s*authorityWriter,?\s*\)/);
     expect(worker).not.toMatch(/EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL[^\n]*(?:DATABASE_URL|APP_DATABASE_URL)/);
     expect(example).toContain('EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL=');
   });

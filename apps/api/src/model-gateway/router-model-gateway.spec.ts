@@ -8,7 +8,11 @@ import {
   ProviderOutputError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
-import { BudgetLedger, BudgetExceededError } from '../tools/budget';
+import {
+  BudgetLedger,
+  InMemoryBudgetStoreAdapter,
+  TestBudgetExceededError as BudgetExceededError,
+} from '@global/test-support';
 import { ModelResult, type ReviewVisionInput } from './types';
 import { AiTraceSink } from './ai-trace.sink';
 import type { BudgetStore } from '../tools/budget-store';
@@ -41,6 +45,7 @@ const DURABLE_RECEIPT: DurableExecutionReceipt = {
     upperBoundMicrousd: '0',
   },
   costBasis: 'estimated_upper_bound',
+  status: 'SETTLED',
 };
 
 function fakeProvider(impl?: () => Promise<ModelResult<string>>): ModelProvider {
@@ -91,8 +96,11 @@ const visionInput = (): ReviewVisionInput => ({
 
 function gatewayWith(provider: ModelProvider, budget: BudgetLedger): RouterModelGateway {
   const router = { route: () => [provider] } as unknown as ModelRouter;
-  const gw = new RouterModelGateway(router);
-  gw.budget = budget;
+  const gw = new RouterModelGateway(
+    router,
+    undefined,
+    new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore,
+  );
   return gw;
 }
 
@@ -106,11 +114,11 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     });
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(40) * 10_000n, replay: false,
       })),
       settle: vi.fn(async () => ({
-        chargedCents: 0,
-        observedCents: 0,
+        chargedMicrousd: BigInt(0) * 10_000n,
+        observedMicrousd: BigInt(0) * 10_000n,
         capVariance: false,
         replay: false,
         receipt: DURABLE_RECEIPT,
@@ -137,7 +145,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     )).resolves.toMatchObject({ durableReceipt: DURABLE_RECEIPT });
     expect(budgetStore.settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: 'op' }),
-      expect.any(Number),
+      expect.any(BigInt),
       expect.objectContaining({
         kind: 'model',
         schema: 'taxonomy-code/v1',
@@ -164,14 +172,14 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       callCount: 1,
     });
     const settle = vi.fn(async () => ({
-      chargedCents: 1,
-      observedCents: 1,
+      chargedMicrousd: BigInt(1) * 10_000n,
+      observedMicrousd: BigInt(1) * 10_000n,
       capVariance: false,
       replay: false,
     }));
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(40) * 10_000n, replay: false,
       })),
       settle,
     } as unknown as BudgetStore;
@@ -197,7 +205,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
 
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: 'op' }),
-      expect.any(Number),
+      expect.any(BigInt),
       expect.objectContaining({ schema: 'taxonomy-code/v1' }),
       {
         usage: {
@@ -224,14 +232,14 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       callCount: 1,
     });
     const settle = vi.fn(async () => ({
-      chargedCents: 2,
-      observedCents: 2,
+      chargedMicrousd: BigInt(2) * 10_000n,
+      observedMicrousd: BigInt(2) * 10_000n,
       capVariance: false,
       replay: false,
     }));
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 40, replay: false,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(40) * 10_000n, replay: false,
       })),
       settle,
     } as unknown as BudgetStore;
@@ -257,7 +265,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
 
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: 'op' }),
-      2,
+       12_500n,
       expect.objectContaining({ schema: 'taxonomy-code/v1' }),
       {
         usage: {
@@ -266,7 +274,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
           callCount: 1,
           inputTokens: 7,
           outputTokens: 3,
-          chargedMicrousd: '20000',
+          chargedMicrousd: '12500',
           upperBoundMicrousd: '400000',
         },
         costBasis: 'provider_reported',
@@ -280,7 +288,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const projection = projectModelResultForReplay('taxonomy-code/v1', restored);
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(20) * 10_000n,
         replay: true,
         replayResult: { resultStrategy: 'typed_projection', projection },
         receipt: DURABLE_RECEIPT,
@@ -315,10 +323,10 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       provider: 'fake',
       model: 'm',
     });
-    const settle = vi.fn(async () => ({ chargedCents: 20, observedCents: 20, capVariance: false, replay: false }));
+    const settle = vi.fn(async () => ({ chargedMicrousd: BigInt(20) * 10_000n, observedMicrousd: BigInt(20) * 10_000n, capVariance: false, replay: false }));
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20, replay: false,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(20) * 10_000n, replay: false,
       })),
       settle,
     } as unknown as BudgetStore;
@@ -343,7 +351,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     );
     expect(settle).toHaveBeenCalledWith(
       expect.objectContaining({ operationId: 'op' }),
-      5,
+       50_000n,
       expect.objectContaining({ kind: 'model', schema: 'taxonomy-code/v1' }),
       {
         usage: {
@@ -365,10 +373,10 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     });
     const settle = vi.fn()
       .mockRejectedValueOnce(new Error('settlement ACK unavailable'))
-      .mockResolvedValueOnce({ chargedCents: 20, observedCents: 20, capVariance: false, replay: true });
+      .mockResolvedValueOnce({ chargedMicrousd: BigInt(20) * 10_000n, observedMicrousd: BigInt(20) * 10_000n, capVariance: false, replay: true });
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20, replay: false,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(20) * 10_000n, replay: false,
       })),
       settle,
     } as unknown as BudgetStore;
@@ -398,7 +406,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
       kind: 'model', schema: 'taxonomy-code/v1',
     });
     expect(settle.mock.calls[0]?.[3]).toMatchObject({
-      usage: { chargedMicrousd: '20000' },
+      usage: { chargedMicrousd: '12500' },
       costBasis: 'provider_reported',
     });
   });
@@ -411,7 +419,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     });
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(20) * 10_000n,
         replay: true,
         replayResult: { resultStrategy: 'typed_projection', projection },
       })),
@@ -442,7 +450,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     };
     const budgetStore = {
       reserve: vi.fn(async () => ({
-        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedCents: 20,
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(20) * 10_000n,
         replay: true,
         replayResult: { resultStrategy: 'typed_projection', projection },
       })),
@@ -603,7 +611,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     const trace = { record: vi.fn() } as unknown as AiTraceSink;
     const router = { route: () => [fakeProvider()] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router, trace);
-    gw.budget = budget;
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
 
     await gw.generateText(
       {
@@ -721,7 +729,7 @@ describe('RouterModelGateway — vision identity and closed output gate', () => 
       route: () => [mismatched, fallback],
     } as unknown as ModelRouter;
     const gateway = new RouterModelGateway(router);
-    gateway.budget = new BudgetLedger();
+    gateway.budgetStore = new InMemoryBudgetStoreAdapter(new BudgetLedger()) as unknown as BudgetStore;
 
     await expect(
       gateway.reviewVision(visionInput(), { workspaceId: 'ws-1' }),
@@ -1132,7 +1140,7 @@ describe('RouterModelGateway — ProviderOutputError 结算真实 token（改动
     (stub as { id: string }).id = 'stub';
     const router = { route: () => [real, stub] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router);
-    gw.budget = budget;
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
     await expect(
       gw.generateText({ task: QUALIFY_TASK, prompt: 'p' }, { workspaceId: 'ws-1', runId: 'run-1' }),
     ).rejects.toBeInstanceOf(ProviderOutputError);
@@ -1253,7 +1261,7 @@ describe('RouterModelGateway — per-wire external-action authorization', () => 
       route: () => [primary, fallback],
     } as unknown as ModelRouter;
     const gateway = new RouterModelGateway(router);
-    gateway.budget = budget;
+    gateway.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
 
     await expect(
       gateway.generateStructured(
@@ -1297,7 +1305,7 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
       });
     const router = { route: () => [provider] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router, trace);
-    gw.budget = budget;
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
 
     const result = await gw.generateStructured(
       {
@@ -1339,7 +1347,7 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     });
     const router = { route: () => [provider] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router, trace);
-    gw.budget = budget;
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
 
     const error = await gw.generateStructured(
       {
@@ -1388,7 +1396,7 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
       });
     const router = { route: () => [provider] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router, trace);
-    gw.budget = budget;
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
 
     const error = await gw.generateStructured(
       {
@@ -1495,7 +1503,7 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     (stub as { id: string }).id = 'stub';
     const router = { route: () => [real, stub] } as unknown as ModelRouter;
     const gw = new RouterModelGateway(router, trace);
-    gw.budget = budget;
+    gw.budgetStore = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
 
     const error = await gw.generateStructured(
       {

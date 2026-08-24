@@ -9,7 +9,7 @@ export interface AiContext {
   /** 必须是真实 workspace uuid（ai_trace/usage_ledger @db.Uuid 列；伪值=记账静默失败）。 */
   workspaceId: string;
   userId?: string;
-  /** 预算归账键（BudgetLedger reserve-then-settle 按 runId ?? workspaceId 归账）。 */
+  /** 持久预算归账键（reserve-then-settle 按 runId ?? workspaceId 归账）。 */
   runId?: string;
   correlationId?: string;
   /**

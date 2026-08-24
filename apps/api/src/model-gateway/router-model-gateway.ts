@@ -6,10 +6,10 @@ import { AiTraceSink } from './ai-trace.sink';
 import {
   assertModelOutputSchemaCompiles,
   checkAgainstSchema } from './schema-validate';
-import { BudgetLedger, BudgetExceededError, DEFAULT_LLM_EST_CENTS } from '../tools/budget';
+import { DEFAULT_LLM_EST_CENTS } from '../tools/budget';
 import {
+  BudgetExceededError,
   BudgetOperationReplayError,
-  InMemoryBudgetStoreAdapter,
   TOOL_BUDGET_STORE,
   UnavailableBudgetStore,
   type BudgetStore,
@@ -57,15 +57,6 @@ function providerReportedMicrousd(usage?: ModelUsage): bigint | null {
   const costUsd = usage?.costUsd;
   if (!Number.isFinite(costUsd) || (costUsd as number) < 0) return null;
   return usdToMicrousdCeil(String(costUsd));
-}
-
-function centsCeilFromMicrousd(value: bigint): number {
-  const cents = (value + 9_999n) / 10_000n;
-  const result = Number(cents);
-  if (!Number.isSafeInteger(result)) {
-    throw new RangeError('provider-reported Model cost exceeds the cents ledger range');
-  }
-  return result;
 }
 
 /**
@@ -117,10 +108,6 @@ export class RouterModelGateway extends ModelGateway {
   );
   budgetStore: BudgetStore;
 
-  /** Test-only compatibility surface: product composition injects BudgetStore. */
-  set budget(ledger: BudgetLedger) {
-    this.budgetStore = new InMemoryBudgetStoreAdapter(ledger);
-  }
   /** Worker installs the durable R4-B ledger; paid contexts fail closed without it. */
   paidLedger?: SiteBuildCostLedger;
   /**
@@ -387,7 +374,7 @@ export class RouterModelGateway extends ModelGateway {
         workspaceId: ctx.workspaceId,
         accountKey,
         operationKey,
-        estimatedCents: reserveCents,
+        estimatedMicrousd: centsToMicrousd(reserveCents),
       });
       if (reservation.replay) {
         const replay = reservation.replayResult?.resultStrategy === 'typed_projection'
@@ -455,11 +442,13 @@ export class RouterModelGateway extends ModelGateway {
         // Once a provider may have been called, an unusable output or unknown ACK is
         // conservatively charged to the reservation and never falls through to a
         // second physical model request.
-        const observedCents =
+        const observedMicrousd =
           err instanceof ProviderOutputError
-            ? (centsFromTokens(err.usage) ?? baseCents * err.callCount)
-            : reserveCents;
-        await this.budgetStore.settle(reservation, observedCents);
+            ? (providerReportedMicrousd(err.usage) ?? centsToMicrousd(
+                centsFromTokens(err.usage) ?? baseCents * err.callCount,
+              ))
+            : centsToMicrousd(reserveCents);
+        await this.budgetStore.settle(reservation, observedMicrousd);
       }
       this.trace?.record({
         workspaceId: ctx.workspaceId,
@@ -492,17 +481,17 @@ export class RouterModelGateway extends ModelGateway {
       // cannot issue a second physical request or settle an empty result.
       throw new BudgetOperationReplayError(operationKey);
     }
-    const reservedMicrousd = centsToMicrousd(reservation.estimatedCents);
+    const reservedMicrousd = reservation.estimatedMicrousd;
     const reportedMicrousd = providerReportedMicrousd(result.usage);
     const tokenPricedCents = reportedMicrousd === null
       ? centsFromTokens(result.usage)
       : null;
-    const observedCents = reportedMicrousd !== null
-      ? centsCeilFromMicrousd(reportedMicrousd)
-      : (tokenPricedCents ?? baseCents * (result.callCount ?? 1));
-    const chargedMicrousd = centsToMicrousd(
-      Math.min(observedCents, reservation.estimatedCents),
+    const observedMicrousd = reportedMicrousd ?? centsToMicrousd(
+      tokenPricedCents ?? baseCents * (result.callCount ?? 1),
     );
+    const chargedMicrousd = observedMicrousd < reservation.estimatedMicrousd
+      ? observedMicrousd
+      : reservation.estimatedMicrousd;
     const receiptFacts = projection && ctx.durableResultSchema
       ? modelExecutionReceiptFacts({
           taskId: input.task,
@@ -512,7 +501,7 @@ export class RouterModelGateway extends ModelGateway {
           chargedMicrousd,
         })
       : undefined;
-    const settlement = [reservation, observedCents, projection, receiptFacts] as const;
+    const settlement = [reservation, observedMicrousd, projection, receiptFacts] as const;
     let settled;
     try {
       settled = await this.budgetStore.settle(...settlement);

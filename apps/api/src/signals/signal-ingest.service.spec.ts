@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BudgetExceededError } from '../tools/budget';
+import { BudgetExceededError } from '../tools/budget-store';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PrismaService } from '../prisma/prisma.service';

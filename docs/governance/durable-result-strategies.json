@@ -1,16 +1,16 @@
 {
   "schemaVersion": "execution-authority-policy/v2",
-  "cutoverFence": "TASK_6_AUTHORITY_BOUND_PHYSICAL_EXECUTION_NOT_WIRED",
+  "cutoverFence": "TASK_6_AUTHORITY_BOUND_TYPED_EXECUTION_ARTIFACT_HOLD",
   "physicalExecutionWiring": {
-    "status": "NOT_WIRED",
+    "status": "PARTIAL_HOLD",
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "6d14b42a4bd6b9693edc7bf8a5211ea6fa3644e2311796a473ae1fc15633391e"
+        "sha256": "8a688bf23122a67d4d117893d81f87f85dfadf4461905ddbe79c4db9b4db6bcf"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "ee31ded3a9f37367c90dd5bc7d89cb9d2e47eb470c2fd6fa5c92b4673e5ce080"
+        "sha256": "5cb687996804e5ab423a6238ffe93f31b9f0cf51c67176c14e0e73ba2c7c7a44"
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",
@@ -22,10 +22,21 @@
       }
     ]
   },
+  "artifactPhysicalExecution": {
+    "status": "SUBJECT_BINDING_HOLD",
+    "schemas": [
+      "crawl4ai-fetch/v1",
+      "crawl4ai-render/v1",
+      "http-get/v1",
+      "sanctions-download/v1"
+    ],
+    "deniedBeforeWire": true,
+    "inlineFallbackAllowed": false
+  },
   "receipt": {
     "schema": "durable-execution-receipt/v1",
-    "author": "TRUSTED_LEDGER_REQUIRED_AT_TASK_6_CUTOVER",
-    "attachedAtRuntime": false,
+    "author": "trusted-ledger",
+    "attachedAtRuntime": true,
     "fields": [
       "schemaVersion",
       "scopeKey",
@@ -74,7 +85,7 @@
       "operationIdentity": "tool:searxng.search:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "SearchDiscoveryProvider",
         "domainAggregateType": "SearchResultEvidence",
         "identitySource": "query-digest-and-result-url",
@@ -90,7 +101,7 @@
       "operationIdentity": "tool:crawl4ai.fetch:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "SUBJECT_BINDING_HOLD",
         "consumer": "WebCrawlKnowledgeSource",
         "domainAggregateType": "KnowledgeSource",
         "identitySource": "source-url-and-content-hash",
@@ -106,7 +117,7 @@
       "operationIdentity": "tool:wikidata.sparql:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "WikidataTaxonomyResolver",
         "domainAggregateType": "TaxonomyEvidence",
         "identitySource": "query-digest-and-wikidata-qid",
@@ -122,7 +133,7 @@
       "operationIdentity": "tool:osm.overpass:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "GeoDiscoveryProvider",
         "domainAggregateType": "LocationEvidence",
         "identitySource": "osm-element-id",
@@ -138,7 +149,7 @@
       "operationIdentity": "tool:smtp.rcpt_probe:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "EmailVerificationProvider",
         "domainAggregateType": "EmailVerification",
         "identitySource": "normalized-email-hash",
@@ -154,7 +165,7 @@
       "operationIdentity": "tool:crawl4ai.render:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "SUBJECT_BINDING_HOLD",
         "consumer": "RenderedPageCapture",
         "domainAggregateType": "KnowledgeSource",
         "identitySource": "source-url-and-render-hash",
@@ -170,7 +181,7 @@
       "operationIdentity": "tool:http.get:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "SUBJECT_BINDING_HOLD",
         "consumer": "GenericHttpArtifactConsumer",
         "domainAggregateType": "ExternalArtifact",
         "identitySource": "url-and-content-hash",
@@ -186,7 +197,7 @@
       "operationIdentity": "tool:wikidata.entity:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "WikidataEntityResolver",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "wikidata-qid",
@@ -202,7 +213,7 @@
       "operationIdentity": "tool:gleif.fetch:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "LegalEntityEnrichment",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "lei",
@@ -218,7 +229,7 @@
       "operationIdentity": "tool:ted.search:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "TedTenderDiscoveryProvider",
         "domainAggregateType": "TenderEvidence",
         "identitySource": "ted-notice-id",
@@ -234,7 +245,7 @@
       "operationIdentity": "tool:openfda.search:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "OpenFdaDiscoveryProvider",
         "domainAggregateType": "ProductRegistrationEvidence",
         "identitySource": "registration-or-k-number",
@@ -250,7 +261,7 @@
       "operationIdentity": "tool:companies_house.search:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "CompanyRegistryDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "company-number-and-officer-id",
@@ -266,7 +277,7 @@
       "operationIdentity": "tool:inpi_rne.search:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "CompanyRegistryDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "siren-and-minimized-dirigeant-name",
@@ -285,21 +296,21 @@
         "maxRowsPerOperation": 25,
         "maxApplicantsPerPatent": 32,
         "maxInventorsPerPatent": 25,
-        "typedProjectionMaxPatents": 2000,
+        "typedProjectionMaxPatents": 50,
         "rawBigQueryRowsRetained": false,
         "inventorFields": ["name"]
       },
       "costConstraints": {
         "configuredDefaultMaximumBytesBilled": "214748364800",
         "requiredMaximumBytesBilledAtCutover": "214748364800",
-        "runtimeHardMaximumBytesBilled": null,
-        "runtimeOverrideStatus": "UNBOUNDED_PRE_CUTOVER",
+        "runtimeHardMaximumBytesBilled": "214748364800",
+        "runtimeOverrideStatus": "HARD_CAPPED",
         "costBasis": "estimated_upper_bound",
         "providerReportedBytesOptional": true,
         "realBigQueryInTests": false
       },
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "PatentCacheBrokerScanner",
         "domainAggregateType": "PatentCacheAnchor",
         "identitySource": "operation-key-and-normalized-assignee-anchor",
@@ -315,7 +326,7 @@
       "operationIdentity": "tool:tradefair.algolia:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "TradeFairDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "event-and-exhibitor-id",
@@ -331,7 +342,7 @@
       "operationIdentity": "tool:mapyourshow.fetch:<version>:<idempotencyKey>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "TradeFairDiscoveryProvider",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "show-and-exhibitor-id",
@@ -347,7 +358,7 @@
       "operationIdentity": "tool:samgov.search:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "SamGovDiscoveryProvider",
         "domainAggregateType": "FederalContractEvidence",
         "identitySource": "notice-id",
@@ -363,7 +374,7 @@
       "operationIdentity": "tool:sanctions.download:<version>:<idempotencyKey>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "SUBJECT_BINDING_HOLD",
         "consumer": "SanctionsScreeningCache",
         "domainAggregateType": "SanctionsDataset",
         "identitySource": "dataset-source-and-result-digest",
@@ -381,7 +392,7 @@
       "operationIdentity": "model:company_understanding.extract_claims:<runId>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "UnderstandingActivities.extractClaims",
         "domainAggregateType": "CompanyProfile",
         "identitySource": "company-id-and-claims-run-revision",
@@ -397,7 +408,7 @@
       "operationIdentity": "model:company_understanding.extract_profile:<runId>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "UnderstandingActivities.extractAndPersistProfile",
         "domainAggregateType": "CompanyProfile",
         "identitySource": "company-id-and-profile-revision",
@@ -413,7 +424,7 @@
       "operationIdentity": "model:company_understanding.extract_offerings:<runId>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "UnderstandingActivities.extractOfferings",
         "domainAggregateType": "CompanyProfile",
         "identitySource": "company-id-and-offerings-run-revision",
@@ -429,7 +440,7 @@
       "operationIdentity": "model:icp.design:<request-hash>",
       "privacyClass": "CONFIDENTIAL_TENANT",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "IcpService.generateFromCompany",
         "domainAggregateType": "IcpDefinition",
         "identitySource": "preallocated-icp-id-and-version",
@@ -445,7 +456,7 @@
       "operationIdentity": "model:discovery.query_plan:<request-hash>",
       "privacyClass": "CONFIDENTIAL_TENANT",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "IcpService.generateQueryPlan",
         "domainAggregateType": "DiscoveryQueryPlan",
         "identitySource": "preallocated-plan-id-and-version",
@@ -461,7 +472,7 @@
       "operationIdentity": "model:taxonomy.normalize:<request-hash>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "TaxonomyResolver",
         "domainAggregateType": "TermAlias",
         "identitySource": "taxonomy-kind-and-normalized-term",
@@ -477,7 +488,7 @@
       "operationIdentity": "model:discovery.qualify_fit:<request-hash>",
       "privacyClass": "CONFIDENTIAL_TENANT",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "FitJudge.upsertLeadFit",
         "domainAggregateType": "Lead",
         "identitySource": "workspace-icp-company-and-revision",
@@ -493,7 +504,7 @@
       "operationIdentity": "model:discovery.extract_company:<request-hash>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "PublicWebDiscoveryProvider.mineDomain",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "normalized-domain",
@@ -509,7 +520,7 @@
       "operationIdentity": "model:discovery.extract_list:<request-hash>",
       "privacyClass": "PUBLIC_ORGANIZATION",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "DirectoryDiscoveryProvider.extractList",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "directory-source-and-company-name",
@@ -525,7 +536,7 @@
       "operationIdentity": "model:contact.find_decision_makers:<request-hash>",
       "privacyClass": "PERSONAL_DATA",
       "domainAck": {
-        "mode": "CONTRACT_DECLARED_NOT_WIRED",
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
         "consumer": "DecisionMakerProvider.extract",
         "domainAggregateType": "Contact",
         "identitySource": "source-page-and-normalized-person-name-hash",

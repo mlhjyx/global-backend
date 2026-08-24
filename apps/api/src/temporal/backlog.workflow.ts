@@ -9,6 +9,27 @@ import type {
 } from './backlog.activities';
 import type { QualifyActivities } from './qualify.activities';
 
+const BACKLOG_AUTHORITY_HOLD = 'EXECUTION_BUDGET_PLATFORM_AUTHORITY_REQUIRED';
+
+/** Exact new failure only: preserving every predecessor failure-history catch
+ * keeps Temporal replay command sequences deterministic without a patch flag. */
+function isBacklogAuthorityHold(error: unknown): boolean {
+  const visited = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth <= 12 && current && typeof current === 'object'; depth++) {
+    if (visited.has(current)) return false;
+    visited.add(current);
+    const record = current as Record<string, unknown>;
+    if (
+      record.type === BACKLOG_AUTHORITY_HOLD ||
+      record.code === BACKLOG_AUTHORITY_HOLD ||
+      record.message === BACKLOG_AUTHORITY_HOLD
+    ) return true;
+    current = record.cause;
+  }
+  return false;
+}
+
 // 资格门批 = 每家一次 LLM 结构化调用。实测 gemini-2.5-pro 单家 10-30s（含 schema 修复重试可更长）
 // → 批默认 20 家 × 30s ≈ 10 分钟，配 30 分钟上界（40×20s 曾逼近 15 分钟超时线，会整批重试）。
 const fitActs = proxyActivities<BacklogActivities>({
@@ -97,6 +118,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         }
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 资格门阶段失败（网关不可用等），不阻断后续', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -112,6 +134,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -127,6 +150,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -141,6 +165,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -156,6 +181,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 
@@ -171,6 +197,7 @@ export async function backlogSweepWorkflow(input?: BacklogSweepInput): Promise<B
         if (!cursor) break;
       }
     } catch (err) {
+      if (isBacklogAuthorityHold(err)) throw err;
       log.warn('[backlogSweep] 阶段 fail-safe 跳过（不阻断后续阶段）', { workspaceId: t.workspaceId, icpId: t.icpId, err });
     }
 

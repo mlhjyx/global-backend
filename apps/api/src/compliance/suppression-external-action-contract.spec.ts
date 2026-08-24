@@ -42,7 +42,7 @@ describe('suppression external-action and PII projection topology', () => {
     }
   });
 
-  it('manual and backlog email guessing pass a per-candidate authorization callback', () => {
+  it('manual email guessing authorizes each candidate while backlog is parked before any candidate', () => {
     const service = read('apps/api/src/discovery/discovery.service.ts');
     const manual = service.slice(service.indexOf('async guessEmailsForCompany'), service.indexOf('async verifyContactPoint'));
     const backlogSource = read('apps/api/src/temporal/backlog.activities.ts');
@@ -51,7 +51,8 @@ describe('suppression external-action and PII projection topology', () => {
       backlogSource.indexOf('export type BacklogActivities'),
     );
     expect(manual).toContain('authorizeCandidate:');
-    expect(backlog).toContain('authorizeCandidate:');
+    expect(backlog).toContain('return authorityHold()');
+    expect(backlog).not.toContain('authorizeCandidate:');
   });
 
   it('multi-wire source adapters recheck authorization inside pagination, retry, and fallback loops', () => {

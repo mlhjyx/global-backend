@@ -169,7 +169,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(queries.map(({ receiver }) => receiver)).toEqual([tx, tx]);
     expect(queries[0]?.query.strings?.join('')).toContain('consume_workspace_execution_authority');
-    expect(queries[1]?.query.strings?.join('')).toContain('open_authorized_tool_budget_v1');
+    expect(queries[1]?.query.strings?.join('')).toContain('open_tool_budget');
     expect(queries[1]?.query.values).toEqual([WORKSPACE_ID, AUTHORITY_ID, ACCOUNT_KEY, true]);
     expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(COMPACT_JWS);
   });
@@ -199,7 +199,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
       'consume_workspace_execution_authority',
     );
     expect(query.strings?.join('')).not.toContain(
-      'open_authorized_tool_budget_v1',
+      'open_tool_budget',
     );
   });
 

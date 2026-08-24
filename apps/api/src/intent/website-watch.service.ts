@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MISS_THRESHOLD, computeNextFetchAt } from '../acquisition/monitored-source.lifecycle';
 import { PageFetcher } from './page-fetcher';
-import { BudgetExceededError } from '../tools/budget';
+import { BudgetExceededError } from '../tools/budget-store';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { classifyPageKind, extractPageSignals, signalHash, diffPageSignals, PageKind, PageSignals } from './page-signals';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';

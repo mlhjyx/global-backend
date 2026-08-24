@@ -5,7 +5,8 @@ import { ModelRouter } from '../../model-gateway/model-router';
 import { RouterModelGateway } from '../../model-gateway/router-model-gateway';
 import type { AiContext, GenerateStructuredInput, ModelResult } from '../../model-gateway/types';
 import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
-import { BudgetLedger } from '../../tools/budget';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
+import type { BudgetStore } from '../../tools/budget-store';
 import { PaidOperationUnknownError } from '../site-build-cost-ledger';
 import { AiTaskError, runAiTask, SiteBuilderTaskDefinition } from './ai-task';
 import type { TaskRoute } from './task-routes';
@@ -287,7 +288,7 @@ describe('runAiTask — 回退链与显式失败', () => {
     const gateway = new RouterModelGateway(router);
     const testBudget = new BudgetLedger();
     testBudget.open(CTX.runId, 10_000);
-    gateway.budget = testBudget;
+    gateway.budgetStore = new InMemoryBudgetStoreAdapter(testBudget) as unknown as BudgetStore;
 
     const out = await runAiTask(guardedDef, { name: 'Acme' }, {
       gateway,

@@ -4,9 +4,7 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
-import { createHash } from 'node:crypto';
-import { BudgetExceededError, runBudgetCents } from '../tools/budget';
-import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
+import { BudgetExceededError, type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -439,45 +437,30 @@ export class TaxonomyResolver {
     executionBudget?: ExecutionBudgetBinding,
   ) {
     const budgets = this.budgetStore ?? new UnavailableBudgetStore('TaxonomyResolver requires an authoritative BudgetStore');
-    if (executionBudget) {
-      const binding = parseExecutionBudgetBinding(executionBudget, {
-        scopeKey: workspaceId,
-      });
-      if (runId !== binding.accountKey) {
-        throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
-      }
-      await budgets.attestAuthorized({
-        authorityId: binding.authorityId,
-        scopeKey: binding.scopeKey,
-        accountKey: binding.accountKey,
-      });
-      return executeStructuredTaskWithRuntime<Output>(
-        this.gateway,
-        input,
-        {
-          workspaceId: binding.scopeKey,
-          runId: binding.accountKey,
-          durableResultSchema: 'taxonomy-code/v1',
-        },
-        { telemetry: this.runtimeTelemetry },
-      );
+    if (!executionBudget) {
+      throw new Error('EXECUTION_BUDGET_BINDING_REQUIRED');
     }
-    const accountKey = runId ?? `taxonomy:${createHash('sha256').update(`${input.task}:${input.prompt}`).digest('hex').slice(0, 32)}`;
-    await budgets.open({ workspaceId, accountKey, capCents: runBudgetCents(), replayScope: true });
-    try {
-      return await executeStructuredTaskWithRuntime<Output>(
-        this.gateway,
-        input,
-        {
-          workspaceId,
-          runId: accountKey,
-          durableResultSchema: 'taxonomy-code/v1',
-        },
-        { telemetry: this.runtimeTelemetry },
-      );
-    } finally {
-      await budgets.close({ workspaceId, accountKey });
+    const binding = parseExecutionBudgetBinding(executionBudget, {
+      scopeKey: workspaceId,
+    });
+    if (runId !== binding.accountKey) {
+      throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
     }
+    await budgets.attestAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+    });
+    return executeStructuredTaskWithRuntime<Output>(
+      this.gateway,
+      input,
+      {
+        workspaceId: binding.scopeKey,
+        runId: binding.accountKey,
+        durableResultSchema: 'taxonomy-code/v1',
+      },
+      { telemetry: this.runtimeTelemetry },
+    );
   }
 
   private async persistTermAlias(

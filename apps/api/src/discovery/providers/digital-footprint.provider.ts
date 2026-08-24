@@ -10,6 +10,7 @@ import {
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import { isAllowedByRobots } from '../../adapters/robots';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'digital-footprint/v1';
 
@@ -48,7 +49,10 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
     const toolCtx: ToolContext = { ...ctx };
     const page = await this.deps.broker
       .invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>('crawl4ai.render', { url: base }, toolCtx)
-      .catch(() => null);
+      .catch((error) => {
+        if (isExecutionControlError(error)) throw error;
+        return null;
+      });
     if (!page || page.data.robotsBlocked) return miss();
     const { html, headers } = page.data;
     if (html.length < 200) return miss();

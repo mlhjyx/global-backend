@@ -236,12 +236,12 @@ describe("artifact expected-facts persistence", () => {
             queries.push(query);
             return [
               {
-                charged_cents: 17n,
-                observed_cents: 13n,
+                charged_microusd: 170_000n,
+                observed_microusd: 130_000n,
                 cap_variance: false,
                 status: "SETTLED",
                 replay: false,
-                reserved_cents: 17n,
+                reserved_microusd: 170_000n,
                 operation_id: OPERATION_ID,
                 operation_key: "artifact-operation",
                 account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
@@ -264,11 +264,11 @@ describe("artifact expected-facts persistence", () => {
       workspaceId: WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: OPERATION_ID,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     } satisfies BudgetReservation;
 
-    await budgetStore.settleArtifactManifest(reservation, 13, {
+    await budgetStore.settleArtifactManifest(reservation, 130_000n, {
       manifest,
       expectedFacts: EXPECTED_FACTS,
     }, RECEIPT_FACTS, {
@@ -278,9 +278,9 @@ describe("artifact expected-facts persistence", () => {
     });
 
     expect(queries[0]?.strings.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_with_receipt_v1",
+      "settle_tool_budget_artifact_manifest_with_receipt_v2",
     );
-    expect(queries[0]?.values.slice(-8)).toEqual([
+    expect(queries[0]?.values.slice(-10)).toEqual([
       200,
       true,
       "https://example.com/final",
@@ -289,6 +289,8 @@ describe("artifact expected-facts persistence", () => {
       null,
       JSON.stringify(RECEIPT_FACTS.usage),
       RECEIPT_FACTS.costBasis,
+      null,
+      null,
     ]);
     expect(queries[0]?.values[3]).toBe(JSON.stringify(manifest));
     expect(queries[0]?.values[3]).not.toContain("expectedFacts");

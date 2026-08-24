@@ -290,14 +290,14 @@ function validateTopLevel(manifest, path, issues) {
   const allowed = [
     'schemaVersion', 'cutoverFence', 'physicalExecutionWiring', 'receipt',
     'resultDisposition', 'tools', 'modelTasks', 'artifactSchemas',
-    'managedExternalAdapters',
+    'managedExternalAdapters', 'artifactPhysicalExecution',
   ];
   if (!closedKeys(manifest, allowed, issues, path, 'EXECUTION_AUTHORITY_MANIFEST_INVALID')) return;
   if (manifest.schemaVersion !== 'execution-authority-policy/v2') {
     issues.push(issue('EXECUTION_AUTHORITY_MANIFEST_INVALID', path, 'schemaVersion must be execution-authority-policy/v2'));
   }
-  if (manifest.cutoverFence !== 'TASK_6_AUTHORITY_BOUND_PHYSICAL_EXECUTION_NOT_WIRED') {
-    issues.push(issue('EXECUTION_AUTHORITY_CUTOVER_FENCE_INVALID', path, 'Task 6 physical cutover fence is mandatory'));
+  if (manifest.cutoverFence !== 'TASK_6_AUTHORITY_BOUND_TYPED_EXECUTION_ARTIFACT_HOLD') {
+    issues.push(issue('EXECUTION_AUTHORITY_CUTOVER_FENCE_INVALID', path, 'Task 6 typed cutover must retain the explicit artifact subject-binding hold'));
   }
   for (const key of ['tools', 'modelTasks', 'artifactSchemas', 'managedExternalAdapters']) {
     if (!Array.isArray(manifest[key])) issues.push(issue('EXECUTION_AUTHORITY_MANIFEST_INVALID', path, `${key} must be an array`));
@@ -313,8 +313,8 @@ function validateReceipt(manifest, path, issues) {
   if (!closedKeys(receipt, allowed, issues, path, 'EXECUTION_AUTHORITY_RECEIPT_CONTRACT_INVALID')) return;
   if (
     receipt.schema !== 'durable-execution-receipt/v1' ||
-    receipt.author !== 'TRUSTED_LEDGER_REQUIRED_AT_TASK_6_CUTOVER' ||
-    receipt.attachedAtRuntime !== false ||
+    receipt.author !== 'trusted-ledger' ||
+    receipt.attachedAtRuntime !== true ||
     !exactArray(receipt.fields, RECEIPT_FIELDS) ||
     !exactArray(receipt.allowedStatus, ['SETTLED']) ||
     receipt.tokenCountsOnly !== true ||
@@ -351,8 +351,11 @@ function validateDomainAck(entry, path, issues, producerId) {
     return;
   }
   const bounded = (value) => typeof value === 'string' && value.length > 0 && value.length <= 200;
+  const expectedMode = entry.resultStrategy === 'artifact_reference'
+    ? 'SUBJECT_BINDING_HOLD'
+    : 'AUTHORITY_BOUND_ACK_REPOSITORY';
   if (
-    ack.mode !== 'CONTRACT_DECLARED_NOT_WIRED' ||
+    ack.mode !== expectedMode ||
     !bounded(ack.consumer) || !bounded(ack.domainAggregateType) ||
     !bounded(ack.identitySource) || typeof ack.subjectRefRequired !== 'boolean' ||
     typeof ack.personalDataDsrCompatible !== 'boolean'
@@ -362,6 +365,29 @@ function validateDomainAck(entry, path, issues, producerId) {
     personal &&
     (ack.subjectRefRequired !== true || ack.personalDataDsrCompatible !== true)
   ) issues.push(issue('EXECUTION_AUTHORITY_PERSONAL_DATA_ACK_INVALID', path, `PERSONAL_DATA ACK requires hashed subject/DSR compatibility ${producerId}`, producerId));
+}
+
+function validateArtifactPhysicalExecution(manifest, path, issues) {
+  const value = manifest.artifactPhysicalExecution;
+  if (
+    !closedKeys(
+      value,
+      ['status', 'schemas', 'deniedBeforeWire', 'inlineFallbackAllowed'],
+      issues,
+      path,
+      'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID',
+    ) ||
+    value.status !== 'SUBJECT_BINDING_HOLD' ||
+    !sameSet(value.schemas, Object.keys(ARTIFACT_CONTRACTS)) ||
+    value.deniedBeforeWire !== true ||
+    value.inlineFallbackAllowed !== false
+  ) {
+    issues.push(issue(
+      'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID',
+      path,
+      'artifact physical execution must remain denied before wire until a truthful subject binding exists',
+    ));
+  }
 }
 
 function validateTools(manifest, path, issues) {
@@ -391,7 +417,7 @@ function validateTools(manifest, path, issues) {
       if (
         !isRecord(result) || result.maxRowsPerOperation !== 25 ||
         result.maxApplicantsPerPatent !== 32 || result.maxInventorsPerPatent !== 25 ||
-        result.typedProjectionMaxPatents !== 2000 || result.rawBigQueryRowsRetained !== false ||
+        result.typedProjectionMaxPatents !== 50 || result.rawBigQueryRowsRetained !== false ||
         !exactArray(result.inventorFields, ['name']) ||
         !sameSet(Object.keys(result), [
           'maxRowsPerOperation', 'maxApplicantsPerPatent',
@@ -402,8 +428,8 @@ function validateTools(manifest, path, issues) {
       if (
         !isRecord(cost) || cost.configuredDefaultMaximumBytesBilled !== '214748364800' ||
         cost.requiredMaximumBytesBilledAtCutover !== '214748364800' ||
-        cost.runtimeHardMaximumBytesBilled !== null ||
-        cost.runtimeOverrideStatus !== 'UNBOUNDED_PRE_CUTOVER' ||
+        cost.runtimeHardMaximumBytesBilled !== '214748364800' ||
+        cost.runtimeOverrideStatus !== 'HARD_CAPPED' ||
         cost.costBasis !== 'estimated_upper_bound' ||
         cost.providerReportedBytesOptional !== true || cost.realBigQueryInTests !== false ||
         !sameSet(Object.keys(cost), [
@@ -464,9 +490,9 @@ async function validateProtectedFiles(repoRoot, manifest, path, issues) {
   const wiring = manifest.physicalExecutionWiring;
   if (
     !closedKeys(wiring, ['status', 'protectedFiles'], issues, path, 'EXECUTION_AUTHORITY_WIRING_FENCE_INVALID') ||
-    wiring.status !== 'NOT_WIRED' || !Array.isArray(wiring.protectedFiles)
+    wiring.status !== 'PARTIAL_HOLD' || !Array.isArray(wiring.protectedFiles)
   ) {
-    issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'physical execution wiring must remain NOT_WIRED'));
+    issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'physical execution wiring must preserve the typed-wired/artifact-held boundary'));
     return;
   }
   const protectedPaths = wiring.protectedFiles.map((entry) => entry?.path).filter(Boolean);
@@ -686,10 +712,10 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const patentRequired = [
     [patentScanner, 'const MAX_PATENTS_PER_ANCHOR = 25'],
     [patentScanner, '"google_patents.search"'],
-    [patentAdapter, 'const DEFAULT_MAX_GB = 200'],
-    [patentAdapter, 'this.deps.maxGb ??'],
+    [patentAdapter, "GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED = '214748364800'"],
+    [patentAdapter, 'return GOOGLE_PATENTS_MAXIMUM_BYTES_BILLED'],
     [patentAdapter, 'MAX_APPLICANTS_PER_PATENT = 32'],
-    [patentProjectionSpec, "'$.data.patents.maxItems': 2000"],
+    [patentProjectionSpec, "'$.data.patents.maxItems': 50"],
     [patentProjectionSpec, "'$.data.patents[].inventors.maxItems': 25"],
   ];
   if (patentRequired.some(([text, token]) => !text.includes(token))) {
@@ -709,6 +735,48 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     const analysis = analyzeTypeScript(path, await readText(repoRoot, path));
     if (analysis.importsGoogleBigQuery || analysis.constructsBigQuery) {
       issues.push(issue('EXECUTION_AUTHORITY_DIRECT_BIGQUERY_BYPASS', path, 'BigQuery physical access is allowed only inside the google_patents.search Tool adapter', 'google_patents.search'));
+    }
+  }
+  const cutoverMigrationPath =
+    'packages/db/prisma/migrations/20260824120000_execution_budget_authority_cutover/migration.sql';
+  const cutoverMigration = existsSync(resolve(repoRoot, cutoverMigrationPath))
+    ? await readText(repoRoot, cutoverMigrationPath)
+    : '';
+  for (const token of [
+    'TOOL_BUDGET_ACTIVE_UNAUTHORIZED_ACCOUNTS',
+    'tool_budget_account_authority_cutover_check',
+    'CREATE FUNCTION open_tool_budget(',
+    'CREATE FUNCTION reserve_tool_budget(',
+    'CREATE FUNCTION settle_tool_budget(',
+    'CREATE FUNCTION settle_tool_budget_artifact_manifest_with_receipt_v2(',
+    'CREATE FUNCTION mark_tool_budget_result_unknown_v5(',
+    'CREATE FUNCTION load_tool_budget_result_unknown_artifact_v5(',
+    'mark_tool_budget_result_unknown_v4(TEXT,UUID,JSONB,SMALLINT,BOOLEAN,TEXT,TEXT,TEXT,BOOLEAN,TEXT,UUID)',
+  ]) {
+    if (!cutoverMigration.includes(token)) {
+      issues.push(issue('EXECUTION_AUTHORITY_CUTOVER_MIGRATION_INVALID', cutoverMigrationPath, `cutover migration missing ${token}`));
+    }
+  }
+  const bannedProductTokens = [
+    'RUN_BUDGET_CENTS', 'SWEEP_BUDGET_CENTS', 'runBudgetCents',
+    'sweepBudgetCents', 'budgetCapCents', 'capCents', '.openAuthorized(',
+    'InMemoryBudgetStoreAdapter', 'BudgetLedger',
+  ];
+  for (const path of genericSources) {
+    const content = await readText(repoRoot, path);
+    for (const token of bannedProductTokens) {
+      if (content.includes(token)) {
+        issues.push(issue('EXECUTION_AUTHORITY_LEGACY_PRODUCT_PATH', path, `legacy product token ${token}`));
+      }
+    }
+  }
+  const budgetStoreSource = await readText(repoRoot, 'apps/api/src/tools/budget-store.ts');
+  for (const token of [
+    'openAuthorized(', 'reserveMicrousd(', 'settleMicrousd(',
+    'releaseMicrousd(', 'statusMicrousd(', 'closeMicrousd(',
+  ]) {
+    if (budgetStoreSource.includes(token)) {
+      issues.push(issue('EXECUTION_AUTHORITY_LEGACY_BUDGET_API', 'apps/api/src/tools/budget-store.ts', `legacy budget API ${token}`));
     }
   }
   return Object.freeze({
@@ -765,6 +833,7 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   validateTools(manifest, manifestPath, issues);
   validateModelTasks(manifest, manifestPath, issues);
   validateArtifacts(manifest, manifestPath, issues);
+  validateArtifactPhysicalExecution(manifest, manifestPath, issues);
   validateManagedAdapters(manifest, manifestPath, issues);
   await validateProtectedFiles(repoRoot, manifest, manifestPath, issues);
   const callsites = await scanCurrentSources(repoRoot, manifest, issues);

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BudgetLedger } from "../../tools/budget";
+import { InMemoryBudgetStoreAdapter } from "@global/test-support";
 import { RateLimiter } from "../../tools/rate-limiter";
 import { ToolBroker, ToolPolicyDenied } from "../../tools/tool-broker";
 import { ToolRegistry } from "../../tools/tool-registry";
@@ -41,7 +41,7 @@ function broker(fetchImpl: typeof fetch, registered = true) {
   registry.register(createCopySonnetRecoveryOpenOxPricingTool({ fetch: fetchImpl }));
   return new ToolBroker({
     registry,
-    budget: new BudgetLedger(),
+    budgetStore: new InMemoryBudgetStoreAdapter() as never,
     limiter: new RateLimiter(),
     sourcePolicyReader: async (domain) =>
       registered && domain === "openox.tech"

@@ -415,7 +415,7 @@ export class ExecutionBudgetAuthorityRepository {
         );
       }
       const opened = await tx.$queryRaw<AuthorizedOpenRow[]>(
-        Prisma.sql`SELECT * FROM open_authorized_tool_budget_v1(
+        Prisma.sql`SELECT * FROM open_tool_budget(
           ${authority.workspaceId}, ${consumption.authorityId}::uuid,
           ${accountKey}, ${true}
         )`,

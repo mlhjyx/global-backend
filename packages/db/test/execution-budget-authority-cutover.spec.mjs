@@ -91,6 +91,10 @@ function asApp(sql, workspace = workspaceId) {
   `;
 }
 
+function asPlatform(sql) {
+  return `SET SESSION AUTHORIZATION task6_platform_writer; BEGIN; ${sql} COMMIT;`;
+}
+
 function seedWorkspaceAndAuthority(database) {
   psql(database, `
     INSERT INTO workspace(id,name,created_at,updated_at)
@@ -104,7 +108,7 @@ function seedWorkspaceAndAuthority(database) {
       '${authorityId}'::uuid,'${workspaceId}','WORKSPACE_GRANT','${workspaceId}'::uuid,
       'https://task6.test','global-backend:execution-budget','${randomUUID()}'::uuid,
       repeat('a',64),'execution-budget-grant/v1','icp.design','company','company:task6',
-      repeat('b',64),NULL,'USD','microusd',10000,NULL,NULL,NULL,1,
+      repeat('b',64),NULL,'USD','microusd',10000,NULL,NULL,NULL,0,
       now()-interval '30 seconds',now()-interval '20 seconds',now()+interval '4 minutes',now()
     );
   `);
@@ -178,12 +182,19 @@ describe('Task 6 authority-only PostgreSQL cutover', () => {
     const procedures = psql('task6_fresh', `SELECT concat_ws('|',
       to_regprocedure('open_tool_budget(text,uuid,text,boolean)') IS NOT NULL,
       to_regprocedure('open_tool_budget(text,text,bigint,boolean)') IS NULL,
-      to_regprocedure('open_authorized_tool_budget_v1(text,uuid,text,boolean)') IS NULL,
-      to_regprocedure('reserve_tool_budget_microusd_v1(text,text,text,bigint)') IS NULL,
-      to_regprocedure('settle_tool_budget_microusd_v1(text,uuid,bigint,text,text,text,jsonb)') IS NULL,
-      to_regprocedure('release_tool_budget_microusd_v1(text,uuid)') IS NULL
+      NOT has_function_privilege('app_user','open_authorized_tool_budget_v1(text,uuid,text,boolean)','EXECUTE'),
+      NOT has_function_privilege('app_user','reserve_tool_budget_microusd_v1(text,text,text,bigint)','EXECUTE'),
+      NOT has_function_privilege('app_user','settle_tool_budget_microusd_v1(text,uuid,bigint,text,text,text,jsonb)','EXECUTE'),
+      NOT has_function_privilege('app_user','release_tool_budget_microusd_v1(text,uuid)','EXECUTE'),
+      NOT has_function_privilege('app_user','mark_tool_budget_result_unknown_v4(text,uuid,jsonb,smallint,boolean,text,text,text,boolean,text,uuid)','EXECUTE'),
+      NOT has_function_privilege('app_user','load_tool_budget_result_unknown_artifact_v4(text,uuid,uuid,text,uuid)','EXECUTE'),
+      NOT has_function_privilege('app_user','settle_tool_budget_artifact_manifest_v4(text,uuid,bigint,jsonb,smallint,boolean,text,text,text,boolean,text,uuid)','EXECUTE'),
+      NOT has_function_privilege('execution_budget_platform_writer','mark_tool_budget_result_unknown_v4(text,uuid,jsonb,smallint,boolean,text,text,text,boolean,text,uuid)','EXECUTE'),
+      NOT has_function_privilege('execution_budget_platform_writer','load_tool_budget_result_unknown_artifact_v4(text,uuid,uuid,text,uuid)','EXECUTE'),
+      NOT has_function_privilege('execution_budget_platform_writer','settle_tool_budget_artifact_manifest_v4(text,uuid,bigint,jsonb,smallint,boolean,text,text,text,boolean,text,uuid)','EXECUTE'),
+      has_function_privilege('app_user','load_tool_budget_result_unknown_artifact_v5(text,uuid,uuid,text,uuid)','EXECUTE')
     );`);
-    assert.equal(procedures, 't|t|t|t|t|t');
+    assert.equal(procedures, 't|t|t|t|t|t|t|t|t|t|t|t|t');
 
     const opened = psql('task6_fresh', asApp(`
       SELECT authority_id::text || '|' || authorized_cap_microusd::text
@@ -203,7 +214,39 @@ describe('Task 6 authority-only PostgreSQL cutover', () => {
       SELECT (reserved_microusd + charged_microusd <= authorized_cap_microusd)::text
       FROM tool_budget_account WHERE account_key='fresh-account';
     `);
-    assert.equal(invariant, 't');
+    assert.equal(invariant, 'true');
+
+    const operationId = psql('task6_fresh', `
+      SELECT operation."id"::text
+      FROM tool_budget_operation operation
+      JOIN tool_budget_account account ON account.id=operation.account_id
+      WHERE account.account_key='fresh-account'
+        AND operation.operation_key='operation-0';
+    `);
+    const reserveAndSettle = await Promise.all(Array.from(
+      { length: 20 },
+      (_, index) => index % 2 === 0
+        ? psqlAsync('task6_fresh', asApp(`
+            SELECT kind FROM reserve_tool_budget(
+              '${workspaceId}','fresh-account','operation-0',1000
+            );
+          `))
+        : psqlAsync('task6_fresh', asApp(`
+            SELECT status FROM settle_tool_budget(
+              '${workspaceId}','${operationId}'::uuid,900,
+              NULL,NULL,NULL,NULL,NULL,NULL
+            );
+          `)),
+    ));
+    assert.equal(reserveAndSettle.length, 20);
+    assert.equal(reserveAndSettle.every((value) => !/deadlock detected/i.test(value)), true);
+    assert.throws(() => psql('task6_fresh', asApp(`
+      SELECT * FROM mark_tool_budget_result_unknown_v4(
+        '${workspaceId}','${operationId}'::uuid,NULL::jsonb,
+        NULL::smallint,NULL::boolean,NULL::text,NULL::text,NULL::text,
+        NULL::boolean,NULL::text,NULL::uuid
+      );
+    `)), /permission denied for function mark_tool_budget_result_unknown_v4/);
   });
 
   it('upgrades nonempty authority data while preserving historical terminal rows read-only', async () => {
@@ -221,7 +264,7 @@ describe('Task 6 authority-only PostgreSQL cutover', () => {
       SELECT concat_ws('|',account_key,cap_cents,charged_cents,closed_at IS NOT NULL)
       FROM tool_budget_account WHERE account_key='historical-terminal';
     `);
-    assert.equal(preserved, 'historical-terminal|7|7|true');
+    assert.equal(preserved, 'historical-terminal|7|7|t');
     psql('task6_upgrade', asApp(`
       SELECT * FROM reserve_tool_budget(
         '${workspaceId}','historical-terminal','forbidden-history-reopen',1
@@ -233,6 +276,63 @@ describe('Task 6 authority-only PostgreSQL cutover', () => {
       FROM tool_budget_account WHERE account_key='upgrade-authority';
     `);
     assert.equal(active, `${authorityId}|10000|0`);
+  });
+
+  it('lets only the bounded platform writer complete the final microusd lifecycle', async () => {
+    const platformAuthorityId = '62000000-0000-4000-8000-000000000002';
+    psql('task6_fresh', `
+      CREATE ROLE task6_platform_writer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+        NOREPLICATION NOBYPASSRLS INHERIT;
+      GRANT execution_budget_platform_writer TO task6_platform_writer;
+      INSERT INTO execution_budget_authority(
+        id,scope_key,authority_kind,workspace_id,issuer,audience,jti,token_sha256,
+        schema_version,purpose,subject_type,subject_id,request_sha256,schedule_id,
+        currency,unit,cap_microusd,cap_per_run_microusd,campaign_cap_microusd,
+        max_runs,runs_consumed,issued_at,not_before,expires_at,consumed_at
+      ) VALUES (
+        '${platformAuthorityId}'::uuid,'platform','PLATFORM_GRANT',NULL,
+        'https://task6.test','global-backend:execution-budget','${randomUUID()}'::uuid,
+        repeat('c',64),'execution-budget-grant/v1','platform.acquisition',
+        'schedule','task6-platform',NULL,'task6-platform','USD','microusd',NULL,
+        10000,100000,10,0,now()-interval '30 seconds',now()-interval '20 seconds',
+        now()+interval '4 minutes',NULL
+      );
+    `);
+    psql('task6_fresh', asPlatform(`
+      SELECT * FROM open_tool_budget(
+        'platform','${platformAuthorityId}'::uuid,'platform-account',false
+      );
+    `));
+    const execute = JSON.parse(psql('task6_fresh', asPlatform(`
+      SELECT row_to_json(result)::text FROM reserve_tool_budget(
+        'platform','platform-account','platform-settle',1000
+      ) result;
+    `)).split('\n').find((line) => line.startsWith('{')));
+    assert.equal(execute.kind, 'EXECUTE');
+    const settled = psql('task6_fresh', asPlatform(`
+      SELECT charged_microusd::text || '|' || status
+      FROM settle_tool_budget(
+        'platform','${execute.operation_id}'::uuid,750,
+        NULL,NULL,NULL,NULL,NULL,NULL
+      );
+    `));
+    assert.match(settled, /750\|SETTLED/);
+    const releasedReservation = JSON.parse(psql('task6_fresh', asPlatform(`
+      SELECT row_to_json(result)::text FROM reserve_tool_budget(
+        'platform','platform-account','platform-release',1000
+      ) result;
+    `)).split('\n').find((line) => line.startsWith('{')));
+    const released = psql('task6_fresh', asPlatform(`
+      SELECT status FROM release_tool_budget(
+        'platform','${releasedReservation.operation_id}'::uuid
+      );
+    `));
+    assert.match(released, /RELEASED/);
+    assert.equal(psql('task6_fresh', asPlatform(`
+      SELECT remaining_microusd::text FROM tool_budget_status(
+        'platform','platform-account'
+      );
+    `)).split('\n').find((line) => /^\d+$/.test(line)), '9250');
   });
 
   it('rolls the migration transaction back when an active unauthorized account exists', async () => {

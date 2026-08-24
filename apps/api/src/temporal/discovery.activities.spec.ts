@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDiscoveryActivities } from './discovery.activities';
 import { resolveRunStatus } from './discovery.run-status';
-import { BudgetExceededError, BudgetLedger } from '../tools/budget';
+import { BudgetLedger, InMemoryBudgetStoreAdapter, TestBudgetExceededError as BudgetExceededError } from '@global/test-support';
 import {
   BudgetOperationReplayError,
   BudgetUnsettledOperationsError,
-  InMemoryBudgetStoreAdapter,
   type BudgetStore,
 } from '../tools/budget-store';
 

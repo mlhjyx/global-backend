@@ -26,7 +26,6 @@ describe('Task 6 execution authority cutover', () => {
 
     expect(source).not.toContain('openAuthorized(');
     expect(source).not.toContain('capCents');
-    expect(source).not.toContain('BudgetReservationRequest');
     expect(source).not.toContain('BudgetMicrousdReservationRequest');
     expect(source).not.toContain('reserveMicrousd(');
     expect(source).not.toContain('settleMicrousd(');
@@ -71,8 +70,16 @@ describe('Task 6 execution authority cutover', () => {
     const policy = JSON.parse(manifest) as {
       cutoverFence?: string;
       physicalExecutionWiring?: { status?: string };
+      artifactPhysicalExecution?: {
+        status?: string;
+        deniedBeforeWire?: boolean;
+        inlineFallbackAllowed?: boolean;
+      };
       receipt?: { author?: string; attachedAtRuntime?: boolean };
-      tools?: Array<{ domainAck?: { mode?: string } }>;
+      tools?: Array<{
+        resultStrategy?: string;
+        domainAck?: { mode?: string };
+      }>;
       modelTasks?: Array<{ domainAck?: { mode?: string } }>;
     };
 
@@ -82,12 +89,22 @@ describe('Task 6 execution authority cutover', () => {
     expect(artifactService).toContain('artifactExecutionReceiptFacts');
     expect(artifactService).toContain('domainAck');
     expect(artifactService).toContain('subjectRef');
-    expect(policy.cutoverFence).toBe('TASK_6_AUTHORITY_BOUND_PHYSICAL_EXECUTION_WIRED');
-    expect(policy.physicalExecutionWiring?.status).toBe('WIRED');
+    expect(broker).toContain('GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD');
+    expect(policy.cutoverFence).toBe('TASK_6_AUTHORITY_BOUND_TYPED_EXECUTION_ARTIFACT_HOLD');
+    expect(policy.physicalExecutionWiring?.status).toBe('PARTIAL_HOLD');
+    expect(policy.artifactPhysicalExecution).toMatchObject({
+      status: 'SUBJECT_BINDING_HOLD',
+      deniedBeforeWire: true,
+      inlineFallbackAllowed: false,
+    });
     expect(policy.receipt).toMatchObject({ author: 'trusted-ledger', attachedAtRuntime: true });
-    expect([
-      ...(policy.tools ?? []),
-      ...(policy.modelTasks ?? []),
-    ].every((entry) => entry.domainAck?.mode === 'AUTHORITY_BOUND_ACK_REPOSITORY')).toBe(true);
+    expect((policy.tools ?? []).every((entry) => entry.domainAck?.mode === (
+      entry.resultStrategy === 'artifact_reference'
+        ? 'SUBJECT_BINDING_HOLD'
+        : 'AUTHORITY_BOUND_ACK_REPOSITORY'
+    ))).toBe(true);
+    expect((policy.modelTasks ?? []).every(
+      (entry) => entry.domainAck?.mode === 'AUTHORITY_BOUND_ACK_REPOSITORY',
+    )).toBe(true);
   });
 });

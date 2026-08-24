@@ -6,13 +6,11 @@ import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-
 import {
   BudgetAccountUnavailableError,
   BudgetExceededError,
-  BudgetMicrousdExceededError,
   BudgetUnsettledOperationsError,
-  InMemoryBudgetStoreAdapter,
   PostgresBudgetStore,
   UnavailableBudgetStore,
 } from './budget-store';
-import { BudgetLedger } from './budget';
+import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
 import {
   GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
   type GenericOperationArtifactManifest,
@@ -119,14 +117,14 @@ describe('PostgresBudgetStore', () => {
       } as unknown as PrismaService;
       const store = new PostgresBudgetStore(prisma);
 
-      await expect(store.reserveMicrousd({
+      await expect(store.reserve({
         workspaceId: TEST_WORKSPACE_ID,
         accountKey: 'legacy-unbound',
         operationKey: `boundary:${estimatedMicrousd}`,
         estimatedMicrousd,
       })).resolves.toMatchObject({ estimatedMicrousd });
       expect(queries[0]?.strings?.join('')).toContain(
-        'reserve_tool_budget_microusd_with_receipt_v1',
+        'reserve_tool_budget',
       );
       expect(queries[0]?.values).toContain(estimatedMicrousd);
     },
@@ -135,7 +133,7 @@ describe('PostgresBudgetStore', () => {
   it('rejects microusd overflow before persistence', async () => {
     const prisma = fakePrisma([]);
     const store = new PostgresBudgetStore(prisma);
-    await expect(store.reserveMicrousd({
+    await expect(store.reserve({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'legacy-unbound',
       operationKey: 'overflow',
@@ -159,7 +157,7 @@ describe('PostgresBudgetStore', () => {
           replay: false,
         },
       ]]));
-      await expect(store.settleMicrousd({
+      await expect(store.settle({
         workspaceId: TEST_WORKSPACE_ID,
         accountKey: 'legacy-unbound',
         operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
@@ -182,9 +180,9 @@ describe('PostgresBudgetStore', () => {
     });
     const store = new PostgresBudgetStore(fakePrisma([[
       {
-        charged_cents: 1n,
-        observed_cents: 1n,
-        reserved_cents: 3n,
+        charged_microusd: BigInt(1) * 10_000n,
+        observed_microusd: BigInt(1) * 10_000n,
+        reserved_microusd: BigInt(3) * 10_000n,
         cap_variance: false,
         status: 'SETTLED',
         replay: false,
@@ -211,11 +209,11 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
-      estimatedCents: 3,
+      estimatedMicrousd: BigInt(3) * 10_000n,
       replay: false,
-    }, 1, projection, PROVIDER_REPORTED_FACTS)).resolves.toMatchObject({
-      chargedCents: 1,
-      observedCents: 1,
+    }, BigInt(1) * 10_000n, projection, PROVIDER_REPORTED_FACTS)).resolves.toMatchObject({
+      chargedMicrousd: BigInt(1) * 10_000n,
+      observedMicrousd: BigInt(1) * 10_000n,
       receipt: {
         scopeKey: TEST_WORKSPACE_ID,
         authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
@@ -243,9 +241,9 @@ describe('PostgresBudgetStore', () => {
     });
     const store = new PostgresBudgetStore(fakePrisma([[
       {
-        charged_cents: 2n,
-        observed_cents: 2n,
-        reserved_cents: 9n,
+        charged_microusd: BigInt(2) * 10_000n,
+        observed_microusd: BigInt(2) * 10_000n,
+        reserved_microusd: BigInt(9) * 10_000n,
         cap_variance: false,
         status: 'SETTLED',
         replay: false,
@@ -264,9 +262,9 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
-      estimatedCents: 9,
+      estimatedMicrousd: BigInt(9) * 10_000n,
       replay: false,
-    }, 2, projection)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
+    }, BigInt(2) * 10_000n, projection)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED');
   });
 
   it('rejects cents receipt reconstruction when the locked row omits or drifts from caller projection facts', async () => {
@@ -276,9 +274,9 @@ describe('PostgresBudgetStore', () => {
       data: { result: { data: { code: 'CPV-123' }, provider: 'new-api', model: 'gpt' } },
     });
     const common = {
-      charged_cents: 1n,
-      observed_cents: 1n,
-      reserved_cents: 3n,
+      charged_microusd: BigInt(1) * 10_000n,
+      observed_microusd: BigInt(1) * 10_000n,
+      reserved_microusd: BigInt(3) * 10_000n,
       cap_variance: false,
       status: 'SETTLED',
       replay: false,
@@ -293,7 +291,7 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: common.operation_id,
-      estimatedCents: 3,
+      estimatedMicrousd: BigInt(3) * 10_000n,
       replay: false,
     };
 
@@ -301,7 +299,7 @@ describe('PostgresBudgetStore', () => {
       common,
     ]])).settle(
       reservation,
-      1,
+      10_000n,
       projection,
       PROVIDER_REPORTED_FACTS,
     )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
@@ -316,7 +314,7 @@ describe('PostgresBudgetStore', () => {
       },
     ]])).settle(
       reservation,
-      1,
+      10_000n,
       projection,
       PROVIDER_REPORTED_FACTS,
     )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
@@ -337,13 +335,13 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
-      estimatedCents: 3,
+      estimatedMicrousd: BigInt(3) * 10_000n,
       replay: false,
     };
     const common = {
-      charged_cents: 1n,
-      observed_cents: 1n,
-      reserved_cents: 3n,
+      charged_microusd: BigInt(1) * 10_000n,
+      observed_microusd: BigInt(1) * 10_000n,
+      reserved_microusd: BigInt(3) * 10_000n,
       cap_variance: false,
       status: 'SETTLED',
       replay: false,
@@ -360,7 +358,7 @@ describe('PostgresBudgetStore', () => {
     };
     const settle = (row: Record<string, unknown>) => new PostgresBudgetStore(
       fakePrisma([[row]]),
-    ).settle(reservation, 1, projection, PROVIDER_REPORTED_FACTS);
+    ).settle(reservation, 10_000n, projection, PROVIDER_REPORTED_FACTS);
 
     await expect(settle({
       ...common,
@@ -389,12 +387,12 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
-      estimatedCents: 1,
+      estimatedMicrousd: BigInt(1) * 10_000n,
       replay: false,
     };
     await expect(store.settle(
       centsReservation,
-      0,
+      0n,
       undefined,
       PROVIDER_REPORTED_FACTS,
     )).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_FACTS_INVALID');
@@ -402,7 +400,7 @@ describe('PostgresBudgetStore', () => {
     const projection = projectGenericOperationResult({
       kind: 'model', schema: 'taxonomy-code/v1', data: { code: 'CPV-123' },
     });
-    await expect(store.settleMicrousd({
+    await expect(store.settle({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
@@ -419,9 +417,9 @@ describe('PostgresBudgetStore', () => {
     });
     const store = new PostgresBudgetStore(fakePrisma([[
       {
-        charged_cents: 2n,
-        observed_cents: 2n,
-        reserved_cents: 9n,
+        charged_microusd: BigInt(2) * 10_000n,
+        observed_microusd: BigInt(2) * 10_000n,
+        reserved_microusd: BigInt(9) * 10_000n,
         cap_variance: false,
         status: 'SETTLED',
         replay: false,
@@ -450,9 +448,9 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
-      estimatedCents: 9,
+      estimatedMicrousd: BigInt(9) * 10_000n,
       replay: false,
-    }, 2, projection, {
+    }, BigInt(2) * 10_000n, projection, {
       usage: {
         currency: 'USD',
         unit: 'microusd',
@@ -474,27 +472,30 @@ describe('PostgresBudgetStore', () => {
     });
   });
 
-  it('ships receipt-ready additive microusd wrappers without connecting Task 6 spend', async () => {
-    const migration = await readFile(
-      new URL(
+  it('ships the final authority-only microusd wrappers at Task 6 cutover', async () => {
+    const [receiptMigration, migration] = await Promise.all([
+      readFile(new URL(
         '../../../../packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql',
         import.meta.url,
-      ),
-      'utf8',
-    );
+      ), 'utf8'),
+      readFile(new URL(
+        '../../../../packages/db/prisma/migrations/20260824120000_execution_budget_authority_cutover/migration.sql',
+        import.meta.url,
+      ), 'utf8'),
+    ]);
 
-    expect(migration).toContain('"receipt_usage" JSONB');
-    expect(migration).toContain('"receipt_cost_basis" VARCHAR(40)');
-    expect(migration).toContain('CREATE FUNCTION reserve_tool_budget_microusd_with_receipt_v1');
-    expect(migration).toContain('CREATE FUNCTION settle_tool_budget_microusd_with_receipt_v1');
-    expect(migration).toContain('reserve_tool_budget_microusd_v1');
-    expect(migration).toContain('settle_tool_budget_microusd_v1');
+    expect(receiptMigration).toContain('"receipt_usage" JSONB');
+    expect(receiptMigration).toContain('"receipt_cost_basis" VARCHAR(40)');
+    expect(migration).toContain('CREATE FUNCTION reserve_tool_budget');
+    expect(migration).toContain('CREATE FUNCTION settle_tool_budget');
+    expect(migration).toContain('reserve_tool_budget');
+    expect(migration).toContain('settle_tool_budget');
     expect(migration).not.toContain('open_authorized_tool_budget_microusd');
     const budgetStore = await readFile(new URL('./budget-store.ts', import.meta.url), 'utf8');
-    expect(budgetStore).toContain('reserve_tool_budget_microusd_with_receipt_v1');
-    expect(budgetStore).toContain('settle_tool_budget_microusd_with_receipt_v1');
-    expect(budgetStore).not.toMatch(/SELECT \* FROM reserve_tool_budget_microusd_v1\(/);
-    expect(budgetStore).not.toMatch(/SELECT \* FROM settle_tool_budget_microusd_v1\(/);
+    expect(budgetStore).toContain('reserve_tool_budget');
+    expect(budgetStore).toContain('settle_tool_budget');
+    expect(budgetStore).toMatch(/SELECT \* FROM reserve_tool_budget\(/);
+    expect(budgetStore).toMatch(/SELECT \* FROM settle_tool_budget\(/);
   });
 
   it('persists and reconstructs explicit receipt facts on the native microusd path', async () => {
@@ -543,7 +544,7 @@ describe('PostgresBudgetStore', () => {
     } as unknown as PrismaService;
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.settleMicrousd({
+    await expect(store.settle({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
@@ -557,7 +558,7 @@ describe('PostgresBudgetStore', () => {
       },
     });
     expect(queries[0]?.strings?.join('')).toContain(
-      'settle_tool_budget_microusd_with_receipt_v1',
+      'settle_tool_budget',
     );
     expect(queries[0]?.values).toContain(JSON.stringify(facts.usage));
     expect(queries[0]?.values).toContain(facts.costBasis);
@@ -605,7 +606,7 @@ describe('PostgresBudgetStore', () => {
 
     await expect(new PostgresBudgetStore(fakePrisma([[
       common,
-    ]])).settleMicrousd(
+    ]])).settle(
       reservation,
       777n,
       projection,
@@ -620,7 +621,7 @@ describe('PostgresBudgetStore', () => {
         result_digest: projection.digest,
         result_json: projection,
       },
-    ]])).settleMicrousd(
+    ]])).settle(
       reservation,
       777n,
       projection,
@@ -639,10 +640,10 @@ describe('PostgresBudgetStore', () => {
         kind: 'REPLAY',
         operation_id: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
         operation_key: 'workspace:model:taxonomy.normalize:request-1',
-        reserved_cents: 3n,
-        remaining_cents: 7n,
-        charged_cents: 1n,
-        observed_cents: 1n,
+        reserved_microusd: BigInt(3) * 10_000n,
+        remaining_microusd: BigInt(7) * 10_000n,
+        charged_microusd: BigInt(1) * 10_000n,
+        observed_microusd: BigInt(1) * 10_000n,
         status: 'SETTLED',
         account_id: '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0',
         authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
@@ -665,7 +666,7 @@ describe('PostgresBudgetStore', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationKey: 'workspace:model:taxonomy.normalize:request-1',
-      estimatedCents: 3,
+      estimatedMicrousd: BigInt(3) * 10_000n,
     });
 
     expect(reservation).toMatchObject({
@@ -706,16 +707,16 @@ describe('PostgresBudgetStore', () => {
     await expect(new PostgresBudgetStore(fakePrisma([[
       {
         ...common,
-        reserved_cents: 3n,
-        remaining_cents: 7n,
-        charged_cents: 1n,
-        observed_cents: 1n,
+        reserved_microusd: BigInt(3) * 10_000n,
+        remaining_microusd: BigInt(7) * 10_000n,
+        charged_microusd: BigInt(1) * 10_000n,
+        observed_microusd: BigInt(1) * 10_000n,
       },
     ]])).reserve({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationKey: 'expected-operation-key',
-      estimatedCents: 3,
+      estimatedMicrousd: BigInt(3) * 10_000n,
     })).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
 
     await expect(new PostgresBudgetStore(fakePrisma([[
@@ -726,7 +727,7 @@ describe('PostgresBudgetStore', () => {
         charged_microusd: 10_000n,
         observed_microusd: 10_000n,
       },
-    ]])).reserveMicrousd({
+    ]])).reserve({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'run-1',
       operationKey: 'expected-operation-key',
@@ -745,7 +746,7 @@ describe('PostgresBudgetStore', () => {
       } as never)),
     } as unknown as PrismaService;
     const store = new PostgresBudgetStore(prisma);
-    await expect(store.reserveMicrousd({
+    await expect(store.reserve({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'authority-bound',
       operationKey: 'blocked',
@@ -766,13 +767,13 @@ describe('PostgresBudgetStore', () => {
         remaining_microusd: 9_999n,
       },
     ]]));
-    await expect(store.reserveMicrousd({
+    await expect(store.reserve({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'legacy-unbound',
       operationKey: 'denied',
       estimatedMicrousd: 10_000n,
     })).rejects.toEqual(
-      new BudgetMicrousdExceededError(
+      new BudgetExceededError(
         'legacy-unbound',
         10_000n,
         9_999n,
@@ -794,7 +795,7 @@ describe('PostgresBudgetStore', () => {
         exhausted: false,
         ref_count: 1,
       }],
-      [{ close_tool_budget_microusd_v1: true }],
+      [{ close_tool_budget: true }],
     ]);
     const store = new PostgresBudgetStore(prisma);
     const reservation = {
@@ -804,13 +805,13 @@ describe('PostgresBudgetStore', () => {
       estimatedMicrousd: 1n,
       replay: false,
     };
-    await expect(store.releaseMicrousd(reservation)).resolves.toEqual({
+    await expect(store.release(reservation)).resolves.toEqual({
       chargedMicrousd: 0n,
       observedMicrousd: 0n,
       capVariance: false,
       replay: false,
     });
-    await expect(store.statusMicrousd({
+    await expect(store.status({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: reservation.accountKey,
     })).resolves.toEqual({
@@ -818,7 +819,7 @@ describe('PostgresBudgetStore', () => {
       exhausted: false,
       open: true,
     });
-    await expect(store.closeMicrousd({
+    await expect(store.close({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: reservation.accountKey,
       force: true,
@@ -827,7 +828,7 @@ describe('PostgresBudgetStore', () => {
 
   it('reports an absent additive microusd status as closed', async () => {
     const store = new PostgresBudgetStore(fakePrisma([[]]));
-    await expect(store.statusMicrousd({
+    await expect(store.status({
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'missing',
     })).resolves.toEqual({
@@ -854,7 +855,7 @@ describe('PostgresBudgetStore', () => {
     } as unknown as PrismaService;
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: TEST_WORKSPACE_ID,
       accountKey: 'icp:design:req',
@@ -867,7 +868,7 @@ describe('PostgresBudgetStore', () => {
     });
 
     const serializedQuery = queries[0]?.strings?.join('') ?? '';
-    expect(serializedQuery).toContain('open_authorized_tool_budget_v1');
+    expect(serializedQuery).toContain('open_tool_budget');
     expect(serializedQuery).not.toMatch(/capCents|capMicrousd|amount/i);
     expect(queries[0]?.values).toEqual([
       'e03abddd-1307-47cb-a731-7e7a786615a0',
@@ -881,9 +882,9 @@ describe('PostgresBudgetStore', () => {
     const ownerDb = {
       $transaction: vi.fn(async () => []),
     } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb);
+    const store = new PostgresBudgetStore(fakePrisma([]));
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: 'platform',
       accountKey: 'acquisition-hourly:run-1',
@@ -912,9 +913,9 @@ describe('PostgresBudgetStore', () => {
         $queryRaw: queryRaw,
       } as never)),
     } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb, platformWriter);
+    const store = new PostgresBudgetStore(fakePrisma([]), platformWriter);
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: 'platform',
       accountKey: 'acquisition-hourly:run-1',
@@ -927,7 +928,7 @@ describe('PostgresBudgetStore', () => {
     ).toContain('pg_auth_members');
     expect(
       (queryRaw.mock.calls[1]?.[0] as { strings?: readonly string[] }).strings?.join(''),
-    ).toContain('open_authorized_tool_budget_v1');
+    ).toContain('open_tool_budget');
   });
 
   it('admits a platform schedule run atomically through the writer with no caller cap or owner fallback', async () => {
@@ -952,7 +953,7 @@ describe('PostgresBudgetStore', () => {
         $queryRaw: queryRaw,
       } as never)),
     } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb, platformWriter);
+    const store = new PostgresBudgetStore(fakePrisma([]), platformWriter);
     const input = {
       purpose: 'platform.acquisition' as const,
       subjectType: 'schedule' as const,
@@ -994,7 +995,7 @@ describe('PostgresBudgetStore', () => {
     const ownerDb = {
       $transaction: vi.fn(async () => []),
     } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(fakePrisma([]), ownerDb);
+    const store = new PostgresBudgetStore(fakePrisma([]));
 
     await expect(store.admitPlatformRun({
       purpose: 'platform.sanctions',
@@ -1038,7 +1039,7 @@ describe('PostgresBudgetStore', () => {
 
     const sql = (queryRaw.mock.calls[0]?.[0] as { strings?: readonly string[] }).strings?.join('') ?? '';
     expect(sql).toContain('attest_authorized_tool_budget_v1');
-    expect(sql).not.toContain('open_authorized_tool_budget_v1');
+    expect(sql).not.toContain('open_tool_budget');
     expect(queryRaw).toHaveBeenCalledTimes(20);
   });
 
@@ -1056,13 +1057,9 @@ describe('PostgresBudgetStore', () => {
         $queryRaw: queryRaw,
       } as never)),
     } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(
-      fakePrisma([]),
-      undefined,
-      platformWriter,
-    );
+    const store = new PostgresBudgetStore(fakePrisma([]), platformWriter);
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: 'platform',
       accountKey: 'acquisition-hourly:run-1',
@@ -1089,7 +1086,7 @@ describe('PostgresBudgetStore', () => {
       workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
       accountKey: 'authority-bound',
       operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      estimatedCents: 1,
+      estimatedMicrousd: BigInt(1) * 10_000n,
       replay: false,
     };
     const expected = new ExecutionBudgetGrantError(
@@ -1097,17 +1094,17 @@ describe('PostgresBudgetStore', () => {
     );
 
     await expect(store.open({
-      workspaceId: reservation.workspaceId,
+      authorityId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
+      scopeKey: reservation.workspaceId,
       accountKey: reservation.accountKey,
-      capCents: 1,
     })).rejects.toEqual(expected);
     await expect(store.reserve({
       workspaceId: reservation.workspaceId,
       accountKey: reservation.accountKey,
       operationKey: 'operation',
-      estimatedCents: 1,
+      estimatedMicrousd: BigInt(1) * 10_000n,
     })).rejects.toEqual(expected);
-    await expect(store.settle(reservation, 1)).rejects.toEqual(expected);
+    await expect(store.settle(reservation, BigInt(1) * 10_000n)).rejects.toEqual(expected);
     await expect(store.release(reservation)).rejects.toEqual(expected);
     await expect(store.status({
       workspaceId: reservation.workspaceId,
@@ -1139,7 +1136,7 @@ describe('PostgresBudgetStore', () => {
     } as unknown as PrismaService;
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: TEST_WORKSPACE_ID,
       accountKey: 'icp:design:req',
@@ -1161,12 +1158,12 @@ describe('PostgresBudgetStore', () => {
     } as unknown as PrismaService);
 
     await expect(
-      fake(new Error('TOOL_BUDGET_UNSETTLED_OPERATIONS')).openAuthorized(input),
+      fake(new Error('TOOL_BUDGET_UNSETTLED_OPERATIONS')).open(input),
     ).rejects.toEqual(
       new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
     );
     await expect(
-      fake(rawQueryMarkerError('TOOL_BUDGET_UNSETTLED_OPERATIONS')).openAuthorized(input),
+      fake(rawQueryMarkerError('TOOL_BUDGET_UNSETTLED_OPERATIONS')).open(input),
     ).rejects.toBeInstanceOf(BudgetUnsettledOperationsError);
   });
 
@@ -1242,7 +1239,7 @@ describe('PostgresBudgetStore', () => {
     } as unknown as PrismaService;
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
       accountKey: 'icp:design:req',
@@ -1272,7 +1269,7 @@ describe('PostgresBudgetStore', () => {
     const prisma = fakePrisma([]);
     const store = new PostgresBudgetStore(prisma);
 
-    await expect(store.openAuthorized({
+    await expect(store.open({
       ...input,
       accountKey: 'icp:design:req',
     })).rejects.toEqual(new ExecutionBudgetGrantError(code));
@@ -1286,8 +1283,8 @@ describe('PostgresBudgetStore', () => {
           {
             kind: 'EXECUTE',
             operation_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-            reserved_cents: 12n,
-            remaining_cents: 88n,
+            reserved_microusd: BigInt(12) * 10_000n,
+            remaining_microusd: BigInt(88) * 10_000n,
             status: 'RESERVED',
           },
         ],
@@ -1299,30 +1296,30 @@ describe('PostgresBudgetStore', () => {
         workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
         accountKey: 'run-1',
         operationKey: 'tool:v1:request-1',
-        estimatedCents: 12,
+        estimatedMicrousd: BigInt(12) * 10_000n,
       }),
     ).resolves.toEqual({
       workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
       accountKey: 'run-1',
       operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      estimatedCents: 12,
+      estimatedMicrousd: BigInt(12) * 10_000n,
       replay: false,
     });
   });
 
   it('fails closed when the account is absent and preserves a budget denial', async () => {
     const unavailable = new PostgresBudgetStore(
-      fakePrisma([[{ kind: 'ACCOUNT_UNAVAILABLE', operation_id: null, reserved_cents: 0n, remaining_cents: 0n }]]),
+      fakePrisma([[{ kind: 'ACCOUNT_UNAVAILABLE', operation_id: null, reserved_microusd: BigInt(0) * 10_000n, remaining_microusd: BigInt(0) * 10_000n }]]),
     );
     await expect(
-      unavailable.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'missing', operationKey: 'op', estimatedCents: 1 }),
+      unavailable.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'missing', operationKey: 'op', estimatedMicrousd: BigInt(1) * 10_000n }),
     ).rejects.toBeInstanceOf(BudgetAccountUnavailableError);
 
     const exceeded = new PostgresBudgetStore(
-      fakePrisma([[{ kind: 'DENIED', operation_id: null, reserved_cents: 0n, remaining_cents: 3n }]]),
+      fakePrisma([[{ kind: 'DENIED', operation_id: null, reserved_microusd: BigInt(0) * 10_000n, remaining_microusd: BigInt(3) * 10_000n }]]),
     );
     await expect(
-      exceeded.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedCents: 9 }),
+      exceeded.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedMicrousd: BigInt(9) * 10_000n }),
     ).rejects.toBeInstanceOf(BudgetExceededError);
   });
 
@@ -1342,14 +1339,14 @@ describe('PostgresBudgetStore', () => {
         workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
         accountKey: 'missing',
         operationKey: 'op',
-        estimatedCents: 1,
+        estimatedMicrousd: BigInt(1) * 10_000n,
       }),
     ).rejects.toBeInstanceOf(BudgetAccountUnavailableError);
   });
 
   it('settles through the database and reports an observed cap variance', async () => {
     const store = new PostgresBudgetStore(
-      fakePrisma([[{ charged_cents: 10n, observed_cents: 14n, cap_variance: true, status: 'SETTLED' }]]),
+      fakePrisma([[{ charged_microusd: BigInt(10) * 10_000n, observed_microusd: BigInt(14) * 10_000n, cap_variance: true, status: 'SETTLED' }]]),
     );
     await expect(
       store.settle(
@@ -1357,131 +1354,46 @@ describe('PostgresBudgetStore', () => {
           workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
           accountKey: 'run-1',
           operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-          estimatedCents: 10,
+          estimatedMicrousd: BigInt(10) * 10_000n,
           replay: false,
         },
-        14,
+        140_000n,
       ),
-    ).resolves.toEqual({ chargedCents: 10, observedCents: 14, capVariance: true, replay: false });
+    ).resolves.toEqual({ chargedMicrousd: BigInt(10) * 10_000n, observedMicrousd: BigInt(14) * 10_000n, capVariance: true, replay: false });
   });
 
   it('releases a reservation without charging when execution never starts', async () => {
     const store = new PostgresBudgetStore(
-      fakePrisma([[{ charged_cents: 0n, observed_cents: 0n, cap_variance: false, status: 'RELEASED' }]]),
+      fakePrisma([[{ charged_microusd: BigInt(0) * 10_000n, observed_microusd: BigInt(0) * 10_000n, cap_variance: false, status: 'RELEASED' }]]),
     );
     await expect(
       store.release({
         workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
         accountKey: 'run-1',
         operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-        estimatedCents: 10,
+        estimatedMicrousd: BigInt(10) * 10_000n,
         replay: false,
       }),
-    ).resolves.toMatchObject({ chargedCents: 0, observedCents: 0, replay: false });
+    ).resolves.toMatchObject({ chargedMicrousd: BigInt(0) * 10_000n, observedMicrousd: BigInt(0) * 10_000n, replay: false });
   });
 
   it('preserves explicit database replay facts for repeated settle and release', async () => {
     const store = new PostgresBudgetStore(
       fakePrisma([
-        [{ charged_cents: 7n, observed_cents: 7n, cap_variance: false, status: 'SETTLED', replay: true }],
-        [{ charged_cents: 0n, observed_cents: 0n, cap_variance: false, status: 'RELEASED', replay: true }],
+        [{ charged_microusd: BigInt(7) * 10_000n, observed_microusd: BigInt(7) * 10_000n, cap_variance: false, status: 'SETTLED', replay: true }],
+        [{ charged_microusd: BigInt(0) * 10_000n, observed_microusd: BigInt(0) * 10_000n, cap_variance: false, status: 'RELEASED', replay: true }],
       ]),
     );
     const reservation = {
       workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
       accountKey: 'run-1',
       operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      estimatedCents: 7,
+      estimatedMicrousd: BigInt(7) * 10_000n,
       replay: false,
     };
 
-    await expect(store.settle(reservation, 7)).resolves.toMatchObject({ replay: true });
+    await expect(store.settle(reservation, BigInt(7) * 10_000n)).resolves.toMatchObject({ replay: true });
     await expect(store.release(reservation)).resolves.toMatchObject({ replay: true });
-  });
-
-  it('opens, reads status, and closes the same durable account', async () => {
-    const prisma = fakePrisma([
-      [{ account_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', generation: 1 }],
-      [{ remaining_cents: 44n, exhausted: true, ref_count: 2, generation: 1 }],
-      [{ close_tool_budget: null }],
-    ]);
-    const store = new PostgresBudgetStore(prisma);
-    const scope = { workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1' };
-    await store.open({ ...scope, capCents: 50 });
-    await expect(store.status(scope)).resolves.toEqual({ remainingCents: 44, exhausted: true, open: true });
-    await expect(store.close({ ...scope, force: true })).resolves.toBeUndefined();
-  });
-
-  it('force-closes references but refuses to reopen while an old reservation is unresolved', async () => {
-    const calls: string[] = [];
-    const prisma = {
-      withWorkspace: vi.fn(async (_workspaceId, fn) =>
-        fn({
-          $queryRaw: vi.fn(async (query: { strings?: readonly string[] }) => {
-            const sql = query.strings?.join('') ?? '';
-            calls.push(sql);
-            if (sql.includes('open_tool_budget')) throw new Error('TOOL_BUDGET_UNSETTLED_OPERATIONS');
-            return [];
-          }),
-        } as never)),
-    } as unknown as PrismaService;
-    const store = new PostgresBudgetStore(prisma);
-    const scope = { workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-unknown' };
-
-    await store.close({ ...scope, force: true });
-    const concurrentReopens = await Promise.allSettled(
-      Array.from({ length: 20 }, () => store.open({ ...scope, capCents: 50 })),
-    );
-    expect(concurrentReopens).toHaveLength(20);
-    for (const result of concurrentReopens) {
-      expect(result.status).toBe('rejected');
-      if (result.status === 'rejected') expect(result.reason).toBeInstanceOf(BudgetUnsettledOperationsError);
-    }
-    expect(calls.some((sql) => sql.includes('close_tool_budget'))).toBe(true);
-  });
-
-  it('allows a new generation after the old reservation has been settled', async () => {
-    const prisma = fakePrisma([
-      [{ charged_cents: 7n, observed_cents: 7n, cap_variance: false, status: 'SETTLED' }],
-      [{ close_tool_budget: null }],
-      [{ account_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', generation: 2 }],
-    ]);
-    const store = new PostgresBudgetStore(prisma);
-    const reservation = {
-      workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
-      accountKey: 'run-known',
-      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      estimatedCents: 7,
-      replay: false,
-    };
-
-    await store.settle(reservation, 7);
-    await store.close({ workspaceId: reservation.workspaceId, accountKey: reservation.accountKey, force: true });
-    await expect(
-      store.open({ workspaceId: reservation.workspaceId, accountKey: reservation.accountKey, capCents: 50 }),
-    ).resolves.toBeUndefined();
-  });
-
-  it('allows a new generation after execution was proven not to have started and the reservation was released', async () => {
-    const prisma = fakePrisma([
-      [{ charged_cents: 0n, observed_cents: 0n, cap_variance: false, status: 'RELEASED' }],
-      [{ close_tool_budget: null }],
-      [{ account_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b', generation: 2 }],
-    ]);
-    const store = new PostgresBudgetStore(prisma);
-    const reservation = {
-      workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
-      accountKey: 'run-not-started',
-      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      estimatedCents: 7,
-      replay: false,
-    };
-
-    await store.release(reservation);
-    await store.close({ workspaceId: reservation.workspaceId, accountKey: reservation.accountKey, force: true });
-    await expect(
-      store.open({ workspaceId: reservation.workspaceId, accountKey: reservation.accountKey, capCents: 50 }),
-    ).resolves.toBeUndefined();
   });
 
   it('marks an existing operation as replay and rejects unsafe inputs', async () => {
@@ -1493,8 +1405,8 @@ describe('PostgresBudgetStore', () => {
         {
           kind: 'REPLAY',
           operation_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-          reserved_cents: 5n,
-          remaining_cents: 10n,
+          reserved_microusd: BigInt(5) * 10_000n,
+          remaining_microusd: BigInt(10) * 10_000n,
           status: 'RESERVED',
           result_json: projection,
           operation_key: 'op',
@@ -1512,17 +1424,21 @@ describe('PostgresBudgetStore', () => {
       ]]),
     );
     await expect(
-      store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedCents: 5 }),
+      store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedMicrousd: BigInt(5) * 10_000n }),
     ).resolves.toMatchObject({
       replay: true,
       replayResult: { resultStrategy: 'typed_projection', projection },
     });
     await expect(
-      store.open({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: '', capCents: 1 }),
+      store.open({
+        authorityId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+        scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+        accountKey: '',
+      }),
     ).rejects.toBeInstanceOf(TypeError);
     await expect(
-      store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run', operationKey: 'op', estimatedCents: -1 }),
-    ).rejects.toBeInstanceOf(TypeError);
+      store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run', operationKey: 'op', estimatedMicrousd: -1n }),
+    ).rejects.toBeInstanceOf(RangeError);
   });
 
   it('passes an approved projection into the atomic settlement function', async () => {
@@ -1532,8 +1448,8 @@ describe('PostgresBudgetStore', () => {
         $queryRaw: vi.fn(async (query: { values?: unknown[] }) => {
           queries.push(query);
           return [{
-            charged_cents: 1n,
-            observed_cents: 1n,
+            charged_microusd: BigInt(1) * 10_000n,
+            observed_microusd: BigInt(1) * 10_000n,
             cap_variance: false,
             status: 'SETTLED',
             replay: false,
@@ -1561,8 +1477,8 @@ describe('PostgresBudgetStore', () => {
 
     await store.settle({
       workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run',
-      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b', estimatedCents: 1, replay: false,
-    }, 1, projection, {
+      operationId: '42c863b9-7c7e-4d28-8678-60ef9a20219b', estimatedMicrousd: BigInt(1) * 10_000n, replay: false,
+    }, BigInt(1) * 10_000n, projection, {
       usage: {
         currency: 'USD', unit: 'microusd', callCount: 1,
         upperBoundMicrousd: '10000',
@@ -1581,8 +1497,8 @@ describe('PostgresBudgetStore', () => {
         {
           kind: 'EXECUTE',
           operation_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-          reserved_cents: 0n,
-          remaining_cents: 10n,
+          reserved_microusd: BigInt(0) * 10_000n,
+          remaining_microusd: BigInt(10) * 10_000n,
           status: 'RESERVED',
         },
       ]]),
@@ -1593,15 +1509,19 @@ describe('PostgresBudgetStore', () => {
         workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
         accountKey: 'run',
         operationKey: 'free-operation',
-        estimatedCents: 0,
+        estimatedMicrousd: BigInt(0) * 10_000n,
       }),
-    ).resolves.toMatchObject({ estimatedCents: 0, replay: false });
+    ).resolves.toMatchObject({ estimatedMicrousd: BigInt(0) * 10_000n, replay: false });
   });
 
-  it('requires the owner connection for the platform scope', async () => {
+  it('requires the authority writer connection for the platform scope', async () => {
     const store = new PostgresBudgetStore(fakePrisma([]));
-    await expect(store.open({ workspaceId: 'platform', accountKey: 'sweep', capCents: 1 })).rejects.toMatchObject({
-      code: 'BUDGET_STORE_UNAVAILABLE',
+    await expect(store.open({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'platform',
+      accountKey: 'sweep',
+    })).rejects.toMatchObject({
+      code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
     });
   });
 });
@@ -1610,15 +1530,19 @@ describe('UnavailableBudgetStore', () => {
   it('never treats a missing authoritative store as unlimited budget', async () => {
     const store = new UnavailableBudgetStore('postgres not configured');
     await expect(
-      store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedCents: 1 }),
+      store.reserve({ workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0', accountKey: 'run-1', operationKey: 'op', estimatedMicrousd: BigInt(1) * 10_000n }),
     ).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
   });
 
   it('fails every lifecycle operation closed', async () => {
     const store = new UnavailableBudgetStore();
-    const reservation = { workspaceId: 'w', accountKey: 'a', operationId: 'o', estimatedCents: 1, replay: false };
-    await expect(store.open({ workspaceId: 'w', accountKey: 'a', capCents: 1 })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
-    await expect(store.settle(reservation, 1)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+    const reservation = { workspaceId: 'w', accountKey: 'a', operationId: 'o', estimatedMicrousd: BigInt(1) * 10_000n, replay: false };
+    await expect(store.open({
+      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
+      scopeKey: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+      accountKey: 'a',
+    })).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+    await expect(store.settle(reservation, BigInt(1) * 10_000n)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.markResultUnknown(reservation)).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
     await expect(store.loadResultUnknownArtifact(
       reservation,
@@ -1632,7 +1556,7 @@ describe('UnavailableBudgetStore', () => {
 
   it('fails authorized open directly without fabricating an account', async () => {
     const store = new UnavailableBudgetStore();
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: TEST_WORKSPACE_ID,
       accountKey: 'authority-bound',
@@ -1642,28 +1566,25 @@ describe('UnavailableBudgetStore', () => {
 
 describe('InMemoryBudgetStoreAdapter', () => {
   it('remains available only through explicit test injection', async () => {
-    const store = new InMemoryBudgetStoreAdapter(new BudgetLedger());
-    await store.open({ workspaceId: 'w', accountKey: 'run', capCents: 10 });
-    const reservation = await store.reserve({ workspaceId: 'w', accountKey: 'run', operationKey: 'op', estimatedCents: 4 });
-    await expect(store.status({ workspaceId: 'w', accountKey: 'run' })).resolves.toMatchObject({ remainingCents: 6, open: true });
-    await expect(store.settle(reservation, 3)).resolves.toMatchObject({ chargedCents: 3 });
-    const released = await store.reserve({ workspaceId: 'w', accountKey: 'run', operationKey: 'op-2', estimatedCents: 2 });
-    await expect(store.release(released)).resolves.toMatchObject({ chargedCents: 0 });
+    const ledger = new BudgetLedger();
+    ledger.open('run', 10);
+    const store = new InMemoryBudgetStoreAdapter(ledger);
+    const reservation = await store.reserve({ workspaceId: 'w', accountKey: 'run', operationKey: 'op', estimatedMicrousd: BigInt(4) * 10_000n });
+    await expect(store.status({ workspaceId: 'w', accountKey: 'run' })).resolves.toMatchObject({ remainingMicrousd: BigInt(6) * 10_000n, open: true });
+    await expect(store.settle(reservation, BigInt(3) * 10_000n)).resolves.toMatchObject({ chargedMicrousd: BigInt(3) * 10_000n });
+    const released = await store.reserve({ workspaceId: 'w', accountKey: 'run', operationKey: 'op-2', estimatedMicrousd: BigInt(2) * 10_000n });
+    await expect(store.release(released)).resolves.toMatchObject({ chargedMicrousd: BigInt(0) * 10_000n });
     await store.close({ workspaceId: 'w', accountKey: 'run', force: true });
     await expect(store.status({ workspaceId: 'w', accountKey: 'run' })).resolves.toMatchObject({ open: false });
   });
 
   it('cannot emulate an externally signed authority account', async () => {
     const store = new InMemoryBudgetStoreAdapter(new BudgetLedger());
-    await expect(store.openAuthorized({
+    await expect(store.open({
       authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
       scopeKey: TEST_WORKSPACE_ID,
       accountKey: 'authority-bound',
-    })).rejects.toEqual(
-      new ExecutionBudgetGrantError(
-        'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-      ),
-    );
+    })).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');
   });
 
   it('cannot emulate artifact RESULT_UNKNOWN or durable reference settlement', async () => {
@@ -1672,15 +1593,13 @@ describe('InMemoryBudgetStoreAdapter', () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: 'artifact-account',
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: BigInt(17) * 10_000n,
       replay: false,
     };
 
-    await expect(store.markResultUnknown(reservation)).rejects.toMatchObject({
-      code: 'BUDGET_STORE_UNAVAILABLE',
-    });
+    await expect(store.markResultUnknown(reservation)).rejects.toThrow('BUDGET_STORE_UNAVAILABLE');
     await expect(
-      store.settleArtifactManifest(reservation, 13, ARTIFACT_SNAPSHOT),
-    ).rejects.toMatchObject({ code: 'BUDGET_STORE_UNAVAILABLE' });
+      store.settleArtifactManifest(reservation, 130_000n, ARTIFACT_SNAPSHOT),
+    ).rejects.toThrow('BUDGET_STORE_UNAVAILABLE');
   });
 });

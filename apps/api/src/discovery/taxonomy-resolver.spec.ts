@@ -27,8 +27,41 @@ const TAXONOMY_RECEIPT: DurableExecutionReceipt = Object.freeze({
   usage: { currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10000' },
   costBasis: 'estimated_upper_bound',
 });
+const REQUEST_SHA256 = 'b'.repeat(64);
+const TEST_BINDING = Object.freeze({
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  replay: false,
+  scopeKey: '10000000-0000-4000-8000-000000000001',
+  accountKey: `icp.query_plan:icp:30000000-0000-4000-8000-000000000003:${REQUEST_SHA256}`,
+  purpose: 'icp.query_plan' as const,
+  subjectType: 'icp',
+  subjectId: '30000000-0000-4000-8000-000000000003',
+  requestSha256: REQUEST_SHA256,
+});
 
 describe('TaxonomyResolver — durable model budget binding', () => {
+  it.each([
+    ['missing binding', undefined, TEST_BINDING.accountKey, 'EXECUTION_BUDGET_BINDING_REQUIRED'],
+    ['wrong run', TEST_BINDING, 'wrong-run', 'EXECUTION_BUDGET_BINDING_INVALID'],
+  ] as const)('rejects %s before the model wire', async (_name, executionBudget, runId, code) => {
+    const generateStructured = vi.fn();
+    const resolver = new TaxonomyResolver({
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: {
+        findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]),
+      },
+    } as never, { generateStructured } as never, undefined, {
+      attestAuthorized: vi.fn(),
+    } as never);
+
+    await expect(resolver.resolve('industry', 'pumps', {
+      workspaceId: TEST_BINDING.scopeKey,
+      runId,
+      ...(executionBudget ? { executionBudget } : {}),
+    })).rejects.toThrow(code);
+    expect(generateStructured).not.toHaveBeenCalled();
+  });
+
   it('uses the verified ICP authority binding for nested taxonomy model calls without a legacy account fallback', async () => {
     const requestSha256 = 'a'.repeat(64);
     const binding = {
@@ -100,8 +133,8 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     const generateStructured = vi.fn(async (_input, context) => {
       order.push('model');
       expect(context).toMatchObject({
-        workspaceId: 'workspace-1',
-        runId: 'discovery:run-1',
+        workspaceId: TEST_BINDING.scopeKey,
+        runId: TEST_BINDING.accountKey,
         durableResultSchema: 'taxonomy-code/v1',
       });
       return { data: { code: 'industry-1' }, provider: 'gateway', model: 'model', usage: { inputTokens: 1, outputTokens: 1 } };
@@ -121,18 +154,19 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     };
     const budgetStore = {
       open: vi.fn(async () => { order.push('open'); }),
+      attestAuthorized: vi.fn(async () => { order.push('attest'); }),
       close: vi.fn(async () => { order.push('close'); }),
     };
     const resolver = new TaxonomyResolver(prisma as never, { generateStructured } as never, undefined, budgetStore as never);
 
     await expect(resolver.resolve('industry', 'pumps', {
-      workspaceId: 'workspace-1', runId: 'discovery:run-1',
+      workspaceId: TEST_BINDING.scopeKey,
+      runId: TEST_BINDING.accountKey,
+      executionBudget: TEST_BINDING,
     })).resolves.toMatchObject({ code: 'industry-1' });
-    expect(budgetStore.open).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1', accountKey: 'discovery:run-1', capCents: expect.any(Number), replayScope: true,
-    });
-    expect(budgetStore.close).toHaveBeenCalledWith({ workspaceId: 'workspace-1', accountKey: 'discovery:run-1' });
-    expect(order).toEqual(['open', 'model', 'close']);
+    expect(budgetStore.open).not.toHaveBeenCalled();
+    expect(budgetStore.close).not.toHaveBeenCalled();
+    expect(order).toEqual(['attest', 'model']);
   });
 
   it('does not downgrade generic replay loss to a taxonomy miss', async () => {
@@ -144,7 +178,11 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       termAlias: { findUnique: vi.fn(async () => null) },
       canonicalTaxonomy: { findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]) },
     };
-    const budgetStore = { open: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    const budgetStore = {
+      open: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      attestAuthorized: vi.fn(async () => undefined),
+    };
     const resolver = new TaxonomyResolver(
       prisma as never,
       { generateStructured: vi.fn(async () => { throw replayError; }) } as never,
@@ -153,9 +191,11 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     );
 
     await expect(resolver.resolve('industry', 'pumps', {
-      workspaceId: 'workspace-1', runId: 'discovery:run-1',
+      workspaceId: TEST_BINDING.scopeKey,
+      runId: TEST_BINDING.accountKey,
+      executionBudget: TEST_BINDING,
     })).rejects.toBe(replayError);
-    expect(budgetStore.close).toHaveBeenCalled();
+    expect(budgetStore.close).not.toHaveBeenCalled();
   });
 
   it('sends all four real taxonomy wires an exact enum over the closed bounded task schema', async () => {
@@ -204,15 +244,17 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     };
     const budgetStore = {
       open: vi.fn(async () => undefined), close: vi.fn(async () => undefined),
+      attestAuthorized: vi.fn(async () => undefined),
     };
     const resolver = new TaxonomyResolver(
       prisma as never, { generateStructured } as never, undefined, budgetStore as never,
     );
 
-    await resolver.resolve('industry', 'pumps', { workspaceId: 'workspace-1', runId: 'run-1' });
-    await resolver.resolveCpvForProduct('pump', ['4212'], { workspaceId: 'workspace-1', runId: 'run-1' });
-    await resolver.resolveNaicsForProduct('pump', ['3339'], { workspaceId: 'workspace-1', runId: 'run-1' });
-    await resolver.resolveFdaProductCode('pump', ['RA'], { workspaceId: 'workspace-1', runId: 'run-1' });
+    const opts = { workspaceId: TEST_BINDING.scopeKey, runId: TEST_BINDING.accountKey, executionBudget: TEST_BINDING };
+    await resolver.resolve('industry', 'pumps', opts);
+    await resolver.resolveCpvForProduct('pump', ['4212'], opts);
+    await resolver.resolveNaicsForProduct('pump', ['3339'], opts);
+    await resolver.resolveFdaProductCode('pump', ['RA'], opts);
 
     expect(generateStructured).toHaveBeenCalledTimes(4);
     const expectedEnums = [
@@ -270,9 +312,9 @@ describe('TaxonomyResolver — durable model budget binding', () => {
         prisma as never,
         { generateStructured } as never,
         undefined,
-        { open: vi.fn(), close: vi.fn() } as never,
+        { open: vi.fn(), close: vi.fn(), attestAuthorized: vi.fn() } as never,
       );
-      const opts = { workspaceId: 'workspace-1', runId: 'taxonomy-run' };
+      const opts = { workspaceId: TEST_BINDING.scopeKey, runId: TEST_BINDING.accountKey, executionBudget: TEST_BINDING };
 
       await expect(resolver.resolve('industry', 'pumps', opts)).resolves.toBeNull();
       await expect(resolver.resolveCpvForProduct('pump', ['4212'], opts)).resolves.toBeNull();

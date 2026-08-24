@@ -5,7 +5,6 @@ import { fetchSitemapUrls, HttpGetFn } from '../discovery/providers/structured-h
 import { isTerminalExternalActionPolicyDenied } from '../tools/tool-contract';
 import type { HttpGetInput, HttpGetOutput } from '../tools/source-tools';
 import type { ExecutionBroker } from '../tools/tool-contract';
-import { runBudgetCents } from '../tools/budget';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   parseExecutionBudgetBinding,
@@ -68,7 +67,6 @@ export class IntentProjectionService {
       authorizeExternalAction?: () => Promise<boolean>;
       budgetKey?: string;
       budgetWorkspaceId?: string;
-      budgetCapCents?: number;
       executionBudget?: ExecutionBudgetBinding;
     },
   ): Promise<RegisterWatchResult> {
@@ -281,7 +279,6 @@ export class IntentProjectionService {
       authorizeExternalAction?: () => Promise<boolean>;
       budgetKey?: string;
       budgetWorkspaceId?: string;
-      budgetCapCents?: number;
       executionBudget?: ExecutionBudgetBinding;
     },
     durableReceipts: DurableExecutionReceipt[] = [],
@@ -291,45 +288,29 @@ export class IntentProjectionService {
     const budgetWorkspaceId = opts.budgetWorkspaceId ?? workspaceId;
     const budgets = this.deps.budgetStore
       ?? new UnavailableBudgetStore('IntentProjectionService requires an authoritative BudgetStore');
-    if (opts.executionBudget) {
-      const binding = parseExecutionBudgetBinding(opts.executionBudget, {
-        scopeKey: budgetWorkspaceId,
-        purpose: 'discovery.run',
-        subjectType: 'discovery_run',
-      });
-      if (opts.budgetKey !== binding.accountKey) {
-        throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
-      }
-      await budgets.attestAuthorized({
-        authorityId: binding.authorityId,
-        scopeKey: binding.scopeKey,
-        accountKey: binding.accountKey,
-      });
-      return this.discoverWatchPages(
-        domain,
-        binding.scopeKey,
-        binding.accountKey,
-        opts.authorizeExternalAction,
-        durableReceipts,
-      );
+    if (!opts.executionBudget) {
+      throw new Error('EXECUTION_BUDGET_BINDING_REQUIRED');
     }
-    await budgets.open({
-      workspaceId: budgetWorkspaceId,
-      accountKey: opts.budgetKey,
-      capCents: opts.budgetCapCents ?? runBudgetCents(),
-      replayScope: true,
+    const binding = parseExecutionBudgetBinding(opts.executionBudget, {
+      scopeKey: budgetWorkspaceId,
+      purpose: 'discovery.run',
+      subjectType: 'discovery_run',
     });
-    try {
-      return await this.discoverWatchPages(
-        domain,
-        budgetWorkspaceId,
-        opts.budgetKey,
-        opts.authorizeExternalAction,
-        durableReceipts,
-      );
-    } finally {
-      await budgets.close({ workspaceId: budgetWorkspaceId, accountKey: opts.budgetKey });
+    if (opts.budgetKey !== binding.accountKey) {
+      throw new Error('EXECUTION_BUDGET_BINDING_INVALID');
     }
+    await budgets.attestAuthorized({
+      authorityId: binding.authorityId,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+    });
+    return this.discoverWatchPages(
+      domain,
+      binding.scopeKey,
+      binding.accountKey,
+      opts.authorizeExternalAction,
+      durableReceipts,
+    );
   }
 
   private async discoverWatchPages(

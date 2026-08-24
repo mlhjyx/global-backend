@@ -149,10 +149,10 @@ describe("PostgresBudgetStore artifact recovery", () => {
         kind: "REPLAY",
         operation_id: ARTIFACT_REFERENCE.operationId,
         operation_key: "artifact-operation",
-        reserved_cents: 17n,
-        remaining_cents: 83n,
-        charged_cents: 17n,
-        observed_cents: 13n,
+        reserved_microusd: 170_000n,
+        remaining_microusd: 830_000n,
+        charged_microusd: 170_000n,
+        observed_microusd: 130_000n,
         status: "SETTLED",
         account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
         authority_id: ARTIFACT_MANIFEST.authorityId,
@@ -169,7 +169,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationKey: "artifact-operation",
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
     })).resolves.toMatchObject({
       replay: true,
       replayResult: {
@@ -196,7 +196,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
             queries.push(query);
             return [
               {
-                reserved_cents: 17n,
+                reserved_microusd: 170_000n,
                 status: "RESULT_UNKNOWN",
                 replay: false,
                 recoverable: true,
@@ -211,18 +211,18 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     };
 
     await expect(
       store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
     ).resolves.toEqual({
-      reservedCents: 17,
+      reservedMicrousd: 170_000n,
       replay: false,
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "mark_tool_budget_result_unknown_v4",
+      "mark_tool_budget_result_unknown_v5",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
@@ -248,7 +248,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
             queries.push(query);
             return [
               {
-                reserved_cents: 17n,
+                reserved_microusd: 170_000n,
                 status: "RESULT_UNKNOWN",
                 replay: false,
                 recoverable: false,
@@ -263,12 +263,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     };
 
     await expect(store.markResultUnknown(reservation)).resolves.toEqual({
-      reservedCents: 17,
+      reservedMicrousd: 170_000n,
       replay: false,
     });
     expect(queries[0]?.values?.at(-1)).toBeNull();
@@ -282,7 +282,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
           workspaceId: TEST_WORKSPACE_ID,
           accountKey: "artifact-account",
           operationId: ARTIFACT_REFERENCE.operationId,
-          estimatedCents: 17,
+          estimatedMicrousd: 170_000n,
           replay: false,
         },
         ARTIFACT_MANIFEST.authorityId,
@@ -297,7 +297,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: true,
     };
     await expect(
@@ -322,7 +322,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
           workspaceId: TEST_WORKSPACE_ID,
           accountKey: "artifact-account",
           operationId: ARTIFACT_REFERENCE.operationId,
-          estimatedCents: 17,
+          estimatedMicrousd: 170_000n,
           replay: true,
         },
         ARTIFACT_MANIFEST.authorityId,
@@ -347,12 +347,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
             }
             return [
               {
-                charged_cents: 17n,
-                observed_cents: 13n,
+                charged_microusd: 170_000n,
+                observed_microusd: 130_000n,
                 cap_variance: false,
                 status: "SETTLED",
                 replay: false,
-                reserved_cents: 17n,
+                reserved_microusd: 170_000n,
                 operation_id: ARTIFACT_REFERENCE.operationId,
                 operation_key: "artifact-operation",
                 account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
@@ -377,17 +377,17 @@ describe("PostgresBudgetStore artifact recovery", () => {
           workspaceId: TEST_WORKSPACE_ID,
           accountKey: "artifact-account",
           operationId: ARTIFACT_REFERENCE.operationId,
-          estimatedCents: 17,
+          estimatedMicrousd: 170_000n,
           replay: false,
         },
-        13,
+        130_000n,
         ARTIFACT_SNAPSHOT,
         ARTIFACT_RECEIPT_FACTS,
         ARTIFACT_DOMAIN_ACK,
       ),
     ).resolves.toMatchObject({
-      chargedCents: 17,
-      observedCents: 13,
+      chargedMicrousd: 170_000n,
+      observedMicrousd: 130_000n,
       capVariance: false,
       replay: false,
       receipt: {
@@ -397,12 +397,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
       },
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_with_receipt_v1",
+      "settle_tool_budget_artifact_manifest_with_receipt_v2",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
       ARTIFACT_REFERENCE.operationId,
-      13n,
+      130_000n,
       JSON.stringify(ARTIFACT_MANIFEST),
       200,
       true,
@@ -419,12 +419,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
 
   it("rejects artifact receipts when the locked row omits or drifts from the submitted manifest reference", async () => {
     const common = {
-      charged_cents: 17n,
-      observed_cents: 13n,
+      charged_microusd: 170_000n,
+      observed_microusd: 130_000n,
       cap_variance: false,
       status: "SETTLED",
       replay: false,
-      reserved_cents: 17n,
+      reserved_microusd: 170_000n,
       operation_id: ARTIFACT_REFERENCE.operationId,
       operation_key: "artifact-operation",
       account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
@@ -436,7 +436,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     };
 
@@ -444,7 +444,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       common,
     ]])).settleArtifactManifest(
       reservation,
-      13,
+       130_000n,
       ARTIFACT_SNAPSHOT,
       ARTIFACT_RECEIPT_FACTS,
       ARTIFACT_DOMAIN_ACK,
@@ -460,7 +460,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       },
     ]])).settleArtifactManifest(
       reservation,
-      13,
+       130_000n,
       ARTIFACT_SNAPSHOT,
       ARTIFACT_RECEIPT_FACTS,
       ARTIFACT_DOMAIN_ACK,
@@ -469,12 +469,12 @@ describe("PostgresBudgetStore artifact recovery", () => {
 
   it("fails closed for locked artifact-reference bytes, receipt metadata, and parser drift", async () => {
     const common = {
-      charged_cents: 17n,
-      observed_cents: 13n,
+      charged_microusd: 170_000n,
+      observed_microusd: 130_000n,
       cap_variance: false,
       status: "SETTLED",
       replay: false,
-      reserved_cents: 17n,
+      reserved_microusd: 170_000n,
       operation_id: ARTIFACT_REFERENCE.operationId,
       operation_key: "artifact-operation",
       account_id: "5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0",
@@ -490,14 +490,14 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     };
     const settle = (row: Record<string, unknown>) => new PostgresBudgetStore(
       fakePrisma([[row]]),
     ).settleArtifactManifest(
       reservation,
-      13,
+       130_000n,
       ARTIFACT_SNAPSHOT,
       ARTIFACT_RECEIPT_FACTS,
       ARTIFACT_DOMAIN_ACK,
@@ -527,10 +527,10 @@ describe("PostgresBudgetStore artifact recovery", () => {
           workspaceId: TEST_WORKSPACE_ID,
           accountKey: "artifact-account",
           operationId: ARTIFACT_REFERENCE.operationId,
-          estimatedCents: 17,
+          estimatedMicrousd: 170_000n,
           replay: false,
         },
-        13,
+         130_000n,
         {
           manifest: {
             ...ARTIFACT_MANIFEST,
@@ -562,7 +562,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     };
 
@@ -573,7 +573,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
     });
     await expect(
       store.settleArtifactManifest(
-        reservation, 13, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
+        reservation, 130_000n, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
         ARTIFACT_DOMAIN_ACK,
       ),
     ).rejects.toMatchObject({
@@ -604,14 +604,14 @@ describe("PostgresBudgetStore artifact recovery", () => {
       workspaceId: TEST_WORKSPACE_ID,
       accountKey: "artifact-account",
       operationId: ARTIFACT_REFERENCE.operationId,
-      estimatedCents: 17,
+      estimatedMicrousd: 170_000n,
       replay: false,
     };
 
     const results = await Promise.allSettled([
       store.markResultUnknown(reservation, ARTIFACT_SNAPSHOT),
       store.settleArtifactManifest(
-        reservation, 13, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
+        reservation, 130_000n, ARTIFACT_SNAPSHOT, ARTIFACT_RECEIPT_FACTS,
         ARTIFACT_DOMAIN_ACK,
       ),
       store.loadResultUnknownArtifact(
