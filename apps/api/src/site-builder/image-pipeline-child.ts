@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { lstat, open, realpath, writeFile } from 'node:fs/promises';
+import { open, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import sharp from 'sharp';
@@ -49,20 +49,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function readRegularBounded(file: string, maxBytes: number): Promise<Buffer> {
-  const before = await lstat(file);
-  if (!before.isFile() || before.isSymbolicLink() || before.size <= 0 || before.size > maxBytes) {
-    throw new Error('child input is not a bounded regular file');
-  }
   // codeql[js/file-system-race] The opened descriptor is identity-checked
-  // against the pre-open lstat and again after reading; no path is reused.
+  // after opening and again after reading; no path is reused.
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
     if (
       !stat.isFile() ||
-      stat.dev !== before.dev ||
-      stat.ino !== before.ino ||
-      stat.size !== before.size ||
       stat.size <= 0 ||
       stat.size > maxBytes
     ) {

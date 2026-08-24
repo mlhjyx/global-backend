@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
   access,
-  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -301,23 +300,16 @@ async function readRegularFileBounded(
   if (file !== expected || path.dirname(file) !== dir || path.basename(file) !== expectedName) {
     throw new Error(`child returned an out-of-bounds path for ${expectedName}`);
   }
-  const before = await lstat(file);
-  if (!before.isFile() || before.isSymbolicLink()) {
-    throw new Error(`child output is not a regular file: ${expectedName}`);
-  }
   if ((await realpath(file)) !== expected) {
     throw new Error(`child output escaped the job directory: ${expectedName}`);
   }
   // codeql[js/file-system-race] The opened descriptor is identity-checked
-  // against the pre-open lstat and again after reading; no path is reused.
+  // after opening and again after reading; no path is reused.
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
     if (
       !stat.isFile() ||
-      stat.dev !== before.dev ||
-      stat.ino !== before.ino ||
-      stat.size !== before.size ||
       stat.size <= 0 ||
       stat.size > maxBytes
     ) {

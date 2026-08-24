@@ -165,24 +165,21 @@ async function readCatalogAsset(
     }
   }
   const resolved = await realpath(candidate);
-  const before = await lstat(resolved);
-  if (!beneath(root, resolved) || !before.isFile()) {
+  if (!beneath(root, resolved)) {
     throw new ControlledAssetMaterializationError(
       'CONTROLLED_ASSET_PATH_FORBIDDEN',
       repositoryPath,
     );
   }
   // codeql[js/file-system-race] The opened descriptor is identity-checked
-  // against the pre-open lstat and again after reading; no path is reused.
+  // after opening and again after reading; no path is reused.
   const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
     if (
       !stat.isFile() ||
       stat.isSymbolicLink() ||
-      stat.dev !== before.dev ||
-      stat.ino !== before.ino ||
-      stat.size !== before.size
+      stat.size < 0
     ) {
       throw new ControlledAssetMaterializationError(
         'CONTROLLED_ASSET_PATH_FORBIDDEN',

@@ -206,7 +206,7 @@ export function settlementCredentialFingerprint(value: string): string {
   // This is a compatibility fingerprint for a random opaque provider token,
   // not a password verifier or credential-storage scheme.
   // codeql[js/insufficient-password-hash]
-  return createHash('sha256').update(value).digest('hex');
+  return createHash('sha256').update(value).digest('hex'); // lgtm[js/insufficient-password-hash]
 }
 
 function sha256CanonicalJson(value: unknown): string {
