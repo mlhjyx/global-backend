@@ -7,6 +7,8 @@
 - 用户授权的 disposable PostgreSQL 16 验证使用本机已有 `pgvector/pgvector:pg16`、内部临时网络与 tmpfs 数据目录；全新数据库应用 98 个迁移，真实 `app_user` 通过受控函数完成 inspect/enqueue/claim/complete/replay，验证 exact VersionId、FORCE RLS、直表权限拒绝、跨 workspace deny 与 shared subject binding fence。临时容器和网络已清理；该记录不触碰 retained `global-postgres`。
 - 运行验证先后捕获并修复两个迁移缺陷：PL/pgSQL `audit` 局部变量与 SQL alias 歧义、PostgreSQL 不支持 `{1,1024}` 重复上限。修复提交为 `da7b92c0`、`bb5a9d03`，并新增 migration regression tests；cleanup activity 的异常 cause 保留修复为 `50c23d8d`。
 - 最新 source checks：API 384 files / 5752 tests（3/39 skipped）、API build PASS、lint 0 errors/16 既有 warnings、governance 118/118、`docs:verify` 0 errors/1 既有 table warning、ContractGraph 10917 nodes / 25049 edges / 0 errors。MinIO/S3 policy attach 与 exact-version delete、Temporal/Worker/Relay 目标环境 admission、OCI 发布/部署、主线合并、RuntimeEvidence 与真实模型调用仍为 UNKNOWN/未执行。
+- 后续门修复：`f41c12a5` 恢复 sanctions workflow 的 destructured activity graph binding，并让 Temporal 测试 proxy 在 reset 时保留 memoized spies；`65eabae9` 修正文档注释。`fb5e2e21` 将 OCI Dockerfile 与 SBOM/manifest contract pin 从已撤出的 Chromium `151.0.7922.137-1~deb12u1` 更新到当前可得的锁定版本 `151.0.7922.173-1~deb12u1`。新 PR CI 的 governance/contracts/renderer/gitleaks/CodeQL canary 结果已回读，production advisory delta 仍因既有 overdue advisories fail；OCI 完整 readback尚在运行。
+- CodeQL 安全收口提交 `a648706a`：Helmet 恢复 CSP；catalog 与 image pipeline/child 使用 `O_NOFOLLOW` 句柄并校验 dev/ino/size；managed image child path 改为生产相邻制品、测试显式 DI；slug 去除交替锚定正则；opaque provider token 保留 v2 SHA-256 fingerprint 合同并添加有理由的 CodeQL 语义抑制。该提交的本地 API 384/5752 与 focused 39/39 通过，新的 CodeQL/CI readback 尚待推送。
 
 ## 2026-08-22 · 通用操作 Artifact 耐久重放 Task 8 记录（pre-cutover / no runtime claim）
 
