@@ -74,6 +74,27 @@ describe('domain ACK declaration contract', () => {
         .toThrow('DOMAIN_ACK_CONTRACT_INVALID');
     }
   });
+
+  it('accepts a bounded artifact ACK and rejects strategy/artifact/timestamp drift', () => {
+    const artifactAck = {
+      ...personalAck,
+      resultStrategy: 'artifact_reference',
+      resultSchema: 'http-get/v1',
+      artifactId: '892b2e0e-990a-4c66-89d9-2ce467a0da4d',
+    };
+    expect(parseDomainAckContract(artifactAck)).toMatchObject({
+      resultStrategy: 'artifact_reference',
+      artifactId: artifactAck.artifactId,
+    });
+    for (const candidate of [
+      { ...artifactAck, artifactId: null },
+      { ...personalAck, artifactId: artifactAck.artifactId },
+      { ...personalAck, acknowledgedAt: '2026-08-24T10:20:30Z' },
+      { ...personalAck, domainRevision: '' },
+    ]) {
+      expect(() => parseDomainAckContract(candidate)).toThrow('DOMAIN_ACK_CONTRACT_INVALID');
+    }
+  });
 });
 
 describe('valid/unknown/control/replay disposition contract', () => {
@@ -120,5 +141,29 @@ describe('valid/unknown/control/replay disposition contract', () => {
       automaticPhysicalRetryAllowed: true,
     })).toThrow('EXECUTION_RESULT_DISPOSITION_INVALID');
   });
-});
 
+  it('rejects mismatched status/code pairs and malformed valid receipts', () => {
+    for (const candidate of [
+      {
+        schemaVersion: 'execution-result-disposition/v1', kind: 'control_error',
+        code: 'GENERIC_OPERATION_RESULT_UNKNOWN', operationStatus: 'RELEASED',
+        operationId: receipt.operationId, operationKey: receipt.operationKey,
+        automaticPhysicalRetryAllowed: false,
+      },
+      {
+        schemaVersion: 'execution-result-disposition/v1', kind: 'replay_error',
+        code: 'GENERIC_OPERATION_REPLAY_INVALID', operationStatus: 'RESULT_UNKNOWN',
+        operationId: receipt.operationId, operationKey: receipt.operationKey,
+        automaticPhysicalRetryAllowed: false,
+      },
+      {
+        schemaVersion: 'execution-result-disposition/v1', kind: 'valid_output',
+        receipt: { ...receipt, status: 'RESULT_UNKNOWN' },
+        automaticPhysicalRetryAllowed: false,
+      },
+    ]) {
+      expect(() => parseExecutionResultDisposition(candidate))
+        .toThrow('EXECUTION_RESULT_DISPOSITION_INVALID');
+    }
+  });
+});

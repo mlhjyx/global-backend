@@ -87,11 +87,54 @@ describe('durable execution receipt contract', () => {
       { ...typedReceipt, usage: { ...typedReceipt.usage, chargedMicrousd: '03' } },
       { ...typedReceipt, usage: { ...typedReceipt.usage, chargedMicrousd: '5001' } },
       { ...typedReceipt, usage: { ...typedReceipt.usage, inputTokens: -1 } },
+      { ...typedReceipt, usage: { ...typedReceipt.usage, bytesBilled: '2', maximumBytesBilled: '1' } },
+      { ...typedReceipt, usage: { ...typedReceipt.usage, currency: 'EUR' } },
       { ...typedReceipt, resultDigest: 'A'.repeat(64) },
     ]) {
       expect(() => parseDurableExecutionReceipt(candidate))
         .toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
     }
   });
-});
 
+  it('enforces estimated-upper-bound and not-incurred cost facts', () => {
+    expect(parseDurableExecutionReceipt({
+      ...typedReceipt,
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 1,
+        chargedMicrousd: '9000', upperBoundMicrousd: '9000',
+      },
+      costBasis: 'estimated_upper_bound',
+    }).costBasis).toBe('estimated_upper_bound');
+    expect(parseDurableExecutionReceipt({
+      ...typedReceipt,
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 0,
+        chargedMicrousd: '0', upperBoundMicrousd: '0',
+      },
+      costBasis: 'not_incurred',
+    }).costBasis).toBe('not_incurred');
+    expect(() => parseDurableExecutionReceipt({
+      ...typedReceipt,
+      usage: {
+        currency: 'USD', unit: 'microusd', callCount: 1,
+        chargedMicrousd: '0', upperBoundMicrousd: '0',
+      },
+      costBasis: 'not_incurred',
+    })).toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
+  });
+
+  it('accepts null-prototype data properties but rejects proxies and accessors', () => {
+    const canonical = Object.assign(Object.create(null), typedReceipt);
+    const parsed = parseDurableExecutionReceipt(canonical);
+    expect(parsed.operationId).toBe(UUIDS.operationId);
+    expect(() => parseDurableExecutionReceipt(new Proxy({ ...typedReceipt }, {})))
+      .toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
+    const accessor = { ...typedReceipt } as Record<string, unknown>;
+    Object.defineProperty(accessor, 'operationKey', {
+      enumerable: true,
+      get: () => typedReceipt.operationKey,
+    });
+    expect(() => parseDurableExecutionReceipt(accessor))
+      .toThrow('DURABLE_EXECUTION_RECEIPT_INVALID');
+  });
+});

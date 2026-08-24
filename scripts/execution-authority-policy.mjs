@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -68,6 +68,17 @@ function sameSet(left, right) {
   return JSON.stringify(sorted(left)) === JSON.stringify(sorted(right));
 }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
+
+async function listFiles(root, relative) {
+  const entries = await readdir(resolve(root, relative), { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const path = `${relative}/${entry.name}`;
+    if (entry.isDirectory()) files.push(...await listFiles(root, path));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files;
+}
 
 async function readText(repoRoot, path) {
   return readFile(resolve(repoRoot, path), 'utf8');
@@ -214,12 +225,21 @@ function validateTools(manifest, path, issues) {
         !isRecord(result) || result.maxRowsPerOperation !== 25 ||
         result.maxApplicantsPerPatent !== 32 || result.maxInventorsPerPatent !== 25 ||
         result.typedProjectionMaxPatents !== 2000 || result.rawBigQueryRowsRetained !== false ||
-        !exactArray(result.inventorFields, ['name'])
+        !exactArray(result.inventorFields, ['name']) ||
+        !sameSet(Object.keys(result), [
+          'maxRowsPerOperation', 'maxApplicantsPerPatent',
+          'maxInventorsPerPatent', 'typedProjectionMaxPatents',
+          'rawBigQueryRowsRetained', 'inventorFields',
+        ])
       ) issues.push(issue('EXECUTION_AUTHORITY_PATENT_RESULT_CONTRACT_INVALID', path, 'Patent Cache result constraints do not match current bounded path', id));
       if (
         !isRecord(cost) || cost.maximumBytesBilled !== '214748364800' ||
         cost.costBasis !== 'estimated_upper_bound' ||
-        cost.providerReportedBytesOptional !== true || cost.realBigQueryInTests !== false
+        cost.providerReportedBytesOptional !== true || cost.realBigQueryInTests !== false ||
+        !sameSet(Object.keys(cost), [
+          'maximumBytesBilled', 'costBasis', 'providerReportedBytesOptional',
+          'realBigQueryInTests',
+        ])
       ) issues.push(issue('EXECUTION_AUTHORITY_PATENT_COST_CONTRACT_INVALID', path, 'Patent Cache cost constraints must remain bounded and offline-tested', id));
     }
   }
@@ -278,7 +298,10 @@ async function validateProtectedFiles(repoRoot, manifest, path, issues) {
     return;
   }
   for (const entry of wiring.protectedFiles) {
-    if (!isRecord(entry) || typeof entry.path !== 'string' || !/^[0-9a-f]{64}$/.test(entry.sha256 ?? '')) {
+    if (
+      !isRecord(entry) || !sameSet(Object.keys(entry), ['path', 'sha256']) ||
+      typeof entry.path !== 'string' || !/^[0-9a-f]{64}$/.test(entry.sha256 ?? '')
+    ) {
       issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'protected file entry is invalid'));
       continue;
     }
@@ -293,8 +316,53 @@ function toolBlock(source, id) {
   const marker = `id: "${id}"`;
   const start = source.indexOf(marker);
   if (start < 0) return '';
-  const next = source.indexOf('\n  id: "', start + marker.length);
-  return source.slice(start, next < 0 ? source.length : next);
+  const remainder = source.slice(start + marker.length);
+  const next = remainder.search(/\n\s+id:\s*["'][a-z0-9_.]+["']/);
+  return source.slice(start, next < 0 ? source.length : start + marker.length + next);
+}
+
+function numberConstants(source) {
+  const values = new Map();
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*([0-9_]+)\s*;/g)) {
+    const normalized = match[2].replaceAll('_', '');
+    if (/^[0-9]+$/.test(normalized)) values.set(match[1], Number(normalized));
+  }
+  return values;
+}
+
+function stringConstants(source) {
+  const values = new Map();
+  for (const match of source.matchAll(/\b(?:export\s+)?const\s+([A-Z0-9_]+)\s*=\s*["']([^"']+)["'](?:\s+as\s+const)?\s*;/g)) {
+    values.set(match[1], match[2]);
+  }
+  return values;
+}
+
+function resolveNumber(token, constants) {
+  const normalized = token.replaceAll('_', '').trim();
+  return /^[0-9]+$/.test(normalized) ? Number(normalized) : constants.get(token.trim());
+}
+
+function resolveString(token, constants) {
+  const literal = token.trim().match(/^["']([^"']+)["']$/);
+  return literal?.[1] ?? constants.get(token.trim());
+}
+
+function artifactSourceContract(block, completeSource) {
+  const maxToken = block.match(/\bmaxBytes:\s*([A-Za-z0-9_]+)/)?.[1];
+  const ttlToken = block.match(/\bttlSeconds:\s*([0-9_]+)/)?.[1];
+  const mediaExpression = block.match(/\bmediaTypes:\s*\[([^\]]+)\]/)?.[1];
+  if (!maxToken || !ttlToken || !mediaExpression) return null;
+  const numbers = numberConstants(completeSource);
+  const strings = stringConstants(completeSource);
+  const mediaTypes = mediaExpression.split(',').map((token) => resolveString(token, strings));
+  if (mediaTypes.some((entry) => typeof entry !== 'string')) return null;
+  return Object.freeze({
+    maxBytes: resolveNumber(maxToken, numbers),
+    mediaTypes,
+    privacyClass: block.match(/\bprivacyClass:\s*["']([^"']+)["']/)?.[1],
+    ttlSeconds: resolveNumber(ttlToken, numbers),
+  });
 }
 
 async function scanCurrentSources(repoRoot, manifest, issues) {
@@ -316,12 +384,36 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
       issues.push(issue('EXECUTION_AUTHORITY_TOOL_STRATEGY_SOURCE_MISMATCH', entry.declarationPath, `source strategy mismatch ${entry.id}`, entry.id));
     }
     if (entry.resultStrategy === 'artifact_reference') {
-      if (!block.includes(`schema: "${entry.resultSchema}"`)) {
+      const expected = ARTIFACT_CONTRACTS[entry.resultSchema];
+      const actual = artifactSourceContract(block, source);
+      if (
+        !block.includes(`schema: "${entry.resultSchema}"`) || !expected || !actual ||
+        actual.maxBytes !== expected.maxBytes || actual.privacyClass !== expected.privacyClass ||
+        actual.ttlSeconds !== expected.ttlSeconds || !exactArray(actual.mediaTypes, expected.mediaTypes)
+      ) {
         issues.push(issue('EXECUTION_AUTHORITY_TOOL_SCHEMA_SOURCE_MISMATCH', entry.declarationPath, `artifact schema mismatch ${entry.id}`, entry.id));
       }
-    } else if (!projectionSources.includes(`'${entry.id}': '${entry.resultSchema}'`)) {
-      issues.push(issue('EXECUTION_AUTHORITY_TOOL_SCHEMA_SOURCE_MISMATCH', entry.declarationPath, `typed projection mapping mismatch ${entry.id}`, entry.id));
+    } else {
+      const sourceBinding =
+        block.includes(`["${entry.id}"]`) || block.includes(`['${entry.id}']`) ||
+        block.includes(`schema: "${entry.resultSchema}"`) || block.includes(`schema: '${entry.resultSchema}'`);
+      if (!sourceBinding || !projectionSources.includes(`'${entry.id}': '${entry.resultSchema}'`)) {
+        issues.push(issue('EXECUTION_AUTHORITY_TOOL_SCHEMA_SOURCE_MISMATCH', entry.declarationPath, `typed projection mapping mismatch ${entry.id}`, entry.id));
+      }
     }
+  }
+  const genericSources = (await listFiles(repoRoot, 'apps/api/src'))
+    .filter((path) => path.endsWith('.ts') && !path.endsWith('.spec.ts'))
+    .filter((path) => !path.startsWith('apps/api/src/site-builder/'));
+  const discoveredModelTasks = new Set();
+  for (const path of genericSources) {
+    const content = await readText(repoRoot, path);
+    for (const match of content.matchAll(/\bgetTask\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+      discoveredModelTasks.add(match[1]);
+    }
+  }
+  if (!sameSet(discoveredModelTasks, EXPECTED_MODEL_TASKS.map((entry) => entry.taskId))) {
+    issues.push(issue('EXECUTION_AUTHORITY_MODEL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src', 'generic product Model task inventory drifted from the closed registry'));
   }
   const modelProjectionSource = await readText(repoRoot, 'apps/api/src/durable-results/model-result-projections.ts');
   for (const entry of EXPECTED_MODEL_TASKS) {
@@ -340,6 +432,12 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   }
   for (const token of ['parseDomainAckContract', 'parseExecutionResultDisposition', 'PERSONAL_DATA', 'subjectIdHash', 'automaticPhysicalRetryAllowed']) {
     if (!ackSource.includes(token)) issues.push(issue('EXECUTION_AUTHORITY_DOMAIN_ACK_SCHEMA_MISSING', ACK_PATH, `ACK contract missing ${token}`));
+  }
+  const artifactRegistry = await readText(repoRoot, 'apps/api/src/durable-results/artifact/artifact-materializer.registry.ts');
+  for (const schema of Object.keys(ARTIFACT_CONTRACTS)) {
+    if (!artifactRegistry.includes(`'${schema}'`) && !artifactRegistry.includes(`"${schema}"`)) {
+      issues.push(issue('EXECUTION_AUTHORITY_ARTIFACT_MATERIALIZER_MISSING', 'apps/api/src/durable-results/artifact/artifact-materializer.registry.ts', `missing artifact materializer ${schema}`));
+    }
   }
   const patentScanner = await readText(repoRoot, 'apps/api/src/temporal/patent-cache-broker-scanner.ts');
   const patentAdapter = await readText(repoRoot, 'apps/api/src/adapters/bigquery-patents.ts');
@@ -360,6 +458,22 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
     patentsActivity.includes("from '../adapters/bigquery-patents'") ||
     patentsActivity.includes('bigqueryPatents.') || patentScanner.includes('bigqueryPatents.')
   ) issues.push(issue('EXECUTION_AUTHORITY_DIRECT_BIGQUERY_BYPASS', 'apps/api/src/temporal', 'managed Patent Cache activity bypasses google_patents.search', 'google_patents.search'));
+}
+
+function validateManagedAdapters(manifest, path, issues) {
+  const entries = manifest.managedExternalAdapters;
+  if (
+    !Array.isArray(entries) || entries.length !== 1 ||
+    !sameSet(Object.keys(entries[0] ?? {}), [
+      'adapter', 'managedPath', 'requiredBrokerTool', 'directPhysicalCalls',
+      'testExecution',
+    ]) ||
+    entries[0].adapter !== 'google_patents.bigquery' ||
+    entries[0].managedPath !== 'apps/api/src/temporal/patent-cache-broker-scanner.ts' ||
+    entries[0].requiredBrokerTool !== 'google_patents.search' ||
+    entries[0].directPhysicalCalls !== 'DISALLOWED_IN_MANAGED_ACTIVITY' ||
+    entries[0].testExecution !== 'NO_REAL_BIGQUERY'
+  ) issues.push(issue('EXECUTION_AUTHORITY_MANAGED_ADAPTER_INVALID', path, 'managed BigQuery adapter declaration is incomplete', 'google_patents.search'));
 }
 
 export async function verifyExecutionAuthorityPolicy(options = {}) {
@@ -388,6 +502,7 @@ export async function verifyExecutionAuthorityPolicy(options = {}) {
   validateTools(manifest, manifestPath, issues);
   validateModelTasks(manifest, manifestPath, issues);
   validateArtifacts(manifest, manifestPath, issues);
+  validateManagedAdapters(manifest, manifestPath, issues);
   await validateProtectedFiles(repoRoot, manifest, manifestPath, issues);
   await scanCurrentSources(repoRoot, manifest, issues);
   return Object.freeze({
