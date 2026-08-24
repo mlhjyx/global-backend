@@ -12,6 +12,10 @@ import {
   type GenericOperationArtifactSnapshot,
 } from './artifact-expected-facts';
 import { parseArtifactReference } from './artifact-reference.schema';
+import {
+  parseGenericOperationArtifactSubjectRef,
+  type GenericOperationArtifactSubjectRef,
+} from './generic-operation-artifact-subject.repository';
 import type {
   GenericOperationArtifactBinding,
   GenericOperationArtifactRepository,
@@ -79,6 +83,8 @@ export interface PersistGenericOperationArtifactInput {
   readonly maxBytes: number;
   readonly resultSchema: string;
   readonly privacyClass: ArtifactPrivacyClass;
+  /** Required only for workspace PERSONAL_DATA; contains row ids, never identity text. */
+  readonly subjectRef?: GenericOperationArtifactSubjectRef;
   readonly expiresAt: string;
   readonly actualCents: number;
   /** Small closed facts captured from the same physical operation result. */
@@ -90,6 +96,8 @@ export interface RecoverUnknownGenericOperationArtifactInput {
   readonly reservation: BudgetReservation;
   readonly authorityId: string;
   readonly actualCents: number;
+  /** Re-supplied from the durable rights-flow input; never inferred from body bytes. */
+  readonly subjectRef?: GenericOperationArtifactSubjectRef;
   readonly signal?: AbortSignal;
 }
 
@@ -109,6 +117,24 @@ export interface VerifiedGenericOperationArtifact {
 
 function invalid(): never {
   return invalidGenericOperationArtifact();
+}
+
+function boundSubjectRef(
+  privacyClass: ArtifactPrivacyClass,
+  scopeKind: ArtifactScopeKind,
+  value: unknown,
+): GenericOperationArtifactSubjectRef | null {
+  if (privacyClass !== 'PERSONAL_DATA') {
+    return value === undefined || value === null ? null : invalid();
+  }
+  if (scopeKind !== 'workspace' || value === undefined || value === null) {
+    return invalid();
+  }
+  try {
+    return parseGenericOperationArtifactSubjectRef(value);
+  } catch {
+    return invalid();
+  }
 }
 
 function canonicalTimestamp(value: unknown): string | null {
@@ -309,7 +335,15 @@ export class GenericOperationArtifactService {
   async persist(
     input: PersistGenericOperationArtifactInput,
   ): Promise<GenericOperationArtifactReference> {
-    assertReservationBinding(input.reservation, input.authorityId);
+    const binding = assertReservationBinding(
+      input.reservation,
+      input.authorityId,
+    );
+    const subjectRef = boundSubjectRef(
+      input.privacyClass,
+      binding.scopeKind,
+      input.subjectRef,
+    );
     const expectedFacts = parseArtifactExpectedFactsForResultSchema(
       input.resultSchema,
       input.expectedFacts,
@@ -367,6 +401,7 @@ export class GenericOperationArtifactService {
         error,
         input.reservation,
         snapshot,
+        subjectRef ?? undefined,
       );
       throw error;
     }
@@ -382,11 +417,20 @@ export class GenericOperationArtifactService {
     await this.drainVerifiedBody(promoted, input.signal);
 
     const reference = referenceFromManifest(manifest);
-    await this.budgetStore.settleArtifactManifest(
-      input.reservation,
-      input.actualCents,
-      snapshot,
-    );
+    if (subjectRef) {
+      await this.budgetStore.settleArtifactManifest(
+        input.reservation,
+        input.actualCents,
+        snapshot,
+        subjectRef,
+      );
+    } else {
+      await this.budgetStore.settleArtifactManifest(
+        input.reservation,
+        input.actualCents,
+        snapshot,
+      );
+    }
     await this.cleanup(staged.artifactId);
     return reference;
   }
@@ -398,6 +442,7 @@ export class GenericOperationArtifactService {
     const loaded = await this.budgetStore.loadResultUnknownArtifact(
       input.reservation,
       input.authorityId,
+      input.subjectRef,
     );
     if (loaded === null) return invalid();
     const expected = snapshotExpectedManifest(
@@ -406,17 +451,31 @@ export class GenericOperationArtifactService {
       input.authorityId,
       true,
     );
+    const subjectRef = boundSubjectRef(
+      expected.privacyClass,
+      expected.scopeKind,
+      input.subjectRef,
+    );
     const snapshot = buildSnapshot(expected, loaded.expectedFacts);
     const inspected = await this.store.inspect(expected.sha256, input.signal);
     if (!sameStoredArtifact(inspected, expected)) return invalid();
     await this.drainVerifiedBody(expected, input.signal);
 
     const reference = referenceFromManifest(expected);
-    await this.budgetStore.settleArtifactManifest(
-      input.reservation,
-      input.actualCents,
-      snapshot,
-    );
+    if (subjectRef) {
+      await this.budgetStore.settleArtifactManifest(
+        input.reservation,
+        input.actualCents,
+        snapshot,
+        subjectRef,
+      );
+    } else {
+      await this.budgetStore.settleArtifactManifest(
+        input.reservation,
+        input.actualCents,
+        snapshot,
+      );
+    }
     await this.cleanup(expected.artifactId);
     return reference;
   }
@@ -452,13 +511,22 @@ export class GenericOperationArtifactService {
     error: unknown,
     reservation: BudgetReservation,
     expected?: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<void> {
     if (
       error instanceof ArtifactStorageError &&
       (error.code === 'GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN' ||
         error.code === 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN')
     ) {
-      await this.budgetStore.markResultUnknown(reservation, expected);
+      if (subjectRef) {
+        await this.budgetStore.markResultUnknown(
+          reservation,
+          expected,
+          subjectRef,
+        );
+      } else {
+        await this.budgetStore.markResultUnknown(reservation, expected);
+      }
     }
   }
 

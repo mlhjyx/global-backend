@@ -245,12 +245,14 @@ describe("artifact expected-facts persistence", () => {
     });
 
     expect(queries[0]?.strings.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v3",
+      "settle_tool_budget_artifact_manifest_v4",
     );
-    expect(queries[0]?.values.slice(-6)).toEqual([
+    expect(queries[0]?.values.slice(-8)).toEqual([
       200,
       true,
       "https://example.com/final",
+      null,
+      null,
       null,
       null,
       null,

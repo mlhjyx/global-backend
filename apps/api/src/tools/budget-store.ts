@@ -29,8 +29,44 @@ import {
   type GenericOperationArtifactSnapshot,
   type UnknownArtifactRow,
 } from './artifact-budget-expected-facts';
+import {
+  parseGenericOperationArtifactSubjectRef,
+  type GenericOperationArtifactSubjectRef,
+} from '../durable-results/artifact/generic-operation-artifact-subject.repository';
 import { assertMicrousd } from './microusd';
 const MAX_KEY_LENGTH = 200;
+
+function bindExpectedArtifactSubject(
+  snapshot: GenericOperationArtifactSnapshot | null,
+  value: GenericOperationArtifactSubjectRef | undefined,
+): GenericOperationArtifactSubjectRef | null {
+  if (!snapshot) {
+    return value === undefined ? null : invalidGenericOperationArtifact();
+  }
+  const personal = snapshot.manifest.privacyClass === 'PERSONAL_DATA';
+  if (!personal) {
+    return value === undefined ? null : invalidGenericOperationArtifact();
+  }
+  if (snapshot.manifest.scopeKind !== 'workspace' || value === undefined) {
+    return invalidGenericOperationArtifact();
+  }
+  try {
+    return parseGenericOperationArtifactSubjectRef(value);
+  } catch {
+    return invalidGenericOperationArtifact();
+  }
+}
+
+function parseOptionalArtifactSubject(
+  value: GenericOperationArtifactSubjectRef | undefined,
+): GenericOperationArtifactSubjectRef | null {
+  if (value === undefined) return null;
+  try {
+    return parseGenericOperationArtifactSubjectRef(value);
+  } catch {
+    return invalidGenericOperationArtifact();
+  }
+}
 
 export const TOOL_BUDGET_STORE = Symbol('TOOL_BUDGET_STORE');
 export { BudgetExceededError } from './budget';
@@ -149,17 +185,20 @@ export interface BudgetStore {
   markResultUnknown(
     reservation: BudgetReservation,
     expected?: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetResultUnknownTransition>;
   /** Loads only facts atomically bound when the original physical result became unknown. */
   loadResultUnknownArtifact(
     reservation: BudgetReservation,
     authorityId: string,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<GenericOperationArtifactSnapshot | null>;
   /** Atomically appends the manifest and settles its exact closed reference. */
   settleArtifactManifest(
     reservation: BudgetReservation,
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetSettlement>;
   release(reservation: BudgetReservation): Promise<BudgetSettlement>;
   status(input: { workspaceId: string; accountKey: string }): Promise<BudgetStatus>;
@@ -582,11 +621,16 @@ function isAuthorityLifecycleUnavailable(error: unknown): boolean {
 }
 
 function isTrustedArtifactDatabaseInvalid(error: unknown): boolean {
+  const markers = new Set([
+    'ERROR: GENERIC_OPERATION_ARTIFACT_INVALID',
+    'ERROR: GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID',
+    'ERROR: GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED',
+  ]);
   return Boolean(
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2010' &&
     error.meta?.code === 'P0001' &&
-    error.meta?.message === 'ERROR: GENERIC_OPERATION_ARTIFACT_INVALID',
+    typeof error.meta?.message === 'string' && markers.has(error.meta.message),
   );
 }
 
@@ -823,17 +867,19 @@ export class PostgresBudgetStore implements BudgetStore {
   async markResultUnknown(
     reservation: BudgetReservation,
     expected?: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetResultUnknownTransition> {
     const bound = expected
       ? parseBoundArtifactBudgetSnapshot(expected, reservation)
       : null;
     const durable = bound?.snapshot ?? null;
     const facts = bound?.columns ?? null;
+    const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
     let rows: ResultUnknownRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<ResultUnknownRow[]>(
-          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v3(
+          Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v4(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${durable ? JSON.stringify(durable.manifest) : null}::jsonb,
             ${facts?.expectedHttpStatus ?? null},
@@ -841,7 +887,9 @@ export class PostgresBudgetStore implements BudgetStore {
             ${facts?.expectedSanitizedUrl ?? null},
             ${facts?.expectedContentHash ?? null},
             ${facts?.expectedBlockedCode ?? null},
-            ${facts?.expectedRobotsBlocked ?? null}
+            ${facts?.expectedRobotsBlocked ?? null},
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid
           )`,
         ),
       );
@@ -888,6 +936,7 @@ export class PostgresBudgetStore implements BudgetStore {
   async loadResultUnknownArtifact(
     reservation: BudgetReservation,
     authorityId: string,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<GenericOperationArtifactSnapshot | null> {
     if (
       !isCanonicalArtifactUuid(reservation.operationId) ||
@@ -897,13 +946,16 @@ export class PostgresBudgetStore implements BudgetStore {
     ) {
       return invalidGenericOperationArtifact();
     }
+    const durableSubject = parseOptionalArtifactSubject(subjectRef);
     let rows: UnknownArtifactRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<UnknownArtifactRow[]>(
-          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v3(
+          Prisma.sql`SELECT * FROM load_tool_budget_result_unknown_artifact_v4(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
-            ${authorityId}::uuid
+            ${authorityId}::uuid,
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid
           )`,
         ),
       );
@@ -952,21 +1004,25 @@ export class PostgresBudgetStore implements BudgetStore {
     reservation: BudgetReservation,
     actualCents: number,
     snapshot: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetSettlement> {
     assertCents('actualCents', actualCents, true);
     const { snapshot: durable, columns: facts } =
       parseBoundArtifactBudgetSnapshot(snapshot, reservation);
     const manifest = durable.manifest;
+    const durableSubject = bindExpectedArtifactSubject(durable, subjectRef);
     let rows: SettleRow[];
     try {
       rows = await this.inAuthorityScope(reservation.workspaceId, (tx) =>
         tx.$queryRaw<SettleRow[]>(
-          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v3(
+          Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_v4(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${BigInt(actualCents)}, ${JSON.stringify(manifest)}::jsonb,
             ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
-            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked}
+            ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
+            ${durableSubject?.subjectType ?? null},
+            ${durableSubject?.subjectId ?? null}::uuid
           )`,
         ),
       );

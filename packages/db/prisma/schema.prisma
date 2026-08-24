@@ -76,11 +76,14 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  companyProfiles            CompanyProfile[]
-  outboxEvents               OutboxEvent[]
-  outboxDeliveries           OutboxDelivery[]
-  executionBudgetAuthorities ExecutionBudgetAuthority[]
-  genericOperationArtifacts  GenericOperationArtifact[]
+  companyProfiles                                CompanyProfile[]
+  outboxEvents                                   OutboxEvent[]
+  outboxDeliveries                               OutboxDelivery[]
+  executionBudgetAuthorities                     ExecutionBudgetAuthority[]
+  genericOperationArtifacts                      GenericOperationArtifact[]
+  genericOperationArtifactSubjects               GenericOperationArtifactSubject[]               @relation("GenericOperationArtifactSubjectWorkspace")
+  genericOperationArtifactSubjectTombstones      GenericOperationArtifactSubjectTombstone[]      @relation("GenericOperationArtifactSubjectTombstoneWorkspace")
+  genericOperationArtifactSubjectTombstoneAudits GenericOperationArtifactSubjectTombstoneAudit[] @relation("GenericOperationArtifactSubjectTombstoneAuditWorkspace")
 
   @@map("workspace")
 }
@@ -197,32 +200,34 @@ model ExecutionBudgetAuthorityRevocation {
 }
 
 model ToolBudgetOperation {
-  id                    String                    @id @default(uuid()) @db.Uuid
-  scopeKey              String                    @map("scope_key") @db.VarChar(200)
-  accountId             String                    @map("account_id") @db.Uuid
-  generation            Int
-  operationKey          String                    @map("operation_key") @db.VarChar(200)
-  amountUnit            String                    @default("cent") @map("amount_unit") @db.VarChar(16)
-  reservedCents         BigInt                    @map("reserved_cents")
-  observedCents         BigInt?                   @map("observed_cents")
-  chargedCents          BigInt?                   @map("charged_cents")
-  reservedMicrousd      BigInt?                   @map("reserved_microusd")
-  observedMicrousd      BigInt?                   @map("observed_microusd")
-  chargedMicrousd       BigInt?                   @map("charged_microusd")
-  resultSchemaVersion   String?                   @map("result_schema_version") @db.VarChar(80)
-  resultSchema          String?                   @map("result_schema") @db.VarChar(100)
-  resultDigest          String?                   @map("result_digest") @db.VarChar(64)
-  resultJson            Json?                     @map("result_json")
-  expectedArtifact      Json?                     @map("expected_artifact")
-  expectedHttpStatus    Int?                      @map("expected_http_status") @db.SmallInt
-  expectedHttpOk        Boolean?                  @map("expected_http_ok")
-  expectedSanitizedUrl  String?                   @map("expected_sanitized_url") @db.VarChar(2000)
-  expectedContentHash   String?                   @map("expected_content_hash") @db.Char(24)
-  expectedBlockedCode   String?                   @map("expected_blocked_code") @db.VarChar(80)
-  expectedRobotsBlocked Boolean?                  @map("expected_robots_blocked")
-  status                ToolBudgetOperationStatus @default(RESERVED)
-  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
-  settledAt             DateTime?                 @map("settled_at") @db.Timestamptz(3)
+  id                          String                    @id @default(uuid()) @db.Uuid
+  scopeKey                    String                    @map("scope_key") @db.VarChar(200)
+  accountId                   String                    @map("account_id") @db.Uuid
+  generation                  Int
+  operationKey                String                    @map("operation_key") @db.VarChar(200)
+  amountUnit                  String                    @default("cent") @map("amount_unit") @db.VarChar(16)
+  reservedCents               BigInt                    @map("reserved_cents")
+  observedCents               BigInt?                   @map("observed_cents")
+  chargedCents                BigInt?                   @map("charged_cents")
+  reservedMicrousd            BigInt?                   @map("reserved_microusd")
+  observedMicrousd            BigInt?                   @map("observed_microusd")
+  chargedMicrousd             BigInt?                   @map("charged_microusd")
+  resultSchemaVersion         String?                   @map("result_schema_version") @db.VarChar(80)
+  resultSchema                String?                   @map("result_schema") @db.VarChar(100)
+  resultDigest                String?                   @map("result_digest") @db.VarChar(64)
+  resultJson                  Json?                     @map("result_json")
+  expectedArtifact            Json?                     @map("expected_artifact")
+  expectedArtifactSubjectType String?                   @map("expected_artifact_subject_type") @db.VarChar(16)
+  expectedArtifactSubjectId   String?                   @map("expected_artifact_subject_id") @db.Uuid
+  expectedHttpStatus          Int?                      @map("expected_http_status") @db.SmallInt
+  expectedHttpOk              Boolean?                  @map("expected_http_ok")
+  expectedSanitizedUrl        String?                   @map("expected_sanitized_url") @db.VarChar(2000)
+  expectedContentHash         String?                   @map("expected_content_hash") @db.Char(24)
+  expectedBlockedCode         String?                   @map("expected_blocked_code") @db.VarChar(80)
+  expectedRobotsBlocked       Boolean?                  @map("expected_robots_blocked")
+  status                      ToolBudgetOperationStatus @default(RESERVED)
+  createdAt                   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  settledAt                   DateTime?                 @map("settled_at") @db.Timestamptz(3)
 
   account  ToolBudgetAccount         @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_operation_account_scope_fkey")
   artifact GenericOperationArtifact?
@@ -257,10 +262,11 @@ model GenericOperationArtifact {
   createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   expiresAt             DateTime @map("expires_at") @db.Timestamptz(3)
 
-  workspace Workspace?                     @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
-  authority ExecutionBudgetAuthority       @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
-  operation ToolBudgetOperation            @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
-  object    GenericOperationArtifactObject @relation(fields: [sha256, objectKey, sizeBytes, mediaType, privacyClass], references: [sha256, objectKey, sizeBytes, mediaType, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_metadata_fkey")
+  workspace Workspace?                       @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
+  authority ExecutionBudgetAuthority         @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
+  operation ToolBudgetOperation              @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+  object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, mediaType, privacyClass], references: [sha256, objectKey, sizeBytes, mediaType, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_metadata_fkey")
+  subject   GenericOperationArtifactSubject?
 
   @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
   @@unique([scopeKey, operationId], map: "generic_operation_artifact_scope_operation_key")
@@ -269,6 +275,58 @@ model GenericOperationArtifact {
   @@index([workspaceId, expiresAt], map: "generic_operation_artifact_workspace_expiry_idx")
   @@index([privacyClass, expiresAt], map: "generic_operation_artifact_privacy_expiry_idx")
   @@map("generic_operation_artifact")
+}
+
+/// Append-only PERSONAL_DATA lookup. It contains only the existing rights-flow
+/// subject discriminator and row UUID; identity text and artifact bytes remain
+/// forbidden. One artifact can bind to exactly one DSR subject.
+model GenericOperationArtifactSubject {
+  artifactId  String   @id @map("artifact_id") @db.Uuid
+  scopeKey    String   @map("scope_key") @db.VarChar(200)
+  workspaceId String   @map("workspace_id") @db.Uuid
+  subjectType String   @map("subject_type") @db.VarChar(16)
+  subjectId   String   @map("subject_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  artifact  GenericOperationArtifact @relation(fields: [scopeKey, artifactId], references: [scopeKey, id], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_subject_artifact_scope_fkey")
+  workspace Workspace                @relation("GenericOperationArtifactSubjectWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_subject_workspace_fkey")
+
+  @@unique([scopeKey, artifactId], map: "generic_operation_artifact_subject_scope_id_key")
+  @@index([workspaceId, subjectType, subjectId, artifactId], map: "generic_operation_artifact_subject_lookup_idx")
+  @@map("generic_operation_artifact_subject")
+}
+
+/// Append-only subject-wide DSR fence. It intentionally survives artifact
+/// expiry and blocks future PERSONAL_DATA binding for the same workspace row.
+model GenericOperationArtifactSubjectTombstone {
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  subjectType  String   @map("subject_type") @db.VarChar(16)
+  subjectId    String   @map("subject_id") @db.Uuid
+  tombstonedAt DateTime @default(now()) @map("tombstoned_at") @db.Timestamptz(3)
+
+  workspace Workspace                                       @relation("GenericOperationArtifactSubjectTombstoneWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_subject_tombstone_workspace_fkey")
+  audits    GenericOperationArtifactSubjectTombstoneAudit[]
+
+  @@id([workspaceId, subjectType, subjectId])
+  @@index([workspaceId, tombstonedAt], map: "generic_operation_artifact_subject_tombstone_time_idx")
+  @@map("generic_operation_artifact_subject_tombstone")
+}
+
+/// Per-request append-only audit linking repeated DSR requests to the durable
+/// subject-wide fence. Repeated lawful requests never rewrite the first fence.
+model GenericOperationArtifactSubjectTombstoneAudit {
+  deletionRequestId String   @id @map("deletion_request_id") @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  subjectType       String   @map("subject_type") @db.VarChar(16)
+  subjectId         String   @map("subject_id") @db.Uuid
+  tombstonedAt      DateTime @default(now()) @map("tombstoned_at") @db.Timestamptz(3)
+
+  request   DeletionRequest                          @relation(fields: [deletionRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "goa_subject_tombstone_audit_request_fkey")
+  workspace Workspace                                @relation("GenericOperationArtifactSubjectTombstoneAuditWorkspace", fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "goa_subject_tombstone_audit_workspace_fkey")
+  tombstone GenericOperationArtifactSubjectTombstone @relation(fields: [workspaceId, subjectType, subjectId], references: [workspaceId, subjectType, subjectId], onDelete: Restrict, onUpdate: Restrict, map: "goa_subject_tombstone_audit_subject_fkey")
+
+  @@index([workspaceId, subjectType, subjectId, tombstonedAt], map: "generic_operation_artifact_subject_tombstone_audit_subject_idx")
+  @@map("generic_operation_artifact_subject_tombstone_audit")
 }
 
 /// Physical metadata for one globally content-addressed immutable object.
@@ -1291,7 +1349,8 @@ model DeletionRequest {
   updatedAt   DateTime  @updatedAt @map("updated_at")
   completedAt DateTime? @map("completed_at")
 
-  receipt DeletionReceipt?
+  receipt                       DeletionReceipt?
+  artifactSubjectTombstoneAudit GenericOperationArtifactSubjectTombstoneAudit?
 
   @@index([workspaceId])
   @@index([workspaceId, status])

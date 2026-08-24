@@ -218,7 +218,9 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
       0,
       `fresh migrations must deploy\n${deployment.stdout}\n${deployment.stderr}`,
     );
-    await owner.$executeRawUnsafe("TRUNCATE TABLE generic_operation_artifact");
+    await owner.$executeRawUnsafe(
+      "TRUNCATE TABLE generic_operation_artifact_subject, generic_operation_artifact",
+    );
 
     await owner.$executeRawUnsafe(`
       DO $role$
@@ -291,7 +293,9 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
     assert.equal(functions.length, 6);
     for (const routine of functions) {
       assert.equal(routine.prosecdef, true);
-      assert.deepEqual(routine.proconfig, ["search_path=pg_catalog, public"]);
+      assert.deepEqual(routine.proconfig, [
+        "search_path=pg_catalog, public, pg_temp",
+      ]);
     }
   });
 
@@ -568,6 +572,16 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
           'mark_tool_budget_result_unknown_v3',
           'load_tool_budget_result_unknown_artifact_v3',
           'settle_tool_budget_artifact_manifest_v3'
+          ,'bind_workspace_generic_operation_artifact_subject_v1'
+          ,'find_workspace_generic_operation_artifacts_by_subject_v1'
+          ,'tombstone_workspace_generic_operation_artifact_subject_v1'
+          ,'enforce_generic_operation_artifact_personal_subject_v1'
+          ,'append_workspace_generic_operation_artifact_v3'
+          ,'settle_tool_budget_artifact_manifest_v4'
+          ,'enforce_tool_budget_expected_artifact_subject_v1'
+          ,'mark_tool_budget_result_unknown_v4'
+          ,'load_tool_budget_result_unknown_artifact_v4'
+          ,'assert_workspace_generic_operation_artifact_subject_v1'
         )
       )
       SELECT routine.proname AS routine, principal.name AS principal,
@@ -587,11 +601,11 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
       append_platform_generic_operation_artifact_v1: [
         "execution_budget_platform_writer",
       ],
-      find_exact_workspace_generic_operation_artifact_v1: ["app_user"],
+      find_exact_workspace_generic_operation_artifact_v1: [],
       find_exact_platform_generic_operation_artifact_v1: [
         "execution_budget_platform_writer",
       ],
-      find_workspace_generic_operation_artifact_by_operation_v1: ["app_user"],
+      find_workspace_generic_operation_artifact_by_operation_v1: [],
       find_platform_generic_operation_artifact_by_operation_v1: [
         "execution_budget_platform_writer",
       ],
@@ -600,18 +614,9 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
       guard_tool_budget_expected_artifact_v2: [],
       mark_tool_budget_result_unknown_v1: [],
       settle_tool_budget_artifact_reference_v1: [],
-      mark_tool_budget_result_unknown_v2: [
-        "app_user",
-        "execution_budget_platform_writer",
-      ],
-      load_tool_budget_result_unknown_artifact_v2: [
-        "app_user",
-        "execution_budget_platform_writer",
-      ],
-      settle_tool_budget_artifact_manifest_v2: [
-        "app_user",
-        "execution_budget_platform_writer",
-      ],
+      mark_tool_budget_result_unknown_v2: [],
+      load_tool_budget_result_unknown_artifact_v2: [],
+      settle_tool_budget_artifact_manifest_v2: [],
       assert_generic_operation_artifact_expected_facts_v1: [],
       generic_operation_artifact_sanitized_url_valid_v1: [],
       generic_operation_artifact_expected_facts_valid_v1: [],
@@ -630,20 +635,30 @@ describe("generic operation artifact PostgreSQL and FORCE RLS", () => {
       find_platform_generic_operation_artifact_by_operation_v2: [
         "execution_budget_platform_writer",
       ],
-      mark_tool_budget_result_unknown_v3: [
+      mark_tool_budget_result_unknown_v3: [],
+      load_tool_budget_result_unknown_artifact_v3: [],
+      settle_tool_budget_artifact_manifest_v3: [],
+      bind_workspace_generic_operation_artifact_subject_v1: ["app_user"],
+      find_workspace_generic_operation_artifacts_by_subject_v1: ["app_user"],
+      tombstone_workspace_generic_operation_artifact_subject_v1: ["app_user"],
+      enforce_generic_operation_artifact_personal_subject_v1: [],
+      append_workspace_generic_operation_artifact_v3: ["app_user"],
+      settle_tool_budget_artifact_manifest_v4: [
         "app_user",
         "execution_budget_platform_writer",
       ],
-      load_tool_budget_result_unknown_artifact_v3: [
+      enforce_tool_budget_expected_artifact_subject_v1: [],
+      mark_tool_budget_result_unknown_v4: [
         "app_user",
         "execution_budget_platform_writer",
       ],
-      settle_tool_budget_artifact_manifest_v3: [
+      load_tool_budget_result_unknown_artifact_v4: [
         "app_user",
         "execution_budget_platform_writer",
       ],
+      assert_workspace_generic_operation_artifact_subject_v1: [],
     };
-    assert.equal(routinePrivileges.length, 90);
+    assert.equal(routinePrivileges.length, 120);
     for (const privilege of routinePrivileges) {
       assert.equal(
         privilege.allowed,

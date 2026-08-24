@@ -119,7 +119,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       replay: false,
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "mark_tool_budget_result_unknown_v3",
+      "mark_tool_budget_result_unknown_v4",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
@@ -128,6 +128,8 @@ describe("PostgresBudgetStore artifact recovery", () => {
       200,
       true,
       "https://example.com/final",
+      null,
+      null,
       null,
       null,
       null,
@@ -271,7 +273,7 @@ describe("PostgresBudgetStore artifact recovery", () => {
       replay: false,
     });
     expect(queries[0]?.strings?.join("")).toContain(
-      "settle_tool_budget_artifact_manifest_v3",
+      "settle_tool_budget_artifact_manifest_v4",
     );
     expect(queries[0]?.values).toEqual([
       TEST_WORKSPACE_ID,
@@ -281,6 +283,8 @@ describe("PostgresBudgetStore artifact recovery", () => {
       200,
       true,
       "https://example.com/final",
+      null,
+      null,
       null,
       null,
       null,
@@ -315,12 +319,16 @@ describe("PostgresBudgetStore artifact recovery", () => {
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
   });
 
-  it("maps trusted database artifact rejections to the one bounded artifact error", async () => {
+  it.each([
+    "GENERIC_OPERATION_ARTIFACT_INVALID",
+    "GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID",
+    "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
+  ])("maps trusted database %s to the one bounded artifact error", async (marker) => {
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) =>
         fn({
           $queryRaw: vi.fn(async () => {
-            throw rawQueryMarkerError("GENERIC_OPERATION_ARTIFACT_INVALID");
+            throw rawQueryMarkerError(marker);
           }),
         } as never),
       ),

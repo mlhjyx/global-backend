@@ -339,6 +339,47 @@ describe('GenericOperationArtifactService', () => {
     expect(deps.store.promote).not.toHaveBeenCalled();
   });
 
+  it('binds promote ACK_UNKNOWN recovery to the original PERSONAL_DATA subject', async () => {
+    const subjectRef = Object.freeze({
+      subjectType: 'contact' as const,
+      subjectId: 'b8b3ee5c-fbb8-42ef-a382-9c10c16dca72',
+    });
+    const personalStaged = Object.freeze({
+      ...staged,
+      privacyClass: 'PERSONAL_DATA' as const,
+    });
+    const deps = dependencies({
+      stage: async (input) => {
+        for await (const _chunk of input.source.body) {
+          // Consume exactly once before the ambiguous promote acknowledgement.
+        }
+        return personalStaged;
+      },
+      promote: async () => {
+        throw new ArtifactStorageError(
+          'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
+        );
+      },
+    });
+
+    await expect(deps.service.persist({
+      ...persistInput(),
+      privacyClass: 'PERSONAL_DATA',
+      subjectRef,
+    })).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
+    });
+
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(
+      reservation,
+      {
+        ...snapshot,
+        manifest: { ...snapshot.manifest, privacyClass: 'PERSONAL_DATA' },
+      },
+      subjectRef,
+    );
+  });
+
   it('rejects replay reservations before reading a producer or touching storage', async () => {
     let producerReads = 0;
     const deps = dependencies();
@@ -505,6 +546,32 @@ describe('GenericOperationArtifactService', () => {
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });
     expect(deps.store.inspect).not.toHaveBeenCalled();
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
+  });
+
+  it('does not inspect or read ACK_UNKNOWN PERSONAL_DATA after a subject tombstone', async () => {
+    const deps = dependencies({
+      loadResultUnknownArtifact: async () => {
+        throw new GenericOperationArtifactError(
+          'GENERIC_OPERATION_ARTIFACT_INVALID',
+        );
+      },
+    });
+
+    await expect(deps.service.recoverUnknown({
+      reservation: recoveryReservation,
+      authorityId: AUTHORITY_ID,
+      actualCents: 13,
+      subjectRef: {
+        subjectType: 'contact',
+        subjectId: 'b8b3ee5c-fbb8-42ef-a382-9c10c16dca72',
+      },
+    })).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+
+    expect(deps.store.inspect).not.toHaveBeenCalled();
+    expect(deps.store.read).not.toHaveBeenCalled();
     expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
   });
 

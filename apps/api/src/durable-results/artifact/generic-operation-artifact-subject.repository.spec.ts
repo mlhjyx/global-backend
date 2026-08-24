@@ -31,6 +31,43 @@ describe('GenericOperationArtifactSubjectRepository', () => {
     }
   });
 
+  it('binds one PERSONAL_DATA artifact without accepting result content', async () => {
+    const queryRaw = vi.fn(async () => [{
+      artifact_id: ARTIFACT_ID,
+      workspace_id: WORKSPACE_ID,
+      subject_type: 'contact',
+      subject_id: SUBJECT_ID,
+      created_at: new Date('2026-08-24T02:00:00.000Z'),
+      replay: false,
+    }]);
+    const repository = new GenericOperationArtifactSubjectRepository();
+
+    await expect(repository.bindArtifact(
+      { $queryRaw: queryRaw } as never,
+      {
+        workspaceId: WORKSPACE_ID,
+        artifactId: ARTIFACT_ID,
+        subjectRef: { subjectType: 'contact', subjectId: SUBJECT_ID },
+      },
+    )).resolves.toMatchObject({
+      artifactId: ARTIFACT_ID,
+      subjectType: 'contact',
+      subjectId: SUBJECT_ID,
+      replay: false,
+    });
+
+    const sql = queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+    expect(sql.strings.join('')).toContain(
+      'bind_workspace_generic_operation_artifact_subject_v1',
+    );
+    expect(sql.values).toEqual([
+      WORKSPACE_ID,
+      ARTIFACT_ID,
+      'contact',
+      SUBJECT_ID,
+    ]);
+  });
+
   it('uses exact workspace, type and UUID subject lookup without free text', async () => {
     const queryRaw = vi.fn(async () => [{
       artifact_id: ARTIFACT_ID,
