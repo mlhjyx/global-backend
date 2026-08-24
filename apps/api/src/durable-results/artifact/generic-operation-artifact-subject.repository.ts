@@ -21,6 +21,10 @@ export interface GenericOperationArtifactSubjectBindingResult extends GenericOpe
   readonly replay: boolean;
 }
 
+export interface ResolvedGenericOperationArtifactSubject extends GenericOperationArtifactSubjectRef {
+  readonly workspaceId: string;
+}
+
 export interface GenericOperationArtifactSubjectTombstone extends GenericOperationArtifactSubjectRef {
   readonly workspaceId: string;
   readonly deletionRequestId: string;
@@ -48,6 +52,12 @@ type TombstoneRow = Readonly<{
 }>;
 
 type SubjectBindingRow = SubjectRow & Readonly<{ replay: unknown }>;
+
+type ResolvedSubjectRow = Readonly<{
+  workspace_id: unknown;
+  subject_type: unknown;
+  subject_id: unknown;
+}>;
 
 function invalid(): never {
   throw new Error(GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID);
@@ -160,6 +170,21 @@ function parseSubjectBindingRow(
   });
 }
 
+function parseResolvedSubjectRow(
+  value: unknown,
+): ResolvedGenericOperationArtifactSubject {
+  const source = closedRecord(value, [
+    "workspace_id",
+    "subject_type",
+    "subject_id",
+  ]) as ResolvedSubjectRow;
+  return Object.freeze({
+    workspaceId: uuid(source.workspace_id),
+    subjectType: subjectType(source.subject_type),
+    subjectId: uuid(source.subject_id),
+  });
+}
+
 function parseTombstoneRow(
   value: unknown,
 ): GenericOperationArtifactSubjectTombstone {
@@ -196,6 +221,53 @@ function assertWorkspace(value: unknown): string {
 }
 
 export class GenericOperationArtifactSubjectRepository {
+  async resolveExistingSubject(
+    tx: Prisma.TransactionClient,
+    input: Readonly<{
+      workspaceId: string;
+      subjectRef: GenericOperationArtifactSubjectRef;
+    }>,
+  ): Promise<ResolvedGenericOperationArtifactSubject | null> {
+    const workspaceId = assertWorkspace(input.workspaceId);
+    const subjectRef = parseGenericOperationArtifactSubjectRef(
+      input.subjectRef,
+    );
+    const rows = await tx.$queryRaw<ResolvedSubjectRow[]>(Prisma.sql`
+      SELECT candidate.workspace_id, candidate.subject_type,
+        candidate.subject_id
+      FROM (
+        SELECT company.workspace_id, 'company'::text AS subject_type,
+          company.id AS subject_id
+        FROM public.canonical_company company
+        WHERE company.workspace_id = ${workspaceId}::uuid
+          AND ${subjectRef.subjectType} = 'company'
+          AND company.id = ${subjectRef.subjectId}::uuid
+        UNION ALL
+        SELECT contact.workspace_id, 'contact'::text AS subject_type,
+          contact.id AS subject_id
+        FROM public.canonical_contact contact
+        WHERE contact.workspace_id = ${workspaceId}::uuid
+          AND ${subjectRef.subjectType} = 'contact'
+          AND contact.id = ${subjectRef.subjectId}::uuid
+      ) candidate
+      WHERE session_user = 'app_user'
+        AND current_setting('role', true) IS NOT DISTINCT FROM 'none'
+        AND candidate.workspace_id IS NOT DISTINCT FROM current_workspace_id()
+      LIMIT 1
+    `);
+    if (rows.length === 0) return null;
+    if (rows.length !== 1) return invalid();
+    const resolved = parseResolvedSubjectRow(rows[0]);
+    if (
+      resolved.workspaceId !== workspaceId ||
+      resolved.subjectType !== subjectRef.subjectType ||
+      resolved.subjectId !== subjectRef.subjectId
+    ) {
+      return invalid();
+    }
+    return resolved;
+  }
+
   async bindArtifact(
     tx: Prisma.TransactionClient,
     input: Readonly<{

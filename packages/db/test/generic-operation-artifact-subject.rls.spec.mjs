@@ -87,10 +87,11 @@ async function seedWorkspaceBinding(owner, workspaceId) {
   await owner.$executeRawUnsafe(
     `INSERT INTO tool_budget_account (
       id, scope_key, account_key, generation, cap_cents, reserved_cents,
-      charged_cents, exhausted, ref_count, authority_id,
+      charged_cents, reserved_microusd, charged_microusd,
+      exhausted, ref_count, authority_id,
       authorized_cap_microusd, created_at, updated_at
     ) VALUES (
-      $1::uuid, $2, $3, 1, 100, 10, 0, false, 1, $4::uuid,
+      $1::uuid, $2, $3, 1, 0, 0, 0, 10, 0, false, 1, $4::uuid,
       5000000, statement_timestamp(), statement_timestamp()
     )`,
     accountId,
@@ -101,12 +102,25 @@ async function seedWorkspaceBinding(owner, workspaceId) {
   await owner.$executeRawUnsafe(
     `INSERT INTO tool_budget_operation (
       id, scope_key, account_id, generation, operation_key,
-      reserved_cents, status, created_at
-    ) VALUES ($1::uuid, $2, $3::uuid, 1, $4, 10, 'RESERVED', now())`,
+      amount_unit, reserved_cents, reserved_microusd, status, created_at
+    ) VALUES (
+      $1::uuid, $2, $3::uuid, 1, $4, 'microusd', 0, 10,
+      'RESERVED', now()
+    )`,
     operationId,
     workspaceId,
     accountId,
     `subject-operation-${randomUUID()}`,
+  );
+  // The generation-reset trigger correctly zeroes microusd counters on account
+  // INSERT. This fixture hand-seeds the corresponding RESERVED operation, so
+  // mirror the post-reserve account state only after that trigger has run.
+  await owner.$executeRawUnsafe(
+    `UPDATE tool_budget_account
+     SET reserved_microusd = 10, updated_at = statement_timestamp()
+     WHERE id = $1::uuid AND scope_key = $2`,
+    accountId,
+    workspaceId,
   );
   return { workspaceId, authorityId, operationId };
 }
@@ -208,7 +222,7 @@ async function appendWorkspaceV2(transaction, input) {
   );
 }
 
-async function settleWorkspaceV4(transaction, input) {
+async function settleWorkspaceCurrent(transaction, input) {
   const manifest = {
     schemaVersion: "generic-operation-artifact/v1",
     artifactId: input.artifactId,
@@ -227,9 +241,9 @@ async function settleWorkspaceV4(transaction, input) {
     expiresAt: input.expiresAt.toISOString(),
   };
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM settle_tool_budget_artifact_manifest_v4(
+    `SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
       $1, $2::uuid, $3::bigint, $4::jsonb, $5::smallint, $6::boolean,
-      $7, $8, $9, $10::boolean, $11, $12::uuid
+      $7, $8, $9, $10::boolean, $11::jsonb, $12, $13, $14::uuid
     )`,
     input.workspaceId,
     input.operationId,
@@ -241,6 +255,13 @@ async function settleWorkspaceV4(transaction, input) {
     null,
     null,
     null,
+    JSON.stringify({
+      currency: "USD",
+      unit: "microusd",
+      callCount: 1,
+      upperBoundMicrousd: "10",
+    }),
+    "estimated_upper_bound",
     input.subjectRef?.subjectType ?? null,
     input.subjectRef?.subjectId ?? null,
   );
@@ -266,9 +287,9 @@ function manifestFor(input) {
   };
 }
 
-async function markUnknownV4(transaction, input) {
+async function markUnknownCurrent(transaction, input) {
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM mark_tool_budget_result_unknown_v4(
+    `SELECT * FROM mark_tool_budget_result_unknown_v5(
       $1, $2::uuid, $3::jsonb, $4::smallint, $5::boolean,
       $6, $7, $8, $9::boolean, $10, $11::uuid
     )`,
@@ -286,9 +307,9 @@ async function markUnknownV4(transaction, input) {
   );
 }
 
-async function loadUnknownV4(transaction, input, subjectRef) {
+async function loadUnknownCurrent(transaction, input, subjectRef) {
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM load_tool_budget_result_unknown_artifact_v4(
+    `SELECT * FROM load_tool_budget_result_unknown_artifact_v5(
       $1, $2::uuid, $3::uuid, $4, $5::uuid
     )`,
     input.workspaceId,
@@ -304,6 +325,40 @@ async function findBySubject(transaction, workspaceId, subjectType, subjectId) {
     `SELECT * FROM find_workspace_generic_operation_artifacts_by_subject_v1(
       $1::uuid, $2, $3::uuid
     )`,
+    workspaceId,
+    subjectType,
+    subjectId,
+  );
+}
+
+async function resolveSubjectCandidate(
+  transaction,
+  workspaceId,
+  subjectType,
+  subjectId,
+) {
+  return transaction.$queryRawUnsafe(
+    `SELECT candidate.workspace_id, candidate.subject_type,
+      candidate.subject_id
+     FROM (
+       SELECT company.workspace_id, 'company'::text AS subject_type,
+         company.id AS subject_id
+       FROM public.canonical_company company
+       WHERE company.workspace_id = $1::uuid
+         AND $2 = 'company'
+         AND company.id = $3::uuid
+       UNION ALL
+       SELECT contact.workspace_id, 'contact'::text AS subject_type,
+         contact.id AS subject_id
+       FROM public.canonical_contact contact
+       WHERE contact.workspace_id = $1::uuid
+         AND $2 = 'contact'
+         AND contact.id = $3::uuid
+     ) candidate
+     WHERE session_user = 'app_user'
+       AND current_setting('role', true) IS NOT DISTINCT FROM 'none'
+       AND candidate.workspace_id IS NOT DISTINCT FROM current_workspace_id()
+     LIMIT 1`,
     workspaceId,
     subjectType,
     subjectId,
@@ -395,7 +450,9 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
     });
     nonPersonalA = artifactInput(nonPersonalBinding, "CONFIDENTIAL_TENANT");
 
-    await withWorkspace(app, WS_A, (tx) => settleWorkspaceV4(tx, personalA));
+    await withWorkspace(app, WS_A, (tx) =>
+      settleWorkspaceCurrent(tx, personalA),
+    );
     await withWorkspace(app, WS_B, (tx) => appendWorkspaceV3(tx, personalB));
     await withWorkspace(app, WS_A, (tx) => appendWorkspaceV3(tx, nonPersonalA));
     deletionRequestId = randomUUID();
@@ -537,7 +594,9 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
     });
     await rejectsSql(
       () =>
-        withWorkspace(app, WS_A, (tx) => settleWorkspaceV4(tx, replacement)),
+        withWorkspace(app, WS_A, (tx) =>
+          settleWorkspaceCurrent(tx, replacement),
+        ),
       "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
     );
     const [{ count }] = await owner
@@ -568,11 +627,11 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
       subjectType: "contact",
       subjectId,
     });
-    await withWorkspace(app, WS_A, (tx) => markUnknownV4(tx, unknown));
+    await withWorkspace(app, WS_A, (tx) => markUnknownCurrent(tx, unknown));
     assert.equal(
       (
         await withWorkspace(app, WS_A, (tx) =>
-          loadUnknownV4(tx, unknown, unknown.subjectRef),
+          loadUnknownCurrent(tx, unknown, unknown.subjectRef),
         )
       ).length,
       1,
@@ -602,7 +661,7 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
     await rejectsSql(
       () =>
         withWorkspace(app, WS_A, (tx) =>
-          loadUnknownV4(tx, unknown, {
+          loadUnknownCurrent(tx, unknown, {
             subjectType: "contact",
             subjectId: SUBJECT_ID,
           }),
@@ -619,6 +678,55 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
             WS_A,
             unknown.operationId,
             unknown.authorityId,
+          ),
+        ),
+      "permission denied",
+    );
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (tx) =>
+          tx.$queryRawUnsafe(
+            `SELECT * FROM load_tool_budget_result_unknown_artifact_v4(
+          $1, $2::uuid, $3::uuid, 'contact', $4::uuid
+        )`,
+            WS_A,
+            unknown.operationId,
+            unknown.authorityId,
+            subjectId,
+          ),
+        ),
+      "permission denied",
+    );
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (tx) =>
+          tx.$queryRawUnsafe(
+            `SELECT * FROM mark_tool_budget_result_unknown_v4(
+          $1, $2::uuid, $3::jsonb, 200::smallint, true,
+          'https://example.com/final', NULL::text, NULL::text,
+          NULL::boolean, 'contact', $4::uuid
+        )`,
+            WS_A,
+            unknown.operationId,
+            JSON.stringify(manifestFor(unknown)),
+            subjectId,
+          ),
+        ),
+      "permission denied",
+    );
+    await rejectsSql(
+      () =>
+        withWorkspace(app, WS_A, (tx) =>
+          tx.$queryRawUnsafe(
+            `SELECT * FROM settle_tool_budget_artifact_manifest_v4(
+          $1, $2::uuid, 10::bigint, $3::jsonb, 200::smallint, true,
+          'https://example.com/final', NULL::text, NULL::text,
+          NULL::boolean, 'contact', $4::uuid
+        )`,
+            WS_A,
+            unknown.operationId,
+            JSON.stringify(manifestFor(unknown)),
+            subjectId,
           ),
         ),
       "permission denied",
@@ -669,12 +777,13 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
     await rejectsSql(
       () =>
         withWorkspace(app, WS_A, (tx) =>
-          loadUnknownV4(tx, unknown, unknown.subjectRef),
+          loadUnknownCurrent(tx, unknown, unknown.subjectRef),
         ),
       "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
     );
     await rejectsSql(
-      () => withWorkspace(app, WS_A, (tx) => settleWorkspaceV4(tx, unknown)),
+      () =>
+        withWorkspace(app, WS_A, (tx) => settleWorkspaceCurrent(tx, unknown)),
       "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
     );
   });
@@ -842,5 +951,37 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
       subjectId,
     );
     assert.equal(stored.deletion_request_id, requestId);
+  });
+
+  it("resolves canonical subjects from public even when app_user creates pg_temp shadows", async () => {
+    const forgedSubjectId = "00000000-0000-4000-8000-0000000000f7";
+    await withWorkspace(app, WS_A, async (tx) => {
+      await tx.$executeRawUnsafe(
+        "CREATE TEMP TABLE canonical_company (id uuid, workspace_id uuid) ON COMMIT DROP",
+      );
+      await tx.$executeRawUnsafe(
+        "CREATE TEMP TABLE canonical_contact (id uuid, workspace_id uuid) ON COMMIT DROP",
+      );
+      await tx.$executeRawUnsafe(
+        "INSERT INTO canonical_company(id, workspace_id) VALUES ($1::uuid, $2::uuid)",
+        forgedSubjectId,
+        WS_A,
+      );
+
+      assert.deepEqual(
+        await resolveSubjectCandidate(tx, WS_A, "company", forgedSubjectId),
+        [],
+      );
+      assert.deepEqual(
+        await resolveSubjectCandidate(tx, WS_A, "company", COMPANY_A),
+        [
+          {
+            workspace_id: WS_A,
+            subject_type: "company",
+            subject_id: COMPANY_A,
+          },
+        ],
+      );
+    });
   });
 });
