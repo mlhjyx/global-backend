@@ -65,6 +65,7 @@ test("current repository keeps representative business and dynamic chains comple
         "CompanyProfileCreated",
         "DeletionRequested",
         "DiscoveryRunRequested",
+        "PersonalArtifactCleanupRequested",
         "QualifyRequested",
       ],
     ],

@@ -97,7 +97,11 @@ export const log = {
 
 /** `beforeEach` 调用：清空注册表 + logger，杜绝跨用例 spy 状态泄漏。 */
 export function resetActivities(): void {
-  for (const key of Object.keys(registry)) delete registry[key];
+  // Keep memoized spies alive so workflows that use a destructured
+  // `proxyActivities` binding remain connected to the same test registry
+  // across beforeEach resets. Resetting implementations/call history is
+  // enough; deleting entries would leave those closed-over bindings stale.
+  for (const mock of Object.values(registry)) mock.mockReset();
   patchedFn = () => true;
   currentWorkflowInfo = Object.freeze({ runId: 'test-workflow-run' });
   log.debug.mockReset();

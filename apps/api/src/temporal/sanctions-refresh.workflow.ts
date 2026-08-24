@@ -5,7 +5,7 @@ import type { PlatformScheduleWorkflowInput } from './platform-schedule-authorit
 import { admitPlatformScheduleForWorkflow } from './platform-schedule-authority.workflow';
 import { SANCTIONS_REFRESH_SCHEDULE_ID } from './understanding.constants';
 
-const acts = proxyActivities<SanctionsRefreshActivities>({
+const { refreshSanctionsLists } = proxyActivities<SanctionsRefreshActivities>({
   startToCloseTimeout: '15 minutes',
   retry: { maximumAttempts: 2 },
 });
@@ -17,6 +17,6 @@ const authorityActs = proxyActivities<PlatformScheduleAuthorityActivities>({ sta
  */
 export async function sanctionsRefreshWorkflow(input: PlatformScheduleWorkflowInput = {}): Promise<{ sources: number }> {
   const executionBudget = await admitPlatformScheduleForWorkflow({ activities: authorityActs, scheduleId: SANCTIONS_REFRESH_SCHEDULE_ID, workflowInput: input });
-  const res = await acts.refreshSanctionsLists(executionBudget ? { executionContractVersion: 1, executionBudget } : undefined);
+  const res = await refreshSanctionsLists(executionBudget ? { executionContractVersion: 1, executionBudget } : undefined);
   return { sources: res.sources };
 }
