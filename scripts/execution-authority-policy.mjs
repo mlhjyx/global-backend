@@ -137,6 +137,7 @@ function analyzeTypeScript(path, source) {
   const toolCalls = [];
   const dynamicInvokes = [];
   const bigQueryValueImports = new Set();
+  const bigQueryNamespaces = new Set();
   const stringConstantsByLocalName = new Map();
   let importsGoogleBigQuery = false;
   let constructsBigQuery = false;
@@ -155,6 +156,9 @@ function analyzeTypeScript(path, source) {
       if (moduleName.endsWith('/adapters/bigquery-patents') || moduleName === '../adapters/bigquery-patents') {
         const clause = node.importClause;
         const bindings = clause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings) && !clause?.isTypeOnly) {
+          bigQueryNamespaces.add(bindings.name.text);
+        }
         if (bindings && ts.isNamedImports(bindings)) {
           for (const element of bindings.elements) {
             const importedName = element.propertyName?.text ?? element.name.text;
@@ -168,13 +172,28 @@ function analyzeTypeScript(path, source) {
     }
     if (ts.isNewExpression(node)) {
       const constructorName = node.expression.getText(sourceFile);
-      if (constructorName === 'BigQuery' || bigQueryValueImports.has(constructorName)) {
+      if (
+        constructorName === 'BigQuery' || bigQueryValueImports.has(constructorName) ||
+        [...bigQueryNamespaces].some((namespace) => constructorName.startsWith(`${namespace}.`))
+      ) {
         constructsBigQuery = true;
       }
     }
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const method = node.expression.name.text;
-      const receiver = node.expression.expression.getText(sourceFile);
+    if (ts.isCallExpression(node)) {
+      const expression = node.expression;
+      const method = ts.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : ts.isElementAccessExpression(expression) &&
+            expression.argumentExpression && ts.isStringLiteralLike(expression.argumentExpression)
+          ? expression.argumentExpression.text
+          : null;
+      const receiver = ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
+        ? expression.expression.getText(sourceFile)
+        : null;
+      if (method === null || receiver === null) {
+        ts.forEachChild(node, visit);
+        return;
+      }
       if (
         ['generateText', 'generateStructured', 'reviewVision'].includes(method) ||
         (method === 'embed' && /(?:gateway|modelGateway)$/i.test(receiver))
@@ -189,7 +208,10 @@ function analyzeTypeScript(path, source) {
         if (toolId !== undefined) toolCalls.push(Object.freeze({ toolId, position: node.getStart(sourceFile) }));
         else dynamicInvokes.push(Object.freeze({ receiver, position: node.getStart(sourceFile) }));
       }
-      if (bigQueryValueImports.has(receiver)) constructsBigQuery = true;
+      if (
+        bigQueryValueImports.has(receiver) ||
+        [...bigQueryNamespaces].some((namespace) => receiver.startsWith(`${namespace}.`))
+      ) constructsBigQuery = true;
     }
     ts.forEachChild(node, visit);
   }

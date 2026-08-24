@@ -76,6 +76,17 @@ test('AST inspection sees aliased gateway calls, Tool calls and BigQuery aliases
     await patents.searchPatentsByAssignee('Acme', options);
   `);
   assert.equal(bigQuery.constructsBigQuery, true);
+  const namespaceBigQuery = inspectExecutionAuthoritySource('synthetic.ts', `
+    import * as patents from "../adapters/bigquery-patents";
+    await patents.bigqueryPatents.searchPatentsByAssignee('Acme', options);
+  `);
+  assert.equal(namespaceBigQuery.constructsBigQuery, true);
+  const elementAccess = inspectExecutionAuthoritySource('synthetic.ts', `
+    await gateway["generateStructured"]({ task: 'new.task' }, context);
+    await broker['invoke']('http.get', input, context);
+  `);
+  assert.deepEqual(elementAccess.modelMethods, ['generateStructured']);
+  assert.deepEqual(elementAccess.toolIds, ['http.get']);
 });
 
 test('pure contracts are complete while physical Router/ToolBroker wiring remains fenced', async () => {
