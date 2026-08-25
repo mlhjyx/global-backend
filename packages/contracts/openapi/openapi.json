@@ -11847,6 +11847,181 @@
           "acquisition:write"
         ]
       }
+    },
+    "/api/v1/site-builder/intake-budget-quote": {
+      "post": {
+        "operationId": "SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SiteBuildTechnicalBudgetQuoteResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "正式 execution envelope 无法证明",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "计算 intake 的内部技术预算包络；零模型、零工作流、零持久写入",
+        "tags": [
+          "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/site-builder/sites/{id}/build-budget-quote": {
+      "post": {
+        "operationId": "SiteBuildTechnicalBudgetQuoteController_quoteRefurbish_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBuildDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SiteBuildTechnicalBudgetQuoteResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "正式 execution envelope 无法证明",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "计算 refurbish 的内部技术预算包络；不构成客户报价或余额限制",
+        "tags": [
+          "SiteBuilder"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
     }
   },
   "info": {
@@ -13664,6 +13839,134 @@
           "startedAt",
           "finishedAt",
           "costSummary"
+        ]
+      },
+      "SiteBuildTechnicalBudgetQuoteResponseDto": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "site-builder-technical-budget-quote/v1"
+            ]
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "intake",
+              "refurbish"
+            ]
+          },
+          "siteId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requestSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "microusd"
+            ]
+          },
+          "requiredCapMicrousd": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "policyRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "operation",
+          "siteId",
+          "requestSha256",
+          "currency",
+          "unit",
+          "requiredCapMicrousd",
+          "policyRevision",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "BuildOptionsDto": {
+        "type": "object",
+        "properties": {
+          "stylePreset": {
+            "type": "string",
+            "enum": [
+              "modern-industrial",
+              "precision-light",
+              "local-trust",
+              "editorial-press",
+              "warm-kitchen",
+              "farmhouse",
+              "dispatch",
+              "precision-instrument",
+              "saas-cream",
+              "industrial-power",
+              "biotech-minimal"
+            ]
+          },
+          "pages": {
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "locales": {
+            "minItems": 1,
+            "maxItems": 8,
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateBuildDto": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "site",
+              "page",
+              "section"
+            ]
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "description": "SiteSpec page/block identifier；局部构建要求目标存在于 active version"
+          },
+          "options": {
+            "$ref": "#/components/schemas/BuildOptionsDto"
+          }
+        },
+        "required": [
+          "scope"
         ]
       }
     }

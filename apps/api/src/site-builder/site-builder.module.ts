@@ -64,7 +64,11 @@ import { SiteBuildTechnicalBudgetQuoteService } from './site-build-technical-bud
         new SiteBuildBudgetGrantVerifier(process.env, {}, registry),
     },
     SiteBuildRuntimeGuard,
-    SiteBuildTechnicalBudgetQuoteService,
+    {
+      provide: SiteBuildTechnicalBudgetQuoteService,
+      useFactory: () =>
+        new SiteBuildTechnicalBudgetQuoteService(process.env),
+    },
     SitePreviewArtifactService,
     ImagePipelineService,
     { provide: IMAGE_PIPELINE_RUNNER, useFactory: () => new IsolatedImagePipelineRunner() },
