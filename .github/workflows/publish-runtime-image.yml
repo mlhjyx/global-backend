@@ -1,0 +1,264 @@
+name: Publish immutable runtime image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: publish-runtime-image-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/mlhjyx/global-backend
+  SUBJECT_SHA: ${{ github.sha }}
+
+jobs:
+  publish:
+    name: publish exact OCI digest
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: runtime-image-publication
+    timeout-minutes: 60
+    outputs:
+      image_reference: ${{ steps.existing.outputs.image_reference || steps.publish.outputs.image_reference }}
+      image_digest: ${{ steps.existing.outputs.image_digest || steps.publish.outputs.image_digest }}
+    steps:
+      - name: Checkout exact workflow subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove the subject is current exact main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${SUBJECT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          test "${SUBJECT_SHA}" = "${MAIN_SHA}"
+          test "$(git rev-parse HEAD)" = "${SUBJECT_SHA}"
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+
+      - name: Authenticate to GHCR with the workflow token
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" |
+            docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - id: existing
+        name: Resolve an existing publish-once SHA tag
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/ghcr-runtime-publication.mjs resolve \
+            --image mlhjyx/global-backend \
+            --tag "${SUBJECT_SHA}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - id: existing_provenance
+        name: Verify or recover the existing immutable publication
+        if: steps.existing.outputs.exists == 'true'
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.existing.outputs.image_reference }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          timeout 10m docker pull "${IMAGE_REFERENCE}"
+          IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE_REFERENCE}")"
+          [[ "${IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${IMAGE_REFERENCE}")" = "${SUBJECT_SHA}"
+          test "$(docker image inspect --format '{{.Config.User}}' "${IMAGE_REFERENCE}")" = global
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${IMAGE_REFERENCE}")" = '["node","/app/runtime-entrypoint.mjs"]'
+
+          ARCHIVE="${RUNNER_TEMP}/existing-runtime-image.tar"
+          CONFIG_PATH="${RUNNER_TEMP}/runtime-image-config.json"
+          docker save --output "${ARCHIVE}" "${IMAGE_REFERENCE}"
+          CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node -e '
+            let body = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", (chunk) => { body += chunk; });
+            process.stdin.on("end", () => {
+              const manifest = JSON.parse(body);
+              const name = manifest.length === 1 ? manifest[0]?.Config : undefined;
+              if (typeof name !== "string" || !/^[0-9a-f]{64}\.json$/.test(name)) process.exit(1);
+              process.stdout.write(name);
+            });
+          ')"
+          tar -xOf "${ARCHIVE}" "${CONFIG_NAME}" > "${CONFIG_PATH}"
+          test "sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)" = "${IMAGE_ID}"
+
+          set +e
+          gh attestation verify "oci://${IMAGE_REFERENCE}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/publish-runtime-image.yml" \
+            --signer-digest "${SUBJECT_SHA}" \
+            --source-ref refs/heads/main \
+            --source-digest "${SUBJECT_SHA}" \
+            --deny-self-hosted-runners >/dev/null
+          REGISTRY_ATTESTED=$?
+          set -e
+          if [[ "${REGISTRY_ATTESTED}" -eq 0 ]]; then
+            printf 'registry_attested=true\n' >> "${GITHUB_OUTPUT}"
+          else
+            gh attestation verify "${CONFIG_PATH}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/publish-runtime-image.yml" \
+              --signer-digest "${SUBJECT_SHA}" \
+              --source-ref refs/heads/main \
+              --source-digest "${SUBJECT_SHA}" \
+              --deny-self-hosted-runners >/dev/null
+            printf 'registry_attested=false\n' >> "${GITHUB_OUTPUT}"
+          fi
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --pids-limit 256 \
+            --entrypoint node "${IMAGE_REFERENCE}" \
+            /app/runtime-image-verifier.mjs /app
+
+      - id: build
+        name: Build the immutable API and Worker image once
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          IMAGE_TAG="${IMAGE_NAME}:${SUBJECT_SHA}"
+          docker build \
+            --build-arg "BUILD_SHA=${SUBJECT_SHA}" \
+            --build-arg "BUILT_AT=${BUILT_AT}" \
+            --tag "${IMAGE_TAG}" \
+            .
+          test "$(docker image inspect --format '{{.Config.User}}' "${IMAGE_TAG}")" = global
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${IMAGE_TAG}")" = '["node","/app/runtime-entrypoint.mjs"]'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${IMAGE_TAG}")" = "${SUBJECT_SHA}"
+          LOCAL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE_TAG}")"
+          [[ "${LOCAL_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          ARCHIVE="${RUNNER_TEMP}/fresh-runtime-image.tar"
+          CONFIG_PATH="${RUNNER_TEMP}/runtime-image-config.json"
+          docker save --output "${ARCHIVE}" "${IMAGE_TAG}"
+          CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node -e '
+            let body = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", (chunk) => { body += chunk; });
+            process.stdin.on("end", () => {
+              const manifest = JSON.parse(body);
+              const name = manifest.length === 1 ? manifest[0]?.Config : undefined;
+              if (typeof name !== "string" || !/^[0-9a-f]{64}\.json$/.test(name)) process.exit(1);
+              process.stdout.write(name);
+            });
+          ')"
+          tar -xOf "${ARCHIVE}" "${CONFIG_NAME}" > "${CONFIG_PATH}"
+          test "sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)" = "${LOCAL_IMAGE_ID}"
+          printf 'local_image_id=%s\n' "${LOCAL_IMAGE_ID}" >> "${GITHUB_OUTPUT}"
+          printf 'config_path=%s\n' "${CONFIG_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest the local image config before publication
+        if: steps.existing.outputs.exists != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.build.outputs.config_path }}
+          create-storage-record: false
+
+      - id: prepush
+        name: Refuse to overwrite a SHA tag created during the build
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/ghcr-runtime-publication.mjs resolve \
+            --image mlhjyx/global-backend \
+            --tag "${SUBJECT_SHA}" \
+            --github-output "${GITHUB_OUTPUT}"
+          test "$(tail -n 1 "${GITHUB_OUTPUT}")" = 'exists=false'
+
+      - id: publish
+        name: Push once, resolve, and read back the exact registry digest
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LOCAL_IMAGE_ID: ${{ steps.build.outputs.local_image_id }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${IMAGE_NAME}:${SUBJECT_SHA}"
+          git fetch --no-tags origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          test "${SUBJECT_SHA}" = "${MAIN_SHA}"
+          test "$(git rev-parse HEAD)" = "${SUBJECT_SHA}"
+          timeout 15m docker push "${IMAGE_TAG}"
+          node scripts/ghcr-runtime-publication.mjs resolve \
+            --image mlhjyx/global-backend \
+            --tag "${SUBJECT_SHA}" \
+            --github-output "${GITHUB_OUTPUT}" \
+            --wait-ms 30000
+          IMAGE_REFERENCE="$(sed -n 's/^image_reference=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
+          DIGEST="$(sed -n 's/^image_digest=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
+          [[ "${IMAGE_REFERENCE}" =~ ^ghcr\.io/mlhjyx/global-backend@sha256:[0-9a-f]{64}$ ]]
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          timeout 10m docker pull "${IMAGE_REFERENCE}"
+          test "$(docker image inspect --format '{{.Id}}' "${IMAGE_REFERENCE}")" = "${LOCAL_IMAGE_ID}"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${IMAGE_REFERENCE}")" = "${SUBJECT_SHA}"
+          test "$(docker image inspect --format '{{.Config.User}}' "${IMAGE_REFERENCE}")" = global
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${IMAGE_REFERENCE}")" = '["node","/app/runtime-entrypoint.mjs"]'
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true --pids-limit 256 \
+            --entrypoint node "${IMAGE_REFERENCE}" \
+            /app/runtime-image-verifier.mjs /app
+
+      - name: Attest or recover the exact registry digest
+        if: steps.existing.outputs.exists != 'true' || steps.existing_provenance.outputs.registry_attested != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.existing.outputs.image_digest || steps.publish.outputs.image_digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify provenance and report the exact publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_REFERENCE: ${{ steps.existing.outputs.image_reference || steps.publish.outputs.image_reference }}
+          EXISTING_PUBLICATION: ${{ steps.existing.outputs.exists }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://${IMAGE_REFERENCE}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/publish-runtime-image.yml" \
+            --signer-digest "${SUBJECT_SHA}" \
+            --source-ref refs/heads/main \
+            --source-digest "${SUBJECT_SHA}" \
+            --deny-self-hosted-runners >/dev/null
+          {
+            printf '## Immutable runtime image\n\n'
+            printf -- '- subject: `%s`\n' "${SUBJECT_SHA}"
+            printf -- '- exact reference: `%s`\n' "${IMAGE_REFERENCE}"
+            printf -- '- provenance: `VERIFIED`\n'
+            if [[ "${EXISTING_PUBLICATION}" == 'true' ]]; then
+              printf -- '- result: `REUSED_OR_RECOVERED_EXISTING`\n'
+            else
+              printf -- '- result: `PUBLISHED_NEW`\n'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove the registry credential from the runner
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io
