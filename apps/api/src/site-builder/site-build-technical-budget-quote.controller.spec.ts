@@ -39,7 +39,7 @@ describe('SiteBuildTechnicalBudgetQuoteController', () => {
       data: { operation: 'intake' },
     });
     expect(quoteIntake).toHaveBeenCalledWith(
-      '9a761707cc1e2b9ee11815a1c0749846449be1275da236902b0b6abf88e6c681',
+      '337e71a7859f753977ab2f59a0bc99647894e0210c653747659607cf9bc217ba',
     );
   });
 
@@ -55,7 +55,7 @@ describe('SiteBuildTechnicalBudgetQuoteController', () => {
     });
     expect(quoteRefurbish).toHaveBeenCalledWith(
       SITE_ID,
-      '43c72479424eed27218852a589c3736c24f311b60ef7a4053fa85f364e47d5f0',
+      '57c9fc873a9cf659f7e08fe8e46e7ac1b083538ce413f4dad56400f8405c0017',
     );
   });
 

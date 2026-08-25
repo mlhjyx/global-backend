@@ -29,6 +29,8 @@ import { ClosedRepairService } from './quality/closed-repair.service';
 import { SiteBuildBudgetGrantVerifier } from './site-build-budget-grant';
 import { SiteBuildRuntimeGuard } from '../runtime/site-build-runtime.guard';
 import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readiness-registry';
+import { SiteBuildTechnicalBudgetQuoteController } from './site-build-technical-budget-quote.controller';
+import { SiteBuildTechnicalBudgetQuoteService } from './site-build-technical-budget-quote';
 
 /**
  * 独立站建设（docs/site-builder/02 §1）。M0：intake + 站点档案 + 素材/KB 地基。
@@ -42,6 +44,7 @@ import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readines
     AssetsController,
     KbController,
     BuildsController,
+    SiteBuildTechnicalBudgetQuoteController,
     SitePreviewController,
   ],
   providers: [
@@ -61,6 +64,7 @@ import { RuntimeReadinessContributorRegistry } from '../runtime/runtime-readines
         new SiteBuildBudgetGrantVerifier(process.env, {}, registry),
     },
     SiteBuildRuntimeGuard,
+    SiteBuildTechnicalBudgetQuoteService,
     SitePreviewArtifactService,
     ImagePipelineService,
     { provide: IMAGE_PIPELINE_RUNNER, useFactory: () => new IsolatedImagePipelineRunner() },

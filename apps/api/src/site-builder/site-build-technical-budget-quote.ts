@@ -3,8 +3,8 @@ import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { COPY_GENERATION_LOCALES } from '@global/contracts';
 import {
   resolveTaskRoute,
-  type SiteBuilderGenerativeTaskId,
 } from './agents/task-routes';
+import type { SiteBuilderGenerativeTaskId } from './agents/task-route-bindings';
 import {
   crawl4aiFetchTool,
   searxngSearchTool,
