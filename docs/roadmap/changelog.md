@@ -3,6 +3,8 @@
 
 ## 2026-08-24 · Production Parity PERSONAL_DATA cleanup runtime readback
 
+- [PR #413](https://github.com/mlhjyx/global-backend/pull/413) 在 required CI、Supply Chain、CodeQL 与全部 inline review thread 收口后，以普通 merge commit `866ede78` 合入 main；未使用 admin bypass。main freshness 以 `BASELINE_SOURCE_LOCK_MISMATCH` HOLD，证明旧 36-advisory baseline 不能描述新 lock。后继 baseline refresh 从 exact main 重建 10 条 advisory / 10 条 canonical exposure，并逐项继承剩余 Site Renderer/Astro 的 owner、due date 与 validity；不把已解决项保留为例外，也不延后剩余债务。
+
 - 生产依赖安全收口提交 `7a7bea11` 完成 NestJS 10→11 / Express 4→5 与 `fast-xml-parser` 4→5 的协调迁移；未通过 override 强压不兼容主版本。新增 loopback HTTP 测试捕获并修复 Express 5 wildcard 参数从字符串变为数组的真实语义变化，同时保留 nested query 的 extended parser 合同。API 385 files / 5755 tests PASS（3/39 skipped），本地受信 base→candidate graph-delta 为 `COMPARABLE_AUDIT_PASS`，36 条 production advisory 降至 10 条、26 条 resolved，全部逾期 NestJS/Express/XML 公告消失。该记录不替代 PR #413 Hosted CI、合并或部署 readback；Copy fixed-source 继续为 `STALE_HOLD / NOT_AUTHORIZED / BLOCKED`。
 
 - `codex/production-parity` 的 exact clean HEAD `50c23d8de738ba7bdac9b9b2ff85630bab8473a1` 收口了 PERSONAL_DATA artifact cleanup 的物理 runtime wiring：内部 exact S3 VersionId、tombstone/audit commit fence、shared-digest advisory fence、durable cleanup command、Outbox→Temporal retry/backoff 与独立 cleanup principal。ToolBroker 的 `GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD` 仍保持，未新增 producer 旁路。
