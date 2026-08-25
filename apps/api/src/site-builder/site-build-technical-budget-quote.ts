@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { COPY_GENERATION_LOCALES } from '@global/contracts';
 import {
   resolveTaskRoute,
@@ -63,32 +63,56 @@ interface RouteEnvelope {
   readonly multiplicity: number;
 }
 
-export class SiteBuildTechnicalBudgetQuoteError extends ServiceUnavailableException {
-  readonly code = 'SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE' as const;
+export type SiteBuildTechnicalBudgetQuoteErrorCode =
+  | 'SITE_BUILD_BUDGET_QUOTE_INVALID'
+  | 'SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE'
+  | 'SITE_BUILD_BUDGET_POLICY_DRIFT';
 
-  constructor() {
+export class SiteBuildTechnicalBudgetQuoteError extends HttpException {
+  constructor(public readonly code: SiteBuildTechnicalBudgetQuoteErrorCode) {
     super({
       error: {
-        code: 'SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE',
-        message: 'technical budget quote is temporarily unavailable',
+        code,
+        message:
+          code === 'SITE_BUILD_BUDGET_QUOTE_INVALID'
+            ? 'technical budget quote request is invalid'
+            : code === 'SITE_BUILD_BUDGET_POLICY_DRIFT'
+              ? 'technical budget policy is temporarily unavailable'
+              : 'technical budget quote is temporarily unavailable',
       },
-    });
+    }, code === 'SITE_BUILD_BUDGET_QUOTE_INVALID'
+      ? HttpStatus.BAD_REQUEST
+      : HttpStatus.SERVICE_UNAVAILABLE);
     this.name = 'SiteBuildTechnicalBudgetQuoteError';
     this.message = this.code;
   }
 }
 
 function unavailable(): never {
-  throw new SiteBuildTechnicalBudgetQuoteError();
+  throw new SiteBuildTechnicalBudgetQuoteError(
+    'SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE',
+  );
+}
+
+function invalid(): never {
+  throw new SiteBuildTechnicalBudgetQuoteError(
+    'SITE_BUILD_BUDGET_QUOTE_INVALID',
+  );
+}
+
+function policyDrift(): never {
+  throw new SiteBuildTechnicalBudgetQuoteError(
+    'SITE_BUILD_BUDGET_POLICY_DRIFT',
+  );
 }
 
 function checkedRequestHash(value: string): string {
-  if (!SHA256.test(value)) unavailable();
+  if (!SHA256.test(value)) invalid();
   return value;
 }
 
 function checkedSiteId(value: string): string {
-  if (!UUID.test(value)) unavailable();
+  if (!UUID.test(value)) invalid();
   return value;
 }
 
@@ -98,7 +122,7 @@ function routeEnvelope(
   multiplicity: number,
 ): RouteEnvelope {
   if (!route || !Number.isSafeInteger(multiplicity) || multiplicity < 1) {
-    return unavailable();
+    return policyDrift();
   }
   const aliases = [route.primary, ...route.fallbacks];
   if (
@@ -112,7 +136,7 @@ function routeEnvelope(
     !Number.isSafeInteger(route.maxTokens) ||
     route.maxTokens < 1
   ) {
-    return unavailable();
+    return policyDrift();
   }
   return Object.freeze({
     taskId,
@@ -217,7 +241,7 @@ export class SiteBuildTechnicalBudgetQuoteService {
           tool.estimatedCents < 0,
       )
     ) {
-      return unavailable();
+      return policyDrift();
     }
     const researchCents = researchTools.reduce(
       (total, tool) =>
@@ -230,7 +254,7 @@ export class SiteBuildTechnicalBudgetQuoteService {
     const requiredCapMicrousd =
       (routeCostCents(brand) + routeCostCents(copy) + researchCents) *
       MICROUSD_PER_CENT;
-    if (requiredCapMicrousd < 1n) return unavailable();
+    if (requiredCapMicrousd < 1n) return policyDrift();
     const policy = Object.freeze({
       schemaVersion: SITE_BUILD_TECHNICAL_BUDGET_QUOTE_SCHEMA,
       operation: 'refurbish',
