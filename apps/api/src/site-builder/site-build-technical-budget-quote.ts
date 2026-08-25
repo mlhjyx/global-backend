@@ -1,21 +1,19 @@
 import { createHash } from 'node:crypto';
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { COPY_GENERATION_LOCALES } from '@global/contracts';
-import {
-  resolveTaskRoute,
-} from './agents/task-routes';
+import { resolveTaskRoute } from './agents/task-routes';
 import type { SiteBuilderGenerativeTaskId } from './agents/task-route-bindings';
 import {
   crawl4aiFetchTool,
   searxngSearchTool,
 } from '../tools/builtin-tools';
+import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
+import { SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS } from './site-build-execution-envelope';
 
 export const SITE_BUILD_TECHNICAL_BUDGET_QUOTE_SCHEMA =
   'site-builder-technical-budget-quote/v1' as const;
 
 const QUOTE_TTL_MS = 5 * 60 * 1_000;
-const STRUCTURED_OUTPUT_WIRE_UPPER_BOUND = 2;
-const TEMPORAL_ACTIVITY_ATTEMPT_UPPER_BOUND = 2;
 const MICROUSD_PER_CENT = 10_000n;
 const INTAKE_REPRESENTATION_MINIMUM_MICROUSD = 1n;
 const MAX_ROUTE_ALIASES = 4;
@@ -145,9 +143,10 @@ function routeEnvelope(
     maxCostCents: route.maxCostCents,
     maxTokens: route.maxTokens,
     routeAliases: aliases.length,
-    structuredOutputWireUpperBound: STRUCTURED_OUTPUT_WIRE_UPPER_BOUND,
+    structuredOutputWireUpperBound:
+      MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND,
     temporalActivityAttemptUpperBound:
-      TEMPORAL_ACTIVITY_ATTEMPT_UPPER_BOUND,
+      SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS,
     multiplicity,
   });
 }
@@ -247,7 +246,7 @@ export class SiteBuildTechnicalBudgetQuoteService {
       (total, tool) =>
         total +
         BigInt(tool.callsPerActivityAttempt) *
-          BigInt(TEMPORAL_ACTIVITY_ATTEMPT_UPPER_BOUND) *
+          BigInt(SITE_BUILD_PAID_ACTIVITY_MAXIMUM_ATTEMPTS) *
           BigInt(tool.estimatedCents),
       0n,
     );

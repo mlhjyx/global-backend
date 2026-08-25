@@ -10,8 +10,8 @@ const source = (path: string): string =>
 describe('Site Build technical budget execution-envelope integrity', () => {
   it('makes Router reservation and Quote consume one structured-output wire cap', () => {
     expect(MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND).toBe(2);
-    expect(source('model-gateway/router-model-gateway.ts')).toContain(
-      'baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND',
+    expect(source('model-gateway/router-model-gateway.ts')).toMatch(
+      /baseCents\s*\*\s*MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND/,
     );
     expect(source('site-builder/site-build-technical-budget-quote.ts')).toContain(
       'MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND',
