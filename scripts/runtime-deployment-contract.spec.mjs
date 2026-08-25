@@ -335,6 +335,10 @@ function assertGhcrPublicationContract(workflow) {
   assert.match(workflow, /docker save/);
   assert.match(workflow, /manifest\.json/);
   assert.match(workflow, /sha256sum/);
+  assert.equal(
+    workflow.match(/node scripts\/docker-image-config-path\.mjs/g)?.length,
+    2,
+  );
   assert.match(
     workflow,
     /docker image inspect --format '\{\{\.Id\}\}' "\$\{IMAGE_REFERENCE\}"\)" = "\$\{LOCAL_IMAGE_ID\}"/,

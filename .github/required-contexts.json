@@ -220,6 +220,7 @@
       "/patches/",
       "/scripts/governance-*.mjs",
       "/scripts/ghcr-runtime-publication*.mjs",
+      "/scripts/docker-image-config-path*.mjs",
       "/scripts/runtime-deployment-contract.spec.mjs",
       "/scripts/environment-parity-*.mjs",
       "/scripts/copy-fixed-source-impact*.mjs",

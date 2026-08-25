@@ -87,17 +87,7 @@ jobs:
           ARCHIVE="${RUNNER_TEMP}/existing-runtime-image.tar"
           CONFIG_PATH="${RUNNER_TEMP}/runtime-image-config.json"
           docker save --output "${ARCHIVE}" "${IMAGE_REFERENCE}"
-          CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node -e '
-            let body = "";
-            process.stdin.setEncoding("utf8");
-            process.stdin.on("data", (chunk) => { body += chunk; });
-            process.stdin.on("end", () => {
-              const manifest = JSON.parse(body);
-              const name = manifest.length === 1 ? manifest[0]?.Config : undefined;
-              if (typeof name !== "string" || !/^[0-9a-f]{64}\.json$/.test(name)) process.exit(1);
-              process.stdout.write(name);
-            });
-          ')"
+          CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node scripts/docker-image-config-path.mjs)"
           tar -xOf "${ARCHIVE}" "${CONFIG_NAME}" > "${CONFIG_PATH}"
           test "sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)" = "${IMAGE_ID}"
 
@@ -150,17 +140,7 @@ jobs:
           ARCHIVE="${RUNNER_TEMP}/fresh-runtime-image.tar"
           CONFIG_PATH="${RUNNER_TEMP}/runtime-image-config.json"
           docker save --output "${ARCHIVE}" "${IMAGE_TAG}"
-          CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node -e '
-            let body = "";
-            process.stdin.setEncoding("utf8");
-            process.stdin.on("data", (chunk) => { body += chunk; });
-            process.stdin.on("end", () => {
-              const manifest = JSON.parse(body);
-              const name = manifest.length === 1 ? manifest[0]?.Config : undefined;
-              if (typeof name !== "string" || !/^[0-9a-f]{64}\.json$/.test(name)) process.exit(1);
-              process.stdout.write(name);
-            });
-          ')"
+          CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node scripts/docker-image-config-path.mjs)"
           tar -xOf "${ARCHIVE}" "${CONFIG_NAME}" > "${CONFIG_PATH}"
           test "sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)" = "${LOCAL_IMAGE_ID}"
           printf 'local_image_id=%s\n' "${LOCAL_IMAGE_ID}" >> "${GITHUB_OUTPUT}"
