@@ -276,3 +276,135 @@ test('legacy systemd units delegate to the immutable compose runtime instead of 
     assert.match(unit, /backend-runtime\.compose\.yml/);
   }
 });
+
+function assertGhcrPublicationContract(workflow) {
+  assert.match(workflow, /^name: Publish immutable runtime image$/m);
+  assert.match(workflow, /^on:\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow, /^  (push|pull_request|schedule):/m);
+  assert.match(
+    workflow,
+    /^permissions:\n  contents: read\n  packages: write\n  id-token: write\n  attestations: write$/m,
+  );
+  assert.doesNotMatch(workflow, /^    permissions:/m);
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /environment: runtime-image-publication/);
+  assert.match(workflow, /timeout-minutes: 60/);
+  assert.match(
+    workflow,
+    /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7/,
+  );
+  assert.match(
+    workflow,
+    /uses: actions\/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4\.2\.2/,
+  );
+  assert.equal(
+    workflow.match(/uses: actions\/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4\.2\.2/g)?.length,
+    2,
+  );
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /IMAGE_NAME: ghcr\.io\/mlhjyx\/global-backend/);
+  assert.match(workflow, /SUBJECT_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /git rev-parse origin\/main/);
+  assert.equal(
+    workflow.match(/test "\$\{SUBJECT_SHA\}" = "\$\{MAIN_SHA\}"/g)?.length,
+    2,
+  );
+  const publishStep = workflow.indexOf('      - id: publish');
+  const secondMainCheck = workflow.lastIndexOf(
+    'test "${SUBJECT_SHA}" = "${MAIN_SHA}"',
+  );
+  const push = workflow.indexOf('docker push "${IMAGE_TAG}"', publishStep);
+  assert.ok(publishStep > 0 && secondMainCheck > publishStep && push > secondMainCheck);
+  const configAttestation = workflow.indexOf(
+    'name: Attest the local image config before publication',
+  );
+  assert.ok(configAttestation > 0 && configAttestation < push);
+  assert.match(workflow, /docker login ghcr\.io[\s\S]*--password-stdin/);
+  assert.match(workflow, /id: existing/);
+  assert.match(
+    workflow,
+    /node scripts\/ghcr-runtime-publication\.mjs resolve[\s\S]*--github-output "\$\{GITHUB_OUTPUT\}"/,
+  );
+  assert.match(workflow, /if: steps\.existing\.outputs\.exists != 'true'/);
+  assert.match(workflow, /--build-arg "BUILD_SHA=\$\{SUBJECT_SHA\}"/);
+  assert.match(workflow, /--build-arg "BUILT_AT=\$\{BUILT_AT\}"/);
+  assert.match(workflow, /docker push "\$\{IMAGE_TAG\}"/);
+  assert.doesNotMatch(workflow, /PUSH_OUTPUT|digest: \(sha256:/);
+  assert.match(workflow, /LOCAL_IMAGE_ID/);
+  assert.match(workflow, /docker save/);
+  assert.match(workflow, /manifest\.json/);
+  assert.match(workflow, /sha256sum/);
+  assert.match(
+    workflow,
+    /docker image inspect --format '\{\{\.Id\}\}' "\$\{IMAGE_REFERENCE\}"\)" = "\$\{LOCAL_IMAGE_ID\}"/,
+  );
+  assert.match(workflow, /docker pull "\$\{IMAGE_REFERENCE\}"/);
+  assert.equal(
+    workflow.match(/runtime-image-verifier\.mjs \/app/g)?.length,
+    2,
+  );
+  assert.equal(workflow.match(/gh attestation verify/g)?.length, 3);
+  assert.equal(workflow.match(/--bundle-from-oci/g)?.length, 2);
+  assert.match(
+    workflow,
+    /steps\.existing_provenance\.outputs\.registry_attested != 'true'/,
+  );
+  assert.match(
+    workflow,
+    /subject-path: \$\{\{ steps\.build\.outputs\.config_path \}\}/,
+  );
+  assert.match(
+    workflow,
+    /subject-digest: \$\{\{ steps\.existing\.outputs\.image_digest \|\| steps\.publish\.outputs\.image_digest \}\}/,
+  );
+  for (const flag of [
+    '--repo "${GITHUB_REPOSITORY}"',
+    '--signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/publish-runtime-image.yml"',
+    '--signer-digest "${SUBJECT_SHA}"',
+    '--source-ref refs/heads/main',
+    '--source-digest "${SUBJECT_SHA}"',
+    '--deny-self-hosted-runners',
+  ]) {
+    assert.equal(workflow.split(flag).length - 1, 3, `missing attestation flag ${flag}`);
+  }
+  assert.match(workflow, /org\.opencontainers\.image\.revision/);
+  assert.match(workflow, /Config\.User/);
+  assert.match(workflow, /Config\.Entrypoint/);
+  assert.doesNotMatch(workflow, /(?:^|[:\s])latest(?:$|[\s"'])/m);
+  assert.doesNotMatch(workflow, /secrets\.(?!GITHUB_TOKEN)/);
+}
+
+test('GHCR publication is manual, exact-main only, publish-once, digest read back, and minimally privileged', async () => {
+  const workflow = await repositoryFile('.github/workflows/publish-runtime-image.yml');
+  assertGhcrPublicationContract(workflow);
+});
+
+test('GHCR publication contract rejects removed main recheck and job-level permission widening', async () => {
+  const workflow = await repositoryFile('.github/workflows/publish-runtime-image.yml');
+  const equality = 'test "${SUBJECT_SHA}" = "${MAIN_SHA}"';
+  const secondEqualityIndex = workflow.lastIndexOf(equality);
+  const withoutSecondMainCheck =
+    workflow.slice(0, secondEqualityIndex) +
+    'true # removed exact-main comparison' +
+    workflow.slice(secondEqualityIndex + equality.length);
+  assert.throws(() => assertGhcrPublicationContract(withoutSecondMainCheck));
+
+  const widenedJobPermissions = workflow.replace(
+    '  publish:\n',
+    '  publish:\n    permissions:\n      actions: write\n',
+  );
+  assert.throws(() => assertGhcrPublicationContract(widenedJobPermissions));
+
+  const withoutProvenanceVerification = workflow.replace(
+    'gh attestation verify',
+    'true # removed provenance verification',
+  );
+  assert.throws(() => assertGhcrPublicationContract(withoutProvenanceVerification));
+
+  const withoutPrepushConfigAttestation = workflow.replace(
+    'name: Attest the local image config before publication',
+    'name: Removed local config attestation',
+  );
+  assert.throws(() => assertGhcrPublicationContract(withoutPrepushConfigAttestation));
+});

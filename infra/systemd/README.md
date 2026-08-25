@@ -26,12 +26,20 @@ docker build \
   .
 ```
 
-The registry publication workflow must return one exact reference such as
-`registry.example/global-backend@sha256:<64-lowercase-hex>`. Development,
+The manual `Publish immutable runtime image` workflow publishes current exact
+`main` to GHCR and must return one exact reference shaped as
+`ghcr.io/mlhjyx/global-backend@sha256:<64-lowercase-hex>`. Development,
 pre-production, and production promote that same reference; they do not rebuild
 it. `GLOBAL_BACKEND_IMAGE` is the single configuration source for both the
 container image and runtime identity admission. Do not configure a second digest
 variable.
+
+The publication job is bound to the protected `runtime-image-publication`
+environment and only admits `main`. A commit SHA tag is publish-once: an existing
+digest is reusable only after the full in-image artifact verifier and GitHub
+artifact-attestation verification bind it to this repository, this workflow,
+`refs/heads/main`, and the exact source commit. A registry tag or image label by
+itself is never publication provenance.
 
 The image requires only two entrypoints:
 
@@ -46,7 +54,7 @@ Store the exact reference and runtime secrets outside Git in
 `/global/backend/.secrets/backend-runtime.env`:
 
 ```text
-GLOBAL_BACKEND_IMAGE=registry.example/global-backend@sha256:<digest>
+GLOBAL_BACKEND_IMAGE=ghcr.io/mlhjyx/global-backend@sha256:<digest>
 ```
 
 The same file supplies the runtime's required endpoints and secret references.

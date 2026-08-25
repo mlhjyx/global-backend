@@ -65,6 +65,8 @@
 /**/.pnpmfile.cjs @mlhjyx
 /patches/ @mlhjyx
 /scripts/governance-*.mjs @mlhjyx
+/scripts/ghcr-runtime-publication*.mjs @mlhjyx
+/scripts/runtime-deployment-contract.spec.mjs @mlhjyx
 /scripts/environment-parity-*.mjs @mlhjyx
 /scripts/copy-fixed-source-impact*.mjs @mlhjyx
 /scripts/pr-decision-card*.mjs @mlhjyx

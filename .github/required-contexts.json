@@ -162,6 +162,18 @@
       "action": "github/codeql-action/analyze",
       "revision": "5595ccaf912efad79be6eef63a5619ff05969be3",
       "version": "v4"
+    },
+    {
+      "workflow": ".github/workflows/publish-runtime-image.yml",
+      "action": "actions/checkout",
+      "revision": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "version": "v7"
+    },
+    {
+      "workflow": ".github/workflows/publish-runtime-image.yml",
+      "action": "actions/attest",
+      "revision": "1e69f48acb82d1966a394da916b4c1698aa569d6",
+      "version": "v4.2.2"
     }
   ],
   "codeowner_requirements": {
@@ -207,6 +219,8 @@
       "/**/.pnpmfile.cjs",
       "/patches/",
       "/scripts/governance-*.mjs",
+      "/scripts/ghcr-runtime-publication*.mjs",
+      "/scripts/runtime-deployment-contract.spec.mjs",
       "/scripts/environment-parity-*.mjs",
       "/scripts/copy-fixed-source-impact*.mjs",
       "/scripts/pr-decision-card*.mjs",
