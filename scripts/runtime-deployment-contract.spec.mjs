@@ -345,6 +345,7 @@ function assertGhcrPublicationContract(workflow) {
     2,
   );
   assert.equal(workflow.match(/gh attestation verify/g)?.length, 3);
+  assert.equal(workflow.match(/--bundle-from-oci/g)?.length, 2);
   assert.match(
     workflow,
     /steps\.existing_provenance\.outputs\.registry_attested != 'true'/,
