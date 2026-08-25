@@ -98,7 +98,6 @@ describe('SiteBuildTechnicalBudgetQuoteService', () => {
   });
 
   it.each([
-    ['missing route', () => undefined as never],
     [
       'too many route aliases',
       () => ({
@@ -110,7 +109,7 @@ describe('SiteBuildTechnicalBudgetQuoteService', () => {
       'non-canonical cost ceiling',
       () => ({ ...ROUTES['site_builder.brand_profile']!, maxCostCents: 0 }),
     ],
-  ])('fails closed when %s makes the technical envelope unprovable', (_name, brandRoute) => {
+  ])('classifies %s as execution-policy drift', (_name, brandRoute) => {
     const quoteService = new SiteBuildTechnicalBudgetQuoteService({}, {
       now: () => NOW,
       resolveRoute: (taskId) =>
@@ -124,7 +123,29 @@ describe('SiteBuildTechnicalBudgetQuoteService', () => {
         SITE_ID,
         buildRequestHash(SITE_ID, normalizeBuildRequest({ scope: 'site' })),
       ),
+    ).toThrow('SITE_BUILD_BUDGET_POLICY_DRIFT');
+  });
+
+  it('classifies an unavailable route resolver without exposing its error', () => {
+    const quoteService = new SiteBuildTechnicalBudgetQuoteService({}, {
+      now: () => NOW,
+      resolveRoute: () => {
+        throw new Error('operator secret route detail');
+      },
+    });
+
+    expect(() =>
+      quoteService.quoteRefurbish(
+        SITE_ID,
+        buildRequestHash(SITE_ID, normalizeBuildRequest({ scope: 'site' })),
+      ),
     ).toThrow('SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE');
+  });
+
+  it('classifies malformed internal scope as an invalid quote request', () => {
+    expect(() => service().quoteRefurbish(SITE_ID, 'not-a-sha256')).toThrow(
+      'SITE_BUILD_BUDGET_QUOTE_INVALID',
+    );
   });
 
   it('does not perform database, workflow, provider or network calls', () => {
