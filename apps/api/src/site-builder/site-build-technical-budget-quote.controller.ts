@@ -57,25 +57,27 @@ class SiteBuildTechnicalBudgetQuoteResponseDto {
   expiresAt!: string;
 }
 
-const QUOTE_UNAVAILABLE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['error'],
-  properties: {
-    error: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['code', 'message'],
-      properties: {
-        code: {
-          type: 'string',
-          enum: ['SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE'],
+function quoteErrorSchema(codes: readonly string[]) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['error'],
+    properties: {
+      error: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'message'],
+        properties: {
+          code: {
+            type: 'string',
+            enum: [...codes],
+          },
+          message: { type: 'string' },
         },
-        message: { type: 'string' },
       },
     },
-  },
-};
+  };
+}
 
 /**
  * Authenticated, zero-side-effect quote boundary used by the SaaS control
@@ -98,9 +100,17 @@ export class SiteBuildTechnicalBudgetQuoteController {
   })
   @ApiEnvelope(SiteBuildTechnicalBudgetQuoteResponseDto)
   @ApiResponse({
+    status: 400,
+    description: '规范化后的 quote scope 非法',
+    schema: quoteErrorSchema(['SITE_BUILD_BUDGET_QUOTE_INVALID']),
+  })
+  @ApiResponse({
     status: 503,
     description: '正式 execution envelope 无法证明',
-    schema: QUOTE_UNAVAILABLE_SCHEMA,
+    schema: quoteErrorSchema([
+      'SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE',
+      'SITE_BUILD_BUDGET_POLICY_DRIFT',
+    ]),
   })
   quoteIntake(
     @Body() dto: IntakeDto,
@@ -115,9 +125,17 @@ export class SiteBuildTechnicalBudgetQuoteController {
   })
   @ApiEnvelope(SiteBuildTechnicalBudgetQuoteResponseDto)
   @ApiResponse({
+    status: 400,
+    description: '规范化后的 quote scope 非法',
+    schema: quoteErrorSchema(['SITE_BUILD_BUDGET_QUOTE_INVALID']),
+  })
+  @ApiResponse({
     status: 503,
     description: '正式 execution envelope 无法证明',
-    schema: QUOTE_UNAVAILABLE_SCHEMA,
+    schema: quoteErrorSchema([
+      'SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE',
+      'SITE_BUILD_BUDGET_POLICY_DRIFT',
+    ]),
   })
   quoteRefurbish(
     @Param('id', ParseUUIDPipe) siteId: string,
@@ -132,4 +150,3 @@ export class SiteBuildTechnicalBudgetQuoteController {
     );
   }
 }
-

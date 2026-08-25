@@ -11881,6 +11881,41 @@
               }
             }
           },
+          "400": {
+            "description": "规范化后的 quote scope 非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SITE_BUILD_BUDGET_QUOTE_INVALID"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "503": {
             "description": "正式 execution envelope 无法证明",
             "content": {
@@ -11903,7 +11938,8 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE"
+                            "SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE",
+                            "SITE_BUILD_BUDGET_POLICY_DRIFT"
                           ]
                         },
                         "message": {
@@ -11973,6 +12009,41 @@
               }
             }
           },
+          "400": {
+            "description": "规范化后的 quote scope 非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SITE_BUILD_BUDGET_QUOTE_INVALID"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "503": {
             "description": "正式 execution envelope 无法证明",
             "content": {
@@ -11995,7 +12066,8 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE"
+                            "SITE_BUILD_BUDGET_QUOTE_UNAVAILABLE",
+                            "SITE_BUILD_BUDGET_POLICY_DRIFT"
                           ]
                         },
                         "message": {
