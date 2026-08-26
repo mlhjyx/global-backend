@@ -165,6 +165,40 @@ describe("Raw Source v2 ingestion boundary", () => {
   );
 
   it.each([
+    ["leading whitespace", " Alice Van Smith"],
+    ["trailing whitespace", "Alice Van Smith "],
+    ["email", "person@example.test"],
+    ["ASCII local phone", "Acme 555-0100"],
+    ["Unicode local phone", "Acme ٥٥٥-٠١٠٠"],
+    ["credential marker", "Bearer secret"],
+    ["secret marker", "Acme api key"],
+    ["unsafe URL", "https://acme.example"],
+    ["NFKC drift", "Ａcme GmbH"],
+    ["malformed type", 42, "MALFORMED_PAYLOAD"],
+    ["forbidden personal free text", "John Doe"],
+    ["oversized value", "A".repeat(161)],
+  ])(
+    "rejects a provider company name with %s",
+    (_label, name, dispositionCode = "PROVIDER_PAYLOAD_SCHEMA_INVALID") => {
+      const row = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord({ name })],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+
+      expect(row).toMatchObject({
+        ingestStatus: "REJECTED",
+        dispositionCode,
+      });
+      if (typeof name === "string") {
+        expect(JSON.stringify(row.payload)).not.toContain(name);
+      }
+    },
+  );
+
+  it.each([
     ["company name", { name: "Acme ٥٥٥-٠١٠٠" }, "٥٥٥-٠١٠٠"],
     [
       "company name URL",
@@ -181,22 +215,25 @@ describe("Raw Source v2 ingestion boundary", () => {
       },
       "٥٥٥-٠١٠٠",
     ],
-  ])("rejects a contact- or URL-shaped value in persisted %s", (_label, overrides, forbidden) => {
-    const row = prepareRawSourceBatch({
-      providerKey: "registry",
-      records: [companyRecord(overrides)],
-      policies: POLICIES,
-      limits: LIMITS,
-      now: NOW,
-    }).rows[0]!;
+  ])(
+    "rejects a contact- or URL-shaped value in persisted %s",
+    (_label, overrides, forbidden) => {
+      const row = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [companyRecord(overrides)],
+        policies: POLICIES,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
 
-    expect(row).toMatchObject({
-      ingestStatus: "REJECTED",
-      dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
-      externalId: null,
-    });
-    expect(JSON.stringify(row.payload)).not.toContain(forbidden);
-  });
+      expect(row).toMatchObject({
+        ingestStatus: "REJECTED",
+        dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+        externalId: null,
+      });
+      expect(JSON.stringify(row.payload)).not.toContain(forbidden);
+    },
+  );
 
   it("rejects an attribute outside the provider schema and an ungoverned provider", () => {
     const bounded = prepareRawSourceBatch({
@@ -304,15 +341,17 @@ describe("Raw Source v2 ingestion boundary", () => {
         records: [
           companyRecord({
             externalId:
-              ({
-                directory: "directory:acme.example",
-                wikidata: "wikidata:Q1",
-                openstreetmap: "osm:node/1",
-                trade_fair: "fair-1:company-1",
-                ted: "ted:1:0",
-                openfda: "openfda:1",
-                public_web: "acme.example",
-              } as Record<string, string>)[providerKey] ?? "company-1",
+              (
+                {
+                  directory: "directory:acme.example",
+                  wikidata: "wikidata:Q1",
+                  openstreetmap: "osm:node/1",
+                  trade_fair: "fair-1:company-1",
+                  ted: "ted:1:0",
+                  openfda: "openfda:1",
+                  public_web: "acme.example",
+                } as Record<string, string>
+              )[providerKey] ?? "company-1",
             attributes,
             ...({
               wikidata: {
@@ -361,13 +400,13 @@ describe("Raw Source v2 ingestion boundary", () => {
               ? "overpass-api.de"
               : providerKey === "wikidata"
                 ? "wikidata.org"
-              : providerKey === "ted"
-                ? "api.ted.europa.eu"
-                : providerKey === "openfda"
-                  ? "api.fda.gov"
-                  : providerKey === "public_web"
-                    ? "acme.example"
-                : policy.domain,
+                : providerKey === "ted"
+                  ? "api.ted.europa.eu"
+                  : providerKey === "openfda"
+                    ? "api.fda.gov"
+                    : providerKey === "public_web"
+                      ? "acme.example"
+                      : policy.domain,
         })),
         limits: {
           ...LIMITS,
@@ -424,8 +463,7 @@ describe("Raw Source v2 ingestion boundary", () => {
             license: "CC0-1.0",
             provenance: {
               ...companyRecord().provenance,
-              sourceUrl:
-                "https://api.fda.gov/device/registrationlisting.json",
+              sourceUrl: "https://api.fda.gov/device/registrationlisting.json",
             },
           }),
         ],

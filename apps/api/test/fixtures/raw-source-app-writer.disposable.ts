@@ -103,16 +103,50 @@ async function main(): Promise<void> {
       policies: [approvedPolicy],
       now: NOW,
     }).rows[0]!;
-    const providerClassifiedCompany = prepareRawSourceBatch({
-      providerKey: "registry",
-      records: [
-        registryRecord("app-flow-alice-van-smith", {
-          name: "Alice Van Smith",
-        }),
-      ],
-      policies: [approvedPolicy],
-      now: NOW,
-    }).rows[0]!;
+    const providerClassifiedCompanies = [
+      "Alice Van Smith",
+      "Johnson Controls",
+      "Parker Hannifin",
+      "General Dynamics",
+    ].map(
+      (name, index) =>
+        prepareRawSourceBatch({
+          providerKey: "registry",
+          records: [
+            registryRecord(`app-flow-provider-company-${index + 1}`, { name }),
+          ],
+          policies: [approvedPolicy],
+          now: NOW,
+        }).rows[0]!,
+    );
+    const applicationNameDecisions = [
+      ["leading-whitespace", " Alice Van Smith"],
+      ["trailing-whitespace", "Alice Van Smith "],
+      ["email", "person@example.test"],
+      ["ascii-phone", "Acme 555-0100"],
+      ["unicode-phone", "Acme ٥٥٥-٠١٠٠"],
+      ["credential", "Bearer secret"],
+      ["secret-marker", "Acme api key"],
+      ["unsafe-url", "https://acme.example"],
+      ["nfkc-drift", "Ａcme GmbH"],
+      ["malformed-type", 42],
+      ["forbidden-free-text", "John Doe"],
+      ["oversized", "A".repeat(161)],
+    ].map(([label, name], index) => {
+      const row = prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [
+          registryRecord(`app-flow-invalid-company-${index + 1}`, { name }),
+        ],
+        policies: [approvedPolicy],
+        now: NOW,
+      }).rows[0]!;
+      return {
+        label,
+        ingestStatus: row.ingestStatus,
+        dispositionCode: row.dispositionCode,
+      };
+    });
 
     const persisted = await withWorkspace(database, async (tx) => {
       const receipts = [];
@@ -128,16 +162,18 @@ async function main(): Promise<void> {
           }),
         );
       }
-      receipts.push(
-        await persistPreparedRawSourceRecord(tx, {
-          workspaceId: WORKSPACE_ID,
-          runId: RUN_ID,
-          sourceEntityId: null,
-          providerKey: "registry",
-          sourceClass: "company_registry",
-          row: providerClassifiedCompany,
-        }),
-      );
+      for (const row of providerClassifiedCompanies) {
+        receipts.push(
+          await persistPreparedRawSourceRecord(tx, {
+            workspaceId: WORKSPACE_ID,
+            runId: RUN_ID,
+            sourceEntityId: null,
+            providerKey: "registry",
+            sourceClass: "company_registry",
+            row,
+          }),
+        );
+      }
       const originalReceipt = await persistPreparedRawSourceRecord(tx, {
         workspaceId: WORKSPACE_ID,
         runId: RUN_ID,
@@ -152,15 +188,18 @@ async function main(): Promise<void> {
         policies: [approvedPolicy],
         now: NOW,
       }).rows[0]!;
-      const drift = reconcileRawSourceBatch([changed], [
-        {
-          id: originalReceipt.id,
-          externalId: original.externalId,
-          ingestKey: original.ingestKey,
-          payloadHash: originalReceipt.payloadHash,
-          payload: original.payload,
-        },
-      ]).rows[0]!;
+      const drift = reconcileRawSourceBatch(
+        [changed],
+        [
+          {
+            id: originalReceipt.id,
+            externalId: original.externalId,
+            ingestKey: original.ingestKey,
+            payloadHash: originalReceipt.payloadHash,
+            payload: original.payload,
+          },
+        ],
+      ).rows[0]!;
       receipts.push(
         await persistPreparedRawSourceRecord(tx, {
           workspaceId: WORKSPACE_ID,
@@ -182,7 +221,7 @@ async function main(): Promise<void> {
         },
         orderBy: { dispositionCode: "asc" },
       });
-      return { receipts, rows };
+      return { receipts, rows, applicationNameDecisions };
     });
 
     console.log(JSON.stringify(persisted));

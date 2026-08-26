@@ -98,6 +98,7 @@ const RUN_B = "20000000-0000-4000-8000-000000000002";
 const SAFE_RAW_A = "30000000-0000-4000-8000-000000000001";
 const RESTRICTED_RAW_A = "30000000-0000-4000-8000-000000000002";
 const SAFE_RAW_B = "30000000-0000-4000-8000-000000000003";
+const EVIDENCE_CHAIN_RAW_A = "30000000-0000-4000-8000-000000000004";
 const SOURCE = "40000000-0000-4000-8000-000000000001";
 const FETCH = "50000000-0000-4000-8000-000000000001";
 const SOURCE_ENTITY = "60000000-0000-4000-8000-000000000001";
@@ -105,6 +106,10 @@ const COMPANY_A = "70000000-0000-4000-8000-000000000001";
 const LOCKED_RAW = "90000000-0000-4000-8000-000000000001";
 const POLICY_A = "a0000000-0000-4000-8000-000000000001";
 const POLICY_B = "a0000000-0000-4000-8000-000000000002";
+const EVIDENCE_CHAIN_ORIGINAL_VALUE_HASH =
+  "2613c94b602988c61f1b56c42e51b814a1310baee6a73b999be84460472a7be7";
+const EVIDENCE_CHAIN_PREDECESSOR_RECEIPT_HASH =
+  "c3c29511a75ec65ac77a677770336c5adb1f0936d94c132139edd11382b2caec";
 
 let baselineDirectory;
 let firstDeployOutput = "";
@@ -429,7 +434,10 @@ function seedCurrentMainClone(database = databases.upgrade) {
        'https://api.usaspending.gov/awards',now()-interval '2 days',repeat('b',64),'usaspending/v1',0,now()-interval '2 days'),
       ('${SAFE_RAW_B}','${WORKSPACE_B}','${RUN_B}','registry','company_registry','safe-b',
        '{"name":"Safe B","domain":"safe-b.example"}',
-       'https://registry.example/safe-b',now()-interval '2 days',repeat('c',64),'registry/v1',0,now()-interval '2 days');
+       'https://registry.example/safe-b',now()-interval '2 days',repeat('c',64),'registry/v1',0,now()-interval '2 days'),
+      ('${EVIDENCE_CHAIN_RAW_A}','${WORKSPACE_A}','${RUN_A}','registry','company_registry','chain-a',
+       '{"name":"Chain A","domain":"chain-a.example"}',
+       'https://registry.example/chain-a',now()-interval '2 days',repeat('e',64),'registry/v1',0,now()-interval '2 days');
     INSERT INTO canonical_company(
       id,workspace_id,name,domain,attributes,status,dedupe_key,version,created_at,updated_at
     ) VALUES (
@@ -515,6 +523,11 @@ function seedCurrentMainClone(database = databases.upgrade) {
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
         '{"products":["LLZ1","AB"]}',
         'usaspending_awards','${RESTRICTED_RAW_A}',1,'public','["display"]','2026-08-25T16:31:00Z'
+      ),
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
+        '{"products":["AB"],"custom_payload":{"notes":"forbidden free text"}}',
+        'registry','${EVIDENCE_CHAIN_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
       );
   `,
   );
@@ -996,7 +1009,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.upgrade,
         `SELECT count(*) FROM field_evidence WHERE entity_id='${COMPANY_A}';`,
       ),
-      "7",
+      "8",
     );
     const cleanedEvidence = JSON.parse(
       dockerPsql(
@@ -1089,6 +1102,61 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     });
   });
 
+  it("preserves the original evidence digest and binds the immediate v1 cleanup receipt", () => {
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT concat_ws('|',
+          value->>'_historicalCleanup',
+          value->>'reason',
+          value->>'originalValueHash',
+          coalesce(value->>'predecessorReceiptHash','MISSING'),
+          (value ? 'retainedValue')::text,
+          (value::text LIKE '%\"AB\"%')::text,
+          (value::text LIKE '%forbidden free text%')::text,
+          (workspace_id='${WORKSPACE_A}'::uuid)::text,
+          (raw_record_id='${EVIDENCE_CHAIN_RAW_A}'::uuid)::text,
+          (field='attributes')::text,
+          (provider_key='registry')::text,
+          (fetched_at='2026-08-25T16:31:00Z'::timestamptz)::text,
+          data_class,
+          allowed_actions::text
+        ) FROM field_evidence
+        WHERE entity_id='${COMPANY_A}'
+          AND raw_record_id='${EVIDENCE_CHAIN_RAW_A}';`,
+      ),
+      [
+        "canonical-attribute-cleanup/v2",
+        "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+        EVIDENCE_CHAIN_ORIGINAL_VALUE_HASH,
+        EVIDENCE_CHAIN_PREDECESSOR_RECEIPT_HASH,
+        "false",
+        "false",
+        "false",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "red",
+        "[]",
+      ].join("|"),
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT (
+          value IS NOT DISTINCT FROM
+            raw_source_sanitize_field_evidence_v4(field,value)
+        )::text
+        FROM field_evidence
+        WHERE entity_id='${COMPANY_A}'
+          AND raw_record_id='${EVIDENCE_CHAIN_RAW_A}';`,
+      ),
+      "true",
+    );
+  });
+
   it("applies the closed PostgreSQL semantic schema to every governed provider payload", () => {
     const provenance = (sourceUrl, parserVersion) => ({
       sourceUrl,
@@ -1116,10 +1184,16 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
           name: "Johnson Controls",
           domain: "johnson.example",
           country: "US",
-          attributes: { products: ["industrial pump"], employee_band: "50-100" },
+          attributes: {
+            products: ["industrial pump"],
+            employee_band: "50-100",
+          },
           identifier: { scheme: "lei", value: "529900T8BM49AURSDO55" },
           license: "public",
-          provenance: provenance("https://registry.example/company/1", "registry/v2"),
+          provenance: provenance(
+            "https://registry.example/company/1",
+            "registry/v2",
+          ),
         },
       ],
       [
@@ -1134,7 +1208,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             source_directory: "directory.example",
             source_kind: "directory",
           },
-          provenance: provenance("https://directory.example/list", "directory/v1"),
+          provenance: provenance(
+            "https://directory.example/list",
+            "directory/v1",
+          ),
         },
       ],
       [
@@ -1165,7 +1242,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             source_class: "company_registry",
           },
           license: "CC0-1.0",
-          provenance: provenance("https://www.wikidata.org/wiki/Q1", "wikidata/v1"),
+          provenance: provenance(
+            "https://www.wikidata.org/wiki/Q1",
+            "wikidata/v1",
+          ),
         },
       ],
       [
@@ -1180,7 +1260,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             source_class: "industry_data",
           },
           license: "ODbL-1.0",
-          provenance: provenance("https://overpass-api.de/api/interpreter", "osm/v1"),
+          provenance: provenance(
+            "https://overpass-api.de/api/interpreter",
+            "osm/v1",
+          ),
         },
       ],
       [
@@ -1195,7 +1278,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             source_class: "industry_data",
           },
           license: "SOURCE_SPECIFIC_RESTRICTED",
-          provenance: provenance("https://fair.example/exhibitors", "trade-fair/v1"),
+          provenance: provenance(
+            "https://fair.example/exhibitors",
+            "trade-fair/v1",
+          ),
         },
       ],
       [
@@ -1216,7 +1302,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             },
           },
           license: "CC BY 4.0",
-          provenance: provenance("https://api.ted.europa.eu/v3/notices/search", "ted/v1"),
+          provenance: provenance(
+            "https://api.ted.europa.eu/v3/notices/search",
+            "ted/v1",
+          ),
         },
       ],
       [
@@ -1259,7 +1348,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
             extraction_evidence_digest: "f".repeat(64),
             source_class: "public_intelligence",
           },
-          provenance: provenance("https://numeric.example/company", "public-web/v1"),
+          provenance: provenance(
+            "https://numeric.example/company",
+            "public-web/v1",
+          ),
         },
       ],
     ];
@@ -1276,6 +1368,90 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         providerKey,
       );
     }
+  });
+
+  it("keeps the controlled writer in exact company-name parity with application admission", () => {
+    const acceptedNames = [
+      "Alice Van Smith",
+      "Johnson Controls",
+      "Parker Hannifin",
+      "General Dynamics",
+    ];
+    acceptedNames.forEach((name, index) => {
+      const sequence = String(index + 1).padStart(3, "0");
+      const command = writerCommand({
+        recordId: `82100000-0000-4000-8000-000000000${sequence}`,
+        externalId: `company-parity-valid-${index + 1}`,
+        payload: {
+          externalId: `company-parity-valid-${index + 1}`,
+          name,
+          domain: `company-parity-valid-${index + 1}.example`,
+          attributes: { products: ["pump"] },
+          provenance: {
+            sourceUrl: `https://registry.example/company/parity-valid-${index + 1}`,
+            fetchedAt: new Date().toISOString(),
+            contentHash: "a".repeat(64),
+            parserVersion: "registry/v2",
+          },
+        },
+      });
+      const receipt = dockerPsql(
+        databases.upgrade,
+        asApp(WORKSPACE_A, writerSql(command)),
+      )
+        .split("\n")
+        .at(-1)
+        .split("|");
+      assert.equal(receipt[0], command.recordId);
+      assert.match(receipt[1], /^[0-9a-f]{64}$/u);
+      assert.ok(Number(receipt[2]) > 0);
+      assert.deepEqual(receipt.slice(3), ["ACCEPTED", "true"]);
+    });
+
+    const rejectedNames = [
+      "Alice Van Smith ",
+      " Alice Van Smith",
+      "person@example.test",
+      "Acme 555-0100",
+      "Acme ٥٥٥-٠١٠٠",
+      "Bearer secret",
+      "Acme api key",
+      "https://acme.example",
+      "Ａcme GmbH",
+      42,
+      "John Doe",
+      "A".repeat(161),
+    ];
+    rejectedNames.forEach((name, index) => {
+      const sequence = String(index + 1).padStart(3, "0");
+      const command = writerCommand({
+        recordId: `82200000-0000-4000-8000-000000000${sequence}`,
+        externalId: `company-parity-invalid-${index + 1}`,
+        payload: {
+          externalId: `company-parity-invalid-${index + 1}`,
+          name,
+          domain: `company-parity-invalid-${index + 1}.example`,
+          attributes: { products: ["pump"] },
+          provenance: {
+            sourceUrl: `https://registry.example/company/parity-invalid-${index + 1}`,
+            fetchedAt: new Date().toISOString(),
+            contentHash: "a".repeat(64),
+            parserVersion: "registry/v2",
+          },
+        },
+      });
+      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(command)), {
+        rejects: /RAW_SOURCE_WRITER_PAYLOAD_SCHEMA_INVALID/u,
+      });
+    });
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM raw_source_record
+         WHERE id::text LIKE '82200000-0000-4000-8000-%';`,
+      ),
+      "0",
+    );
   });
 
   it("rejects Unicode phones, secret-shaped FDA codes, booleans, and present JSON null across PostgreSQL provider scalars", () => {
@@ -1321,7 +1497,10 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ["registry", { ...registryBase, license: null }],
       [
         "registry",
-        { ...registryBase, attributes: { ...registryBase.attributes, employee_band: null } },
+        {
+          ...registryBase,
+          attributes: { ...registryBase.attributes, employee_band: null },
+        },
       ],
       [
         "registry",
@@ -1770,8 +1949,19 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
     );
 
     const result = runApplicationWriterFixture(databases.upgrade);
-    assert.equal(result.receipts.length, 5);
-    assert.equal(result.rows.length, 5);
+    assert.equal(result.receipts.length, 8);
+    assert.equal(result.rows.length, 8);
+    assert.equal(result.applicationNameDecisions.length, 12);
+    for (const decision of result.applicationNameDecisions) {
+      assert.equal(decision.ingestStatus, "REJECTED", decision.label);
+      assert.equal(
+        decision.dispositionCode,
+        decision.label === "malformed-type"
+          ? "MALFORMED_PAYLOAD"
+          : "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+        decision.label,
+      );
+    }
     assert.deepEqual(
       new Set(result.rows.map((row) => row.dispositionCode)),
       new Set([
@@ -1782,10 +1972,16 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "PROCESSING_KEY_DRIFT",
       ]),
     );
+    const acceptedNames = new Set([
+      "Alice Van Smith",
+      "Johnson Controls",
+      "Parker Hannifin",
+      "General Dynamics",
+    ]);
     for (const row of result.rows) {
       if (row.ingestStatus === "ACCEPTED") {
         assert.equal(row.dispositionCode, null);
-        assert.equal(row.payload.name, "Alice Van Smith");
+        assert.equal(acceptedNames.delete(row.payload.name), true);
         continue;
       }
       assert.notEqual(row.ingestStatus, "ACCEPTED");
@@ -1805,6 +2001,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ].sort();
       assert.deepEqual(Object.keys(row.payload).sort(), expectedKeys);
     }
+    assert.equal(acceptedNames.size, 0);
   });
 
   it("accepts only exact closed non-ACCEPTED receipts and denies them for owner, unset app, and SET ROLE", () => {
@@ -2024,12 +2221,26 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       { rejects: /RAW_SOURCE_WRITER_COMMAND_BOUNDS/u },
     );
     for (const malformedV1 of [
-      { ...base, schemaVersion: "raw-source-writer/v1", expectedPayloadHash: null, expectedPayloadBytes: 1 },
-      { ...base, schemaVersion: "raw-source-writer/v1", expectedPayloadHash: "a".repeat(64), expectedPayloadBytes: true },
+      {
+        ...base,
+        schemaVersion: "raw-source-writer/v1",
+        expectedPayloadHash: null,
+        expectedPayloadBytes: 1,
+      },
+      {
+        ...base,
+        schemaVersion: "raw-source-writer/v1",
+        expectedPayloadHash: "a".repeat(64),
+        expectedPayloadBytes: true,
+      },
     ]) {
-      dockerPsql(databases.upgrade, asApp(WORKSPACE_A, writerSql(malformedV1)), {
-        rejects: /RAW_SOURCE_WRITER_COMMAND_INVALID/u,
-      });
+      dockerPsql(
+        databases.upgrade,
+        asApp(WORKSPACE_A, writerSql(malformedV1)),
+        {
+          rejects: /RAW_SOURCE_WRITER_COMMAND_INVALID/u,
+        },
+      );
     }
     assert.equal(
       dockerPsql(
@@ -2553,7 +2764,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                AND value::text LIKE '%person@example.test%')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "true|true|true|7|3",
+      "true|true|true|8|3",
     );
   });
 

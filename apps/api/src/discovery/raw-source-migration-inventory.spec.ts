@@ -40,6 +40,11 @@ const expected: ExpectedMigrationChecksum[] = [
   },
 ];
 
+const REISSUED_1600_MIGRATION =
+  "20260826160000_raw_source_governance_final_correction";
+const OLD_REVIEWED_1600_CHECKSUM =
+  "d8783aa0b513679d8944841c7e55b03812cc9709cc6d6c39005a9caadeaeea11";
+
 describe("PR #407 experiment _prisma_migrations bridge decision", () => {
   it("returns an explicit UNKNOWN/HOLD when no live experiment subject is supplied", () => {
     expect(assessRawSourceMigrationInventory(undefined, expected)).toEqual({
@@ -225,6 +230,35 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
       state: "SUCCESSOR_CHECKSUM_MISMATCH",
       observations: [
         expect.objectContaining({ migrationName: expected[0]!.migrationName }),
+      ],
+    });
+  });
+
+  it("returns an explicit provenance HOLD for the pre-release 1600 checksum that was reissued", () => {
+    const completed = new Date("2026-08-26T00:00:00.000Z");
+    const inventory = expected.map((entry) => ({
+      migration_name: entry.migrationName,
+      checksum:
+        entry.migrationName === REISSUED_1600_MIGRATION
+          ? OLD_REVIEWED_1600_CHECKSUM
+          : entry.checksum,
+      finished_at: completed,
+      rolled_back_at: null,
+    }));
+
+    expect(assessRawSourceMigrationInventory(inventory, expected)).toEqual({
+      schemaVersion: "pr407-raw-source-migration-decision/v1",
+      subject: "SUPPLIED",
+      decision: "HOLD",
+      state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+      observations: [
+        {
+          migrationName: REISSUED_1600_MIGRATION,
+          observedChecksum: OLD_REVIEWED_1600_CHECKSUM,
+          expectedChecksum: "1".repeat(64),
+          rowCount: 1,
+          lifecycleState: "APPLIED",
+        },
       ],
     });
   });
