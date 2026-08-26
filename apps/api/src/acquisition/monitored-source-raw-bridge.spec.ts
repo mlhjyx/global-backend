@@ -195,7 +195,7 @@ describe("monitored source to Raw Source bridge", () => {
     );
   });
 
-  it("uses only the parameterized controlled DB writer and rejects a drifted readback", async () => {
+  it("uses only the parameterized controlled DB writer and accepts the PostgreSQL-authoritative digest", async () => {
     const prepared = prepareMonitoredSourceRawBridge({
       workspaceId: WORKSPACE_A,
       source,
@@ -259,6 +259,27 @@ describe("monitored source to Raw Source bridge", () => {
         prepared,
       }),
     ).rejects.toMatchObject({ code: "MONITORED_SOURCE_WORKSPACE_MISMATCH" });
+  });
+
+  it("rejects a real persisted-row writer drift denial", async () => {
+    const prepared = prepareMonitoredSourceRawBridge({
+      workspaceId: WORKSPACE_A,
+      source,
+      entity,
+      fetch,
+      policies,
+    });
+    const query = vi.fn(async () => {
+      throw new Error("RAW_SOURCE_WRITER_DRIFT");
+    });
+
+    await expect(
+      persistMonitoredSourceRawBridge({ $queryRaw: query } as never, {
+        workspaceId: WORKSPACE_A,
+        prepared,
+      }),
+    ).rejects.toMatchObject({ code: "MONITORED_SOURCE_RAW_DRIFT" });
+    expect(query).toHaveBeenCalledOnce();
   });
 
   it.each([

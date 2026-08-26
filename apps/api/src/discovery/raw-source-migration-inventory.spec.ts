@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   HISTORICAL_PR407_RAW_MIGRATIONS,
+  PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS,
   assessRawSourceMigrationInventory,
   type ExpectedMigrationChecksum,
 } from "./raw-source-migration-inventory";
@@ -46,6 +48,14 @@ const expected: ExpectedMigrationChecksum[] = [
     migrationName: "20260826180000_raw_source_evidence_chain_correction",
     checksum: "3".repeat(64),
   },
+  {
+    migrationName: "20260826190000_raw_source_governance_path_sanitizer",
+    checksum: "4".repeat(64),
+  },
+  {
+    migrationName: "20260826200000_raw_source_path_evidence_cleanup",
+    checksum: "5".repeat(64),
+  },
 ];
 
 const REISSUED_1600_MIGRATION =
@@ -55,7 +65,30 @@ const OLD_REVIEWED_1600_CHECKSUM =
 const INITIAL_TASK_6A1_1600_CHECKSUM =
   "c8e6e5520747ada0d0f70104a7dd0f8ece2edcc7ccdcc7237cacbfd7566c24d0";
 
+const completed = new Date("2026-08-26T00:00:00.000Z");
+
+function exactCurrentInventory() {
+  return expected.map((entry) => ({
+    migration_name: entry.migrationName,
+    checksum: entry.checksum,
+    finished_at: completed,
+    rolled_back_at: null,
+  }));
+}
+
 describe("PR #407 experiment _prisma_migrations bridge decision", () => {
+  it("binds the checker to both forward path-sanitizer migrations", () => {
+    const checker = readFileSync(
+      new URL("../../scripts/check-pr407-experiment-migrations.mts", import.meta.url),
+      "utf8",
+    );
+    expect(checker).toContain(
+      "20260826190000_raw_source_governance_path_sanitizer",
+    );
+    expect(checker).toContain(
+      "20260826200000_raw_source_path_evidence_cleanup",
+    );
+  });
   it("returns an explicit UNKNOWN/HOLD when no live experiment subject is supplied", () => {
     expect(assessRawSourceMigrationInventory(undefined, expected)).toEqual({
       schemaVersion: "pr407-raw-source-migration-decision/v1",
@@ -274,6 +307,133 @@ describe("PR #407 experiment _prisma_migrations bridge decision", () => {
             rowCount: 1,
             lifecycleState: "APPLIED",
           },
+        ],
+      });
+    },
+  );
+
+  it.each([
+    [
+      "historical PR #407",
+      HISTORICAL_PR407_RAW_MIGRATIONS[0]!,
+      "OLD_PR_MIGRATION_PRESENT",
+    ],
+    [
+      "pre-release reissued 1600",
+      PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS[0]!,
+      "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+    ],
+  ] as const)(
+    "finds a renamed %s checksum before accepting an otherwise exact current inventory",
+    (_label, forbidden, state) => {
+      const actualName = `20260826160500_renamed_${forbidden.migrationName}`;
+      const result = assessRawSourceMigrationInventory(
+        [
+          ...exactCurrentInventory(),
+          {
+            migration_name: actualName,
+            checksum: forbidden.checksum,
+            finished_at: completed,
+            rolled_back_at: null,
+          },
+        ],
+        expected,
+      );
+
+      expect(result).toMatchObject({
+        subject: "SUPPLIED",
+        decision: "HOLD",
+        state,
+        observations: [
+          {
+            migrationName: actualName,
+            expectedMigrationName: forbidden.migrationName,
+            observedChecksum: forbidden.checksum,
+            expectedChecksum: forbidden.checksum,
+            rowCount: 1,
+            lifecycleState: "APPLIED",
+          },
+        ],
+      });
+    },
+  );
+
+  it.each([
+    ["UNFINISHED", null, null],
+    ["ROLLED_BACK", completed, new Date("2026-08-26T00:01:00.000Z")],
+  ] as const)(
+    "reports the actual renamed forbidden row when it is %s",
+    (lifecycleState, finishedAt, rolledBackAt) => {
+      const forbidden = PRE_RELEASE_REISSUED_PR407_RAW_MIGRATIONS[0]!;
+      const actualName = "20260826160500_renamed_old_raw_correction";
+      const result = assessRawSourceMigrationInventory(
+        [
+          ...exactCurrentInventory(),
+          {
+            migration_name: actualName,
+            checksum: forbidden.checksum,
+            finished_at: finishedAt,
+            rolled_back_at: rolledBackAt,
+          },
+        ],
+        expected,
+      );
+
+      expect(result).toMatchObject({
+        decision: "HOLD",
+        state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+        observations: [
+          expect.objectContaining({
+            migrationName: actualName,
+            expectedMigrationName: forbidden.migrationName,
+            rowCount: 1,
+            lifecycleState,
+          }),
+        ],
+      });
+    },
+  );
+
+  it.each([
+    ["duplicate", OLD_REVIEWED_1600_CHECKSUM],
+    ["conflicting", "e".repeat(64)],
+  ])(
+    "holds a renamed forbidden checksum with %s rows under the actual name",
+    (_label, secondChecksum) => {
+      const actualName = "20260826160500_renamed_old_raw_correction";
+      const result = assessRawSourceMigrationInventory(
+        [
+          ...exactCurrentInventory(),
+          {
+            migration_name: actualName,
+            checksum: OLD_REVIEWED_1600_CHECKSUM,
+            finished_at: completed,
+            rolled_back_at: null,
+          },
+          {
+            migration_name: actualName,
+            checksum: secondChecksum,
+            finished_at: completed,
+            rolled_back_at: null,
+          },
+        ],
+        expected,
+      );
+
+      expect(result).toMatchObject({
+        decision: "HOLD",
+        state: "PRE_RELEASE_REISSUED_CHECKSUM_PRESENT",
+        observations: [
+          expect.objectContaining({
+            migrationName: actualName,
+            expectedMigrationName: REISSUED_1600_MIGRATION,
+            observedChecksum:
+              secondChecksum === OLD_REVIEWED_1600_CHECKSUM
+                ? OLD_REVIEWED_1600_CHECKSUM
+                : null,
+            rowCount: 2,
+            lifecycleState: "CONFLICT",
+          }),
         ],
       });
     },

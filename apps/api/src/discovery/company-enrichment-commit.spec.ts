@@ -218,6 +218,50 @@ describe('company enrichment commit suppression boundary', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('does not persist a semantic-key collision as Canonical or display/match FieldEvidence', async () => {
+    const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
+    const create = vi.fn(async (_input: unknown) => ({}));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1',
+          name: 'Acme GmbH',
+          domain: 'acme.example',
+          status: 'NEW',
+          attributes: { products: ['pump'] },
+        })),
+        updateMany,
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      fieldEvidence: { create },
+    } as unknown as Prisma.TransactionClient;
+
+    await expect(
+      commitCompanyEnrichmentResults(tx, {
+        workspaceId: 'ws-1',
+        companyId: 'co-1',
+        hits: [
+          {
+            key: 'digital_footprint',
+            result: {
+              matched: true,
+              confidence: 0.9,
+              attributes: { source: 'Call 555-0100' },
+              costCents: 0,
+            },
+          },
+        ],
+        status: 'ENRICHED',
+      }),
+    ).resolves.toBe(false);
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(JSON.stringify({ update: updateMany.mock.calls, evidence: create.mock.calls }))
+      .not.toContain('555-0100');
+  });
+
   it('omits an all-withheld signal namespace when a safe sibling hit is committed', async () => {
     const updateMany = vi.fn(async (_input: unknown) => ({ count: 1 }));
     const create = vi.fn(async (_input: unknown) => ({}));

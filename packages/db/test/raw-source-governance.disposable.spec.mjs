@@ -39,6 +39,10 @@ const writerParityMigrationName =
   "20260826170000_raw_source_governance_writer_parity";
 const evidenceChainMigrationName =
   "20260826180000_raw_source_evidence_chain_correction";
+const pathSanitizerMigrationName =
+  "20260826190000_raw_source_governance_path_sanitizer";
+const pathCleanupMigrationName =
+  "20260826200000_raw_source_path_evidence_cleanup";
 const schemaMigrationPath = resolve(
   migrationRoot,
   schemaMigrationName,
@@ -89,6 +93,16 @@ const evidenceChainMigrationPath = resolve(
   evidenceChainMigrationName,
   "migration.sql",
 );
+const pathSanitizerMigrationPath = resolve(
+  migrationRoot,
+  pathSanitizerMigrationName,
+  "migration.sql",
+);
+const pathCleanupMigrationPath = resolve(
+  migrationRoot,
+  pathCleanupMigrationName,
+  "migration.sql",
+);
 const baselineLastMigration = "20260824130000_personal_artifact_cleanup";
 const container = process.env.TASK6A_PG_CONTAINER;
 const port = process.env.TASK6A_PG_PORT;
@@ -104,6 +118,8 @@ const databases = Object.freeze({
   finalCorrectionRollback: "task6a_raw_final_correction_rollback",
   writerParityRollback: "task6a_raw_writer_parity_rollback",
   evidenceChainRollback: "task6a_raw_evidence_chain_rollback",
+  pathSanitizerRollback: "task6a_raw_path_sanitizer_rollback",
+  pathCleanupRollback: "task6a_raw_path_cleanup_rollback",
   dottedReceipt: "task6a_raw_dotted_receipt",
   locks: "task6a_raw_locks",
 });
@@ -144,6 +160,8 @@ let injectedStatusHardeningRollbackOutput = "";
 let injectedFinalCorrectionRollbackOutput = "";
 let injectedWriterParityRollbackOutput = "";
 let injectedEvidenceChainRollbackOutput = "";
+let injectedPathSanitizerRollbackOutput = "";
+let injectedPathCleanupRollbackOutput = "";
 
 function requireTopology() {
   assert.match(container ?? "", /^codex-task6a-raw-pg-[a-z0-9-]+$/u);
@@ -467,6 +485,7 @@ function seedCurrentMainClone(database = databases.upgrade) {
       '{
         "products":["pump","LLZ","SECRET","person@example.test"],
         "gleif":{"lei":"529900SAFEENTITY001","legal_name":"Parker Hannifin"},
+        "digital_footprint":{"source":"Call 555-0100"},
         "contact_email":"person@example.test",
         "owner_name":"alice van smith",
         "custom_payload":{"notes":"unbounded historical prose"}
@@ -550,6 +569,11 @@ function seedCurrentMainClone(database = databases.upgrade) {
         gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}','attributes',
         '{"products":["AB"],"custom_payload":{"notes":"forbidden free text"}}',
         'registry','${EVIDENCE_CHAIN_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
+      ),
+      (
+        gen_random_uuid(),'${WORKSPACE_A}','company','${COMPANY_A}',
+        'digital_footprint.source','"Call 555-0100"',
+        'registry','${SAFE_RAW_A}',1,'public','["display","match"]','2026-08-25T16:31:00Z'
       );
   `,
   );
@@ -701,6 +725,16 @@ before(() => {
     existsSync(evidenceChainMigrationPath),
     true,
     `${evidenceChainMigrationName} must exist`,
+  );
+  assert.equal(
+    existsSync(pathSanitizerMigrationPath),
+    true,
+    `${pathSanitizerMigrationName} must exist`,
+  );
+  assert.equal(
+    existsSync(pathCleanupMigrationPath),
+    true,
+    `${pathCleanupMigrationName} must exist`,
   );
   dockerPsql(
     "postgres",
@@ -931,6 +965,64 @@ before(() => {
     { rejects: /division by zero/u },
   );
 
+  migrateDeploy(databases.pathSanitizerRollback, baseline.schemaPath);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.pathSanitizerRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedPathSanitizer = readFileSync(
+    pathSanitizerMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedPathSanitizerRollbackOutput = dockerPsql(
+    databases.pathSanitizerRollback,
+    injectedPathSanitizer,
+    { rejects: /division by zero/u },
+  );
+
+  migrateDeploy(databases.pathCleanupRollback, baseline.schemaPath);
+  seedCurrentMainClone(databases.pathCleanupRollback);
+  for (const migrationPath of [
+    schemaMigrationPath,
+    backfillMigrationPath,
+    constraintsMigrationPath,
+    writerMigrationPath,
+    writerHardeningMigrationPath,
+    historicalCleanupMigrationPath,
+    statusHardeningMigrationPath,
+    finalCorrectionMigrationPath,
+    writerParityMigrationPath,
+    evidenceChainMigrationPath,
+    pathSanitizerMigrationPath,
+  ]) {
+    dockerPsql(
+      databases.pathCleanupRollback,
+      readFileSync(migrationPath, "utf8"),
+    );
+  }
+  const injectedPathCleanup = readFileSync(
+    pathCleanupMigrationPath,
+    "utf8",
+  ).replace(/COMMIT;\s*$/u, "SELECT 1 / 0;\nCOMMIT;\n");
+  injectedPathCleanupRollbackOutput = dockerPsql(
+    databases.pathCleanupRollback,
+    injectedPathCleanup,
+    { rejects: /division by zero/u },
+  );
+
   migrateDeploy(databases.locks);
   dockerPsql(
     databases.locks,
@@ -1030,6 +1122,11 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       firstDeployOutput,
       new RegExp(evidenceChainMigrationName, "u"),
     );
+    assert.match(
+      firstDeployOutput,
+      new RegExp(pathSanitizerMigrationName, "u"),
+    );
+    assert.match(firstDeployOutput, new RegExp(pathCleanupMigrationName, "u"));
     assert.match(secondDeployOutput, /No pending migrations to apply/u);
     assert.equal(
       dockerPsql(
@@ -1041,12 +1138,13 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         '${constraintsMigrationName}','${writerMigrationName}',
         '${writerHardeningMigrationName}','${historicalCleanupMigrationName}',
         '${statusHardeningMigrationName}','${finalCorrectionMigrationName}',
-        '${writerParityMigrationName}','${evidenceChainMigrationName}'
+        '${writerParityMigrationName}','${evidenceChainMigrationName}',
+        '${pathSanitizerMigrationName}','${pathCleanupMigrationName}'
       )
         AND finished_at IS NOT NULL AND rolled_back_at IS NULL;
     `,
       ),
-      "10",
+      "12",
     );
   });
 
@@ -1134,7 +1232,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         databases.upgrade,
         `SELECT count(*) FROM field_evidence WHERE entity_id='${COMPANY_A}';`,
       ),
-      "8",
+      "9",
     );
     const cleanedEvidence = JSON.parse(
       dockerPsql(
@@ -1191,7 +1289,29 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
          (attributes #> '{digital_footprint,structured_org}' IS NULL)::text)
        FROM canonical_company WHERE id='${COMPANY_A}';`,
     );
-    assert.equal(correctedCanonical, "3|true|true");
+    assert.equal(correctedCanonical, "4|true|true");
+    assert.deepEqual(
+      JSON.parse(
+        dockerPsql(
+          databases.upgrade,
+          `SELECT jsonb_build_object(
+             'value',value,'class',data_class,'actions',allowed_actions
+           )::text
+           FROM field_evidence
+           WHERE entity_id='${COMPANY_A}'
+             AND field='digital_footprint.source';`,
+        ),
+      ),
+      {
+        value: {
+          _historicalCleanup: "canonical-attribute-cleanup/v2",
+          reason: "UNSAFE_HISTORICAL_CANONICAL_VALUE_WITHHELD",
+          originalValueHash: "5404d8b66cb280539521998c3d56b30cac838dead037463fa46ff72908c792b9",
+        },
+        class: "red",
+        actions: [],
+      },
+    );
     assert.equal(
       dockerPsql(
         databases.upgrade,
@@ -1743,6 +1863,155 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         providerKey,
       );
     }
+  });
+
+  it("sanitizes semantic identifiers by exact full paths instead of global leaf names", () => {
+    const semanticKeys = [
+      "cpv",
+      "fei_number",
+      "isin",
+      "k_number",
+      "lei",
+      "legal_form_code",
+      "naics",
+      "notice",
+      "osm_id",
+      "owner_operator_numbers",
+      "parent_lei",
+      "parent_qid",
+      "product_code",
+      "publication_number",
+      "qid",
+      "registration_number",
+      "source",
+      "ultimate_parent_lei",
+      "wikidata_qid",
+      "winner_identifier",
+    ];
+    const hostile = {
+      digital_footprint: {
+        safe: "industrial",
+        phone_collisions: Object.fromEntries(
+          semanticKeys.map((key) => [key, "Call 555-0100"]),
+        ),
+        unicode_phone_collisions: Object.fromEntries(
+          semanticKeys.map((key) => [key, "Call ٥٥٥-٠١٠٠"]),
+        ),
+        secret_collisions: Object.fromEntries(
+          semanticKeys.map((key) => [key, "Bearer secret"]),
+        ),
+        source: "Call 555-0100",
+      },
+      ted: {
+        publication_number: "123456-2026",
+        cpv: ["42122130"],
+        winner_identifier: "Call 555-0100",
+      },
+      intent: {
+        events: [
+          {
+            type: "TENDER_PUBLISHED",
+            at: "2026-08-26T00:00:00.000Z",
+            strength: 0.9,
+            evidence: {
+              cpv: ["42122130"],
+              notice: "Call ٥٥٥-٠١٠٠",
+              source: "Bearer secret",
+            },
+          },
+        ],
+      },
+    };
+    const sanitized = JSON.parse(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT sanitize_canonical_company_attributes_v3(
+          '${JSON.stringify(hostile).replaceAll("'", "''")}'::jsonb
+        )::text;`,
+      ),
+    );
+    assert.deepEqual(sanitized, {
+      digital_footprint: { safe: "industrial" },
+      ted: {
+        publication_number: "123456-2026",
+        cpv: ["42122130"],
+      },
+      intent: {
+        events: [
+          {
+            type: "TENDER_PUBLISHED",
+            at: "2026-08-26T00:00:00.000Z",
+            strength: 0.9,
+            evidence: { cpv: ["42122130"] },
+          },
+        ],
+      },
+    });
+
+    const legitimate = {
+      wikidata_qid: "Q206894",
+      osm_id: "relation/62422",
+      ted: {
+        publication_number: "123456-2026",
+        cpv: ["42122130"],
+        winner_identifier: "DE111",
+      },
+      fda: {
+        registration_number: "3004512345",
+        fei_number: "3012345678",
+        owner_operator_numbers: ["10001234"],
+      },
+      gleif: {
+        lei: "529900T8BM49AURSDO55",
+        legal_form_code: "8888",
+        parent_lei: "5493001KJTIIGC8Y1R12",
+        ultimate_parent_lei: "213800D1EI4B9WTWWD28",
+      },
+      wikidata: {
+        qid: "Q123",
+        parent_qid: "Q456",
+        lei: "529900T8BM49AURSDO55",
+        isin: "DE000BASF111",
+      },
+      structured_harvest: {
+        hiring_signal: { source: "ats:greenhouse", open_roles: 2 },
+      },
+      intent: {
+        events: [
+          {
+            type: "US_FED_SOURCES_SOUGHT",
+            at: "2026-08-26T00:00:00.000Z",
+            strength: 0.7,
+            evidence: {
+              naics: ["333914"],
+              notice: "notice-1",
+              source: "samgov",
+            },
+          },
+          {
+            type: "FDA_CLEARANCE",
+            at: "2026-08-26T00:00:00.000Z",
+            strength: 0.85,
+            evidence: {
+              product_code: "LLZ",
+              k_number: "K123456",
+              source: "openfda",
+            },
+          },
+        ],
+      },
+    };
+    assert.deepEqual(
+      JSON.parse(
+        dockerPsql(
+          databases.upgrade,
+          `SELECT sanitize_canonical_company_attributes_v3(
+            '${JSON.stringify(legitimate).replaceAll("'", "''")}'::jsonb
+          )::text;`,
+        ),
+      ),
+      legitimate,
+    );
   });
 
   it("keeps the controlled writer in exact company-name parity with application admission", () => {
@@ -3139,7 +3408,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
                AND value::text LIKE '%person@example.test%')
         ) FROM canonical_company WHERE id='${COMPANY_A}';`,
       ),
-      "true|true|true|8|3",
+      "true|true|true|9|3",
     );
   });
 
@@ -3245,11 +3514,79 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
         "true",
         "red",
         "[]",
-        "8",
+        "9",
         "2",
         "true",
         "2",
       ].join("|"),
+    );
+  });
+
+  it("keeps 1900 DDL/ACL-only and 2000 historical correction DML-only", () => {
+    const ddl = readFileSync(pathSanitizerMigrationPath, "utf8");
+    const dml = readFileSync(pathCleanupMigrationPath, "utf8");
+
+    assert.match(ddl, /CREATE (?:OR REPLACE )?FUNCTION/u);
+    assert.match(ddl, /REVOKE ALL ON FUNCTION/u);
+    assert.doesNotMatch(
+      ddl,
+      /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:canonical_company|field_evidence)\b/iu,
+    );
+    assert.match(dml, /\bUPDATE\s+canonical_company\b/iu);
+    assert.match(dml, /\bUPDATE\s+field_evidence\b/iu);
+    assert.doesNotMatch(
+      dml,
+      /\b(?:CREATE|ALTER|DROP)\s+(?:FUNCTION|TABLE|INDEX|TYPE|POLICY|TRIGGER|CONSTRAINT)\b|\b(?:GRANT|REVOKE)\b/iu,
+    );
+  });
+
+  it("rolls back every 1900 path-sanitizer definition and ACL change", () => {
+    assert.match(injectedPathSanitizerRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.pathSanitizerRollback,
+        `SELECT concat_ws('|',
+          (to_regprocedure(
+            'raw_source_semantic_identifier_valid_v1(text[],text)'
+          ) IS NULL)::text,
+          (to_regprocedure(
+            'raw_source_sanitize_derived_json_v4(jsonb,text[],integer)'
+          ) IS NULL)::text,
+          (sanitize_canonical_company_attributes_v3(
+            '{"digital_footprint":{"source":"Call 555-0100"}}'::jsonb
+          ) #>> '{digital_footprint,source}' = 'Call 555-0100')::text
+        );`,
+      ),
+      "true|true|true",
+    );
+  });
+
+  it("rolls back all 2000 Canonical and FieldEvidence correction bytes", () => {
+    assert.match(injectedPathCleanupRollbackOutput, /division by zero/u);
+    assert.equal(
+      dockerPsql(
+        databases.pathCleanupRollback,
+        `SELECT concat_ws('|',
+          version::text,
+          (attributes #>> '{digital_footprint,source}' =
+            'Call 555-0100')::text,
+          (SELECT value #>> '{}' = 'Call 555-0100'
+             FROM field_evidence
+             WHERE entity_id='${COMPANY_A}'
+               AND field='digital_footprint.source')::text,
+          (SELECT data_class
+             FROM field_evidence
+             WHERE entity_id='${COMPANY_A}'
+               AND field='digital_footprint.source'),
+          (SELECT allowed_actions::text
+             FROM field_evidence
+             WHERE entity_id='${COMPANY_A}'
+               AND field='digital_footprint.source'),
+          (SELECT count(*)::text FROM field_evidence
+             WHERE entity_id='${COMPANY_A}')
+        ) FROM canonical_company WHERE id='${COMPANY_A}';`,
+      ),
+      "3|true|true|green|[\"display\", \"match\"]|9",
     );
   });
 });

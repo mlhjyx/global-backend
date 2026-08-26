@@ -233,6 +233,8 @@ function discoveryArgs<T extends object>(runId: string, extra: T) {
   return {
     workspaceId: DISCOVERY_BINDING.scopeKey,
     runId,
+    planId: "50000000-0000-4000-8000-000000000001",
+    queryOrdinal: 0,
     executionContractVersion: 2 as const,
     executionBudget: DISCOVERY_BINDING,
     ...extra,
@@ -431,6 +433,158 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     await expect(
       acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
     ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+  });
+
+  it("reads back the exact persisted query receipt after DomainAck response-loss replay", async () => {
+    const secondRecord: ProviderCompanyRecord = {
+      ...REC,
+      externalId: "wikidata:Q2",
+      name: "Valve GmbH",
+      domain: "valve.example",
+      attributes: { wikidata_qid: "Q2", source_class: "company_registry" },
+      provenance: {
+        ...REC.provenance!,
+        sourceUrl: "https://www.wikidata.org/wiki/Q2",
+        contentHash: "b".repeat(64),
+      },
+    };
+    let runStats: Record<string, unknown> = {};
+    const persistedRows: Array<Record<string, unknown>> = [];
+    let writerInvocation = 0;
+    const queryRaw = vi.fn(
+      async (statement: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+        const sql = statement.strings?.join("?") ?? "";
+        if (sql.includes("FROM discovery_run")) {
+          return [
+            {
+              id: "40000000-0000-4000-8000-000000000001",
+              plan_id: "50000000-0000-4000-8000-000000000001",
+              stats: runStats,
+            },
+          ];
+        }
+        const command = JSON.parse(String(statement.values?.[0])) as Record<
+          string,
+          unknown
+        >;
+        writerInvocation += 1;
+        const inserted = writerInvocation === 2;
+        if (inserted) {
+          persistedRows.push({
+            id: "raw-new",
+            externalId: command.externalId,
+            ingestKey: command.ingestKey,
+            payloadHash: "f".repeat(64),
+            payload: command.payload,
+            ingestStatus: command.ingestStatus,
+          });
+        }
+        return [
+          {
+            raw_record_id: inserted ? "raw-new" : "raw-existing",
+            payload_hash: "f".repeat(64),
+            payload_bytes: Buffer.byteLength(JSON.stringify(command.payload)),
+            ingest_status: command.ingestStatus,
+            inserted,
+          },
+        ];
+      },
+    );
+    const tx = {
+      $executeRaw: vi.fn(async () => 1),
+      $queryRaw: queryRaw,
+      rawSourceRecord: {
+        findMany: vi.fn(async () => []),
+        count: vi.fn(async ({ where }: { where: { ingestStatus: string } }) =>
+          persistedRows.filter((row) => row.ingestStatus === where.ingestStatus).length),
+      },
+      discoveryRun: {
+        update: vi.fn(async ({ data }: { data: { stats: Record<string, unknown> } }) => {
+          runStats = data.stats;
+          return {};
+        }),
+      },
+      usageLedger: { create: vi.fn(async () => ({})) },
+    };
+    const durableReceipt: DurableExecutionReceipt = Object.freeze({
+      ...ENRICHMENT_RECEIPT,
+      operationId: "40000000-0000-4000-8000-000000000002",
+      operationKey: "discovery-wikidata-query",
+      resultSchema: "wikidata-sparql/v1",
+      resultDigest: "b".repeat(64),
+    });
+    const provider: CompanyDiscoveryAdapter = {
+      key: "wikidata",
+      classes: ["public_intelligence"],
+      discoverCompanies: vi.fn(async (_query, ctx) => {
+        ctx.onDurableReceipt?.("wikidata.sparql", durableReceipt);
+        return { records: [REC, secondRecord], costCents: 5 };
+      }),
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        sourcePolicy: {
+          findMany: vi.fn(async () => [
+            {
+              id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              domain: "wikidata.org",
+              retentionDays: 365,
+              reviewStatus: "APPROVED",
+              allowedPurpose: ["discovery"],
+              updatedAt: new Date("2026-08-20T00:00:00.000Z"),
+            },
+          ]),
+        },
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: { routeCompanyDiscovery: vi.fn(async () => [provider]) },
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+    acknowledgementMocks.apply
+      .mockImplementationOnce(async (input) => ({
+        status: "APPLIED",
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: "APPLIED",
+        })),
+        value: await input.apply(input.transaction),
+      }))
+      .mockImplementationOnce(async (input: {
+        transaction: unknown;
+        acknowledgements: Array<{ producerId: string }>;
+        readback: (transaction: unknown) => Promise<unknown>;
+      }) => ({
+        status: "REPLAYED",
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: "REPLAYED",
+        })),
+        value: await input.readback(input.transaction),
+      }));
+
+    const args = discoveryArgs("40000000-0000-4000-8000-000000000001", {
+      planId: "50000000-0000-4000-8000-000000000001",
+      queryOrdinal: 0,
+      query: QUERY,
+    });
+    const first = await activities.executeQuery(args);
+    expect(first).toMatchObject({
+      rawCount: 1,
+      quarantinedCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 1,
+      costCents: 5,
+    });
+    const second = await activities.executeQuery(args);
+
+    expect(second).toEqual(first);
+    expect(writerInvocation).toBe(2);
+    expect(runStats).toMatchObject({
+      perQuery: {
+        [first.queryReceipt.queryKey]: first.queryReceipt,
+      },
+    });
   });
 });
 
@@ -750,6 +904,191 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(upsert).not.toHaveBeenCalled();
     expect(linkCreate).not.toHaveBeenCalled();
     expect(evidenceCreate).not.toHaveBeenCalled();
+  });
+
+  it("treats an activity response-loss retry for the same Raw link as an exact canonical no-op", async () => {
+    const raw = {
+      id: "raw-replay",
+      providerKey: "registry",
+      ingestStatus: "ACCEPTED",
+      ingestVersion: "raw-source/v2",
+      payload: {
+        externalId: "registry:acme",
+        name: "Acme GmbH",
+        domain: "acme.example",
+        country: "DE",
+        attributes: { products: ["pump"] },
+      },
+    };
+    let company: Record<string, unknown> | null = null;
+    const links: Array<Record<string, unknown>> = [];
+    const evidence: Array<Record<string, unknown>> = [];
+    let clock = 0;
+    const upsert = vi.fn(async (input: {
+      update: Record<string, unknown>;
+      create: Record<string, unknown>;
+    }) => {
+      clock += 1;
+      if (!company) {
+        company = {
+          id: "company-replay",
+          ...input.create,
+          version: 1,
+          updatedAt: new Date(`2026-08-26T00:00:0${clock}.000Z`),
+        };
+      } else {
+        const attributes = input.update.attributes ?? company.attributes;
+        company = {
+          ...company,
+          attributes,
+          version: Number(company.version) + 1,
+          updatedAt: new Date(`2026-08-26T00:00:0${clock}.000Z`),
+        };
+      }
+      return { id: company.id };
+    });
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
+      rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      canonicalCompany: {
+        findUnique: vi.fn(async () => company),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+        upsert,
+      },
+      identityLink: {
+        findFirst: vi.fn(async ({ where }: { where: { rawRecordId: string } }) =>
+          links.find((row) => row.rawRecordId === where.rawRecordId) ?? null),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          links.push({ id: `link-${links.length + 1}`, ...data });
+          return {};
+        }),
+      },
+      fieldEvidence: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          evidence.push({ id: `evidence-${evidence.length + 1}`, ...data });
+          return {};
+        }),
+      },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-replay", {})),
+    ).resolves.toEqual({ companies: 1, suppressed: 0 });
+    const committed = JSON.stringify(company);
+    const committedVersion = company!.version;
+    const committedUpdatedAt = company!.updatedAt;
+    const committedLinkCount = links.length;
+    const committedEvidenceCount = evidence.length;
+
+    // Simulate that the transaction committed but its activity response was
+    // lost. Temporal invokes the same activity again with the same Raw row.
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-replay", {})),
+    ).resolves.toEqual({ companies: 0, suppressed: 0 });
+
+    expect(JSON.stringify(company)).toBe(committed);
+    expect(company!.version).toBe(committedVersion);
+    expect(company!.updatedAt).toEqual(committedUpdatedAt);
+    expect(links).toHaveLength(committedLinkCount);
+    expect(evidence).toHaveLength(committedEvidenceCount);
+    expect(upsert).toHaveBeenCalledOnce();
+  });
+
+  it("applies a real sanitizer repair once and carries governed evidence without relinking Raw", async () => {
+    const raw = {
+      id: "raw-repair",
+      providerKey: "registry",
+      ingestStatus: "ACCEPTED",
+      ingestVersion: "raw-source/v2",
+      payload: {
+        externalId: "registry:repair",
+        name: "Repair GmbH",
+        domain: "repair.example",
+        country: "DE",
+        attributes: { products: ["pump"] },
+      },
+    };
+    let company: Record<string, unknown> = {
+      id: "company-repair",
+      workspaceId: DISCOVERY_BINDING.scopeKey,
+      name: "Repair GmbH",
+      domain: "repair.example",
+      country: "DE",
+      region: null,
+      dedupeKey: "d:repair.example",
+      attributes: {
+        products: ["pump"],
+        digital_footprint: { source: "Call 555-0100" },
+      },
+      status: "NEW",
+      version: 3,
+      updatedAt: new Date("2026-08-26T00:00:00.000Z"),
+    };
+    const evidenceCreate = vi.fn(async () => ({}));
+    const upsert = vi.fn(async (input: { update: Record<string, unknown> }) => {
+      company = {
+        ...company,
+        attributes: input.update.attributes,
+        version: Number(company.version) + 1,
+        updatedAt: new Date("2026-08-26T00:00:01.000Z"),
+      };
+      return { id: company.id };
+    });
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ pg_advisory_xact_lock: null }]),
+      rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
+      rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      canonicalCompany: {
+        findUnique: vi.fn(async () => company),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+        upsert,
+      },
+      identityLink: {
+        findFirst: vi.fn(async () => ({ id: "existing-link" })),
+        create: vi.fn(),
+      },
+      fieldEvidence: { create: evidenceCreate },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-repair", {})),
+    ).resolves.toEqual({ companies: 1, suppressed: 0 });
+    expect(company.attributes).toEqual({ products: ["pump"] });
+    expect(company.version).toBe(4);
+    expect(evidenceCreate).toHaveBeenCalledOnce();
+    expect(evidenceCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        rawRecordId: raw.id,
+        field: "attributes",
+        value: { products: ["pump"] },
+      }),
+    });
+
+    const repairedBytes = JSON.stringify(company);
+    await expect(
+      activities.canonicalizeRun(discoveryArgs("run-repair", {})),
+    ).resolves.toEqual({ companies: 0, suppressed: 0 });
+    expect(JSON.stringify(company)).toBe(repairedBytes);
+    expect(evidenceCreate).toHaveBeenCalledOnce();
   });
 });
 

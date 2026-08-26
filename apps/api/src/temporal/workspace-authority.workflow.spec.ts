@@ -48,6 +48,20 @@ function primeDiscovery() {
     quarantinedCount: 0,
     rejectedCount: 0,
     duplicateCount: 0,
+    queryReceipt: {
+      schemaVersion: 'discovery-query-receipt/v1',
+      queryKey: 'a'.repeat(64),
+      queryOrdinal: 0,
+      sourceClass: 'official_registry',
+      providers: ['gleif'],
+      accepted: 1,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: 1,
+      costCents: 0,
+    },
     provider: 'gleif',
     budgetTruncated: false,
   });
@@ -209,6 +223,149 @@ describe('discoveryWorkflow execution-control propagation', () => {
               duplicateCount: 4,
               provider: 'public_web',
             },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('keeps TED, openFDA, and public-web receipts query-scoped while summing their shared source class', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({
+      queries: [
+        {
+          source_class: 'public_intelligence',
+          filters: { source_hint: 'ted' },
+          keywords: [],
+          priority: 1,
+        },
+        {
+          source_class: 'public_intelligence',
+          filters: { source_hint: 'openfda' },
+          keywords: [],
+          priority: 2,
+        },
+        {
+          source_class: 'public_intelligence',
+          filters: { source_hint: 'public_web' },
+          keywords: ['pump'],
+          priority: 3,
+        },
+      ],
+    });
+    const receipts = [
+      {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: 'a'.repeat(64),
+        queryOrdinal: 0,
+        sourceClass: 'public_intelligence',
+        providers: ['ted'],
+        accepted: 1,
+        quarantined: 0,
+        rejected: 0,
+        governanceDenied: 0,
+        duplicate: 1,
+        usageQuantity: 1,
+        costCents: 2,
+      },
+      {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: 'b'.repeat(64),
+        queryOrdinal: 1,
+        sourceClass: 'public_intelligence',
+        providers: ['openfda'],
+        accepted: 0,
+        quarantined: 2,
+        rejected: 0,
+        governanceDenied: 2,
+        duplicate: 3,
+        usageQuantity: 0,
+        costCents: 4,
+      },
+      {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: 'c'.repeat(64),
+        queryOrdinal: 2,
+        sourceClass: 'public_intelligence',
+        providers: ['public_web'],
+        accepted: 0,
+        quarantined: 0,
+        rejected: 1,
+        governanceDenied: 1,
+        duplicate: 5,
+        usageQuantity: 0,
+        costCents: 6,
+      },
+    ] as const;
+    acts.executeQuery
+      .mockResolvedValueOnce({
+        rawCount: 1,
+        quarantinedCount: 0,
+        rejectedCount: 0,
+        duplicateCount: 1,
+        queryReceipt: receipts[0],
+        provider: 'ted',
+        budgetTruncated: false,
+      })
+      .mockResolvedValueOnce({
+        rawCount: 0,
+        quarantinedCount: 2,
+        rejectedCount: 0,
+        duplicateCount: 3,
+        queryReceipt: receipts[1],
+        provider: 'openfda',
+        budgetTruncated: false,
+      })
+      .mockResolvedValueOnce({
+        rawCount: 0,
+        quarantinedCount: 0,
+        rejectedCount: 1,
+        duplicateCount: 5,
+        queryReceipt: receipts[2],
+        provider: 'public_web',
+        budgetTruncated: false,
+      });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery.mock.calls.map(([args]) => ({
+      planId: args.planId,
+      queryOrdinal: args.queryOrdinal,
+      sourceHint: args.query.filters.source_hint,
+    }))).toEqual([
+      { planId: 'plan-1', queryOrdinal: 0, sourceHint: 'ted' },
+      { planId: 'plan-1', queryOrdinal: 1, sourceHint: 'openfda' },
+      { planId: 'plan-1', queryOrdinal: 2, sourceHint: 'public_web' },
+    ]);
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          perQuery: {
+            ['a'.repeat(64)]: receipts[0],
+            ['b'.repeat(64)]: receipts[1],
+            ['c'.repeat(64)]: receipts[2],
+          },
+          perSource: {
+            public_intelligence: {
+              rawCount: 1,
+              quarantinedCount: 2,
+              rejectedCount: 1,
+              governanceDenied: 3,
+              duplicateCount: 9,
+              usageQuantity: 1,
+              costCents: 12,
+              providers: ['openfda', 'public_web', 'ted'],
+            },
+          },
+          rawGovernance: {
+            accepted: 1,
+            quarantined: 2,
+            rejected: 1,
+            governanceDenied: 3,
+            duplicate: 9,
+            usageQuantity: 1,
+            costCents: 12,
           },
         }),
       }),
