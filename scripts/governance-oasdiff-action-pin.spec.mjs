@@ -94,11 +94,18 @@ test("oasdiff breaking is policy-bound to the reviewed v0.1.13 commit and privac
     ["review removed", (value) => value.replace(/          review: "false"\n/u, "")],
     ["moving tag", (value) => value.replace(`@${revision} # ${version}`, `@${version} # ${version}`)],
     ["tag object pin", (value) => value.replace(`@${revision} # ${version}`, "@1111111111111111111111111111111111111111 # v0.1.13 tag object")],
-    ["failure swallowing", (value) => value.replace('        with:\n', '        continue-on-error: true\n        with:\n')],
+    [
+      "failure swallowing",
+      (value) =>
+        value.replace(
+          `uses: ${action}@${revision} # ${version}\n`,
+          `uses: ${action}@${revision} # ${version}\n        continue-on-error: true\n`,
+        ),
+    ],
   ]) {
     assert.throws(
       () => assertOasdiffPolicy(policy, mutate(workflow)),
-      { message: /AssertionError/u },
+      assert.AssertionError,
       description,
     );
   }
