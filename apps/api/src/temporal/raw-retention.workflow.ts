@@ -6,6 +6,7 @@ const activities = proxyActivities<RawSourceActivities>({
   retry: { maximumAttempts: 3 },
 });
 const PAGINATION_PATCH = "raw-retention-fair-pagination-v2";
+const TRUTHFUL_LOCK_PATCH = "raw-retention-truthful-lock-conflicts-v3";
 const MAX_BATCHES_PER_WORKSPACE = 20;
 const DEFAULT_PAGES_PER_RUN = 2;
 const MAX_PAGES_PER_RUN = 5;
@@ -27,9 +28,11 @@ export interface RawRetentionSweepResult {
 async function expireWorkspace(
   workspaceId: string,
   batchSize: number,
+  truthfulLocks: boolean,
 ): Promise<{ expired: number; deferredForConflict: number }> {
   let expired = 0;
   let deferredForConflict = 0;
+  let complete = false;
   for (let batch = 0; batch < MAX_BATCHES_PER_WORKSPACE; batch += 1) {
     const result = await activities.expireRawSourceRecords({
       workspaceId,
@@ -40,8 +43,18 @@ async function expireWorkspace(
       deferredForConflict,
       result.deferredForConflict,
     );
-    if (result.expired < batchSize) break;
+    const completeBatch = truthfulLocks
+      ? !(
+          result.hasMore ??
+          (result.deferredForConflict > 0 || result.expired >= batchSize)
+        ) && result.deferredForConflict === 0
+      : result.expired < batchSize;
+    if (completeBatch) {
+      complete = true;
+      break;
+    }
   }
+  if (!complete) throw new Error("RAW_RETENTION_WORKSPACE_INCOMPLETE");
   return { expired, deferredForConflict };
 }
 
@@ -49,13 +62,18 @@ async function processPage(
   workspaceIds: readonly string[],
   batchSize: number,
   aggregate: RawRetentionSweepResult,
+  truthfulLocks: boolean,
 ): Promise<{ aggregate: RawRetentionSweepResult; failures: number }> {
   let current = { ...aggregate };
   let failures = 0;
   for (const workspaceId of workspaceIds) {
     current = { ...current, workspaces: current.workspaces + 1 };
     try {
-      const result = await expireWorkspace(workspaceId, batchSize);
+      const result = await expireWorkspace(
+        workspaceId,
+        batchSize,
+        truthfulLocks,
+      );
       current = {
         ...current,
         expired: current.expired + result.expired,
@@ -78,16 +96,23 @@ export async function rawRetentionSweepWorkflow(
     Math.min(input.workspaceLimit ?? 100, 500),
   );
   const batchSize = Math.max(1, Math.min(input.batchSize ?? 500, 500));
+  const usesPagination = patched(PAGINATION_PATCH);
+  const truthfulLocks = patched(TRUTHFUL_LOCK_PATCH);
 
-  if (!patched(PAGINATION_PATCH)) {
+  if (!usesPagination) {
     const page = await activities.listRawRetentionWorkspaces({
       limit: workspaceLimit,
     });
-    const result = await processPage(page.workspaceIds, batchSize, {
-      workspaces: 0,
-      expired: 0,
-      deferredForConflict: 0,
-    });
+    const result = await processPage(
+      page.workspaceIds,
+      batchSize,
+      {
+        workspaces: 0,
+        expired: 0,
+        deferredForConflict: 0,
+      },
+      truthfulLocks,
+    );
     if (result.failures) {
       throw new Error(`RAW_RETENTION_WORKSPACE_FAILURE:${result.failures}`);
     }
@@ -112,7 +137,12 @@ export async function rawRetentionSweepWorkflow(
       limit: workspaceLimit,
       ...(cursor ? { afterWorkspaceId: cursor } : {}),
     });
-    const result = await processPage(page.workspaceIds, batchSize, aggregate);
+    const result = await processPage(
+      page.workspaceIds,
+      batchSize,
+      aggregate,
+      truthfulLocks,
+    );
     aggregate = result.aggregate;
     if (result.failures) {
       throw new Error(`RAW_RETENTION_WORKSPACE_FAILURE:${result.failures}`);

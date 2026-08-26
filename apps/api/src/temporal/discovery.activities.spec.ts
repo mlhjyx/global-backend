@@ -50,15 +50,19 @@ vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
  */
 
 const REC: ProviderCompanyRecord = {
-  externalId: 'acme.de',
-  name: 'Acme',
+  externalId: 'wikidata:Q1',
+  name: 'Acme GmbH',
   domain: 'acme.de',
-  attributes: {},
+  attributes: {
+    wikidata_qid: 'Q1',
+    source_class: 'company_registry',
+  },
+  license: 'CC0-1.0',
   provenance: {
     sourceUrl: 'https://acme.de/',
     fetchedAt: '2026-07-11T00:00:00.000Z',
-    contentHash: 'h',
-    parserVersion: 'v1',
+    contentHash: 'a'.repeat(64),
+    parserVersion: 'wikidata/1',
   },
 };
 

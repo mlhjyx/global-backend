@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
@@ -71,10 +72,13 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
         longitude: c.longitude,
         source_class: query.sourceClass,
       },
+      license: 'CC0-1.0',
       provenance: {
-        sourceUrl: `https://www.wikidata.org/wiki/${c.qid}`,
+        sourceUrl: 'https://query.wikidata.org/sparql',
         fetchedAt: now,
-        contentHash: c.qid,
+        contentHash: createHash('sha256')
+          .update(`wikidata:${c.qid}:${c.name}`)
+          .digest('hex'),
         parserVersion: 'wikidata/1',
       },
     }));

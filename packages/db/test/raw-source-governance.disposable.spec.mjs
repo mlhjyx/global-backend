@@ -292,13 +292,10 @@ function openRowLock(database, rowId) {
 
   const ready = new Promise((resolveReady, rejectReady) => {
     let poll;
-    const timeout = setTimeout(
-      () => {
-        clearInterval(poll);
-        rejectReady(new Error(`row lock did not become ready:\n${output}`));
-      },
-      5_000,
-    );
+    const timeout = setTimeout(() => {
+      clearInterval(poll);
+      rejectReady(new Error(`row lock did not become ready:\n${output}`));
+    }, 5_000);
     poll = setInterval(() => {
       if (!output.includes(`LOCKED:${rowId}`)) return;
       clearTimeout(timeout);
@@ -652,6 +649,34 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       ),
       "0",
     );
+    dockerPsql(
+      databases.upgrade,
+      asApp(
+        WORKSPACE_A,
+        `INSERT INTO raw_source_record(
+          id,workspace_id,run_id,provider_key,source_class,external_id,payload,
+          source_url,fetched_at,content_hash,parser_version,cost_cents,created_at,
+          ingest_key,payload_hash,payload_bytes,ingest_version,ingest_status,
+          disposition_code,retention_days,expires_at,expired_at,source_policy_snapshot
+        ) VALUES (
+          '81000000-0000-4000-8000-000000000003','${WORKSPACE_A}','${RUN_A}',
+          'registry','company_registry','safe-a','{"name":"Safe A GmbH"}',
+          'https://registry.example/safe-a-v2',now(),repeat('a',64),'registry/v2',0,now(),
+          'external:${"7".repeat(64)}',repeat('8',64),24,'raw-source/v2','ACCEPTED',
+          NULL,30,now()+interval '30 days',NULL,
+          '{"kind":"source_policy","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","domain":"registry.example","retentionDays":30,"reviewStatus":"APPROVED","updatedAt":"2026-08-25T00:00:00.000Z","minimizedFields":[]}'
+        );`,
+      ),
+    );
+    assert.equal(
+      dockerPsql(
+        databases.upgrade,
+        `SELECT count(*) FROM raw_source_record
+         WHERE run_id='${RUN_A}' AND provider_key='registry'
+           AND external_id='safe-a' AND ingest_version='raw-source/v2';`,
+      ),
+      "1",
+    );
 
     dockerPsql(
       databases.upgrade,
@@ -852,7 +877,7 @@ describe("Raw Source current-lineage migrations on disposable PostgreSQL 16", ()
       WHERE id='80000000-0000-4000-8000-000000000001';
     `,
       ),
-      { rejects: /immutable|one-way/u },
+      { rejects: /immutable|one-way|permission denied/u },
     );
   });
 

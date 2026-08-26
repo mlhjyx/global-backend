@@ -63,7 +63,9 @@ describe("Raw Source retention activities", () => {
   });
 
   it("expires only inside the requested workspace transaction and returns the DB receipt", async () => {
-    const query = vi.fn(async () => [{ expired: 3, deferred_for_conflict: 0 }]);
+    const query = vi.fn(async () => [
+      { expired: 3, deferred_for_conflict: 0, has_more: false },
+    ]);
     const withWorkspace = vi.fn(async (_workspaceId, callback) =>
       callback({ $queryRaw: query }),
     );
@@ -76,7 +78,11 @@ describe("Raw Source retention activities", () => {
         workspaceId: "11111111-1111-4111-8111-111111111111",
         limit: 10_000,
       }),
-    ).resolves.toEqual({ expired: 3, deferredForConflict: 0 });
+    ).resolves.toEqual({
+      expired: 3,
+      deferredForConflict: 0,
+      hasMore: false,
+    });
     expect(withWorkspace).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
       expect.any(Function),
@@ -89,6 +95,7 @@ describe("Raw Source retention activities", () => {
     expect(statement.values).not.toEqual(
       expect.arrayContaining([expect.any(Date)]),
     );
+    expect(statement.strings.join("?")).toContain("has_more");
   });
 
   it("propagates database failure so the workflow cannot report a false terminal success", async () => {
@@ -118,7 +125,7 @@ describe("Raw Source retention activities", () => {
         withWorkspace: vi.fn(async (_workspaceId, callback) =>
           callback({
             $queryRaw: vi.fn(async () => [
-              { expired: -1, deferred_for_conflict: 0 },
+              { expired: -1, deferred_for_conflict: 0, has_more: false },
             ]),
           }),
         ),

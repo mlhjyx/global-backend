@@ -1100,7 +1100,7 @@ model RawSourceRecord {
   ingestKey            String?   @map("ingest_key")
   payloadHash          String?   @map("payload_hash") @db.Char(64)
   payloadBytes         Int?      @map("payload_bytes")
-  ingestVersion        String    @default("raw-source/v1") @map("ingest_version") @db.VarChar(64)
+  ingestVersion        String    @default("raw-source/v2") @map("ingest_version") @db.VarChar(64)
   ingestStatus         String    @default("ACCEPTED") @map("ingest_status") @db.VarChar(32)
   dispositionCode      String?   @map("disposition_code") @db.VarChar(128)
   retentionDays        Int?      @map("retention_days")
@@ -1115,7 +1115,7 @@ model RawSourceRecord {
 
   @@unique([workspaceId, id], map: "raw_source_record_workspace_id_id_key")
   @@unique([workspaceId, sourceEntityId, ingestKey], map: "raw_source_record_workspace_source_entity_ingest_key")
-  @@unique([runId, providerKey, externalId])
+  @@unique([runId, providerKey, externalId, ingestVersion], map: "raw_source_record_run_provider_external_ingest_key")
   @@index([workspaceId])
   @@index([workspaceId, ingestStatus, expiresAt], map: "raw_source_record_workspace_status_expires_idx")
   @@map("raw_source_record")

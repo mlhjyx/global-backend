@@ -210,13 +210,20 @@ export class PublicWebDiscoveryProvider
       name: out.name.trim(),
       domain,
       country: out.country || undefined,
-      industry: out.industry || undefined,
       employeeCount: typeof out.employee_count === 'number' ? out.employee_count : undefined,
       attributes: {
         products: out.products ?? [],
         keywords: out.keywords ?? [],
-        extraction_evidence: out.evidence ?? null,
-        extraction_confidence: out.confidence ?? null,
+        extraction_evidence_digest: createHash('sha256')
+          .update(out.evidence ?? '')
+          .digest('hex'),
+        extraction_confidence:
+          typeof out.confidence === 'number' &&
+          Number.isFinite(out.confidence) &&
+          out.confidence >= 0 &&
+          out.confidence <= 1
+            ? out.confidence
+            : 0,
         source_class: query.sourceClass,
       },
       provenance: {

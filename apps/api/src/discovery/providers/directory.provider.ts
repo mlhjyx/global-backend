@@ -187,10 +187,9 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           name: c.name.trim(),
           domain: domain || undefined,
           attributes: {
-            source_kind: extracted.list_kind ?? 'directory',
+            source_kind: 'directory',
             source_directory: sourceDomain,
-            listing_location: c.location ?? null,
-            detail_url: c.detail_url ?? null,
+            ...(c.detail_url ? { detail_url: c.detail_url } : {}),
             source_class: query.sourceClass,
           },
           provenance: {

@@ -29,9 +29,8 @@ export interface ProjectResult {
  * 复用 discovery 的确定性身份解析（companyIdentity：域名 > 名称+国家）→ 跨源自动去重
  * （同一家公司来自两个展会 = 一条 canonical），并写 identity_link + field_evidence 留痕。
  *
- * 🔴 合规红线：**只投公司事实**（名称/域名/国家/产品/展位——🟢法人公开信息）。
- * source_entity 里的**人名邮箱（personalData=true）不投**，留在平台层隔离，走 LIA 后另议。
- * 职能邮箱（role）是法人数据，随 attributes.contact_email 投。
+ * 🔴 合规红线：**只投经过 Raw v2 closed-schema 验证的公司事实**。
+ * source_entity 中所有邮箱（具名或职能）都与公司 Raw/Canonical 投影分离；联系人路径需独立授权。
  */
 export class TenantProjectionService {
   constructor(private readonly deps: { prisma: PrismaService }) {}
@@ -114,50 +113,7 @@ export class TenantProjectionService {
         );
         for (const e of chunk) {
           const cleaned = (e.cleaned ?? {}) as Record<string, unknown>;
-          const identity = companyIdentity({
-            name: e.name,
-            domain: e.domain,
-            country: e.country,
-          });
-          const materialization = await loadMaterializableCompanyState(
-            tx,
-            workspaceId,
-            identity.dedupeKey,
-            { name: e.name, domain: e.domain },
-            { knownSuppressions: suppressionRows, policyLock },
-          );
-          const { prior } = materialization;
-          if (!materialization.allowed) {
-            suppressed += 1;
-            continue;
-          }
-
-          // 合规：人名邮箱不投；职能邮箱作为法人联系点随公司走
-          const roleEmailKey =
-            cleaned.email_kind === 'role' && typeof cleaned.email === 'string'
-              ? canonicalizeSuppressionValue('email', cleaned.email)
-              : null;
-          const roleEmailDomain = roleEmailKey
-            ? canonicalizeSuppressionValue('domain', roleEmailKey.split('@')[1])
-            : null;
-          const roleEmail =
-            roleEmailKey &&
-            !suppressedEmails.has(roleEmailKey) &&
-            (!roleEmailDomain || !suppressedDomains.has(roleEmailDomain))
-              ? roleEmailKey
-              : undefined;
-          if (cleaned.email_kind === 'personal') personalWithheld += 1;
-
-          const attributes = pruneUndefined({
-            products: Array.isArray(cleaned.products) ? cleaned.products : undefined,
-            contact_email: roleEmail,
-            source_fair: cleaned.source_fair,
-            source_kind: cleaned.source_kind,
-            stand: cleaned.stand,
-            hall: cleaned.hall,
-            acquired_via: source.providerKey,
-            source_key: source.sourceKey,
-          });
+          if (typeof cleaned.email === 'string') personalWithheld += 1;
           const fetch = e.lastSeenFetchId ? fetchById.get(e.lastSeenFetchId) : undefined;
           const preparedRaw = prepareMonitoredSourceRawBridge({
             workspaceId,
@@ -172,6 +128,26 @@ export class TenantProjectionService {
             },
             policies,
           });
+          const preparedCompany = companyFromPreparedRaw(preparedRaw.row.payload);
+          const identity = companyIdentity({
+            name: preparedCompany.name,
+            domain: preparedCompany.domain,
+            country: preparedCompany.country,
+          });
+          const materialization = await loadMaterializableCompanyState(
+            tx,
+            workspaceId,
+            identity.dedupeKey,
+            { name: preparedCompany.name, domain: preparedCompany.domain },
+            { knownSuppressions: suppressionRows, policyLock },
+          );
+          const { prior } = materialization;
+          if (!materialization.allowed) {
+            suppressed += 1;
+            continue;
+          }
+
+          const attributes = preparedCompany.attributes;
           const raw = await persistMonitoredSourceRawBridge(tx, {
             workspaceId,
             prepared: preparedRaw,
@@ -184,8 +160,8 @@ export class TenantProjectionService {
                 where: { id: prior.id },
                 data: {
                   // 后到的源只补缺（domain/country），不覆盖已有
-                  ...(e.domain ? { domain: { set: e.domain } } : {}),
-                  ...(e.country ? { country: { set: e.country } } : {}),
+                  ...(preparedCompany.domain ? { domain: { set: preparedCompany.domain } } : {}),
+                  ...(preparedCompany.country ? { country: { set: preparedCompany.country } } : {}),
                   attributes: mergeAttributes(
                     withoutSuppressedContactEmail(
                       (prior.attributes ?? {}) as Record<string, unknown>,
@@ -201,9 +177,9 @@ export class TenantProjectionService {
             : await tx.canonicalCompany.create({
                 data: {
                   workspaceId,
-                  name: e.name,
-                  domain: e.domain ?? null,
-                  country: e.country ?? null,
+                  name: preparedCompany.name,
+                  domain: preparedCompany.domain ?? null,
+                  country: preparedCompany.country ?? null,
                   attributes: attributes as Prisma.InputJsonValue,
                   status: 'NEW',
                   dedupeKey: identity.dedupeKey,
@@ -229,9 +205,9 @@ export class TenantProjectionService {
           });
           // 字段级 Evidence：展会公开名录 = public license
           const fields: [string, unknown][] = [
-            ['name', e.name],
-            ['domain', e.domain],
-            ['country', e.country],
+            ['name', preparedCompany.name],
+            ['domain', preparedCompany.domain],
+            ['country', preparedCompany.country],
             ['attributes', attributes],
           ];
           for (const [field, value] of fields) {
@@ -266,6 +242,33 @@ export class TenantProjectionService {
   }
 }
 
+function companyFromPreparedRaw(value: unknown): {
+  name: string;
+  domain?: string;
+  country?: string;
+  attributes: Record<string, unknown>;
+} {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('MONITORED_SOURCE_PREPARED_RAW_INVALID');
+  }
+  const payload = value as Record<string, unknown>;
+  const attributes = payload.attributes;
+  if (
+    typeof payload.name !== 'string' ||
+    attributes === null ||
+    typeof attributes !== 'object' ||
+    Array.isArray(attributes)
+  ) {
+    throw new Error('MONITORED_SOURCE_PREPARED_RAW_INVALID');
+  }
+  return {
+    name: payload.name,
+    ...(typeof payload.domain === 'string' ? { domain: payload.domain } : {}),
+    ...(typeof payload.country === 'string' ? { country: payload.country } : {}),
+    attributes: attributes as Record<string, unknown>,
+  };
+}
+
 function withoutSuppressedContactEmail(
   attributes: Record<string, unknown>,
   suppressedEmails: ReadonlySet<string>,
@@ -284,10 +287,6 @@ function withoutSuppressedContactEmail(
     return attributes;
   const { contact_email: _removed, ...safe } = attributes;
   return safe;
-}
-
-function pruneUndefined(o: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null));
 }
 
 /** 合并已有 canonical.attributes 与新源属性：新源覆盖同名标量、**并集 products**，

@@ -2,15 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { TenantProjectionService } from './tenant-projection.service';
 
 const source = {
-  id: 'source-1',
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   sourceKey: 'fair:example',
   providerKey: 'mapyourshow',
   config: { host: 'example.mapyourshow.com' },
 };
 
 function entity(index: number, email = 'sales@example.com') {
+  const entityId = index.toString(16).padStart(12, '0');
   return {
-    id: `entity-${index}`,
+    id: `bbbbbbbb-bbbb-4bbb-8bbb-${entityId}`,
     sourceId: source.id,
     externalId: `source-entity-${index}`,
     name: `Example ${index}`,
@@ -20,7 +21,7 @@ function entity(index: number, email = 'sales@example.com') {
     cleaned: { email_kind: 'role', email },
     contentHash: 'a'.repeat(64),
     lastSeenAt: new Date('2026-08-25T16:31:00.000Z'),
-    lastSeenFetchId: 'fetch-1',
+    lastSeenFetchId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
   };
 }
 
@@ -84,7 +85,7 @@ function projectionHarness(
     monitoredSource: { findUnique: vi.fn(async () => source) },
     sourceEntity: { findMany: vi.fn(async () => entities) },
     sourceFetch: { findMany: vi.fn(async () => [{
-      id: 'fetch-1',
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       sourceId: source.id,
       status: 'DONE',
       parserVersion: 'acquisition/v1',
@@ -112,7 +113,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
   it('does not rematerialize an already suppressed exact role mailbox', async () => {
     const harness = projectionHarness([entity(1)], [[{ type: 'email', value: ' Sales@EXAMPLE.COM ' }]]);
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
 
     expect(harness.creates).toHaveLength(1);
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
@@ -124,7 +125,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       [[{ type: 'domain', value: 'agency.example' }]],
     );
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
 
     expect(harness.creates).toHaveLength(1);
     expect(harness.creates[0].attributes).not.toHaveProperty('contact_email');
@@ -143,7 +144,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       },
     );
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
 
     expect(harness.updates).toHaveLength(1);
     expect(harness.updates[0].attributes).not.toHaveProperty('contact_email');
@@ -156,7 +157,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
     );
     const harness = projectionHarness(entities, [[], [{ type: 'email', value: 'blocked@example.com' }]]);
 
-    await harness.service.projectSource('workspace-1', source.id);
+    await harness.service.projectSource('11111111-1111-4111-8111-111111111111', source.id);
 
     expect(harness.suppressionRecord.findMany).toHaveBeenCalledTimes(2);
     expect(harness.creates).toHaveLength(101);
@@ -164,7 +165,7 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
   });
 
   it('repairs and stops when an existing canonical identity matches company suppression', async () => {
-    const incoming = { ...entity(1), name: 'Source Listing Name', domain: null };
+    const incoming = { ...entity(1), name: 'Source Listing GmbH', domain: null };
     const harness = projectionHarness(
       [incoming],
       [[{ type: 'domain', value: 'blocked.example' }]],
@@ -177,7 +178,10 @@ describe('TenantProjectionService — suppression-aware role mailbox projection'
       },
     );
 
-    const result = await harness.service.projectSource('workspace-1', source.id);
+    const result = await harness.service.projectSource(
+      '11111111-1111-4111-8111-111111111111',
+      source.id,
+    );
 
     expect(result).toMatchObject({ projected: 0, suppressed: 1 });
     expect(harness.updates).toEqual([

@@ -15,9 +15,7 @@ import { companyIdentity, normalizeDomain } from '../identity';
 import { BudgetOperationReplayError } from '../../tools/budget-store';
 
 const PARSER_VERSION = 'ted/v1';
-const NOTICE_DETAIL_BASE = 'https://ted.europa.eu/en/notice/-/detail/';
-// CC BY 4.0 / 2011/833/EU：绿事实可商用但**署名是 license 义务，不可省**（spec §3.1）。
-const TED_ATTRIBUTION = 'Source: TED — © European Union; reused under CC BY 4.0';
+const TED_PROVENANCE_URL = 'https://api.ted.europa.eu/v3/notices/search';
 const NOTICE_CAP = 250; // 有界样本上限（绝不 grind 全量；全量是 Schedule 增量蚕食的活）
 const DEFAULT_SINCE_DAYS = 30;
 const TED_LICENSE = 'CC BY 4.0'; // §8.5 写入 field_evidence.license（展示/法务 token；SPDX slug 'CC-BY-4.0' 见 attributes.ted.license）
@@ -108,15 +106,13 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
       const domain = w.internetAddress ? (normalizeDomain(w.internetAddress) ?? undefined) : undefined;
       const ted = prune({
         publication_number: notice.publicationNumber,
-        publication_date: notice.publicationDate,
+        publication_date: notice.publicationDate?.slice(0, 10),
         notice_type: notice.noticeType,
         cpv: notice.cpvCodes.length ? notice.cpvCodes : undefined,
-        buyer_names: notice.buyerNames.length ? notice.buyerNames : undefined,
-        buyer_countries: notice.buyerCountries.length ? notice.buyerCountries : undefined,
+        buyer_countries: notice.buyerCountries.length
+          ? notice.buyerCountries.map(toAlpha2).filter(Boolean)
+          : undefined,
         winner_identifier: w.identifier,
-        winner_city: w.city,
-        license: 'CC-BY-4.0',
-        attribution: TED_ATTRIBUTION,
       });
       const idValue = w.identifier?.trim();
       const country = toAlpha2(w.country); // §8.3：ISO-3(DEU)→alpha-2(DE)，复用于国别字段 + §8.4 id scheme 国别限定
@@ -136,7 +132,7 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         license: TED_LICENSE, // §8.5 绿事实 CC BY 4.0 署名义务（写入 field_evidence.license）
         attributes: { ted },
         provenance: {
-          sourceUrl: notice.publicationNumber ? `${NOTICE_DETAIL_BASE}${notice.publicationNumber}` : NOTICE_DETAIL_BASE,
+          sourceUrl: TED_PROVENANCE_URL,
           fetchedAt: now,
           contentHash: createHash('sha256')
             .update(`ted:${notice.publicationNumber ?? ''}:${w.name}:${w.identifier ?? ''}`)

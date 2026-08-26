@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validateRawSourceProviderPayload } from "./raw-source-provider-schema";
 
 export const RAW_SOURCE_INGEST_VERSION = "raw-source/v2" as const;
 
@@ -56,95 +57,6 @@ const MAX_RETENTION_DAYS = 3_650;
 const MAX_EXTERNAL_ID_BYTES = 512;
 const MAX_SOURCE_URL_BYTES = 2_048;
 const MAX_PROVENANCE_TOKEN_BYTES = 256;
-const COMPANY_PAYLOAD_KEYS = new Set([
-  "externalId",
-  "name",
-  "domain",
-  "country",
-  "region",
-  "industry",
-  "employeeCount",
-  "revenueUsd",
-  "attributes",
-  "identifier",
-  "license",
-  "provenance",
-  "monitoredSource",
-]);
-const ATTRIBUTE_ALLOWLISTS: Readonly<Record<string, ReadonlySet<string>>> =
-  Object.freeze({
-    registry: new Set([
-      "company_text",
-      "employee_band",
-      "employees",
-      "products",
-      "public_email",
-    ]),
-    directory: new Set([
-      "detail_url",
-      "listing_location",
-      "source_class",
-      "source_directory",
-      "source_kind",
-    ]),
-    wikidata: new Set([
-      "latitude",
-      "longitude",
-      "source_class",
-      "wikidata_qid",
-    ]),
-    openstreetmap: new Set([
-      "city",
-      "latitude",
-      "longitude",
-      "osm_id",
-      "osm_tags",
-      "source_class",
-    ]),
-    trade_fair: new Set([
-      "description",
-      "hall",
-      "hiring_signal",
-      "products",
-      "public_email",
-      "public_phone",
-      "source_class",
-      "source_fair",
-      "source_fair_name",
-      "source_kind",
-      "stand",
-    ]),
-    ted: new Set(["ted"]),
-    openfda: new Set(["fda", "products"]),
-    public_web: new Set([
-      "extraction_confidence",
-      "extraction_evidence",
-      "keywords",
-      "products",
-      "source_class",
-    ]),
-  });
-const PERSONAL_FIELD_KEYS = new Set([
-  "address",
-  "addresses",
-  "contact",
-  "contactemail",
-  "contactname",
-  "email",
-  "emailkind",
-  "ein",
-  "firstname",
-  "formername",
-  "formernames",
-  "fullname",
-  "lastname",
-  "person",
-  "phone",
-  "publicemail",
-  "publicphone",
-  "recipientname",
-]);
-
 class InvalidCanonicalJsonError extends Error {}
 
 function sha256(value: string): string {
@@ -161,7 +73,20 @@ function plainRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function canonicalJson(value: unknown, ancestors = new Set<object>()): string {
+interface BoundedTraversal {
+  ancestors: Set<object>;
+  remaining: number;
+}
+
+function canonicalJson(
+  value: unknown,
+  state: BoundedTraversal = { ancestors: new Set<object>(), remaining: 1_000 },
+  depth = 0,
+): string {
+  state.remaining -= 1;
+  if (state.remaining < 0 || depth > 32) {
+    throw new InvalidCanonicalJsonError("canonical JSON bounds exceeded");
+  }
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);
@@ -174,30 +99,69 @@ function canonicalJson(value: unknown, ancestors = new Set<object>()): string {
   if (typeof value !== "object") {
     throw new InvalidCanonicalJsonError(`unsupported ${typeof value}`);
   }
-  if (ancestors.has(value)) throw new InvalidCanonicalJsonError("cyclic value");
+  if (state.ancestors.has(value)) {
+    throw new InvalidCanonicalJsonError("cyclic value");
+  }
 
-  ancestors.add(value);
+  state.ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      return `[${value.map((item) => canonicalJson(item, ancestors)).join(",")}]`;
+      if (
+        value.length > 1_000 ||
+        Object.getOwnPropertySymbols(value).length > 0 ||
+        Object.keys(value).length !== value.length
+      ) {
+        throw new InvalidCanonicalJsonError("invalid array container");
+      }
+      const items = Array.from({ length: value.length }, (_, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          value,
+          String(index),
+        );
+        if (!descriptor || !("value" in descriptor)) {
+          throw new InvalidCanonicalJsonError("array accessor");
+        }
+        return canonicalJson(descriptor.value, state, depth + 1);
+      });
+      return `[${items.join(",")}]`;
     }
     const record = plainRecord(value);
     if (!record) throw new InvalidCanonicalJsonError("non-plain object");
-    const entries = Object.entries(record)
-      .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right));
+    const ownKeys = Reflect.ownKeys(record);
+    if (
+      ownKeys.length > 128 ||
+      ownKeys.some((key) => typeof key === "symbol")
+    ) {
+      throw new InvalidCanonicalJsonError("invalid object keys");
+    }
+    const entries = Object.entries(Object.getOwnPropertyDescriptors(record))
+      .flatMap(([key, descriptor]) => {
+        if (!descriptor.enumerable || !("value" in descriptor)) {
+          throw new InvalidCanonicalJsonError("object accessor");
+        }
+        return descriptor.value === undefined
+          ? []
+          : ([[key, descriptor.value]] as [string, unknown][]);
+      })
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
     return `{${entries
       .map(
         ([key, item]) =>
-          `${JSON.stringify(key)}:${canonicalJson(item, ancestors)}`,
+          `${JSON.stringify(key)}:${canonicalJson(item, state, depth + 1)}`,
       )
       .join(",")}}`;
   } finally {
-    ancestors.delete(value);
+    state.ancestors.delete(value);
   }
 }
 
-function diagnosticShape(value: unknown, seen = new Set<object>()): string {
+function diagnosticShape(
+  value: unknown,
+  state: BoundedTraversal = { ancestors: new Set<object>(), remaining: 256 },
+  depth = 0,
+): string {
+  state.remaining -= 1;
+  if (state.remaining < 0 || depth > 8) return "[bounded]";
   if (value === null) return "null";
   if (typeof value === "string")
     return `[string:${Buffer.byteLength(value, "utf8")}]`;
@@ -209,56 +173,90 @@ function diagnosticShape(value: unknown, seen = new Set<object>()): string {
     return `[${typeof value}]`;
   }
   if (typeof value !== "object") return "[unknown]";
-  if (seen.has(value)) return "[cycle]";
-  seen.add(value);
-  if (Array.isArray(value))
-    return `[${value.map((item) => diagnosticShape(item, seen)).join(",")}]`;
+  if (state.ancestors.has(value)) return "[cycle]";
+  state.ancestors.add(value);
+  if (Array.isArray(value)) {
+    try {
+      if (value.length > 100) return `[array:${value.length}]`;
+      return `[${Array.from({ length: value.length }, (_, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          value,
+          String(index),
+        );
+        return descriptor && "value" in descriptor
+          ? diagnosticShape(descriptor.value, state, depth + 1)
+          : "[accessor]";
+      }).join(",")}]`;
+    } finally {
+      state.ancestors.delete(value);
+    }
+  }
   const record = plainRecord(value);
-  if (!record) return "[object]";
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${key}:${diagnosticShape(record[key], seen)}`)
-    .join(",")}}`;
+  if (!record) {
+    state.ancestors.delete(value);
+    return "[object]";
+  }
+  try {
+    const keys = Reflect.ownKeys(record);
+    if (keys.length > 64) return `{keys:${keys.length}}`;
+    const descriptors = Object.getOwnPropertyDescriptors(record);
+    return `{${keys
+      .map(String)
+      .sort()
+      .map((key) => {
+        const descriptor = descriptors[key];
+        return `${key}:${
+          descriptor && "value" in descriptor
+            ? diagnosticShape(descriptor.value, state, depth + 1)
+            : "[accessor]"
+        }`;
+      })
+      .join(",")}}`;
+  } finally {
+    state.ancestors.delete(value);
+  }
 }
 
 function hashBasis(value: unknown): unknown {
   const record = plainRecord(value);
-  const provenance = plainRecord(record?.provenance);
+  if (!record) return value;
+  const recordDescriptors = Object.getOwnPropertyDescriptors(record);
+  const provenanceDescriptor = recordDescriptors.provenance;
+  if (!provenanceDescriptor || !("value" in provenanceDescriptor)) return value;
+  const provenance = plainRecord(provenanceDescriptor.value);
   if (!record || !provenance) return value;
-  const { fetchedAt: _observationTime, ...stableProvenance } = provenance;
-  return { ...record, provenance: stableProvenance };
+  const provenanceDescriptors = Object.getOwnPropertyDescriptors(provenance);
+  if (
+    Object.getOwnPropertySymbols(record).length > 0 ||
+    Object.getOwnPropertySymbols(provenance).length > 0 ||
+    Object.values(recordDescriptors).some(
+      (descriptor) => !descriptor.enumerable || !("value" in descriptor),
+    ) ||
+    Object.values(provenanceDescriptors).some(
+      (descriptor) => !descriptor.enumerable || !("value" in descriptor),
+    )
+  ) {
+    return value;
+  }
+  const stableRecord = Object.fromEntries(
+    Object.entries(recordDescriptors).flatMap(([key, descriptor]) =>
+      descriptor.enumerable && "value" in descriptor
+        ? [[key, descriptor.value]]
+        : [],
+    ),
+  );
+  const stableProvenance = Object.fromEntries(
+    Object.entries(provenanceDescriptors).flatMap(([key, descriptor]) =>
+      key !== "fetchedAt" && descriptor.enumerable && "value" in descriptor
+        ? [[key, descriptor.value]]
+        : [],
+    ),
+  );
+  return { ...stableRecord, provenance: stableProvenance };
 }
 
 export function rawPayloadHash(value: unknown): string {
   return sha256(canonicalJson(hashBasis(value)));
-}
-
-function normalizedKey(key: string): string {
-  return key.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
-}
-
-function minimizePersonalFields(
-  value: unknown,
-  path: string,
-  removed: string[],
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item, index) =>
-      minimizePersonalFields(item, `${path}[${index}]`, removed),
-    );
-  }
-  const record = plainRecord(value);
-  if (!record) return value;
-  const clean: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(record)) {
-    const itemPath = path ? `${path}.${key}` : key;
-    if (PERSONAL_FIELD_KEYS.has(normalizedKey(key))) {
-      removed.push(itemPath);
-      continue;
-    }
-    clean[key] = minimizePersonalFields(item, itemPath, removed);
-  }
-  return clean;
 }
 
 function sanitizePayload(
@@ -271,60 +269,13 @@ function sanitizePayload(
     | "MALFORMED_PAYLOAD"
     | "UNKNOWN_PAYLOAD_FIELD"
     | "UNGOVERNED_PROVIDER_PAYLOAD"
+    | "PROVIDER_PAYLOAD_SCHEMA_INVALID"
     | null;
 } {
-  const record = plainRecord(value);
-  if (!record)
-    return { value: {}, minimizedFields: [], error: "MALFORMED_PAYLOAD" };
-  const attributeAllowlist = ATTRIBUTE_ALLOWLISTS[providerKey];
-  if (!attributeAllowlist) {
-    return {
-      value: {},
-      minimizedFields: [],
-      error: "UNGOVERNED_PROVIDER_PAYLOAD",
-    };
-  }
-  const unknown = Object.keys(record).filter(
-    (key) =>
-      !COMPANY_PAYLOAD_KEYS.has(key) ||
-      (key === "monitoredSource" && providerKey !== "trade_fair"),
-  );
-  const allowed = Object.fromEntries(
-    Object.entries(record).filter(([key]) => COMPANY_PAYLOAD_KEYS.has(key)),
-  );
-  const minimizedFields: string[] = [];
-  if (allowed.attributes !== undefined) {
-    const attributes = plainRecord(allowed.attributes);
-    if (!attributes) {
-      return {
-        value: allowed,
-        minimizedFields,
-        error: "MALFORMED_PAYLOAD",
-      };
-    }
-    allowed.attributes = Object.fromEntries(
-      Object.entries(attributes).filter(([key]) => {
-        if (attributeAllowlist.has(key)) return true;
-        minimizedFields.push(`attributes.${key}`);
-        return false;
-      }),
-    );
-  }
-  const sanitized = minimizePersonalFields(allowed, "", minimizedFields);
-  const normalized = plainRecord(sanitized);
-  const name = normalized?.name;
-  if (typeof name !== "string" || !name.trim()) {
-    return {
-      value: sanitized,
-      minimizedFields: minimizedFields.sort(),
-      error: "MALFORMED_PAYLOAD",
-    };
-  }
-  return {
-    value: sanitized,
-    minimizedFields: minimizedFields.sort(),
-    error: unknown.length ? "UNKNOWN_PAYLOAD_FIELD" : null,
-  };
+  const validated = validateRawSourceProviderPayload(providerKey, value);
+  return validated.ok
+    ? { value: validated.value, minimizedFields: [], error: null }
+    : { value: {}, minimizedFields: [], error: validated.reason };
 }
 
 function boundedString(value: unknown, maxBytes: number): string | null {
@@ -523,13 +474,17 @@ export function prepareRawSourceBatch(args: {
     let canonical: string;
     let normalizedPayload: unknown = sanitized.value;
     let jsonInvalid = false;
+    let originalCanonical = "";
     try {
-      canonicalJson(original);
+      originalCanonical = canonicalJson(original);
     } catch {
       jsonInvalid = true;
     }
     if (jsonInvalid) {
       canonical = diagnosticShape(original);
+    } else if (sanitized.error) {
+      canonical = originalCanonical;
+      normalizedPayload = {};
     } else {
       try {
         canonical = canonicalJson(sanitized.value);
@@ -542,7 +497,9 @@ export function prepareRawSourceBatch(args: {
     const payloadBytes = Buffer.byteLength(canonical, "utf8");
     const payloadHash = jsonInvalid
       ? sha256(canonical)
-      : rawPayloadHash(normalizedPayload);
+      : sanitized.error
+        ? rawPayloadHash(original)
+        : rawPayloadHash(normalizedPayload);
     const ingestKey = ingestKeyFor(normalizedPayload, payloadHash);
     batchBytes += payloadBytes;
     const record = plainRecord(normalizedPayload);

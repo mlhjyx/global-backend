@@ -119,7 +119,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     const first = prepareRawSourceBatch({
       providerKey: "registry",
       records: [
-        companyRecord({ externalId: "", attributes: { employees: 10 } }),
+        companyRecord({ externalId: undefined, attributes: { employees: 10 } }),
       ],
       policies: POLICIES,
       limits: LIMITS,
@@ -128,7 +128,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     const changed = prepareRawSourceBatch({
       providerKey: "registry",
       records: [
-        companyRecord({ externalId: "", attributes: { employees: 11 } }),
+        companyRecord({ externalId: undefined, attributes: { employees: 11 } }),
       ],
       policies: POLICIES,
       limits: LIMITS,
@@ -174,7 +174,7 @@ describe("Raw Source v2 ingestion boundary", () => {
         source_kind: "directory",
         source_directory: "registry.example",
         detail_url: "https://registry.example/company/1",
-        source_class: "public_intelligence",
+        source_class: "industry_data",
       },
     ],
     [
@@ -183,7 +183,7 @@ describe("Raw Source v2 ingestion boundary", () => {
         wikidata_qid: "Q1",
         latitude: 1,
         longitude: 2,
-        source_class: "public_intelligence",
+        source_class: "company_registry",
       },
     ],
     [
@@ -192,10 +192,18 @@ describe("Raw Source v2 ingestion boundary", () => {
         osm_id: "node/1",
         latitude: 52.5,
         longitude: 13.4,
-        source_class: "public_intelligence",
+        source_class: "industry_data",
       },
     ],
-    ["trade_fair", { stand: "A42", products: ["pump"], source_fair: "fair-1" }],
+    [
+      "trade_fair",
+      {
+        stand: "A42",
+        products: ["pump"],
+        source_fair: "fair-1",
+        source_class: "industry_data",
+      },
+    ],
     [
       "ted",
       {
@@ -235,9 +243,23 @@ describe("Raw Source v2 ingestion boundary", () => {
     (providerKey, attributes) => {
       const row = prepareRawSourceBatch({
         providerKey,
-        records: [companyRecord({ attributes })],
+        records: [
+          companyRecord({
+            attributes,
+            ...({
+              wikidata: { license: "CC0-1.0" },
+              openstreetmap: { license: "ODbL-1.0" },
+              ted: { license: "CC BY 4.0" },
+              openfda: { license: "CC0-1.0" },
+            }[providerKey] ?? {}),
+          }),
+        ],
         policies: POLICIES,
-        limits: LIMITS,
+        limits: {
+          ...LIMITS,
+          maxRecordBytes: 2_048,
+          maxBatchBytes: 4_096,
+        },
         now: NOW,
       }).rows[0]!;
       expect(row.ingestStatus).toBe("ACCEPTED");
@@ -267,6 +289,49 @@ describe("Raw Source v2 ingestion boundary", () => {
     expect(prepared.dispositionCode).toBe("PROVIDER_PAYLOAD_SCHEMA_INVALID");
     expect(JSON.stringify(prepared.payload)).not.toContain("named.person");
     expect(JSON.stringify(prepared.payload)).not.toContain("Must Not Persist");
+  });
+
+  it("rejects cyclic, over-deep, and accessor payloads without executing untrusted getters", () => {
+    const cyclicAttributes: Record<string, unknown> = { products: ["pump"] };
+    cyclicAttributes.self = cyclicAttributes;
+    const cyclic = companyRecord({ attributes: cyclicAttributes });
+
+    let nested: Record<string, unknown> = { value: "pump" };
+    for (let depth = 0; depth < 10; depth += 1) nested = { nested };
+    const overDeep = companyRecord({ attributes: nested });
+
+    let getterCalls = 0;
+    const accessor = companyRecord();
+    Object.defineProperty(accessor, "name", {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return "Getter GmbH";
+      },
+    });
+
+    expect(() =>
+      prepareRawSourceBatch({
+        providerKey: "registry",
+        records: [cyclic, overDeep, accessor],
+        policies: POLICIES,
+        limits: { ...LIMITS, maxRecordBytes: 8_192 },
+        now: NOW,
+      }),
+    ).not.toThrow();
+    const rows = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [cyclic, overDeep, accessor],
+      policies: POLICIES,
+      limits: { ...LIMITS, maxRecordBytes: 8_192 },
+      now: NOW,
+    }).rows;
+    expect(rows.map((row) => row.dispositionCode)).toEqual([
+      "INVALID_JSON",
+      "PROVIDER_PAYLOAD_SCHEMA_INVALID",
+      "INVALID_JSON",
+    ]);
+    expect(getterCalls).toBe(0);
   });
 
   it.each([
@@ -313,6 +378,7 @@ describe("Raw Source v2 ingestion boundary", () => {
       "registry",
       companyRecord({ externalId: "person@example.test" }),
     ],
+    ["empty externalId", "registry", companyRecord({ externalId: "" })],
     [
       "unbounded externalId",
       "registry",
@@ -455,6 +521,8 @@ describe("Raw Source v2 ingestion boundary", () => {
       ingestStatus: "REJECTED",
       dispositionCode: "PROVIDER_PAYLOAD_SCHEMA_INVALID",
       externalId: null,
+      sourceUrl: null,
+      contentHash: null,
     });
     const serialized = JSON.stringify(row.payload);
     expect(serialized).not.toContain("person@example.test");
@@ -558,7 +626,7 @@ describe("Raw Source v2 ingestion boundary", () => {
     [
       "invalid provenance shape",
       POLICIES,
-      "INVALID_PROVENANCE",
+      "PROVIDER_PAYLOAD_SCHEMA_INVALID",
       companyRecord({
         provenance: { ...companyRecord().provenance, extra: true },
       }),

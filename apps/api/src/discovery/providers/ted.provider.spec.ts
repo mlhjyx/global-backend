@@ -65,8 +65,9 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     expect(ted.publication_number).toBe('123456-2026');
     expect(ted.cpv).toEqual(['42120000']);
     expect(ted.winner_identifier).toBe('DE111');
-    expect(ted.license).toBe('CC-BY-4.0');
-    expect(String(ted.attribution)).toMatch(/European Union/i);
+    expect(ted).not.toHaveProperty('license');
+    expect(ted).not.toHaveProperty('attribution');
+    expect(ted).not.toHaveProperty('buyer_names');
     expect(r.provenance?.parserVersion).toBe('ted/v1');
     // §8.5 top-level 记录许可（写入 field_evidence.license）+ §8.4 provider 标识（税号）
     expect(r.license).toBe('CC BY 4.0');

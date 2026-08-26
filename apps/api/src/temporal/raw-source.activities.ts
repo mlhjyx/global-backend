@@ -21,10 +21,7 @@ function workspaceId(value: string): string {
  * discovery is an aggregate security-definer function returning UUIDs only;
  * mutation still runs inside PrismaService.withWorkspace().
  */
-export function createRawSourceActivities(deps: {
-  prisma: PrismaService;
-  now?: () => Date;
-}) {
+export function createRawSourceActivities(deps: { prisma: PrismaService }) {
   return {
     async listRawRetentionWorkspaces(args: {
       limit?: number;
@@ -49,18 +46,23 @@ export function createRawSourceActivities(deps: {
     async expireRawSourceRecords(args: {
       workspaceId: string;
       limit?: number;
-    }): Promise<{ expired: number; deferredForConflict: number }> {
+    }): Promise<{
+      expired: number;
+      deferredForConflict: number;
+      hasMore: boolean;
+    }> {
       const scopedWorkspaceId = workspaceId(args.workspaceId);
       const limit = boundedLimit(args.limit, 500);
-      const now = deps.now?.() ?? new Date();
-      if (Number.isNaN(now.getTime()))
-        throw new Error("RAW_RETENTION_TIME_INVALID");
       return deps.prisma.withWorkspace(scopedWorkspaceId, async (tx) => {
         const rows = await tx.$queryRaw<
-          Array<{ expired: number; deferred_for_conflict: number }>
-        >(Prisma.sql`SELECT expired, deferred_for_conflict
+          Array<{
+            expired: number;
+            deferred_for_conflict: number;
+            has_more: boolean;
+          }>
+        >(Prisma.sql`SELECT expired, deferred_for_conflict, has_more
           FROM expire_due_raw_source_records_v1(
-            ${scopedWorkspaceId}::uuid, ${limit}, ${now}::timestamptz
+            ${scopedWorkspaceId}::uuid, ${limit}, NULL::timestamptz
           )`);
         const row = rows[0];
         if (
@@ -68,13 +70,15 @@ export function createRawSourceActivities(deps: {
           !Number.isSafeInteger(row.expired) ||
           row.expired < 0 ||
           !Number.isSafeInteger(row.deferred_for_conflict) ||
-          row.deferred_for_conflict < 0
+          row.deferred_for_conflict < 0 ||
+          typeof row.has_more !== "boolean"
         ) {
           throw new Error("RAW_RETENTION_RECEIPT_INVALID");
         }
         return {
           expired: row.expired,
           deferredForConflict: row.deferred_for_conflict,
+          hasMore: row.has_more,
         };
       });
     },

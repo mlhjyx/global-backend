@@ -46,6 +46,7 @@ export type RawSourceMigrationDecision = Readonly<{
   state:
     | "LIVE_EXPERIMENT_DB_NOT_SUPPLIED"
     | "OLD_PR_MIGRATION_PRESENT"
+    | "MIGRATION_INVENTORY_CONFLICT"
     | "SUCCESSOR_CHECKSUM_MISMATCH"
     | "CURRENT_SUCCESSOR_INCOMPLETE"
     | "CURRENT_SUCCESSOR_APPLIED";
@@ -53,6 +54,8 @@ export type RawSourceMigrationDecision = Readonly<{
     migrationName: string;
     observedChecksum: string | null;
     expectedChecksum: string | null;
+    rowCount?: number;
+    lifecycleState?: "APPLIED" | "UNFINISHED" | "ROLLED_BACK" | "CONFLICT";
   }>[];
 }>;
 
@@ -80,58 +83,102 @@ export function assessRawSourceMigrationInventory(
       observations: [],
     });
   }
-  const applied = new Map(
-    inventory
-      .filter((row) => row.finished_at !== null && row.rolled_back_at === null)
-      .map((row) => [row.migration_name, row.checksum]),
-  );
-  const historical = HISTORICAL_PR407_RAW_MIGRATIONS.filter((entry) =>
-    applied.has(entry.migrationName),
-  );
+  const rowsByName = new Map<string, PrismaMigrationInventoryRow[]>();
+  for (const row of inventory) {
+    const rows = rowsByName.get(row.migration_name) ?? [];
+    rows.push(row);
+    rowsByName.set(row.migration_name, rows);
+  }
+  const lifecycle = (
+    rows: readonly PrismaMigrationInventoryRow[],
+  ): "APPLIED" | "UNFINISHED" | "ROLLED_BACK" | "CONFLICT" => {
+    if (rows.length !== 1) return "CONFLICT";
+    if (rows[0]!.rolled_back_at !== null) return "ROLLED_BACK";
+    return rows[0]!.finished_at === null ? "UNFINISHED" : "APPLIED";
+  };
+  const observedChecksum = (
+    rows: readonly PrismaMigrationInventoryRow[],
+  ): string | null => {
+    const checksums = [...new Set(rows.map((row) => row.checksum))];
+    return checksums.length === 1 ? checksums[0]! : null;
+  };
+  const observation = (
+    entry: ExpectedMigrationChecksum,
+    rows: readonly PrismaMigrationInventoryRow[],
+  ) => ({
+    migrationName: entry.migrationName,
+    observedChecksum: observedChecksum(rows),
+    expectedChecksum: entry.checksum,
+    rowCount: rows.length,
+    lifecycleState: lifecycle(rows),
+  });
+
+  // Historical names are a HOLD regardless of their lifecycle or checksum.
+  const historical = HISTORICAL_PR407_RAW_MIGRATIONS.flatMap((entry) => {
+    const rows = rowsByName.get(entry.migrationName) ?? [];
+    return rows.length ? [{ entry, rows }] : [];
+  });
   if (historical.length) {
     return decision({
       subject: "SUPPLIED",
       decision: "HOLD",
       state: "OLD_PR_MIGRATION_PRESENT",
-      observations: historical.map((entry) => ({
-        migrationName: entry.migrationName,
-        observedChecksum: applied.get(entry.migrationName) ?? null,
-        expectedChecksum: entry.checksum,
-      })),
+      observations: historical.map(({ entry, rows }) =>
+        observation(entry, rows),
+      ),
     });
   }
 
-  const mismatches = expectedCurrent.filter(
-    (entry) =>
-      applied.has(entry.migrationName) &&
-      applied.get(entry.migrationName) !== entry.checksum,
-  );
+  const currentConflicts = expectedCurrent.flatMap((entry) => {
+    const rows = rowsByName.get(entry.migrationName) ?? [];
+    return rows.length > 1 ? [{ entry, rows }] : [];
+  });
+  if (currentConflicts.length) {
+    return decision({
+      subject: "SUPPLIED",
+      decision: "HOLD",
+      state: "MIGRATION_INVENTORY_CONFLICT",
+      observations: currentConflicts.map(({ entry, rows }) =>
+        observation(entry, rows),
+      ),
+    });
+  }
+
+  const mismatches = expectedCurrent.filter((entry) => {
+    const rows = rowsByName.get(entry.migrationName) ?? [];
+    return rows.length === 1 && rows[0]!.checksum !== entry.checksum;
+  });
   if (mismatches.length) {
     return decision({
       subject: "SUPPLIED",
       decision: "HOLD",
       state: "SUCCESSOR_CHECKSUM_MISMATCH",
-      observations: mismatches.map((entry) => ({
-        migrationName: entry.migrationName,
-        observedChecksum: applied.get(entry.migrationName) ?? null,
-        expectedChecksum: entry.checksum,
-      })),
+      observations: mismatches.map((entry) =>
+        observation(entry, rowsByName.get(entry.migrationName) ?? []),
+      ),
     });
   }
 
-  const missing = expectedCurrent.filter(
-    (entry) => !applied.has(entry.migrationName),
-  );
+  const missing = expectedCurrent.filter((entry) => {
+    const rows = rowsByName.get(entry.migrationName) ?? [];
+    return rows.length !== 1 || lifecycle(rows) !== "APPLIED";
+  });
   if (missing.length) {
     return decision({
       subject: "SUPPLIED",
       decision: "HOLD",
       state: "CURRENT_SUCCESSOR_INCOMPLETE",
-      observations: missing.map((entry) => ({
-        migrationName: entry.migrationName,
-        observedChecksum: null,
-        expectedChecksum: entry.checksum,
-      })),
+      observations: missing.map((entry) => {
+        const rows = rowsByName.get(entry.migrationName) ?? [];
+        return rows.length
+          ? observation(entry, rows)
+          : {
+              migrationName: entry.migrationName,
+              observedChecksum: null,
+              expectedChecksum: entry.checksum,
+              rowCount: 0,
+            };
+      }),
     });
   }
   return decision({

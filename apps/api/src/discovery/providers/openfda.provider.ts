@@ -11,15 +11,13 @@ import {
 import {
   OpenFdaEstablishment,
   OPENFDA_LICENSE,
-  OPENFDA_ATTRIBUTION,
-  FDA_REGISTRATION_DISCLAIMER,
 } from '../../adapters/openfda-api';
 import type { OpenFdaSearchInput, OpenFdaSearchOutput } from '../../tools/source-tools';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { companyIdentity } from '../identity';
 
 const PARSER_VERSION = 'openfda/v1';
-const REG_QUERY_BASE = 'https://api.fda.gov/device/registrationlisting.json?search=registration.registration_number:';
+const OPENFDA_PROVENANCE_URL = 'https://api.fda.gov/device/registrationlisting.json';
 const RECORD_CAP = 250; // 有界样本上限（绝不 grind 32 万——全量是 Schedule 增量的活）
 const DEFAULT_LIMIT = 100;
 // FDA registration_number 由 FDA 全局分配（**非**国别税号）→ scheme 不按国别限定（与 TED §8.4 国别税号不同）。
@@ -32,7 +30,7 @@ const FDA_ID_SCHEME = 'fda-reg';
  *
  * 合规（spec §3）：只落 🟢 establishment/产品码/分类绿事实（CC0，署名非义务）；
  * 🔴 `us_agent.name`/`contact` 等具名个人**由 adapter 层剥离、绝不入本记录**（GDPR 隔离，走 contact 路径）。
- * 🔴 文案红线：`attributes.fda.disclaimer` 标注「注册≠核准」，绝不呈现为 FDA 认证/批准/背书。
+ * 🔴 法务说明属于展示层固定合同，不把 attribution/disclaimer 自由文本复制进绿 Raw。
  *
  * product code 过滤缺失时直接返回空（fail-safe）——ICP→FDA 产品码映射（P2）落地前，码由 filters 显式带入。
  */
@@ -108,36 +106,32 @@ export function mapEstablishmentToRecord(est: OpenFdaEstablishment, now: string)
     registration_number: idValue,
     fei_number: est.feiNumber,
     status_code: est.statusCode,
-    city: est.city,
     state_code: est.stateCode,
-    establishment_types: est.establishmentTypes.length ? est.establishmentTypes : undefined,
     initial_importer: est.initialImporter,
     product_codes: est.productCodes.length ? est.productCodes : undefined,
-    device_facts: est.deviceFacts,
     owner_operator_numbers: est.ownerOperatorNumbers.length ? est.ownerOperatorNumbers : undefined, // 🟢 非个人 firm id（未来跨设施归并）
     created_date: est.createdDate,
-    license: OPENFDA_LICENSE, // CC0-1.0（署名非义务）
-    attribution: OPENFDA_ATTRIBUTION,
-    disclaimer: FDA_REGISTRATION_DISCLAIMER, // 🔴 注册≠核准
   });
   // externalId 必须**每个 distinct establishment 唯一**（raw @@unique[runId,providerKey,externalId]）：
   // 无注册号时退 name+country（与 dedupeKey 同粒度）——绝不塌成 name-only，否则跨国同名互撞被 skipDuplicates 静默丢一个。
-  const idKey = idValue ?? `${est.name}:${est.country ?? ''}`;
+  const idKey =
+    idValue ??
+    createHash('sha256')
+      .update(`${est.name}\0${est.country ?? ''}`)
+      .digest('hex');
   return {
     externalId: `openfda:${idKey}`,
     name: est.name,
     country: est.country,
-    industry: est.deviceFacts?.medicalSpecialtyDescription, // 匹配搜索码的专科 ≈ 行业维（便利，非硬编码）
-    // fit 门只读 attributes.products（fit-judge.ts）→ 喂可读设备名（无则退产品码），否则 openFDA 线索在门前设备信号为空。
     attributes: {
       fda,
-      products: est.deviceNames.length ? est.deviceNames : est.productCodes,
+      products: est.productCodes,
     },
     // FDA 注册号全局唯一（非国别税号）→ scheme 不按国别限定。
     identifier: idValue ? { scheme: FDA_ID_SCHEME, value: idValue } : undefined,
     license: OPENFDA_LICENSE, // 写入 field_evidence.license（CC0，非硬编码 licensed）
     provenance: {
-      sourceUrl: idValue ? `${REG_QUERY_BASE}${idValue}` : 'https://open.fda.gov/apis/device/registrationlisting/',
+      sourceUrl: OPENFDA_PROVENANCE_URL,
       fetchedAt: now,
       contentHash: createHash('sha256').update(`openfda:${idKey}:${est.name}`).digest('hex'),
       parserVersion: PARSER_VERSION,

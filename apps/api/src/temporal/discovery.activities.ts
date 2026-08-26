@@ -314,7 +314,11 @@ export function createDiscoveryActivities(deps: {
                 Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`raw-source:${args.workspaceId}:${args.runId}:${key}`}, 0))`,
               );
               const existing = await transaction.rawSourceRecord.findMany({
-                where: { runId: args.runId, providerKey: key },
+                where: {
+                  runId: args.runId,
+                  providerKey: key,
+                  ingestVersion: 'raw-source/v2',
+                },
                 select: { id: true, externalId: true, ingestKey: true, payloadHash: true, payload: true },
               });
               const reconciled = reconcileRawSourceBatch(prepared.rows, existing);
@@ -350,9 +354,9 @@ export function createDiscoveryActivities(deps: {
               totalCost += r.costCents;
             }
             const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'ACCEPTED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'QUARANTINED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'REJECTED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'ACCEPTED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'QUARANTINED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'REJECTED' } }),
             ]);
             if (totalCost > 0) {
               await transaction.usageLedger.create({
@@ -377,9 +381,9 @@ export function createDiscoveryActivities(deps: {
           readback: async (transaction) => {
             const fulfilled = settled.filter((item) => item.status === 'fulfilled');
             const [rawCount, quarantinedCount, rejectedCount] = await Promise.all([
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'ACCEPTED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'QUARANTINED' } }),
-              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestStatus: 'REJECTED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'ACCEPTED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'QUARANTINED' } }),
+              transaction.rawSourceRecord.count({ where: { runId: args.runId, sourceClass: q.sourceClass, ingestVersion: 'raw-source/v2', ingestStatus: 'REJECTED' } }),
             ]);
             return {
               rawCount,
@@ -418,7 +422,11 @@ export function createDiscoveryActivities(deps: {
         // the authoritative suppression read and every canonical write.
         const policyLock = await lockWorkspaceSuppressionPolicy(tx, args.workspaceId);
         const candidates = await tx.rawSourceRecord.findMany({
-          where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
+          where: {
+            runId: args.runId,
+            ingestStatus: 'ACCEPTED',
+            ingestVersion: 'raw-source/v2',
+          },
         });
         const restricted = candidates.length
           ? await tx.rawSourceGovernanceDisposition.findMany({
@@ -565,7 +573,11 @@ export function createDiscoveryActivities(deps: {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              ingestVersion: 'raw-source/v2',
+            },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -677,7 +689,11 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              ingestVersion: 'raw-source/v2',
+            },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -836,7 +852,11 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              ingestVersion: 'raw-source/v2',
+            },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -980,7 +1000,11 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              ingestVersion: 'raw-source/v2',
+            },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);
@@ -1051,7 +1075,11 @@ export function createDiscoveryActivities(deps: {
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
-            where: { runId: args.runId, ingestStatus: 'ACCEPTED' },
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              ingestVersion: 'raw-source/v2',
+            },
             select: { id: true, providerKey: true, payload: true },
           })
         ).filter(isProductDiscoveryRawRecord);

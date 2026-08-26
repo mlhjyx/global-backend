@@ -16,6 +16,7 @@ const repositoryRoot = resolve(
 const migrationNames = Object.freeze([
   "20260826090000_raw_source_governance_schema",
   "20260826100000_raw_source_governance_backfill",
+  "20260826110000_raw_source_governance_constraints",
 ]);
 
 async function expectedChecksums(): Promise<ExpectedMigrationChecksum[]> {

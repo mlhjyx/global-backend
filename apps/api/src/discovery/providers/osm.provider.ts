@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
@@ -14,7 +15,7 @@ import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
 /**
  * OpenStreetMap 地理发现 Provider（Overpass API，ODbL 开放数据，零爬取）。
  * 按 filters.industry → OSM 标签、filters.region/country → OSM area 枚举工业实体。
- * 产出真实企业名 + 坐标 + 地址；website 命中率参差，交 mineDomain 富化。
+ * 产出真实企业名 + 坐标 + website；原始 tag/address 不进入公司绿 Raw。
  * 属 industry_data 类。
  *
  * 收口②：出网经 ToolBroker（`osm.overpass` 为 required 工具）——SUSPENDED/未登记/
@@ -69,14 +70,15 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
         osm_id: p.osmId,
         latitude: p.latitude,
         longitude: p.longitude,
-        city: p.city,
-        osm_tags: p.tags,
         source_class: query.sourceClass,
       },
+      license: 'ODbL-1.0',
       provenance: {
-        sourceUrl: `https://www.openstreetmap.org/${p.osmId}`,
+        sourceUrl: 'https://overpass-api.de/api/interpreter',
         fetchedAt: now,
-        contentHash: p.osmId,
+        contentHash: createHash('sha256')
+          .update(`openstreetmap:${p.osmId}:${p.name}`)
+          .digest('hex'),
         parserVersion: 'osm/1',
       },
     }));
